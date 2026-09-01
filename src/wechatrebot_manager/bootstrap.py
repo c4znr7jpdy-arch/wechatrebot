@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 from .brand import BrandProfile, save_brand_profile
 from .install_paths import INSTALL_MARKER, prepare_install_layout, validate_install_path
+from .json_io import write_json_atomic
+from .payload import PayloadError, install_payload
+from .runtime_config import write_runtime_configs
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
 
 
@@ -54,7 +56,11 @@ def _choose_wechat(root):
         messagebox.showerror("微信路径不可用", "\n".join(item.errors), parent=root)
 
 
-def run_bootstrap() -> int:
+def run_bootstrap(
+    payload_root: Path | None = None,
+    *,
+    allow_incomplete_payload: bool = False,
+) -> int:
     if os.name != "nt":
         print("首次配置向导仅支持 Windows。", file=sys.stderr)
         return 2
@@ -116,26 +122,38 @@ def run_bootstrap() -> int:
     if not messagebox.askyesno("确认首次配置", summary, parent=root):
         return 2
 
-    prepare_install_layout(install_root)
-    save_brand_profile(install_root / "config" / "brand.json", profile)
-    manager_config = {
-        "schema_version": 1,
-        "install_root": str(install_root),
-        "wechat_exe_path": str(wechat.path),
-        "wechat_version": wechat.version,
-    }
-    (install_root / "config" / "manager.json").write_text(
-        json.dumps(manager_config, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (install_root / INSTALL_MARKER).write_text(
-        json.dumps({"schema_version": 1}, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        prepare_install_layout(install_root)
+        write_json_atomic(
+            install_root / INSTALL_MARKER,
+            {"schema_version": 1, "state": "installing"},
+        )
+        if payload_root is not None:
+            install_payload(
+                payload_root,
+                install_root,
+                allow_incomplete=allow_incomplete_payload,
+            )
+        save_brand_profile(install_root / "config" / "brand.json", profile)
+        write_runtime_configs(
+            install_root,
+            wechat.path,
+            wechat_version=wechat.version,
+        )
+        write_json_atomic(
+            install_root / INSTALL_MARKER,
+            {
+                "schema_version": 1,
+                "state": "ready" if payload_root is not None else "configured",
+            },
+        )
+    except (OSError, PayloadError, ValueError) as exc:
+        messagebox.showerror("首次配置失败", str(exc), parent=root)
+        return 1
     messagebox.showinfo(
         "首次配置已保存",
-        "安装位置、微信路径和机器人品牌已保存。环境展开将在下一阶段接入。",
+        "安装位置、微信路径和机器人品牌已保存。"
+        + ("商业载荷已完成校验和展开。" if payload_root else "当前未展开商业载荷。"),
         parent=root,
     )
     return 0
-
