@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "status": "phase-1-incomplete",
+  "entries": [
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager",
+      "target": "manager/src/wechatrebot_manager"
+    },
+    {
+      "origin": "commercial",
+      "source": "pyproject.toml",
+      "target": "manager/pyproject.toml"
+    },
+    {
+      "origin": "commercial",
+      "source": "config/brand.example.json",
+      "target": "config/templates/brand.example.json"
+    },
+    {
+      "origin": "project",
+      "source": "hook_41827_astrbot_bridge/src",
+      "target": "app/bridge/src"
+    },
+    {
+      "origin": "project",
+      "source": "hook_41827_astrbot_bridge/pyproject.toml",
+      "target": "app/bridge/pyproject.toml"
+    },
+    {
+      "origin": "project",
+      "source": "hook_41827_astrbot_bridge/config.example.json",
+      "target": "config/templates/bridge.example.json"
+    },
+    {
+      "origin": "project",
+      "source": "hook_41827_astrbot_bridge/vendor/hook/x64 inject.exe",
+      "target": "app/bridge/vendor/hook/x64 inject.exe",
+      "gate": "hook-binary-redistribution"
+    },
+    {
+      "origin": "project",
+      "source": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
+      "target": "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
+      "gate": "hook-binary-redistribution"
+    }
+  ]
+}
+
