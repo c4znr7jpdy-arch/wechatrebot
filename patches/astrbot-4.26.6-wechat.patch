@@ -1,0 +1,308 @@
+diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/expected/astrbot/core/agent/runners/tool_loop_agent_runner.py
+index 43f6beb..b98df04 100644
+--- a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py
++++ b/expected/astrbot/core/agent/runners/tool_loop_agent_runner.py
+@@ -106,6 +106,11 @@ class _ToolExecutionInterrupted(Exception):
+ ToolExecutorResultT = T.TypeVar("ToolExecutorResultT")
+ 
+ 
++def _should_emit_llm_result(llm_resp: LLMResponse) -> bool:
++    """Only expose responses that have finished the tool loop."""
++    return not llm_resp.tools_call_name
++
++
+ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
+     TOOL_RESULT_MAX_ESTIMATED_TOKENS = 27_500
+     TOOL_RESULT_PREVIEW_MAX_ESTIMATED_TOKENS = 7000
+@@ -816,28 +821,30 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
+         if not llm_resp.tools_call_name:
+             await self._complete_with_assistant_response(llm_resp)
+ 
+-        # 返回 LLM 结果
+-        if llm_resp.reasoning_content:
+-            yield AgentResponse(
+-                type="llm_result",
+-                data=AgentResponseData(
+-                    chain=MessageChain(type="reasoning").message(
+-                        llm_resp.reasoning_content,
++        # Tool-call responses can contain provisional text. Only expose the final,
++        # tool-free response so chat platforms do not receive two replies.
++        if _should_emit_llm_result(llm_resp):
++            if llm_resp.reasoning_content:
++                yield AgentResponse(
++                    type="llm_result",
++                    data=AgentResponseData(
++                        chain=MessageChain(type="reasoning").message(
++                            llm_resp.reasoning_content,
++                        ),
+                     ),
+-                ),
+-            )
+-        if llm_resp.result_chain:
+-            yield AgentResponse(
+-                type="llm_result",
+-                data=AgentResponseData(chain=llm_resp.result_chain),
+-            )
+-        elif llm_resp.completion_text:
+-            yield AgentResponse(
+-                type="llm_result",
+-                data=AgentResponseData(
+-                    chain=MessageChain().message(llm_resp.completion_text),
+-                ),
+-            )
++                )
++            if llm_resp.result_chain:
++                yield AgentResponse(
++                    type="llm_result",
++                    data=AgentResponseData(chain=llm_resp.result_chain),
++                )
++            elif llm_resp.completion_text:
++                yield AgentResponse(
++                    type="llm_result",
++                    data=AgentResponseData(
++                        chain=MessageChain().message(llm_resp.completion_text),
++                    ),
++                )
+ 
+         # 如果有工具调用，还需处理工具调用
+         if llm_resp.tools_call_name:
+diff --git a/official/astrbot/core/config/default.py b/expected/astrbot/core/config/default.py
+index 6156601..d101d8d 100644
+--- a/official/astrbot/core/config/default.py
++++ b/expected/astrbot/core/config/default.py
+@@ -358,7 +358,7 @@ CONFIG_METADATA_2 = {
+                         "type": "aiocqhttp",
+                         "enable": True,
+                         "ws_reverse_host": "0.0.0.0",
+-                        "ws_reverse_port": 6199,
++                        "ws_reverse_port": 6200,
+                         "ws_reverse_token": "",
+                     },
+                     "微信公众平台": {
+diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+index 91a7444..1f68163 100644
+--- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
++++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+@@ -19,6 +19,19 @@ from astrbot.api.message_components import (
+ from astrbot.api.platform import Group, MessageMember
+ 
+ 
++def _is_meme_manager_image(segment: Image) -> bool:
++    """Return whether an image comes from meme_manager's old or v4 pack layout."""
++    image_ref = str(segment.path or segment.file or "")
++    normalized = image_ref.replace("\\", "/").lower()
++    plugin_root = "/plugin_data/meme_manager/"
++    if plugin_root not in normalized:
++        return False
++    relative_path = normalized.split(plugin_root, 1)[1]
++    return relative_path.startswith("memes/") or (
++        relative_path.startswith("packs/") and "/memes/" in relative_path
++    )
++
++
+ class AiocqhttpMessageEvent(AstrMessageEvent):
+     def __init__(
+         self,
+@@ -34,8 +47,22 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+     @staticmethod
+     async def _from_segment_to_dict(segment: BaseMessageComponent) -> dict:
+         """修复部分字段"""
+-        if isinstance(segment, Image | Record):
+-            # For Image and Record segments, we convert them to base64
++        if isinstance(segment, Image):
++            # meme_manager 图片需要保留本地路径并显式标记为表情包。
++            # 否则统一转成 base64 后，微信桥接层无法区分表情包与普通图片。
++            if _is_meme_manager_image(segment):
++                payload = await segment.to_dict()
++                payload.setdefault("data", {})["sub_type"] = "emoji"
++                return payload
++            bs64 = await segment.convert_to_base64()
++            return {
++                "type": segment.type.lower(),
++                "data": {
++                    "file": f"base64://{bs64}",
++                },
++            }
++        if isinstance(segment, Record):
++            # For Record segments, we convert them to base64
+             bs64 = await segment.convert_to_base64()
+             return {
+                 "type": segment.type.lower(),
+@@ -95,23 +122,23 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+         session_id: str | None,
+         messages: list[dict],
+     ) -> None:
+-        # session_id 必须是纯数字字符串
+-        session_id_int = (
+-            int(session_id) if session_id and session_id.isdigit() else None
+-        )
++        # session_id: QQ 协议为纯数字，WeChat 为 wxid 或 xxx@chatroom
+         routing_params = {}
+         if isinstance(event, Event) and event.get("self_id"):
+             routing_params["self_id"] = event["self_id"]
+ 
+-        if is_group and isinstance(session_id_int, int):
++        if is_group and session_id:
++            # QQ: 纯数字; WeChat: xxx@chatroom 或 wxid_xxx
++            group_id = int(session_id) if session_id.isdigit() else session_id
+             await bot.send_group_msg(
+-                group_id=session_id_int,
++                group_id=group_id,
+                 message=messages,
+                 **routing_params,
+             )
+-        elif not is_group and isinstance(session_id_int, int):
++        elif not is_group and session_id:
++            user_id = int(session_id) if session_id.isdigit() else session_id
+             await bot.send_private_msg(
+-                user_id=session_id_int,
++                user_id=user_id,
+                 message=messages,
+                 **routing_params,
+             )
+@@ -119,7 +146,7 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+             await bot.send(event=event, message=messages)
+         else:
+             raise ValueError(
+-                f"无法发送消息：缺少有效的数字 session_id({session_id}) 或 event({event})",
++                f"无法发送消息：缺少有效的 session_id({session_id}) 或 event({event})",
+             )
+ 
+     @classmethod
+diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
+index a69cb91..f60f2b7 100644
+--- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
++++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
+@@ -325,7 +325,12 @@ class AiocqhttpAdapter(Platform):
+                                 get_reply=False,
+                             )
+ 
+-                            reply_seg = Reply(
++                            # QQ's legacy ``qq`` field is typed as an integer,
++                            # while WeChat adapters expose string IDs such as
++                            # ``wxid_xxx``.  Keep the full ID in ``sender_id``
++                            # (which accepts strings) and only populate the
++                            # deprecated compatibility field for numeric IDs.
++                            reply_kwargs = dict(
+                                 id=abm_reply.message_id,
+                                 chain=abm_reply.message,
+                                 sender_id=abm_reply.sender.user_id,
+@@ -333,8 +338,15 @@ class AiocqhttpAdapter(Platform):
+                                 time=abm_reply.timestamp,
+                                 message_str=abm_reply.message_str,
+                                 text=abm_reply.message_str,  # for compatibility
+-                                qq=abm_reply.sender.user_id,  # for compatibility
+                             )
++                            reply_sender_id = abm_reply.sender.user_id
++                            if isinstance(reply_sender_id, int) or (
++                                isinstance(reply_sender_id, str)
++                                and reply_sender_id.isdigit()
++                            ):
++                                reply_kwargs["qq"] = int(reply_sender_id)
++
++                            reply_seg = Reply(**reply_kwargs)
+ 
+                             abm.message.append(reply_seg)
+                         except BaseException as e:
+@@ -352,43 +364,54 @@ class AiocqhttpAdapter(Platform):
+                             abm.message.append(At(qq="all", name="全体成员"))
+                             continue
+ 
+-                        at_info = await self.bot.call_action(
+-                            action="get_group_member_info",
+-                            group_id=event.group_id,
+-                            user_id=int(m["data"]["qq"]),
+-                            no_cache=False,
+-                            **routing_params,
+-                        )
+-                        if at_info:
+-                            nickname = at_info.get("card", "")
+-                            if nickname == "":
+-                                at_info = await self.bot.call_action(
+-                                    action="get_stranger_info",
+-                                    user_id=int(m["data"]["qq"]),
+-                                    no_cache=False,
+-                                    **routing_params,
+-                                )
+-                                nickname = at_info.get("nick", "") or at_info.get(
+-                                    "nickname",
+-                                    "",
+-                                )
+-                            is_at_self = str(m["data"]["qq"]) in {abm.self_id, "all"}
+-
+-                            abm.message.append(
+-                                At(
+-                                    qq=m["data"]["qq"],
+-                                    name=nickname,
+-                                ),
++                        # wxid (WeChat) is non-numeric; skip group_member_info lookup
++                        qq_str = str(m["data"]["qq"])
++                        try:
++                            qq_int = int(qq_str)
++                        except (ValueError, TypeError):
++                            qq_int = None
++
++                        at_info = None
++                        nickname = ""
++                        if qq_int is not None:
++                            at_info = await self.bot.call_action(
++                                action="get_group_member_info",
++                                group_id=event.group_id,
++                                user_id=qq_int,
++                                no_cache=False,
++                                **routing_params,
+                             )
++                            if at_info:
++                                nickname = at_info.get("card", "")
++                                if nickname == "":
++                                    at_info = await self.bot.call_action(
++                                        action="get_stranger_info",
++                                        user_id=qq_int,
++                                        no_cache=False,
++                                        **routing_params,
++                                    )
++                                    nickname = at_info.get("nick", "") or at_info.get(
++                                        "nickname",
++                                        "",
++                                    )
++                        else:
++                            # non-numeric id (e.g. wxid): use name from message segment if available
++                            nickname = m["data"].get("name", "")
++                        is_at_self = qq_str in {abm.self_id, "all"}
++
++                        abm.message.append(
++                            At(
++                                qq=qq_str,
++                                name=nickname,
++                            ),
++                        )
+ 
+-                            if is_at_self and not first_at_self_processed:
+-                                # 第一个@是机器人，不添加到message_str
+-                                first_at_self_processed = True
+-                            else:
+-                                # 非第一个@机器人或@其他用户，添加到message_str
+-                                at_parts.append(f" @{nickname}({m['data']['qq']}) ")
++                        if is_at_self and not first_at_self_processed:
++                            # 第一个@是机器人，不添加到message_str
++                            first_at_self_processed = True
+                         else:
+-                            abm.message.append(At(qq=str(m["data"]["qq"]), name=""))
++                            # 非第一个@机器人或@其他用户，添加到message_str
++                            at_parts.append(f" @{nickname}({qq_str}) ")
+                     except ActionFailed as e:
+                         logger.error(f"获取 @ 用户信息失败: {e}，此消息段将被忽略。")
+                     except BaseException as e:
+@@ -427,10 +450,10 @@ class AiocqhttpAdapter(Platform):
+     def run(self) -> Awaitable[Any]:
+         if not self.host or not self.port:
+             logger.warning(
+-                "aiocqhttp: 未配置 ws_reverse_host 或 ws_reverse_port，将使用默认值：http://0.0.0.0:6199",
++                "aiocqhttp: 未配置 ws_reverse_host 或 ws_reverse_port，将使用默认值：http://0.0.0.0:6200",
+             )
+             self.host = "0.0.0.0"
+-            self.port = 6199
++            self.port = 6200
+ 
+         coro = self.bot.run_task(
+             host=self.host,

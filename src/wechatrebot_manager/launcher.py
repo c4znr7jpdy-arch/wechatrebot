@@ -93,6 +93,7 @@ def build_service_specs(
     common_environment = {
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
     }
     astrbot = ServiceSpec(
         name="astrbot",

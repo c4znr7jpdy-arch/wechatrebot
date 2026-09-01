@@ -7,6 +7,8 @@
 3. 插件、Python/Node 包、字体、图片和其他资产的 SBOM、许可证与 NOTICE；
 4. 自有代码的著作权归属、客户许可、支持期和更新权说明。
 
+Python 3.13.9 x64 与 AstrBot 4.26.6 运行时已经通过固定版本、wheelhouse 汇总指纹、逐 wheel SHA-256、离线复建和 staged import 校验。运行时技术可重复性已验证，但该结果不替代 AstrBot、Python 包及其传递依赖的许可证审查。
+
 未关闭这些门槛前，`release/source-manifest.json` 中的受控二进制默认不会进入 staging。
 
 微信客户端及其安装程序不属于商业项目交付物。客户必须自行从官方渠道取得并安装微信；本项目只保存客户选定的本机 `Weixin.exe` 路径，不复制或再分发微信文件。

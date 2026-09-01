@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 
 from .json_io import write_json_atomic
+
+
+def _load_object(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"现有配置无法读取：{path}：{exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"现有配置根节点必须是 JSON 对象：{path}")
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +78,64 @@ def bridge_config_payload(
     }
 
 
+def astrbot_config_payload(
+    *,
+    ports: RuntimePorts = RuntimePorts(),
+) -> dict[str, object]:
+    errors = ports.validate()
+    if errors:
+        raise ValueError("；".join(errors))
+    return {
+        "config_version": 2,
+        "platform": [
+            {
+                "id": "aiocqhttp_hook41827",
+                "type": "aiocqhttp",
+                "enable": True,
+                "ws_reverse_host": "127.0.0.1",
+                "ws_reverse_port": ports.astrbot_ws,
+                "ws_reverse_token": "",
+            }
+        ],
+        "platform_settings": {
+            "reply_with_mention": False,
+            "reply_with_quote": True,
+            "friend_message_needs_wake_prefix": False,
+            "ignore_bot_self_message": True,
+        },
+        "provider_sources": [],
+        "provider": [],
+        "provider_settings": {
+            "default_provider_id": "",
+            "fallback_chat_models": [],
+            "default_image_caption_provider_id": "",
+            "default_personality": "default",
+        },
+        "admins_id": [],
+        "dashboard": {
+            "enable": True,
+            "username": "astrbot",
+            "password": "",
+            "pbkdf2_password": "",
+            "password_storage_upgraded": False,
+            "password_change_required": False,
+            "jwt_secret": "",
+            "host": "127.0.0.1",
+            "port": ports.dashboard,
+        },
+        "wake_prefix": ["/", "\\"],
+        "persona": [],
+        "plugin_set": ["*"],
+        "timezone": "Asia/Shanghai",
+        "log_level": "INFO",
+        "log_file_enable": True,
+        "log_file_path": "../../logs/astrbot-core.log",
+        "trace_enable": False,
+        "trace_log_enable": False,
+        "disable_metrics": True,
+    }
+
+
 def write_runtime_configs(
     install_root: str | Path,
     wechat_exe_path: str | Path,
@@ -74,17 +145,65 @@ def write_runtime_configs(
 ) -> None:
     root = Path(install_root).expanduser().resolve()
     bridge_config = root / "app" / "bridge" / "config.json"
+    bridge_payload = _load_object(bridge_config)
+    bridge_payload.update(bridge_config_payload(wechat_exe_path, ports=ports))
     write_json_atomic(
         bridge_config,
-        bridge_config_payload(wechat_exe_path, ports=ports),
+        bridge_payload,
     )
+    astrbot_root = root / "app" / "astrbot"
+    (astrbot_root / "data").mkdir(parents=True, exist_ok=True)
+    (astrbot_root / ".astrbot").touch(exist_ok=True)
+    astrbot_path = astrbot_root / "data" / "cmd_config.json"
+    generated_astrbot = astrbot_config_payload(ports=ports)
+    astrbot_payload = _load_object(astrbot_path)
+    if astrbot_payload:
+        astrbot_payload["platform"] = generated_astrbot["platform"]
+        astrbot_payload["platform_settings"] = {
+            **(
+                astrbot_payload.get("platform_settings", {})
+                if isinstance(astrbot_payload.get("platform_settings"), dict)
+                else {}
+            ),
+            **generated_astrbot["platform_settings"],
+        }
+        astrbot_payload["dashboard"] = {
+            **(
+                astrbot_payload.get("dashboard", {})
+                if isinstance(astrbot_payload.get("dashboard"), dict)
+                else {}
+            ),
+            "enable": True,
+            "host": "127.0.0.1",
+            "port": ports.dashboard,
+        }
+        for key in (
+            "log_level",
+            "log_file_enable",
+            "log_file_path",
+            "trace_enable",
+            "trace_log_enable",
+            "disable_metrics",
+        ):
+            astrbot_payload[key] = generated_astrbot[key]
+    else:
+        astrbot_payload = generated_astrbot
     write_json_atomic(
-        root / "config" / "manager.json",
+        astrbot_path,
+        astrbot_payload,
+    )
+    manager_path = root / "config" / "manager.json"
+    manager_payload = _load_object(manager_path)
+    manager_payload.update(
         {
             "schema_version": 1,
             "install_root": str(root),
             "wechat_exe_path": str(Path(wechat_exe_path).expanduser().resolve()),
             "wechat_version": wechat_version,
             "ports": asdict(ports),
-        },
+        }
+    )
+    write_json_atomic(
+        manager_path,
+        manager_payload,
     )

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "status": "blessed-offline-wheelhouse",
+  "python_version": "3.13.9",
+  "platform": "win_amd64",
+  "wheel_count": 220,
+  "total_bytes": 257104040,
+  "aggregate_sha256": "8ABBEF0E31BE6461C6ECD7B98D462C460091CC98031354853DB1EB257F9C9114",
+  "distribution": "The wheelhouse is a separate private release artifact and is not committed to Git."
+}

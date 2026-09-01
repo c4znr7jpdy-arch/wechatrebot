@@ -7,18 +7,15 @@ from pathlib import Path
 
 
 FORBIDDEN_PATH_PARTS = {
-    "py",
     "legacy_nonebot2",
     "python311-x86",
-    "logs",
     "__pycache__",
 }
 FORBIDDEN_FILENAMES = {
-    "noveloader.dll",
-    "novehelper.dll",
     ".env.prod",
     "config.json",
 }
+GLOBAL_FORBIDDEN_FILENAMES = {"noveloader.dll", "novehelper.dll"}
 FORBIDDEN_SUFFIXES = {".db", ".db-shm", ".db-wal", ".log"}
 WECHAT_DISTRIBUTABLE_NAMES = (
     re.compile(r"^weixin\.exe$", re.IGNORECASE),
@@ -37,6 +34,23 @@ FORBIDDEN_TEXT = (
     ),
 )
 
+TRUSTED_VENDOR_PREFIX = ("runtime", "python", "lib", "site-packages")
+
+
+def _parts_casefold(path: Path) -> tuple[str, ...]:
+    return tuple(part.casefold() for part in path.parts)
+
+
+def _is_trusted_vendor(relative: Path) -> bool:
+    parts = _parts_casefold(relative)
+    return parts[: len(TRUSTED_VENDOR_PREFIX)] == TRUSTED_VENDOR_PREFIX
+
+
+def _is_patched_astrbot(relative: Path) -> bool:
+    parts = _parts_casefold(relative)
+    prefix = (*TRUSTED_VENDOR_PREFIX, "astrbot")
+    return parts[: len(prefix)] == prefix
+
 
 def scan_release(root: Path) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
@@ -44,24 +58,44 @@ def scan_release(root: Path) -> list[dict[str, str]]:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
+        parts = _parts_casefold(relative)
+        trusted_vendor = _is_trusted_vendor(relative)
         lowered_parts = {part.casefold() for part in relative.parts[:-1]}
         if lowered_parts & FORBIDDEN_PATH_PARTS:
             findings.append({"path": relative.as_posix(), "reason": "forbidden-directory"})
-        if any(part.endswith(".egg-info") for part in lowered_parts):
+        if parts and parts[0] == "py":
+            findings.append({"path": relative.as_posix(), "reason": "forbidden-directory"})
+        if not trusted_vendor and "logs" in lowered_parts:
+            findings.append({"path": relative.as_posix(), "reason": "forbidden-directory"})
+        if not trusted_vendor and any(part.endswith(".egg-info") for part in lowered_parts):
             findings.append({"path": relative.as_posix(), "reason": "build-metadata"})
-        if path.name.casefold() in FORBIDDEN_FILENAMES:
+        if path.name.casefold() in GLOBAL_FORBIDDEN_FILENAMES:
+            findings.append({"path": relative.as_posix(), "reason": "forbidden-filename"})
+        if not trusted_vendor and path.name.casefold() in FORBIDDEN_FILENAMES:
             findings.append({"path": relative.as_posix(), "reason": "forbidden-filename"})
         if any(pattern.fullmatch(path.name) for pattern in WECHAT_DISTRIBUTABLE_NAMES):
             findings.append({"path": relative.as_posix(), "reason": "wechat-distributable"})
-        if any(path.name.casefold().endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
+        if not trusted_vendor and any(
+            path.name.casefold().endswith(suffix) for suffix in FORBIDDEN_SUFFIXES
+        ):
             findings.append({"path": relative.as_posix(), "reason": "runtime-data"})
+        if trusted_vendor and not _is_patched_astrbot(relative):
+            # Third-party wheels are accepted only through the pinned wheelhouse
+            # fingerprint. Their sources can legitimately contain example tokens,
+            # test fixtures, port-like numbers, or package data directories.
+            continue
         if path.stat().st_size > 4 * 1024 * 1024:
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for reason, pattern in FORBIDDEN_TEXT:
+        patterns = FORBIDDEN_TEXT
+        if trusted_vendor:
+            patterns = tuple(
+                item for item in FORBIDDEN_TEXT if item[0] in {"legacy-port", "legacy-loader"}
+            )
+        for reason, pattern in patterns:
             if pattern.search(text):
                 findings.append({"path": relative.as_posix(), "reason": reason})
     return findings

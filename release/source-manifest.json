@@ -18,6 +18,31 @@
       "target": "config/templates/brand.example.json"
     },
     {
+      "origin": "commercial",
+      "source": "config/astrbot.example.json",
+      "target": "config/templates/astrbot.example.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "release/plugin-manifest.json",
+      "target": "legal/plugin-manifest.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "release/runtime-requirements.lock",
+      "target": "legal/runtime-requirements.lock"
+    },
+    {
+      "origin": "commercial",
+      "source": "release/runtime-wheelhouse.json",
+      "target": "legal/runtime-wheelhouse.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "legal/README.md",
+      "target": "legal/README.md"
+    },
+    {
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/src",
       "target": "app/bridge/src"
@@ -46,4 +71,3 @@
     }
   ]
 }
-

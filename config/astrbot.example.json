@@ -1,0 +1,54 @@
+{
+  "config_version": 2,
+  "platform": [
+    {
+      "id": "aiocqhttp_hook41827",
+      "type": "aiocqhttp",
+      "enable": true,
+      "ws_reverse_host": "127.0.0.1",
+      "ws_reverse_port": 6200,
+      "ws_reverse_token": ""
+    }
+  ],
+  "platform_settings": {
+    "reply_with_mention": false,
+    "reply_with_quote": true,
+    "friend_message_needs_wake_prefix": false,
+    "ignore_bot_self_message": true
+  },
+  "provider_sources": [],
+  "provider": [],
+  "provider_settings": {
+    "default_provider_id": "",
+    "fallback_chat_models": [],
+    "default_image_caption_provider_id": "",
+    "default_personality": "default"
+  },
+  "admins_id": [],
+  "dashboard": {
+    "enable": true,
+    "username": "astrbot",
+    "password": "",
+    "pbkdf2_password": "",
+    "password_storage_upgraded": false,
+    "password_change_required": false,
+    "jwt_secret": "",
+    "host": "127.0.0.1",
+    "port": 6185
+  },
+  "wake_prefix": [
+    "/",
+    "\\"
+  ],
+  "persona": [],
+  "plugin_set": [
+    "*"
+  ],
+  "timezone": "Asia/Shanghai",
+  "log_level": "INFO",
+  "log_file_enable": true,
+  "log_file_path": "../../logs/astrbot-core.log",
+  "trace_enable": false,
+  "trace_log_enable": false,
+  "disable_metrics": true
+}
