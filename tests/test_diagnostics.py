@@ -59,3 +59,36 @@ def test_diagnostics_redact_install_wechat_and_user_paths() -> None:
     assert "客户" not in text
     assert "Customer" not in text
     assert redacted["wechat"] == "<WECHAT_EXE>"
+
+
+def test_diagnostics_summarize_large_installed_payload(tmp_path: Path) -> None:
+    (tmp_path / "config").mkdir()
+    (tmp_path / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8"
+    )
+    (tmp_path / "config" / "manager.json").write_text(
+        json.dumps({"ports": {}}), encoding="utf-8"
+    )
+    files = [
+        {"path": f"runtime/private/path-{index}.py", "sha256": "A" * 64}
+        for index in range(100)
+    ]
+    (tmp_path / "config" / "installed-payload.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_manifest_status": "phase-1-incomplete",
+                "files": files,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = collect_diagnostics(tmp_path)
+
+    summary = report["configuration"]["installed_payload"]
+    assert summary["file_count"] == 100
+    assert summary["file_list_valid"] is True
+    assert len(summary["manifest_sha256"]) == 64
+    assert "files" not in summary
+    assert "private/path" not in json.dumps(report)

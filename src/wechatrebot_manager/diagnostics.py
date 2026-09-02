@@ -8,6 +8,7 @@ from typing import Any
 
 from .install_paths import INSTALL_MARKER
 from .launcher import port_accepting
+from .payload import sha256_file
 from .wechat_path import validate_wechat_executable
 
 
@@ -89,6 +90,18 @@ def _load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return payload, None
 
 
+def _installed_payload_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    files = payload.get("files")
+    return {
+        "schema_version": payload.get("schema_version"),
+        "source_manifest_status": payload.get("source_manifest_status"),
+        "file_count": len(files) if isinstance(files, list) else None,
+        "file_list_valid": isinstance(files, list),
+        "manifest_size": path.stat().st_size,
+        "manifest_sha256": sha256_file(path),
+    }
+
+
 def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
     root = Path(install_root).expanduser().resolve()
     checks: list[DiagnosticCheck] = []
@@ -124,7 +137,11 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             )
         )
         if payload is not None:
-            captured[name] = redact_sensitive(payload)
+            captured[name] = (
+                _installed_payload_summary(path, payload)
+                if name == "installed_payload"
+                else redact_sensitive(payload)
+            )
 
     required_files = (
         ("python-runtime", root / "runtime" / "python" / "python.exe"),
