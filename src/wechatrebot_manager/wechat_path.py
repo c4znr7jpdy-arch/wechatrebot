@@ -4,6 +4,7 @@ import ctypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import struct
 
 
 SUPPORTED_WECHAT_VERSIONS = ("4.1.8.27",)
@@ -65,6 +66,24 @@ def read_file_version(path: Path) -> str | None:
     )
 
 
+def read_pe_machine(path: Path) -> int | None:
+    try:
+        with path.open("rb") as handle:
+            if handle.read(2) != b"MZ":
+                return None
+            handle.seek(0x3C)
+            offset_bytes = handle.read(4)
+            if len(offset_bytes) != 4:
+                return None
+            handle.seek(struct.unpack("<I", offset_bytes)[0])
+            if handle.read(4) != b"PE\x00\x00":
+                return None
+            machine_bytes = handle.read(2)
+            return struct.unpack("<H", machine_bytes)[0] if len(machine_bytes) == 2 else None
+    except OSError:
+        return None
+
+
 def validate_wechat_executable(
     value: str | Path,
     *,
@@ -80,6 +99,10 @@ def validate_wechat_executable(
         errors.append("所选微信程序不存在。")
     if path.name.lower() != "weixin.exe":
         errors.append("请选择微信主程序 Weixin.exe。")
+    machine = read_pe_machine(path) if path.is_file() else None
+    if path.is_file() and machine != 0x8664:
+        actual = "无法识别" if machine is None else f"0x{machine:04X}"
+        errors.append(f"微信程序必须是 x64 架构，当前 PE 架构：{actual}。")
     version = read_file_version(path)
     if path.is_file() and version is None:
         errors.append("无法读取微信文件版本。")

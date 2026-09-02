@@ -1,4 +1,6 @@
 from pathlib import Path
+import hashlib
+import json
 import os
 from typing import Any
 
@@ -49,6 +51,26 @@ def _layout(root: Path) -> None:
     hook.mkdir(parents=True)
     (hook / "x64 inject.exe").write_bytes(b"injector")
     (hook / "libGLESv1-c2c-video-v2.dll").write_bytes(b"hook")
+    legal = root / "legal"
+    legal.mkdir()
+    (legal / "hook-binaries.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "files": [
+                    {
+                        "path": "hook/x64 inject.exe",
+                        "sha256": hashlib.sha256(b"injector").hexdigest().upper(),
+                    },
+                    {
+                        "path": "hook/libGLESv1-c2c-video-v2.dll",
+                        "sha256": hashlib.sha256(b"hook").hexdigest().upper(),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
@@ -112,5 +134,48 @@ def test_preflight_rejects_missing_hook_before_any_process_starts(
     supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
 
     with pytest.raises(ServiceLaunchError, match="x64 inject.exe"):
+        supervisor.start()
+    assert starts == []
+
+
+def test_preflight_checks_dashboard_and_hook_api_ports_before_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    starts: list[list[str]] = []
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        starts.append(argv)
+        return _FakeProcess("unexpected", [])
+
+    monkeypatch.setattr(
+        "wechatrebot_manager.launcher.port_accepting",
+        lambda host, port: port == 6185,
+    )
+    supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
+
+    with pytest.raises(ServiceLaunchError, match="6185"):
+        supervisor.start()
+    assert starts == []
+
+
+def test_preflight_rejects_tampered_hook_before_any_process_starts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    (tmp_path / "app" / "bridge" / "vendor" / "hook" / "x64 inject.exe").write_bytes(
+        b"tampered"
+    )
+    starts: list[list[str]] = []
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        starts.append(argv)
+        return _FakeProcess("unexpected", [])
+
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(specs, popen_factory=popen)
+
+    with pytest.raises(ServiceLaunchError, match="完整性校验失败"):
         supervisor.start()
     assert starts == []

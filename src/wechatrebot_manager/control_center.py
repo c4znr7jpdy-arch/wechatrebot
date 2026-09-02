@@ -175,7 +175,15 @@ class ControlCenter:
             return
         self.start_button.configure(state="disabled")
         self.status_var.set("正在启动…")
-        self.supervisor = ProcessSupervisor(build_service_specs(self.install_root))
+        try:
+            self.supervisor = ProcessSupervisor(build_service_specs(self.install_root))
+        except (OSError, ValueError) as exc:
+            from tkinter import messagebox
+
+            messagebox.showerror("启动前检查失败", str(exc), parent=self.root)
+            self.supervisor = None
+            self._refresh_status()
+            return
 
         def worker() -> None:
             try:

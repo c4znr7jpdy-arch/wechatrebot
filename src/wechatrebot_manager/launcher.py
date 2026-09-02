@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import signal
@@ -10,6 +11,7 @@ import time
 from typing import Callable, IO, Mapping, Protocol
 
 from .runtime_config import RuntimePorts
+from .payload import sha256_file
 
 
 class ProcessLike(Protocol):
@@ -35,6 +37,8 @@ class ServiceSpec:
     ready_timeout_seconds: float
     environment: Mapping[str, str]
     required_files: tuple[Path, ...] = ()
+    required_free_ports: tuple[tuple[str, int], ...] = ()
+    required_hashes: tuple[tuple[Path, str], ...] = ()
 
     def validate(self) -> tuple[str, ...]:
         errors: list[str] = []
@@ -46,6 +50,9 @@ class ServiceSpec:
         for required in self.required_files:
             if not required.is_file():
                 errors.append(f"{self.name} 必需文件不存在：{required}")
+        for required, expected in self.required_hashes:
+            if required.is_file() and sha256_file(required) != expected:
+                errors.append(f"{self.name} 文件完整性校验失败：{required}")
         if not 1 <= self.ready_port <= 65535:
             errors.append(f"{self.name} 就绪端口无效。")
         return tuple(errors)
@@ -81,6 +88,40 @@ def wait_until_ready(spec: ServiceSpec, process: ProcessLike) -> bool:
     return False
 
 
+def _hook_integrity_files(root: Path) -> tuple[tuple[Path, str], ...]:
+    manifest_path = root / "legal" / "hook-binaries.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"缺少新 HOOK 完整性清单：{manifest_path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"新 HOOK 完整性清单无法读取：{exc}") from exc
+    files = payload.get("files") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 1
+        or not isinstance(files, list)
+    ):
+        raise ValueError("新 HOOK 完整性清单格式错误。")
+    hook_root = root / "app" / "bridge" / "vendor" / "hook"
+    expected_names = {
+        "x64 inject.exe",
+        "libglesv1-c2c-video-v2.dll",
+    }
+    results: dict[str, tuple[Path, str]] = {}
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        filename = Path(str(item.get("path", ""))).name
+        digest = str(item.get("sha256", "")).upper()
+        key = filename.casefold()
+        if key in expected_names and len(digest) == 64:
+            results[key] = (hook_root / filename, digest)
+    if set(results) != expected_names:
+        raise ValueError("新 HOOK 完整性清单缺少注入器或 DLL。")
+    return tuple(results[name] for name in sorted(results))
+
+
 def build_service_specs(
     install_root: str | Path,
     *,
@@ -106,6 +147,7 @@ def build_service_specs(
             else str(ffmpeg_bin)
         ),
     }
+    hook_integrity_files = _hook_integrity_files(root)
     astrbot = ServiceSpec(
         name="astrbot",
         argv=(str(python_exe), "-m", "astrbot.cli.__main__", "run"),
@@ -119,6 +161,7 @@ def build_service_specs(
             astrbot_root / ".astrbot",
             astrbot_root / "data" / "cmd_config.json",
         ),
+        required_free_ports=(("AstrBot 后台", ports.dashboard),),
     )
     bridge = ServiceSpec(
         name="new-hook-bridge",
@@ -139,6 +182,7 @@ def build_service_specs(
             "PYTHONPATH": str(bridge_root / "src"),
         },
         required_files=(
+            root / "legal" / "hook-binaries.json",
             bridge_root / "config.json",
             bridge_root / "vendor" / "hook" / "x64 inject.exe",
             bridge_root
@@ -146,6 +190,8 @@ def build_service_specs(
             / "hook"
             / "libGLESv1-c2c-video-v2.dll",
         ),
+        required_free_ports=(("新 HOOK API", ports.hook_api),),
+        required_hashes=hook_integrity_files,
     )
     return astrbot, bridge
 
@@ -173,11 +219,19 @@ class ProcessSupervisor:
         ]
         if validation_errors:
             raise ServiceLaunchError("；".join(validation_errors))
-        occupied = [
-            f"{spec.name} 端口已被占用：{spec.ready_host}:{spec.ready_port}"
-            for spec in self.specs
-            if port_accepting(spec.ready_host, spec.ready_port)
-        ]
+        occupied: list[str] = []
+        checked_ports: set[tuple[str, int]] = set()
+        for spec in self.specs:
+            ports = ((spec.name, spec.ready_port), *spec.required_free_ports)
+            for label, port in ports:
+                address = (spec.ready_host, port)
+                if address in checked_ports:
+                    continue
+                checked_ports.add(address)
+                if port_accepting(*address):
+                    occupied.append(
+                        f"{label} 端口已被占用：{spec.ready_host}:{port}"
+                    )
         if occupied:
             raise ServiceLaunchError("；".join(occupied))
         for spec in self.specs:
