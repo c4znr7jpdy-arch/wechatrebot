@@ -9,6 +9,8 @@
 
 Python 3.13.9 x64 与 AstrBot 4.26.6 运行时已经通过固定版本、wheelhouse 汇总指纹、逐 wheel SHA-256、离线复建和 staged import 校验。运行时技术可重复性已验证，但该结果不替代 AstrBot、Python 包及其传递依赖的许可证审查。
 
+图形管理器的功能配置窗口使用 pywebview 6.2.1（BSD-3-Clause）及其固定传递依赖，并依赖 Windows Edge WebView2 Runtime 和 .NET Framework 4.6.2 或更高版本。正式交付前须将对应许可证文本、SBOM 和干净系统兼容性记录并入发行证据。
+
 当前 `WeChatReBot.exe` 与两项新 HOOK PE 文件均未进行 Authenticode 签名。未签名状态必须在交付前通过可信代码签名、签名后哈希归档和干净 Windows 环境信誉测试关闭，不能用降低客户系统安全设置的方式绕过。
 
 开发审计可使用 `hook-binary-redistribution` 门禁验证固定哈希文件的集成结果；该参数不是商业再分发授权，也不能改变 `release/hook-binaries.json` 中的待审核状态。

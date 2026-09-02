@@ -34,3 +34,5 @@ def test_commercial_astrbot_template_has_one_loopback_bridge() -> None:
     assert platform["ws_reverse_host"] == "127.0.0.1"
     assert platform["ws_reverse_port"] == 6200
     assert payload["dashboard"]["host"] == "127.0.0.1"
+    assert payload["dashboard"]["enable"] is True
+    assert payload["dashboard"]["username"] == "local-console"

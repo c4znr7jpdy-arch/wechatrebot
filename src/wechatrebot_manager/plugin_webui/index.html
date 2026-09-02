@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>功能配置中心</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div>
+        <h1 id="product-title">功能配置中心</h1>
+        <p>管理已交付功能、独立模型和高级设置</p>
+      </div>
+      <div class="engine-state" id="engine-state" role="status"><i></i><span>正在检查回复引擎</span></div>
+    </header>
+
+    <main class="workspace">
+      <aside class="plugin-rail" aria-label="功能列表">
+        <div class="rail-heading">
+          <div><strong>已交付功能</strong><span id="plugin-count">0 项</span></div>
+          <label class="search-box">
+            <span class="sr-only">搜索功能</span>
+            <input id="plugin-search" type="search" placeholder="搜索功能名称" autocomplete="off">
+            <button id="clear-search" type="button" aria-label="清空搜索" disabled>×</button>
+          </label>
+        </div>
+        <div id="plugin-list" class="plugin-list" role="listbox" aria-label="功能列表"></div>
+        <div id="plugin-empty" class="rail-empty" hidden>没有找到匹配的功能</div>
+      </aside>
+
+      <section class="detail-pane" aria-live="polite">
+        <div id="loading-view" class="state-view">
+          <div class="spinner" aria-hidden="true"></div>
+          <strong>正在读取功能配置</strong>
+          <span>请稍候</span>
+        </div>
+
+        <div id="empty-view" class="state-view" hidden>
+          <div class="empty-symbol" aria-hidden="true">＋</div>
+          <strong>选择左侧功能开始配置</strong>
+          <span>可修改基础参数、独立模型或打开高级管理页</span>
+        </div>
+
+        <div id="detail-view" hidden>
+          <div class="detail-header">
+            <div class="detail-title">
+              <div class="eyebrow">功能设置</div>
+              <h2 id="plugin-title">功能名称</h2>
+              <p id="plugin-summary">配置项</p>
+            </div>
+            <div class="detail-actions">
+              <button id="toggle-plugin" class="button secondary" type="button" disabled>停用功能</button>
+              <button id="reload-plugin" class="button secondary" type="button" disabled>热重载</button>
+            </div>
+          </div>
+
+          <div id="notice" class="notice" role="alert" hidden></div>
+
+          <nav class="tabs" aria-label="配置类型">
+            <button class="tab active" id="basic-tab" type="button" aria-selected="true" disabled>基础配置</button>
+            <button class="tab" id="pages-tab" type="button" aria-selected="false" hidden disabled>高级页面</button>
+          </nav>
+
+          <div id="basic-panel" class="tab-panel">
+            <form id="config-form" novalidate>
+              <div id="config-fields" class="config-fields"></div>
+              <div id="no-config" class="state-view compact" hidden>
+                <strong>这项功能没有基础配置</strong>
+                <span>仍可启停功能或执行热重载</span>
+              </div>
+              <div class="save-bar">
+                <span id="save-hint">修改完成后保存</span>
+                <button id="save-config" class="button primary" type="submit">保存配置</button>
+              </div>
+            </form>
+          </div>
+
+          <div id="pages-panel" class="tab-panel" hidden>
+            <div id="page-picker" class="page-picker"></div>
+            <div id="page-placeholder" class="state-view compact">
+              <strong>选择一个高级管理页</strong>
+              <span>高级页面仅在机器人运行时可用</span>
+            </div>
+            <iframe id="plugin-frame" title="功能高级管理页" hidden></iframe>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">放弃未保存的修改？</h2>
+      <p>当前配置还没有保存，继续操作会丢失这些修改。</p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="button secondary" type="button" disabled>继续编辑</button>
+        <button id="modal-confirm" class="button danger" type="button" disabled>放弃修改</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

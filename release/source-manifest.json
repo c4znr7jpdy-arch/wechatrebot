@@ -24,6 +24,11 @@
     },
     {
       "origin": "commercial",
+      "source": "assets/engine-webui",
+      "target": "app/astrbot/data/dist"
+    },
+    {
+      "origin": "commercial",
       "source": "release/plugin-manifest.json",
       "target": "legal/plugin-manifest.json"
     },

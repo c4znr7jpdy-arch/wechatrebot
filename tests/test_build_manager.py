@@ -21,6 +21,8 @@ def test_build_tool_lock_is_exact() -> None:
         if line.strip() and not line.startswith("#")
     ]
     assert "pyinstaller==6.22.2" in lines
+    assert "pywebview==6.2.1" in lines
+    assert "pythonnet==3.1.0" in lines
     assert all("==" in line for line in lines)
 
 

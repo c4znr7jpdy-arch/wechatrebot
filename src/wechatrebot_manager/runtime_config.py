@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
+import secrets
 
 from .brand import BrandProfile
 from .json_io import write_json_atomic
@@ -132,11 +134,11 @@ def astrbot_config_payload(
         },
         "admins_id": [normalized_admin] if normalized_admin else [],
         "dashboard": {
-            "enable": False,
-            "username": "local-console-disabled",
+            "enable": True,
+            "username": "local-console",
             "password": "",
             "pbkdf2_password": "",
-            "password_storage_upgraded": False,
+            "password_storage_upgraded": True,
             "password_change_required": False,
             "jwt_secret": "",
             "host": "127.0.0.1",
@@ -158,6 +160,30 @@ def astrbot_config_payload(
     if provider_profile is not None:
         _apply_provider_to_astrbot(payload, provider_profile)
     return payload
+
+
+def _ensure_local_dashboard_credentials(dashboard: dict[str, object]) -> None:
+    """Provision loopback-only credentials used by the branded control window."""
+    dashboard["enable"] = True
+    dashboard["host"] = "127.0.0.1"
+    dashboard["username"] = "local-console"
+    if not str(dashboard.get("jwt_secret") or "").strip():
+        dashboard["jwt_secret"] = secrets.token_hex(32)
+    if not str(dashboard.get("pbkdf2_password") or "").strip():
+        raw_password = secrets.token_urlsafe(24)
+        salt = secrets.token_hex(16)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            raw_password.encode("utf-8"),
+            bytes.fromhex(salt),
+            600_000,
+        ).hex()
+        dashboard["password"] = hashlib.md5(  # noqa: S324 - legacy compatibility hash
+            raw_password.encode("utf-8")
+        ).hexdigest()
+        dashboard["pbkdf2_password"] = f"pbkdf2_sha256$600000${salt}${digest}"
+    dashboard["password_storage_upgraded"] = True
+    dashboard["password_change_required"] = False
 
 
 def _upsert_by_id(
@@ -275,7 +301,7 @@ def write_runtime_configs(
                 if isinstance(astrbot_payload.get("dashboard"), dict)
                 else {}
             ),
-            "enable": False,
+            "enable": True,
             "host": "127.0.0.1",
             "port": ports.dashboard,
         }
@@ -299,6 +325,12 @@ def write_runtime_configs(
             )
     else:
         astrbot_payload = generated_astrbot
+    dashboard = astrbot_payload.get("dashboard")
+    if not isinstance(dashboard, dict):
+        dashboard = {}
+        astrbot_payload["dashboard"] = dashboard
+    _ensure_local_dashboard_credentials(dashboard)
+    dashboard["port"] = ports.dashboard
     write_json_atomic(
         astrbot_path,
         astrbot_payload,

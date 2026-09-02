@@ -8,6 +8,7 @@ import queue
 import threading
 import zipfile
 
+from . import __version__
 from .backup import BackupError, create_customer_backup, restore_customer_backup
 from .brand import BrandProfile
 from .customer_config import (
@@ -17,12 +18,12 @@ from .customer_config import (
     load_robot_settings,
     save_provider_profile,
     save_robot_settings,
-    set_plugin_enabled,
 )
 from .customer_logs import log_sources, tail_log
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import ProcessSupervisor, ServiceLaunchError, ServiceSpec, build_service_specs
 from .provider import OpenAIProviderProfile
+from .plugin_center import launch_plugin_center
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
 from .ui_theme import COLORS, FONT_MONO, FONT_SMALL, GEOMETRY, apply_product_theme
 from .wechat_path import validate_wechat_executable
@@ -208,7 +209,7 @@ class ControlCenter:
         self.tk.Frame(footer, background="#29415F", height=1).pack(fill="x", pady=(6, 0))
         self.tk.Label(
             footer,
-            text="v0.6.0",
+            text=f"v{__version__}",
             background=COLORS.ink,
             foreground="#91A9C6",
             font=FONT_SMALL,
@@ -639,11 +640,11 @@ class ControlCenter:
         page = self._new_page(
             "plugins",
             "功能插件",
-            "这里只显示已经随商业版本交付并通过准入的功能。启停设置在下次启动机器人时生效。",
+            "管理已经随商业版本交付的功能。配置可单独保存，机器人运行时支持即时热重载。",
         )
         surface = self._surface(page, padding=20)
         surface.pack(fill="both", expand=True)
-        self.plugin_notice_var = self.tk.StringVar(value="选择一项功能后可以启用或停用。")
+        self.plugin_notice_var = self.tk.StringVar(value="进入功能配置中心可修改参数、独立模型和高级设置。")
         self.ttk.Label(surface, textvariable=self.plugin_notice_var, style="SurfaceMuted.TLabel").pack(anchor="w", pady=(0, 12))
         tree_box = self.ttk.Frame(surface, style="Surface.TFrame")
         tree_box.pack(fill="both", expand=True)
@@ -659,7 +660,13 @@ class ControlCenter:
         actions = self.ttk.Frame(surface, style="Surface.TFrame")
         actions.pack(fill="x", pady=(12, 0))
         self.ttk.Button(actions, text="刷新列表", command=self._refresh_plugins, style="Secondary.TButton").pack(side="left")
-        self.ttk.Button(actions, text="切换启用状态", command=self._toggle_plugin, style="Primary.TButton").pack(side="right")
+        self.plugin_center_button = self.ttk.Button(
+            actions,
+            text="打开功能配置中心",
+            command=self._open_plugin_center,
+            style="Primary.TButton",
+        )
+        self.plugin_center_button.pack(side="right")
 
     def _build_logs_page(self) -> None:
         page = self._new_page(
@@ -948,23 +955,14 @@ class ControlCenter:
         if not plugins:
             self.plugin_notice_var.set("当前版本没有可管理的扩展功能。后续交付的功能会自动出现在这里。")
         else:
-            self.plugin_notice_var.set(f"已交付 {len(plugins)} 项功能。修改后请重新启动机器人。")
+            self.plugin_notice_var.set(f"已交付 {len(plugins)} 项功能。进入配置中心可管理启停、参数和热重载。")
 
-    def _toggle_plugin(self) -> None:
-        selected = self.plugin_tree.selection()
-        if not selected:
-            self.plugin_notice_var.set("请先选择一项功能。")
-            return
-        module_name = selected[0]
-        values = self.plugin_tree.item(module_name, "values")
-        enabled = len(values) > 1 and values[1] == "已启用"
+    def _open_plugin_center(self) -> None:
         try:
-            set_plugin_enabled(self.install_root, module_name, not enabled)
-            self._refresh_plugins()
-            self.plugin_tree.selection_set(module_name)
-            self.plugin_notice_var.set("已保存。重新启动机器人后生效。")
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            self.plugin_notice_var.set(f"修改失败：{exc}")
+            launch_plugin_center(self.install_root)
+            self.plugin_notice_var.set("功能配置中心已打开。若窗口已存在，请查看任务栏。")
+        except OSError as exc:
+            self.plugin_notice_var.set(f"配置中心打开失败：{exc}")
 
     def _selected_log(self):
         label = self.log_source_var.get()

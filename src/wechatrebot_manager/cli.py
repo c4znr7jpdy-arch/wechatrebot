@@ -11,6 +11,7 @@ from .install_paths import INSTALL_MARKER, prepare_install_layout, validate_inst
 from .json_io import write_json_atomic
 from .launcher import ServiceLaunchError, run_services_foreground
 from .payload import PayloadError, install_payload, verify_payload
+from .plugin_center import PluginCenterError, run_plugin_center
 from .runtime_config import write_runtime_configs
 from .self_test import manager_self_test
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
@@ -63,6 +64,8 @@ def _parser() -> argparse.ArgumentParser:
 
     start = subparsers.add_parser("start", help="按顺序启动回复引擎和微信连接")
     start.add_argument("install_root", type=Path)
+    plugin_center = subparsers.add_parser("plugin-center", help=argparse.SUPPRESS)
+    plugin_center.add_argument("install_root", type=Path)
     return parser
 
 
@@ -183,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return run_services_foreground(args.install_root)
         except (OSError, ServiceLaunchError, ValueError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            return 1
+    if args.command == "plugin-center":
+        try:
+            return run_plugin_center(args.install_root)
+        except (OSError, ValueError, PluginCenterError) as exc:
             print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
             return 1
 

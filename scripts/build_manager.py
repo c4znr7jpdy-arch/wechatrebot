@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -87,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
             str(output / "spec"),
             "--paths",
             str(commercial_root / "src"),
+            "--add-data",
+            f"{commercial_root / 'src' / 'wechatrebot_manager' / 'plugin_webui'}{os.pathsep}wechatrebot_manager/plugin_webui",
+            "--collect-all",
+            "webview",
+            "--hidden-import",
+            "webview.platforms.edgechromium",
             "--version-file",
             str(commercial_root / "release" / "windows-version-info.txt"),
             str(commercial_root / "scripts" / "manager_entry.py"),
