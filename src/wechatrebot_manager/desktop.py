@@ -8,6 +8,7 @@ from .control_center import run_control_center
 from .install_paths import INSTALL_MARKER
 from .location import load_install_location
 from .setup_wizard import run_setup_wizard
+from .single_instance import SingleInstanceLock
 
 
 def _is_payload_root(path: Path) -> bool:
@@ -76,17 +77,31 @@ def run_desktop(
         if install_root is not None
         else install_root_from_executable() or load_install_location()
     )
-    if installed is not None:
-        return run_control_center(installed)
-    payload = find_bundled_payload(payload_root)
-    if payload is None:
-        if payload_root is not None:
-            raise FileNotFoundError(f"商业载荷无效：{Path(payload_root).resolve()}")
-        raise FileNotFoundError("未找到与安装程序配套的 payload 目录。")
-    return run_setup_wizard(
-        payload,
-        allow_incomplete_payload=allow_incomplete_payload,
-    )
+    instance = SingleInstanceLock(installed or "setup")
+    if not instance.acquire():
+        if sys.platform == "win32":
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo("微信机器人", "管理器已经在运行。", parent=root)
+            root.destroy()
+        return 3
+    try:
+        if installed is not None:
+            return run_control_center(installed)
+        payload = find_bundled_payload(payload_root)
+        if payload is None:
+            if payload_root is not None:
+                raise FileNotFoundError(f"商业载荷无效：{Path(payload_root).resolve()}")
+            raise FileNotFoundError("未找到与安装程序配套的 payload 目录。")
+        return run_setup_wizard(
+            payload,
+            allow_incomplete_payload=allow_incomplete_payload,
+        )
+    finally:
+        instance.release()
 
 
 __all__ = [
