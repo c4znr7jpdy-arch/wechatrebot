@@ -23,6 +23,23 @@ _PRIVATE_IDENTIFIER_KEY = re.compile(
 _SECRET_VALUE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 
 
+def white_label_terms(value: Any) -> Any:
+    """Remove implementation brand names from customer-facing diagnostics."""
+    def clean(text: str) -> str:
+        text = re.sub(r"(?i)astrbot", "engine", text)
+        text = re.sub(r"(?i)new[-_ ]?hook", "wechat-connection", text)
+        text = re.sub(r"(?i)hook", "wechat-connection", text)
+        return text
+
+    if isinstance(value, dict):
+        return {clean(str(key)): white_label_terms(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [white_label_terms(item) for item in value]
+    if isinstance(value, str):
+        return clean(value)
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticCheck:
     name: str
@@ -124,7 +141,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
         ("manager_config", root / "config" / "manager.json"),
         ("brand_config", root / "config" / "brand.json"),
         ("bridge_config", root / "app" / "bridge" / "config.json"),
-        ("astrbot_config", root / "app" / "astrbot" / "data" / "cmd_config.json"),
+        ("engine_config", root / "app" / "astrbot" / "data" / "cmd_config.json"),
         ("installed_payload", root / "config" / "installed-payload.json"),
     ):
         payload, config_error = _load_json(path)
@@ -145,10 +162,10 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
 
     required_files = (
         ("python-runtime", root / "runtime" / "python" / "python.exe"),
-        ("astrbot-root", root / "app" / "astrbot" / ".astrbot"),
-        ("new-hook-injector", root / "app" / "bridge" / "vendor" / "hook" / "x64 inject.exe"),
+        ("engine-runtime", root / "app" / "astrbot" / ".astrbot"),
+        ("wechat-connection-launcher", root / "app" / "bridge" / "vendor" / "hook" / "x64 inject.exe"),
         (
-            "new-hook-library",
+            "wechat-connection-library",
             root
             / "app"
             / "bridge"
@@ -156,7 +173,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             / "hook"
             / "libGLESv1-c2c-video-v2.dll",
         ),
-        ("new-hook-integrity-manifest", root / "legal" / "hook-binaries.json"),
+        ("wechat-connection-integrity", root / "legal" / "hook-binaries.json"),
     )
     for name, path in required_files:
         exists = path.is_file()
@@ -229,7 +246,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
     }
     if isinstance(wechat_exe, str):
         replacements[wechat_exe] = "<WECHAT_EXE>"
-    return redact_local_paths(report, replacements)
+    return white_label_terms(redact_local_paths(report, replacements))
 
 
 def diagnostic_error_messages(report: dict[str, Any]) -> tuple[str, ...]:

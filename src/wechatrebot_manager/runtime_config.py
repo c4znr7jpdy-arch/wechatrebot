@@ -132,8 +132,8 @@ def astrbot_config_payload(
         },
         "admins_id": [normalized_admin] if normalized_admin else [],
         "dashboard": {
-            "enable": True,
-            "username": "astrbot",
+            "enable": False,
+            "username": "local-console-disabled",
             "password": "",
             "pbkdf2_password": "",
             "password_storage_upgraded": False,
@@ -275,7 +275,7 @@ def write_runtime_configs(
                 if isinstance(astrbot_payload.get("dashboard"), dict)
                 else {}
             ),
-            "enable": True,
+            "enable": False,
             "host": "127.0.0.1",
             "port": ports.dashboard,
         }

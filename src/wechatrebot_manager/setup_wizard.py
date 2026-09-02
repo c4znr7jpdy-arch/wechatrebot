@@ -59,7 +59,7 @@ class SetupWizard:
         self.installing = False
         self.events: queue.Queue[tuple[object, ...]] = queue.Queue()
 
-        root.title("WeChat ReBot 安装向导")
+        root.title("姜小妹机器人安装向导")
         root.geometry("820x620")
         root.minsize(760, 560)
         root.configure(background="#f4f6fa")
@@ -77,7 +77,7 @@ class SetupWizard:
 
         header = ttk.Frame(root, padding=(32, 24, 32, 12))
         header.pack(fill="x")
-        ttk.Label(header, text="WeChat ReBot", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(header, text="姜小妹机器人 · 商业版", style="Title.TLabel").pack(anchor="w")
         self.step_label = ttk.Label(header, style="Step.TLabel")
         self.step_label.pack(anchor="w", pady=(6, 0))
 
@@ -101,9 +101,9 @@ class SetupWizard:
         self.install_var = tk.StringVar()
         self.wechat_var = tk.StringVar()
         self.wechat_status_var = tk.StringVar(value="尚未检查")
-        self.display_name_var = tk.StringVar(value="智能机器人")
-        self.short_name_var = tk.StringVar(value="机器人")
-        self.persona_name_var = tk.StringVar(value="智能机器人")
+        self.display_name_var = tk.StringVar(value="姜小妹机器人")
+        self.short_name_var = tk.StringVar(value="姜小妹")
+        self.persona_name_var = tk.StringVar(value="姜小妹")
         self.welcome_var = tk.StringVar()
         self.admin_id_var = tk.StringVar()
         self.avatar_var = tk.StringVar()
@@ -206,7 +206,7 @@ class SetupWizard:
     def _page_brand_provider(self) -> None:
         self._heading(
             "机器人名称与模型",
-            "这里修改一次，管理器标题、欢迎语、帮助标题和 AstrBot 默认人格会同步生成。API Key 只写入客户安装目录。",
+            "这里修改一次，控制台标题、欢迎语、帮助标题和默认回复人格会同步生成。API Key 只写入客户安装目录。",
         )
         columns = self.ttk.Frame(self.body)
         columns.pack(fill="both", expand=True)
@@ -243,7 +243,7 @@ class SetupWizard:
         self._entry_row(model, "API Key", self.api_key_var, show="●")
         self.ttk.Label(
             model,
-            text="选择“稍后配置”时可以先完成安装，再从 AstrBot 后台设置模型。",
+            text="选择“稍后配置”时可以先完成安装，再从机器人控制台的“回复模型”中设置。",
             style="Hint.TLabel",
             wraplength=320,
         ).pack(anchor="w", pady=(10, 0))

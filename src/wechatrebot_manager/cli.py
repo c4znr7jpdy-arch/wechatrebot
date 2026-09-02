@@ -53,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     install_payload_parser.add_argument("install_root", type=Path)
     install_payload_parser.add_argument("--allow-incomplete", action="store_true")
 
-    render = subparsers.add_parser("render-config", help="生成新 Hook 与管理器配置")
+    render = subparsers.add_parser("render-config", help="生成微信连接与控制台配置")
     render.add_argument("install_root", type=Path)
     render.add_argument("wechat_exe", type=Path)
     render.add_argument("--wechat-version")
@@ -61,7 +61,7 @@ def _parser() -> argparse.ArgumentParser:
     diagnose = subparsers.add_parser("diagnose", help="生成脱敏安装诊断")
     diagnose.add_argument("install_root", type=Path)
 
-    start = subparsers.add_parser("start", help="按顺序启动 AstrBot 和新 Hook")
+    start = subparsers.add_parser("start", help="按顺序启动回复引擎和微信连接")
     start.add_argument("install_root", type=Path)
     return parser
 

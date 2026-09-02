@@ -138,7 +138,7 @@ def test_preflight_rejects_missing_hook_before_any_process_starts(
     assert starts == []
 
 
-def test_preflight_checks_dashboard_and_hook_api_ports_before_start(
+def test_preflight_checks_wechat_connection_port_before_start(
     tmp_path: Path, monkeypatch
 ) -> None:
     _layout(tmp_path)
@@ -150,11 +150,11 @@ def test_preflight_checks_dashboard_and_hook_api_ports_before_start(
 
     monkeypatch.setattr(
         "wechatrebot_manager.launcher.port_accepting",
-        lambda host, port: port == 6185,
+        lambda host, port: port == 19088,
     )
     supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
 
-    with pytest.raises(ServiceLaunchError, match="6185"):
+    with pytest.raises(ServiceLaunchError, match="19088"):
         supervisor.start()
     assert starts == []
 

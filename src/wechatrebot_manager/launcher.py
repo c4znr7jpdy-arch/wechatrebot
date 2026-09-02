@@ -39,22 +39,27 @@ class ServiceSpec:
     required_files: tuple[Path, ...] = ()
     required_free_ports: tuple[tuple[str, int], ...] = ()
     required_hashes: tuple[tuple[Path, str], ...] = ()
+    display_name: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.name
 
     def validate(self) -> tuple[str, ...]:
         errors: list[str] = []
         executable = Path(self.argv[0])
         if not executable.is_file():
-            errors.append(f"{self.name} 运行时不存在：{executable}")
+            errors.append(f"{self.label}运行时不存在，请重新安装或联系技术支持。")
         if not self.cwd.is_dir():
-            errors.append(f"{self.name} 工作目录不存在：{self.cwd}")
+            errors.append(f"{self.label}工作目录不存在，请重新安装。")
         for required in self.required_files:
             if not required.is_file():
-                errors.append(f"{self.name} 必需文件不存在：{required}")
+                errors.append(f"{self.label}必需文件不存在：{required.name}")
         for required, expected in self.required_hashes:
             if required.is_file() and sha256_file(required) != expected:
-                errors.append(f"{self.name} 文件完整性校验失败：{required}")
+                errors.append(f"{self.label}文件完整性校验失败：{required.name}")
         if not 1 <= self.ready_port <= 65535:
-            errors.append(f"{self.name} 就绪端口无效。")
+            errors.append(f"{self.label}就绪端口无效。")
         return tuple(errors)
 
 
@@ -93,16 +98,16 @@ def _hook_integrity_files(root: Path) -> tuple[tuple[Path, str], ...]:
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError as exc:
-        raise ValueError(f"缺少新 HOOK 完整性清单：{manifest_path}") from exc
+        raise ValueError("缺少微信连接组件完整性清单，请重新安装。") from exc
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"新 HOOK 完整性清单无法读取：{exc}") from exc
+        raise ValueError(f"微信连接组件完整性清单无法读取：{exc}") from exc
     files = payload.get("files") if isinstance(payload, dict) else None
     if (
         not isinstance(payload, dict)
         or payload.get("schema_version") != 1
         or not isinstance(files, list)
     ):
-        raise ValueError("新 HOOK 完整性清单格式错误。")
+        raise ValueError("微信连接组件完整性清单格式错误。")
     hook_root = root / "app" / "bridge" / "vendor" / "hook"
     expected_names = {
         "x64 inject.exe",
@@ -118,7 +123,7 @@ def _hook_integrity_files(root: Path) -> tuple[tuple[Path, str], ...]:
         if key in expected_names and len(digest) == 64:
             results[key] = (hook_root / filename, digest)
     if set(results) != expected_names:
-        raise ValueError("新 HOOK 完整性清单缺少注入器或 DLL。")
+        raise ValueError("微信连接组件清单缺少必要文件。")
     return tuple(results[name] for name in sorted(results))
 
 
@@ -161,7 +166,7 @@ def build_service_specs(
             astrbot_root / ".astrbot",
             astrbot_root / "data" / "cmd_config.json",
         ),
-        required_free_ports=(("AstrBot 后台", ports.dashboard),),
+        display_name="回复引擎",
     )
     bridge = ServiceSpec(
         name="new-hook-bridge",
@@ -190,8 +195,9 @@ def build_service_specs(
             / "hook"
             / "libGLESv1-c2c-video-v2.dll",
         ),
-        required_free_ports=(("新 HOOK API", ports.hook_api),),
+        required_free_ports=(("微信连接", ports.hook_api),),
         required_hashes=hook_integrity_files,
+        display_name="微信连接",
     )
     return astrbot, bridge
 
@@ -203,10 +209,12 @@ class ProcessSupervisor:
         *,
         popen_factory: Callable[..., ProcessLike] = subprocess.Popen,
         readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] = wait_until_ready,
+        progress_callback: Callable[[str, ServiceSpec], None] | None = None,
     ) -> None:
         self.specs = specs
         self._popen_factory = popen_factory
         self._readiness_waiter = readiness_waiter
+        self._progress_callback = progress_callback
         self.running: list[RunningService] = []
 
     def start(self) -> tuple[RunningService, ...]:
@@ -222,7 +230,7 @@ class ProcessSupervisor:
         occupied: list[str] = []
         checked_ports: set[tuple[str, int]] = set()
         for spec in self.specs:
-            ports = ((spec.name, spec.ready_port), *spec.required_free_ports)
+            ports = ((spec.label, spec.ready_port), *spec.required_free_ports)
             for label, port in ports:
                 address = (spec.ready_host, port)
                 if address in checked_ports:
@@ -235,6 +243,8 @@ class ProcessSupervisor:
         if occupied:
             raise ServiceLaunchError("；".join(occupied))
         for spec in self.specs:
+            if self._progress_callback is not None:
+                self._progress_callback("starting", spec)
             spec.log_file.parent.mkdir(parents=True, exist_ok=True)
             log_handle = spec.log_file.open("ab", buffering=0)
             environment = os.environ.copy()
@@ -256,15 +266,17 @@ class ProcessSupervisor:
             except Exception as exc:
                 log_handle.close()
                 self.stop()
-                raise ServiceLaunchError(f"无法启动 {spec.name}：{exc}") from exc
+                raise ServiceLaunchError(f"无法启动{spec.label}：{exc}") from exc
             running = RunningService(spec, process, log_handle)
             self.running.append(running)
             if not self._readiness_waiter(spec, process):
                 exit_code = process.poll()
                 self.stop()
                 raise ServiceLaunchError(
-                    f"{spec.name} 未在规定时间内就绪，退出码：{exit_code!r}。"
+                    f"{spec.label}未在规定时间内就绪，退出码：{exit_code!r}。"
                 )
+            if self._progress_callback is not None:
+                self._progress_callback("ready", spec)
         return tuple(self.running)
 
     def stop(self, timeout_seconds: float = 15) -> None:

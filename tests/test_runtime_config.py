@@ -39,6 +39,7 @@ def test_runtime_config_uses_only_new_bridge_ports_and_selected_wechat(
     assert len(astrbot["platform"]) == 1
     assert astrbot["platform"][0]["ws_reverse_port"] == 6200
     assert astrbot["dashboard"]["host"] == "127.0.0.1"
+    assert astrbot["dashboard"]["enable"] is False
     assert (install / "app" / "astrbot" / ".astrbot").is_file()
 
 

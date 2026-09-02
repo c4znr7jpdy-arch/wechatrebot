@@ -26,8 +26,8 @@
   },
   "admins_id": [],
   "dashboard": {
-    "enable": true,
-    "username": "astrbot",
+    "enable": false,
+    "username": "local-console-disabled",
     "password": "",
     "pbkdf2_password": "",
     "password_storage_upgraded": false,
