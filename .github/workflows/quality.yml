@@ -21,4 +21,7 @@ jobs:
         run: python -m compileall -q src scripts tests
       - name: Test
         run: python -m pytest -q
-
+      - name: Validate release metadata
+        run: python scripts/validate_release_metadata.py
+      - name: Build and self-test frozen Windows manager
+        run: python scripts/build_manager.py --output artifacts/ci-manager
