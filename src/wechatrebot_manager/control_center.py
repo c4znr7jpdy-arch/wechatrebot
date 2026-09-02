@@ -5,6 +5,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import sys
 import threading
 import zipfile
 
@@ -19,13 +20,27 @@ from .customer_config import (
     save_provider_profile,
     save_robot_settings,
 )
-from .customer_logs import log_sources, tail_log
+from .customer_logs import log_sources, sanitize_log_text, tail_log
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import ProcessSupervisor, ServiceLaunchError, ServiceSpec, build_service_specs
 from .provider import OpenAIProviderProfile
 from .plugin_center import launch_plugin_center
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
 from .ui_theme import COLORS, FONT_MONO, FONT_SMALL, GEOMETRY, apply_product_theme
+from .update_ui import UpdateDialog
+from .updates import (
+    PreparedUpdate,
+    UpdateChannel,
+    UpdateError,
+    UpdateRelease,
+    check_for_update,
+    cleanup_stale_update_workdirs,
+    consume_update_result,
+    create_update_plan,
+    launch_update_helper,
+    load_update_channel,
+    prepare_update,
+)
 from .wechat_path import validate_wechat_executable
 
 
@@ -76,7 +91,7 @@ class ControlCenter:
         self.robot_settings = load_robot_settings(self.install_root)
         self.brand = self.robot_settings.profile
         self.supervisor: ProcessSupervisor | None = None
-        self.events: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.current_page = "home"
         self.start_phase = "idle"
         self.last_snapshot = RuntimeSnapshot(False, False, "")
@@ -86,6 +101,17 @@ class ControlCenter:
         self._drag_origin: tuple[int, int] | None = None
         self._windowed_geometry = f"{GEOMETRY.window_width}x{GEOMETRY.window_height}"
         self._maximized = False
+        self.update_channel: UpdateChannel | None = None
+        self.update_channel_error = ""
+        self.update_checking = False
+        self.available_update: UpdateRelease | None = None
+        self.update_dialog: UpdateDialog | None = None
+        self.notified_update_version = ""
+        self._update_after_id: str | None = None
+        try:
+            self.update_channel = load_update_channel(self.install_root)
+        except UpdateError as exc:
+            self.update_channel_error = str(exc)
 
         root.title(f"{self.brand.display_name} · 运行中心")
         root.geometry(self._windowed_geometry)
@@ -106,6 +132,17 @@ class ControlCenter:
         self._refresh_logs()
         self._refresh_status()
         root.after(80, self._apply_windows_chrome)
+        root.after(250, self._show_update_result)
+        root.after(
+            3000,
+            lambda: threading.Thread(
+                target=cleanup_stale_update_workdirs,
+                args=(self.install_root,),
+                daemon=True,
+            ).start(),
+        )
+        if self.update_channel is not None and self.update_channel.enabled:
+            root.after(1800, lambda: self._check_updates(manual=False))
         root.after(700, self._timer)
 
     def _build_shell(self) -> None:
@@ -175,6 +212,21 @@ class ControlCenter:
             cursor="hand2",
         )
         settings_button.pack(side="right", padx=(0, 14), fill="y")
+        self.update_button = self.tk.Button(
+            topbar,
+            text="检查更新",
+            command=lambda: self._check_updates(manual=True),
+            background=COLORS.surface,
+            foreground=COLORS.primary,
+            activebackground=COLORS.surface_muted,
+            activeforeground=COLORS.primary_hover,
+            font=("Microsoft YaHei UI", 10),
+            relief="flat",
+            borderwidth=0,
+            padx=14,
+            cursor="hand2",
+        )
+        self.update_button.pack(side="right", fill="y")
 
         for widget in (topbar, logo, self.brand_title, badge):
             self._bind_title_drag(widget)
@@ -722,6 +774,165 @@ class ControlCenter:
         elif key == "logs":
             self._refresh_logs()
 
+    def _schedule_next_update_check(self) -> None:
+        if self.update_channel is None or not self.update_channel.enabled:
+            return
+        if self._update_after_id is not None:
+            try:
+                self.root.after_cancel(self._update_after_id)
+            except self.tk.TclError:
+                pass
+        self._update_after_id = self.root.after(
+            self.update_channel.check_interval_seconds * 1000,
+            lambda: self._check_updates(manual=False),
+        )
+
+    def _check_updates(self, *, manual: bool) -> None:
+        from tkinter import messagebox
+
+        if self.update_checking:
+            return
+        if self.update_channel is None:
+            if manual:
+                messagebox.showerror(
+                    "无法检查更新",
+                    self.update_channel_error or "更新服务配置不可用。",
+                    parent=self.root,
+                )
+            return
+        if not self.update_channel.enabled:
+            if manual:
+                messagebox.showinfo(
+                    "更新服务尚未启用",
+                    "当前研发版本还没有绑定正式更新地址。配置发布地址后，客户会自动收到新版本弹窗。",
+                    parent=self.root,
+                )
+            return
+        self.update_checking = True
+        self.update_button.configure(state="disabled", text="检查中…")
+
+        def worker() -> None:
+            try:
+                release = check_for_update(
+                    self.update_channel,
+                    current_version=__version__,
+                )
+                if release is None:
+                    self.events.put(("update_current", manual))
+                else:
+                    self.events.put(("update_available", (release, manual)))
+            except (OSError, UpdateError, ValueError) as exc:
+                self.events.put(("update_check_error", (str(exc), manual)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_update_dialog(self, release: UpdateRelease) -> None:
+        if self.update_dialog is not None and self.update_dialog.exists():
+            if self.update_dialog.release.version == release.version:
+                self.update_dialog.lift()
+                return
+            self.update_dialog.close()
+        self.update_dialog = UpdateDialog(
+            self.root,
+            release,
+            current_version=__version__,
+            on_install=self._begin_update,
+        )
+
+    def _begin_update(self, release: UpdateRelease) -> None:
+        from tkinter import messagebox
+
+        if self.update_dialog is None or not self.update_dialog.exists():
+            return
+        if not getattr(sys, "frozen", False):
+            self.update_dialog.set_error("开发运行方式不执行自更新，请使用冻结后的客户程序验证")
+            return
+        snapshot = runtime_snapshot()
+        if snapshot.engine_ready or snapshot.connection_ready:
+            if self.supervisor is None or not self.supervisor.running:
+                messagebox.showwarning(
+                    "请先停止机器人",
+                    "检测到机器人正在其他窗口运行。请先在原控制台停止，再点击更新。",
+                    parent=self.root,
+                )
+                return
+            if not messagebox.askyesno(
+                "停止并更新",
+                "更新期间机器人会暂时停止，安装完成后控制台会自动重新打开。是否继续？",
+                parent=self.root,
+            ):
+                return
+            self.update_dialog.set_preparing("正在安全停止机器人…")
+
+            def stop_worker() -> None:
+                try:
+                    assert self.supervisor is not None
+                    self.supervisor.stop()
+                    self.events.put(("update_service_stopped", release))
+                except (OSError, ServiceLaunchError, ValueError) as exc:
+                    self.events.put(("update_prepare_error", str(exc)))
+
+            threading.Thread(target=stop_worker, daemon=True).start()
+            return
+        self.update_dialog.set_preparing()
+        self._prepare_update_in_background(release)
+
+    def _prepare_update_in_background(self, release: UpdateRelease) -> None:
+        if self.update_channel is None:
+            if self.update_dialog is not None:
+                self.update_dialog.set_error("更新服务配置不可用")
+            return
+
+        def progress(stage: str, current: int, total: int) -> None:
+            self.events.put(("update_progress", (stage, current, total)))
+
+        def worker() -> None:
+            try:
+                prepared = prepare_update(
+                    release,
+                    self.update_channel,
+                    self.install_root,
+                    progress_callback=progress,
+                )
+                self.events.put(("update_prepared", prepared))
+            except Exception as exc:
+                self.events.put(("update_prepare_error", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handoff_update(self, prepared: PreparedUpdate) -> None:
+        if self.update_dialog is None or not self.update_dialog.exists():
+            return
+        try:
+            plan = create_update_plan(prepared, self.install_root)
+            launch_update_helper(plan)
+        except (OSError, UpdateError, ValueError) as exc:
+            self.update_dialog.set_error(str(exc))
+            return
+        self.update_dialog.set_handoff()
+        self.root.after(450, self.root.destroy)
+
+    def _show_update_result(self) -> None:
+        from tkinter import messagebox
+
+        result = consume_update_result(self.install_root)
+        if result is None:
+            return
+        version = str(result.get("version") or __version__)
+        if result.get("ok") is True:
+            messagebox.showinfo(
+                "更新完成",
+                f"已成功更新到 v{version}。机器人不会自动启动，请在运行中心点击“一键启动”。",
+                parent=self.root,
+            )
+        else:
+            message = str(result.get("message") or "未知错误")
+            messagebox.showerror(
+                "更新未完成",
+                f"原版本已保留并重新打开。\n\n原因：{message}\n\n请检查磁盘空间和安全软件后重试。",
+                parent=self.root,
+            )
+
     def _timer(self) -> None:
         try:
             while True:
@@ -745,6 +956,58 @@ class ControlCenter:
                     from tkinter import messagebox
 
                     messagebox.showinfo("恢复完成", f"配置与数据已恢复。恢复前回滚点：\n{message}", parent=self.root)
+                elif kind == "update_current":
+                    from tkinter import messagebox
+
+                    self.update_checking = False
+                    self.update_button.configure(state="normal", text="检查更新")
+                    if bool(message):
+                        messagebox.showinfo(
+                            "已是最新版本",
+                            f"当前 v{__version__} 已是最新版本。",
+                            parent=self.root,
+                        )
+                    self._schedule_next_update_check()
+                elif kind == "update_available":
+                    release, manual = message
+                    assert isinstance(release, UpdateRelease)
+                    self.update_checking = False
+                    self.available_update = release
+                    self.update_button.configure(state="normal", text="发现新版本")
+                    if bool(manual) or self.notified_update_version != release.version:
+                        self.notified_update_version = release.version
+                        self._show_update_dialog(release)
+                    self._schedule_next_update_check()
+                elif kind == "update_check_error":
+                    from tkinter import messagebox
+
+                    error, manual = message
+                    self.update_checking = False
+                    self.update_button.configure(state="normal", text="检查更新")
+                    if bool(manual):
+                        messagebox.showerror(
+                            "检查更新失败",
+                            f"{error}\n\n请检查网络后重试。",
+                            parent=self.root,
+                        )
+                    self._schedule_next_update_check()
+                elif kind == "update_service_stopped":
+                    assert isinstance(message, UpdateRelease)
+                    if self.update_dialog is not None:
+                        self.update_dialog.set_preparing()
+                    self._prepare_update_in_background(message)
+                elif kind == "update_progress":
+                    stage, current, total = message
+                    if self.update_dialog is not None and self.update_dialog.exists():
+                        self.update_dialog.set_progress(
+                            str(stage), int(current), int(total)
+                        )
+                elif kind == "update_prepared":
+                    assert isinstance(message, PreparedUpdate)
+                    self._handoff_update(message)
+                elif kind == "update_prepare_error":
+                    if self.update_dialog is not None and self.update_dialog.exists():
+                        self.update_dialog.set_error(sanitize_log_text(str(message)))
         except queue.Empty:
             pass
         self._refresh_status()
@@ -1058,6 +1321,14 @@ class ControlCenter:
     def _close(self) -> None:
         from tkinter import messagebox
 
+        if self.update_dialog is not None and self.update_dialog.exists() and self.update_dialog.busy:
+            messagebox.showinfo(
+                "正在更新",
+                "请等待下载和校验完成，更新期间不要关闭控制台。",
+                parent=self.root,
+            )
+            self.update_dialog.lift()
+            return
         if self.supervisor and self.supervisor.running:
             if not messagebox.askyesno("退出控制台", "退出会同时停止机器人，是否继续？", parent=self.root):
                 return

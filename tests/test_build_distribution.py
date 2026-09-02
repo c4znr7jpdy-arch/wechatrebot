@@ -87,3 +87,41 @@ def test_distribution_contains_one_click_entry_and_nested_payload(
     )
     assert manifest["entrypoint"] == "WeChatReBot.exe"
     assert manifest["payload_status"] == "ready"
+    assert manifest["development_preview"] is False
+
+
+def test_incomplete_distribution_is_explicitly_marked_as_development_preview(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _builder()
+    commercial = tmp_path / "commercial"
+    artifacts = commercial / "artifacts"
+    release = commercial / "release"
+    release.mkdir(parents=True)
+    (release / "START-HERE.txt").write_text("start\n", encoding="utf-8")
+    payload = tmp_path / "payload"
+    _payload(payload, status="phase-incomplete")
+    output = artifacts / "customer-package"
+    monkeypatch.setattr(module, "COMMERCIAL_ROOT", commercial)
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: type("Result", (), {"returncode": 0})(),
+    )
+
+    assert (
+        module.main(
+            [
+                "--payload",
+                str(payload),
+                "--output",
+                str(output),
+                "--allow-incomplete",
+            ]
+        )
+        == 0
+    )
+    manifest = json.loads(
+        (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert manifest["development_preview"] is True

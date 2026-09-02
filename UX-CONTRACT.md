@@ -38,6 +38,7 @@
 | 插件配置中心 | `PluginCenterService` + 独立 WebView 窗口 | 已安装目录、配置 Schema、本机回复引擎 API | 离线配置/在线热重载/插件高级页 | unit + customer manual |
 | 日志 | `LogCatalog` | 本地日志文件 | 来源/尾部行 | unit + manual |
 | 反馈 | `NoticeBar` | 页面级状态 | info/success/warning/error | widget/manual |
+| 软件更新 | `UpdateDialog` + 独立更新副本 | 签名远程清单与完整 payload | 自动检查/手动检查/回滚 | unit + customer manual |
 
 ## Component behavior
 
@@ -68,6 +69,8 @@
 | 手动热重载 | “热重载”按钮 | 按钮显示“正在重载…” | 当前功能 | “新的设置已经生效” | 保留页面与日志入口 | 热重载按钮 | local engine API |
 | 打开高级页面 | 高级页面按钮 | 显示加载状态 | 当前功能内嵌页 | 页面就地打开 | 引导先启动机器人或重试 | 当前页面按钮 | plugin page API |
 | 导出诊断 | 文件选择 | 后台生成 | 当前页 | 给出文件路径 | 可重试 | 导出按钮 | release contract |
+| 检查更新 | 启动后台检查/顶栏按钮 | “检查中…”且禁止重复 | 当前页/更新弹窗 | 最新版本或发现新版本 | 自动检查静默；手动检查可重试 | 顶栏按钮 | update channel |
+| 安装更新 | “立即更新” | 下载/展开/校验进度；必要时停止机器人 | 新版本控制台 | 更新完成弹窗 | 事务回滚旧版本并显示原因 | 更新弹窗 | signed update manifest |
 
 ## Navigation and responsive behavior
 
@@ -89,6 +92,7 @@
 - Idempotency and duplicate-submit policy: 忙碌期间禁用按钮；启动监督器只允许一个实例。
 - Offline/read-stale/write behavior: 基础配置离线可读写并在下次启动生效；高级页面和手动热重载仅在回复引擎在线时可用。
 - Retry/backoff/timeout behavior: 服务按固定就绪超时；失败后允许重新启动并查看日志。
+- Remote update behavior: 启动后与每 6 小时检查签名清单；自动检查网络失败静默，手动检查反馈原因；包体 SHA-256、签名、路径和逐文件哈希全部通过后才交给独立更新副本。
 - Long-running progress and return path: 启动阶段持续展示在运行中心，用户可以切换到日志页。
 
 ## Validation

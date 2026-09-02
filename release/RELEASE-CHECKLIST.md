@@ -21,5 +21,6 @@
 
 - `release/hook-binaries.json`: `redistribution_approved=false`，安全审查和实机验证均为 `pending`。
 - `release/plugin-manifest.json`: `license-review-required`。
-- 图形管理器版本 `0.7.0`: 尚未签名。
+- 图形管理器版本 `0.8.0`: 尚未签名。
+- 远程更新公钥已内置，正式首发前仍须配置独立 HTTPS 发布地址、离线备份私钥并完成升级/回滚实机验证。
 - ffmpeg 与 Node 侧车: 尚未纳入固定版本发行载荷。

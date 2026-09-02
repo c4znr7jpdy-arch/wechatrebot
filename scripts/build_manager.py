@@ -90,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
             str(commercial_root / "src"),
             "--add-data",
             f"{commercial_root / 'src' / 'wechatrebot_manager' / 'plugin_webui'}{os.pathsep}wechatrebot_manager/plugin_webui",
+            "--add-data",
+            f"{commercial_root / 'src' / 'wechatrebot_manager' / 'update-channel.json'}{os.pathsep}wechatrebot_manager",
             "--collect-all",
             "webview",
             "--hidden-import",

@@ -16,3 +16,5 @@ config/local/
 *.db-wal
 .env*
 
+# Remote-update signing keys must never be committed.
+config/local/update-signing-private.pem

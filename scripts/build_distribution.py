@@ -43,6 +43,7 @@ def _write_distribution_manifest(
     *,
     payload_status: object,
     payload_file_count: int,
+    development_preview: bool,
 ) -> Path:
     manager = root / "WeChatReBot.exe"
     payload_manifest = root / "payload" / "release-manifest.json"
@@ -53,6 +54,7 @@ def _write_distribution_manifest(
         "payload_directory": "payload",
         "payload_status": payload_status,
         "payload_file_count": payload_file_count,
+        "development_preview": development_preview,
         "files": [
             {
                 "path": manager.name,
@@ -115,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
             temp,
             payload_status=verified.manifest.get("source_manifest_status"),
             payload_file_count=len(verified.files),
+            development_preview=(
+                args.allow_incomplete
+                and verified.manifest.get("source_manifest_status") != "ready"
+            ),
         )
         guard = subprocess.run(
             [sys.executable, str(COMMERCIAL_ROOT / "scripts" / "release_guard.py"), str(temp)],

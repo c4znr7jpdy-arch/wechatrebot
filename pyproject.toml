@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechatrebot-manager"
-version = "0.7.0"
+version = "0.8.0"
 description = "Windows bootstrap and release tooling for WeChat ReBot"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "cryptography==48.0.0",
+    "packaging==26.3",
     "pywebview==6.2.1",
 ]
 
@@ -26,7 +28,7 @@ wechatrebot = "wechatrebot_manager.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-wechatrebot_manager = ["plugin_webui/*.html", "plugin_webui/*.css", "plugin_webui/*.js"]
+wechatrebot_manager = ["*.json", "plugin_webui/*.html", "plugin_webui/*.css", "plugin_webui/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

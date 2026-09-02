@@ -19,6 +19,8 @@
 
 安装完成后打开同一个 EXE 会进入白标控制台，可一键拉起微信并启动机器人、修改机器人资料、配置回复模型、管理已交付功能、查看脱敏日志，以及备份/恢复客户配置与数据。“功能扩展”中的独立配置中心复用交付功能的配置 Schema 和专属页面，提供参数编辑、模型绑定、启停与热重载，但不开放底层管理后台。诊断只保留载荷计数与清单哈希，不携带数万条文件路径；恢复前会自动创建本地回滚点。安装阶段不会自动启动服务。
 
+控制台支持远程更新：启动后和每 6 小时后台检查一次签名清单，发现新版本时显示版本、说明和包大小；客户点击后自动下载、校验、停止当前机器人、事务安装并重新打开控制台。更新清单使用 Ed25519 签名，包体同时校验 SHA-256，失败会回滚原版本。断网时自动检查不会弹错打扰客户，仍可通过顶栏“检查更新”手动重试。
+
 商业项目不包含微信客户端、微信安装程序或微信安装压缩包。客户必须自行从官方渠道安装受支持版本；管理器只保存客户选定的本机路径。
 
 ## 当前发布状态
@@ -34,7 +36,7 @@ Windows 安装向导、控制中心、功能配置中心、冻结 EXE、便携 P
 - 全新 Windows 虚拟机安装、升级、卸载和杀毒软件兼容验收；
 - 客户许可协议、第三方 NOTICE、源码提供方式和售后边界。
 
-正式安装器默认拒绝不完整载荷。任何 `--allow-incomplete` 参数仅用于研发验收，不能用于交付客户。
+正式安装器默认拒绝不完整载荷。任何 `--allow-incomplete` 参数仅用于研发验收，不能用于交付客户。研发客户目录会写入可校验的 `development_preview` 标记，因此必须双击完整目录顶层的 `WeChatReBot.exe`；单独复制构建中间 EXE 会弹出“启动文件不完整”。
 
 ## 开发与测试
 
@@ -96,6 +98,20 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
   --archive
 ```
 
+远程更新发布使用同一份 `ready` staging。先上传 ZIP，再最后上传签名清单，客户下一次检查即可收到弹窗：
+
+```powershell
+& 'C:\Program Files\Python313\python.exe' scripts\build_update_release.py `
+  --payload .\artifacts\staging `
+  --output .\artifacts\update-0.8.0 `
+  --private-key .\config\local\update-signing-private.pem `
+  --package-url https://你的更新域名/releases/wechatrebot-0.8.0-update.zip `
+  --note "新增功能配置与热重载" `
+  --note "修复已知问题"
+```
+
+完整的更新地址绑定、密钥备份、发布顺序和回滚说明见 `docs/remote-updates.md`。私钥只能保存在发布电脑和离线备份中，禁止提交到 Git。
+
 构建输出只允许位于本仓库 `artifacts/`，不会修改或启动开发环境里的 AstrBot、微信及桥接进程。
 
 ## 关键清单
@@ -107,3 +123,4 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
 - `release/hook-binaries.json`：新 HOOK 架构、大小、哈希与审核状态。
 - `release/plugin-manifest.json`：插件归属及许可门禁。
 - `release/RELEASE-CHECKLIST.md`：由 `phase-1-incomplete` 升级为 `ready` 前的放行条件。
+- `src/wechatrebot_manager/update-channel.json`：客户内置的更新通道、HTTPS 清单地址和签名公钥。

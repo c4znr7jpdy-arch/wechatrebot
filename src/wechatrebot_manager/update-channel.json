@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "channel": "stable",
+  "manifest_url": "",
+  "key_id": "59E10AD6E829BA64",
+  "public_key_base64": "r6VrZiQwHkEq8/vBf5qdWJ+P1kOcDWMIwe0ySpCCWLA=",
+  "check_interval_seconds": 21600,
+  "request_timeout_seconds": 20,
+  "max_package_bytes": 2147483648
+}

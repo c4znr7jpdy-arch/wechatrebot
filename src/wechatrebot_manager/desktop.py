@@ -7,6 +7,7 @@ import sys
 from .control_center import run_control_center
 from .install_paths import INSTALL_MARKER
 from .location import load_install_location
+from .payload import sha256_file
 from .setup_wizard import run_setup_wizard
 from .single_instance import SingleInstanceLock
 
@@ -66,6 +67,42 @@ def install_root_from_executable(executable: str | Path | None = None) -> Path |
     return None
 
 
+def is_development_preview(executable: str | Path | None = None) -> bool:
+    """Accept an incomplete payload only inside a deliberately assembled audit package."""
+    executable_path = Path(executable or sys.executable).expanduser().resolve()
+    manifest_path = executable_path.parent / "DISTRIBUTION-MANIFEST.json"
+    payload_manifest = executable_path.parent / "payload" / "release-manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        files = manifest["files"]
+    except (FileNotFoundError, KeyError, OSError, TypeError, json.JSONDecodeError):
+        return False
+    if not (
+        isinstance(manifest, dict)
+        and manifest.get("schema_version") == 1
+        and manifest.get("entrypoint") == executable_path.name
+        and manifest.get("development_preview") is True
+        and manifest.get("payload_status") != "ready"
+        and isinstance(files, list)
+    ):
+        return False
+    expected = next(
+        (
+            item.get("sha256")
+            for item in files
+            if isinstance(item, dict)
+            and item.get("path") == "payload/release-manifest.json"
+        ),
+        None,
+    )
+    if not isinstance(expected, str) or len(expected) != 64:
+        return False
+    try:
+        return sha256_file(payload_manifest).casefold() == expected.casefold()
+    except OSError:
+        return False
+
+
 def run_desktop(
     *,
     payload_root: str | Path | None = None,
@@ -98,7 +135,10 @@ def run_desktop(
             raise FileNotFoundError("未找到与安装程序配套的 payload 目录。")
         return run_setup_wizard(
             payload,
-            allow_incomplete_payload=allow_incomplete_payload,
+            allow_incomplete_payload=(
+                allow_incomplete_payload
+                or (payload_root is None and is_development_preview())
+            ),
         )
     finally:
         instance.release()
@@ -107,5 +147,6 @@ def run_desktop(
 __all__ = [
     "find_bundled_payload",
     "install_root_from_executable",
+    "is_development_preview",
     "run_desktop",
 ]

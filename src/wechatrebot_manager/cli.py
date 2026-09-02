@@ -14,6 +14,8 @@ from .payload import PayloadError, install_payload, verify_payload
 from .plugin_center import PluginCenterError, run_plugin_center
 from .runtime_config import write_runtime_configs
 from .self_test import manager_self_test
+from .startup_errors import report_startup_error
+from .updates import apply_update_plan
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
 
 
@@ -66,6 +68,8 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("install_root", type=Path)
     plugin_center = subparsers.add_parser("plugin-center", help=argparse.SUPPRESS)
     plugin_center.add_argument("install_root", type=Path)
+    apply_update = subparsers.add_parser("apply-update", help=argparse.SUPPRESS)
+    apply_update.add_argument("--plan", type=Path, required=True)
     return parser
 
 
@@ -74,8 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         try:
             return run_desktop()
-        except (FileNotFoundError, OSError, ValueError) as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        except Exception as exc:
+            report_startup_error(exc)
             return 1
     if args.command == "gui":
         try:
@@ -84,12 +88,14 @@ def main(argv: list[str] | None = None) -> int:
                 install_root=args.install_root,
                 allow_incomplete_payload=args.allow_incomplete_payload,
             )
-        except (FileNotFoundError, OSError, ValueError) as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        except Exception as exc:
+            report_startup_error(exc)
             return 1
     if args.command == "self-test":
         manager_self_test(args.output)
         return 0
+    if args.command == "apply-update":
+        return apply_update_plan(args.plan)
     if args.command == "bootstrap":
         return run_bootstrap(
             args.payload,
