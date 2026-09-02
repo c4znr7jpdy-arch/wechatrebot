@@ -90,10 +90,17 @@ def build_service_specs(
     astrbot_root = root / "app" / "astrbot"
     bridge_root = root / "app" / "bridge"
     logs_root = root / "logs"
+    ffmpeg_bin = root / "runtime" / "ffmpeg" / "bin"
+    inherited_path = os.environ.get("PATH", "")
     common_environment = {
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "PATH": (
+            f"{ffmpeg_bin}{os.pathsep}{inherited_path}"
+            if inherited_path
+            else str(ffmpeg_bin)
+        ),
     }
     astrbot = ServiceSpec(
         name="astrbot",

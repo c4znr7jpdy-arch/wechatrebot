@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 from pathlib import Path
+import shutil
+import tempfile
 
 from .json_io import write_json_atomic
+
+
+SUPPORTED_AVATAR_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+MAX_AVATAR_BYTES = 10 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,15 @@ class BrandProfile:
                 errors.append(f"{label}不能包含控制字符。")
         if self.avatar_path and not Path(self.avatar_path).is_file():
             errors.append("头像文件不存在。")
+        elif self.avatar_path:
+            avatar = Path(self.avatar_path)
+            if avatar.suffix.casefold() not in SUPPORTED_AVATAR_SUFFIXES:
+                errors.append("头像只支持 JPG、PNG 或 WebP。")
+            try:
+                if avatar.stat().st_size > MAX_AVATAR_BYTES:
+                    errors.append("头像文件不能超过 10 MiB。")
+            except OSError:
+                pass
         return tuple(errors)
 
     def normalized(self) -> "BrandProfile":
@@ -58,3 +74,41 @@ def save_brand_profile(path: Path, profile: BrandProfile) -> None:
     if errors:
         raise ValueError("；".join(errors))
     write_json_atomic(path, profile.to_dict())
+
+
+def install_brand_profile(
+    install_root: str | Path,
+    profile: BrandProfile,
+) -> BrandProfile:
+    root = Path(install_root).expanduser().resolve()
+    normalized = profile.normalized()
+    errors = normalized.validate()
+    if errors:
+        raise ValueError("；".join(errors))
+    if normalized.avatar_path:
+        source = Path(normalized.avatar_path).expanduser().resolve()
+        assets = root / "config" / "assets"
+        assets.mkdir(parents=True, exist_ok=True)
+        target = assets / f"avatar{source.suffix.casefold()}"
+        if source != target.resolve():
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".avatar.", suffix=source.suffix.casefold(), dir=assets
+            )
+            os.close(descriptor)
+            temporary = Path(temporary_name)
+            try:
+                shutil.copy2(source, temporary)
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        normalized = BrandProfile(
+            display_name=normalized.display_name,
+            short_name=normalized.short_name,
+            persona_name=normalized.persona_name,
+            avatar_path=str(target.resolve()),
+            welcome_text=normalized.welcome_text,
+            help_title=normalized.help_title,
+            schema_version=normalized.schema_version,
+        )
+    save_brand_profile(root / "config" / "brand.json", normalized)
+    return normalized

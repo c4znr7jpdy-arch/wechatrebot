@@ -4,7 +4,9 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 
+from .brand import BrandProfile
 from .json_io import write_json_atomic
+from .provider import OpenAIProviderProfile
 
 
 def _load_object(path: Path) -> dict[str, object]:
@@ -81,11 +83,13 @@ def bridge_config_payload(
 def astrbot_config_payload(
     *,
     ports: RuntimePorts = RuntimePorts(),
+    brand_profile: BrandProfile | None = None,
+    provider_profile: OpenAIProviderProfile | None = None,
 ) -> dict[str, object]:
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    return {
+    payload: dict[str, object] = {
         "config_version": 2,
         "platform": [
             {
@@ -134,6 +138,81 @@ def astrbot_config_payload(
         "trace_log_enable": False,
         "disable_metrics": True,
     }
+    if brand_profile is not None:
+        _apply_brand_to_astrbot(payload, brand_profile)
+    if provider_profile is not None:
+        _apply_provider_to_astrbot(payload, provider_profile)
+    return payload
+
+
+def _upsert_by_id(
+    value: object,
+    replacement: dict[str, object],
+) -> list[object]:
+    existing = value if isinstance(value, list) else []
+    replacement_id = replacement["id"]
+    return [
+        item
+        for item in existing
+        if not isinstance(item, dict) or item.get("id") != replacement_id
+    ] + [replacement]
+
+
+def _apply_brand_to_astrbot(
+    payload: dict[str, object],
+    profile: BrandProfile,
+) -> None:
+    normalized = profile.normalized()
+    errors = normalized.validate()
+    if errors:
+        raise ValueError("；".join(errors))
+    persona_name = "commercial_brand"
+    persona = {
+        "name": persona_name,
+        "prompt": (
+            f"你是{normalized.persona_name}，对外显示名称是{normalized.display_name}。"
+            "交流自然、直接、可靠，不使用机械的助手套话；不虚构已经完成的操作。"
+            f"用户询问身份时，使用名称“{normalized.display_name}”。"
+        ),
+        "begin_dialogs": ["你好", normalized.welcome_text],
+        "mood_imitation_dialogs": [],
+        "tools": None,
+        "skills": None,
+        "custom_error_message": f"{normalized.short_name}暂时无法处理这条消息，请稍后再试。",
+    }
+    existing = payload.get("persona")
+    existing_personas = existing if isinstance(existing, list) else []
+    payload["persona"] = [
+        item
+        for item in existing_personas
+        if not isinstance(item, dict) or item.get("name") != persona_name
+    ] + [persona]
+    provider_settings = payload.get("provider_settings")
+    if not isinstance(provider_settings, dict):
+        provider_settings = {}
+        payload["provider_settings"] = provider_settings
+    provider_settings["default_personality"] = persona_name
+
+
+def _apply_provider_to_astrbot(
+    payload: dict[str, object],
+    profile: OpenAIProviderProfile,
+) -> None:
+    normalized = profile.normalized()
+    errors = normalized.validate()
+    if errors:
+        raise ValueError("；".join(errors))
+    payload["provider_sources"] = _upsert_by_id(
+        payload.get("provider_sources"), normalized.astrbot_source()
+    )
+    payload["provider"] = _upsert_by_id(
+        payload.get("provider"), normalized.astrbot_model()
+    )
+    provider_settings = payload.get("provider_settings")
+    if not isinstance(provider_settings, dict):
+        provider_settings = {}
+        payload["provider_settings"] = provider_settings
+    provider_settings["default_provider_id"] = normalized.model_id
 
 
 def write_runtime_configs(
@@ -142,6 +221,8 @@ def write_runtime_configs(
     *,
     wechat_version: str | None = None,
     ports: RuntimePorts = RuntimePorts(),
+    brand_profile: BrandProfile | None = None,
+    provider_profile: OpenAIProviderProfile | None = None,
 ) -> None:
     root = Path(install_root).expanduser().resolve()
     bridge_config = root / "app" / "bridge" / "config.json"
@@ -155,7 +236,11 @@ def write_runtime_configs(
     (astrbot_root / "data").mkdir(parents=True, exist_ok=True)
     (astrbot_root / ".astrbot").touch(exist_ok=True)
     astrbot_path = astrbot_root / "data" / "cmd_config.json"
-    generated_astrbot = astrbot_config_payload(ports=ports)
+    generated_astrbot = astrbot_config_payload(
+        ports=ports,
+        brand_profile=brand_profile,
+        provider_profile=provider_profile,
+    )
     astrbot_payload = _load_object(astrbot_path)
     if astrbot_payload:
         astrbot_payload["platform"] = generated_astrbot["platform"]
@@ -186,6 +271,10 @@ def write_runtime_configs(
             "disable_metrics",
         ):
             astrbot_payload[key] = generated_astrbot[key]
+        if brand_profile is not None:
+            _apply_brand_to_astrbot(astrbot_payload, brand_profile)
+        if provider_profile is not None:
+            _apply_provider_to_astrbot(astrbot_payload, provider_profile)
     else:
         astrbot_payload = generated_astrbot
     write_json_atomic(
@@ -203,6 +292,10 @@ def write_runtime_configs(
             "ports": asdict(ports),
         }
     )
+    if provider_profile is not None:
+        manager_payload["provider_configured"] = True
+    else:
+        manager_payload.setdefault("provider_configured", False)
     write_json_atomic(
         manager_path,
         manager_payload,

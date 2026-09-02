@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import struct
 
 import pytest
 
@@ -59,3 +60,22 @@ def test_runtime_root_validation_rejects_wrong_fingerprint(tmp_path: Path) -> No
     )
     with pytest.raises(RuntimeError, match="fingerprint mismatch"):
         _builder()._validate_runtime_root(runtime, commercial)
+
+
+def test_staging_manager_pe_check_rejects_plain_file(tmp_path: Path) -> None:
+    source = tmp_path / "manager.exe"
+    source.write_bytes(b"not-a-pe")
+    with pytest.raises(RuntimeError, match="Windows PE"):
+        _builder()._validate_manager_exe(source)
+
+
+def test_staging_manager_pe_check_requires_x64(tmp_path: Path) -> None:
+    source = tmp_path / "manager.exe"
+    payload = bytearray(256)
+    payload[:2] = b"MZ"
+    struct.pack_into("<I", payload, 0x3C, 0x80)
+    payload[0x80:0x84] = b"PE\x00\x00"
+    struct.pack_into("<H", payload, 0x84, 0x014C)
+    source.write_bytes(payload)
+    with pytest.raises(RuntimeError, match="x64"):
+        _builder()._validate_manager_exe(source)

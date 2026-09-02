@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -86,6 +87,27 @@ def _validate_staged_runtime(output: Path) -> None:
     )
 
 
+def _validate_manager_exe(value: Path) -> Path:
+    manager_exe = value.expanduser().resolve()
+    if not manager_exe.is_file() or manager_exe.suffix.casefold() != ".exe":
+        raise RuntimeError(f"frozen manager executable is invalid: {manager_exe}")
+    with manager_exe.open("rb") as handle:
+        if handle.read(2) != b"MZ":
+            raise RuntimeError("frozen manager executable is not a Windows PE file")
+        handle.seek(0x3C)
+        offset_bytes = handle.read(4)
+        if len(offset_bytes) != 4:
+            raise RuntimeError("frozen manager executable has an invalid PE header")
+        pe_offset = struct.unpack("<I", offset_bytes)[0]
+        handle.seek(pe_offset)
+        if handle.read(4) != b"PE\x00\x00":
+            raise RuntimeError("frozen manager executable has an invalid PE signature")
+        machine_bytes = handle.read(2)
+        if len(machine_bytes) != 2 or struct.unpack("<H", machine_bytes)[0] != 0x8664:
+            raise RuntimeError("frozen manager executable must be Windows x64")
+    return manager_exe
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=Path, required=True)
@@ -94,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         "--runtime-root",
         type=Path,
         help="validated output directory created by scripts/build_runtime.py",
+    )
+    parser.add_argument(
+        "--manager-exe",
+        type=Path,
+        help="frozen WeChatReBot.exe created by scripts/build_manager.py",
     )
     parser.add_argument("--allow-gate", action="append", default=[])
     args = parser.parse_args(argv)
@@ -121,6 +148,16 @@ def main(argv: list[str] | None = None) -> int:
         source = (origin / entry["source"]).resolve()
         if not source.exists():
             raise FileNotFoundError(source)
+        expected_sha256 = entry.get("sha256")
+        if expected_sha256:
+            if not source.is_file():
+                raise RuntimeError(f"hash-pinned source is not a file: {source}")
+            actual_sha256 = _sha256(source)
+            if actual_sha256 != str(expected_sha256).upper():
+                raise RuntimeError(
+                    f"source hash mismatch: {entry['source']}; "
+                    f"expected {expected_sha256}, actual {actual_sha256}"
+                )
         target = output / entry["target"]
         _copy(source, target)
         copied.append({"source": str(source), "target": target.relative_to(output).as_posix()})
@@ -139,6 +176,17 @@ def main(argv: list[str] | None = None) -> int:
             "wheelhouse": runtime_manifest["wheelhouse"],
         }
         _validate_staged_runtime(output)
+
+    if args.manager_exe:
+        manager_exe = _validate_manager_exe(args.manager_exe)
+        manager_target = output / "manager" / "WeChatReBot.exe"
+        _copy(manager_exe, manager_target)
+        copied.append(
+            {
+                "source": str(manager_exe),
+                "target": manager_target.relative_to(output).as_posix(),
+            }
+        )
 
     hashes = [
         {"path": path.relative_to(output).as_posix(), "sha256": _sha256(path)}

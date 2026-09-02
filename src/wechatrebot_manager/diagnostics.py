@@ -108,6 +108,21 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             DiagnosticCheck(name, exists, "error", "文件存在" if exists else "文件缺失")
         )
 
+    optional_media_tools = (
+        ("ffmpeg", root / "runtime" / "ffmpeg" / "bin" / "ffmpeg.exe"),
+        ("ffprobe", root / "runtime" / "ffmpeg" / "bin" / "ffprobe.exe"),
+    )
+    for name, path in optional_media_tools:
+        exists = path.is_file()
+        checks.append(
+            DiagnosticCheck(
+                name,
+                exists,
+                "warning",
+                "文件存在" if exists else "未随包提供；视频转码功能可能不可用",
+            )
+        )
+
     manager = captured.get("manager_config", {})
     ports = manager.get("ports", {}) if isinstance(manager, dict) else {}
     port_state: dict[str, Any] = {}
@@ -122,11 +137,16 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
     captured["local_ports"] = port_state
 
     error_count = sum(not item.ok and item.severity == "error" for item in checks)
+    warning_count = sum(not item.ok and item.severity == "warning" for item in checks)
     return {
         "schema_version": 1,
         "ok": error_count == 0,
         "install_root": str(root),
-        "summary": {"error_count": error_count, "check_count": len(checks)},
+        "summary": {
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "check_count": len(checks),
+        },
         "checks": [asdict(item) for item in checks],
         "configuration": captured,
     }

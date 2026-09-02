@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-from wechatrebot_manager.brand import BrandProfile, save_brand_profile
+from wechatrebot_manager.brand import (
+    BrandProfile,
+    install_brand_profile,
+    save_brand_profile,
+)
 
 
 def test_brand_profile_is_normalized_and_saved_atomically(tmp_path: Path) -> None:
@@ -29,3 +33,15 @@ def test_missing_avatar_is_rejected(tmp_path: Path) -> None:
     )
     assert "头像文件不存在" in " ".join(profile.validate())
 
+
+def test_avatar_is_copied_into_customer_config(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nplaceholder")
+    install = tmp_path / "install"
+    stored = install_brand_profile(
+        install,
+        BrandProfile("小管家", "管家", "小管家", avatar_path=str(source)),
+    )
+    target = install / "config" / "assets" / "avatar.png"
+    assert target.read_bytes() == source.read_bytes()
+    assert stored.avatar_path == str(target.resolve())

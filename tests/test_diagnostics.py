@@ -30,3 +30,4 @@ def test_diagnostics_report_missing_runtime_without_exposing_secrets(
     assert not report["ok"]
     assert report["configuration"]["manager_config"]["api_token"] == "***REDACTED***"
     assert any(item["name"] == "python-runtime" for item in report["checks"])
+    assert report["summary"]["warning_count"] == 2

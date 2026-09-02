@@ -6,17 +6,26 @@ from pathlib import Path
 
 from .bootstrap import run_bootstrap
 from .diagnostics import collect_diagnostics
+from .desktop import run_desktop
 from .install_paths import INSTALL_MARKER, prepare_install_layout, validate_install_path
 from .json_io import write_json_atomic
 from .launcher import ServiceLaunchError, run_services_foreground
 from .payload import PayloadError, install_payload, verify_payload
 from .runtime_config import write_runtime_configs
+from .self_test import manager_self_test
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wechatrebot-manager")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
+    gui = subparsers.add_parser("gui", help="打开安装向导或机器人管理器")
+    gui.add_argument("--payload", type=Path)
+    gui.add_argument("--install-root", type=Path)
+    gui.add_argument("--allow-incomplete-payload", action="store_true")
+
+    self_test = subparsers.add_parser("self-test", help=argparse.SUPPRESS)
+    self_test.add_argument("--output", type=Path, required=True)
     bootstrap = subparsers.add_parser("bootstrap", help="运行 Windows 首次配置向导")
     bootstrap.add_argument("--payload", type=Path, help="待校验并展开的商业载荷目录")
     bootstrap.add_argument(
@@ -59,6 +68,25 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command is None:
+        try:
+            return run_desktop()
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            return 1
+    if args.command == "gui":
+        try:
+            return run_desktop(
+                payload_root=args.payload,
+                install_root=args.install_root,
+                allow_incomplete_payload=args.allow_incomplete_payload,
+            )
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            return 1
+    if args.command == "self-test":
+        manager_self_test(args.output)
+        return 0
     if args.command == "bootstrap":
         return run_bootstrap(
             args.payload,

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "redistribution-review-required",
+  "supported_wechat_versions": ["4.1.8.27"],
+  "redistribution_approved": false,
+  "security_review": "pending",
+  "real_device_validation": "pending",
+  "files": [
+    {
+      "path": "hook_41827_astrbot_bridge/vendor/hook/x64 inject.exe",
+      "role": "injector",
+      "architecture": "x64",
+      "pe_machine": "0x8664",
+      "size": 26112,
+      "sha256": "F839265D1D986BD072135038A27DDB242F39165C572BCB16609A9030A304734E",
+      "authenticode": "not-signed",
+      "provenance": "user-provided; redistribution basis not yet documented"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
+      "role": "hook-library-c2c-video-patched",
+      "architecture": "x64",
+      "pe_machine": "0x8664",
+      "size": 11469312,
+      "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D",
+      "authenticode": "not-signed",
+      "provenance": "user-provided base with local deterministic C2C video patch; redistribution basis not yet documented"
+    }
+  ]
+}

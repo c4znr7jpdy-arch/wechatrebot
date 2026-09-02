@@ -72,6 +72,25 @@ def test_guard_allows_locked_vendor_examples_but_scans_patched_astrbot(
     assert {item["reason"] for item in findings} == {"legacy-port"}
 
 
+def test_guard_recognizes_vendor_boundary_inside_distribution_payload(
+    tmp_path: Path,
+) -> None:
+    vendor = (
+        tmp_path
+        / "payload"
+        / "runtime"
+        / "python"
+        / "Lib"
+        / "site-packages"
+        / "dependency"
+    )
+    vendor.mkdir(parents=True)
+    (vendor / "fixture.py").write_text(
+        "PORT = 6199\nTOKEN = 'sk-examplefixture'\n", encoding="utf-8"
+    )
+    assert _load_guard()(tmp_path) == []
+
+
 def test_guard_rejects_logs_outside_locked_vendor_boundary(tmp_path: Path) -> None:
     logs = tmp_path / "app" / "logs"
     logs.mkdir(parents=True)
@@ -94,3 +113,17 @@ def test_guard_rejects_legacy_loader_even_inside_vendor_boundary(tmp_path: Path)
     loader.write_bytes(b"legacy")
     findings = _load_guard()(tmp_path)
     assert {item["reason"] for item in findings} == {"forbidden-filename"}
+
+
+def test_guard_distinguishes_secret_literals_from_variable_assignment(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    source = app / "settings.py"
+    source.write_text("api_key=self.api_key.strip()\n", encoding="utf-8")
+    assert _load_guard()(tmp_path) == []
+
+    source.write_text("api_key='private-production-value'\n", encoding="utf-8")
+    findings = _load_guard()(tmp_path)
+    assert {item["reason"] for item in findings} == {"assigned-secret"}

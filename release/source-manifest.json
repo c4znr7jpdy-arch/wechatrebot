@@ -39,8 +39,23 @@
     },
     {
       "origin": "commercial",
+      "source": "release/build-requirements.lock",
+      "target": "legal/build-requirements.lock"
+    },
+    {
+      "origin": "commercial",
+      "source": "release/hook-binaries.json",
+      "target": "legal/hook-binaries.json"
+    },
+    {
+      "origin": "commercial",
       "source": "legal/README.md",
       "target": "legal/README.md"
+    },
+    {
+      "origin": "commercial",
+      "source": "release/RELEASE-CHECKLIST.md",
+      "target": "legal/RELEASE-CHECKLIST.md"
     },
     {
       "origin": "project",
@@ -61,13 +76,15 @@
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/vendor/hook/x64 inject.exe",
       "target": "app/bridge/vendor/hook/x64 inject.exe",
-      "gate": "hook-binary-redistribution"
+      "gate": "hook-binary-redistribution",
+      "sha256": "F839265D1D986BD072135038A27DDB242F39165C572BCB16609A9030A304734E"
     },
     {
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
       "target": "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
-      "gate": "hook-binary-redistribution"
+      "gate": "hook-binary-redistribution",
+      "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D"
     }
   ]
 }

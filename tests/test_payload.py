@@ -71,3 +71,23 @@ def test_manifest_cannot_escape_or_overwrite_user_data(tmp_path: Path) -> None:
     _payload(payload, path="data/private.json")
     with pytest.raises(PayloadError, match="用户数据"):
         verify_payload(payload)
+
+
+def test_install_payload_reports_each_phase(tmp_path: Path) -> None:
+    payload = tmp_path / "payload"
+    _payload(payload)
+    events: list[tuple[str, int, int]] = []
+
+    install_payload(
+        payload,
+        tmp_path / "install",
+        progress_callback=lambda phase, current, total: events.append(
+            (phase, current, total)
+        ),
+    )
+
+    assert events == [
+        ("verify", 1, 1),
+        ("stage", 1, 1),
+        ("install", 1, 1),
+    ]

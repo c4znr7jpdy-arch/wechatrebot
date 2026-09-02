@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 
 from wechatrebot_manager.runtime_config import RuntimePorts, write_runtime_configs
+from wechatrebot_manager.brand import BrandProfile
+from wechatrebot_manager.provider import OpenAIProviderProfile
 
 
 def test_runtime_config_uses_only_new_bridge_ports_and_selected_wechat(
@@ -78,3 +80,39 @@ def test_runtime_reconfiguration_preserves_customer_provider_and_dashboard_hash(
             "ws_reverse_token": "",
         }
     ]
+
+
+def test_runtime_config_applies_brand_and_customer_provider(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    brand = BrandProfile(
+        display_name="群聊管家",
+        short_name="管家",
+        persona_name="小管家",
+    ).normalized()
+    provider = OpenAIProviderProfile(
+        api_key="customer-secret",
+        api_base="https://api.example.com/v1",
+        model="chat-model",
+    )
+
+    write_runtime_configs(
+        install,
+        wechat,
+        brand_profile=brand,
+        provider_profile=provider,
+    )
+
+    astrbot = json.loads(
+        (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert astrbot["provider_settings"]["default_personality"] == "commercial_brand"
+    assert astrbot["provider_settings"]["default_provider_id"] == (
+        "commercial_openai/chat-model"
+    )
+    assert astrbot["persona"][0]["name"] == "commercial_brand"
+    assert "群聊管家" in astrbot["persona"][0]["prompt"]
+    assert astrbot["provider_sources"][0]["key"] == ["customer-secret"]

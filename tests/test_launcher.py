@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from typing import Any
 
 from wechatrebot_manager.launcher import ProcessSupervisor, build_service_specs
@@ -44,6 +45,10 @@ def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
     assert specs[0].ready_port == 6200
     assert specs[1].ready_port == 5000
     assert specs[1].environment["PYTHONPATH"].endswith("app\\bridge\\src")
+    assert specs[0].environment["PATH"].split(os.pathsep)[0].endswith(
+        "runtime\\ffmpeg\\bin"
+    )
+    assert specs[1].environment["PATH"] == specs[0].environment["PATH"]
     assert specs[0].environment["PYTHONDONTWRITEBYTECODE"] == "1"
     assert specs[1].environment["PYTHONDONTWRITEBYTECODE"] == "1"
 

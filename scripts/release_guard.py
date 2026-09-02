@@ -29,7 +29,8 @@ FORBIDDEN_TEXT = (
     (
         "assigned-secret",
         re.compile(
-            r"(?i)\b(?:api[_-]?key|access[_-]?token|secret)\b\s*[=:]\s*[\"']?(?!<|\$\{|your-|example|xxx)[^\s\"']{8,}"
+            r"(?i)\b(?:api[_-]?key|access[_-]?token|secret)\b\s*[=:]\s*"
+            r"[\"'](?!<|\$\{|your-|example|xxx)[^\"'\r\n]{8,}[\"']"
         ),
     ),
 )
@@ -41,13 +42,20 @@ def _parts_casefold(path: Path) -> tuple[str, ...]:
     return tuple(part.casefold() for part in path.parts)
 
 
-def _is_trusted_vendor(relative: Path) -> bool:
+def _distribution_relative_parts(relative: Path) -> tuple[str, ...]:
     parts = _parts_casefold(relative)
+    if parts[:1] == ("payload",):
+        return parts[1:]
+    return parts
+
+
+def _is_trusted_vendor(relative: Path) -> bool:
+    parts = _distribution_relative_parts(relative)
     return parts[: len(TRUSTED_VENDOR_PREFIX)] == TRUSTED_VENDOR_PREFIX
 
 
 def _is_patched_astrbot(relative: Path) -> bool:
-    parts = _parts_casefold(relative)
+    parts = _distribution_relative_parts(relative)
     prefix = (*TRUSTED_VENDOR_PREFIX, "astrbot")
     return parts[: len(prefix)] == prefix
 

@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
+from typing import Callable
 import uuid
 
 from .json_io import write_json_atomic
@@ -19,6 +20,7 @@ USER_MANAGED_PATHS = {
     "config/manager.json",
 }
 USER_MANAGED_ROOTS = {"backups", "cache", "data", "logs", "updates"}
+ProgressCallback = Callable[[str, int, int], None]
 
 
 class PayloadError(RuntimeError):
@@ -73,6 +75,7 @@ def verify_payload(
     payload_root: str | Path,
     *,
     allow_incomplete: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> VerifiedPayload:
     root = Path(payload_root).expanduser().resolve()
     manifest_path = root / PAYLOAD_MANIFEST
@@ -98,7 +101,8 @@ def verify_payload(
     verified: list[VerifiedPayloadFile] = []
     seen: set[str] = set()
     listed: set[str] = set()
-    for entry in entries:
+    entry_count = len(entries)
+    for index, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
             raise PayloadError("载荷文件条目格式错误。")
         relative = _safe_relative_path(entry.get("path"))
@@ -134,6 +138,8 @@ def verify_payload(
         seen.add(key)
         listed.add(relative.as_posix())
         verified.append(VerifiedPayloadFile(relative, source, actual))
+        if progress_callback is not None:
+            progress_callback("verify", index, entry_count)
 
     payload_paths = tuple(root.rglob("*"))
     for path in payload_paths:
@@ -157,8 +163,13 @@ def install_payload(
     install_root: str | Path,
     *,
     allow_incomplete: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> VerifiedPayload:
-    verified = verify_payload(payload_root, allow_incomplete=allow_incomplete)
+    verified = verify_payload(
+        payload_root,
+        allow_incomplete=allow_incomplete,
+        progress_callback=progress_callback,
+    )
     root = Path(install_root).expanduser().resolve()
     updates_root = (root / "updates").resolve()
     updates_root.mkdir(parents=True, exist_ok=True)
@@ -174,14 +185,17 @@ def install_payload(
     backup_root.mkdir(parents=True)
     replaced: list[tuple[Path, Path | None]] = []
     try:
-        for item in verified.files:
+        file_count = len(verified.files)
+        for index, item in enumerate(verified.files, start=1):
             staged = stage_root / item.relative_path
             staged.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item.source_path, staged)
             if sha256_file(staged) != item.sha256:
                 raise PayloadError(f"暂存文件校验失败：{item.relative_path.as_posix()}")
+            if progress_callback is not None:
+                progress_callback("stage", index, file_count)
 
-        for item in verified.files:
+        for index, item in enumerate(verified.files, start=1):
             target = (root / item.relative_path).resolve()
             try:
                 target.relative_to(root)
@@ -199,6 +213,8 @@ def install_payload(
                 shutil.copy2(target, backup)
             os.replace(stage_root / item.relative_path, target)
             replaced.append((target, backup))
+            if progress_callback is not None:
+                progress_callback("install", index, file_count)
 
         write_json_atomic(
             root / "config" / "installed-payload.json",
