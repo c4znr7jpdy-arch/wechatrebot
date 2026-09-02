@@ -34,6 +34,7 @@ class ServiceSpec:
     ready_port: int
     ready_timeout_seconds: float
     environment: Mapping[str, str]
+    required_files: tuple[Path, ...] = ()
 
     def validate(self) -> tuple[str, ...]:
         errors: list[str] = []
@@ -42,6 +43,9 @@ class ServiceSpec:
             errors.append(f"{self.name} 运行时不存在：{executable}")
         if not self.cwd.is_dir():
             errors.append(f"{self.name} 工作目录不存在：{self.cwd}")
+        for required in self.required_files:
+            if not required.is_file():
+                errors.append(f"{self.name} 必需文件不存在：{required}")
         if not 1 <= self.ready_port <= 65535:
             errors.append(f"{self.name} 就绪端口无效。")
         return tuple(errors)
@@ -111,6 +115,10 @@ def build_service_specs(
         ready_port=ports.astrbot_ws,
         ready_timeout_seconds=120,
         environment=common_environment,
+        required_files=(
+            astrbot_root / ".astrbot",
+            astrbot_root / "data" / "cmd_config.json",
+        ),
     )
     bridge = ServiceSpec(
         name="new-hook-bridge",
@@ -130,6 +138,14 @@ def build_service_specs(
             **common_environment,
             "PYTHONPATH": str(bridge_root / "src"),
         },
+        required_files=(
+            bridge_root / "config.json",
+            bridge_root / "vendor" / "hook" / "x64 inject.exe",
+            bridge_root
+            / "vendor"
+            / "hook"
+            / "libGLESv1-c2c-video-v2.dll",
+        ),
     )
     return astrbot, bridge
 
@@ -150,16 +166,21 @@ class ProcessSupervisor:
     def start(self) -> tuple[RunningService, ...]:
         if self.running:
             raise ServiceLaunchError("服务监督器已经启动。")
+        validation_errors = [
+            error
+            for spec in self.specs
+            for error in spec.validate()
+        ]
+        if validation_errors:
+            raise ServiceLaunchError("；".join(validation_errors))
+        occupied = [
+            f"{spec.name} 端口已被占用：{spec.ready_host}:{spec.ready_port}"
+            for spec in self.specs
+            if port_accepting(spec.ready_host, spec.ready_port)
+        ]
+        if occupied:
+            raise ServiceLaunchError("；".join(occupied))
         for spec in self.specs:
-            errors = spec.validate()
-            if errors:
-                self.stop()
-                raise ServiceLaunchError("；".join(errors))
-            if port_accepting(spec.ready_host, spec.ready_port):
-                self.stop()
-                raise ServiceLaunchError(
-                    f"{spec.name} 端口已被占用：{spec.ready_host}:{spec.ready_port}"
-                )
             spec.log_file.parent.mkdir(parents=True, exist_ok=True)
             log_handle = spec.log_file.open("ab", buffering=0)
             environment = os.environ.copy()

@@ -2,7 +2,13 @@ from pathlib import Path
 import os
 from typing import Any
 
-from wechatrebot_manager.launcher import ProcessSupervisor, build_service_specs
+import pytest
+
+from wechatrebot_manager.launcher import (
+    ProcessSupervisor,
+    ServiceLaunchError,
+    build_service_specs,
+)
 
 
 class _FakeProcess:
@@ -34,7 +40,15 @@ def _layout(root: Path) -> None:
     (root / "runtime" / "python").mkdir(parents=True)
     (root / "runtime" / "python" / "python.exe").write_bytes(b"runtime")
     (root / "app" / "astrbot").mkdir(parents=True)
+    (root / "app" / "astrbot" / ".astrbot").touch()
+    (root / "app" / "astrbot" / "data").mkdir()
+    (root / "app" / "astrbot" / "data" / "cmd_config.json").write_text("{}")
     (root / "app" / "bridge" / "src").mkdir(parents=True)
+    (root / "app" / "bridge" / "config.json").write_text("{}")
+    hook = root / "app" / "bridge" / "vendor" / "hook"
+    hook.mkdir(parents=True)
+    (hook / "x64 inject.exe").write_bytes(b"injector")
+    (hook / "libGLESv1-c2c-video-v2.dll").write_bytes(b"hook")
 
 
 def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
@@ -81,3 +95,22 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
         "ready:new-hook-bridge",
     ]
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
+
+
+def test_preflight_rejects_missing_hook_before_any_process_starts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    (tmp_path / "app" / "bridge" / "vendor" / "hook" / "x64 inject.exe").unlink()
+    starts: list[list[str]] = []
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        starts.append(argv)
+        return _FakeProcess("unexpected", [])
+
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
+
+    with pytest.raises(ServiceLaunchError, match="x64 inject.exe"):
+        supervisor.start()
+    assert starts == []
