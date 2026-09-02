@@ -1,16 +1,23 @@
 import json
 from pathlib import Path
 
-from wechatrebot_manager.diagnostics import collect_diagnostics, redact_sensitive
+from wechatrebot_manager.diagnostics import (
+    collect_diagnostics,
+    diagnostic_error_messages,
+    redact_local_paths,
+    redact_sensitive,
+)
 
 
 def test_redaction_handles_nested_keys_and_secret_shaped_values() -> None:
     payload = {
         "api_key": "private-value",
+        "admins_id": ["wxid_private"],
         "nested": {"password": "private-value", "note": "key sk-example12345"},
     }
     redacted = redact_sensitive(payload)
     assert redacted["api_key"] == "***REDACTED***"
+    assert redacted["admins_id"] == "***REDACTED***"
     assert redacted["nested"]["password"] == "***REDACTED***"
     assert "sk-example12345" not in redacted["nested"]["note"]
 
@@ -31,3 +38,24 @@ def test_diagnostics_report_missing_runtime_without_exposing_secrets(
     assert report["configuration"]["manager_config"]["api_token"] == "***REDACTED***"
     assert any(item["name"] == "python-runtime" for item in report["checks"])
     assert report["summary"]["warning_count"] == 2
+    assert diagnostic_error_messages(report)
+
+
+def test_diagnostics_redact_install_wechat_and_user_paths() -> None:
+    payload = {
+        "install": "D:\\客户\\机器人\\config",
+        "wechat": "D:\\Tools\\Weixin\\Weixin.exe",
+        "home": "C:\\Users\\Customer\\Desktop",
+    }
+    redacted = redact_local_paths(
+        payload,
+        {
+            "D:\\客户\\机器人": "<INSTALL_ROOT>",
+            "D:\\Tools\\Weixin\\Weixin.exe": "<WECHAT_EXE>",
+            "C:\\Users\\Customer": "<USER_HOME>",
+        },
+    )
+    text = json.dumps(redacted, ensure_ascii=False)
+    assert "客户" not in text
+    assert "Customer" not in text
+    assert redacted["wechat"] == "<WECHAT_EXE>"

@@ -48,6 +48,7 @@ def test_perform_install_writes_ready_brand_and_provider(
             api_base="https://api.example.com/v1",
             model="chat-model",
         ),
+        admin_id="wxid_customer_admin",
     )
     monkeypatch.setattr(
         "wechatrebot_manager.installer.validate_install_path",
@@ -75,4 +76,5 @@ def test_perform_install_writes_ready_brand_and_provider(
     assert marker["state"] == "ready"
     assert astrbot["provider_settings"]["default_personality"] == "commercial_brand"
     assert astrbot["provider_settings"]["default_provider_id"].endswith("/chat-model")
+    assert astrbot["admins_id"] == ["wxid_customer_admin"]
     assert phases == ["verify", "stage", "install", "configure", "configure"]

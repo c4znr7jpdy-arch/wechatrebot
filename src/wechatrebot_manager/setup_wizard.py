@@ -9,6 +9,7 @@ from .brand import BrandProfile
 from .install_paths import validate_install_path
 from .installer import InstallRequest, perform_install
 from .provider import OpenAIProviderProfile
+from .runtime_config import normalize_admin_id
 from .wechat_path import (
     WechatExecutable,
     discover_wechat_executables,
@@ -104,6 +105,7 @@ class SetupWizard:
         self.short_name_var = tk.StringVar(value="机器人")
         self.persona_name_var = tk.StringVar(value="智能机器人")
         self.welcome_var = tk.StringVar()
+        self.admin_id_var = tk.StringVar()
         self.avatar_var = tk.StringVar()
         self.provider_choice_var = tk.StringVar(value=PROVIDER_DEEPSEEK)
         self.api_base_var = tk.StringVar(value="https://api.deepseek.com")
@@ -217,6 +219,7 @@ class SetupWizard:
         self._entry_row(brand, "机器人简称", self.short_name_var)
         self._entry_row(brand, "人格称呼", self.persona_name_var)
         self._entry_row(brand, "欢迎语（可选）", self.welcome_var)
+        self._entry_row(brand, "管理员 wxid（可选）", self.admin_id_var)
         avatar_row = self.ttk.Frame(brand)
         avatar_row.pack(fill="x", pady=5)
         self.ttk.Label(avatar_row, text="头像（可选）", width=14).pack(side="left")
@@ -256,6 +259,7 @@ class SetupWizard:
             ("微信路径", self.wechat_var.get()),
             ("微信版本", self.wechat.version if self.wechat else "未知"),
             ("机器人名称", self.display_name_var.get().strip()),
+            ("管理员", self.admin_id_var.get().strip() or "稍后配置"),
             ("模型", provider),
             ("载荷", str(self.payload_root) if self.payload_root else "仅保存配置"),
         )
@@ -358,6 +362,10 @@ class SetupWizard:
                 self._set_wechat(item)
         elif self.page == 2:
             errors = self._brand().validate()
+            try:
+                normalize_admin_id(self.admin_id_var.get())
+            except ValueError as exc:
+                errors = (*errors, str(exc))
             provider = self._provider()
             if provider is not None:
                 errors = (*errors, *provider.validate())
@@ -388,6 +396,7 @@ class SetupWizard:
             wechat=self.wechat,
             brand=self._brand(),
             provider=self._provider(),
+            admin_id=self.admin_id_var.get(),
             allow_incomplete_payload=self.allow_incomplete_payload,
         )
 

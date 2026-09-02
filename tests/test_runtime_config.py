@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from wechatrebot_manager.runtime_config import RuntimePorts, write_runtime_configs
+from wechatrebot_manager.runtime_config import (
+    RuntimePorts,
+    normalize_admin_id,
+    write_runtime_configs,
+)
 from wechatrebot_manager.brand import BrandProfile
 from wechatrebot_manager.provider import OpenAIProviderProfile
 
@@ -102,6 +106,7 @@ def test_runtime_config_applies_brand_and_customer_provider(tmp_path: Path) -> N
         wechat,
         brand_profile=brand,
         provider_profile=provider,
+        admin_id="wxid_customer_admin",
     )
 
     astrbot = json.loads(
@@ -116,3 +121,22 @@ def test_runtime_config_applies_brand_and_customer_provider(tmp_path: Path) -> N
     assert astrbot["persona"][0]["name"] == "commercial_brand"
     assert "群聊管家" in astrbot["persona"][0]["prompt"]
     assert astrbot["provider_sources"][0]["key"] == ["customer-secret"]
+    assert astrbot["admins_id"] == ["wxid_customer_admin"]
+
+
+def test_admin_id_validation_and_reconfiguration_preservation(tmp_path: Path) -> None:
+    assert normalize_admin_id(" wxid_customer ") == "wxid_customer"
+    with pytest.raises(ValueError, match="wxid"):
+        normalize_admin_id("含 空格")
+
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat, admin_id="wxid_customer")
+    write_runtime_configs(install, wechat)
+    astrbot = json.loads(
+        (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert astrbot["admins_id"] == ["wxid_customer"]

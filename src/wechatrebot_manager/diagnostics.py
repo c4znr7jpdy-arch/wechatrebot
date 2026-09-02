@@ -8,10 +8,15 @@ from typing import Any
 
 from .install_paths import INSTALL_MARKER
 from .launcher import port_accepting
+from .wechat_path import validate_wechat_executable
 
 
 _SENSITIVE_KEY = re.compile(
     r"(?:api.?key|authorization|cookie|credential|password|secret|token)",
+    re.IGNORECASE,
+)
+_PRIVATE_IDENTIFIER_KEY = re.compile(
+    r"(?:admins?_id|wxid|group.?id|user.?id)",
     re.IGNORECASE,
 )
 _SECRET_VALUE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
@@ -26,7 +31,7 @@ class DiagnosticCheck:
 
 
 def redact_sensitive(value: Any, *, key: str = "") -> Any:
-    if _SENSITIVE_KEY.search(key):
+    if _SENSITIVE_KEY.search(key) or _PRIVATE_IDENTIFIER_KEY.search(key):
         return "***REDACTED***"
     if isinstance(value, dict):
         return {
@@ -37,6 +42,38 @@ def redact_sensitive(value: Any, *, key: str = "") -> Any:
         return [redact_sensitive(item) for item in value]
     if isinstance(value, str):
         return _SECRET_VALUE.sub("***REDACTED***", value)
+    return value
+
+
+def _replace_case_insensitive(value: str, source: str, replacement: str) -> str:
+    if not source:
+        return value
+    result = value
+    while True:
+        index = result.casefold().find(source.casefold())
+        if index < 0:
+            return result
+        result = result[:index] + replacement + result[index + len(source) :]
+
+
+def redact_local_paths(value: Any, replacements: dict[str, str]) -> Any:
+    normalized = sorted(
+        ((str(source), target) for source, target in replacements.items() if source),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    if isinstance(value, dict):
+        return {
+            str(key): redact_local_paths(child, replacements)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_local_paths(item, replacements) for item in value]
+    if isinstance(value, str):
+        result = value
+        for source, replacement in normalized:
+            result = _replace_case_insensitive(result, source, replacement)
+        return result
     return value
 
 
@@ -74,6 +111,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
         ("manager_config", root / "config" / "manager.json"),
         ("brand_config", root / "config" / "brand.json"),
         ("bridge_config", root / "app" / "bridge" / "config.json"),
+        ("astrbot_config", root / "app" / "astrbot" / "data" / "cmd_config.json"),
         ("installed_payload", root / "config" / "installed-payload.json"),
     ):
         payload, config_error = _load_json(path)
@@ -101,6 +139,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             / "hook"
             / "libGLESv1-c2c-video-v2.dll",
         ),
+        ("new-hook-integrity-manifest", root / "legal" / "hook-binaries.json"),
     )
     for name, path in required_files:
         exists = path.is_file()
@@ -124,6 +163,23 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
         )
 
     manager = captured.get("manager_config", {})
+    wechat_exe = manager.get("wechat_exe_path") if isinstance(manager, dict) else None
+    if isinstance(wechat_exe, str) and wechat_exe.strip():
+        item = validate_wechat_executable(wechat_exe)
+        checks.append(
+            DiagnosticCheck(
+                "wechat-executable",
+                item.supported,
+                "error",
+                "微信路径、版本与架构受支持"
+                if item.supported
+                else "；".join(item.errors),
+            )
+        )
+    else:
+        checks.append(
+            DiagnosticCheck("wechat-executable", False, "error", "未配置微信主程序路径")
+        )
     ports = manager.get("ports", {}) if isinstance(manager, dict) else {}
     port_state: dict[str, Any] = {}
     if isinstance(ports, dict):
@@ -138,10 +194,10 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
 
     error_count = sum(not item.ok and item.severity == "error" for item in checks)
     warning_count = sum(not item.ok and item.severity == "warning" for item in checks)
-    return {
+    report = {
         "schema_version": 1,
         "ok": error_count == 0,
-        "install_root": str(root),
+        "install_root": "<INSTALL_ROOT>",
         "summary": {
             "error_count": error_count,
             "warning_count": warning_count,
@@ -150,3 +206,23 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
         "checks": [asdict(item) for item in checks],
         "configuration": captured,
     }
+    replacements = {
+        str(root): "<INSTALL_ROOT>",
+        str(Path.home()): "<USER_HOME>",
+    }
+    if isinstance(wechat_exe, str):
+        replacements[wechat_exe] = "<WECHAT_EXE>"
+    return redact_local_paths(report, replacements)
+
+
+def diagnostic_error_messages(report: dict[str, Any]) -> tuple[str, ...]:
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        return ("诊断报告格式错误。",)
+    return tuple(
+        f"{item.get('name', 'unknown')}：{item.get('message', '检查失败')}"
+        for item in checks
+        if isinstance(item, dict)
+        and not item.get("ok")
+        and item.get("severity") == "error"
+    )

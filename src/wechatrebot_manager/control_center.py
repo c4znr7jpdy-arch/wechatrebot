@@ -8,7 +8,7 @@ import threading
 import webbrowser
 
 from .brand import BrandProfile, install_brand_profile
-from .diagnostics import collect_diagnostics
+from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import (
     ProcessSupervisor,
     ServiceLaunchError,
@@ -176,6 +176,11 @@ class ControlCenter:
         self.start_button.configure(state="disabled")
         self.status_var.set("正在启动…")
         try:
+            report = collect_diagnostics(self.install_root)
+            preflight_errors = diagnostic_error_messages(report)
+            if preflight_errors:
+                preview = "\n".join(f"• {item}" for item in preflight_errors[:8])
+                raise ValueError(f"启动前检查未通过：\n{preview}")
             self.supervisor = ProcessSupervisor(build_service_specs(self.install_root))
         except (OSError, ValueError) as exc:
             from tkinter import messagebox

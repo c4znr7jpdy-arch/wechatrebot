@@ -3,10 +3,23 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+import re
 
 from .brand import BrandProfile
 from .json_io import write_json_atomic
 from .provider import OpenAIProviderProfile
+
+
+_ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
+
+
+def normalize_admin_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if normalized and not _ADMIN_ID.fullmatch(normalized):
+        raise ValueError("管理员 wxid 格式无效，只能使用字母、数字及 _ @ . -。")
+    return normalized
 
 
 def _load_object(path: Path) -> dict[str, object]:
@@ -85,10 +98,12 @@ def astrbot_config_payload(
     ports: RuntimePorts = RuntimePorts(),
     brand_profile: BrandProfile | None = None,
     provider_profile: OpenAIProviderProfile | None = None,
+    admin_id: str | None = None,
 ) -> dict[str, object]:
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
+    normalized_admin = normalize_admin_id(admin_id)
     payload: dict[str, object] = {
         "config_version": 2,
         "platform": [
@@ -115,7 +130,7 @@ def astrbot_config_payload(
             "default_image_caption_provider_id": "",
             "default_personality": "default",
         },
-        "admins_id": [],
+        "admins_id": [normalized_admin] if normalized_admin else [],
         "dashboard": {
             "enable": True,
             "username": "astrbot",
@@ -223,6 +238,7 @@ def write_runtime_configs(
     ports: RuntimePorts = RuntimePorts(),
     brand_profile: BrandProfile | None = None,
     provider_profile: OpenAIProviderProfile | None = None,
+    admin_id: str | None = None,
 ) -> None:
     root = Path(install_root).expanduser().resolve()
     bridge_config = root / "app" / "bridge" / "config.json"
@@ -240,6 +256,7 @@ def write_runtime_configs(
         ports=ports,
         brand_profile=brand_profile,
         provider_profile=provider_profile,
+        admin_id=admin_id,
     )
     astrbot_payload = _load_object(astrbot_path)
     if astrbot_payload:
@@ -275,6 +292,11 @@ def write_runtime_configs(
             _apply_brand_to_astrbot(astrbot_payload, brand_profile)
         if provider_profile is not None:
             _apply_provider_to_astrbot(astrbot_payload, provider_profile)
+        normalized_admin = normalize_admin_id(admin_id)
+        if normalized_admin is not None:
+            astrbot_payload["admins_id"] = (
+                [normalized_admin] if normalized_admin else []
+            )
     else:
         astrbot_payload = generated_astrbot
     write_json_atomic(
@@ -296,6 +318,11 @@ def write_runtime_configs(
         manager_payload["provider_configured"] = True
     else:
         manager_payload.setdefault("provider_configured", False)
+    normalized_admin = normalize_admin_id(admin_id)
+    if normalized_admin is not None:
+        manager_payload["admin_configured"] = bool(normalized_admin)
+    else:
+        manager_payload.setdefault("admin_configured", False)
     write_json_atomic(
         manager_path,
         manager_payload,

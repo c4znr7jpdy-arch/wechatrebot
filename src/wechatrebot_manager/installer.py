@@ -16,6 +16,7 @@ from .location import save_install_location
 from .payload import PayloadError, VerifiedPayload, install_payload
 from .provider import OpenAIProviderProfile
 from .runtime_config import write_runtime_configs
+from .runtime_config import normalize_admin_id
 from .shortcuts import create_windows_shortcuts
 from .wechat_path import WechatExecutable
 
@@ -30,6 +31,7 @@ class InstallRequest:
     wechat: WechatExecutable
     brand: BrandProfile
     provider: OpenAIProviderProfile | None = None
+    admin_id: str = ""
     allow_incomplete_payload: bool = False
 
     def validate(self) -> tuple[str, ...]:
@@ -41,6 +43,10 @@ class InstallRequest:
         errors.extend(self.brand.validate())
         if self.provider is not None:
             errors.extend(self.provider.validate())
+        try:
+            normalize_admin_id(self.admin_id)
+        except ValueError as exc:
+            errors.append(str(exc))
         if self.payload_root is not None and not self.payload_root.is_dir():
             errors.append("商业载荷目录不存在。")
         return tuple(errors)
@@ -81,6 +87,7 @@ def perform_install(
             wechat_version=request.wechat.version,
             brand_profile=normalized_brand,
             provider_profile=request.provider,
+            admin_id=request.admin_id,
         )
         write_json_atomic(
             root / INSTALL_MARKER,
