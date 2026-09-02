@@ -225,25 +225,31 @@ def parse_update_manifest(
         or payload.get("channel") != channel.channel
     ):
         raise UpdateError("更新清单与当前产品或更新通道不匹配。")
-    package = payload.get("package")
     notes_value = payload.get("notes", [])
-    if not isinstance(package, dict) or not isinstance(notes_value, list):
-        raise UpdateError("更新清单缺少安装包信息。")
-    if package.get("format") not in {None, "zip"}:
-        raise UpdateError("更新包格式不受支持。")
+    if not isinstance(notes_value, list):
+        raise UpdateError("更新说明格式错误。")
     try:
         latest_text = str(payload["version"]).strip()
         current = Version(current_version)
         latest = Version(latest_text)
         minimum = Version(str(payload.get("minimum_supported_version") or "0.0.0"))
-        package_size = int(package["size"])
-        package_sha256 = str(package["sha256"]).upper()
     except (KeyError, TypeError, ValueError, InvalidVersion) as exc:
-        raise UpdateError("更新版本或安装包摘要格式错误。") from exc
-    if latest <= current:
-        return None
+        raise UpdateError("更新版本格式错误。") from exc
     if not latest_text or str(latest) != latest_text:
         raise UpdateError("更新版本必须使用规范版本号。")
+    if latest <= current:
+        return None
+
+    package = payload.get("package")
+    if not isinstance(package, dict):
+        raise UpdateError("更新清单缺少安装包信息。")
+    if package.get("format") not in {None, "zip"}:
+        raise UpdateError("更新包格式不受支持。")
+    try:
+        package_size = int(package["size"])
+        package_sha256 = str(package["sha256"]).upper()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise UpdateError("更新安装包摘要格式错误。") from exc
     if not (0 < package_size <= channel.max_package_bytes):
         raise UpdateError("更新包大小超出允许范围。")
     if len(package_sha256) != 64 or any(

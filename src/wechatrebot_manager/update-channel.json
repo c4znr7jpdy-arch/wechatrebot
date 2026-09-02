@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "channel": "stable",
-  "manifest_url": "",
+  "manifest_url": "https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json",
   "key_id": "59E10AD6E829BA64",
   "public_key_base64": "r6VrZiQwHkEq8/vBf5qdWJ+P1kOcDWMIwe0ySpCCWLA=",
   "check_interval_seconds": 21600,

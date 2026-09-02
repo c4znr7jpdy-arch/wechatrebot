@@ -105,7 +105,10 @@ def test_embedded_update_channel_has_a_valid_pinned_public_key() -> None:
     channel = load_update_channel()
     assert len(channel.public_key) == 32
     assert len(channel.key_id) == 16
-    assert not channel.enabled
+    assert channel.enabled
+    assert channel.manifest_url == (
+        "https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json"
+    )
 
 
 def test_signed_manifest_is_verified_before_update_is_offered() -> None:
@@ -126,6 +129,23 @@ def test_current_or_older_signed_version_is_not_offered() -> None:
     channel, private = _channel_and_key()
     payload = _signed_manifest(channel, private)
     assert parse_update_manifest(payload, channel, current_version="0.8.0") is None
+
+
+def test_signed_current_version_can_be_published_without_a_package() -> None:
+    channel, private = _channel_and_key()
+    payload = _signed_manifest(channel, private)
+    payload["package"] = None
+    payload.pop("signature")
+    signature = private.sign(canonical_manifest_bytes(payload))
+    payload["signature"] = {
+        "algorithm": "ed25519",
+        "key_id": channel.key_id,
+        "value": base64.b64encode(signature).decode("ascii"),
+    }
+
+    assert parse_update_manifest(payload, channel, current_version="0.8.0") is None
+    with pytest.raises(UpdateError, match="缺少安装包"):
+        parse_update_manifest(payload, channel, current_version="0.7.0")
 
 
 def test_update_archive_must_keep_every_file_under_payload(tmp_path: Path) -> None:

@@ -6,14 +6,27 @@
 
 项目已在 `config/local/update-signing-private.pem` 生成本机 Ed25519 私钥，并把对应公钥写入 `src/wechatrebot_manager/update-channel.json`。私钥已被 `.gitignore` 排除。
 
-正式首发前必须完成：
+正式首发已绑定签名清单地址：
 
-1. 为更新文件准备独立 HTTPS 静态地址或对象存储；清单建议固定为 `https://更新域名/stable.json`。
-2. 把该地址写入 `src/wechatrebot_manager/update-channel.json` 的 `manifest_url`，重新构建首发管理器。
-3. 把私钥复制到至少一份离线加密备份。私钥丢失后，已售客户端无法验证用新密钥签发的更新。
-4. 不要把对象存储管理密钥、GitHub PAT 或更新签名私钥放进客户程序、配置模板、日志或仓库。
+`https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json`
+
+服务器发布目录为 `/srv/wechatrebot-updates`，完整更新 ZIP 放在 `releases/`，稳定清单为根目录的 `stable.json`。
+
+正式首发前还必须完成：
+
+1. 把签名私钥复制到至少一份离线加密备份。私钥丢失后，已售客户端无法验证用新密钥签发的更新。
+2. 不要把服务器凭据、GitHub PAT 或更新签名私钥放进客户程序、配置模板、日志或仓库。
 
 客户安装目录可以用 `config/update-channel.json` 覆盖 `manifest_url`、检查间隔和超时，签名公钥仍固定使用程序内置值，不能被覆盖。
+
+没有可发布的新包时，用 `scripts/build_update_status.py` 发布当前版本的签名状态清单。它不携带下载包，当前版本客户端会显示“已是最新版本”：
+
+```powershell
+python scripts\build_update_status.py `
+  --output artifacts\update-status-0.8.0 `
+  --private-key config\local\update-signing-private.pem `
+  --note "远程更新通道已就绪"
+```
 
 ## 每次发布
 
