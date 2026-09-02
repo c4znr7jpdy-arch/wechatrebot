@@ -6,7 +6,9 @@ from pathlib import Path
 import queue
 import threading
 import webbrowser
+import zipfile
 
+from .backup import BackupError, create_customer_backup, restore_customer_backup
 from .brand import BrandProfile, install_brand_profile
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import (
@@ -124,18 +126,24 @@ class ControlCenter:
 
         settings = ttk.LabelFrame(shell, text="常用设置", padding=14)
         settings.pack(fill="x")
-        ttk.Button(settings, text="一键修改机器人名称", command=self._edit_brand).pack(
-            side="left"
+        setting_actions = (
+            ("一键修改机器人名称", self._edit_brand),
+            ("重新选择微信", self._select_wechat),
+            ("导出脱敏诊断", self._export_diagnostics),
+            ("备份配置与数据", self._backup),
+            ("恢复配置与数据", self._restore),
+            ("打开安装目录", self._open_install_root),
         )
-        ttk.Button(settings, text="重新选择微信", command=self._select_wechat).pack(
-            side="left", padx=8
-        )
-        ttk.Button(settings, text="导出脱敏诊断", command=self._export_diagnostics).pack(
-            side="left", padx=8
-        )
-        ttk.Button(settings, text="打开安装目录", command=self._open_install_root).pack(
-            side="left", padx=8
-        )
+        for column in range(3):
+            settings.columnconfigure(column, weight=1, uniform="settings")
+        for index, (label, command) in enumerate(setting_actions):
+            self.ttk.Button(settings, text=label, command=command).grid(
+                row=index // 3,
+                column=index % 3,
+                sticky="ew",
+                padx=4,
+                pady=4,
+            )
 
         self._refresh_status()
         self.root.after(1000, self._timer)
@@ -164,6 +172,23 @@ class ControlCenter:
                     from tkinter import messagebox
 
                     messagebox.showerror("操作失败", message, parent=self.root)
+                elif kind == "backup_done":
+                    from tkinter import messagebox
+
+                    messagebox.showinfo(
+                        "备份完成",
+                        f"备份已保存：\n{message}\n\n该文件包含客户配置和 API Key，请妥善保管。",
+                        parent=self.root,
+                    )
+                elif kind == "restore_done":
+                    from tkinter import messagebox
+
+                    messagebox.showinfo(
+                        "恢复完成",
+                        "配置与数据已恢复。恢复前的自动回滚点保存在：\n"
+                        f"{message}",
+                        parent=self.root,
+                    )
                 self._refresh_status()
         except queue.Empty:
             pass
@@ -316,6 +341,74 @@ class ControlCenter:
             messagebox.showinfo("导出完成", "诊断文件已脱敏保存。", parent=self.root)
         except OSError as exc:
             messagebox.showerror("导出失败", str(exc), parent=self.root)
+
+    def _backup(self) -> None:
+        from tkinter import filedialog, messagebox
+
+        if any(
+            port_accepting("127.0.0.1", port)
+            for port in (6185, 6200, 5000, 19088)
+        ):
+            messagebox.showwarning(
+                "请先停止机器人",
+                "为避免备份到写入一半的数据，请先停止机器人后再备份。",
+                parent=self.root,
+            )
+            return
+        target = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="备份机器人配置与数据",
+            defaultextension=".zip",
+            initialfile="wechatrebot-backup.zip",
+            filetypes=(("ZIP 备份", "*.zip"),),
+        )
+        if not target:
+            return
+
+        def worker() -> None:
+            try:
+                create_customer_backup(self.install_root, target)
+                self.events.put(("backup_done", str(Path(target).resolve())))
+            except (OSError, BackupError) as exc:
+                self.events.put(("error", f"备份失败：{exc}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _restore(self) -> None:
+        from tkinter import filedialog, messagebox
+
+        if any(
+            port_accepting("127.0.0.1", port)
+            for port in (6185, 6200, 5000, 19088)
+        ):
+            messagebox.showwarning(
+                "请先停止机器人",
+                "恢复会覆盖配置和数据，请先停止机器人。",
+                parent=self.root,
+            )
+            return
+        selected = filedialog.askopenfilename(
+            parent=self.root,
+            title="选择机器人备份",
+            filetypes=(("ZIP 备份", "*.zip"),),
+        )
+        if not selected:
+            return
+        if not messagebox.askyesno(
+            "确认恢复",
+            "恢复会覆盖备份中包含的配置与数据。程序会先自动创建恢复前回滚点，是否继续？",
+            parent=self.root,
+        ):
+            return
+
+        def worker() -> None:
+            try:
+                result = restore_customer_backup(self.install_root, selected)
+                self.events.put(("restore_done", str(result["recovery_point"])))
+            except (OSError, BackupError, zipfile.BadZipFile) as exc:
+                self.events.put(("error", f"恢复失败：{exc}"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _close(self) -> None:
         from tkinter import messagebox
