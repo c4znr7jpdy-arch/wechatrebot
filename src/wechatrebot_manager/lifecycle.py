@@ -108,10 +108,17 @@ class LifecycleController:
         self._snapshotter = snapshotter
         self._process_probe = process_probe
         self._preflight = preflight
+        self._uses_default_supervisor = supervisor_factory is None
         self._supervisor_factory = supervisor_factory or (
             lambda progress: ProcessSupervisor(
                 build_service_specs(self.install_root),
                 progress_callback=progress,
+                state_path=(
+                    self.install_root
+                    / "data"
+                    / "manager"
+                    / "service-state.json"
+                ),
             )
         )
         self.catalog = catalog or load_error_catalog(self.install_root)
@@ -123,7 +130,33 @@ class LifecycleController:
         self._environment = self._environment_checker(self.install_root)
         self._runtime = self._snapshotter()
         self._running_events_emitted = False
+        self._wechat_closed_confirmations = 0
         self.events.emit("APP_START", "success")
+        if self._uses_default_supervisor:
+            try:
+                candidate = self._supervisor_factory(self._on_progress)
+                adopter = getattr(candidate, "adopt", None)
+                if callable(adopter) and adopter():
+                    self._supervisor = candidate
+                    if not bool(getattr(candidate, "adoption_complete", False)):
+                        self.state = LifecycleState.ERROR
+                        self._error = self.catalog.get("13002")
+                        self.events.emit(
+                            "APP_ERROR",
+                            "failed",
+                            code=self._error.code,
+                            message="检测到上次未完整启动的后台服务，请点击停止后重试。",
+                        )
+                    elif self._runtime.online:
+                        self._mark_running()
+                    elif self._runtime.connection_ready and not self._runtime.wechat_identity:
+                        self.state = LifecycleState.WAITING_WECHAT
+                        self._error = self.catalog.get("11003")
+                    else:
+                        self.state = LifecycleState.VERIFYING_CONNECTION
+                        self._error = self.catalog.get("13002")
+            except (OSError, ServiceLaunchError, ValueError):
+                self._supervisor = None
 
     def _set_error(self, code: str, *, detail: str = "") -> LifecycleView:
         self.state = LifecycleState.ERROR
@@ -219,7 +252,16 @@ class LifecycleController:
             self._environment = self._environment_checker(self.install_root)
             self._runtime = self._snapshotter()
             if self.state == LifecycleState.STOP_WAIT_WECHAT:
-                if not self._process_probe():
+                wechat_active = bool(self._process_probe()) or bool(
+                    self._runtime.hook_ready
+                    or self._runtime.heartbeat_fresh
+                    or self._runtime.wechat_identity
+                )
+                if wechat_active:
+                    self._wechat_closed_confirmations = 0
+                    return self.view()
+                self._wechat_closed_confirmations += 1
+                if self._wechat_closed_confirmations >= 2:
                     return self._finish_stop()
                 return self.view()
             if self._supervisor is not None and self._supervisor.running:
@@ -253,9 +295,16 @@ class LifecycleController:
                 self.state = LifecycleState.STOPPED
                 self._error = None
                 return self.view()
-            if self._process_probe():
+            self._runtime = self._snapshotter()
+            wechat_active = bool(self._process_probe()) or bool(
+                self._runtime.hook_ready
+                or self._runtime.heartbeat_fresh
+                or self._runtime.wechat_identity
+            )
+            if wechat_active:
                 self.state = LifecycleState.STOP_WAIT_WECHAT
                 self._error = self.catalog.get("12003")
+                self._wechat_closed_confirmations = 0
                 return self.view()
             return self._finish_stop()
 
@@ -271,6 +320,7 @@ class LifecycleController:
         self._runtime = self._snapshotter()
         self.state = LifecycleState.STOPPED
         self._running_events_emitted = False
+        self._wechat_closed_confirmations = 0
         return self.view()
 
     def view(self) -> LifecycleView:

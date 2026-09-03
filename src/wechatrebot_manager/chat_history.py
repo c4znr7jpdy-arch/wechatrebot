@@ -20,11 +20,31 @@ def _plain_conversation_id(session_id: str, group_id: str) -> tuple[str, str]:
     return "private", value
 
 
-def _display_name(kind: str, conversation_id: str, sender_name: str) -> str:
+def _display_name(
+    kind: str,
+    conversation_id: str,
+    sender_name: str,
+    group_name: str = "",
+) -> str:
     if kind == "group":
+        if group_name.strip():
+            return group_name.strip()
         compact = conversation_id.removesuffix("@chatroom")
         return f"微信群 · {compact[-8:]}"
     return sender_name.strip() or conversation_id
+
+
+def _identity_metadata(value: object) -> dict[str, str]:
+    try:
+        payload = json.loads(str(value or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        key: str(payload.get(key) or "").strip()
+        for key in ("group_name", "group_nickname", "wechat_name")
+    }
 
 
 class ChatHistoryService:
@@ -72,6 +92,9 @@ class ChatHistoryService:
                     sender_id TEXT NOT NULL,
                     sender_name TEXT NOT NULL,
                     group_id TEXT NOT NULL,
+                    group_name TEXT NOT NULL DEFAULT '',
+                    group_nickname TEXT NOT NULL DEFAULT '',
+                    wechat_name TEXT NOT NULL DEFAULT '',
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
                     UNIQUE(source_key, source_message_id)
@@ -82,6 +105,15 @@ class ChatHistoryService:
                     ON messages(timestamp DESC);
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(messages)").fetchall()
+            }
+            for column in ("group_name", "group_nickname", "wechat_name"):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE messages ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+                    )
 
     def sync(self) -> int:
         if not self.source.is_file():
@@ -101,7 +133,8 @@ class ChatHistoryService:
                     """
                     SELECT id, session_id, role, content, sender_id,
                            COALESCE(sender_name, '') AS sender_name,
-                           COALESCE(group_id, '') AS group_id, timestamp
+                           COALESCE(group_id, '') AS group_id, timestamp,
+                           COALESCE(metadata, '{}') AS metadata
                     FROM messages
                     WHERE id > ?
                     ORDER BY id
@@ -115,6 +148,7 @@ class ChatHistoryService:
                     source.close()
             highest = last_id
             for item in rows:
+                identity = _identity_metadata(item["metadata"])
                 kind, conversation_id = _plain_conversation_id(
                     str(item["session_id"]), str(item["group_id"])
                 )
@@ -123,8 +157,9 @@ class ChatHistoryService:
                     INSERT OR IGNORE INTO messages (
                         source_key, source_message_id, session_id,
                         conversation_id, conversation_type, role, sender_id,
-                        sender_name, group_id, content, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        sender_name, group_id, group_name, group_nickname,
+                        wechat_name, content, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_key,
@@ -136,6 +171,9 @@ class ChatHistoryService:
                         str(item["sender_id"]),
                         str(item["sender_name"]),
                         str(item["group_id"]),
+                        identity.get("group_name", ""),
+                        identity.get("group_nickname", ""),
+                        identity.get("wechat_name", ""),
                         str(item["content"]),
                         float(item["timestamp"]),
                     ),
@@ -171,9 +209,9 @@ class ChatHistoryService:
         if search.strip():
             pattern = f"%{search.strip()}%"
             clauses.append(
-                "(content LIKE ? OR sender_name LIKE ? OR sender_id LIKE ? OR conversation_id LIKE ?)"
+                "(content LIKE ? OR sender_name LIKE ? OR sender_id LIKE ? OR conversation_id LIKE ? OR group_name LIKE ? OR group_nickname LIKE ? OR wechat_name LIKE ?)"
             )
-            params.extend((pattern, pattern, pattern, pattern))
+            params.extend((pattern,) * 7)
         if start_time is not None:
             clauses.append("timestamp >= ?")
             params.append(float(start_time))
@@ -184,7 +222,8 @@ class ChatHistoryService:
         query = f"""
             SELECT conversation_id, conversation_type, COUNT(*) AS message_count,
                    MAX(timestamp) AS last_timestamp,
-                   MAX(CASE WHEN role = 'user' THEN sender_name ELSE '' END) AS sender_name
+                   MAX(CASE WHEN role = 'user' THEN sender_name ELSE '' END) AS sender_name,
+                   MAX(group_name) AS group_name
             FROM messages
             {where}
             GROUP BY conversation_id, conversation_type
@@ -212,6 +251,7 @@ class ChatHistoryService:
                         row["conversation_type"],
                         row["conversation_id"],
                         row["sender_name"] or "",
+                        row["group_name"] or "",
                     ),
                     "message_count": row["message_count"],
                     "last_timestamp": row["last_timestamp"],
@@ -244,7 +284,8 @@ class ChatHistoryService:
             rows = connection.execute(
                 f"""
                 SELECT id, conversation_type, role, sender_id, sender_name,
-                       group_id, content, timestamp
+                       group_id, group_name, group_nickname, wechat_name,
+                       content, timestamp
                 FROM messages
                 WHERE {' AND '.join(clauses)}
                 ORDER BY timestamp DESC
@@ -264,6 +305,9 @@ class ChatHistoryService:
                 "group_id": _plain_conversation_id("", row["group_id"])[1]
                 if row["group_id"]
                 else "",
+                "group_name": row["group_name"],
+                "group_nickname": row["group_nickname"],
+                "wechat_name": row["wechat_name"],
                 "content": row["content"],
                 "timestamp": row["timestamp"],
             }
@@ -291,7 +335,8 @@ class ChatHistoryService:
             rows = connection.execute(
                 """
                 SELECT conversation_type, conversation_id, role, sender_id,
-                       sender_name, content, timestamp
+                       sender_name, group_name, group_nickname, wechat_name,
+                       content, timestamp
                 FROM messages ORDER BY timestamp
                 """
             ).fetchall()
@@ -305,16 +350,21 @@ class ChatHistoryService:
             with output.open("w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(
-                    ("聊天类型", "聊天对象", "角色", "发送人微信号", "发送人昵称", "内容", "时间")
+                    (
+                        "聊天类型", "聊天对象", "群名称", "角色", "发送人微信号",
+                        "发送人微信昵称", "发送人群昵称", "内容", "时间",
+                    )
                 )
                 for row in rows:
                     writer.writerow(
                         (
                             "群聊" if row["conversation_type"] == "group" else "个人聊天",
                             row["conversation_id"],
+                            row["group_name"],
                             "机器人" if row["role"] == "assistant" else "用户",
                             row["sender_id"],
-                            row["sender_name"],
+                            row["wechat_name"] or row["sender_name"],
+                            row["group_nickname"],
                             row["content"],
                             datetime.fromtimestamp(
                                 row["timestamp"], tz=timezone.utc

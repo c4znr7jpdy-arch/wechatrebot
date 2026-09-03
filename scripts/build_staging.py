@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-def _copy(source: Path, target: Path) -> None:
+def _copy(source: Path, target: Path, exclude: tuple[str, ...] = ()) -> None:
     if source.is_dir():
         shutil.copytree(
             source,
@@ -21,6 +21,17 @@ def _copy(source: Path, target: Path) -> None:
                 "*.pyc",
                 ".pytest_cache",
                 "*.egg-info",
+                ".git",
+                ".github",
+                ".env",
+                ".env.*",
+                "*.log",
+                "*.db",
+                "*.sqlite",
+                "*.sqlite3",
+                "test_*.py",
+                "tests",
+                *exclude,
             ),
         )
     else:
@@ -159,7 +170,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"expected {expected_sha256}, actual {actual_sha256}"
                 )
         target = output / entry["target"]
-        _copy(source, target)
+        excludes = entry.get("exclude", [])
+        if not isinstance(excludes, list) or not all(
+            isinstance(value, str) and value for value in excludes
+        ):
+            raise RuntimeError(f"invalid exclude list: {entry['source']}")
+        _copy(source, target, tuple(excludes))
         copied.append({"source": str(source), "target": target.relative_to(output).as_posix()})
 
     runtime_summary: dict[str, object] | None = None

@@ -270,22 +270,30 @@
     const label = field.description || field.title || key.replaceAll("_", " ");
     const hint = field.hint || field.help || "";
     const encodedPath = escapeHtml(JSON.stringify(path));
+    const encodedLabel = escapeHtml(label);
     let control = "";
     if (type === "bool") {
-      control = `<label class="toggle"><input class="config-input" data-path="${encodedPath}" data-type="bool" type="checkbox" ${value ? "checked" : ""}><span class="toggle-track"></span><span>${value ? "已启用" : "已停用"}</span></label>`;
+      control = `<label class="toggle"><input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="bool" type="checkbox" ${value ? "checked" : ""}><span class="toggle-track"></span><span>${value ? "已启用" : "已停用"}</span></label>`;
+    } else if (type === "list" && Array.isArray(field.options)) {
+      const optionNames = Array.isArray(field.labels) ? field.labels : (Array.isArray(field.options_label) ? field.options_label : field.options);
+      const selected = Array.isArray(value) ? value.map(String) : [];
+      control = `<div class="option-grid">${field.options.map((option, index) => `<label class="option-check"><input class="config-list-option" data-path="${encodedPath}" data-label="${encodedLabel}" value="${escapeHtml(String(option))}" type="checkbox" ${selected.includes(String(option)) ? "checked" : ""}><span>${escapeHtml(optionNames[index] ?? option)}</span></label>`).join("")}</div>`;
     } else if (Array.isArray(field.options)) {
-      const optionNames = Array.isArray(field.options_label) ? field.options_label : field.options;
-      control = `<select class="config-input" data-path="${encodedPath}" data-type="${escapeHtml(type)}">${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${String(value) === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
+      const optionNames = Array.isArray(field.labels) ? field.labels : (Array.isArray(field.options_label) ? field.options_label : field.options);
+      control = `<select class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(type)}">${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${String(value ?? "") === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
     } else if (["list", "template_list"].includes(type)) {
-      control = `<textarea class="config-input" data-path="${encodedPath}" data-type="json" rows="5">${escapeHtml(JSON.stringify(value ?? [], null, 2))}</textarea>`;
+      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="json" rows="5">${escapeHtml(JSON.stringify(value ?? [], null, 2))}</textarea>`;
     } else if (type === "text") {
-      control = `<textarea class="config-input" data-path="${encodedPath}" data-type="string" rows="4">${escapeHtml(value ?? "")}</textarea>`;
+      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="string" rows="4">${escapeHtml(value ?? "")}</textarea>`;
     } else {
       const inputType = ["int", "float"].includes(type) ? "number" : (field.secret ? "password" : "text");
       const step = type === "float" ? "any" : "1";
-      control = `<input class="config-input" data-path="${encodedPath}" data-type="${escapeHtml(type)}" type="${inputType}" ${inputType === "number" ? `step="${step}"` : ""} value="${escapeHtml(value ?? "")}">`;
+      const slider = field.slider && typeof field.slider === "object" ? field.slider : {};
+      const numericRules = inputType === "number" ? `step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
+      const secretRules = field.secret ? `autocomplete="new-password" placeholder="${field._secret_configured ? "已安全保存；留空保持不变" : "请输入后保存"}"` : "";
+      control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox">清除已保存的密钥</label>` : ""}`;
     }
-    return `<label class="form-field ${["text", "list", "template_list"].includes(type) ? "full" : ""}"><span>${escapeHtml(label)}</span>${control}${hint ? `<small>${escapeHtml(hint)}</small>` : ""}</label>`;
+    return `<div class="form-field ${["text", "list", "template_list"].includes(type) ? "full" : ""}"><span>${escapeHtml(label)}</span>${control}${hint ? `<small>${escapeHtml(hint)}</small>` : ""}</div>`;
   }
 
   function schemaMarkup(schema, config, prefix = []) {
@@ -310,7 +318,7 @@
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${detail.configurable ? "修改参数后保存；运行中会尽量立即应用。" : "这项功能无需额外参数，可直接启停。"}</p></div>
         <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
       </div>
-      ${detail.configurable ? `<div class="config-tabs"><button data-tab="basic" class="${state.featureTab === "basic" ? "active" : ""}" ${!basicCount ? "disabled" : ""}>基础设置 ${basicCount ? `(${detail.field_count - detail.model_field_count})` : ""}</button><button data-tab="models" class="${state.featureTab === "models" ? "active" : ""}" ${!modelCount ? "disabled" : ""}>模型设置 ${modelCount ? `(${detail.model_field_count})` : ""}</button></div><form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema || {}).length ? '<div class="empty-state compact"><p>这个分类暂无可配置内容</p></div>' : ""}</form><div class="feature-savebar"><span class="form-note" id="featureNote">${detail.engine_online ? "保存后立即应用" : "保存后将在下次启动时应用"}</span><button class="button primary" id="saveFeature">保存设置</button></div>` : '<div class="empty-state compact"><p>通过右上角开关即可管理这项功能。</p></div>'}`;
+      ${detail.configurable ? `<div class="config-tabs"><button data-tab="basic" class="${state.featureTab === "basic" ? "active" : ""}" ${!basicCount ? "disabled" : ""}>基础设置 ${basicCount ? `(${detail.field_count - detail.model_field_count})` : ""}</button><button data-tab="models" class="${state.featureTab === "models" ? "active" : ""}" ${!modelCount ? "disabled" : ""}>模型设置 ${modelCount ? `(${detail.model_field_count})` : ""}</button></div><form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema || {}).length ? '<div class="empty-state compact"><p>这个分类暂无可配置内容</p></div>' : ""}</form><div class="feature-savebar"><span class="form-note" id="featureNote" aria-live="polite">${detail.engine_online ? "保存后立即应用" : "保存后将在下次启动时应用"}</span><div class="feature-save-actions">${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}${detail.engine_online && detail.enabled ? '<button class="button secondary" id="reloadFeature" type="button">重新载入功能</button>' : ""}<button class="button primary" id="saveFeature" type="button">保存设置</button></div></div>` : `<div class="empty-state compact"><p>通过右上角开关即可管理这项功能。</p>${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureEnabled").addEventListener("change", toggleFeature);
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (!button.disabled) { state.featureTab = button.dataset.tab; renderFeatureDetail(); }
@@ -320,6 +328,8 @@
       if (label) label.textContent = input.checked ? "已启用" : "已停用";
     }));
     $("#saveFeature")?.addEventListener("click", saveFeature);
+    $("#reloadFeature")?.addEventListener("click", reloadFeature);
+    $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
   }
 
   async function toggleFeature(event) {
@@ -338,16 +348,29 @@
 
   function configFromForm() {
     const config = structuredClone(state.featureDetail.config || {});
+    const listValues = new Map();
+    $$(".config-list-option", $("#featureForm")).forEach((input) => {
+      const key = input.dataset.path;
+      if (!listValues.has(key)) listValues.set(key, []);
+      if (input.checked) listValues.get(key).push(input.value);
+    });
+    listValues.forEach((value, key) => setAtPath(config, JSON.parse(key), value));
     $$(".config-input", $("#featureForm")).forEach((input) => {
       const path = JSON.parse(input.dataset.path);
       let value;
       if (input.dataset.type === "bool") value = input.checked;
-      else if (input.dataset.type === "int") value = Number.parseInt(input.value, 10);
-      else if (input.dataset.type === "float") value = Number.parseFloat(input.value);
-      else if (input.dataset.type === "json") value = JSON.parse(input.value || "[]");
+      else if (input.dataset.type === "int") value = input.value.trim() === "" ? null : Number.parseInt(input.value, 10);
+      else if (input.dataset.type === "float") value = input.value.trim() === "" ? null : Number.parseFloat(input.value);
+      else if (input.dataset.type === "json") {
+        try { value = JSON.parse(input.value || "[]"); }
+        catch (_error) { throw new Error(`${input.dataset.label || "列表配置"}的格式不正确，请检查括号和引号。`); }
+        if (!Array.isArray(value)) throw new Error(`${input.dataset.label || "列表配置"}必须填写为列表。`);
+      }
       else value = input.value;
+      if (["int", "float"].includes(input.dataset.type) && value !== null && !Number.isFinite(value)) throw new Error(`${input.dataset.label || "数字配置"}必须填写有效数字。`);
       setAtPath(config, path, value);
     });
+    $$(".config-secret-clear:checked", $("#featureForm")).forEach((input) => setAtPath(config, JSON.parse(input.dataset.path), null));
     return config;
   }
 
@@ -355,15 +378,34 @@
     const button = $("#saveFeature");
     button.disabled = true;
     try {
-      const data = await api("save_feature", state.selectedFeature, configFromForm(), state.featureDetail.revision || "");
-      state.featureDetail.config = configFromForm();
-      state.featureDetail.revision = data.revision;
-      $("#featureNote").textContent = data.message;
+      const config = configFromForm();
+      const data = await api("save_feature", state.selectedFeature, config, state.featureDetail.revision || "");
       toast(data.message);
+      await openFeature(state.selectedFeature);
     } catch (error) {
       reportError(error);
       $("#featureNote").textContent = error.message;
     } finally { button.disabled = false; }
+  }
+
+  async function reloadFeature() {
+    const button = $("#reloadFeature");
+    button.disabled = true;
+    try {
+      const data = await api("reload_feature", state.selectedFeature);
+      toast(data.message || "功能已经重新载入。");
+    } catch (error) { reportError(error); }
+    finally { button.disabled = false; }
+  }
+
+  async function openFeatureCenter() {
+    const button = $("#openFeatureCenter");
+    button.disabled = true;
+    try {
+      const data = await api("open_feature_center");
+      toast(data.message || "高级配置窗口正在打开。");
+    } catch (error) { reportError(error); }
+    finally { button.disabled = false; }
   }
 
   async function loadConversations() {
@@ -402,8 +444,9 @@
       const messages = await api("get_messages", conversationId);
       $("#messageList").innerHTML = messages.length ? messages.map((message) => {
         const assistant = message.role === "assistant";
-        const name = assistant ? "机器人" : (message.sender_name || message.sender_id || "用户");
-        return `<article class="message ${assistant ? "assistant" : ""}"><span class="message-avatar">${escapeHtml(name.slice(0, 1))}</span><div class="message-content"><div class="message-meta"><span>${escapeHtml(name)}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div><div class="message-bubble">${escapeHtml(message.content)}</div></div></article>`;
+        const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
+        const identity = !assistant && message.wechat_name && message.wechat_name !== name ? `${message.wechat_name} · ${message.sender_id}` : (!assistant && message.sender_id ? message.sender_id : "");
+        return `<article class="message ${assistant ? "assistant" : ""}"><span class="message-avatar">${escapeHtml(name.slice(0, 1))}</span><div class="message-content"><div class="message-meta"><span>${escapeHtml(name)}${identity ? `<small>${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div><div class="message-bubble">${escapeHtml(message.content)}</div></div></article>`;
       }).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息</p></div>';
       $("#messageList").scrollTop = $("#messageList").scrollHeight;
       renderConversationInspector(item);
@@ -655,7 +698,7 @@
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: [feature, {id: "feature-music", display_name: "音乐点播", enabled: true, configurable: true, field_count: 4, model_field_count: 0}, {id: "feature-reply", display_name: "自动回复", enabled: false, configurable: true, field_count: 8, model_field_count: 2}, {id: "feature-image", display_name: "图片生成", enabled: true, configurable: true, field_count: 7, model_field_count: 3}, {id: "feature-report", display_name: "群聊日报", enabled: true, configurable: false, field_count: 0, model_field_count: 0}], engine_online: true}),
       get_feature: (id) => ok({...feature, id, display_name: id === "feature-music" ? "音乐点播" : "短剧解析", basic_schema: {enabled_notice: {type: "bool", description: "发送解析提示", default: true}, player_url: {type: "string", description: "播放页面地址", hint: "用于生成用户可打开的播放页面"}, recommendation: {type: "object", description: "推荐设置", items: {limit: {type: "int", description: "每次推荐数量", default: 10}, media_type: {type: "string", description: "内容类型", options: ["短剧", "电影"]}}}}, model_schema: {summary_provider_id: {type: "string", description: "内容总结模型"}}, config: {enabled_notice: true, player_url: "https://example.com/player", recommendation: {limit: 10, media_type: "短剧"}, summary_provider_id: "chat-model"}, revision: "preview", providers: [], personas: [], engine_online: true}),
-      set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: () => ok({revision: "preview-2", message: "配置已保存并立即应用。"}),
+      set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: () => ok({revision: "preview-2", message: "配置已保存并立即应用。"}), reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600}, {conversation_id: "18310516375@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200}], summary: {messages: 238, conversations: 3, private_messages: 34, group_messages: 204}}),
       get_messages: () => ok([{role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {role: "user", sender_id: "wxid_lisi", sender_name: "李四", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),

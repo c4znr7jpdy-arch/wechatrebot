@@ -42,7 +42,7 @@ function customerText(value) {
 function setEngineState(online) {
   const node = el("engine-state");
   node.classList.toggle("online", Boolean(online));
-  node.querySelector("span").textContent = online ? "回复引擎在线 · 支持热重载" : "回复引擎未启动 · 可离线配置";
+  node.querySelector("span").textContent = online ? "机器人在线 · 设置可立即应用" : "机器人未启动 · 设置会在下次启动时生效";
 }
 
 function setNotice(message = "", kind = "") {
@@ -596,7 +596,7 @@ function updateDetailHeader() {
   el("reload-plugin").disabled = !detail.engine_online || !detail.enabled;
   el("reload-plugin").title = !detail.engine_online ? "请先在运行中心启动机器人" : (!detail.enabled ? "请先启用功能" : "立即重新载入这项功能");
   setEngineState(detail.engine_online);
-  el("save-config").textContent = detail.engine_online && detail.enabled ? "保存并热重载" : "保存配置";
+  el("save-config").textContent = detail.engine_online && detail.enabled ? "保存并立即应用" : "保存设置";
 }
 
 function applyConfigSearch() {

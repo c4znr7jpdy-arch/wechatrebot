@@ -90,13 +90,15 @@ def test_only_full_health_marks_robot_running(tmp_path: Path) -> None:
     assert running.online is True
 
 
-def test_stop_waits_for_wechat_process_then_stops_services(tmp_path: Path) -> None:
-    process_states = iter((("weixin.exe",), ()))
+def test_stop_waits_for_process_and_connection_to_close_twice(tmp_path: Path) -> None:
+    process_states = iter((("weixin.exe",), (), ()))
     snapshots = iter(
         (
             RuntimeSnapshot(False, False, ""),
             RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
             RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
+            RuntimeSnapshot(False, False, ""),
+            RuntimeSnapshot(False, False, ""),
             RuntimeSnapshot(False, False, ""),
         )
     )
@@ -118,9 +120,47 @@ def test_stop_waits_for_wechat_process_then_stops_services(tmp_path: Path) -> No
     controller.start()
 
     waiting = controller.request_stop()
+    confirming = controller.refresh()
+    was_running_during_confirmation = not holder["supervisor"].stopped
     stopped = controller.refresh()
 
     assert waiting.state == LifecycleState.STOP_WAIT_WECHAT
     assert waiting.error is not None and waiting.error.code == "12003"
+    assert confirming.state == LifecycleState.STOP_WAIT_WECHAT
+    assert was_running_during_confirmation is True
     assert stopped.state == LifecycleState.STOPPED
     assert holder["supervisor"].stopped is True
+
+
+def test_stop_keeps_waiting_when_process_is_gone_but_hook_is_still_alive(tmp_path: Path) -> None:
+    snapshots = iter(
+        (
+            RuntimeSnapshot(False, False, ""),
+            RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
+            RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
+            RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
+        )
+    )
+    holder = {}
+
+    def factory(progress):
+        holder["supervisor"] = _Supervisor(progress)
+        return holder["supervisor"]
+
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: _environment(tmp_path),
+        environment_saver=lambda root, environment: None,
+        snapshotter=lambda: next(snapshots),
+        process_probe=lambda: (),
+        preflight=lambda root: (),
+        supervisor_factory=factory,
+    )
+    controller.start()
+
+    waiting = controller.request_stop()
+    still_waiting = controller.refresh()
+
+    assert waiting.state == LifecycleState.STOP_WAIT_WECHAT
+    assert still_waiting.state == LifecycleState.STOP_WAIT_WECHAT
+    assert holder["supervisor"].stopped is False

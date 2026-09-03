@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -31,6 +32,10 @@ _PROXY_PREFIXES = (
     "/api/plug/",
 )
 _MAX_BODY_BYTES = 4 * 1024 * 1024
+_SECRET_FIELD = re.compile(
+    r"(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)",
+    re.IGNORECASE,
+)
 
 
 class PluginCenterError(RuntimeError):
@@ -81,7 +86,7 @@ def _json_revision(value: dict[str, Any]) -> str:
 def _field_count(schema: dict[str, Any]) -> int:
     count = 0
     for item in schema.values():
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or item.get("invisible") is True:
             continue
         if item.get("type") == "object" and isinstance(item.get("items"), dict):
             count += _field_count(item["items"])
@@ -96,9 +101,13 @@ def _model_field_kind(key: str, field: dict[str, Any]) -> str | None:
     normalized = key.casefold()
     if special == "select_persona":
         return "persona"
-    if special == "select_embedding_provider" or provider_type == "embedding":
+    if (
+        special == "select_embedding_provider"
+        or provider_type == "embedding"
+        or "embedding" in normalized
+    ):
         return "embedding"
-    if provider_type == "rerank" or "rerank_provider" in normalized:
+    if provider_type == "rerank" or "rerank" in normalized:
         return "rerank"
     if special == "select_provider" or normalized.endswith("provider_id"):
         return "chat"
@@ -113,7 +122,7 @@ def _split_schema(
     basic: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for key, field in schema.items():
-        if not isinstance(field, dict):
+        if not isinstance(field, dict) or field.get("invisible") is True:
             continue
         if field.get("type") == "object" and isinstance(field.get("items"), dict):
             basic_items, model_items = _split_schema(field["items"])
@@ -222,6 +231,229 @@ def _white_label_schema(value: Any) -> Any:
         result = re.sub(r"(?i)qq", "微信", result)
         return re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", result).strip()
     return value
+
+
+def _is_secret_field(key: str, field: dict[str, Any]) -> bool:
+    return bool(
+        field.get("secret")
+        or field.get("_secret")
+        or _SECRET_FIELD.search(key)
+    )
+
+
+def _customer_schema(
+    schema: dict[str, Any],
+    stored: dict[str, Any],
+) -> dict[str, Any]:
+    """Return only fields customers may edit, with secrets represented safely."""
+    result: dict[str, Any] = {}
+    for key, raw_field in schema.items():
+        if not isinstance(raw_field, dict) or raw_field.get("invisible") is True:
+            continue
+        field = copy.deepcopy(raw_field)
+        current = stored.get(key)
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            nested_stored = current if isinstance(current, dict) else {}
+            field["items"] = _customer_schema(field["items"], nested_stored)
+            if not field["items"]:
+                continue
+        elif field.get("type") == "template_list" and isinstance(
+            field.get("templates"), dict
+        ):
+            values = current if isinstance(current, list) else []
+            for template_key, template in field["templates"].items():
+                if not isinstance(template, dict) or not isinstance(
+                    template.get("items"), dict
+                ):
+                    continue
+                samples = [
+                    item
+                    for item in values
+                    if isinstance(item, dict)
+                    and item.get("__template_key") == template_key
+                ]
+                combined: dict[str, Any] = {}
+                for sample in samples:
+                    for sample_key, sample_value in sample.items():
+                        if sample_key not in combined or (
+                            not combined[sample_key] and sample_value
+                        ):
+                            combined[sample_key] = sample_value
+                template["items"] = _customer_schema(
+                    template["items"], combined
+                )
+        if _is_secret_field(str(key), field):
+            field["secret"] = True
+            field["_secret_configured"] = bool(current)
+        result[str(key)] = field
+    return _white_label_schema(result)
+
+
+def _customer_config(
+    schema: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Return editable values only and never send stored credentials to the UI."""
+    result: dict[str, Any] = {}
+    for key, field in schema.items():
+        if not isinstance(field, dict) or field.get("invisible") is True:
+            continue
+        value = config.get(key)
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            nested = _customer_config(
+                field["items"], value if isinstance(value, dict) else {}
+            )
+            if nested:
+                result[key] = nested
+        elif field.get("type") == "template_list" and isinstance(
+            field.get("templates"), dict
+        ):
+            rows: list[dict[str, Any]] = []
+            for index, item in enumerate(value if isinstance(value, list) else []):
+                if not isinstance(item, dict):
+                    continue
+                template_key = str(item.get("__template_key") or "")
+                template = field["templates"].get(template_key)
+                clean = (
+                    _customer_config(template["items"], item)
+                    if isinstance(template, dict)
+                    and isinstance(template.get("items"), dict)
+                    else {}
+                )
+                rows.append(
+                    {
+                        "__template_key": template_key,
+                        "__manager_index": index,
+                        **clean,
+                    }
+                )
+            result[key] = rows
+        elif _is_secret_field(str(key), field):
+            result[key] = ""
+        elif key in config:
+            result[key] = value
+    return result
+
+
+def _merge_customer_config(
+    schema: dict[str, Any],
+    submitted: dict[str, Any],
+    stored: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge a redacted customer form without losing hidden or unknown settings."""
+    result = copy.deepcopy(stored)
+    for key, field in schema.items():
+        if not isinstance(field, dict):
+            continue
+        if field.get("invisible") is True:
+            if key not in result and "default" in field:
+                result[key] = copy.deepcopy(field["default"])
+            continue
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            result[key] = _merge_customer_config(
+                field["items"],
+                submitted.get(key) if isinstance(submitted.get(key), dict) else {},
+                stored.get(key) if isinstance(stored.get(key), dict) else {},
+            )
+            continue
+        if field.get("type") == "template_list" and isinstance(
+            field.get("templates"), dict
+        ):
+            if key not in submitted:
+                continue
+            submitted_rows = submitted.get(key)
+            stored_rows = stored.get(key)
+            if not isinstance(submitted_rows, list):
+                result[key] = submitted_rows
+                continue
+            existing = stored_rows if isinstance(stored_rows, list) else []
+            merged_rows: list[Any] = []
+            for row in submitted_rows:
+                if not isinstance(row, dict):
+                    merged_rows.append(row)
+                    continue
+                template_key = str(row.get("__template_key") or "")
+                template = field["templates"].get(template_key)
+                try:
+                    manager_index = int(row.get("__manager_index", -1))
+                except (TypeError, ValueError):
+                    manager_index = -1
+                previous = (
+                    existing[manager_index]
+                    if 0 <= manager_index < len(existing)
+                    and isinstance(existing[manager_index], dict)
+                    and existing[manager_index].get("__template_key") == template_key
+                    else {}
+                )
+                if not isinstance(template, dict) or not isinstance(
+                    template.get("items"), dict
+                ):
+                    if previous:
+                        merged_rows.append(copy.deepcopy(previous))
+                    continue
+                clean_row = {
+                    child_key: child_value
+                    for child_key, child_value in row.items()
+                    if child_key not in {"__template_key", "__manager_index"}
+                }
+                merged_row = _merge_customer_config(
+                    template["items"], clean_row, previous
+                )
+                merged_rows.append(
+                    {"__template_key": template_key, **merged_row}
+                )
+            result[key] = merged_rows
+            continue
+        if _is_secret_field(str(key), field):
+            if key in submitted and submitted[key] is None:
+                result[key] = ""
+            elif key in submitted and str(submitted[key]).strip():
+                result[key] = submitted[key]
+            elif key not in result and "default" in field:
+                result[key] = copy.deepcopy(field["default"])
+            continue
+        if key in submitted:
+            result[key] = submitted[key]
+        elif key not in result and "default" in field:
+            result[key] = copy.deepcopy(field["default"])
+    return result
+
+
+def _with_runtime_choices(
+    schema: dict[str, Any],
+    *,
+    providers: list[dict[str, str]],
+    embedding_providers: list[dict[str, str]],
+    rerank_providers: list[dict[str, str]],
+    personas: list[str],
+) -> dict[str, Any]:
+    result = copy.deepcopy(schema)
+    for key, field in result.items():
+        if not isinstance(field, dict):
+            continue
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            field["items"] = _with_runtime_choices(
+                field["items"],
+                providers=providers,
+                embedding_providers=embedding_providers,
+                rerank_providers=rerank_providers,
+                personas=personas,
+            )
+            continue
+        kind = _model_field_kind(str(key), field)
+        choices: list[dict[str, str]] = []
+        if kind == "chat":
+            choices = providers
+        elif kind == "embedding":
+            choices = embedding_providers
+        elif kind == "rerank":
+            choices = rerank_providers
+        elif kind == "persona":
+            choices = [{"value": value, "label": value} for value in personas]
+        if kind:
+            field["options"] = [""] + [item["value"] for item in choices]
+            field["labels"] = ["使用系统默认"] + [item["label"] for item in choices]
+    return result
 
 
 def _validate_config(schema: dict[str, Any], config: dict[str, Any], path: str = "") -> None:
@@ -493,7 +725,6 @@ class PluginCenterService:
         item = self._plugin(public_id)
         module_name = item.module_name
         schema = _read_object(_plugin_root(self.install_root) / module_name / "_conf_schema.json")
-        basic_schema, model_schema = _split_schema(schema)
         stored = _read_object(_config_path(self.install_root, module_name))
         config = _normalize_config(schema, _merge_defaults(schema, stored))
         engine_config = _read_object(_dashboard_path(self.install_root))
@@ -537,7 +768,16 @@ class PluginCenterService:
             for value in configured_personas
             if isinstance(value, dict) and str(value.get("name") or value.get("id") or "").strip()
         ]
-        clean_schema = _white_label_schema(schema)
+        runtime_schema = _with_runtime_choices(
+            schema,
+            providers=providers,
+            embedding_providers=embedding_providers,
+            rerank_providers=rerank_providers,
+            personas=personas,
+        )
+        clean_schema = _customer_schema(runtime_schema, config)
+        customer_config = _customer_config(schema, config)
+        clean_basic_schema, clean_model_schema = _split_schema(clean_schema)
         return {
             "id": public_id,
             "display_name": item.display_name,
@@ -547,9 +787,9 @@ class PluginCenterService:
             "model_field_count": item.model_field_count,
             "pages": item.pages,
             "schema": clean_schema,
-            "basic_schema": _white_label_schema(basic_schema),
-            "model_schema": _white_label_schema(model_schema),
-            "config": config,
+            "basic_schema": clean_basic_schema,
+            "model_schema": clean_model_schema,
+            "config": customer_config,
             "revision": _json_revision(stored),
             "providers": providers,
             "embedding_providers": embedding_providers,
@@ -568,20 +808,22 @@ class PluginCenterService:
         if base_revision and base_revision != _json_revision(stored):
             raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
         schema = _read_object(_plugin_root(self.install_root) / module_name / "_conf_schema.json")
-        _validate_config(schema, config)
+        merged = _merge_customer_config(schema, config, stored)
+        normalized = _normalize_config(schema, _merge_defaults(schema, merged))
+        _validate_config(schema, normalized)
         online = self.engine.is_available()
         reloaded = False
         if online and item.enabled:
-            self.engine.save_config(module_name, config)
+            self.engine.save_config(module_name, normalized)
             reloaded = True
         else:
-            write_json_atomic(path, config)
+            write_json_atomic(path, normalized)
         saved = _read_object(path)
         return {
             "saved": True,
             "reloaded": reloaded,
             "revision": _json_revision(saved),
-            "message": "配置已保存并完成热重载。" if reloaded else "配置已保存，将在下次启动时生效。",
+            "message": "设置已保存并立即生效。" if reloaded else "设置已保存，将在下次启动时生效。",
         }
 
     def set_enabled(self, public_id: str, enabled: bool) -> dict[str, Any]:
@@ -602,9 +844,9 @@ class PluginCenterService:
         item = self._plugin(public_id)
         module_name = item.module_name
         if not item.enabled:
-            raise PluginCenterError("请先启用这项功能，再执行热重载。")
+            raise PluginCenterError("请先启用这项功能，再重新载入设置。")
         self.engine.reload(module_name)
-        return {"reloaded": True, "message": "热重载完成，新的设置已经生效。"}
+        return {"reloaded": True, "message": "设置已重新载入并生效。"}
 
     def page_entry(self, public_id: str, page_name: str) -> dict[str, str]:
         item = self._plugin(public_id)

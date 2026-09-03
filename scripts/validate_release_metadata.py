@@ -85,6 +85,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     source = _load_object(release / "source-manifest.json", errors)
     hook = _load_object(release / "hook-binaries.json", errors)
     plugins = _load_object(release / "plugin-manifest.json", errors)
+    feature_set = _load_object(release / "feature-set.json", errors)
     wheelhouse = _load_object(release / "runtime-wheelhouse.json", errors)
 
     if source.get("schema_version") != 1:
@@ -133,6 +134,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
                 gated_hook_entries[source_path] = digest.upper()
 
     required_targets = {
+        "legal/feature-set.json",
         "legal/hook-binaries.json",
         "legal/plugin-manifest.json",
         "legal/runtime-requirements.lock",
@@ -163,6 +165,36 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     if gated_hook_entries != expected_hook_entries:
         errors.append("source manifest hook gates do not match hook-binaries.json")
 
+    features = feature_set.get("features")
+    if feature_set.get("schema_version") != 1 or not isinstance(features, list):
+        errors.append("feature set schema or feature list is invalid")
+        features = []
+    feature_modules: set[str] = set()
+    source_features = {
+        PurePosixPath(str(entry.get("target"))).name: entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and str(entry.get("target") or "").startswith(
+            "app/astrbot/data/plugins/"
+        )
+    }
+    for index, feature in enumerate(features):
+        if not isinstance(feature, dict):
+            errors.append(f"feature entry {index} is not an object")
+            continue
+        module = feature.get("module")
+        if not isinstance(module, str) or not module:
+            errors.append(f"feature entry {index} has no module")
+            continue
+        if module in feature_modules:
+            errors.append(f"duplicate feature module: {module}")
+        feature_modules.add(module)
+        source_entry = source_features.get(module)
+        if source_entry is None:
+            errors.append(f"feature is not packaged by source manifest: {module}")
+        elif source_entry.get("gate") != feature.get("gate"):
+            errors.append(f"feature gate does not match source manifest: {module}")
+
     if status == "ready":
         if hook.get("redistribution_approved") is not True:
             errors.append("ready release requires hook redistribution approval")
@@ -172,6 +204,8 @@ def validate_release_metadata(root: str | Path) -> list[str]:
             errors.append("ready release requires approved hook real-device validation")
         if plugins.get("status") != "approved":
             errors.append("ready release requires an approved plugin manifest")
+        if feature_set.get("status") != "approved":
+            errors.append("ready release requires an approved feature set")
 
     if wheelhouse.get("python_version") != "3.13.9" or wheelhouse.get("platform") != "win_amd64":
         errors.append("runtime wheelhouse must target Python 3.13.9 win_amd64")

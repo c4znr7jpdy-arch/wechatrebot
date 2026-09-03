@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import queue
 import threading
+import subprocess
 
 from .brand import BrandProfile
 from .install_paths import validate_install_path
@@ -20,6 +21,13 @@ DEFAULT_BRAND = BrandProfile(
     short_name="姜小妹",
     persona_name="姜小妹",
 )
+
+
+def default_install_root() -> Path:
+    """Return a writable per-user default that can still be changed in the wizard."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    return (base / "JiangXiaomeiRobot").expanduser().resolve()
 
 
 def provider_profile_for_choice(
@@ -106,7 +114,8 @@ class SetupWizard:
         self.back_button = ttk.Button(footer, text="上一步", command=self._back)
         self.back_button.pack(side="right", padx=(0, 10))
 
-        self.install_var = tk.StringVar()
+        self.install_var = tk.StringVar(value=str(default_install_root()))
+        self.launch_after_install_var = tk.BooleanVar(value=True)
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text_var = tk.StringVar(value="等待开始")
         self._show_page()
@@ -154,7 +163,7 @@ class SetupWizard:
         )
         self.ttk.Label(
             self.body,
-            text="建议选择固定磁盘上的独立目录，并至少保留 5 GiB 空间；支持中文和空格路径。",
+            text="已为您填写推荐目录，可直接点击“下一步”；如需更改，点击“浏览”。至少保留 5 GiB 空间。",
             style="Hint.TLabel",
             wraplength=660,
         ).pack(anchor="w", pady=(12, 0))
@@ -319,10 +328,38 @@ class SetupWizard:
             font=("Consolas", 11),
             wraplength=660,
         ).pack(anchor="w", pady=(8, 0))
+        self.ttk.Checkbutton(
+            self.body,
+            text="完成后立即打开机器人管理软件",
+            variable=self.launch_after_install_var,
+        ).pack(anchor="w", pady=(24, 0))
         self.progress_var.set(100)
         self.back_button.configure(state="disabled")
-        self.next_button.configure(text="完成", state="normal", command=self.root.destroy)
+        self.next_button.configure(
+            text="完成",
+            state="normal",
+            command=lambda: self._finish(install_root),
+        )
         self.cancel_button.configure(state="disabled")
+
+    def _finish(self, install_root: Path) -> None:
+        if self.launch_after_install_var.get():
+            executable = install_root / "manager" / "WeChatReBot.exe"
+            try:
+                subprocess.Popen(
+                    [str(executable), "gui", "--install-root", str(install_root)],
+                    cwd=install_root,
+                    close_fds=True,
+                )
+            except OSError as exc:
+                from tkinter import messagebox
+
+                messagebox.showwarning(
+                    "安装完成",
+                    f"软件已安装，但暂时无法自动打开：{exc}\n您可以从桌面快捷方式打开。",
+                    parent=self.root,
+                )
+        self.root.destroy()
 
     def _close(self) -> None:
         if self.installing:
@@ -355,6 +392,7 @@ __all__ = [
     "PROVIDER_DEEPSEEK",
     "PROVIDER_LATER",
     "SetupWizard",
+    "default_install_root",
     "provider_profile_for_choice",
     "run_setup_wizard",
 ]

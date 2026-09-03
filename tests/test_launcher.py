@@ -7,16 +7,19 @@ from typing import Any
 import pytest
 
 from wechatrebot_manager.launcher import (
+    ProcessIdentity,
     ProcessSupervisor,
     ServiceLaunchError,
+    _normalized_executable,
     build_service_specs,
 )
 
 
 class _FakeProcess:
-    def __init__(self, name: str, events: list[str]) -> None:
+    def __init__(self, name: str, events: list[str], pid: int = 0) -> None:
         self.name = name
         self.events = events
+        self.pid = pid
         self.code: int | None = None
 
     def poll(self) -> int | None:
@@ -179,3 +182,50 @@ def test_preflight_rejects_tampered_hook_before_any_process_starts(
     with pytest.raises(ServiceLaunchError, match="完整性校验失败"):
         supervisor.start()
     assert starts == []
+
+
+def test_supervisor_persists_and_readopts_owned_processes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    state_path = tmp_path / "data" / "manager" / "service-state.json"
+    events: list[str] = []
+    identities = {
+        101: ProcessIdentity(_normalized_executable(specs[0].argv[0]), 1001),
+        102: ProcessIdentity(_normalized_executable(specs[1].argv[0]), 1002),
+    }
+    pids = iter((101, 102))
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        return _FakeProcess(name, events, next(pids))
+
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(
+        specs,
+        popen_factory=popen,
+        readiness_waiter=lambda spec, process: True,
+        state_path=state_path,
+        identity_probe=identities.get,
+    )
+    supervisor.start()
+    assert json.loads(state_path.read_text(encoding="utf-8"))["complete"] is True
+
+    for running in supervisor.running:
+        running.log_handle.close()
+    supervisor.running.clear()
+    adopted = ProcessSupervisor(
+        specs,
+        state_path=state_path,
+        identity_probe=identities.get,
+        readiness_probe=lambda host, port: True,
+    )
+
+    assert adopted.adopt() is True
+    assert adopted.adoption_complete is True
+    assert [running.process.pid for running in adopted.running] == [101, 102]
+
+    monkeypatch.setattr(os, "kill", lambda pid, sig: identities.pop(pid, None))
+    adopted.stop()
+    assert not state_path.exists()

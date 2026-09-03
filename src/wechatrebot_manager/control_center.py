@@ -691,8 +691,8 @@ class ControlCenter:
     def _build_plugins_page(self) -> None:
         page = self._new_page(
             "plugins",
-            "功能插件",
-            "管理已经随商业版本交付的功能。配置可单独保存，机器人运行时支持即时热重载。",
+            "功能管理",
+            "管理已经随商业版本交付的功能。设置可单独保存，机器人运行时支持立即应用。",
         )
         surface = self._surface(page, padding=20)
         surface.pack(fill="both", expand=True)
@@ -1218,7 +1218,7 @@ class ControlCenter:
         if not plugins:
             self.plugin_notice_var.set("当前版本没有可管理的扩展功能。后续交付的功能会自动出现在这里。")
         else:
-            self.plugin_notice_var.set(f"已交付 {len(plugins)} 项功能。进入配置中心可管理启停、参数和热重载。")
+            self.plugin_notice_var.set(f"已交付 {len(plugins)} 项功能。进入配置中心可管理启停、参数和重新载入设置。")
 
     def _open_plugin_center(self) -> None:
         try:

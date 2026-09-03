@@ -119,6 +119,27 @@ def _installed_payload_summary(path: Path, payload: dict[str, Any]) -> dict[str,
     }
 
 
+def _feature_configuration_issues(plugin_root: Path, feature: dict[str, Any]) -> list[str]:
+    module = str(feature.get("module") or "").strip()
+    display_name = str(feature.get("display_name") or module or "未命名功能")
+    mode = str(feature.get("configuration") or "").strip()
+    root = plugin_root / module
+    issues: list[str] = []
+    if not module or not root.is_dir():
+        return [f"{display_name}：功能目录缺失"]
+    if mode in {"schema", "schema-and-page"}:
+        schema, schema_error = _load_json(root / "_conf_schema.json")
+        if schema_error is not None or not schema:
+            issues.append(f"{display_name}：配置表单定义缺失或无效")
+    if mode in {"schema-and-page", "page-and-global-schedule-center"}:
+        page_root = root / "pages"
+        if not page_root.is_dir() or not any(page_root.rglob("index.html")):
+            issues.append(f"{display_name}：高级配置页面缺失")
+    if mode not in {"schema", "schema-and-page", "page-and-global-schedule-center"}:
+        issues.append(f"{display_name}：配置方式未登记")
+    return issues
+
+
 def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
     root = Path(install_root).expanduser().resolve()
     checks: list[DiagnosticCheck] = []
@@ -159,6 +180,41 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
                 if name == "installed_payload"
                 else redact_sensitive(payload)
             )
+
+    feature_set, feature_error = _load_json(root / "legal" / "feature-set.json")
+    feature_items = feature_set.get("features") if feature_set is not None else None
+    feature_issues: list[str] = []
+    if isinstance(feature_items, list):
+        plugin_root = root / "app" / "astrbot" / "data" / "plugins"
+        for feature in feature_items:
+            if not isinstance(feature, dict):
+                feature_issues.append("功能清单条目格式错误")
+                continue
+            feature_issues.extend(_feature_configuration_issues(plugin_root, feature))
+    feature_ready = (
+        feature_error is None
+        and isinstance(feature_items, list)
+        and bool(feature_items)
+        and not feature_issues
+    )
+    checks.append(
+        DiagnosticCheck(
+            "feature-bundle",
+            feature_ready,
+            "error",
+            feature_error
+            or (
+                "；".join(feature_issues)
+                if feature_issues
+                else f"已交付 {len(feature_items)} 项可配置功能"
+            ),
+        )
+    )
+    if isinstance(feature_items, list):
+        captured["feature_bundle"] = {
+            "feature_count": len(feature_items),
+            "issue_count": len(feature_issues),
+        }
 
     required_files = (
         ("python-runtime", root / "runtime" / "python" / "python.exe"),

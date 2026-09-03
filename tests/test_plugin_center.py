@@ -66,11 +66,22 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
                     "default": None,
                     "_special": "select_provider",
                 },
+                "embedding_provider_id": {
+                    "description": "记忆检索模型",
+                    "type": "string",
+                    "default": None,
+                },
                 "api_secret": {
                     "description": "服务密钥",
                     "type": "string",
                     "default": "",
                     "_secret": True,
+                },
+                "enc_params": {
+                    "description": "内部加密参数",
+                    "type": "string",
+                    "default": "",
+                    "invisible": True,
                 },
             },
         },
@@ -86,7 +97,16 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
     config_path = install / "app" / "astrbot" / "data" / "config"
     config_path.mkdir(parents=True)
     (config_path / f"{module_name}_config.json").write_text(
-        json.dumps({"unknown": {"keep": True}}, ensure_ascii=False),
+        json.dumps(
+            {
+                "unknown": {"keep": True},
+                "model_group": {
+                    "api_secret": "stored-secret",
+                    "enc_params": "stored-encrypted-value",
+                },
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     service = PluginCenterService(install)
@@ -108,8 +128,8 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "display_name": "自我学习",
             "enabled": True,
             "configurable": True,
-            "field_count": 3,
-            "model_field_count": 1,
+            "field_count": 4,
+            "model_field_count": 2,
             "pages": ("dashboard",),
         }
     ]
@@ -129,8 +149,12 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     assert "napcat" not in customer_copy
     assert "webui" not in customer_copy
     assert "qq" not in customer_copy
-    assert detail["config"]["unknown"] == {"keep": True}
+    assert "unknown" not in detail["config"]
     assert detail["config"]["model_group"]["provider_id"] is None
+    assert detail["config"]["model_group"]["api_secret"] == ""
+    assert "enc_params" not in detail["schema"]["model_group"]["items"]
+    assert detail["schema"]["model_group"]["items"]["api_secret"]["secret"] is True
+    assert detail["schema"]["model_group"]["items"]["api_secret"]["_secret_configured"] is True
     assert detail["providers"] == [
         {
             "value": "vendor/reasoning-model",
@@ -145,8 +169,17 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     ]
     assert detail["personas"] == ["客服人格"]
     assert "provider_id" in detail["model_schema"]["model_group"]["items"]
+    assert "embedding_provider_id" in detail["model_schema"]["model_group"]["items"]
     assert "provider_id" not in detail["basic_schema"]["model_group"]["items"]
     assert "api_secret" in detail["basic_schema"]["model_group"]["items"]
+    assert detail["model_schema"]["model_group"]["items"]["provider_id"]["options"] == [
+        "",
+        "vendor/reasoning-model",
+    ]
+    assert detail["model_schema"]["model_group"]["items"]["embedding_provider_id"]["options"] == [
+        "",
+        "vector_private",
+    ]
 
 
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
@@ -172,6 +205,8 @@ def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Pa
     )
     assert saved["unknown"] == {"keep": True}
     assert saved["model_group"]["provider_id"] == "vendor/reasoning-model"
+    assert saved["model_group"]["api_secret"] == "stored-secret"
+    assert saved["model_group"]["enc_params"] == "stored-encrypted-value"
 
     with pytest.raises(ConfigConflictError, match="其他窗口"):
         service.save(public_id, updated, detail["revision"])
@@ -182,9 +217,103 @@ def test_offline_save_validates_field_types(tmp_path: Path) -> None:
     service = PluginCenterService(tmp_path / "install")
     service.engine.is_available = lambda: False  # type: ignore[method-assign]
     detail = service.detail(public_id)
-    detail["config"]["model_group"]["api_secret"] = 42
+    detail["config"]["model_group"]["provider_id"] = ["not-a-string"]
     with pytest.raises(PluginCenterError, match="类型不正确"):
         service.save(public_id, detail["config"], detail["revision"])
+
+
+def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "astrbot_plugin_self_learning_config.json"
+    )
+    calls: list[tuple[object, ...]] = []
+    service.engine.is_available = lambda: True  # type: ignore[method-assign]
+
+    def save_config(module_name: str, config: dict) -> None:
+        calls.append(("save", module_name, config))
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+
+    service.engine.save_config = save_config  # type: ignore[method-assign]
+    service.engine.set_enabled = lambda module, enabled: calls.append(  # type: ignore[method-assign]
+        ("enabled", module, enabled)
+    )
+    service.engine.reload = lambda module: calls.append(("reload", module))  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    detail["config"]["model_group"]["provider_id"] = "vendor/reasoning-model"
+
+    saved = service.save(public_id, detail["config"], detail["revision"])
+    enabled = service.set_enabled(public_id, True)
+    reloaded = service.reload(public_id)
+
+    assert saved["saved"] is True
+    assert saved["reloaded"] is True
+    assert enabled == {
+        "enabled": True,
+        "applied": True,
+        "message": "功能状态已立即更新。",
+    }
+    assert reloaded["reloaded"] is True
+    assert [call[:2] for call in calls] == [
+        ("save", "astrbot_plugin_self_learning"),
+        ("enabled", "astrbot_plugin_self_learning"),
+        ("reload", "astrbot_plugin_self_learning"),
+    ]
+
+
+def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    client = EngineApiClient(install)
+    calls: list[tuple[str, str, object]] = []
+
+    def request(method: str, path: str, body=None):
+        calls.append((method, path, body))
+        if path.endswith("/pages/settings"):
+            return {"content_path": "/api/v1/plugins/example/pages/settings/content/index.html"}
+        return {}
+
+    client.request = request  # type: ignore[method-assign]
+    client.save_config("example", {"enabled": True})
+    client.set_enabled("example", False)
+    client.reload("example")
+    page = client.page_entry("example", "settings")
+
+    assert calls == [
+        ("PUT", "/api/v1/plugins/example/config", {"config": {"enabled": True}}),
+        ("PATCH", "/api/v1/plugins/example/enabled", {"enabled": False}),
+        ("POST", "/api/v1/plugins/example/reload", None),
+        ("GET", "/api/v1/plugins/example/pages/settings", None),
+    ]
+    assert page.endswith("/content/index.html")
+
+
+def test_offline_save_can_replace_and_explicitly_clear_secret(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    detail["config"]["model_group"]["api_secret"] = "replacement-secret"
+    first = service.save(public_id, detail["config"], detail["revision"])
+    path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "astrbot_plugin_self_learning_config.json"
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["model_group"]["api_secret"] == "replacement-secret"
+
+    refreshed = service.detail(public_id)
+    refreshed["config"]["model_group"]["api_secret"] = None
+    service.save(public_id, refreshed["config"], first["revision"])
+    assert json.loads(path.read_text(encoding="utf-8"))["model_group"]["api_secret"] == ""
 
 
 def test_offline_save_validates_template_list_items(tmp_path: Path) -> None:
@@ -223,6 +352,64 @@ def test_offline_save_validates_template_list_items(tmp_path: Path) -> None:
 
     with pytest.raises(PluginCenterError, match="类型不正确"):
         service.save(public_id, detail["config"], detail["revision"])
+
+
+def test_template_list_credentials_are_redacted_and_preserved(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    plugin = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "plugins"
+        / "astrbot_plugin_self_learning"
+    )
+    schema = json.loads((plugin / "_conf_schema.json").read_text(encoding="utf-8"))
+    schema["workers"] = {
+        "description": "任务列表",
+        "type": "template_list",
+        "default": [],
+        "templates": {
+            "worker": {
+                "name": "任务",
+                "items": {
+                    "name": {"description": "名称", "type": "string", "default": ""},
+                    "api_token": {"description": "令牌", "type": "string", "default": ""},
+                },
+            }
+        },
+    }
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps(schema, ensure_ascii=False), encoding="utf-8"
+    )
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "astrbot_plugin_self_learning_config.json"
+    )
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    stored["workers"] = [
+        {"__template_key": "worker", "name": "日报", "api_token": "row-secret"}
+    ]
+    config_path.write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+
+    detail = service.detail(public_id)
+
+    row = detail["config"]["workers"][0]
+    assert row["api_token"] == ""
+    assert row["__manager_index"] == 0
+    token_schema = detail["schema"]["workers"]["templates"]["worker"]["items"]["api_token"]
+    assert token_schema["secret"] is True
+    assert token_schema["_secret_configured"] is True
+    service.save(public_id, detail["config"], detail["revision"])
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["workers"][0]["api_token"] == "row-secret"
+    assert "__manager_index" not in saved["workers"][0]
 
 
 def test_legacy_scalar_values_are_normalized_for_schema_forms() -> None:
@@ -277,8 +464,9 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     javascript = (root / "app.js").read_text(encoding="utf-8")
     css = (root / "app.css").read_text(encoding="utf-8")
     visible = f"{html}\n{javascript}\n{css}".casefold()
-    assert "热重载" in visible
-    assert "保存并热重载" in visible
+    assert "重新载入设置" in visible
+    assert "保存并立即应用" in visible
+    assert "热重载" not in visible
     assert "模型绑定" in visible
     assert "template-card" in visible
     assert "astrbot" not in visible

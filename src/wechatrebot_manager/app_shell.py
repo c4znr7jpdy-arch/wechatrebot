@@ -21,7 +21,11 @@ from .customer_config import (
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog
 from .lifecycle import LifecycleController
-from .plugin_center import PluginCenterError, PluginCenterService
+from .plugin_center import (
+    PluginCenterError,
+    PluginCenterService,
+    launch_plugin_center,
+)
 from .provider import OpenAIProviderProfile
 from .schedules import ScheduleService
 from .updates import (
@@ -240,6 +244,22 @@ class ApplicationApi:
             )
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
+
+    def reload_feature(self, feature_id: str) -> dict[str, object]:
+        try:
+            return self._ok(self.features.reload(feature_id))
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "13003")
+
+    def open_feature_center(self) -> dict[str, object]:
+        try:
+            launch_plugin_center(self.install_root)
+            return self._ok(
+                {"opened": True},
+                message="高级配置窗口正在打开。",
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "13003")
 
     @staticmethod
     def _date_timestamp(value: object, *, end: bool = False) -> float | None:

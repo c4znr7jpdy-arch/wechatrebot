@@ -63,6 +63,11 @@
       "target": "legal/RELEASE-CHECKLIST.md"
     },
     {
+      "origin": "commercial",
+      "source": "release/feature-set.json",
+      "target": "legal/feature-set.json"
+    },
+    {
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/src",
       "target": "app/bridge/src"
@@ -76,6 +81,51 @@
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/config.example.json",
       "target": "config/templates/bridge.example.json"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_livingmemory",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_livingmemory",
+      "gate": "third-party-license-reviewed"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_music",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_music",
+      "gate": "third-party-license-reviewed"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_short_drama",
+      "target": "app/astrbot/data/plugins/jiang_short_drama",
+      "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_commands",
+      "target": "app/astrbot/data/plugins/jiang_commands",
+      "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_schedule",
+      "target": "app/astrbot/data/plugins/jiang_schedule",
+      "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/_nonebot_stubs.py",
+      "target": "app/astrbot/data/plugins/_nonebot_stubs.py",
+      "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "ai_plugin/ai_plugin",
+      "target": "app/astrbot/ai_plugin/ai_plugin",
+      "gate": "owner-source-approved",
+      "exclude": [
+        "weather_test.png"
+      ]
     },
     {
       "origin": "project",

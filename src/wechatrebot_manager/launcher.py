@@ -10,6 +10,7 @@ import subprocess
 import time
 from typing import Callable, IO, Mapping, Protocol
 
+from .json_io import write_json_atomic
 from .runtime_config import RuntimePorts
 from .payload import sha256_file
 
@@ -72,6 +73,113 @@ class RunningService:
 
 class ServiceLaunchError(RuntimeError):
     """Raised when the managed startup sequence cannot complete."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessIdentity:
+    executable: str
+    creation_time: int
+
+
+def _normalized_executable(value: str | Path) -> str:
+    return os.path.normcase(os.path.realpath(str(value)))
+
+
+def process_identity(pid: int) -> ProcessIdentity | None:
+    """Return a PID-reuse-safe Windows process identity without extra packages."""
+    if os.name != "nt" or pid <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.GetProcessTimes.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(
+        process_query_limited_information, False, pid
+    )
+    if not handle:
+        return None
+    try:
+        capacity = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(capacity.value)
+        if not kernel32.QueryFullProcessImageNameW(
+            handle, 0, buffer, ctypes.byref(capacity)
+        ):
+            return None
+        created = wintypes.FILETIME()
+        exited = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return None
+        creation_time = (int(created.dwHighDateTime) << 32) | int(
+            created.dwLowDateTime
+        )
+        return ProcessIdentity(_normalized_executable(buffer.value), creation_time)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class AdoptedProcess:
+    """Minimal process facade for a service started by an earlier UI session."""
+
+    def __init__(
+        self,
+        pid: int,
+        identity: ProcessIdentity,
+        identity_probe: Callable[[int], ProcessIdentity | None] = process_identity,
+    ) -> None:
+        self.pid = pid
+        self._identity = identity
+        self._identity_probe = identity_probe
+
+    def poll(self) -> int | None:
+        current = self._identity_probe(self.pid)
+        if current is None or current != self._identity:
+            return 1
+        return None
+
+    def wait(self, timeout: float | None = None) -> int:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self.poll() is None:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(str(self.pid), timeout)
+            time.sleep(0.1)
+        return 0
+
+    def terminate(self) -> None:
+        os.kill(self.pid, signal.SIGTERM)
+
+    def kill(self) -> None:
+        os.kill(self.pid, signal.SIGTERM)
+
+    def send_signal(self, sig: int) -> None:
+        os.kill(self.pid, sig)
 
 
 def port_accepting(host: str, port: int, timeout_seconds: float = 0.3) -> bool:
@@ -210,12 +318,123 @@ class ProcessSupervisor:
         popen_factory: Callable[..., ProcessLike] = subprocess.Popen,
         readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] = wait_until_ready,
         progress_callback: Callable[[str, ServiceSpec], None] | None = None,
+        state_path: str | Path | None = None,
+        identity_probe: Callable[[int], ProcessIdentity | None] = process_identity,
+        readiness_probe: Callable[[str, int], bool] = port_accepting,
     ) -> None:
         self.specs = specs
         self._popen_factory = popen_factory
         self._readiness_waiter = readiness_waiter
         self._progress_callback = progress_callback
+        self._state_path = Path(state_path).resolve() if state_path is not None else None
+        self._identity_probe = identity_probe
+        self._readiness_probe = readiness_probe
         self.running: list[RunningService] = []
+        self.adoption_complete = False
+
+    def _clear_state(self) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.unlink()
+        except FileNotFoundError:
+            return
+
+    def _persist_state(self) -> None:
+        if self._state_path is None:
+            return
+        services: list[dict[str, object]] = []
+        for running in self.running:
+            pid = int(getattr(running.process, "pid", 0) or 0)
+            identity = self._identity_probe(pid)
+            if identity is None:
+                raise ServiceLaunchError(
+                    f"无法记录{running.spec.label}的运行状态，请重试。"
+                )
+            services.append(
+                {
+                    "name": running.spec.name,
+                    "pid": pid,
+                    "executable": identity.executable,
+                    "creation_time": identity.creation_time,
+                }
+            )
+        write_json_atomic(
+            self._state_path,
+            {
+                "schema_version": 1,
+                "complete": len(self.running) == len(self.specs),
+                "services": services,
+            },
+        )
+
+    def adopt(self) -> bool:
+        """Reattach to services previously started by this installation."""
+        if self.running or self._state_path is None:
+            return bool(self.running)
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            return False
+        except (OSError, json.JSONDecodeError):
+            self._clear_state()
+            return False
+        entries = payload.get("services") if isinstance(payload, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+            or not isinstance(entries, list)
+        ):
+            self._clear_state()
+            return False
+        by_name = {spec.name: spec for spec in self.specs}
+        adopted: list[RunningService] = []
+        adopted_names: set[str] = set()
+        try:
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                spec = by_name.get(str(entry.get("name") or ""))
+                try:
+                    pid = int(entry.get("pid") or 0)
+                    creation_time = int(entry.get("creation_time") or 0)
+                except (TypeError, ValueError):
+                    continue
+                identity = self._identity_probe(pid)
+                expected_executable = _normalized_executable(spec.argv[0]) if spec else ""
+                if (
+                    spec is None
+                    or spec.name in adopted_names
+                    or identity is None
+                    or identity.creation_time != creation_time
+                    or identity.executable != _normalized_executable(
+                        str(entry.get("executable") or "")
+                    )
+                    or identity.executable != expected_executable
+                    or not self._readiness_probe(spec.ready_host, spec.ready_port)
+                ):
+                    continue
+                spec.log_file.parent.mkdir(parents=True, exist_ok=True)
+                log_handle = spec.log_file.open("ab", buffering=0)
+                adopted.append(
+                    RunningService(
+                        spec,
+                        AdoptedProcess(pid, identity, self._identity_probe),
+                        log_handle,
+                    )
+                )
+                adopted_names.add(spec.name)
+        except OSError:
+            for running in adopted:
+                running.log_handle.close()
+            return False
+        self.running = adopted
+        if not self.running:
+            self._clear_state()
+            return False
+        self.adoption_complete = len(self.running) == len(self.specs)
+        self._persist_state()
+        return True
 
     def start(self) -> tuple[RunningService, ...]:
         if self.running:
@@ -269,6 +488,11 @@ class ProcessSupervisor:
                 raise ServiceLaunchError(f"无法启动{spec.label}：{exc}") from exc
             running = RunningService(spec, process, log_handle)
             self.running.append(running)
+            try:
+                self._persist_state()
+            except (OSError, ServiceLaunchError) as exc:
+                self.stop()
+                raise ServiceLaunchError(str(exc)) from exc
             if not self._readiness_waiter(spec, process):
                 exit_code = process.poll()
                 self.stop()
@@ -277,6 +501,12 @@ class ProcessSupervisor:
                 )
             if self._progress_callback is not None:
                 self._progress_callback("ready", spec)
+        self.adoption_complete = True
+        try:
+            self._persist_state()
+        except (OSError, ServiceLaunchError) as exc:
+            self.stop()
+            raise ServiceLaunchError(str(exc)) from exc
         return tuple(self.running)
 
     def stop(self, timeout_seconds: float = 15) -> None:
@@ -297,6 +527,8 @@ class ProcessSupervisor:
                         pass
             running.log_handle.close()
         self.running.clear()
+        self.adoption_complete = False
+        self._clear_state()
 
     def wait(self) -> int:
         if not self.running:

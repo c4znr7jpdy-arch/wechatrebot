@@ -48,7 +48,11 @@ def test_hook_hash_must_match_source_manifest_gate(tmp_path: Path) -> None:
     root = _metadata_copy(tmp_path)
     source_path = root / "release" / "source-manifest.json"
     source = json.loads(source_path.read_text(encoding="utf-8"))
-    hook_entry = next(item for item in source["entries"] if item.get("gate"))
+    hook_entry = next(
+        item
+        for item in source["entries"]
+        if item.get("gate") == "hook-binary-redistribution"
+    )
     hook_entry["sha256"] = "0" * 64
     source_path.write_text(json.dumps(source), encoding="utf-8")
 

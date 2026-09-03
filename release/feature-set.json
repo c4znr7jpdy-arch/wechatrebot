@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "status": "release-gates-pending",
+  "features": [
+    {
+      "module": "astrbot_plugin_livingmemory",
+      "display_name": "聊天记录与长期记忆",
+      "ownership": "third-party",
+      "gate": "third-party-license-reviewed",
+      "configuration": "schema"
+    },
+    {
+      "module": "astrbot_plugin_music",
+      "display_name": "音乐点播",
+      "ownership": "third-party",
+      "gate": "third-party-license-reviewed",
+      "configuration": "schema"
+    },
+    {
+      "module": "jiang_short_drama",
+      "display_name": "短剧解析",
+      "ownership": "owner",
+      "gate": "owner-source-approved",
+      "configuration": "schema-and-page"
+    },
+    {
+      "module": "jiang_commands",
+      "display_name": "常用指令",
+      "ownership": "owner",
+      "gate": "owner-source-approved",
+      "configuration": "schema"
+    },
+    {
+      "module": "jiang_schedule",
+      "display_name": "定时任务",
+      "ownership": "owner",
+      "gate": "owner-source-approved",
+      "configuration": "page-and-global-schedule-center"
+    }
+  ],
+  "shared_runtime": [
+    {
+      "source": "data/plugins/_nonebot_stubs.py",
+      "purpose": "legacy module compatibility"
+    },
+    {
+      "source": "ai_plugin/ai_plugin",
+      "purpose": "command and schedule function library",
+      "excluded": [
+        ".env.prod",
+        "legacy_nonebot2",
+        "venv",
+        "logs",
+        "test files"
+      ]
+    }
+  ]
+}
