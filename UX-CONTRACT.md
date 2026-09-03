@@ -32,7 +32,7 @@
 | 运行记录 | 脱敏的结构化生命周期事件 | `EventStore` |
 | 设置 | 品牌、回复模型、微信路径、更新与维护 | `ApplicationApi` |
 
-UI 只能调用 `ApplicationApi`，不得直接终止进程、改数据库或读取底层日志。
+UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作，WebView 不得递归暴露窗口、生命周期、数据服务或其他内部对象；页面不得直接终止进程、改数据库或读取底层日志。
 
 ## Flow ledger
 

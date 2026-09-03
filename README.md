@@ -10,7 +10,7 @@
 
 安装向导只有两步：选择安装目录，确认安装。推荐目录已自动填写，客户可以直接连续点击“下一步/安装”，也可以自行浏览更改；安装时从数据包一次性解压并同步校验，避免“校验 → 准备”重复读取，同时保留事务落盘和失败回滚。完成后默认打开管理软件。安装阶段不要求客户先安装微信，也不要求理解模型或运行环境。
 
-安装完成后打开同一个 EXE 会进入统一白标控制台。软件每次打开都检查 `Weixin.exe` 和版本 `4.1.8.27`；未安装或版本不兼容时禁用启动，并提供下载安装、手动选择和重新检测。控制台包含运行中心、功能中心、聊天记录、定时任务、运行记录和设置，所有客户文案都隐藏底层运行架构。品牌名称、简称、人格和欢迎语在设置页一键统一替换；回复模型也在同一界面配置。安装阶段不会自动启动任何机器人进程。
+安装完成后打开同一个 EXE 会进入统一白标控制台。WebView 只加载显式白名单中的客户操作，不扫描或暴露窗口、生命周期和数据服务等内部对象，避免初始化递归造成界面卡死。软件每次打开都检查 `Weixin.exe` 和版本 `4.1.8.27`；未安装或版本不兼容时禁用启动，并提供下载安装、手动选择和重新检测。控制台包含运行中心、功能中心、聊天记录、定时任务、运行记录和设置，所有客户文案都隐藏底层运行架构。品牌名称、简称、人格和欢迎语在设置页一键统一替换；回复模型也在同一界面配置。安装阶段不会自动启动任何机器人进程。
 
 点歌默认使用星之阁在线接口，搜索不到时回退到网易云直连源；商业包不再需要 Node 网易云侧车或 PHP Meting 服务。
 
@@ -98,9 +98,9 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
 ```powershell
 & 'C:\Program Files\Python313\python.exe' scripts\build_update_release.py `
   --payload .\artifacts\staging `
-  --output .\artifacts\update-0.8.1 `
+  --output .\artifacts\update-0.8.2 `
   --private-key .\config\local\update-signing-private.pem `
-  --package-url https://你的更新域名/releases/wechatrebot-0.8.1-update.zip `
+  --package-url https://你的更新域名/releases/wechatrebot-0.8.2-update.zip `
   --note "新增功能配置与设置立即应用" `
   --note "修复已知问题"
 ```
