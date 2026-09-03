@@ -11,6 +11,7 @@
     }
   ],
   "platform_settings": {
+    "enable_id_white_list": false,
     "reply_with_mention": false,
     "reply_with_quote": true,
     "friend_message_needs_wake_prefix": false,
@@ -22,7 +23,11 @@
     "default_provider_id": "",
     "fallback_chat_models": [],
     "default_image_caption_provider_id": "",
-    "default_personality": "default"
+    "default_personality": "default",
+    "context_limit_reached_strategy": "llm_compress",
+    "llm_compress_provider_id": "",
+    "max_context_length": -1,
+    "dequeue_context_length": 1
   },
   "admins_id": [],
   "dashboard": {
@@ -42,7 +47,11 @@
   ],
   "persona": [],
   "plugin_set": [
-    "*"
+    "astrbot_plugin_angel_heart",
+    "astrbot_plugin_music",
+    "jiang_short_drama",
+    "jiang_commands",
+    "jiang_schedule"
   ],
   "timezone": "Asia/Shanghai",
   "log_level": "INFO",

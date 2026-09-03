@@ -252,11 +252,7 @@ class LifecycleController:
             self._environment = self._environment_checker(self.install_root)
             self._runtime = self._snapshotter()
             if self.state == LifecycleState.STOP_WAIT_WECHAT:
-                wechat_active = bool(self._process_probe()) or bool(
-                    self._runtime.hook_ready
-                    or self._runtime.heartbeat_fresh
-                    or self._runtime.wechat_identity
-                )
+                wechat_active = self._bot_wechat_active()
                 if wechat_active:
                     self._wechat_closed_confirmations = 0
                     return self.view()
@@ -296,17 +292,27 @@ class LifecycleController:
                 self._error = None
                 return self.view()
             self._runtime = self._snapshotter()
-            wechat_active = bool(self._process_probe()) or bool(
-                self._runtime.hook_ready
-                or self._runtime.heartbeat_fresh
-                or self._runtime.wechat_identity
-            )
+            wechat_active = self._bot_wechat_active()
             if wechat_active:
                 self.state = LifecycleState.STOP_WAIT_WECHAT
                 self._error = self.catalog.get("12003")
                 self._wechat_closed_confirmations = 0
                 return self.view()
             return self._finish_stop()
+
+    def _bot_wechat_active(self) -> bool:
+        """Track only the WeChat instance owned by the active HOOK session.
+
+        A customer may already have a personal WeChat open before starting the
+        robot.  Process-name probing cannot distinguish that window from the
+        dedicated instance launched by the bridge, while the HOOK and heartbeat
+        signals are scoped to the latter.
+        """
+        return bool(
+            self._runtime.hook_ready
+            or self._runtime.heartbeat_fresh
+            or self._runtime.wechat_identity
+        )
 
     def _finish_stop(self) -> LifecycleView:
         self.state = LifecycleState.STOPPING

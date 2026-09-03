@@ -15,8 +15,11 @@
     selectedConversation: null,
     schedules: [],
     polling: false,
+    startPending: false,
     composing: false,
     availableUpdate: null,
+    updateChecking: false,
+    updateCheckTimer: 0,
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -93,7 +96,38 @@
     $("em", element).textContent = label;
   }
 
-  function renderStatus(status) {
+  const STARTUP_STATES = new Set([
+    "CHECKING", "CORE_STARTING", "CORE_READY", "CONNECTION_STARTING",
+  ]);
+
+  function startingStatus(status) {
+    return {
+      ...(status || {}),
+      state: "CORE_STARTING",
+      title: "正在启动机器人",
+      message: "正在准备机器人功能，请稍候。",
+      busy: true,
+      online: false,
+      can_start: false,
+      can_stop: false,
+      error: null,
+      environment: status?.environment || {},
+      runtime: status?.runtime || {},
+    };
+  }
+
+  function reconcileStartPending(status) {
+    if (!state.startPending) return status;
+    const current = status?.state || "STOPPED";
+    if (current === "STOPPED" && status?.environment?.ready && !status?.error) {
+      return startingStatus(status);
+    }
+    if (!STARTUP_STATES.has(current)) state.startPending = false;
+    return status;
+  }
+
+  function renderStatus(rawStatus) {
+    const status = reconcileStartPending(rawStatus);
     state.status = status;
     const runtime = status.runtime || {};
     const environment = status.environment || {};
@@ -102,6 +136,7 @@
     const waiting = ["WAITING_WECHAT", "VERIFYING_CONNECTION", "STOP_WAIT_WECHAT"].includes(current);
     const problem = current === "ERROR";
     const active = !["STOPPED", "ERROR"].includes(current);
+    const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
 
     $("#stateTitle").textContent = status.title;
     $("#stateMessage").textContent = status.message;
@@ -113,15 +148,16 @@
     global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : waiting ? status.title : active ? "正在启动" : environment.ready ? "等待启动" : "环境未就绪")}`;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
-    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : waiting ? "等待操作" : "当前未运行";
+    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
 
     const orbit = $("#statusOrbit");
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting ? "waiting" : status.busy || active ? "starting" : "stopped";
     const primary = $("#primaryAction");
     const stopMode = status.can_stop || online;
-    primary.innerHTML = `${icon(stopMode ? "i-stop" : "i-play")}<span>${stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止") : "启动"}</span>`;
+    primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止") : "启动"}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
     primary.disabled = current === "STOP_WAIT_WECHAT" || Boolean(status.busy) || (!status.can_start && !status.can_stop);
+    primary.setAttribute("aria-busy", String(Boolean(status.busy)));
 
     const alert = $("#environmentAlert");
     alert.hidden = Boolean(environment.ready);
@@ -168,11 +204,18 @@
 
   async function runPrimaryAction() {
     const button = $("#primaryAction");
+    const action = button.dataset.action === "stop" ? "stop" : "start";
     button.disabled = true;
+    if (action === "start") {
+      state.startPending = true;
+      renderStatus(startingStatus(state.status));
+    }
     try {
-      await api(button.dataset.action === "stop" ? "stop_robot" : "start_robot");
+      const result = await api(action === "stop" ? "stop_robot" : "start_robot");
+      if (action === "start" && result?.accepted === false) state.startPending = false;
       window.setTimeout(refreshStatus, 250);
     } catch (error) {
+      if (action === "start") state.startPending = false;
       reportError(error);
       await refreshStatus();
     }
@@ -230,7 +273,7 @@
     const items = state.features.filter((item) => !keyword || item.display_name.toLocaleLowerCase("zh-CN").includes(keyword));
     $("#featureList").innerHTML = items.length ? items.map((item) => `
       <button class="feature-item ${state.selectedFeature === item.id ? "active" : ""}" data-feature-id="${escapeHtml(item.id)}">
-        <span><strong>${escapeHtml(item.display_name)}</strong><small>${item.configurable ? `${item.field_count} 项可配置内容` : "无需额外配置"}</small></span>
+        <span><strong>${escapeHtml(item.display_name)}</strong><small>${item.configurable ? `${item.field_count} 项可配置内容` : (Array.isArray(item.pages) && item.pages.length ? "在专属页面管理" : "无需配置")}</small></span>
         <span class="feature-state ${item.enabled ? "enabled" : ""}" title="${item.enabled ? "已启用" : "已停用"}"></span>
       </button>`).join("") : '<div class="loading-row">没有符合条件的功能</div>';
     $$(".feature-item").forEach((button) => button.addEventListener("click", () => openFeature(button.dataset.featureId)));
@@ -315,10 +358,10 @@
     const currentSchema = state.featureTab === "models" ? detail.model_schema : detail.basic_schema;
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
-        <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${detail.configurable ? "修改参数后保存；运行中会尽量立即应用。" : "这项功能无需额外参数，可直接启停。"}</p></div>
+        <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(detail.description || (detail.configurable ? "修改参数后保存；运行中会尽量立即应用。" : "这项功能无需额外参数，可直接启停。"))}</p></div>
         <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
       </div>
-      ${detail.configurable ? `<div class="config-tabs"><button data-tab="basic" class="${state.featureTab === "basic" ? "active" : ""}" ${!basicCount ? "disabled" : ""}>基础设置 ${basicCount ? `(${detail.field_count - detail.model_field_count})` : ""}</button><button data-tab="models" class="${state.featureTab === "models" ? "active" : ""}" ${!modelCount ? "disabled" : ""}>模型设置 ${modelCount ? `(${detail.model_field_count})` : ""}</button></div><form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema || {}).length ? '<div class="empty-state compact"><p>这个分类暂无可配置内容</p></div>' : ""}</form><div class="feature-savebar"><span class="form-note" id="featureNote" aria-live="polite">${detail.engine_online ? "保存后立即应用" : "保存后将在下次启动时应用"}</span><div class="feature-save-actions">${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}${detail.engine_online && detail.enabled ? '<button class="button secondary" id="reloadFeature" type="button">重新载入功能</button>' : ""}<button class="button primary" id="saveFeature" type="button">保存设置</button></div></div>` : `<div class="empty-state compact"><p>通过右上角开关即可管理这项功能。</p>${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
+      ${detail.configurable ? `<div class="config-tabs"><button data-tab="basic" class="${state.featureTab === "basic" ? "active" : ""}" ${!basicCount ? "disabled" : ""}>基础设置 ${basicCount ? `(${detail.field_count - detail.model_field_count})` : ""}</button><button data-tab="models" class="${state.featureTab === "models" ? "active" : ""}" ${!modelCount ? "disabled" : ""}>模型设置 ${modelCount ? `(${detail.model_field_count})` : ""}</button></div><form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema || {}).length ? '<div class="empty-state compact"><p>这个分类暂无可配置内容</p></div>' : ""}</form><div class="feature-savebar"><span class="form-note" id="featureNote" aria-live="polite">${detail.engine_online ? "保存后立即应用" : "保存后将在下次启动时应用"}</span><div class="feature-save-actions">${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}${detail.engine_online && detail.enabled ? '<button class="button secondary" id="reloadFeature" type="button">重新载入功能</button>' : ""}<button class="button primary" id="saveFeature" type="button">保存设置</button></div></div>` : `<div class="empty-state compact"><p>${Array.isArray(detail.pages) && detail.pages.length ? "详细设置请在专属页面中管理。" : "这项功能已经适配完成，通过右上角开关即可管理。"}</p>${Array.isArray(detail.pages) && detail.pages.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureEnabled").addEventListener("change", toggleFeature);
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (!button.disabled) { state.featureTab = button.dataset.tab; renderFeatureDetail(); }
@@ -402,7 +445,7 @@
     const button = $("#openFeatureCenter");
     button.disabled = true;
     try {
-      const data = await api("open_feature_center");
+      const data = await api("open_feature_center", state.selectedFeature || "");
       toast(data.message || "高级配置窗口正在打开。");
     } catch (error) { reportError(error); }
     finally { button.disabled = false; }
@@ -591,6 +634,8 @@
   }
 
   async function refreshUpdate(manual = true) {
+    if (state.updateChecking) return;
+    state.updateChecking = true;
     const button = $("#checkUpdate");
     button.disabled = true;
     button.textContent = "检查中…";
@@ -624,9 +669,24 @@
       $("#updateStatus").textContent = "检查失败";
       if (manual) reportError(error);
     } finally {
+      state.updateChecking = false;
       button.disabled = !(state.bootstrap?.update?.enabled);
       button.textContent = state.availableUpdate ? "查看更新" : "检查更新";
     }
+  }
+
+  function automaticUpdateIntervalMs() {
+    const configured = Number(state.bootstrap?.update?.check_interval_seconds);
+    const seconds = Number.isFinite(configured) && configured >= 300 ? configured : 21600;
+    return seconds * 1000;
+  }
+
+  function scheduleAutomaticUpdateCheck(delayMs) {
+    window.clearTimeout(state.updateCheckTimer);
+    state.updateCheckTimer = window.setTimeout(async () => {
+      await refreshUpdate(false);
+      scheduleAutomaticUpdateCheck(automaticUpdateIntervalMs());
+    }, delayMs);
   }
 
   function bindSearch(boxSelector, inputSelector, callback) {
@@ -677,7 +737,7 @@
       fillSettings(state.bootstrap);
       renderStatus(state.bootstrap.status);
       window.setInterval(refreshStatus, 1500);
-      if (state.bootstrap.update?.enabled) window.setTimeout(() => refreshUpdate(false), 1800);
+      if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
     } catch (error) {
       reportError(error);
       $("#stateTitle").textContent = "软件未能完成初始化";
@@ -691,13 +751,17 @@
       environment: {ready: true, code: "10000", title: "微信环境正常", message: "已检测到兼容微信。", solutions: [], path: "C:\\Program Files\\Tencent\\Weixin\\Weixin.exe", version: "4.1.8.27", process_running: true},
       runtime: {engine_ready: true, connection_ready: true, wechat_identity: "wxid_demo_account", hook_ready: true, upstream_connected: true, heartbeat_fresh: true},
     };
-    const feature = {id: "feature-demo", display_name: "短剧解析", enabled: true, configurable: true, field_count: 6, model_field_count: 1, pages: []};
+    const features = [
+      {id: "feature-memory", display_name: "长期记忆", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: ["chat-config"], configuration: "page", description: "由回复引擎的原生会话上下文与天使之心共同维护连续对话，可在专属页面管理群聊和私聊记忆。"},
+      {id: "feature-music", display_name: "点歌", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: [], configuration: "none", description: "点歌能力已按交付环境完成适配，无需额外配置。"},
+      {id: "feature-drama", display_name: "短剧", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: ["recommendation-schedules"], configuration: "page-and-global-schedule-center", description: "播放中间页由服务端统一提供；专属页面保留短剧推送定时任务、内容类型和目标群聊等设置。"},
+    ];
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
-      bootstrap: () => ok({version: "0.8.2", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: true, api_base: "https://api.example.com/v1", model: "chat-model", api_key_configured: true}, update: {enabled: true, channel: "stable", result: null}}),
+      bootstrap: () => ok({version: "0.8.3", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: true, api_base: "https://api.example.com/v1", model: "chat-model", api_key_configured: true}, update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
-      get_features: () => ok({plugins: [feature, {id: "feature-music", display_name: "音乐点播", enabled: true, configurable: true, field_count: 4, model_field_count: 0}, {id: "feature-reply", display_name: "自动回复", enabled: false, configurable: true, field_count: 8, model_field_count: 2}, {id: "feature-image", display_name: "图片生成", enabled: true, configurable: true, field_count: 7, model_field_count: 3}, {id: "feature-report", display_name: "群聊日报", enabled: true, configurable: false, field_count: 0, model_field_count: 0}], engine_online: true}),
-      get_feature: (id) => ok({...feature, id, display_name: id === "feature-music" ? "音乐点播" : "短剧解析", basic_schema: {enabled_notice: {type: "bool", description: "发送解析提示", default: true}, player_url: {type: "string", description: "播放页面地址", hint: "用于生成用户可打开的播放页面"}, recommendation: {type: "object", description: "推荐设置", items: {limit: {type: "int", description: "每次推荐数量", default: 10}, media_type: {type: "string", description: "内容类型", options: ["短剧", "电影"]}}}}, model_schema: {summary_provider_id: {type: "string", description: "内容总结模型"}}, config: {enabled_notice: true, player_url: "https://example.com/player", recommendation: {limit: 10, media_type: "短剧"}, summary_provider_id: "chat-model"}, revision: "preview", providers: [], personas: [], engine_online: true}),
+      get_features: () => ok({plugins: features, engine_online: true}),
+      get_feature: (id) => ok({...features.find((item) => item.id === id), basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true}),
       set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: () => ok({revision: "preview-2", message: "配置已保存并立即应用。"}), reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600}, {conversation_id: "18310516375@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200}], summary: {messages: 238, conversations: 3, private_messages: 34, group_messages: 204}}),
       get_messages: () => ok([{role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {role: "user", sender_id: "wxid_lisi", sender_name: "李四", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),

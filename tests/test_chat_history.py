@@ -47,6 +47,38 @@ def _source(root: Path) -> Path:
     return path
 
 
+def _bridge_source(root: Path) -> Path:
+    path = root / "app" / "bridge" / "var" / "message-history.db"
+    path.parent.mkdir(parents=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+                sender_id TEXT, sender_name TEXT, group_id TEXT, platform TEXT,
+                timestamp REAL, metadata TEXT, dedup_key TEXT UNIQUE
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "hook_bridge:GroupMessage:456@chatroom",
+                "user",
+                "点歌 发如雪",
+                "wxid_c",
+                "王五",
+                "456@chatroom",
+                "hook_bridge",
+                103.0,
+                '{"group_name":"测试群","wechat_name":"王五"}',
+                "in:message-1",
+            ),
+        )
+    return path
+
+
 def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:
     _source(tmp_path)
     service = ChatHistoryService(tmp_path)
@@ -78,3 +110,15 @@ def test_history_export_csv(tmp_path: Path) -> None:
     text = target.read_text(encoding="utf-8-sig")
     assert "聊天类型" in text
     assert "群消息" in text
+
+
+def test_history_prefers_bridge_journal_without_memory_plugin(tmp_path: Path) -> None:
+    _bridge_source(tmp_path)
+    service = ChatHistoryService(tmp_path)
+
+    result = service.conversations(kind="group")
+
+    assert result["summary"]["messages"] == 1
+    assert result["items"][0]["conversation_id"] == "456@chatroom"
+    assert result["items"][0]["display_name"] == "测试群"
+    assert service.messages("456@chatroom")[0]["content"] == "点歌 发如雪"

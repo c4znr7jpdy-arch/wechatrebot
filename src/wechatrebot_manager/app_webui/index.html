@@ -78,7 +78,7 @@
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
                   <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
                 </div>
-                <div class="control-copy"><span class="state-kicker" id="stateKicker">机器人状态</span><h2 id="stateTitle">正在检查环境</h2><p id="stateMessage">请稍候。</p></div>
+                <div class="control-copy" role="status" aria-live="polite" aria-atomic="true"><span class="state-kicker" id="stateKicker">机器人状态</span><h2 id="stateTitle">正在检查环境</h2><p id="stateMessage">请稍候。</p></div>
               </div>
             </section>
 
@@ -107,7 +107,7 @@
         </section>
 
         <section class="page" id="page-features" aria-labelledby="featureHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>每项功能都可以单独启停、查看说明和修改参数。</p></div></div>
+          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>每项功能都可以单独启停并查看说明；需要设置时会提供对应入口。</p></div></div>
           <div class="feature-layout">
             <aside class="feature-catalog panel">
               <label class="search-box" id="featureSearchBox"><svg><use href="#i-search"/></svg><input id="featureSearch" type="search" placeholder="搜索功能" autocomplete="off"><button type="button" class="clear-search" aria-label="清空搜索">×</button></label>

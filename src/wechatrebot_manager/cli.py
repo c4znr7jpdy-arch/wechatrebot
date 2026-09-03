@@ -68,6 +68,7 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("install_root", type=Path)
     plugin_center = subparsers.add_parser("plugin-center", help=argparse.SUPPRESS)
     plugin_center.add_argument("install_root", type=Path)
+    plugin_center.add_argument("feature_id", nargs="?")
     apply_update = subparsers.add_parser("apply-update", help=argparse.SUPPRESS)
     apply_update.add_argument("--plan", type=Path, required=True)
     return parser
@@ -196,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "plugin-center":
         try:
-            return run_plugin_center(args.install_root)
+            return run_plugin_center(args.install_root, args.feature_id)
         except (OSError, ValueError, PluginCenterError) as exc:
             print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
             return 1

@@ -90,8 +90,7 @@ def test_only_full_health_marks_robot_running(tmp_path: Path) -> None:
     assert running.online is True
 
 
-def test_stop_waits_for_process_and_connection_to_close_twice(tmp_path: Path) -> None:
-    process_states = iter((("weixin.exe",), (), ()))
+def test_stop_ignores_personal_wechat_after_bot_hook_closes(tmp_path: Path) -> None:
     snapshots = iter(
         (
             RuntimeSnapshot(False, False, ""),
@@ -113,7 +112,7 @@ def test_stop_waits_for_process_and_connection_to_close_twice(tmp_path: Path) ->
         environment_checker=lambda root: _environment(tmp_path),
         environment_saver=lambda root, environment: None,
         snapshotter=lambda: next(snapshots),
-        process_probe=lambda: next(process_states),
+        process_probe=lambda: ("weixin.exe",),
         preflight=lambda root: (),
         supervisor_factory=factory,
     )
@@ -132,7 +131,9 @@ def test_stop_waits_for_process_and_connection_to_close_twice(tmp_path: Path) ->
     assert holder["supervisor"].stopped is True
 
 
-def test_stop_keeps_waiting_when_process_is_gone_but_hook_is_still_alive(tmp_path: Path) -> None:
+def test_closing_personal_wechat_does_not_stop_bot_while_hook_is_alive(
+    tmp_path: Path,
+) -> None:
     snapshots = iter(
         (
             RuntimeSnapshot(False, False, ""),

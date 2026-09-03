@@ -131,11 +131,17 @@ def _feature_configuration_issues(plugin_root: Path, feature: dict[str, Any]) ->
         schema, schema_error = _load_json(root / "_conf_schema.json")
         if schema_error is not None or not schema:
             issues.append(f"{display_name}：配置表单定义缺失或无效")
-    if mode in {"schema-and-page", "page-and-global-schedule-center"}:
+    if mode in {"page", "schema-and-page", "page-and-global-schedule-center"}:
         page_root = root / "pages"
         if not page_root.is_dir() or not any(page_root.rglob("index.html")):
             issues.append(f"{display_name}：高级配置页面缺失")
-    if mode not in {"schema", "schema-and-page", "page-and-global-schedule-center"}:
+    if mode not in {
+        "none",
+        "schema",
+        "page",
+        "schema-and-page",
+        "page-and-global-schedule-center",
+    }:
         issues.append(f"{display_name}：配置方式未登记")
     return issues
 
@@ -206,7 +212,7 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             or (
                 "；".join(feature_issues)
                 if feature_issues
-                else f"已交付 {len(feature_items)} 项可配置功能"
+                else f"已交付 {len(feature_items)} 项功能"
             ),
         )
     )

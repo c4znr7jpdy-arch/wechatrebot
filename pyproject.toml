@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechatrebot-manager"
-version = "0.8.2"
+version = "0.8.3"
 description = "Windows bootstrap and release tooling for WeChat ReBot"
 requires-python = ">=3.13,<3.14"
 dependencies = [

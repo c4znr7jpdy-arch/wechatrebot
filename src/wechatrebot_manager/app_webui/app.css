@@ -137,6 +137,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .power-button { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; width: 128px; height: 128px; border: 1px solid #c9d5e3; border-radius: 50%; color: var(--blue-700); background: #fff; box-shadow: 0 10px 28px rgba(7,95,199,.12); cursor: pointer; font-weight: 800; }
 .power-button:hover:not(:disabled) { border-color: #83b7ef; background: #f8fbff; }
 .power-button svg { width: 30px; height: 30px; }
+.status-orbit[data-state="starting"] .power-button { cursor: progress; opacity: 1; }
+.status-orbit[data-state="starting"] .power-button svg { animation: control-spin .9s linear infinite; }
+@keyframes control-spin { to { transform: rotate(360deg); } }
 .status-orbit[data-state="online"] .power-button { color: var(--red-700); }
 .control-copy h2 { margin: 8px 0; font-size: 25px; letter-spacing: -.02em; }
 .control-copy p { margin: 0; color: var(--muted); max-width: 320px; }

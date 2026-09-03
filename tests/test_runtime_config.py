@@ -96,6 +96,8 @@ def test_runtime_reconfiguration_preserves_customer_provider_and_dashboard_hash(
     assert updated["provider"][0]["id"] == "customer-provider"
     assert updated["dashboard"]["pbkdf2_password"] == "stored-hash"
     assert updated["plugin_set"] == ["customer-plugin"]
+    assert updated["platform_settings"]["enable_id_white_list"] is False
+    assert (install / "app" / "astrbot" / "data" / "config").is_dir()
     assert updated["platform"] == [
         {
             "id": "aiocqhttp_hook41827",
@@ -162,3 +164,84 @@ def test_admin_id_validation_and_reconfiguration_preservation(tmp_path: Path) ->
         )
     )
     assert astrbot["admins_id"] == ["wxid_customer"]
+
+
+def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    legal = install / "legal"
+    plugin = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "plugins"
+        / "astrbot_plugin_angel_heart"
+    )
+    legal.mkdir(parents=True)
+    plugin.mkdir(parents=True)
+    (legal / "feature-set.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "module": "astrbot_plugin_angel_heart",
+                        "display_name": "长期记忆",
+                        "configuration": "page",
+                    },
+                    {
+                        "module": "astrbot_plugin_music",
+                        "display_name": "点歌",
+                        "configuration": "none",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    provider = OpenAIProviderProfile(
+        api_key="customer-secret",
+        api_base="https://api.example.com/v1",
+        model="chat-model",
+    )
+
+    write_runtime_configs(install, provider_profile=provider)
+
+    astrbot = json.loads(
+        (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    angel_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "astrbot_plugin_angel_heart_config.json"
+    )
+    angel = json.loads(angel_path.read_text(encoding="utf-8"))
+    assert astrbot["plugin_set"] == [
+        "astrbot_plugin_angel_heart",
+        "astrbot_plugin_music",
+    ]
+    assert astrbot["provider_settings"]["context_limit_reached_strategy"] == "llm_compress"
+    assert astrbot["provider_settings"]["llm_compress_provider_id"] == (
+        "commercial_openai/chat-model"
+    )
+    assert angel["analyzer_model"] == "commercial_openai/chat-model"
+
+    angel_path.write_text(json.dumps({"analyzer_model": "custom/model"}), encoding="utf-8")
+    astrbot["plugin_set"] = ["astrbot_plugin_angel_heart", "legacy-plugin"]
+    (install / "app" / "astrbot" / "data" / "cmd_config.json").write_text(
+        json.dumps(astrbot), encoding="utf-8"
+    )
+    write_runtime_configs(install, provider_profile=provider)
+    preserved = json.loads(angel_path.read_text(encoding="utf-8"))
+    updated_astrbot = json.loads(
+        (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert preserved["analyzer_model"] == "custom/model"
+    assert updated_astrbot["plugin_set"] == ["astrbot_plugin_angel_heart"]

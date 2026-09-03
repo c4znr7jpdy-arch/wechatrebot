@@ -12,7 +12,7 @@
 
 安装完成后打开同一个 EXE 会进入统一白标控制台。WebView 只加载显式白名单中的客户操作，不扫描或暴露窗口、生命周期和数据服务等内部对象，避免初始化递归造成界面卡死。软件每次打开都检查 `Weixin.exe` 和版本 `4.1.8.27`；未安装或版本不兼容时禁用启动，并提供下载安装、手动选择和重新检测。控制台包含运行中心、功能中心、聊天记录、定时任务、运行记录和设置，所有客户文案都隐藏底层运行架构。品牌名称、简称、人格和欢迎语在设置页一键统一替换；回复模型也在同一界面配置。安装阶段不会自动启动任何机器人进程。
 
-点歌默认使用星之阁在线接口，搜索不到时回退到网易云直连源；商业包不再需要 Node 网易云侧车或 PHP Meting 服务。
+点歌默认使用星之阁在线接口，搜索不到时回退到网易云直连源；商业包不再需要 Node 网易云侧车或 PHP Meting 服务，功能中心不再显示无意义的点歌配置项。短剧默认使用 `E:\project` 已配置的服务端播放中间页，客户侧隐藏服务器地址和令牌，只保留短剧推送计划、内容类型与目标群聊等业务设置。
 
 控制台支持远程更新：启动后和每 6 小时后台检查一次签名清单，发现新版本时显示版本和说明；机器人完全停止后才允许下载、校验并交给独立更新程序安装。更新清单使用 Ed25519 签名，包体同时校验大小、SHA-256、解压路径和逐文件哈希，失败会回滚原版本。断网时自动检查不会弹错打扰客户，仍可在设置页手动重试。
 
@@ -20,7 +20,7 @@
 
 ## 当前发布状态
 
-Windows 两步安装向导、统一控制台、环境检测、全链路状态机、功能配置、聊天记录、定时任务、结构化事件、签名更新/回滚、冻结 EXE、便携 Python 运行时、固定哈希新 HOOK 接入、客户目录组装器和发布扫描已经实现并通过自动化测试。首批实际载荷已经确定为聊天记录与长期记忆、音乐点播、短剧解析、常用指令和定时任务；每项功能必须具有可用 Schema 或高级配置页，诊断会拒绝缺少配置资源的空壳功能。统一控制台要求系统具备 Edge WebView2 Runtime；正式发行前仍需在干净 Windows 10/11 环境验证并确定缺失时的一键补齐策略。
+Windows 两步安装向导、统一控制台、环境检测、全链路状态机、功能配置、聊天记录、定时任务、结构化事件、签名更新/回滚、冻结 EXE、便携 Python 运行时、固定哈希新 HOOK 接入、客户目录组装器和发布扫描已经实现并通过自动化测试。首批实际载荷已经确定为长期记忆、点歌、短剧、常用指令和定时任务；长期记忆使用 AstrBot 原生会话上下文与天使之心，不再交付 LivingMemory 或 Self Learning。交付清单同时决定功能中心的顺序与配置入口，诊断会拒绝缺少所声明配置资源的空壳功能。统一控制台要求系统具备 Edge WebView2 Runtime；正式发行前仍需在干净 Windows 10/11 环境验证并确定缺失时的一键补齐策略。
 
 仓库仍不可直接收费发布，`release/source-manifest.json` 保持 `phase-1-incomplete`。尚未关闭的硬门槛包括：
 
@@ -98,9 +98,9 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
 ```powershell
 & 'C:\Program Files\Python313\python.exe' scripts\build_update_release.py `
   --payload .\artifacts\staging `
-  --output .\artifacts\update-0.8.2 `
+  --output .\artifacts\update-0.8.3 `
   --private-key .\config\local\update-signing-private.pem `
-  --package-url https://你的更新域名/releases/wechatrebot-0.8.2-update.zip `
+  --package-url https://你的更新域名/releases/wechatrebot-0.8.3-update.zip `
   --note "新增功能配置与设置立即应用" `
   --note "修复已知问题"
 ```

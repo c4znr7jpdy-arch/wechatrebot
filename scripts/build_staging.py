@@ -81,9 +81,12 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
 
 def _validate_staged_runtime(output: Path) -> None:
     python_exe = output / "runtime" / "python" / "python.exe"
+    bridge_source = output / "app" / "bridge" / "src"
     code = (
         "import importlib.metadata as m,sys;"
+        "sys.path.insert(0,sys.argv.pop(1));"
         "import aiohttp,astrbot,PIL,websockets;"
+        "import hook_bridge;"
         "assert sys.maxsize > 2**32;"
         "assert sys.version_info[:2] == (3,13);"
         "assert m.version('AstrBot') == '4.26.6'"
@@ -91,7 +94,7 @@ def _validate_staged_runtime(output: Path) -> None:
     environment = dict(os.environ)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     subprocess.run(
-        [str(python_exe), "-B", "-I", "-c", code],
+        [str(python_exe), "-B", "-I", "-c", code, str(bridge_source)],
         cwd=output,
         env=environment,
         check=True,

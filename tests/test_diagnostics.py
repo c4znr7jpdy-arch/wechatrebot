@@ -131,7 +131,7 @@ def test_diagnostics_require_real_feature_configuration_assets(tmp_path: Path) -
     feature_check = next(item for item in report["checks"] if item["name"] == "feature-bundle")
 
     assert feature_check["ok"] is True
-    assert feature_check["message"] == "已交付 2 项可配置功能"
+    assert feature_check["message"] == "已交付 2 项功能"
     assert report["configuration"]["feature_bundle"]["issue_count"] == 0
 
 

@@ -151,6 +151,9 @@ class ApplicationApi:
                     "update": {
                         "enabled": bool(channel and channel.enabled),
                         "channel": channel.channel if channel else "stable",
+                        "check_interval_seconds": (
+                            channel.check_interval_seconds if channel else None
+                        ),
                         "result": self._update_result,
                     },
                 }
@@ -283,9 +286,9 @@ class ApplicationApi:
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 
-    def open_feature_center(self) -> dict[str, object]:
+    def open_feature_center(self, feature_id: str = "") -> dict[str, object]:
         try:
-            launch_plugin_center(self._install_root)
+            launch_plugin_center(self._install_root, feature_id or None)
             return self._ok(
                 {"opened": True},
                 message="高级配置窗口正在打开。",

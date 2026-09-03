@@ -10,6 +10,13 @@ import tomllib
 _HASH = re.compile(r"^[0-9A-F]{64}$")
 _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 _FORBIDDEN_PARTS = {"py", "legacy_nonebot2", "python311-x86"}
+_FEATURE_CONFIGURATION_MODES = {
+    "none",
+    "schema",
+    "page",
+    "schema-and-page",
+    "page-and-global-schedule-center",
+}
 
 
 def _load_object(path: Path, errors: list[str]) -> dict[str, object]:
@@ -189,6 +196,8 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         if module in feature_modules:
             errors.append(f"duplicate feature module: {module}")
         feature_modules.add(module)
+        if feature.get("configuration") not in _FEATURE_CONFIGURATION_MODES:
+            errors.append(f"feature has invalid configuration mode: {module}")
         source_entry = source_features.get(module)
         if source_entry is None:
             errors.append(f"feature is not packaged by source manifest: {module}")

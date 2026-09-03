@@ -84,8 +84,8 @@
     },
     {
       "origin": "project",
-      "source": "data/plugins/astrbot_plugin_livingmemory",
-      "target": "app/astrbot/data/plugins/astrbot_plugin_livingmemory",
+      "source": "data/plugins/astrbot_plugin_angel_heart",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart",
       "gate": "third-party-license-reviewed"
     },
     {
@@ -111,6 +111,18 @@
       "source": "data/plugins/jiang_schedule",
       "target": "app/astrbot/data/plugins/jiang_schedule",
       "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "data/config/jiang_short_drama_config.json",
+      "target": "app/astrbot/data/config/jiang_short_drama_config.json",
+      "gate": "owner-source-approved"
+    },
+    {
+      "origin": "project",
+      "source": "data/config/astrbot_plugin_music_config.json",
+      "target": "app/astrbot/data/config/astrbot_plugin_music_config.json",
+      "gate": "third-party-license-reviewed"
     },
     {
       "origin": "project",

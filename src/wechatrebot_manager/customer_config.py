@@ -135,20 +135,18 @@ class PluginEntry:
 
 
 _PLUGIN_LABELS = {
-    "astrbot_plugin_angel_heart": "暖心陪伴",
+    "astrbot_plugin_angel_heart": "长期记忆",
     "astrbot_plugin_apis": "实用接口",
     "astrbot_plugin_bittorrent": "资源检索",
     "astrbot_plugin_kimi_web_search": "联网搜索",
-    "astrbot_plugin_livingmemory": "长期记忆",
     "astrbot_plugin_mimo_tts_clone": "语音克隆",
     "astrbot_plugin_mnemosyne": "记忆管理",
-    "astrbot_plugin_music": "音乐点播",
+    "astrbot_plugin_music": "点歌",
     "astrbot_plugin_parser": "链接解析",
     "astrbot_plugin_patch_at_wxid": "群聊兼容",
     "astrbot_plugin_proactive_chat": "主动聊天",
     "astrbot_plugin_qq_group_daily_analysis": "群聊分析",
     "astrbot_plugin_self_iterative_core": "自我优化",
-    "astrbot_plugin_self_learning": "自我学习",
     "astrbot_plugin_twitter": "动态订阅",
     "astrbot_plugin_zhenxunribao": "群聊日报",
     "jiang_12123_notify": "车辆提醒",
@@ -164,11 +162,16 @@ _PLUGIN_LABELS = {
     "jiang_rocom": "运势娱乐",
     "jiang_schedule": "定时任务",
     "jiang_server_status": "服务状态",
-    "jiang_short_drama": "短剧解析",
+    "jiang_short_drama": "短剧",
     "jiang_tide": "潮汐查询",
     "jiang_video_understanding": "视频理解",
     "jiang_yanyun_checkin": "签到助手",
     "meme_manager": "表情管理",
+}
+
+_HIDDEN_CUSTOMER_PLUGINS = {
+    "astrbot_plugin_livingmemory",
+    "astrbot_plugin_self_learning",
 }
 
 
@@ -196,6 +199,7 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
                 or path.name.startswith((".", "__"))
                 or path.name in {"data", "logs"}
                 or path.name.endswith("_disabled")
+                or path.name in _HIDDEN_CUSTOMER_PLUGINS
             ):
                 continue
             entries.append(

@@ -11,6 +11,7 @@ const state = {
   activeTab: "basic",
   pendingAction: null,
 };
+const requestedFeatureId = new URLSearchParams(window.location.search).get("feature") || "";
 
 const el = (id) => document.getElementById(id);
 const list = el("plugin-list");
@@ -669,7 +670,7 @@ function renderPages() {
   });
 }
 
-async function selectPlugin(moduleName) {
+async function selectPlugin(moduleName, openFirstPage = false) {
   if (state.busy) return;
   state.currentId = moduleName;
   renderCatalog();
@@ -685,6 +686,11 @@ async function selectPlugin(moduleName) {
     detailView.hidden = false;
     showTab("basic");
     renderDetail();
+    if (openFirstPage && state.detail.pages?.length) {
+      showTab("pages");
+      const firstPageButton = el("page-picker").querySelector(".page-button");
+      if (firstPageButton) await openPluginPage(state.detail.pages[0], firstPageButton);
+    }
   } catch (error) {
     loadingView.hidden = true;
     emptyView.hidden = false;
@@ -833,7 +839,10 @@ async function loadCatalog() {
     setEngineState(data.engine_online);
     renderCatalog();
     loadingView.hidden = true;
-    if (state.catalog.length) selectPlugin(state.catalog[0].id);
+    if (state.catalog.length) {
+      const requested = state.catalog.find((item) => item.id === requestedFeatureId);
+      await selectPlugin((requested || state.catalog[0]).id, Boolean(requested));
+    }
     else emptyView.hidden = false;
   } catch (error) {
     loadingView.hidden = true;

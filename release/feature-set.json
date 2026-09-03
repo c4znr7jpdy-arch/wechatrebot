@@ -3,25 +3,28 @@
   "status": "release-gates-pending",
   "features": [
     {
-      "module": "astrbot_plugin_livingmemory",
-      "display_name": "聊天记录与长期记忆",
+      "module": "astrbot_plugin_angel_heart",
+      "display_name": "长期记忆",
       "ownership": "third-party",
       "gate": "third-party-license-reviewed",
-      "configuration": "schema"
+      "configuration": "page",
+      "description": "由回复引擎的原生会话上下文与天使之心共同维护连续对话，可在专属页面管理群聊和私聊记忆。"
     },
     {
       "module": "astrbot_plugin_music",
-      "display_name": "音乐点播",
+      "display_name": "点歌",
       "ownership": "third-party",
       "gate": "third-party-license-reviewed",
-      "configuration": "schema"
+      "configuration": "none",
+      "description": "点歌能力已按交付环境完成适配，无需额外配置。"
     },
     {
       "module": "jiang_short_drama",
-      "display_name": "短剧解析",
+      "display_name": "短剧",
       "ownership": "owner",
       "gate": "owner-source-approved",
-      "configuration": "schema-and-page"
+      "configuration": "page-and-global-schedule-center",
+      "description": "播放中间页由服务端统一提供；专属页面保留短剧推送定时任务、内容类型和目标群聊等设置。"
     },
     {
       "module": "jiang_commands",

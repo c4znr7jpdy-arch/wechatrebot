@@ -60,7 +60,7 @@ def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path
     (plugin_root / "astrbot_plugin_hapi_connector_disabled").mkdir()
 
     plugins = load_plugins(install)
-    assert {item.display_name for item in plugins} == {"常用指令", "音乐点播"}
+    assert {item.display_name for item in plugins} == {"常用指令", "点歌"}
     assert all("astrbot" not in item.display_name.casefold() for item in plugins)
     set_plugin_enabled(install, "astrbot_plugin_music", False)
     state = {item.module_name: item.enabled for item in load_plugins(install)}

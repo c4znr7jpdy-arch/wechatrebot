@@ -22,6 +22,7 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value._catalog = load_error_catalog()
     value._update_lock = threading.Lock()
     value._available_update = None
+    value._update_result = None
     value._update_channel = UpdateChannel(
         manifest_url="https://updates.example.test/stable.json",
         channel="stable",
@@ -31,6 +32,26 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value._lifecycle = SimpleNamespace(events=_Events())
     value._window = None
     return value
+
+
+def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
+    monkeypatch.setattr(
+        app_shell,
+        "load_robot_settings",
+        lambda _root: SimpleNamespace(
+            profile=SimpleNamespace(to_dict=lambda: {"display_name": "测试机器人"}),
+            admin_id="wxid_admin",
+        ),
+    )
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+
+    result = api.bootstrap()
+
+    assert result["ok"] is True
+    assert result["data"]["update"]["enabled"] is True
+    assert result["data"]["update"]["check_interval_seconds"] == 21_600
 
 
 def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path) -> None:
@@ -89,6 +110,36 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
+
+
+def test_start_action_shows_pending_state_before_bridge_returns() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+    handler = script[
+        script.index("async function runPrimaryAction") : script.index(
+            "async function checkEnvironment"
+        )
+    ]
+
+    assert handler.index("state.startPending = true") < handler.index("await api(")
+    assert 'current === "STOPPED" && status?.environment?.ready' in script
+    assert '"启动中…"' in script
+    assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
+    assert '.status-orbit[data-state="starting"] .power-button' in styles
+
+
+def test_webui_schedules_startup_and_recurring_update_checks() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "function automaticUpdateIntervalMs()" in script
+    assert "state.bootstrap?.update?.check_interval_seconds" in script
+    assert "scheduleAutomaticUpdateCheck(automaticUpdateIntervalMs())" in script
+    assert "scheduleAutomaticUpdateCheck(1800)" in script
+    assert "if (state.updateChecking) return" in script
 
 
 def test_run_application_uses_explicit_webview_api_allowlist(

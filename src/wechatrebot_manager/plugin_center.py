@@ -20,7 +20,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
 
-from .customer_config import load_plugins, load_robot_settings, set_plugin_enabled
+from .customer_config import PluginEntry, load_plugins, load_robot_settings, set_plugin_enabled
+from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
 from .single_instance import SingleInstanceLock
 
@@ -59,6 +60,8 @@ class PluginCatalogItem:
     field_count: int
     model_field_count: int
     pages: tuple[str, ...]
+    configuration: str = "schema-and-page"
+    description: str = ""
 
 
 def _public_plugin_id(module_name: str) -> str:
@@ -660,30 +663,72 @@ class PluginCenterService:
         self.install_root = Path(install_root).expanduser().resolve()
         self.engine = EngineApiClient(self.install_root)
 
-    def catalog(self) -> dict[str, Any]:
-        entries = []
+    def _catalog_items(self) -> tuple[PluginCatalogItem, ...]:
         root = _plugin_root(self.install_root)
-        for plugin in load_plugins(self.install_root):
-            plugin_dir = root / plugin.module_name
-            schema = _read_object(plugin_dir / "_conf_schema.json")
+        installed = {item.module_name: item for item in load_plugins(self.install_root)}
+        policies = load_delivery_features(self.install_root)
+        ordered: list[tuple[PluginEntry, DeliveryFeature | None]]
+        if policies is None:
+            ordered = [(item, None) for item in installed.values()]
+        else:
+            ordered = [
+                (installed[policy.module], policy)
+                for policy in policies
+                if policy.module in installed
+            ]
+
+        result: list[PluginCatalogItem] = []
+        for raw_plugin, policy in ordered:
+            module_name = str(raw_plugin.module_name)
+            plugin_dir = root / module_name
+            raw_schema = _read_object(plugin_dir / "_conf_schema.json")
+            exposes_schema = policy is None or policy.exposes_schema
+            exposes_pages = policy is None or policy.exposes_pages
+            schema = raw_schema if exposes_schema else {}
             _, model_schema = _split_schema(schema)
             pages_root = plugin_dir / "pages"
-            pages = tuple(
-                path.name
-                for path in sorted(pages_root.iterdir(), key=lambda item: item.name.casefold())
-                if path.is_dir()
-                and _PAGE_ID.fullmatch(path.name)
-                and (path / "index.html").is_file()
-            ) if pages_root.is_dir() else ()
+            pages = (
+                tuple(
+                    path.name
+                    for path in sorted(
+                        pages_root.iterdir(), key=lambda item: item.name.casefold()
+                    )
+                    if path.is_dir()
+                    and _PAGE_ID.fullmatch(path.name)
+                    and (path / "index.html").is_file()
+                )
+                if exposes_pages and pages_root.is_dir()
+                else ()
+            )
+            result.append(
+                PluginCatalogItem(
+                    module_name=module_name,
+                    display_name=(policy.display_name if policy else raw_plugin.display_name),
+                    enabled=bool(raw_plugin.enabled),
+                    configurable=bool(schema),
+                    field_count=_field_count(schema),
+                    model_field_count=_field_count(model_schema),
+                    pages=pages,
+                    configuration=(policy.configuration if policy else "schema-and-page"),
+                    description=(policy.description if policy else ""),
+                )
+            )
+        return tuple(result)
+
+    def catalog(self) -> dict[str, Any]:
+        entries = []
+        for plugin in self._catalog_items():
             entries.append(
                 {
                     "id": _public_plugin_id(plugin.module_name),
                     "display_name": plugin.display_name,
                     "enabled": plugin.enabled,
-                    "configurable": bool(schema),
-                    "field_count": _field_count(schema),
-                    "model_field_count": _field_count(model_schema),
-                    "pages": pages,
+                    "configurable": plugin.configurable,
+                    "field_count": plugin.field_count,
+                    "model_field_count": plugin.model_field_count,
+                    "pages": plugin.pages,
+                    "configuration": plugin.configuration,
+                    "description": plugin.description,
                 }
             )
         return {
@@ -695,36 +740,18 @@ class PluginCenterService:
     def _plugin(self, public_id: str) -> PluginCatalogItem:
         if not _PUBLIC_PLUGIN_ID.fullmatch(public_id):
             raise PluginCenterError("功能标识无效。")
-        root = _plugin_root(self.install_root)
-        for plugin in load_plugins(self.install_root):
+        for plugin in self._catalog_items():
             if _public_plugin_id(plugin.module_name) == public_id:
-                schema = _read_object(root / plugin.module_name / "_conf_schema.json")
-                _, model_schema = _split_schema(schema)
-                pages_root = root / plugin.module_name / "pages"
-                pages = tuple(
-                    path.name
-                    for path in sorted(
-                        pages_root.iterdir(), key=lambda item: item.name.casefold()
-                    )
-                    if path.is_dir()
-                    and _PAGE_ID.fullmatch(path.name)
-                    and (path / "index.html").is_file()
-                ) if pages_root.is_dir() else ()
-                return PluginCatalogItem(
-                    module_name=plugin.module_name,
-                    display_name=plugin.display_name,
-                    enabled=plugin.enabled,
-                    configurable=bool(schema),
-                    field_count=_field_count(schema),
-                    model_field_count=_field_count(model_schema),
-                    pages=pages,
-                )
+                return plugin
         raise PluginCenterError("所选功能不存在或尚未交付。")
 
     def detail(self, public_id: str) -> dict[str, Any]:
         item = self._plugin(public_id)
         module_name = item.module_name
-        schema = _read_object(_plugin_root(self.install_root) / module_name / "_conf_schema.json")
+        raw_schema = _read_object(
+            _plugin_root(self.install_root) / module_name / "_conf_schema.json"
+        )
+        schema = raw_schema if item.configurable else {}
         stored = _read_object(_config_path(self.install_root, module_name))
         config = _normalize_config(schema, _merge_defaults(schema, stored))
         engine_config = _read_object(_dashboard_path(self.install_root))
@@ -786,6 +813,8 @@ class PluginCenterService:
             "field_count": item.field_count,
             "model_field_count": item.model_field_count,
             "pages": item.pages,
+            "configuration": item.configuration,
+            "description": item.description,
             "schema": clean_schema,
             "basic_schema": clean_basic_schema,
             "model_schema": clean_model_schema,
@@ -807,7 +836,9 @@ class PluginCenterService:
         stored = _read_object(path)
         if base_revision and base_revision != _json_revision(stored):
             raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
-        schema = _read_object(_plugin_root(self.install_root) / module_name / "_conf_schema.json")
+        schema = _read_object(
+            _plugin_root(self.install_root) / module_name / "_conf_schema.json"
+        )
         merged = _merge_customer_config(schema, config, stored)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)
@@ -1063,17 +1094,28 @@ def _handler(service: PluginCenterService):
     return Handler
 
 
-def plugin_center_command(install_root: str | Path) -> list[str]:
+def plugin_center_command(
+    install_root: str | Path, feature_id: str | None = None
+) -> list[str]:
     root = str(Path(install_root).expanduser().resolve())
+    selected = str(feature_id or "").strip()
+    if selected and not _PUBLIC_PLUGIN_ID.fullmatch(selected):
+        raise PluginCenterError("功能标识无效。")
     if getattr(sys, "frozen", False):
-        return [sys.executable, "plugin-center", root]
-    return [sys.executable, "-m", "wechatrebot_manager", "plugin-center", root]
+        command = [sys.executable, "plugin-center", root]
+    else:
+        command = [sys.executable, "-m", "wechatrebot_manager", "plugin-center", root]
+    if selected:
+        command.append(selected)
+    return command
 
 
-def launch_plugin_center(install_root: str | Path) -> subprocess.Popen[bytes]:
+def launch_plugin_center(
+    install_root: str | Path, feature_id: str | None = None
+) -> subprocess.Popen[bytes]:
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     return subprocess.Popen(
-        plugin_center_command(install_root),
+        plugin_center_command(install_root, feature_id),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -1081,8 +1123,13 @@ def launch_plugin_center(install_root: str | Path) -> subprocess.Popen[bytes]:
     )
 
 
-def run_plugin_center(install_root: str | Path) -> int:
+def run_plugin_center(
+    install_root: str | Path, feature_id: str | None = None
+) -> int:
     root = Path(install_root).expanduser().resolve()
+    selected = str(feature_id or "").strip()
+    if selected and not _PUBLIC_PLUGIN_ID.fullmatch(selected):
+        raise PluginCenterError("功能标识无效。")
     lock = SingleInstanceLock(f"plugin-center:{root}")
     if not lock.acquire():
         return 3
@@ -1095,7 +1142,8 @@ def run_plugin_center(install_root: str | Path) -> int:
         import webview
 
         brand = load_robot_settings(root).profile
-        url = f"http://127.0.0.1:{server.server_port}/"
+        query = f"?feature={quote(selected, safe='')}" if selected else ""
+        url = f"http://127.0.0.1:{server.server_port}/{query}"
         webview.create_window(
             f"{brand.display_name} · 功能配置",
             url,

@@ -75,6 +75,13 @@ class ServiceLaunchError(RuntimeError):
     """Raised when the managed startup sequence cannot complete."""
 
 
+_RUN_MODULE_FROM_PATH = (
+    "import runpy,sys;"
+    "sys.path.insert(0,sys.argv.pop(1));"
+    "runpy.run_module(sys.argv.pop(1),run_name='__main__')"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessIdentity:
     executable: str
@@ -280,7 +287,9 @@ def build_service_specs(
         name="new-hook-bridge",
         argv=(
             str(python_exe),
-            "-m",
+            "-c",
+            _RUN_MODULE_FROM_PATH,
+            str(bridge_root / "src"),
             "hook_bridge",
             "--config",
             str(bridge_root / "config.json"),
@@ -297,6 +306,8 @@ def build_service_specs(
         required_files=(
             root / "legal" / "hook-binaries.json",
             bridge_root / "config.json",
+            bridge_root / "src" / "hook_bridge" / "__init__.py",
+            bridge_root / "src" / "hook_bridge" / "__main__.py",
             bridge_root / "vendor" / "hook" / "x64 inject.exe",
             bridge_root
             / "vendor"

@@ -48,7 +48,7 @@ def _identity_metadata(value: object) -> dict[str, str]:
 
 
 class ChatHistoryService:
-    """Product-owned history index imported incrementally from the memory module."""
+    """Product history index sourced from the bridge with a legacy fallback."""
 
     def __init__(self, install_root: str | Path) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
@@ -61,6 +61,13 @@ class ChatHistoryService:
             / "plugin_data"
             / "astrbot_plugin_livingmemory"
             / "conversations.db"
+        )
+        self.bridge_source = (
+            self.install_root
+            / "app"
+            / "bridge"
+            / "var"
+            / "message-history.db"
         )
         self._initialize()
 
@@ -116,16 +123,20 @@ class ChatHistoryService:
                     )
 
     def sync(self) -> int:
-        if not self.source.is_file():
+        source = self.bridge_source if self.bridge_source.is_file() else self.source
+        return self._sync_source(source)
+
+    def _sync_source(self, source_path: Path) -> int:
+        if not source_path.is_file():
             return 0
-        source_key = str(self.source.resolve()).casefold()
+        source_key = str(source_path.resolve()).casefold()
         with self._connect() as target:
             row = target.execute(
                 "SELECT last_message_id FROM import_sources WHERE source_key = ?",
                 (source_key,),
             ).fetchone()
             last_id = int(row[0]) if row else 0
-            source_uri = f"file:{self.source.resolve().as_posix()}?mode=ro"
+            source_uri = f"file:{source_path.resolve().as_posix()}?mode=ro"
             try:
                 source = sqlite3.connect(source_uri, uri=True, timeout=2)
                 source.row_factory = sqlite3.Row

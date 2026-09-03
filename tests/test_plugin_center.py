@@ -22,6 +22,7 @@ from wechatrebot_manager.plugin_center import (
     _asset_root,
     _handler,
     _normalize_config,
+    plugin_center_command,
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
 
@@ -48,7 +49,7 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
         json.dumps(engine_config, ensure_ascii=False), encoding="utf-8"
     )
 
-    module_name = "astrbot_plugin_self_learning"
+    module_name = "sample_configurable_feature"
     plugin = install / "app" / "astrbot" / "data" / "plugins" / module_name
     (plugin / "pages" / "dashboard").mkdir(parents=True)
     (plugin / "pages" / "dashboard" / "index.html").write_text(
@@ -95,7 +96,7 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
         json.dumps(schema, ensure_ascii=False), encoding="utf-8"
     )
     config_path = install / "app" / "astrbot" / "data" / "config"
-    config_path.mkdir(parents=True)
+    config_path.mkdir(parents=True, exist_ok=True)
     (config_path / f"{module_name}_config.json").write_text(
         json.dumps(
             {
@@ -125,12 +126,14 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     assert catalog["plugins"] == [
         {
             "id": public_id,
-            "display_name": "自我学习",
+            "display_name": "Sample Configurable Feature",
             "enabled": True,
             "configurable": True,
             "field_count": 4,
             "model_field_count": 2,
             "pages": ("dashboard",),
+            "configuration": "schema-and-page",
+            "description": "",
         }
     ]
     assert public_id.startswith("feature-")
@@ -182,6 +185,82 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     ]
 
 
+def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+    legal = install / "legal"
+    legal.mkdir(parents=True)
+    modules = {
+        "astrbot_plugin_angel_heart": ("chat-config",),
+        "astrbot_plugin_music": (),
+        "jiang_short_drama": ("recommendation-schedules",),
+        "astrbot_plugin_livingmemory": (),
+        "astrbot_plugin_self_learning": (),
+    }
+    for module, pages in modules.items():
+        directory = plugin_root / module
+        directory.mkdir(parents=True)
+        (directory / "_conf_schema.json").write_text(
+            json.dumps({"technical_value": {"type": "string", "default": "hidden"}}),
+            encoding="utf-8",
+        )
+        for page in pages:
+            page_root = directory / "pages" / page
+            page_root.mkdir(parents=True)
+            (page_root / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (legal / "feature-set.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "module": "astrbot_plugin_angel_heart",
+                        "display_name": "长期记忆",
+                        "configuration": "page",
+                        "description": "原生上下文与天使之心",
+                    },
+                    {
+                        "module": "astrbot_plugin_music",
+                        "display_name": "点歌",
+                        "configuration": "none",
+                    },
+                    {
+                        "module": "jiang_short_drama",
+                        "display_name": "短剧",
+                        "configuration": "page-and-global-schedule-center",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+
+    catalog = service.catalog()["plugins"]
+
+    assert [item["display_name"] for item in catalog] == ["长期记忆", "点歌", "短剧"]
+    assert all(item["configurable"] is False for item in catalog)
+    by_name = {item["display_name"]: item for item in catalog}
+    assert by_name["点歌"]["pages"] == ()
+    assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
+    assert by_name["长期记忆"]["pages"] == ("chat-config",)
+    music = service.detail(by_name["点歌"]["id"])
+    drama = service.detail(by_name["短剧"]["id"])
+    assert music["schema"] == music["config"] == {}
+    assert drama["schema"] == drama["config"] == {}
+    with pytest.raises(PluginCenterError, match="没有可编辑"):
+        service.save(by_name["点歌"]["id"], {}, music["revision"])
+
+
+def test_plugin_center_command_can_open_selected_feature(tmp_path: Path) -> None:
+    command = plugin_center_command(tmp_path, "feature-0123456789abcdef")
+
+    assert command[-1] == "feature-0123456789abcdef"
+    with pytest.raises(PluginCenterError, match="标识无效"):
+        plugin_center_command(tmp_path, "../not-a-feature")
+
+
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)
@@ -200,7 +279,7 @@ def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Pa
             / "astrbot"
             / "data"
             / "config"
-            / "astrbot_plugin_self_learning_config.json"
+            / "sample_configurable_feature_config.json"
         ).read_text(encoding="utf-8")
     )
     assert saved["unknown"] == {"keep": True}
@@ -231,7 +310,7 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
         / "astrbot"
         / "data"
         / "config"
-        / "astrbot_plugin_self_learning_config.json"
+        / "sample_configurable_feature_config.json"
     )
     calls: list[tuple[object, ...]] = []
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
@@ -261,9 +340,9 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     }
     assert reloaded["reloaded"] is True
     assert [call[:2] for call in calls] == [
-        ("save", "astrbot_plugin_self_learning"),
-        ("enabled", "astrbot_plugin_self_learning"),
-        ("reload", "astrbot_plugin_self_learning"),
+        ("save", "sample_configurable_feature"),
+        ("enabled", "sample_configurable_feature"),
+        ("reload", "sample_configurable_feature"),
     ]
 
 
@@ -306,7 +385,7 @@ def test_offline_save_can_replace_and_explicitly_clear_secret(tmp_path: Path) ->
         / "astrbot"
         / "data"
         / "config"
-        / "astrbot_plugin_self_learning_config.json"
+        / "sample_configurable_feature_config.json"
     )
     assert json.loads(path.read_text(encoding="utf-8"))["model_group"]["api_secret"] == "replacement-secret"
 
@@ -324,7 +403,7 @@ def test_offline_save_validates_template_list_items(tmp_path: Path) -> None:
         / "astrbot"
         / "data"
         / "plugins"
-        / "astrbot_plugin_self_learning"
+        / "sample_configurable_feature"
     )
     schema = json.loads((plugin / "_conf_schema.json").read_text(encoding="utf-8"))
     schema["workers"] = {
@@ -362,7 +441,7 @@ def test_template_list_credentials_are_redacted_and_preserved(tmp_path: Path) ->
         / "astrbot"
         / "data"
         / "plugins"
-        / "astrbot_plugin_self_learning"
+        / "sample_configurable_feature"
     )
     schema = json.loads((plugin / "_conf_schema.json").read_text(encoding="utf-8"))
     schema["workers"] = {
@@ -388,7 +467,7 @@ def test_template_list_credentials_are_redacted_and_preserved(tmp_path: Path) ->
         / "astrbot"
         / "data"
         / "config"
-        / "astrbot_plugin_self_learning_config.json"
+        / "sample_configurable_feature_config.json"
     )
     stored = json.loads(config_path.read_text(encoding="utf-8"))
     stored["workers"] = [

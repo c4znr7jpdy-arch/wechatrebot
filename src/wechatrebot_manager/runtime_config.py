@@ -8,6 +8,7 @@ import re
 import secrets
 
 from .brand import BrandProfile
+from .feature_policy import load_delivery_features
 from .json_io import write_json_atomic
 from .provider import OpenAIProviderProfile
 
@@ -122,6 +123,7 @@ def astrbot_config_payload(
             }
         ],
         "platform_settings": {
+            "enable_id_white_list": False,
             "reply_with_mention": False,
             "reply_with_quote": True,
             "friend_message_needs_wake_prefix": False,
@@ -134,6 +136,10 @@ def astrbot_config_payload(
             "fallback_chat_models": [],
             "default_image_caption_provider_id": "",
             "default_personality": "default",
+            "context_limit_reached_strategy": "llm_compress",
+            "llm_compress_provider_id": "",
+            "max_context_length": -1,
+            "dequeue_context_length": 1,
         },
         "admins_id": [normalized_admin] if normalized_admin else [],
         "dashboard": {
@@ -257,6 +263,44 @@ def _apply_provider_to_astrbot(
         provider_settings = {}
         payload["provider_settings"] = provider_settings
     provider_settings["default_provider_id"] = normalized.model_id
+    provider_settings["context_limit_reached_strategy"] = "llm_compress"
+    provider_settings["llm_compress_provider_id"] = normalized.model_id
+
+
+def _sync_delivery_plugins(
+    root: Path,
+    astrbot_payload: dict[str, object],
+) -> None:
+    features = load_delivery_features(root)
+    if features is not None:
+        allowed = [feature.module for feature in features]
+        configured = astrbot_payload.get("plugin_set", ["*"])
+        configured_names = (
+            {str(item) for item in configured}
+            if isinstance(configured, list)
+            else {"*"}
+        )
+        astrbot_payload["plugin_set"] = (
+            allowed
+            if "*" in configured_names
+            else [module for module in allowed if module in configured_names]
+        )
+
+
+def _sync_angel_heart_model(
+    astrbot_data_root: Path,
+    provider_profile: OpenAIProviderProfile | None,
+) -> None:
+    if provider_profile is None:
+        return
+    plugin_dir = astrbot_data_root / "plugins" / "astrbot_plugin_angel_heart"
+    if not plugin_dir.is_dir():
+        return
+    path = astrbot_data_root / "config" / "astrbot_plugin_angel_heart_config.json"
+    payload = _load_object(path)
+    if not str(payload.get("analyzer_model") or "").strip():
+        payload["analyzer_model"] = provider_profile.normalized().model_id
+        write_json_atomic(path, payload)
 
 
 def write_runtime_configs(
@@ -278,9 +322,11 @@ def write_runtime_configs(
         bridge_payload,
     )
     astrbot_root = root / "app" / "astrbot"
-    (astrbot_root / "data").mkdir(parents=True, exist_ok=True)
+    astrbot_data_root = astrbot_root / "data"
+    astrbot_data_root.mkdir(parents=True, exist_ok=True)
+    (astrbot_data_root / "config").mkdir(parents=True, exist_ok=True)
     (astrbot_root / ".astrbot").touch(exist_ok=True)
-    astrbot_path = astrbot_root / "data" / "cmd_config.json"
+    astrbot_path = astrbot_data_root / "cmd_config.json"
     generated_astrbot = astrbot_config_payload(
         ports=ports,
         brand_profile=brand_profile,
@@ -328,6 +374,7 @@ def write_runtime_configs(
             )
     else:
         astrbot_payload = generated_astrbot
+    _sync_delivery_plugins(root, astrbot_payload)
     dashboard = astrbot_payload.get("dashboard")
     if not isinstance(dashboard, dict):
         dashboard = {}
@@ -338,6 +385,7 @@ def write_runtime_configs(
         astrbot_path,
         astrbot_payload,
     )
+    _sync_angel_heart_model(astrbot_data_root, provider_profile)
     manager_path = root / "config" / "manager.json"
     manager_payload = _load_object(manager_path)
     manager_payload.update(

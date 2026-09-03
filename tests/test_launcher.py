@@ -2,6 +2,8 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -48,7 +50,12 @@ def _layout(root: Path) -> None:
     (root / "app" / "astrbot" / ".astrbot").touch()
     (root / "app" / "astrbot" / "data").mkdir()
     (root / "app" / "astrbot" / "data" / "cmd_config.json").write_text("{}")
-    (root / "app" / "bridge" / "src").mkdir(parents=True)
+    bridge_package = root / "app" / "bridge" / "src" / "hook_bridge"
+    bridge_package.mkdir(parents=True)
+    (bridge_package / "__init__.py").write_text("")
+    (bridge_package / "__main__.py").write_text(
+        "print('bridge-bootstrap-ok')\n", encoding="utf-8"
+    )
     (root / "app" / "bridge" / "config.json").write_text("{}")
     hook = root / "app" / "bridge" / "vendor" / "hook"
     hook.mkdir(parents=True)
@@ -84,12 +91,31 @@ def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
     assert specs[0].ready_port == 6200
     assert specs[1].ready_port == 5000
     assert specs[1].environment["PYTHONPATH"].endswith("app\\bridge\\src")
+    assert specs[1].argv[1] == "-c"
+    assert specs[1].argv[3].endswith("app\\bridge\\src")
+    assert specs[1].argv[4] == "hook_bridge"
     assert specs[0].environment["PATH"].split(os.pathsep)[0].endswith(
         "runtime\\ffmpeg\\bin"
     )
     assert specs[1].environment["PATH"] == specs[0].environment["PATH"]
     assert specs[0].environment["PYTHONDONTWRITEBYTECODE"] == "1"
     assert specs[1].environment["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_bridge_bootstrap_imports_source_with_isolated_python(tmp_path: Path) -> None:
+    _layout(tmp_path)
+    bridge = build_service_specs(tmp_path)[1]
+
+    result = subprocess.run(
+        [sys.executable, "-I", *bridge.argv[1:]],
+        cwd=bridge.cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "bridge-bootstrap-ok"
 
 
 def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
