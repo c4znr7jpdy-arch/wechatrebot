@@ -3,16 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import zipfile
 
 from .app_shell import run_application
 from .install_paths import INSTALL_MARKER
 from .location import load_install_location
-from .payload import sha256_file
+from .payload import PAYLOAD_ARCHIVE, PAYLOAD_MANIFEST, sha256_file
 from .setup_wizard import run_setup_wizard
 from .single_instance import SingleInstanceLock
 
 
 def _is_payload_root(path: Path) -> bool:
+    if path.is_file():
+        try:
+            with zipfile.ZipFile(path) as archive:
+                payload = json.loads(archive.read(PAYLOAD_MANIFEST).decode("utf-8"))
+        except (KeyError, OSError, UnicodeDecodeError, zipfile.BadZipFile, json.JSONDecodeError):
+            return False
+        return isinstance(payload, dict) and payload.get("schema_version") == 1
     try:
         payload = json.loads(
             (path / "release-manifest.json").read_text(encoding="utf-8-sig")
@@ -32,11 +40,14 @@ def find_bundled_payload(
         candidates.append(Path(explicit).expanduser())
     bundle_root = getattr(sys, "_MEIPASS", None)
     if bundle_root:
+        candidates.append(Path(bundle_root) / PAYLOAD_ARCHIVE)
         candidates.append(Path(bundle_root) / "payload")
     executable_path = Path(executable or sys.executable).expanduser().resolve()
     candidates.extend(
         (
+            executable_path.parent / PAYLOAD_ARCHIVE,
             executable_path.parent / "payload",
+            Path.cwd() / PAYLOAD_ARCHIVE,
             Path.cwd() / "payload",
         )
     )
@@ -71,7 +82,7 @@ def is_development_preview(executable: str | Path | None = None) -> bool:
     """Accept an incomplete payload only inside a deliberately assembled audit package."""
     executable_path = Path(executable or sys.executable).expanduser().resolve()
     manifest_path = executable_path.parent / "DISTRIBUTION-MANIFEST.json"
-    payload_manifest = executable_path.parent / "payload" / "release-manifest.json"
+    payload_archive = executable_path.parent / PAYLOAD_ARCHIVE
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
         files = manifest["files"]
@@ -91,15 +102,19 @@ def is_development_preview(executable: str | Path | None = None) -> bool:
             item.get("sha256")
             for item in files
             if isinstance(item, dict)
-            and item.get("path") == "payload/release-manifest.json"
+            and item.get("path") == PAYLOAD_ARCHIVE
         ),
         None,
     )
     if not isinstance(expected, str) or len(expected) != 64:
         return False
     try:
-        return sha256_file(payload_manifest).casefold() == expected.casefold()
-    except OSError:
+        if sha256_file(payload_archive).casefold() != expected.casefold():
+            return False
+        with zipfile.ZipFile(payload_archive) as archive:
+            payload = json.loads(archive.read(PAYLOAD_MANIFEST).decode("utf-8"))
+        return payload.get("source_manifest_status") == manifest.get("payload_status")
+    except (KeyError, OSError, UnicodeDecodeError, zipfile.BadZipFile, json.JSONDecodeError):
         return False
 
 
@@ -132,7 +147,7 @@ def run_desktop(
         if payload is None:
             if payload_root is not None:
                 raise FileNotFoundError(f"商业载荷无效：{Path(payload_root).resolve()}")
-            raise FileNotFoundError("未找到与安装程序配套的 payload 目录。")
+            raise FileNotFoundError("未找到与安装程序配套的 payload.wrb。")
         return run_setup_wizard(
             payload,
             allow_incomplete_payload=(

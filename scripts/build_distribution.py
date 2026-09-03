@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import uuid
+import zipfile
 
 
 COMMERCIAL_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ SOURCE_ROOT = COMMERCIAL_ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from wechatrebot_manager.payload import sha256_file, verify_payload
+from wechatrebot_manager.payload import PAYLOAD_ARCHIVE, sha256_file, verify_payload
 
 
 def _validate_pe(path: Path) -> None:
@@ -46,12 +47,13 @@ def _write_distribution_manifest(
     development_preview: bool,
 ) -> Path:
     manager = root / "WeChatReBot.exe"
-    payload_manifest = root / "payload" / "release-manifest.json"
+    payload_archive = root / PAYLOAD_ARCHIVE
     manifest = {
         "schema_version": 1,
         "product": "WeChat ReBot",
         "entrypoint": manager.name,
-        "payload_directory": "payload",
+        "payload_file": PAYLOAD_ARCHIVE,
+        "payload_format": "zip-v1",
         "payload_status": payload_status,
         "payload_file_count": payload_file_count,
         "development_preview": development_preview,
@@ -62,9 +64,9 @@ def _write_distribution_manifest(
                 "sha256": sha256_file(manager),
             },
             {
-                "path": "payload/release-manifest.json",
-                "size": payload_manifest.stat().st_size,
-                "sha256": sha256_file(payload_manifest),
+                "path": PAYLOAD_ARCHIVE,
+                "size": payload_archive.stat().st_size,
+                "sha256": sha256_file(payload_archive),
             },
         ],
     }
@@ -74,6 +76,33 @@ def _write_distribution_manifest(
         encoding="utf-8",
     )
     return target
+
+
+def _write_payload_archive(payload: Path, target: Path) -> None:
+    with zipfile.ZipFile(
+        target,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=6,
+        allowZip64=True,
+    ) as archive:
+        for path in sorted(payload.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(payload).as_posix())
+
+
+def _write_outer_archive(output: Path) -> Path:
+    archive_path = output.parent / f"{output.name}.zip"
+    with zipfile.ZipFile(
+        archive_path,
+        "w",
+        compression=zipfile.ZIP_STORED,
+        allowZip64=True,
+    ) as archive:
+        for path in sorted(output.rglob("*")):
+            if path.is_file():
+                archive.write(path, f"{output.name}/{path.relative_to(output).as_posix()}")
+    return archive_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,13 +133,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("output must not be placed inside the source payload")
 
     verified = verify_payload(payload, allow_incomplete=args.allow_incomplete)
+    source_guard = subprocess.run(
+        [sys.executable, str(COMMERCIAL_ROOT / "scripts" / "release_guard.py"), str(payload)],
+        check=False,
+    )
+    if source_guard.returncode:
+        raise RuntimeError("release guard rejected the source payload")
     source_manager = payload / "manager" / "WeChatReBot.exe"
     _validate_pe(source_manager)
 
     temp = artifacts_root / f".distribution-{uuid.uuid4().hex}"
     temp.mkdir(parents=True)
     try:
-        shutil.copytree(payload, temp / "payload")
+        _write_payload_archive(payload, temp / PAYLOAD_ARCHIVE)
         shutil.copy2(source_manager, temp / "WeChatReBot.exe")
         shutil.copy2(COMMERCIAL_ROOT / "release" / "START-HERE.txt", temp / "START-HERE.txt")
         _write_distribution_manifest(
@@ -143,14 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         "archive": None,
     }
     if args.archive:
-        archive = Path(
-            shutil.make_archive(
-                str(output),
-                "zip",
-                root_dir=output.parent,
-                base_dir=output.name,
-            )
-        )
+        archive = _write_outer_archive(output)
         digest = sha256_file(archive)
         checksum = archive.with_suffix(archive.suffix + ".sha256")
         checksum.write_text(f"{digest}  {archive.name}\n", encoding="ascii")

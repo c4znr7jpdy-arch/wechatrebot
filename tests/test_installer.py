@@ -44,7 +44,7 @@ def test_perform_install_writes_ready_brand_and_provider(
         wechat=WechatExecutable(wechat_path, "4.1.8.27", "test", ()),
         brand=BrandProfile("群聊管家", "管家", "小管家"),
         provider=OpenAIProviderProfile(
-            api_key="customer-secret",
+            api_key="example-secret",
             api_base="https://api.example.com/v1",
             model="chat-model",
         ),
@@ -77,7 +77,7 @@ def test_perform_install_writes_ready_brand_and_provider(
     assert astrbot["provider_settings"]["default_personality"] == "commercial_brand"
     assert astrbot["provider_settings"]["default_provider_id"].endswith("/chat-model")
     assert astrbot["admins_id"] == ["wxid_customer_admin"]
-    assert phases == ["verify", "stage", "install", "configure", "configure"]
+    assert phases == ["prepare", "install", "configure", "configure"]
 
 
 def test_perform_install_does_not_require_wechat(

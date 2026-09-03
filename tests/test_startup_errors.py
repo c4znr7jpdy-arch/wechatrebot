@@ -8,7 +8,7 @@ from wechatrebot_manager.startup_errors import (
 
 def test_missing_payload_error_explains_that_the_full_directory_is_required() -> None:
     message = customer_startup_error_message(
-        FileNotFoundError("未找到与安装程序配套的 payload 目录。")
+        FileNotFoundError("未找到与安装程序配套的 payload.wrb。")
     )
     assert "不要单独复制" in message
     assert "DISTRIBUTION-MANIFEST.json" in message

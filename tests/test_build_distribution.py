@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import struct
+import zipfile
 
 import pytest
 
@@ -81,12 +82,17 @@ def test_distribution_contains_one_click_entry_and_nested_payload(
 
     assert module.main(["--payload", str(payload), "--output", str(output)]) == 0
     assert (output / "WeChatReBot.exe").read_bytes().startswith(b"MZ")
-    assert (output / "payload" / "release-manifest.json").is_file()
+    assert (output / "payload.wrb").is_file()
+    with zipfile.ZipFile(output / "payload.wrb") as archive:
+        assert "release-manifest.json" in archive.namelist()
+        assert "manager/WeChatReBot.exe" in archive.namelist()
     manifest = json.loads(
         (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
     )
     assert manifest["entrypoint"] == "WeChatReBot.exe"
     assert manifest["payload_status"] == "ready"
+    assert manifest["payload_file"] == "payload.wrb"
+    assert manifest["payload_format"] == "zip-v1"
     assert manifest["development_preview"] is False
 
 
@@ -125,3 +131,15 @@ def test_incomplete_distribution_is_explicitly_marked_as_development_preview(
         (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
     )
     assert manifest["development_preview"] is True
+
+
+def test_outer_archive_preserves_dotted_release_name(tmp_path: Path) -> None:
+    module = _builder()
+    output = tmp_path / "WeChatReBot-0.8.1-Audit"
+    output.mkdir()
+    (output / "WeChatReBot.exe").write_bytes(b"exe")
+
+    archive = module._write_outer_archive(output)
+
+    assert archive.name == "WeChatReBot-0.8.1-Audit.zip"
+    assert archive.is_file()

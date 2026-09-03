@@ -47,8 +47,10 @@ class InstallRequest:
             normalize_admin_id(self.admin_id)
         except ValueError as exc:
             errors.append(str(exc))
-        if self.payload_root is not None and not self.payload_root.is_dir():
-            errors.append("商业载荷目录不存在。")
+        if self.payload_root is not None and not (
+            self.payload_root.is_dir() or self.payload_root.is_file()
+        ):
+            errors.append("商业安装载荷不存在。")
         return tuple(errors)
 
 

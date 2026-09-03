@@ -23,7 +23,7 @@ def customer_startup_error_message(exc: BaseException) -> str:
         return (
             "启动文件不完整。\n\n"
             "请不要单独复制 WeChatReBot.exe。请使用完整交付目录，并确认 EXE "
-            "旁边保留 payload 文件夹和 DISTRIBUTION-MANIFEST.json。"
+            "旁边保留 payload.wrb 和 DISTRIBUTION-MANIFEST.json。"
         )
     if detail:
         return f"程序未能打开。\n\n原因：{detail}\n\n请将启动错误记录发给技术支持。"

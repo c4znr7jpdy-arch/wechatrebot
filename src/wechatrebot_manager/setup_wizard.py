@@ -298,21 +298,20 @@ class SetupWizard:
 
     def _show_progress(self, phase: str, current: int, total: int) -> None:
         labels = {
-            "verify": "正在验证安装文件",
-            "stage": "正在准备安装文件",
+            "prepare": "正在检查并准备程序",
             "install": "正在写入程序文件",
             "configure": "正在生成初始配置",
         }
         ranges = {
-            "verify": (0.0, 25.0),
-            "stage": (25.0, 50.0),
-            "install": (50.0, 95.0),
+            "prepare": (0.0, 65.0),
+            "install": (65.0, 95.0),
             "configure": (95.0, 100.0),
         }
         start, end = ranges.get(phase, (0.0, 100.0))
         ratio = current / max(total, 1)
         self.progress_var.set(start + (end - start) * ratio)
-        self.progress_text_var.set(f"{labels.get(phase, phase)}：{current} / {total}")
+        percent = min(100, max(0, round(ratio * 100)))
+        self.progress_text_var.set(f"{labels.get(phase, phase)}：{percent}%")
 
     def _show_complete(self, install_root: Path) -> None:
         self.installing = False

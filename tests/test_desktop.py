@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import zipfile
 
 from wechatrebot_manager.desktop import (
     find_bundled_payload,
@@ -20,6 +21,16 @@ def test_find_bundled_payload_next_to_executable(tmp_path: Path) -> None:
     assert find_bundled_payload(executable=executable) == payload.resolve()
 
 
+def test_find_bundled_archive_next_to_executable(tmp_path: Path) -> None:
+    executable = tmp_path / "WeChatReBot.exe"
+    executable.write_bytes(b"exe")
+    payload = tmp_path / "payload.wrb"
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("release-manifest.json", json.dumps({"schema_version": 1}))
+
+    assert find_bundled_payload(executable=executable) == payload.resolve()
+
+
 def test_installed_manager_discovers_its_install_root(tmp_path: Path) -> None:
     manager = tmp_path / "install" / "manager" / "WeChatReBot.exe"
     manager.parent.mkdir(parents=True)
@@ -35,13 +46,12 @@ def test_development_preview_requires_matching_payload_manifest_hash(
 ) -> None:
     executable = tmp_path / "WeChatReBot.exe"
     executable.write_bytes(b"exe")
-    payload = tmp_path / "payload"
-    payload.mkdir()
-    payload_manifest = payload / "release-manifest.json"
-    payload_manifest.write_text(
-        json.dumps({"schema_version": 1, "source_manifest_status": "phase-incomplete"}),
-        encoding="utf-8",
-    )
+    payload = tmp_path / "payload.wrb"
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(
+            "release-manifest.json",
+            json.dumps({"schema_version": 1, "source_manifest_status": "phase-incomplete"}),
+        )
     distribution = {
         "schema_version": 1,
         "entrypoint": executable.name,
@@ -49,8 +59,8 @@ def test_development_preview_requires_matching_payload_manifest_hash(
         "development_preview": True,
         "files": [
             {
-                "path": "payload/release-manifest.json",
-                "sha256": sha256_file(payload_manifest),
+                "path": "payload.wrb",
+                "sha256": sha256_file(payload),
             }
         ],
     }
@@ -59,5 +69,5 @@ def test_development_preview_requires_matching_payload_manifest_hash(
     )
 
     assert is_development_preview(executable)
-    payload_manifest.write_text("{}", encoding="utf-8")
+    payload.write_bytes(b"tampered")
     assert not is_development_preview(executable)

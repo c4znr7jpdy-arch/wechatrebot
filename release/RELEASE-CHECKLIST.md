@@ -21,6 +21,6 @@
 
 - `release/hook-binaries.json`: `redistribution_approved=false`，安全审查和实机验证均为 `pending`。
 - `release/plugin-manifest.json`: `license-review-required`。
-- 图形管理器版本 `0.8.0`: 尚未签名。
+- 图形管理器版本 `0.8.1`: 尚未签名。
 - 远程更新公钥已内置，正式首发前仍须配置独立 HTTPS 发布地址、离线备份私钥并完成升级/回滚实机验证。
 - Node/PHP 音乐侧车已经从商业运行链路移除；点歌使用星之阁并回退网易云直连源。ffmpeg 仅在需要视频转码时才纳入后续许可证审查。
