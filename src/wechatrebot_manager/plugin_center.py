@@ -52,6 +52,7 @@ class PluginCatalogItem:
     enabled: bool
     configurable: bool
     field_count: int
+    model_field_count: int
     pages: tuple[str, ...]
 
 
@@ -89,6 +90,44 @@ def _field_count(schema: dict[str, Any]) -> int:
     return count
 
 
+def _model_field_kind(key: str, field: dict[str, Any]) -> str | None:
+    special = str(field.get("_special") or "").casefold()
+    provider_type = str(field.get("_provider_type") or "").casefold()
+    normalized = key.casefold()
+    if special == "select_persona":
+        return "persona"
+    if special == "select_embedding_provider" or provider_type == "embedding":
+        return "embedding"
+    if provider_type == "rerank" or "rerank_provider" in normalized:
+        return "rerank"
+    if special == "select_provider" or normalized.endswith("provider_id"):
+        return "chat"
+    if "persona" in normalized and normalized.endswith(("_id", "_name")):
+        return "persona"
+    return None
+
+
+def _split_schema(
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    basic: dict[str, Any] = {}
+    models: dict[str, Any] = {}
+    for key, field in schema.items():
+        if not isinstance(field, dict):
+            continue
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            basic_items, model_items = _split_schema(field["items"])
+            if basic_items:
+                basic[key] = {**field, "items": basic_items}
+            if model_items:
+                models[key] = {**field, "items": model_items}
+        elif _model_field_kind(str(key), field):
+            models[key] = field
+        else:
+            basic[key] = field
+    return basic, models
+
+
 def _merge_defaults(schema: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     result = dict(config)
     for key, field in schema.items():
@@ -102,6 +141,67 @@ def _merge_defaults(schema: dict[str, Any], config: dict[str, Any]) -> dict[str,
             )
         elif key not in result and "default" in field:
             result[key] = field["default"]
+    return result
+
+
+def _normalize_value(field: dict[str, Any], value: Any) -> Any:
+    if value is None:
+        return None
+    field_type = str(field.get("type") or "string")
+    if field_type in {"string", "text"}:
+        if isinstance(value, (str, int, float, bool)):
+            return str(value).lower() if isinstance(value, bool) else str(value)
+        return value
+    if field_type == "int" and isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return value
+    if field_type == "float" and isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return value
+    if field_type == "bool" and isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        return value
+    if field_type == "object" and isinstance(value, dict):
+        items = field.get("items")
+        return _normalize_config(items, value) if isinstance(items, dict) else dict(value)
+    if field_type == "list" and isinstance(value, list):
+        item_schema = field.get("items")
+        if isinstance(item_schema, dict) and item_schema.get("type"):
+            return [_normalize_value(item_schema, item) for item in value]
+        return list(value)
+    if field_type == "template_list" and isinstance(value, list):
+        templates = field.get("templates")
+        result = []
+        for item in value:
+            if not isinstance(item, dict) or not isinstance(templates, dict):
+                result.append(item)
+                continue
+            template = templates.get(item.get("__template_key"))
+            template_items = template.get("items") if isinstance(template, dict) else None
+            result.append(
+                _normalize_config(template_items, item)
+                if isinstance(template_items, dict)
+                else dict(item)
+            )
+        return result
+    return value
+
+
+def _normalize_config(
+    schema: dict[str, Any], config: dict[str, Any]
+) -> dict[str, Any]:
+    result = dict(config)
+    for key, field in schema.items():
+        if isinstance(field, dict) and key in result:
+            result[key] = _normalize_value(field, result[key])
     return result
 
 
@@ -170,6 +270,32 @@ def _validate_config(schema: dict[str, Any], config: dict[str, Any], path: str =
                 )
         if field_type == "object" and isinstance(value, dict) and isinstance(field.get("items"), dict):
             _validate_config(field["items"], value, field_path)
+        elif field_type == "list" and isinstance(value, list):
+            item_schema = field.get("items")
+            if isinstance(item_schema, dict) and item_schema.get("type"):
+                for index, item in enumerate(value):
+                    _validate_config(
+                        {"item": item_schema},
+                        {"item": item},
+                        f"{field_path}[{index}]",
+                    )
+        elif field_type == "template_list" and isinstance(value, list):
+            templates = field.get("templates")
+            if not isinstance(templates, dict):
+                continue
+            for index, item in enumerate(value):
+                if not isinstance(item, dict):
+                    raise PluginCenterError(
+                        f"“{field.get('description') or field_path}”的第 {index + 1} 项格式不正确。"
+                    )
+                template_key = item.get("__template_key")
+                template = templates.get(template_key)
+                if isinstance(template, dict) and isinstance(template.get("items"), dict):
+                    _validate_config(
+                        template["items"],
+                        item,
+                        f"{field_path}[{index}]",
+                    )
 
 
 def _dashboard_path(install_root: Path) -> Path:
@@ -261,7 +387,12 @@ class EngineApiClient:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PluginCenterError("回复引擎返回了无法识别的数据。") from exc
         if status >= 400 or not isinstance(response, dict) or response.get("status") == "error":
-            raise PluginCenterError("回复引擎未接受本次操作，请检查配置后重试。")
+            message = ""
+            if isinstance(response, dict):
+                message = str(_white_label_schema(response.get("message") or "")).strip()
+            raise PluginCenterError(
+                message or "回复引擎未接受本次操作，请检查配置后重试。"
+            )
         return response.get("data", response)
 
     def is_available(self) -> bool:
@@ -303,11 +434,14 @@ class PluginCenterService:
         for plugin in load_plugins(self.install_root):
             plugin_dir = root / plugin.module_name
             schema = _read_object(plugin_dir / "_conf_schema.json")
+            _, model_schema = _split_schema(schema)
             pages_root = plugin_dir / "pages"
             pages = tuple(
                 path.name
                 for path in sorted(pages_root.iterdir(), key=lambda item: item.name.casefold())
-                if path.is_dir() and _PAGE_ID.fullmatch(path.name)
+                if path.is_dir()
+                and _PAGE_ID.fullmatch(path.name)
+                and (path / "index.html").is_file()
             ) if pages_root.is_dir() else ()
             entries.append(
                 {
@@ -316,6 +450,7 @@ class PluginCenterService:
                     "enabled": plugin.enabled,
                     "configurable": bool(schema),
                     "field_count": _field_count(schema),
+                    "model_field_count": _field_count(model_schema),
                     "pages": pages,
                 }
             )
@@ -332,13 +467,16 @@ class PluginCenterService:
         for plugin in load_plugins(self.install_root):
             if _public_plugin_id(plugin.module_name) == public_id:
                 schema = _read_object(root / plugin.module_name / "_conf_schema.json")
+                _, model_schema = _split_schema(schema)
                 pages_root = root / plugin.module_name / "pages"
                 pages = tuple(
                     path.name
                     for path in sorted(
                         pages_root.iterdir(), key=lambda item: item.name.casefold()
                     )
-                    if path.is_dir() and _PAGE_ID.fullmatch(path.name)
+                    if path.is_dir()
+                    and _PAGE_ID.fullmatch(path.name)
+                    and (path / "index.html").is_file()
                 ) if pages_root.is_dir() else ()
                 return PluginCatalogItem(
                     module_name=plugin.module_name,
@@ -346,6 +484,7 @@ class PluginCenterService:
                     enabled=plugin.enabled,
                     configurable=bool(schema),
                     field_count=_field_count(schema),
+                    model_field_count=_field_count(model_schema),
                     pages=pages,
                 )
         raise PluginCenterError("所选功能不存在或尚未交付。")
@@ -354,11 +493,13 @@ class PluginCenterService:
         item = self._plugin(public_id)
         module_name = item.module_name
         schema = _read_object(_plugin_root(self.install_root) / module_name / "_conf_schema.json")
+        basic_schema, model_schema = _split_schema(schema)
         stored = _read_object(_config_path(self.install_root, module_name))
-        config = _merge_defaults(schema, stored)
+        config = _normalize_config(schema, _merge_defaults(schema, stored))
         engine_config = _read_object(_dashboard_path(self.install_root))
         providers: list[dict[str, str]] = []
         embedding_providers: list[dict[str, str]] = []
+        rerank_providers: list[dict[str, str]] = []
         configured_providers = engine_config.get("provider", [])
         if not isinstance(configured_providers, list):
             configured_providers = []
@@ -368,12 +509,25 @@ class PluginCenterService:
             provider_id = str(provider.get("id") or "").strip()
             if not provider_id:
                 continue
-            label = str(provider.get("model") or provider_id.rsplit("/", 1)[-1]).strip()
-            choice = {"value": provider_id, "label": label}
-            provider_kind = str(provider.get("type") or "").casefold()
-            if "embedding" in provider_kind or "embedding" in provider_id.casefold():
+            model_name = str(provider.get("model") or "").strip()
+            label = (
+                f"{model_name} · {provider_id}"
+                if model_name and model_name != provider_id
+                else provider_id
+            )
+            choice = {"value": provider_id, "label": str(_white_label_schema(label))}
+            provider_kind = " ".join(
+                (
+                    str(provider.get("type") or ""),
+                    provider_id,
+                    model_name,
+                )
+            ).casefold()
+            if "embedding" in provider_kind:
                 embedding_providers.append(choice)
-            elif "rerank" not in provider_kind and "rerank" not in provider_id.casefold():
+            elif "rerank" in provider_kind:
+                rerank_providers.append(choice)
+            else:
                 providers.append(choice)
         configured_personas = engine_config.get("persona", [])
         if not isinstance(configured_personas, list):
@@ -390,12 +544,16 @@ class PluginCenterService:
             "enabled": item.enabled,
             "configurable": item.configurable,
             "field_count": item.field_count,
+            "model_field_count": item.model_field_count,
             "pages": item.pages,
             "schema": clean_schema,
+            "basic_schema": _white_label_schema(basic_schema),
+            "model_schema": _white_label_schema(model_schema),
             "config": config,
             "revision": _json_revision(stored),
             "providers": providers,
             "embedding_providers": embedding_providers,
+            "rerank_providers": rerank_providers,
             "personas": personas,
             "engine_online": self.engine.is_available(),
         }

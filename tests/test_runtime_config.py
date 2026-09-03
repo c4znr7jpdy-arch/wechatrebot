@@ -46,6 +46,24 @@ def test_runtime_config_uses_only_new_bridge_ports_and_selected_wechat(
     assert (install / "app" / "astrbot" / ".astrbot").is_file()
 
 
+def test_runtime_config_can_be_created_before_wechat_is_installed(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+
+    write_runtime_configs(install)
+
+    bridge = json.loads(
+        (install / "app" / "bridge" / "config.json").read_text(encoding="utf-8")
+    )
+    manager = json.loads(
+        (install / "config" / "manager.json").read_text(encoding="utf-8")
+    )
+    assert bridge["wechat_exe_path"] == ""
+    assert manager["wechat_exe_path"] == ""
+    assert manager["wechat_version"] is None
+
+
 def test_runtime_ports_must_be_unique() -> None:
     ports = RuntimePorts(dashboard=6200, astrbot_ws=6200)
     with pytest.raises(ValueError, match="不能重复"):

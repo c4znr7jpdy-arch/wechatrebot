@@ -1,153 +1,108 @@
 ---
-version: "0.1"
-name: "WeChat ReBot Desktop Console"
-description: "面向非技术客户的一键运行、白标微信机器人通信控制台。"
+version: "0.2"
+name: "WeChat ReBot Customer Desktop"
+description: "面向非技术客户的一键安装、微信环境检测、运行控制与业务功能管理软件。"
 colors:
-  ink: "#102A49"
-  primary: "#1769E8"
-  primary-hover: "#0E55C6"
-  success: "#16845B"
-  warning: "#92400E"
-  danger: "#B33A3A"
-  canvas: "#F8FAFD"
+  navy-950: "#071D32"
+  navy-900: "#102A49"
+  blue-600: "#0877E8"
+  blue-700: "#0867CC"
+  green-600: "#149A68"
+  amber-700: "#B66818"
+  red-700: "#B33A4A"
+  canvas: "#F3F6FA"
   surface: "#FFFFFF"
-  surface-muted: "#F3F6FA"
-  border: "#D9DFE8"
-  text-muted: "#59677B"
+  line: "#D8E1EC"
+  text: "#0A1D33"
+  text-muted: "#617087"
 typography:
-  sans:
-    fontFamily: "Microsoft YaHei UI, Segoe UI, sans-serif"
-  display:
-    fontFamily: "Bahnschrift, Segoe UI Semibold, Microsoft YaHei UI, sans-serif"
-  mono:
-    fontFamily: "Cascadia Mono, Consolas, monospace"
+  sans: "Microsoft YaHei UI, Segoe UI, sans-serif"
+  display: "Bahnschrift, Segoe UI Semibold, Microsoft YaHei UI, sans-serif"
+  mono: "Cascadia Mono, Consolas, monospace"
 rounded:
-  DEFAULT: "8px"
-  sm: "6px"
-  md: "8px"
-  lg: "12px"
+  control: "8px"
+  panel: "12px"
 spacing:
   unit: "4px"
-  sidebar-width: "212px"
-  content-gap: "20px"
-components:
-  button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.surface}"
-    rounded: "{rounded.sm}"
-    padding: "12px"
-  button-primary-hover:
-    backgroundColor: "{colors.primary-hover}"
-  navigation:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.surface}"
-  page-canvas:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-  surface:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-  surface-muted:
-    backgroundColor: "{colors.surface-muted}"
-    textColor: "{colors.text-muted}"
-  divider:
-    backgroundColor: "{colors.border}"
-    height: "1px"
-  status-success:
-    backgroundColor: "{colors.success}"
-    textColor: "{colors.surface}"
-  status-warning:
-    backgroundColor: "{colors.warning}"
-    textColor: "{colors.surface}"
-  status-danger:
-    backgroundColor: "{colors.danger}"
-    textColor: "{colors.surface}"
+  sidebar: "244px"
+  page-gap: "18px"
 ---
 
-# WeChat ReBot Desktop Console Design System
+# WeChat ReBot Customer Desktop Design System
 
-## Overview
+## Product direction
 
-### Creative North Star
+这是普通用户使用的微信机器人管理软件，不是底层运行框架的管理壳。用户只需要理解四件事：微信是否准备好、机器人是否可用、有哪些功能、自己的数据在哪里。
 
-以用户提供的“姜小妹机器人商业版”桌面稿为直接视觉基准：白色品牌顶栏、深蓝侧栏、中央圆形启动器、右侧运行状态和底部最近运行。状态先于装饰，操作顺序清楚，故障位置可以一眼定位；不使用玻璃拟态或营销式插画。
+- 用户：非技术 Windows 客户、社群运营者、客服经营者。
+- 首要任务：安装后打开软件，确认微信环境，点击一次启动。
+- 语言：只使用“机器人、微信连接、功能、聊天记录、定时任务、运行记录”。客户界面不得出现底层框架名、组件名或开发术语。
+- 视觉基调：可靠、安静、偏桌面工具；状态比装饰重要。
+- 识别特征：深海军蓝侧栏、中央圆形运行状态、三阶段连接轨道。
 
-### Product context and register
+## Runtime ownership
 
-- **Audience and primary job:** 中国大陆非技术 Windows 客户；双击程序并点击一次，让机器人拉起微信、等待登录并进入在线状态。
-- **Target market(s) and evidence:** 中国大陆微信社群运营者与客服经营者，来自 `docs/requirements/requirements-commercialization.md` 的商业化需求。
-- **Locale(s) and language policy:** 首版仅简体中文；界面术语必须是产品自有语言，底层框架名不得出现在日常操作界面、提示或导出诊断中。
-- **Usage scene:** Windows 桌面、日常高频启动与低频配置；首页低密度，日志页高密度。
-- **Register:** 产品型控制台。法律声明和第三方许可证属于交付材料，不进入日常运行界面。
-- **Memorable signature:** 首页中央双环电源启动器与下方三步进度，依次表示启动服务、打开微信、登录完成。
-- **Restraint:** 表单、插件列表和日志遵循熟悉的桌面交互，表达性只放在运行中心。
-- **Anti-references:** 不做通用后台模板、圆角卡片海、巨型标题、无意义图标、emoji 状态或网页导航栏。
-- **Token ownership/runtime mapping:** 本文件是设计意图源；运行时由 `src/wechatrebot_manager/ui_theme.py` 显式映射到 Tk/ttk 样式，测试检查关键颜色与术语漂移。
-
-## Colors
-
-`ink` 用于侧栏与强层级；`primary` 只用于主要动作和当前导航；`success`、`warning`、`danger` 只表达状态。`canvas` 与 `surface` 形成安静的两层背景，`border` 保证浅色环境下的组件边界。首版仅支持亮色主题，键盘焦点使用 `primary` 高对比描边。
-
-## Typography
-
-正文和控件使用 Microsoft YaHei UI；标题/状态数字优先 Bahnschrift 或 Segoe UI Semibold；日志、端口和路径使用 Cascadia Mono/Consolas。标题不用全大写，中文按钮使用动作短语。
+`DESIGN.md` 定义视觉与交互意图；实际桌面界面由 `src/wechatrebot_manager/app_webui/` 实现并通过 Edge WebView2 承载。Python `ApplicationApi` 只提供业务数据与动作，页面不得直接启动、终止或探测进程。
 
 ## Layout
 
-默认窗口 1254×802、最小尺寸 1120×720；使用 56px 自绘品牌顶栏和固定 212px 左侧导航。在 Windows 125% 缩放下对应参考稿的 1568×1003、70px 顶栏和 265px 侧栏。右侧内容区按 20px 间距组织：首页上部为中央启动器与右侧状态面板，下部为最近运行；表单标签宽度稳定，错误提示保留布局空间。窗口缩放时内容区扩展，侧栏与主操作几何保持稳定。
+- 正式窗口默认 1380×860，最小 1080×680。
+- 侧栏 244px，顶部状态栏 70px，内容区最大宽度 1480px。
+- 1220px 以下将运行中心、聊天详情等复杂区域逐步重排；900px 以下侧栏缩为 78px 图标栏，功能、聊天、设置改为单列。
+- 表格在窄窗口内局部滚动，不让整个页面产生横向滚动。
+- 100% 与 125% Windows 缩放下都必须保留主按钮、错误处理入口与当前状态。
 
-## Elevation & Depth
+## Color and typography
 
-以色块和 1px 边框表达层级，窗口内部不叠加重阴影。弹窗使用系统窗口层级；侧栏、页头和内容面板不使用模糊或透明效果。
+海军蓝用于结构，亮蓝只用于当前导航和主要动作，绿色/琥珀/红色只表达成功、等待、失败。状态必须同时有文字或形状，不得只靠颜色。
 
-## Shapes
-
-普通容器 8px、强调面板 12px、输入和按钮 6px；状态节点使用圆形。日志区域与侧栏允许直边，避免所有内容都变成卡片。
+正文使用 Microsoft YaHei UI/Segoe UI；状态标题和数字使用 Bahnschrift/Segoe UI Semibold；路径与错误码使用等宽字体。正文不小于 12px，主要正文以 13–14px 为主。
 
 ## Components
 
-### Foundational visual states
+### Navigation
 
-默认、悬停、按下、禁用和忙碌状态由共享 ttk 样式控制。保存与启动期间按钮保持原宽并显示明确动词；错误以内联横幅为主，破坏性恢复操作才使用确认弹窗。
+固定六项：运行中心、功能中心、聊天记录、定时任务、运行记录、设置。当前项使用整行高亮与左侧蓝条。品牌名称与简称来自统一品牌配置。
 
-### Buttons and actions
+### Run center
 
-每页最多一个主按钮。运行中心使用宽主按钮“一键启动”；停止为次级危险动作。按钮忙碌时禁用重复提交，文本切换为“正在启动…”或“正在保存…”。
+首页必须同时回答：当前是否可用、停在哪一步、用户下一步做什么。
 
-### Navigation and data display
+- 主操作只有启动或停止一个语义。
+- 只有回复能力、微信连接、身份和心跳全部健康时才显示“机器人可用”。
+- 环境未通过时主按钮禁用，并展示下载安装、重新选择、重新检测。
+- 停止时如微信仍运行，进入等待状态并明确要求用户先关闭微信。
+- 错误块固定包含用户语言标题、错误码、说明和解决步骤。
 
-左侧导航固定为运行中心、机器人设置、回复模型、功能扩展、运行日志。当前页使用整行蓝色底与左侧高亮条；每页标题同步更新窗口标题。
+### Feature center
 
-“功能扩展”从主控制台打开独立配置窗口。配置窗口沿用白色品牌顶栏与深蓝功能目录，使用 292px 左栏搜索/选择功能，右栏展示标题、启停、热重载、基础配置和高级页面。内部功能标识不得作为列表名称、标题或浏览地址展示。
+左侧搜索和选择功能，右侧展示启停、基础设置与模型设置。功能 Schema 动态生成字段；用户界面统一称“功能”，禁止出现“插件”。保存时保留输入，失败不清空表单。
 
-### Forms and overlays
+### Chat history
 
-字段使用稳定标签列，密钥默认遮罩并提供显示/隐藏。验证错误出现在表单顶部且不清空输入。关闭运行中的控制台与恢复备份需要确认。
+宽屏为聊天列表、消息内容、聊天信息三栏；窄屏按列表→消息→信息顺序排列。支持个人/群聊分类、昵称/微信号/内容搜索、日期筛选、导出、按会话删除和按日期清理。本地副本删除不得伤害原始微信记录或机器人记忆源。
 
-插件配置由交付 Schema 动态生成：对象为分组，布尔值为带文字状态的复选框，枚举与模型使用 Windows 原生下拉选择，数字使用范围输入，列表/模板列表使用带格式校验的结构编辑区。Windows 原生下拉弹层是本桌面产品允许的系统控件变体。切换功能且存在未保存修改时使用自有模态层，不调用浏览器提示框。
+### Schedules
 
-软件更新使用 610×510 的自有模态窗口，展示当前/目标版本、更新标题、变更摘要、包体大小和签名校验说明。下载、展开和逐文件验证共享一条稳定进度条；忙碌期间禁用关闭与重复提交，失败后在原位显示恢复建议和“重试”。顶栏“检查更新”是次级动作，发现版本后文案切换为“发现新版本”，不使用仅靠颜色传达状态的红点。
+只展示业务定时任务，内部维护任务隐藏。表格包含任务、来源、发送对象、执行时间、下次运行、状态和操作。暂停、修改时间、删除都使用产品自有反馈和确认层。
 
-### Iconography
+### Settings and updates
 
-首版不依赖图标字体或外部图片；品牌标记、导航、状态和窗口控件均使用代码绘制的线性图标，确保离线安装一致。所有关键动作必须同时保留文字标签。
+设置分为品牌身份、回复模型、微信位置、维护四块。品牌保存是“一键替换”的唯一入口。API Key 不回显。更新只在机器人完全停止时安装；远程清单与包体校验全部通过后交给独立更新程序，失败自动回滚。
 
-### Motion
+### Dialogs and feedback
 
-不使用装饰动画。状态轨道仅在阶段变化时更新颜色和文案；轮询为 1 秒，不造成布局跳动。
+确认、删除、修改时间和更新确认使用应用自有模态层；文件/目录选择使用 Windows 系统选择器。禁止 `alert`、`confirm`、`prompt`。普通成功使用短时 toast，持久故障使用页面内错误块。
 
-配置窗口只在首次载入使用小型进度旋转；遵循系统减少动态效果设置。保存、启停和热重载期间保持按钮宽度并阻止重复提交。
+## Interaction states
 
-更新检查没有装饰动画；自动检查断网时保持安静，只有手动检查才显示网络错误。更新过程中使用确定进度，不自动启动机器人。
+按钮和输入必须覆盖默认、悬停、键盘焦点、禁用、忙碌、错误。忙碌期间禁止重复提交且保持原宽。搜索支持中文输入法合成事件、280ms 防抖和清除按钮。尊重 `prefers-reduced-motion`。
 
-### Content and data visualization
+## Do / Don't
 
-语气直接、可操作：说明当前状态、下一步和恢复方式。客户可见术语固定为“回复引擎”“微信连接”“功能插件”“运行日志”，不暴露底层项目名称。
-
-## Do's and Don'ts
-
-- **Do:** 首屏只让用户做一次明确选择：启动机器人。
-- **Do:** 所有页面复用同一套颜色、间距、按钮和反馈组件。
-- **Don't:** 在客户界面、提示、诊断键名或日志来源标签中出现底层框架品牌。
-- **Don't:** 用大量卡片、渐变和 emoji 掩盖状态与故障恢复信息。
+- Do：先告诉用户结果和下一步，再提供细节。
+- Do：始终让“能否启动/停止”与后台真实状态一致。
+- Do：把日志、错误和更新反馈写成普通用户能理解的中文。
+- Don't：暴露底层框架、连接组件、模块加载器、堆栈或内部端口。
+- Don't：使用 emoji 充当操作图标、浏览器原生确认框或无意义装饰动画。
+- Don't：在商业包中携带微信安装程序、旧连接实现、本地 Node/PHP 音乐服务或未获准发布的内容。

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from .control_center import run_control_center
+from .app_shell import run_application
 from .install_paths import INSTALL_MARKER
 from .location import load_install_location
 from .payload import sha256_file
@@ -127,7 +127,7 @@ def run_desktop(
         return 3
     try:
         if installed is not None:
-            return run_control_center(installed)
+            return run_application(installed)
         payload = find_bundled_payload(payload_root)
         if payload is None:
             if payload_root is not None:

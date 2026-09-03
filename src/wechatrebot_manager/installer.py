@@ -28,8 +28,8 @@ InstallProgress = Callable[[str, int, int], None]
 class InstallRequest:
     install_root: Path
     payload_root: Path | None
-    wechat: WechatExecutable
     brand: BrandProfile
+    wechat: WechatExecutable | None = None
     provider: OpenAIProviderProfile | None = None
     admin_id: str = ""
     allow_incomplete_payload: bool = False
@@ -38,7 +38,7 @@ class InstallRequest:
         errors: list[str] = []
         install = validate_install_path(self.install_root)
         errors.extend(install.errors)
-        if not self.wechat.supported:
+        if self.wechat is not None and not self.wechat.supported:
             errors.extend(self.wechat.errors)
         errors.extend(self.brand.validate())
         if self.provider is not None:
@@ -83,8 +83,10 @@ def perform_install(
         normalized_brand = install_brand_profile(root, request.brand)
         write_runtime_configs(
             root,
-            request.wechat.path,
-            wechat_version=request.wechat.version,
+            request.wechat.path if request.wechat is not None else None,
+            wechat_version=(
+                request.wechat.version if request.wechat is not None else None
+            ),
             brand_profile=normalized_brand,
             provider_profile=request.provider,
             admin_id=request.admin_id,

@@ -62,22 +62,44 @@
 
           <nav class="tabs" aria-label="配置类型">
             <button class="tab active" id="basic-tab" type="button" aria-selected="true" disabled>基础配置</button>
+            <button class="tab" id="models-tab" type="button" aria-selected="false" hidden disabled>模型绑定</button>
             <button class="tab" id="pages-tab" type="button" aria-selected="false" hidden disabled>高级页面</button>
           </nav>
 
-          <div id="basic-panel" class="tab-panel">
-            <form id="config-form" novalidate>
+          <form id="config-form" novalidate>
+            <div id="basic-panel" class="tab-panel">
+              <div class="config-toolbar">
+                <label class="config-search">
+                  <span class="sr-only">搜索当前功能的配置项</span>
+                  <input id="config-search" type="search" placeholder="搜索配置名称或说明" autocomplete="off">
+                  <button id="clear-config-search" type="button" aria-label="清空配置搜索" disabled>×</button>
+                </label>
+                <span id="config-search-result" class="config-search-result"></span>
+              </div>
               <div id="config-fields" class="config-fields"></div>
               <div id="no-config" class="state-view compact" hidden>
                 <strong>这项功能没有基础配置</strong>
                 <span>仍可启停功能或执行热重载</span>
               </div>
-              <div class="save-bar">
-                <span id="save-hint">修改完成后保存</span>
-                <button id="save-config" class="button primary" type="submit">保存配置</button>
+            </div>
+
+            <div id="models-panel" class="tab-panel" hidden>
+              <div class="model-callout">
+                <strong>每项功能独立选择模型</strong>
+                <span>这里只影响当前功能，不会改变机器人的日常对话模型。留空时跟随机器人默认设置。</span>
               </div>
-            </form>
-          </div>
+              <div id="model-fields" class="config-fields"></div>
+              <div id="no-model-config" class="state-view compact" hidden>
+                <strong>这项功能没有独立模型配置</strong>
+                <span>会自动使用机器人的默认回复模型</span>
+              </div>
+            </div>
+
+            <div id="config-save-bar" class="save-bar">
+              <span id="save-hint">修改完成后保存</span>
+              <button id="save-config" class="button primary" type="submit">保存配置</button>
+            </div>
+          </form>
 
           <div id="pages-panel" class="tab-panel" hidden>
             <div id="page-picker" class="page-picker"></div>

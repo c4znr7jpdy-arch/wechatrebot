@@ -2,116 +2,86 @@
 
 ## Product context
 
-- Audience: 非技术 Windows 客户、社群运营者和微信客服经营者。
-- Primary jobs: 一键启动并登录微信；修改机器人资料；配置回复模型；管理已交付功能；查看日志与导出诊断。
-- Target market(s): 中国大陆。
-- Active locales: 简体中文。
-- Language/content register and native-review policy: 产品自有、直接、无底层框架术语；发布前由项目所有者做中文业务复核。
-- Timezone/calendar policy: Asia/Shanghai，日志显示本机时间。
-- Accessibility target: 键盘可达、高对比焦点、正文不低于 10pt；桌面 Tk 不宣称完整 WCAG 认证。
+- Audience: 非技术 Windows 客户、社群运营者、微信客服经营者。
+- Primary jobs: 一键安装；检查微信；启动/停止机器人；管理功能；查看聊天记录和定时任务；更新软件。
+- Locale: 简体中文，时间使用本机时区（首发目标 Asia/Shanghai）。
+- Accessibility: 键盘可达、焦点可见、状态不只靠颜色、支持减少动态效果。
+- Terminology: 客户可见区域禁止底层框架名、“插件”和“桥”；统一使用“功能、微信连接、机器人功能、运行记录”。
 
-## Business-context sources
+## Sources of truth
 
-| Domain / scope | Authoritative source | Source type | Reviewed date |
-|---|---|---|---|
-| 商业模式与交付范围 | `docs/requirements/requirements-commercialization.md` | Requirements | 2026-09-02 |
-| 客户包文件边界 | `release/source-manifest.json` | Release contract | 2026-09-02 |
-| 插件准入 | `release/plugin-manifest.json` | Release gate | 2026-09-02 |
-| 第三方许可 | `legal/` 与发布包第三方声明 | Legal artifacts | 2026-09-02 |
+| 范围 | 权威来源 | 验证 |
+|---|---|---|
+| 页面与交互 | `src/wechatrebot_manager/app_webui/` | Playwright + 人工截图 |
+| 生命周期 | `lifecycle.py`、`runtime_status.py` | 单元测试 + 真实机器验收 |
+| 环境检测 | `environment.py` | 单元测试 + 各微信安装路径验收 |
+| 功能配置 | `PluginCenterService` + 交付 Schema | 单元测试 |
+| 聊天记录 | `chat_history.py` 的产品数据库 | 单元测试 + 大数据量验收 |
+| 定时任务 | `schedules.py` + 功能原始配置 | 单元测试 + 联调 |
+| 更新 | `updates.py` + 签名发布清单 | 单元测试 + 冻结程序验收 |
+| 发布边界 | `release/source-manifest.json` | release guard |
 
-## Visual contract
+## Canonical UI map
 
-- Project `DESIGN.md`: `DESIGN.md`
-- Token ownership model: DESIGN.md 定义意图，Python 主题文件实现。
-- Runtime design-system/token source: `src/wechatrebot_manager/ui_theme.py`
-- Mapping/export/adapters: `apply_product_theme()`。
-- Token drift gate: 单元测试 + DESIGN lint + 严格项目审计。
-- Supported themes: Windows 亮色主题。
-- Design-context owner/review policy: 商业版桌面端变更必须同时维护 DESIGN.md 与本契约。
+| 页面 | 用户可见能力 | 数据/动作所有者 |
+|---|---|---|
+| 运行中心 | 环境、状态、启动、停止、错误恢复 | `LifecycleController` |
+| 功能中心 | 搜索、选择、启停、动态配置 | `PluginCenterService` |
+| 聊天记录 | 分类、搜索、筛选、消息、导出、清理 | `ChatHistoryService` |
+| 定时任务 | 汇总、启停、改时间、删除 | `ScheduleService` |
+| 运行记录 | 脱敏的结构化生命周期事件 | `EventStore` |
+| 设置 | 品牌、回复模型、微信路径、更新与维护 | `ApplicationApi` |
 
-## Canonical UI Map
-
-| Capability | Canonical owner | Source of truth | Allowed variants | Verification |
-|---|---|---|---|---|
-| 导航 | `ControlCenter` | 页面注册表 | 固定侧栏 | widget test/manual |
-| 表单 | `SettingsPage` / `ModelPage` | manager + runtime config | 编辑 | unit + manual |
-| 插件配置中心 | `PluginCenterService` + 独立 WebView 窗口 | 已安装目录、配置 Schema、本机回复引擎 API | 离线配置/在线热重载/插件高级页 | unit + customer manual |
-| 日志 | `LogCatalog` | 本地日志文件 | 来源/尾部行 | unit + manual |
-| 反馈 | `NoticeBar` | 页面级状态 | info/success/warning/error | widget/manual |
-| 软件更新 | `UpdateDialog` + 独立更新副本 | 签名远程清单与完整 payload | 自动检查/手动检查/回滚 | unit + customer manual |
-
-## Component behavior
-
-| Component | Default | Hover | Focus | Active | Disabled | Busy | Error |
-|---|---|---|---|---|---|---|---|
-| Button | 清晰动作标签 | 色阶变化 | 蓝色焦点 | 加深 | 降低对比 | 文案切换且防重复 | 顶部横幅 |
-| Input | 边框可见 | 不移动 | 焦点描边 | n/a | 只读底色 | 保留宽度 | 保留值并显示原因 |
-| Secret input | 默认遮罩 | n/a | 同 Input | 显示按钮独立 | 同 Input | 同 Input | 不在反馈中回显 |
-| Table/list | 单行选择 | 轻底色 | 键盘可达 | 选中底色 | n/a | 保留旧数据 | 空态/错误态 |
-
-## Dataset navigation
-
-- Admin tables: 首版没有大数据表；插件列表按已安装功能数量自然滚动。
-- Exploratory lists: 日志来源列表保留当前选择。
-- Empty/no-results/error/loading treatment: 每个页面都有明确空态和恢复建议。
-- Selection scope: 插件逐项启停，不提供批量动作。
+UI 只能调用 `ApplicationApi`，不得直接终止进程、改数据库或读取底层日志。
 
 ## Flow ledger
 
-| Operation | Trigger | Pending | Success destination | Success feedback | Failure recovery | Focus outcome | Source ref |
-|---|---|---|---|---|---|---|---|
-| 一键启动 | 首页主按钮 | 阶段轨道 + 禁止重复点击 | 运行中心 | “机器人在线” | 保留日志入口并给出错误 | 回到主按钮/错误横幅 | requirements |
-| 停止 | 首页次按钮 | “正在停止” | 运行中心 | “已停止” | 显示未停止原因 | 停止按钮 | requirements |
-| 保存机器人设置 | 保存按钮 | 禁止重复保存 | 当前页 | 页内成功提示 | 保留全部输入 | 首个错误字段 | requirements |
-| 保存模型 | 保存按钮 | 密钥不回显 | 当前页 | 下次启动生效提示 | 保留输入并指出字段 | 首个错误字段 | requirements |
-| 切换插件状态 | 配置中心启停按钮 | 禁止重复提交 | 当前功能 | 在线立即更新；离线提示下次启动 | 恢复原状态并保留错误 | 当前功能 | plugin manifest |
-| 保存插件配置 | “保存配置/保存并热重载” | 原子写入或本机 API 提交 | 当前功能 | 在线完成热重载；离线提示下次启动 | 保留输入；版本冲突要求刷新 | 保存按钮/首个错误 | plugin schema |
-| 手动热重载 | “热重载”按钮 | 按钮显示“正在重载…” | 当前功能 | “新的设置已经生效” | 保留页面与日志入口 | 热重载按钮 | local engine API |
-| 打开高级页面 | 高级页面按钮 | 显示加载状态 | 当前功能内嵌页 | 页面就地打开 | 引导先启动机器人或重试 | 当前页面按钮 | plugin page API |
-| 导出诊断 | 文件选择 | 后台生成 | 当前页 | 给出文件路径 | 可重试 | 导出按钮 | release contract |
-| 检查更新 | 启动后台检查/顶栏按钮 | “检查中…”且禁止重复 | 当前页/更新弹窗 | 最新版本或发现新版本 | 自动检查静默；手动检查可重试 | 顶栏按钮 | update channel |
-| 安装更新 | “立即更新” | 下载/展开/校验进度；必要时停止机器人 | 新版本控制台 | 更新完成弹窗 | 事务回滚旧版本并显示原因 | 更新弹窗 | signed update manifest |
+| 操作 | Pending | 成功 | 失败与恢复 |
+|---|---|---|---|
+| 首次打开 | 自动检查微信 | 环境通过，允许启动 | 缺失/版本错误时禁用启动，提供下载、选择、重检 |
+| 启动 | 核心准备→微信连接→身份/心跳确认 | 仅全链路健康显示“机器人可用” | 进入 ERROR，展示错误码、用户说明、解决步骤 |
+| 停止 | 若微信运行则等待用户关闭 | 自动依序停止微信连接和机器人功能 | 保持等待页，可重新检测，不强杀微信 |
+| 保存功能 | 禁用重复提交 | 在线尽量立即应用，离线提示下次启动 | 保留字段值；版本冲突要求刷新 |
+| 查询聊天 | 加载保留旧列表 | 显示会话摘要和消息 | 空态或 toast，可修改筛选重试 |
+| 删除聊天 | 自有确认弹窗 | 只删产品本机副本 | 不改微信原记录和记忆源 |
+| 修改定时任务 | 当前行操作暂不可重复 | 同步原功能配置并刷新汇总 | 保留任务并给错误码 |
+| 保存品牌 | 单次提交 | 窗口、导航、回复身份统一更新 | 保留输入并聚焦缺失字段 |
+| 检查更新 | 按钮“检查中…” | 最新版本提示或版本确认弹窗 | 自动检查静默；手动检查展示 14001 |
+| 安装更新 | 必须先完全停止；下载/验证 | 独立更新程序替换后重启 | 14002/14003；事务回滚并在下次打开提示 |
 
-## Navigation and responsive behavior
+## Lifecycle contract
 
-- Route document title policy: `{机器人名称} · {当前页面}`。
-- Sidebar transformation: 桌面端固定侧栏；窗口低于最小尺寸时不再压缩。
-- Truncation/full-value access: 路径和模型名允许换行或横向展开；日志保留横向滚动。
-- Focus restoration: 页面切换后焦点落到页面标题或首个主要操作。
+状态固定为 `STOPPED → CHECKING → CORE_STARTING → CORE_READY → CONNECTION_STARTING → WAITING_WECHAT/VERIFYING_CONNECTION → RUNNING`。任一阶段失败进入 `ERROR`。停止为 `STOP_WAIT_WECHAT → STOPPING → STOPPED`。
 
-## Overlays and feedback
+`RUNNING` 必须同时满足：机器人功能端口就绪、微信连接服务就绪、注入状态就绪、上游通信已连接、已取得微信身份、心跳新鲜。仅端口存在不能宣告可用。
 
-- Dialog primitive: 主窗口使用 Tk Toplevel/系统文件选择器；配置中心使用自有 HTML 模态层，插件高级页使用同源内嵌框架。
-- Destructive confirmation levels: 恢复备份、运行中退出必须二次确认。
-- Alert/banner scope and persistence: 普通保存与错误使用页内横幅；文件选择与破坏性动作使用模态框。
-- Unsaved-changes behavior: 配置中心切换功能时提示放弃或继续编辑；窗口退出不自动提交。
+## Validation and sensitive data
+
+- 表单使用 `novalidate` 与产品自有中文校验，错误不清空输入。
+- API Key、Cookie、令牌、完整堆栈和底层名称不得进入普通日志、错误详情或导出。
+- 错误码来自独立 JSON，可由安装目录配置覆盖；未知错误回落 19000。
+- 结构化事件使用 JSONL，至少覆盖打开、检查微信、准备功能、连接微信、功能完成、微信关闭、停止和错误。
+
+## Responsive and overlay contract
+
+- 正式最小窗口 1080×680；900px 仍需可用，作为布局压力测试。
+- 宽屏聊天三栏；1220px 隐藏信息侧栏；900px 单列。
+- 数据表在面板内滚动；路径和值可换行或截断，但需可选择复制。
+- 所有应用确认框使用自有模态层；系统文件选择器是唯一允许的原生弹层。
+- Esc、点击遮罩和取消按钮关闭非强制模态；确认期间禁止重复提交。
 
 ## Async and resilience
 
-- Mutation default: 离线配置使用原子写入；在线配置调用本机回环接口并由功能管理器完成热重载；配置版本摘要阻止多窗口覆盖。
-- Idempotency and duplicate-submit policy: 忙碌期间禁用按钮；启动监督器只允许一个实例。
-- Offline/read-stale/write behavior: 基础配置离线可读写并在下次启动生效；高级页面和手动热重载仅在回复引擎在线时可用。
-- Retry/backoff/timeout behavior: 服务按固定就绪超时；失败后允许重新启动并查看日志。
-- Remote update behavior: 启动后与每 6 小时检查签名清单；自动检查网络失败静默，手动检查反馈原因；包体 SHA-256、签名、路径和逐文件哈希全部通过后才交给独立更新副本。
-- Long-running progress and return path: 启动阶段持续展示在运行中心，用户可以切换到日志页。
+- 生命周期动作由服务管理层串行化；重复点击返回“正在处理”。
+- 基础设置使用原子写入；聊天导入使用增量游标，删除的产品副本不被重复导入。
+- 自动状态轮询 1.5 秒，不造成布局跳动。
+- 更新清单只接受 HTTPS 与 Ed25519 签名；包体限制大小、SHA-256、解压路径和逐文件清单；替换失败自动回滚。
 
-## Validation
+## Verification matrix
 
-- Schema/validation layer: Python dataclass/显式 validate 方法；插件配置使用交付 Schema 递归校验与浏览器字段校验。
-- Trigger timing: 保存或下一步时验证；微信路径选择后立即验证。
-- Error summary/inline policy: 页首摘要 + 具体字段说明，不清空输入。
-- Sensitive-value handling: API Key 默认遮罩，诊断导出脱敏，日志页不主动显示配置文件。
-
-## Permission and clipboard
-
-- Permission UI strategy: 未交付或未通过准入的插件不展示为可安装项。
-- Clipboard copy policy: 只复制脱敏诊断或日志选段，不复制 API Key。
-- Disabled-state explanation: 控件旁显示“运行中不可修改”或“重启后生效”。
-
-## Verification
-
-- Required static commands: `python -m pytest`; `python -m compileall src`; `npx -p @google/design.md designmd lint DESIGN.md`; premium strict audit。
-- Browser/device/locale/theme matrix: Windows 10/11、Edge WebView2、100%/125% 缩放、简体中文、亮色；开发自动化不得控制用户电脑，最终图形验收由用户手动完成。
-- Accessibility checks: Tab 顺序、焦点可见、密钥遮罩、颜色不作为唯一状态信息。
-- Component-state/visual regression coverage: 运行中心离线/启动中/待登录/在线/失败；表单成功/失败；插件空态；日志缺失。
-- Failure-path evidence: 服务端口占用、微信路径失效、模型字段无效、日志文件不存在。
+- Static: `node --check app.js`、`python -m compileall src`、JSON 解析。
+- Unit: 使用 `PYTHONPATH=src python -m pytest -q`。
+- Browser: Edge/Chromium，1380×860 与 900×700；六个页面、搜索、模态、空态、错误态、控制台零 error/warning。
+- Windows: Windows 10/11，100%/125% 缩放；微信未安装、错误版本、未登录、连接中断、正常运行。
+- Release: 仅新连接实现；无旧目录、微信安装包、本地 Node/PHP 音乐服务；签名更新与回滚使用冻结 EXE 实测。
+- Completion gate: 单元测试通过不等于正式可发布；真实机器、代码签名、Hook 授权、第三方许可证和正式安装包验收仍是独立发布门槛。

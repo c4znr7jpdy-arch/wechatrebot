@@ -55,18 +55,21 @@ class RuntimePorts:
 
 
 def bridge_config_payload(
-    wechat_exe_path: str | Path,
+    wechat_exe_path: str | Path | None = None,
     *,
     ports: RuntimePorts = RuntimePorts(),
 ) -> dict[str, object]:
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    wechat_path = Path(wechat_exe_path).expanduser()
-    if not wechat_path.is_absolute():
-        raise ValueError("微信主程序路径必须是绝对路径。")
+    wechat_path = ""
+    if wechat_exe_path:
+        selected_path = Path(wechat_exe_path).expanduser()
+        if not selected_path.is_absolute():
+            raise ValueError("微信主程序路径必须是绝对路径。")
+        wechat_path = str(selected_path.resolve())
     return {
-        "wechat_exe_path": str(wechat_path.resolve()),
+        "wechat_exe_path": wechat_path,
         "injector_path": "vendor/hook/x64 inject.exe",
         "hook_dll_path": "vendor/hook/libGLESv1-c2c-video-v2.dll",
         "hook_api_host": "127.0.0.1",
@@ -258,7 +261,7 @@ def _apply_provider_to_astrbot(
 
 def write_runtime_configs(
     install_root: str | Path,
-    wechat_exe_path: str | Path,
+    wechat_exe_path: str | Path | None = None,
     *,
     wechat_version: str | None = None,
     ports: RuntimePorts = RuntimePorts(),
@@ -341,7 +344,11 @@ def write_runtime_configs(
         {
             "schema_version": 1,
             "install_root": str(root),
-            "wechat_exe_path": str(Path(wechat_exe_path).expanduser().resolve()),
+            "wechat_exe_path": (
+                str(Path(wechat_exe_path).expanduser().resolve())
+                if wechat_exe_path
+                else ""
+            ),
             "wechat_version": wechat_version,
             "ports": asdict(ports),
         }

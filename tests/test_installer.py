@@ -78,3 +78,38 @@ def test_perform_install_writes_ready_brand_and_provider(
     assert astrbot["provider_settings"]["default_provider_id"].endswith("/chat-model")
     assert astrbot["admins_id"] == ["wxid_customer_admin"]
     assert phases == ["verify", "stage", "install", "configure", "configure"]
+
+
+def test_perform_install_does_not_require_wechat(
+    tmp_path: Path, monkeypatch
+) -> None:
+    payload = tmp_path / "payload"
+    _payload(payload)
+    request = InstallRequest(
+        install_root=tmp_path / "install",
+        payload_root=payload,
+        brand=BrandProfile("群聊管家", "管家", "小管家"),
+    )
+    monkeypatch.setattr(
+        "wechatrebot_manager.installer.validate_install_path",
+        lambda path: InstallPathValidation(Path(path), (), (), 10 * 1024**3),
+    )
+
+    perform_install(
+        request,
+        save_locator=False,
+        create_shortcuts=False,
+    )
+
+    manager = json.loads(
+        (request.install_root / "config" / "manager.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bridge = json.loads(
+        (request.install_root / "app" / "bridge" / "config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manager["wechat_exe_path"] == ""
+    assert bridge["wechat_exe_path"] == ""

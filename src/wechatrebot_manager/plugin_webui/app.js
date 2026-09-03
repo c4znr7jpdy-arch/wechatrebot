@@ -8,12 +8,14 @@ const state = {
   revision: "",
   dirty: false,
   busy: false,
+  activeTab: "basic",
   pendingAction: null,
 };
 
 const el = (id) => document.getElementById(id);
 const list = el("plugin-list");
 const search = el("plugin-search");
+const configSearch = el("config-search");
 const detailView = el("detail-view");
 const emptyView = el("empty-view");
 const loadingView = el("loading-view");
@@ -136,17 +138,41 @@ function isSecret(key, schema) {
   return schema._secret === true || /(?:api.?key|password|secret|token|credential|cookie)/i.test(key);
 }
 
-function choicesFor(schema) {
-  if (Array.isArray(schema.options)) {
-    return schema.options.map((value, index) => ({
+function fieldRole(key, schema) {
+  const special = String(schema._special || "").toLowerCase();
+  const providerType = String(schema._provider_type || "").toLowerCase();
+  const normalized = String(key || "").toLowerCase();
+  if (special === "select_persona") return "persona";
+  if (special === "select_embedding_provider" || providerType === "embedding" || normalized.includes("embedding_provider")) return "embedding";
+  if (providerType === "rerank" || normalized.includes("rerank_provider")) return "rerank";
+  if (special === "select_provider" || normalized.endsWith("provider_id")) return "chat";
+  if (normalized.includes("persona") && (normalized.endsWith("_id") || normalized.endsWith("_name"))) return "persona";
+  return "";
+}
+
+function choicesFor(key, schema, current) {
+  let choices = null;
+  if (schema.type !== "list" && Array.isArray(schema.options)) {
+    choices = schema.options.map((value, index) => ({
       value,
       label: Array.isArray(schema.labels) && schema.labels[index] !== undefined ? schema.labels[index] : value,
     }));
   }
-  if (schema._special === "select_provider") return state.detail.providers || [];
-  if (schema._special === "select_embedding_provider") return state.detail.embedding_providers || [];
-  if (schema._special === "select_persona") return (state.detail.personas || []).map((value) => ({ value, label: value }));
-  return null;
+  const role = fieldRole(key, schema);
+  if (role === "chat") choices = clone(state.detail.providers || []);
+  if (role === "embedding") choices = clone(state.detail.embedding_providers || []);
+  if (role === "rerank") choices = clone(state.detail.rerank_providers || []);
+  if (role === "persona") choices = (state.detail.personas || []).map((value) => ({ value, label: value }));
+  if (choices && current !== null && current !== undefined && current !== "" && !choices.some((item) => item.value === current)) {
+    choices.unshift({ value: current, label: `当前值（模型列表中已不可用） · ${current}`, unavailable: true });
+  }
+  return { choices, role };
+}
+
+function blankChoiceLabel(role) {
+  if (role === "persona") return "跟随默认人格";
+  if (["chat", "embedding", "rerank"].includes(role)) return "跟随机器人默认模型";
+  return "请选择";
 }
 
 function fieldShell(key, schema, path, parentPath) {
@@ -186,7 +212,196 @@ function clearErrors() {
   document.querySelectorAll(".field-error").forEach((node) => node.remove());
 }
 
+function defaultValue(schema) {
+  if (Object.prototype.hasOwnProperty.call(schema, "default")) return clone(schema.default);
+  if (schema.type === "object") {
+    const result = {};
+    Object.entries(schema.items || {}).forEach(([key, field]) => { result[key] = defaultValue(field); });
+    return result;
+  }
+  if (["list", "template_list"].includes(schema.type)) return [];
+  if (schema.type === "bool") return false;
+  if (["int", "float"].includes(schema.type)) return null;
+  return "";
+}
+
+function renderListField(key, schema, path, parentPath) {
+  const { row, label, control } = fieldShell(key, schema, path, parentPath);
+  row.classList.add("list-field");
+  const hint = control.querySelector(".field-hint");
+  const values = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+  const options = Array.isArray(schema.options) ? schema.options : null;
+  if (options) {
+    const choices = document.createElement("div");
+    choices.className = "multi-choice";
+    options.forEach((value, index) => {
+      const item = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = values.includes(value);
+      input.disabled = schema._readonly === true;
+      input.addEventListener("change", () => {
+        const selected = options.filter((option) => choices.querySelector(`input[data-index="${options.indexOf(option)}"]`).checked);
+        setAtPath(path, selected);
+      });
+      input.dataset.index = String(index);
+      const text = document.createElement("span");
+      text.textContent = customerText(Array.isArray(schema.labels) && schema.labels[index] !== undefined ? schema.labels[index] : value);
+      item.append(input, text);
+      choices.appendChild(item);
+    });
+    control.insertBefore(choices, hint);
+  } else if (values.every((value) => ["string", "number"].includes(typeof value))) {
+    const editor = document.createElement("div");
+    editor.className = "simple-list-editor";
+    const draw = () => {
+      editor.replaceChildren();
+      const currentValues = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+      currentValues.forEach((value, index) => {
+        const item = document.createElement("div");
+        item.className = "simple-list-row";
+        const input = document.createElement("input");
+        input.className = "text-input";
+        input.value = value ?? "";
+        input.disabled = schema._readonly === true;
+        input.addEventListener("input", () => {
+          const updated = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+          updated[index] = input.value;
+          setAtPath(path, updated);
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "icon-action danger-text";
+        remove.textContent = "删除";
+        remove.disabled = schema._readonly === true;
+        remove.addEventListener("click", () => {
+          const updated = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+          updated.splice(index, 1);
+          setAtPath(path, updated);
+          draw();
+        });
+        item.append(input, remove);
+        editor.appendChild(item);
+      });
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "inline-add";
+      add.textContent = "+ 添加一项";
+      add.disabled = schema._readonly === true;
+      add.addEventListener("click", () => {
+        const updated = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+        updated.push("");
+        setAtPath(path, updated);
+        draw();
+        editor.querySelector(".simple-list-row:last-of-type input")?.focus();
+      });
+      editor.appendChild(add);
+    };
+    draw();
+    control.insertBefore(editor, hint);
+  } else {
+    const input = document.createElement("textarea");
+    input.className = "json-input";
+    input.spellcheck = false;
+    input.value = JSON.stringify(values, null, 2);
+    input.dataset.json = "true";
+    input.disabled = schema._readonly === true;
+    input.addEventListener("input", () => setDirty(true));
+    control.insertBefore(input, hint);
+  }
+  label.htmlFor = `field-${path.join("-")}`;
+  return row;
+}
+
+function renderTemplateList(key, schema, path, parentPath) {
+  const { row, control } = fieldShell(key, schema, path, parentPath);
+  row.classList.add("template-list-field");
+  const hint = control.querySelector(".field-hint");
+  const templates = schema.templates && typeof schema.templates === "object" ? schema.templates : {};
+  const toolbar = document.createElement("div");
+  toolbar.className = "template-toolbar";
+  const picker = document.createElement("select");
+  picker.className = "select-input";
+  Object.entries(templates).forEach(([templateKey, template]) => {
+    const option = document.createElement("option");
+    option.value = templateKey;
+    option.textContent = customerText(template.name || templateKey);
+    picker.appendChild(option);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "button secondary compact-button";
+  add.textContent = "添加配置";
+  add.disabled = schema._readonly === true || picker.options.length === 0;
+  add.addEventListener("click", () => {
+    const templateKey = picker.value;
+    const template = templates[templateKey];
+    if (!template || typeof template !== "object") return;
+    const item = { __template_key: templateKey };
+    Object.entries(template.items || {}).forEach(([itemKey, itemSchema]) => { item[itemKey] = defaultValue(itemSchema); });
+    const updated = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+    updated.push(item);
+    setAtPath(path, updated);
+    renderConfigPanels();
+  });
+  toolbar.append(picker, add);
+  control.insertBefore(toolbar, hint);
+
+  const cards = document.createElement("div");
+  cards.className = "template-cards";
+  const values = Array.isArray(getAtPath(path)) ? getAtPath(path) : [];
+  values.forEach((item, index) => {
+    const templateKey = item && typeof item === "object" ? item.__template_key : "";
+    const template = templates[templateKey];
+    const card = document.createElement("section");
+    card.className = "template-card";
+    const header = document.createElement("div");
+    header.className = "template-card-header";
+    const title = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = customerText(template?.name || `自定义配置 ${index + 1}`);
+    const badge = document.createElement("span");
+    badge.textContent = `#${index + 1}`;
+    title.append(strong, badge);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-action danger-text";
+    remove.textContent = "删除";
+    remove.disabled = schema._readonly === true;
+    remove.addEventListener("click", () => {
+      const updated = Array.isArray(getAtPath(path)) ? clone(getAtPath(path)) : [];
+      updated.splice(index, 1);
+      setAtPath(path, updated);
+      renderConfigPanels();
+    });
+    header.append(title, remove);
+    card.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "template-card-body";
+    if (template && template.items) {
+      renderSchema(template.items, body, [...path, index]);
+    } else {
+      const message = document.createElement("p");
+      message.className = "field-hint";
+      message.textContent = "这是旧版本留下的自定义配置，会原样保留。";
+      body.appendChild(message);
+    }
+    card.appendChild(body);
+    cards.appendChild(card);
+  });
+  if (!values.length) {
+    const empty = document.createElement("div");
+    empty.className = "template-empty";
+    empty.textContent = "还没有添加配置，请先选择类型。";
+    cards.appendChild(empty);
+  }
+  control.insertBefore(cards, hint);
+  return row;
+}
+
 function renderPrimitive(key, schema, path, parentPath) {
+  if (schema.type === "template_list" && schema.templates) return renderTemplateList(key, schema, path, parentPath);
+  if (schema.type === "list") return renderListField(key, schema, path, parentPath);
   const { row, label, control } = fieldShell(key, schema, path, parentPath);
   const hint = control.querySelector(".field-hint");
   const current = getAtPath(path);
@@ -209,37 +424,37 @@ function renderPrimitive(key, schema, path, parentPath) {
     wrap.append(input, status);
     control.insertBefore(wrap, hint);
   } else {
-    const choices = choicesFor(schema);
+    const { choices, role } = choicesFor(key, schema, current);
     if (choices) {
       input = document.createElement("select");
       input.className = "select-input";
       const blank = document.createElement("option");
       blank.value = "";
-      blank.textContent = "跟随默认设置";
+      blank.textContent = blankChoiceLabel(role);
       input.appendChild(blank);
-      choices.forEach(({ value, label: choiceLabel }) => {
+      choices.forEach(({ value, label: choiceLabel, unavailable }) => {
         const option = document.createElement("option");
         option.value = JSON.stringify(value);
         option.textContent = customerText(choiceLabel);
+        if (unavailable) option.className = "unavailable-option";
         option.selected = current === value;
         input.appendChild(option);
       });
       if (current === null || current === undefined || current === "") blank.selected = true;
-      input.addEventListener("change", () => setAtPath(path, input.value ? JSON.parse(input.value) : null));
+      const emptyValue = schema.default === null || current === null ? null : "";
+      input.addEventListener("change", () => setAtPath(path, input.value ? JSON.parse(input.value) : emptyValue));
     } else if (isSecret(key, schema)) {
       input = document.createElement("input");
       input.className = "text-input";
       input.type = "password";
       input.value = current ?? "";
       input.addEventListener("input", () => setAtPath(path, input.value));
-    } else if (["list", "template_list"].includes(schema.type) || schema.editor_mode === true) {
+    } else if (schema.editor_mode === true) {
       input = document.createElement("textarea");
       input.className = "json-input";
       input.spellcheck = false;
-      input.value = typeof current === "string" && schema.editor_mode === true
-        ? current
-        : JSON.stringify(current ?? (schema.type === "list" || schema.type === "template_list" ? [] : ""), null, 2);
-      input.dataset.json = schema.type === "list" || schema.type === "template_list" ? "true" : "false";
+      input.value = current ?? "";
+      input.dataset.json = "false";
       input.addEventListener("input", () => {
         if (input.dataset.json !== "true") setAtPath(path, input.value);
         else setDirty(true);
@@ -355,6 +570,7 @@ function renderCatalog() {
     button.querySelector(".plugin-name").textContent = customerText(plugin.display_name);
     const labels = [];
     if (plugin.configurable) labels.push(`${plugin.field_count} 项配置`);
+    if (plugin.model_field_count) labels.push(`${plugin.model_field_count} 项模型`);
     if (plugin.pages.length) labels.push(`${plugin.pages.length} 个高级页`);
     button.querySelector(".plugin-meta").textContent = labels.join(" · ") || "无需配置";
     button.addEventListener("click", () => requestSelection(plugin.id));
@@ -370,6 +586,7 @@ function updateDetailHeader() {
   const summary = [];
   summary.push(detail.enabled ? "当前已启用" : "当前已停用");
   if (detail.configurable) summary.push(`${detail.field_count} 项基础配置`);
+  if (detail.model_field_count) summary.push(`${detail.model_field_count} 项模型绑定`);
   if (detail.pages.length) summary.push(`${detail.pages.length} 个高级管理页`);
   el("plugin-summary").textContent = summary.join(" · ");
   el("toggle-plugin").textContent = detail.enabled ? "停用功能" : "启用功能";
@@ -382,18 +599,53 @@ function updateDetailHeader() {
   el("save-config").textContent = detail.engine_online && detail.enabled ? "保存并热重载" : "保存配置";
 }
 
+function applyConfigSearch() {
+  const query = configSearch.value.trim().toLocaleLowerCase("zh-CN");
+  let visible = 0;
+  document.querySelectorAll("#config-fields .field").forEach((row) => {
+    const matched = !query || customerText(row.textContent).toLocaleLowerCase("zh-CN").includes(query);
+    row.classList.toggle("search-hidden", !matched);
+    if (matched) visible += 1;
+  });
+  [...document.querySelectorAll("#config-fields .config-section")].reverse().forEach((section) => {
+    const hasMatch = [...section.querySelectorAll(":scope > .section-fields > .field, :scope > .section-fields > .config-section")]
+      .some((child) => !child.classList.contains("search-hidden"));
+    section.classList.toggle("search-hidden", Boolean(query) && !hasMatch);
+  });
+  el("config-search-result").textContent = query ? `找到 ${visible} 项` : "";
+}
+
+function renderConfigPanels() {
+  const fields = el("config-fields");
+  fields.replaceChildren();
+  const basicSchema = state.detail.basic_schema || state.detail.schema || {};
+  const modelSchema = state.detail.model_schema || {};
+  const hasBasic = state.detail.configurable && Object.keys(basicSchema).length > 0;
+  fields.hidden = !hasBasic;
+  configSearch.closest(".config-toolbar").hidden = !hasBasic;
+  el("no-config").hidden = hasBasic;
+  if (hasBasic) renderSchema(basicSchema, fields);
+
+  const modelFields = el("model-fields");
+  modelFields.replaceChildren();
+  const hasModels = Object.keys(modelSchema).length > 0;
+  el("models-tab").hidden = !hasModels;
+  modelFields.hidden = !hasModels;
+  el("no-model-config").hidden = hasModels;
+  if (hasModels) renderSchema(modelSchema, modelFields);
+
+  const hasConfig = hasBasic || hasModels;
+  el("save-config").dataset.locked = (!hasConfig).toString();
+  el("save-config").disabled = !hasConfig;
+  refreshConditions();
+  applyConfigSearch();
+}
+
 function renderDetail() {
   updateDetailHeader();
   setNotice("");
-  const fields = el("config-fields");
-  fields.replaceChildren();
-  const hasConfig = state.detail.configurable && Object.keys(state.detail.schema || {}).length > 0;
-  fields.hidden = !hasConfig;
-  el("no-config").hidden = hasConfig;
-  el("save-config").dataset.locked = (!hasConfig).toString();
-  el("save-config").disabled = !hasConfig;
-  if (hasConfig) renderSchema(state.detail.schema, fields);
-  refreshConditions();
+  configSearch.value = "";
+  renderConfigPanels();
   renderPages();
   setDirty(false);
 }
@@ -403,6 +655,10 @@ function renderPages() {
   el("pages-tab").hidden = pages.length === 0;
   const picker = el("page-picker");
   picker.replaceChildren();
+  const frame = el("plugin-frame");
+  frame.hidden = true;
+  frame.removeAttribute("src");
+  el("page-placeholder").hidden = false;
   pages.forEach((pageName) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -457,13 +713,17 @@ function closeDiscardModal() {
 }
 
 function showTab(name) {
-  const advanced = name === "pages";
-  el("basic-tab").classList.toggle("active", !advanced);
-  el("pages-tab").classList.toggle("active", advanced);
-  el("basic-tab").setAttribute("aria-selected", (!advanced).toString());
-  el("pages-tab").setAttribute("aria-selected", advanced.toString());
-  el("basic-panel").hidden = advanced;
-  el("pages-panel").hidden = !advanced;
+  state.activeTab = name;
+  ["basic", "models", "pages"].forEach((tabName) => {
+    const selected = name === tabName;
+    el(`${tabName}-tab`).classList.toggle("active", selected);
+    el(`${tabName}-tab`).setAttribute("aria-selected", selected.toString());
+  });
+  const pages = name === "pages";
+  el("config-form").hidden = pages;
+  el("basic-panel").hidden = name !== "basic";
+  el("models-panel").hidden = name !== "models";
+  el("pages-panel").hidden = !pages;
 }
 
 async function saveConfig(event) {
@@ -585,10 +845,13 @@ async function loadCatalog() {
 
 search.addEventListener("input", renderCatalog);
 el("clear-search").addEventListener("click", () => { search.value = ""; renderCatalog(); search.focus(); });
+configSearch.addEventListener("input", applyConfigSearch);
+el("clear-config-search").addEventListener("click", () => { configSearch.value = ""; applyConfigSearch(); configSearch.focus(); });
 el("config-form").addEventListener("submit", saveConfig);
 el("toggle-plugin").addEventListener("click", togglePlugin);
 el("reload-plugin").addEventListener("click", reloadPlugin);
 el("basic-tab").addEventListener("click", () => showTab("basic"));
+el("models-tab").addEventListener("click", () => showTab("models"));
 el("pages-tab").addEventListener("click", () => showTab("pages"));
 el("modal-cancel").addEventListener("click", closeDiscardModal);
 el("modal-confirm").addEventListener("click", () => {
@@ -604,7 +867,7 @@ window.addEventListener("beforeunload", (event) => {
   if (state.dirty) event.preventDefault();
 });
 
-["clear-search", "basic-tab", "pages-tab", "modal-cancel", "modal-confirm"].forEach((id) => {
+["clear-search", "clear-config-search", "basic-tab", "models-tab", "pages-tab", "modal-cancel", "modal-confirm"].forEach((id) => {
   el(id).disabled = false;
 });
 

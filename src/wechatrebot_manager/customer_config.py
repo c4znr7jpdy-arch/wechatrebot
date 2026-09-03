@@ -59,15 +59,13 @@ def save_robot_settings(root: str | Path, settings: RobotSettings) -> RobotSetti
     install, manager_path, _ = _paths(root)
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
-    if not wechat_path:
-        raise ValueError("尚未配置微信路径，请先在数据维护中重新选择微信。")
     normalized_admin = normalize_admin_id(settings.admin_id) or ""
     from .brand import install_brand_profile
 
     profile = install_brand_profile(install, settings.profile)
     write_runtime_configs(
         install,
-        wechat_path,
+        wechat_path or None,
         wechat_version=str(manager.get("wechat_version") or "") or None,
         brand_profile=profile,
         admin_id=normalized_admin,
@@ -120,11 +118,9 @@ def save_provider_profile(root: str | Path, profile: OpenAIProviderProfile) -> O
         raise ValueError("；".join(errors))
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
-    if not wechat_path:
-        raise ValueError("尚未配置微信路径。")
     write_runtime_configs(
         install,
-        wechat_path,
+        wechat_path or None,
         wechat_version=str(manager.get("wechat_version") or "") or None,
         provider_profile=normalized,
     )

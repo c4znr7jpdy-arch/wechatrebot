@@ -1,12 +1,14 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.playwright-cli/
 *.egg-info/
 .venv/
 
 artifacts/
 build/
 dist/
+output/
 
 config/local/
 *.local.json

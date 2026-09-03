@@ -21,6 +21,7 @@ from wechatrebot_manager.plugin_center import (
     PluginCenterService,
     _asset_root,
     _handler,
+    _normalize_config,
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
 
@@ -39,6 +40,7 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
     engine_config["provider"] = [
         {"id": "vendor/reasoning-model", "model": "推理模型", "enable": True},
         {"id": "vector_private", "type": "openai_embedding", "enable": True},
+        {"id": "rank_private", "type": "vllm_rerank", "enable": True},
         {"id": "disabled/model", "model": "停用模型", "enable": False},
     ]
     engine_config["persona"] = [{"name": "客服人格"}]
@@ -49,6 +51,9 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
     module_name = "astrbot_plugin_self_learning"
     plugin = install / "app" / "astrbot" / "data" / "plugins" / module_name
     (plugin / "pages" / "dashboard").mkdir(parents=True)
+    (plugin / "pages" / "dashboard" / "index.html").write_text(
+        "<!doctype html><title>dashboard</title>", encoding="utf-8"
+    )
     schema = {
         "model_group": {
             "description": "AstrBot 模型配置",
@@ -104,6 +109,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "enabled": True,
             "configurable": True,
             "field_count": 3,
+            "model_field_count": 1,
             "pages": ("dashboard",),
         }
     ]
@@ -126,12 +132,21 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     assert detail["config"]["unknown"] == {"keep": True}
     assert detail["config"]["model_group"]["provider_id"] is None
     assert detail["providers"] == [
-        {"value": "vendor/reasoning-model", "label": "推理模型"}
+        {
+            "value": "vendor/reasoning-model",
+            "label": "推理模型 · vendor/reasoning-model",
+        }
     ]
     assert detail["embedding_providers"] == [
         {"value": "vector_private", "label": "vector_private"}
     ]
+    assert detail["rerank_providers"] == [
+        {"value": "rank_private", "label": "rank_private"}
+    ]
     assert detail["personas"] == ["客服人格"]
+    assert "provider_id" in detail["model_schema"]["model_group"]["items"]
+    assert "provider_id" not in detail["basic_schema"]["model_group"]["items"]
+    assert "api_secret" in detail["basic_schema"]["model_group"]["items"]
 
 
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
@@ -170,6 +185,57 @@ def test_offline_save_validates_field_types(tmp_path: Path) -> None:
     detail["config"]["model_group"]["api_secret"] = 42
     with pytest.raises(PluginCenterError, match="类型不正确"):
         service.save(public_id, detail["config"], detail["revision"])
+
+
+def test_offline_save_validates_template_list_items(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    plugin = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "plugins"
+        / "astrbot_plugin_self_learning"
+    )
+    schema = json.loads((plugin / "_conf_schema.json").read_text(encoding="utf-8"))
+    schema["workers"] = {
+        "description": "任务列表",
+        "type": "template_list",
+        "default": [],
+        "templates": {
+            "worker": {
+                "name": "任务",
+                "items": {
+                    "retries": {"description": "重试次数", "type": "int", "default": 2}
+                },
+            }
+        },
+    }
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps(schema, ensure_ascii=False), encoding="utf-8"
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    detail["config"]["workers"] = [
+        {"__template_key": "worker", "retries": "two"}
+    ]
+
+    with pytest.raises(PluginCenterError, match="类型不正确"):
+        service.save(public_id, detail["config"], detail["revision"])
+
+
+def test_legacy_scalar_values_are_normalized_for_schema_forms() -> None:
+    normalized = _normalize_config(
+        {
+            "probability": {"type": "string"},
+            "retries": {"type": "int"},
+            "enabled": {"type": "bool"},
+        },
+        {"probability": 0.3, "retries": "2", "enabled": "true"},
+    )
+
+    assert normalized == {"probability": "0.3", "retries": 2, "enabled": True}
 
 
 def test_dashboard_token_is_short_lived_and_signed(tmp_path: Path) -> None:
@@ -213,6 +279,8 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     visible = f"{html}\n{javascript}\n{css}".casefold()
     assert "热重载" in visible
     assert "保存并热重载" in visible
+    assert "模型绑定" in visible
+    assert "template-card" in visible
     assert "astrbot" not in visible
     assert "window.alert(" not in visible
     assert "window.confirm(" not in visible

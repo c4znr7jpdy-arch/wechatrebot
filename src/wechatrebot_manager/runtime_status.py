@@ -10,6 +10,58 @@ from .launcher import port_accepting
 from .runtime_config import RuntimePorts
 
 
+@dataclass(frozen=True, slots=True)
+class BridgeHealth:
+    service_ready: bool = False
+    hook_ready: bool = False
+    wechat_logged_in: bool = False
+    wechat_identity: str = ""
+    upstream_connected: bool = False
+    heartbeat_fresh: bool = False
+
+    @property
+    def connected(self) -> bool:
+        return (
+            self.service_ready
+            and self.hook_ready
+            and self.wechat_logged_in
+            and bool(self.wechat_identity)
+            and self.upstream_connected
+            and self.heartbeat_fresh
+        )
+
+
+def probe_bridge_health(
+    host: str = "127.0.0.1",
+    port: int = 5000,
+    *,
+    timeout_seconds: float = 0.5,
+) -> BridgeHealth:
+    request = Request(f"http://{host}:{port}/api/health", method="GET")
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read(256 * 1024).decode("utf-8"))
+    except (
+        OSError,
+        HTTPError,
+        URLError,
+        TimeoutError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ):
+        return BridgeHealth()
+    if not isinstance(payload, dict):
+        return BridgeHealth()
+    return BridgeHealth(
+        service_ready=payload.get("service_ready") is True,
+        hook_ready=payload.get("hook_ready") is True,
+        wechat_logged_in=payload.get("wechat_logged_in") is True,
+        wechat_identity=str(payload.get("wechat_identity") or "").strip(),
+        upstream_connected=payload.get("upstream_connected") is True,
+        heartbeat_fresh=payload.get("heartbeat_fresh") is True,
+    )
+
+
 def _find_identity(value: Any) -> str:
     if isinstance(value, dict):
         for key in ("wxid", "account_id", "userName", "user_name"):
@@ -53,10 +105,21 @@ class RuntimeSnapshot:
     engine_ready: bool
     connection_ready: bool
     wechat_identity: str
+    hook_ready: bool | None = None
+    upstream_connected: bool | None = None
+    heartbeat_fresh: bool | None = None
 
     @property
     def online(self) -> bool:
-        return self.engine_ready and self.connection_ready and bool(self.wechat_identity)
+        base = self.engine_ready and self.connection_ready and bool(self.wechat_identity)
+        confirmations = (
+            self.hook_ready,
+            self.upstream_connected,
+            self.heartbeat_fresh,
+        )
+        if all(value is None for value in confirmations):
+            return base
+        return base and all(value is True for value in confirmations)
 
     @property
     def stage(self) -> str:
@@ -72,8 +135,24 @@ class RuntimeSnapshot:
 def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
     engine = port_accepting("127.0.0.1", ports.astrbot_ws)
     connection = port_accepting("127.0.0.1", ports.bridge_callback)
-    identity = probe_wechat_identity(port=ports.hook_api) if connection else ""
-    return RuntimeSnapshot(engine, connection, identity)
+    health = probe_bridge_health(port=ports.bridge_callback) if connection else BridgeHealth()
+    identity = health.wechat_identity
+    if connection and not identity:
+        identity = probe_wechat_identity(port=ports.hook_api)
+    return RuntimeSnapshot(
+        engine,
+        connection and health.service_ready,
+        identity,
+        hook_ready=health.hook_ready,
+        upstream_connected=health.upstream_connected,
+        heartbeat_fresh=health.heartbeat_fresh,
+    )
 
 
-__all__ = ["RuntimeSnapshot", "probe_wechat_identity", "runtime_snapshot"]
+__all__ = [
+    "BridgeHealth",
+    "RuntimeSnapshot",
+    "probe_bridge_health",
+    "probe_wechat_identity",
+    "runtime_snapshot",
+]
