@@ -13,7 +13,12 @@ from .install_paths import (
 )
 from .json_io import write_json_atomic
 from .location import save_install_location
-from .payload import PayloadError, VerifiedPayload, install_payload
+from .payload import (
+    PayloadError,
+    VerifiedPayload,
+    install_payload,
+    payload_relative_paths,
+)
 from .provider import OpenAIProviderProfile
 from .runtime_config import write_runtime_configs
 from .runtime_config import normalize_admin_id
@@ -32,11 +37,21 @@ class InstallRequest:
     wechat: WechatExecutable | None = None
     provider: OpenAIProviderProfile | None = None
     admin_id: str = ""
-    allow_incomplete_payload: bool = False
 
     def validate(self) -> tuple[str, ...]:
         errors: list[str] = []
-        install = validate_install_path(self.install_root)
+        relative_paths: tuple[Path, ...] = ()
+        if self.payload_root is not None and (
+            self.payload_root.is_dir() or self.payload_root.is_file()
+        ):
+            try:
+                relative_paths = payload_relative_paths(self.payload_root)
+            except PayloadError as exc:
+                errors.append(str(exc))
+        install = validate_install_path(
+            self.install_root,
+            payload_relative_paths=relative_paths,
+        )
         errors.extend(install.errors)
         if self.wechat is not None and not self.wechat.supported:
             errors.extend(self.wechat.errors)
@@ -77,7 +92,6 @@ def perform_install(
             verified = install_payload(
                 request.payload_root,
                 root,
-                allow_incomplete=request.allow_incomplete_payload,
                 progress_callback=progress_callback,
             )
         if progress_callback is not None:

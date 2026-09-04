@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_download_page_has_safe_progressive_download_ui() -> None:
+    page = (ROOT / "deploy" / "download-site" / "index.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'lang="zh-CN"' in page
+    assert 'id="downloadLink"' in page
+    assert 'aria-disabled="true"' in page
+    assert 'role="alert"' in page
+    assert 'aria-live="polite"' in page
+    assert 'fetch("./download.json"' in page
+    assert 'endsWith(".zip")' in page
+    assert "trustedDownloadOrigins" in page
+    assert '"https://download.xiuxianjyj.xin"' in page
+    assert 'url.protocol !== "https:"' in page
+    assert "SHA-256" in page
+    assert "完整解压" in page
+    assert "不要直接在压缩包内运行" in page
+    assert "@media (prefers-reduced-motion: reduce)" in page
+
+
+def test_nginx_exposes_page_metadata_and_customer_archives() -> None:
+    config = (ROOT / "deploy" / "nginx" / "wechatrebot-updates.conf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "location = /wechatrebot-updates {" in config
+    assert "return 301 /wechatrebot-updates/;" in config
+    assert "alias /srv/wechatrebot-updates/site/;" in config
+    assert "index index.html;" in config
+    assert "location = /wechatrebot-updates/index.html {" in config
+    assert "alias /srv/wechatrebot-updates/site/index.html;" in config
+    assert "internal;" in config
+    assert "location = /wechatrebot-updates/download.json {" in config
+    assert "alias /srv/wechatrebot-updates/download.json;" in config
+    assert "location ^~ /wechatrebot-updates/downloads/ {" in config
+    assert "alias /srv/wechatrebot-updates/downloads/;" in config
+    assert "return 404" not in config

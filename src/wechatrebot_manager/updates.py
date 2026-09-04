@@ -342,6 +342,28 @@ def _safe_archive_path(value: str) -> Path:
     return Path(*posix.parts)
 
 
+def _extended_windows_path(path: Path) -> Path:
+    """Return an absolute Win32 extended path without changing non-Windows paths."""
+    resolved = path.expanduser().resolve()
+    if os.name != "nt":
+        return resolved
+    raw = str(resolved)
+    if raw.startswith("\\\\?\\"):
+        return resolved
+    if raw.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + raw[2:])
+    return Path("\\\\?\\" + raw)
+
+
+def _path_within(path: Path, parent: Path) -> bool:
+    """Compare paths consistently when one side uses a Win32 extended prefix."""
+    try:
+        _extended_windows_path(path).relative_to(_extended_windows_path(parent))
+        return True
+    except ValueError:
+        return False
+
+
 def extract_update_archive(
     archive_path: str | Path,
     destination: str | Path,
@@ -359,16 +381,28 @@ def extract_update_archive(
             total_size = sum(item.file_size for item in items)
             if total_size > MAX_UNCOMPRESSED_BYTES:
                 raise UpdateError("更新包展开后体积超出限制。")
-            for index, item in enumerate(items, start=1):
+            planned: list[tuple[zipfile.ZipInfo, Path]] = []
+            for item in items:
                 relative = _safe_archive_path(item.filename)
                 mode = item.external_attr >> 16
                 if stat.S_ISLNK(mode):
                     raise UpdateError("更新包不能包含符号链接。")
-                target = (root / relative).resolve()
-                try:
-                    target.relative_to(root)
-                except ValueError as exc:
-                    raise UpdateError("更新包文件越过暂存目录。") from exc
+                planned.append((item, relative))
+
+            # ZIP entries can legitimately be longer than the legacy Win32
+            # MAX_PATH limit once the update's temporary directories are added.
+            # Keep normal paths for ordinary archives and opt into the extended
+            # namespace only when an entry needs it.
+            filesystem_root = root
+            if os.name == "nt" and any(
+                len(str(root / relative)) >= 248 for _item, relative in planned
+            ):
+                filesystem_root = _extended_windows_path(root)
+
+            for index, (item, relative) in enumerate(planned, start=1):
+                target = filesystem_root / relative
+                if not _path_within(target, filesystem_root):
+                    raise UpdateError("更新包文件越过暂存目录。")
                 if item.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
                 else:
@@ -379,7 +413,7 @@ def extract_update_archive(
                     progress_callback("extract", index, len(items))
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
         raise UpdateError(f"更新包无法展开：{exc}") from exc
-    payload_root = root / "payload"
+    payload_root = filesystem_root / "payload"
     if not payload_root.is_dir():
         raise UpdateError("更新包缺少 payload 目录。")
     return payload_root
@@ -440,7 +474,6 @@ def prepare_update(
         )
         verify_payload(
             payload_root,
-            allow_incomplete=False,
             progress_callback=progress_callback,
         )
         manager = payload_root / "manager" / "WeChatReBot.exe"
@@ -448,7 +481,7 @@ def prepare_update(
             raise UpdateError("更新包缺少桌面管理器。")
         return PreparedUpdate(release, working, payload_root, final_archive)
     except Exception:
-        shutil.rmtree(working, ignore_errors=True)
+        shutil.rmtree(_extended_windows_path(working), ignore_errors=True)
         raise
 
 
@@ -464,14 +497,16 @@ def create_update_plan(
     working = prepared.working_root.resolve()
     try:
         working.relative_to(updates_root)
-        prepared.payload_root.resolve().relative_to(working)
     except ValueError as exc:
         raise UpdateError("更新计划引用了暂存目录之外的文件。") from exc
+    if not _path_within(prepared.payload_root, working):
+        raise UpdateError("更新计划引用了暂存目录之外的文件。")
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
     helper = working / "WeChatReBot-Updater.exe"
     shutil.copy2(source_executable, helper)
+    application_pid = int(parent_pid if parent_pid is not None else os.getpid())
     plan_path = working / "update-plan.json"
     write_json_atomic(
         plan_path,
@@ -481,7 +516,15 @@ def create_update_plan(
             "install_root": str(root),
             "payload_root": str(prepared.payload_root.resolve()),
             "target_executable": str(root / "manager" / "WeChatReBot.exe"),
-            "parent_pid": int(parent_pid if parent_pid is not None else os.getpid()),
+            # parent_pid is retained for update helpers shipped before 0.8.7.
+            "parent_pid": application_pid,
+            "wait_pids": list(
+                _update_wait_pids(
+                    source_executable,
+                    application_pid,
+                    include_bootloader=parent_pid is None,
+                )
+            ),
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },
     )
@@ -535,6 +578,83 @@ def _wait_for_process_exit(pid: int, timeout_seconds: int = 180) -> None:
     raise UpdateError("等待旧版本退出超时。")
 
 
+def _process_executable(pid: int) -> Path | None:
+    """Return a Windows process image path without requiring elevated access."""
+    if os.name != "nt" or pid <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    query_limited_information = 0x1000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(
+        query_limited_information,
+        False,
+        pid,
+    )
+    if not handle:
+        return None
+    try:
+        size = wintypes.DWORD(32_768)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(
+            handle,
+            0,
+            buffer,
+            ctypes.byref(size),
+        ):
+            return None
+        return Path(buffer.value)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _update_wait_pids(
+    source_executable: Path,
+    application_pid: int,
+    *,
+    include_bootloader: bool,
+) -> tuple[int, ...]:
+    """Include PyInstaller's one-file bootloader when it owns the same EXE."""
+    candidates = [application_pid]
+    if include_bootloader and os.name == "nt" and getattr(sys, "frozen", False):
+        bootloader_pid = os.getppid()
+        bootloader_executable = _process_executable(bootloader_pid)
+        if (
+            bootloader_pid > 0
+            and bootloader_pid != application_pid
+            and bootloader_executable is not None
+            and os.path.normcase(str(bootloader_executable.resolve()))
+            == os.path.normcase(str(source_executable.resolve()))
+        ):
+            candidates.append(bootloader_pid)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _plan_wait_pids(plan: dict[str, object], parent_pid: int) -> tuple[int, ...]:
+    raw = plan.get("wait_pids", [parent_pid])
+    if not isinstance(raw, list) or not raw or len(raw) > 4:
+        raise UpdateError("更新计划包含无效的进程等待列表。")
+    try:
+        result = tuple(dict.fromkeys(int(item) for item in raw))
+    except (TypeError, ValueError) as exc:
+        raise UpdateError("更新计划包含无效的进程等待列表。") from exc
+    if any(pid < 0 for pid in result):
+        raise UpdateError("更新计划包含无效的进程等待列表。")
+    return result
+
+
 def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Path, Path]:
     path = Path(plan_path).expanduser().resolve()
     payload = _read_json_object(path)
@@ -549,9 +669,10 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Pat
     expected_target = (root / "manager" / "WeChatReBot.exe").resolve()
     try:
         path.relative_to(updates_root)
-        payload_root.relative_to(path.parent)
     except ValueError as exc:
         raise UpdateError("更新计划路径越过安装目录。") from exc
+    if not _path_within(payload_root, path.parent):
+        raise UpdateError("更新计划路径越过安装目录。")
     if (
         payload.get("schema_version") != 1
         or target != expected_target
@@ -559,6 +680,7 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Pat
         or not (root / INSTALL_MARKER).is_file()
     ):
         raise UpdateError("更新计划与当前安装不匹配。")
+    _plan_wait_pids(payload, parent_pid)
     return payload, root, payload_root, target
 
 
@@ -588,8 +710,9 @@ def apply_update_plan(
     try:
         plan, root, payload_root, target = _validated_plan(plan_path)
         version = str(plan.get("version") or "")
-        _wait_for_process_exit(int(plan["parent_pid"]))
-        install_payload(payload_root, root, allow_incomplete=False)
+        for pid in _plan_wait_pids(plan, int(plan["parent_pid"])):
+            _wait_for_process_exit(pid)
+        install_payload(payload_root, root)
         write_json_atomic(
             root / INSTALL_MARKER,
             {"schema_version": 1, "state": "ready"},
@@ -648,7 +771,7 @@ def cleanup_stale_update_workdirs(
             if not candidate.is_dir() or candidate.stat().st_mtime > cutoff:
                 continue
             candidate.resolve().relative_to(updates.resolve())
-            shutil.rmtree(candidate)
+            shutil.rmtree(_extended_windows_path(candidate))
             removed += 1
         except (OSError, ValueError):
             continue
@@ -668,6 +791,8 @@ def consume_update_result(install_root: str | Path) -> dict[str, object] | None:
         return None
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         return None
+    if payload.get("status") not in {"success", "failed"}:
+        payload["status"] = "success" if payload.get("ok") is True else "failed"
     return payload
 
 

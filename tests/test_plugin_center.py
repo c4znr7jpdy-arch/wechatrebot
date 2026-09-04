@@ -22,6 +22,7 @@ from wechatrebot_manager.plugin_center import (
     _asset_root,
     _handler,
     _normalize_config,
+    _normalize_plugin_extension_endpoint,
     plugin_center_command,
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
@@ -372,6 +373,19 @@ def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> N
     assert page.endswith("/content/index.html")
 
 
+def test_plugin_extension_path_is_scoped_to_selected_feature(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+
+    assert service.extension_path(public_id, "page/schedules") == (
+        "/api/plug/sample_configurable_feature/page/schedules"
+    )
+    assert _normalize_plugin_extension_endpoint("profiles/update") == "profiles/update"
+    for endpoint in ("", "../config", "page//config", "https://example.invalid"):
+        with pytest.raises(PluginCenterError, match="请求无效"):
+            service.extension_path(public_id, endpoint)
+
+
 def test_offline_save_can_replace_and_explicitly_clear_secret(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)
@@ -548,10 +562,13 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     assert "热重载" not in visible
     assert "模型绑定" in visible
     assert "template-card" in visible
-    assert "astrbot" not in visible
+    assert "astrbot" not in visible.replace("astrbot-plugin-page", "")
     assert "window.alert(" not in visible
     assert "window.confirm(" not in visible
     assert "window.prompt(" not in visible
+    assert "astrbot-plugin-page" in javascript
+    assert 'message.action === "api:get"' in javascript
+    assert 'message.action === "api:post"' in javascript
 
 
 def test_original_engine_home_is_replaced_with_neutral_local_page() -> None:
@@ -600,6 +617,59 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
         with pytest.raises(HTTPError) as rejected:
             urlopen(request, timeout=2)
         assert rejected.value.code == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_local_web_handler_hosts_plugin_page_bridge_and_preserves_content_type() -> None:
+    calls: list[tuple[str, str, bytes | None]] = []
+
+    class FakeEngine:
+        def raw_request(self, method, path, *, body=None, **_kwargs):
+            calls.append((method, path, body))
+            if path.startswith("/api/plugin/page/"):
+                return 200, {"content-type": "text/html; charset=utf-8"}, b"<h1>page</h1>"
+            return 200, {"content-type": "application/json; charset=utf-8"}, b'{"status":"ok","data":{"saved":true}}'
+
+    class FakeService:
+        engine = FakeEngine()
+
+        def extension_path(self, public_id: str, endpoint: str) -> str:
+            assert public_id == "feature-0000000000000000"
+            assert endpoint == "page/schedules"
+            return "/api/plug/example/page/schedules"
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(FakeService()))  # type: ignore[arg-type]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(f"{base}/api/plugin/page/content/example/dashboard/", timeout=2) as response:
+            assert response.headers.get_content_type() == "text/html"
+            assert response.read() == b"<h1>page</h1>"
+
+        with urlopen(
+            f"{base}/control/plugins/feature-0000000000000000/extension/page/schedules?kind=short",
+            timeout=2,
+        ) as response:
+            assert response.headers.get_content_type() == "application/json"
+            assert json.loads(response.read())["data"]["saved"] is True
+
+        request = Request(
+            f"{base}/control/plugins/feature-0000000000000000/extension/page/schedules",
+            data=b'{"enabled":true}',
+            method="POST",
+            headers={"Content-Type": "application/json", "Origin": base},
+        )
+        with urlopen(request, timeout=2) as response:
+            assert response.status == 200
+        assert calls == [
+            ("GET", "/api/plugin/page/content/example/dashboard/", None),
+            ("GET", "/api/plug/example/page/schedules?kind=short", None),
+            ("POST", "/api/plug/example/page/schedules", b'{"enabled":true}'),
+        ]
     finally:
         server.shutdown()
         server.server_close()

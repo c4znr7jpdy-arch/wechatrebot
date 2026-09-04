@@ -8,7 +8,7 @@ import zipfile
 from .app_shell import run_application
 from .install_paths import INSTALL_MARKER
 from .location import load_install_location
-from .payload import PAYLOAD_ARCHIVE, PAYLOAD_MANIFEST, sha256_file
+from .payload import PAYLOAD_ARCHIVE, PAYLOAD_MANIFEST
 from .setup_wizard import run_setup_wizard
 from .single_instance import SingleInstanceLock
 
@@ -78,51 +78,10 @@ def install_root_from_executable(executable: str | Path | None = None) -> Path |
     return None
 
 
-def is_development_preview(executable: str | Path | None = None) -> bool:
-    """Accept an incomplete payload only inside a deliberately assembled audit package."""
-    executable_path = Path(executable or sys.executable).expanduser().resolve()
-    manifest_path = executable_path.parent / "DISTRIBUTION-MANIFEST.json"
-    payload_archive = executable_path.parent / PAYLOAD_ARCHIVE
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-        files = manifest["files"]
-    except (FileNotFoundError, KeyError, OSError, TypeError, json.JSONDecodeError):
-        return False
-    if not (
-        isinstance(manifest, dict)
-        and manifest.get("schema_version") == 1
-        and manifest.get("entrypoint") == executable_path.name
-        and manifest.get("development_preview") is True
-        and manifest.get("payload_status") != "ready"
-        and isinstance(files, list)
-    ):
-        return False
-    expected = next(
-        (
-            item.get("sha256")
-            for item in files
-            if isinstance(item, dict)
-            and item.get("path") == PAYLOAD_ARCHIVE
-        ),
-        None,
-    )
-    if not isinstance(expected, str) or len(expected) != 64:
-        return False
-    try:
-        if sha256_file(payload_archive).casefold() != expected.casefold():
-            return False
-        with zipfile.ZipFile(payload_archive) as archive:
-            payload = json.loads(archive.read(PAYLOAD_MANIFEST).decode("utf-8"))
-        return payload.get("source_manifest_status") == manifest.get("payload_status")
-    except (KeyError, OSError, UnicodeDecodeError, zipfile.BadZipFile, json.JSONDecodeError):
-        return False
-
-
 def run_desktop(
     *,
     payload_root: str | Path | None = None,
     install_root: str | Path | None = None,
-    allow_incomplete_payload: bool = False,
 ) -> int:
     installed = (
         Path(install_root).expanduser().resolve()
@@ -148,13 +107,7 @@ def run_desktop(
             if payload_root is not None:
                 raise FileNotFoundError(f"商业载荷无效：{Path(payload_root).resolve()}")
             raise FileNotFoundError("未找到与安装程序配套的 payload.wrb。")
-        return run_setup_wizard(
-            payload,
-            allow_incomplete_payload=(
-                allow_incomplete_payload
-                or (payload_root is None and is_development_preview())
-            ),
-        )
+        return run_setup_wizard(payload)
     finally:
         instance.release()
 
@@ -162,6 +115,5 @@ def run_desktop(
 __all__ = [
     "find_bundled_payload",
     "install_root_from_executable",
-    "is_development_preview",
     "run_desktop",
 ]

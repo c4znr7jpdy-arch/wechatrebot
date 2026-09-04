@@ -552,19 +552,52 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, confirmText = "确认", field = null, onConfirm}) {
+  function confirmAction({title, message, confirmText = "确认", pendingText = "处理中…", pendingMessage = "", field = null, onConfirm}) {
+    const backdrop = $("#modalBackdrop");
+    const cancel = $("#modalCancel");
+    const confirm = $("#modalConfirm");
     $("#modalTitle").textContent = title;
     $("#modalMessage").textContent = message;
-    $("#modalConfirm").textContent = confirmText;
+    confirm.textContent = confirmText;
     $("#modalField").innerHTML = field ? `<label class="modal-field"><span>${escapeHtml(field.label)}</span><input id="modalInput" type="${escapeHtml(field.type || "text")}" value="${escapeHtml(field.value || "")}"></label>` : "";
-    $("#modalBackdrop").hidden = false;
-    $("#modalCancel").focus();
+    $("#modalProgress").hidden = true;
+    $("#modalProgressBar").style.width = "0%";
+    $("#modalError").hidden = true;
+    $("#modalError").textContent = "";
+    backdrop.dataset.busy = "false";
+    backdrop.hidden = false;
+    cancel.disabled = false;
+    cancel.focus();
     modalResolve = async (confirmed) => {
-      if (!confirmed) { $("#modalBackdrop").hidden = true; return; }
-      const confirm = $("#modalConfirm"); confirm.disabled = true;
-      try { await onConfirm(field ? $("#modalInput").value : undefined); $("#modalBackdrop").hidden = true; }
-      catch (error) { reportError(error); }
-      finally { confirm.disabled = false; }
+      if (!confirmed) {
+        if (backdrop.dataset.busy === "true") return;
+        backdrop.hidden = true;
+        return;
+      }
+      backdrop.dataset.busy = "true";
+      confirm.disabled = true;
+      confirm.textContent = pendingText;
+      cancel.disabled = true;
+      $("#modalError").hidden = true;
+      if (pendingMessage) $("#modalMessage").textContent = pendingMessage;
+      try {
+        await onConfirm(field ? $("#modalInput").value : undefined);
+        backdrop.hidden = true;
+      } catch (error) {
+        const product = error?.product;
+        const detail = product
+          ? `${product.message || product.title || "操作未完成"}${product.code ? `（错误码 ${product.code}）` : ""}`
+          : (error?.message || "操作未完成，请稍后重试。 ");
+        $("#modalMessage").textContent = message;
+        $("#modalError").textContent = detail;
+        $("#modalError").hidden = false;
+        reportError(error);
+      } finally {
+        backdrop.dataset.busy = "false";
+        confirm.disabled = false;
+        confirm.textContent = confirmText;
+        cancel.disabled = false;
+      }
     };
   }
 
@@ -625,9 +658,14 @@
     $("#updateStatus").textContent = update.enabled ? "稳定通道" : "在线更新未启用";
     $("#checkUpdate").disabled = !update.enabled;
     if (update.result) {
-      const succeeded = update.result.status === "success";
+      const succeeded = update.result.ok === true || update.result.status === "success";
+      const failureDetail = String(update.result.message || "").trim();
       window.setTimeout(() => toast(
-        succeeded ? `已更新到 v${update.result.version || data.version}` : "上次更新未能完成，软件已恢复到原版本。",
+        succeeded
+          ? `已更新到 v${update.result.version || data.version}`
+          : failureDetail
+            ? `上次更新未能完成：${failureDetail}`
+            : "上次更新未能完成，软件已恢复到原版本。",
         succeeded ? "success" : "error",
       ), 350);
     }
@@ -655,13 +693,25 @@
           title: `发现新版本 v${release.version}`,
           message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。安装前请先停止机器人，更新失败会自动恢复原版本。`,
           confirmText: "下载并安装",
+          pendingText: "正在下载…",
+          pendingMessage: `正在下载并校验 v${release.version}，完成后软件会自动重启。请勿关闭软件。`,
           onConfirm: async () => {
-            if (state.status?.state !== "STOPPED") {
-              toast("请先在运行中心停止机器人，再安装更新。", "error");
-              return;
+            const accepted = await api("install_update", release.version);
+            if (!accepted?.accepted) toast("更新任务已经在处理中。 ");
+            $("#modalProgress").hidden = false;
+            while (true) {
+              const progress = await api("get_update_status");
+              const percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
+              $("#modalProgressBar").style.width = `${Math.min(100, Math.max(0, percent))}%`;
+              $("#modalMessage").textContent = `${progress.message || "正在准备更新"}${["download", "extract", "verify"].includes(progress.phase) ? ` · ${percent}%` : ""}。请勿关闭软件。`;
+              if (progress.state === "failed") {
+                const error = new Error(progress.error?.message || progress.message || "更新未能完成。 ");
+                error.product = progress.error || null;
+                throw error;
+              }
+              if (progress.state === "restarting") return;
+              await new Promise((resolve) => window.setTimeout(resolve, 400));
             }
-            button.textContent = "准备更新…";
-            await api("install_update", release.version);
           },
         });
       }
@@ -753,12 +803,13 @@
     };
     const features = [
       {id: "feature-memory", display_name: "长期记忆", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: ["chat-config"], configuration: "page", description: "由回复引擎的原生会话上下文与天使之心共同维护连续对话，可在专属页面管理群聊和私聊记忆。"},
+      {id: "feature-group-analysis", display_name: "群聊分析", enabled: true, configurable: true, field_count: 81, model_field_count: 6, pages: [], configuration: "schema", description: "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与按群定时生成报告。"},
       {id: "feature-music", display_name: "点歌", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: [], configuration: "none", description: "点歌能力已按交付环境完成适配，无需额外配置。"},
       {id: "feature-drama", display_name: "短剧", enabled: true, configurable: false, field_count: 0, model_field_count: 0, pages: ["recommendation-schedules"], configuration: "page-and-global-schedule-center", description: "播放中间页由服务端统一提供；专属页面保留短剧推送定时任务、内容类型和目标群聊等设置。"},
     ];
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
-      bootstrap: () => ok({version: "0.8.3", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: true, api_base: "https://api.example.com/v1", model: "chat-model", api_key_configured: true}, update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
+      bootstrap: () => ok({version: "0.8.7", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: true, api_base: "https://api.example.com/v1", model: "chat-model", api_key_configured: true}, update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_feature: (id) => ok({...features.find((item) => item.id === id), basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true}),
@@ -766,7 +817,7 @@
       get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600}, {conversation_id: "18310516375@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200}], summary: {messages: 238, conversations: 3, private_messages: 34, group_messages: 204}}),
       get_messages: () => ok([{role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {role: "user", sender_id: "wxid_lisi", sender_name: "李四", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
-      get_schedules: () => ok({running: 3, paused: 1, items: [{id: "1", name: "天气预报", source: "天气", target: "微信群 · 51632940287", enabled: true, status: "运行中", schedule_text: "每天 08:00", cron_expression: "0 8 * * *", next_run_time: new Date(Date.now() + 86400000).toISOString()}, {id: "2", name: "短剧推荐", source: "短剧", target: "微信群 · 18310516375", enabled: true, status: "运行中", schedule_text: "每天 20:00", cron_expression: "0 20 * * *", next_run_time: new Date(Date.now() + 36000000).toISOString()}, {id: "3", name: "疯狂星期四", source: "趣味内容", target: "微信群 · 51632940287", enabled: false, status: "已暂停", schedule_text: "周四 09:00", cron_expression: "0 9 * * thu", next_run_time: ""}, {id: "4", name: "每日签到", source: "签到", target: "个人聊天 · wxid_admin", enabled: true, status: "运行中", schedule_text: "每天 08:30", cron_expression: "30 8 * * *", next_run_time: new Date(Date.now() + 50000000).toISOString()}]}),
+      get_schedules: () => ok({running: 2, paused: 1, items: [{id: "1", name: "天气预报", source: "天气", target: "微信群 · 51632940287", enabled: true, status: "运行中", schedule_text: "每天 08:00", cron_expression: "0 8 * * *", next_run_time: new Date(Date.now() + 86400000).toISOString()}, {id: "2", name: "短剧推荐", source: "短剧", target: "微信群 · 18310516375", enabled: true, status: "运行中", schedule_text: "每天 20:00", cron_expression: "0 20 * * *", next_run_time: new Date(Date.now() + 36000000).toISOString()}, {id: "3", name: "疯狂星期四", source: "趣味内容", target: "微信群 · 51632940287", enabled: false, status: "已暂停", schedule_text: "周四 09:00", cron_expression: "0 9 * * thu", next_run_time: ""}]}),
       set_schedule_enabled: (_id, enabled) => ok({updated: true, enabled}), update_schedule_time: () => ok({updated: true}), delete_schedule: () => ok({deleted: true}),
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       save_brand: (values) => ok(values, "机器人名称和回复身份已统一更新。"), save_provider: (values) => ok({...values, configured: true, api_key_configured: true}), open_install_folder: () => ok({opened: true}),

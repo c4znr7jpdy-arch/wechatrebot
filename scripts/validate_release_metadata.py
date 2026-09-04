@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
@@ -17,6 +19,31 @@ _FEATURE_CONFIGURATION_MODES = {
     "schema-and-page",
     "page-and-global-schedule-center",
 }
+_REQUIRED_ACCEPTANCE_EVIDENCE = {
+    "hook-redistribution",
+    "hook-security",
+    "real-device-wechat-4.1.8.27",
+    "authenticode",
+    "plugin-license-review",
+    "runtime-license-review",
+    "customer-agreement",
+    "clean-windows",
+    "antivirus-compatibility",
+    "upgrade-rollback",
+    "offline-signing-key-backup",
+    "release-artifact-hashes",
+    "customer-document-scan",
+}
+
+
+def _approval_time(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def _load_object(path: Path, errors: list[str]) -> dict[str, object]:
@@ -62,16 +89,24 @@ def _exact_lock(path: Path, errors: list[str]) -> None:
             errors.append(f"{path.name} contains an unpinned requirement: {requirement}")
 
 
-def _version_consistency(root: Path, errors: list[str]) -> None:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def _version_consistency(root: Path, errors: list[str]) -> str | None:
     try:
         project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         project_version = str(project["project"]["version"])
     except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
         errors.append(f"cannot read project version: {exc}")
-        return
+        return None
     if not _VERSION.fullmatch(project_version):
         errors.append(f"project version is not semantic x.y.z: {project_version}")
-        return
+        return None
     init_text = (root / "src" / "wechatrebot_manager" / "__init__.py").read_text(
         encoding="utf-8"
     )
@@ -83,6 +118,170 @@ def _version_consistency(root: Path, errors: list[str]) -> None:
     for field in ("FileVersion", "ProductVersion"):
         if f"StringStruct(u'{field}', u'{project_version}')" not in windows_text:
             errors.append(f"Windows {field} does not match pyproject.toml")
+    return project_version
+
+
+def _validate_legal_review(
+    root: Path,
+    review: dict[str, object],
+    *,
+    errors: list[str],
+) -> None:
+    if review.get("schema_version") != 1:
+        errors.append("legal review schema must be 1")
+    if review.get("status") not in {"review-required", "approved", "rejected"}:
+        errors.append("legal review status is invalid")
+    artifacts = review.get("artifacts")
+    if not isinstance(artifacts, dict):
+        errors.append("legal review artifacts are missing")
+        return
+    for name in ("sbom", "notices", "license_texts", "corresponding_source"):
+        record = artifacts.get(name)
+        if not isinstance(record, dict):
+            errors.append(f"legal review artifact is missing: {name}")
+            continue
+        path_value = record.get("path")
+        expected_hash = record.get("sha256")
+        if not _safe_repo_path(path_value):
+            errors.append(f"legal review artifact path is unsafe: {name}")
+            continue
+        if not isinstance(expected_hash, str) or not _HASH.fullmatch(
+            expected_hash.upper()
+        ):
+            errors.append(f"legal review artifact hash is invalid: {name}")
+            continue
+        artifact = root / Path(*PurePosixPath(path_value).parts)
+        if not artifact.is_file():
+            errors.append(f"legal review artifact does not exist: {path_value}")
+        elif _sha256(artifact) != expected_hash.upper():
+            errors.append(f"legal review artifact hash mismatch: {path_value}")
+def _validate_acceptance_evidence(
+    root: Path,
+    evidence: dict[str, object],
+    *,
+    project_version: str | None,
+    errors: list[str],
+) -> None:
+    if evidence.get("schema_version") != 1:
+        errors.append("acceptance evidence schema must be 1")
+    if project_version and evidence.get("release_version") != project_version:
+        errors.append("acceptance evidence version does not match release version")
+    requirements = evidence.get("requirements")
+    if not isinstance(requirements, list):
+        errors.append("acceptance evidence requirements must be a list")
+        return
+    seen: set[str] = set()
+    approved: set[str] = set()
+    for index, item in enumerate(requirements):
+        if not isinstance(item, dict):
+            errors.append(f"acceptance evidence item {index} is not an object")
+            continue
+        identifier = item.get("id")
+        if not isinstance(identifier, str) or identifier not in _REQUIRED_ACCEPTANCE_EVIDENCE:
+            errors.append(f"acceptance evidence item {index} has unknown id")
+            continue
+        if identifier in seen:
+            errors.append(f"duplicate acceptance evidence id: {identifier}")
+        seen.add(identifier)
+        item_status = item.get("status")
+        if item_status not in {"pending", "prepared", "approved", "rejected"}:
+            errors.append(f"acceptance evidence has invalid status: {identifier}")
+            continue
+        if item_status != "approved":
+            continue
+        approved.add(identifier)
+        if not item.get("reviewer") or not _approval_time(item.get("approved_at")):
+            errors.append(f"approved evidence has no reviewer or time: {identifier}")
+        records = item.get("evidence")
+        if not isinstance(records, list) or not records:
+            errors.append(f"approved evidence has no artifacts: {identifier}")
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                errors.append(f"approved evidence artifact is invalid: {identifier}")
+                continue
+            path_value = record.get("path")
+            digest = record.get("sha256")
+            if not _safe_repo_path(path_value):
+                errors.append(f"approved evidence path is unsafe: {identifier}")
+                continue
+            if not isinstance(digest, str) or not _HASH.fullmatch(digest.upper()):
+                errors.append(f"approved evidence hash is invalid: {identifier}")
+                continue
+            artifact = root / Path(*PurePosixPath(path_value).parts)
+            if not artifact.is_file() or _sha256(artifact) != digest.upper():
+                errors.append(f"approved evidence artifact is missing or changed: {identifier}")
+    missing = sorted(_REQUIRED_ACCEPTANCE_EVIDENCE - seen)
+    if missing:
+        errors.append(f"acceptance evidence requirements are missing: {missing}")
+    all_approved = approved == _REQUIRED_ACCEPTANCE_EVIDENCE
+    rejected = any(
+        isinstance(item, dict) and item.get("status") == "rejected"
+        for item in requirements
+    )
+    expected_status = "rejected" if rejected else ("approved" if all_approved else "pending")
+    if evidence.get("status") != expected_status:
+        errors.append(f"acceptance evidence overall status must be {expected_status}")
+def _validate_signing_evidence(
+    evidence: dict[str, object],
+    *,
+    project_version: str | None,
+    expected_hook_entries: dict[str, str],
+    errors: list[str],
+) -> None:
+    if evidence.get("schema_version") != 1:
+        errors.append("signing evidence schema must be 1")
+    if evidence.get("status") not in {"pending", "invalid", "valid"}:
+        errors.append("signing evidence status is invalid")
+    if project_version and evidence.get("release_version") != project_version:
+        errors.append("signing evidence version does not match release version")
+    files = evidence.get("files")
+    if not isinstance(files, list):
+        errors.append("signing evidence files must be a list")
+        files = []
+    if evidence.get("status") != "valid":
+        return
+    if evidence.get("all_signatures_valid") is not True:
+        errors.append("signing evidence says one or more Authenticode signatures are invalid")
+    if not _approval_time(evidence.get("collected_at")):
+        errors.append("valid signing evidence has no collection time")
+    by_role: dict[str, dict[str, object]] = {}
+    for item in files:
+        if not isinstance(item, dict) or item.get("role") not in {
+            "manager",
+            "injector",
+            "hook-library",
+        }:
+            errors.append("signing evidence contains an invalid file entry")
+            continue
+        role = str(item["role"])
+        if role in by_role:
+            errors.append(f"duplicate signing evidence role: {role}")
+        by_role[role] = item
+        if item.get("authenticode_status") != "Valid":
+            errors.append(f"signing evidence signature is not valid: {role}")
+        digest = item.get("sha256")
+        if not isinstance(digest, str) or not _HASH.fullmatch(digest.upper()):
+            errors.append(f"signing evidence hash is invalid: {role}")
+        if not item.get("signer_thumbprint") or not item.get("timestamp_thumbprint"):
+            errors.append(f"signing evidence has no signer or timestamp: {role}")
+    missing_roles = sorted({"manager", "injector", "hook-library"} - set(by_role))
+    if missing_roles:
+        errors.append(f"signing evidence roles are missing: {missing_roles}")
+    hook_hashes_by_role = {
+        "injector": next(
+            (digest for path, digest in expected_hook_entries.items() if path.endswith("x64 inject.exe")),
+            None,
+        ),
+        "hook-library": next(
+            (digest for path, digest in expected_hook_entries.items() if path.endswith(".dll")),
+            None,
+        ),
+    }
+    for role, expected_hash in hook_hashes_by_role.items():
+        item = by_role.get(role)
+        if item is not None and expected_hash and str(item.get("sha256", "")).upper() != expected_hash:
+            errors.append(f"signed file hash does not match hook metadata: {role}")
 
 
 def validate_release_metadata(root: str | Path) -> list[str]:
@@ -94,19 +293,19 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     plugins = _load_object(release / "plugin-manifest.json", errors)
     feature_set = _load_object(release / "feature-set.json", errors)
     wheelhouse = _load_object(release / "runtime-wheelhouse.json", errors)
+    legal_review = _load_object(release / "legal-review.json", errors)
+    acceptance_evidence = _load_object(release / "acceptance-evidence.json", errors)
+    signing_evidence = _load_object(release / "signing-evidence.json", errors)
 
     if source.get("schema_version") != 1:
         errors.append("source manifest schema must be 1")
-    status = source.get("status")
-    if not isinstance(status, str) or not status:
-        errors.append("source manifest status is missing")
     entries = source.get("entries")
     if not isinstance(entries, list):
         errors.append("source manifest entries must be a list")
         entries = []
 
     targets: set[str] = set()
-    gated_hook_entries: dict[str, str] = {}
+    source_hashes: dict[str, str] = {}
     commercial_targets: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -133,17 +332,23 @@ def validate_release_metadata(root: str | Path) -> list[str]:
             commercial_targets.add(target_key)
             if not (root / Path(*PurePosixPath(source_path).parts)).exists():
                 errors.append(f"commercial source does not exist: {source_path}")
-        if entry.get("gate") == "hook-binary-redistribution":
-            digest = entry.get("sha256")
-            if not isinstance(source_path, str) or not isinstance(digest, str):
-                errors.append(f"hook-gated entry {index} is incomplete")
+        digest = entry.get("sha256")
+        if digest is not None:
+            if not isinstance(source_path, str) or not isinstance(digest, str) or not _HASH.fullmatch(digest.upper()):
+                errors.append(f"source entry {index} has an invalid SHA-256")
             else:
-                gated_hook_entries[source_path] = digest.upper()
+                source_hashes[source_path] = digest.upper()
 
     required_targets = {
+        "legal/corresponding-source.md",
+        "legal/corresponding-source/astrbot-4.26.6-wechat.patch",
+        "legal/corresponding-source/build_runtime.py",
         "legal/feature-set.json",
         "legal/hook-binaries.json",
         "legal/plugin-manifest.json",
+        "legal/sbom.cdx.json",
+        "legal/third-party-licenses.txt",
+        "legal/third-party-notices.md",
         "legal/runtime-requirements.lock",
         "legal/runtime-wheelhouse.json",
         "legal/release-checklist.md",
@@ -169,14 +374,32 @@ def validate_release_metadata(root: str | Path) -> list[str]:
             expected_hook_entries[path] = digest.upper()
             if (item.get("architecture"), item.get("pe_machine")) != ("x64", "0x8664"):
                 errors.append(f"hook binary architecture is not x64: {path}")
-    if gated_hook_entries != expected_hook_entries:
-        errors.append("source manifest hook gates do not match hook-binaries.json")
+    source_hook_entries = {
+        path: source_hashes[path]
+        for path in expected_hook_entries
+        if path in source_hashes
+    }
+    if source_hook_entries != expected_hook_entries:
+        errors.append("source manifest hook hashes do not match hook-binaries.json")
 
     features = feature_set.get("features")
     if feature_set.get("schema_version") != 1 or not isinstance(features, list):
         errors.append("feature set schema or feature list is invalid")
         features = []
     feature_modules: set[str] = set()
+    plugin_items = plugins.get("plugins")
+    if plugins.get("schema_version") != 1 or not isinstance(plugin_items, list):
+        errors.append("plugin manifest schema or plugin list is invalid")
+        plugin_items = []
+    delivered_plugins: dict[str, dict[str, object]] = {}
+    for item in plugin_items:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            errors.append("plugin manifest entry is invalid")
+            continue
+        name = item["name"]
+        if name in delivered_plugins:
+            errors.append(f"duplicate plugin manifest entry: {name}")
+        delivered_plugins[name] = item
     source_features = {
         PurePosixPath(str(entry.get("target"))).name: entry
         for entry in entries
@@ -201,20 +424,15 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         source_entry = source_features.get(module)
         if source_entry is None:
             errors.append(f"feature is not packaged by source manifest: {module}")
-        elif source_entry.get("gate") != feature.get("gate"):
-            errors.append(f"feature gate does not match source manifest: {module}")
-
-    if status == "ready":
-        if hook.get("redistribution_approved") is not True:
-            errors.append("ready release requires hook redistribution approval")
-        if hook.get("security_review") != "approved":
-            errors.append("ready release requires approved hook security review")
-        if hook.get("real_device_validation") != "approved":
-            errors.append("ready release requires approved hook real-device validation")
-        if plugins.get("status") != "approved":
-            errors.append("ready release requires an approved plugin manifest")
-        if feature_set.get("status") != "approved":
-            errors.append("ready release requires an approved feature set")
+        plugin_entry = delivered_plugins.get(module)
+        if plugin_entry is None:
+            errors.append(f"feature is missing from plugin manifest: {module}")
+        else:
+            for field in ("version", "license", "review_status"):
+                if not isinstance(plugin_entry.get(field), str) or not plugin_entry[field]:
+                    errors.append(f"delivered plugin has no {field}: {module}")
+            if plugin_entry.get("ownership") != feature.get("ownership"):
+                errors.append(f"plugin ownership does not match feature set: {module}")
 
     if wheelhouse.get("python_version") != "3.13.9" or wheelhouse.get("platform") != "win_amd64":
         errors.append("runtime wheelhouse must target Python 3.13.9 win_amd64")
@@ -226,9 +444,27 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     _exact_lock(release / "runtime-requirements.lock", errors)
     _exact_lock(release / "build-requirements.lock", errors)
     try:
-        _version_consistency(root, errors)
+        project_version = _version_consistency(root, errors)
     except OSError as exc:
         errors.append(f"cannot validate version metadata: {exc}")
+        project_version = None
+    _validate_legal_review(
+        root,
+        legal_review,
+        errors=errors,
+    )
+    _validate_acceptance_evidence(
+        root,
+        acceptance_evidence,
+        project_version=project_version,
+        errors=errors,
+    )
+    _validate_signing_evidence(
+        signing_evidence,
+        project_version=project_version,
+        expected_hook_entries=expected_hook_entries,
+        errors=errors,
+    )
     return errors
 
 

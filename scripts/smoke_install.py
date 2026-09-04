@@ -23,7 +23,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--install-root", type=Path, required=True)
     parser.add_argument("--wechat-exe", type=Path, required=True)
-    parser.add_argument("--allow-incomplete", action="store_true")
     args = parser.parse_args(argv)
 
     artifacts_root = (COMMERCIAL_ROOT / "artifacts").resolve()
@@ -43,7 +42,6 @@ def main(argv: list[str] | None = None) -> int:
             payload_root=args.payload.expanduser().resolve(),
             wechat=wechat,
             brand=BrandProfile("验收机器人", "验收", "验收机器人"),
-            allow_incomplete_payload=args.allow_incomplete,
         ),
         progress_callback=lambda phase, current, total: phases.__setitem__(
             phase, current

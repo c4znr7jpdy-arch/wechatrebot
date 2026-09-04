@@ -14,7 +14,7 @@
       "size": 26112,
       "sha256": "F839265D1D986BD072135038A27DDB242F39165C572BCB16609A9030A304734E",
       "authenticode": "not-signed",
-      "provenance": "user-provided; redistribution basis not yet documented"
+      "provenance": "original work independently authored by Wechatrebot; signed rights declaration pending"
     },
     {
       "path": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
@@ -24,7 +24,7 @@
       "size": 11469312,
       "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D",
       "authenticode": "not-signed",
-      "provenance": "user-provided base with local deterministic C2C video patch; redistribution basis not yet documented"
+      "provenance": "original work independently authored by Wechatrebot, including the C2C video implementation; signed rights declaration pending"
     }
   ]
 }

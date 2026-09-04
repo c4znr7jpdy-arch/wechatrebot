@@ -127,3 +127,34 @@ def test_guard_distinguishes_secret_literals_from_variable_assignment(
     source.write_text("api_key='private-production-value'\n", encoding="utf-8")
     findings = _load_guard()(tmp_path)
     assert {item["reason"] for item in findings} == {"assigned-secret"}
+
+
+def test_guard_rejects_developer_paths_in_payload_manifest(tmp_path: Path) -> None:
+    (tmp_path / "release-manifest.json").write_text(
+        '{"copied":[{"source":"E:\\\\workspace\\\\private\\\\file.py"}]}',
+        encoding="utf-8",
+    )
+
+    findings = _load_guard()(tmp_path)
+
+    assert {item["reason"] for item in findings} == {"developer-absolute-path"}
+
+
+def test_guard_rejects_developer_paths_in_customer_documents(tmp_path: Path) -> None:
+    document = tmp_path / "START-HERE.txt"
+    document.write_text(
+        "Internal build path: C:\\Users\\builder\\workspace\\release.zip\n",
+        encoding="utf-8",
+    )
+
+    findings = _load_guard()(tmp_path)
+
+    assert {item["reason"] for item in findings} == {"developer-path"}
+
+
+def test_guard_allows_legacy_references_in_corresponding_source(tmp_path: Path) -> None:
+    source = tmp_path / "legal" / "corresponding-source" / "historical.patch"
+    source.parent.mkdir(parents=True)
+    source.write_text("- port = 6199\n- NoveLoader\n", encoding="utf-8")
+
+    assert _load_guard()(tmp_path) == []

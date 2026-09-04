@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "product": "姜小妹机器人",
+  "platform": "Windows 10/11 x64",
+  "version": "0.8.7",
+  "published_at": "2026-09-04T10:30:00+08:00",
+  "title": "0.8.7 客户下载与在线更新修复",
+  "notes": [
+    "新增服务器客户端下载页面，支持手动下载完整安装 ZIP",
+    "修复旧版管理器在线更新失败后自动回滚的问题"
+  ],
+  "download": {
+    "url": "./downloads/WeChatReBot-0.8.7-Windows-x64.zip",
+    "filename": "WeChatReBot-0.8.7-Windows-x64.zip",
+    "size": 318767104,
+    "sha256": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+    "checksum_url": "./downloads/WeChatReBot-0.8.7-Windows-x64.zip.sha256"
+  },
+  "requirements": {
+    "windows": "Windows 10/11 x64",
+    "wechat": "4.1.8.27",
+    "webview": "Microsoft Edge WebView2"
+  }
+}

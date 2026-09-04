@@ -22,3 +22,18 @@ def test_unicode_and_spaces_are_supported() -> None:
     target = Path.cwd() / "artifacts" / "机器人 安装目录"
     result = validate_install_path(target, required_bytes=0)
     assert result.ok, result.errors
+
+
+def test_payload_depth_reduces_allowed_install_root_length() -> None:
+    base = Path.cwd() / "artifacts"
+    target = base / ("x" * 90)
+    relative = Path("runtime") / ("y" * 143)
+
+    result = validate_install_path(
+        target,
+        required_bytes=0,
+        payload_relative_paths=(relative,),
+    )
+
+    assert not result.ok
+    assert "当前载荷最多支持" in " ".join(result.errors)

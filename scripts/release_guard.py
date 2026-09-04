@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 FORBIDDEN_PATH_PARTS = {
@@ -23,6 +23,12 @@ WECHAT_DISTRIBUTABLE_NAMES = (
     re.compile(r"^(?:weixin|wechat)[-_]?(?:setup|installer|client)(?:[-_].*)?\.(?:exe|msi|msix|appx|zip|7z|rar)$", re.IGNORECASE),
 )
 FORBIDDEN_TEXT = (
+    (
+        "developer-path",
+        re.compile(
+            r"(?i)(?<![A-Za-z0-9])[A-Z]:\\(?:Users|Documents and Settings|Projects?|workspace|wechatrebot)(?:\\|$)"
+        ),
+    ),
     ("legacy-port", re.compile(r"(?<!\d)6199(?!\d)")),
     ("legacy-loader", re.compile(r"Nove(?:Loader|Helper)", re.IGNORECASE)),
     ("secret-key", re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")),
@@ -36,6 +42,27 @@ FORBIDDEN_TEXT = (
 )
 
 TRUSTED_VENDOR_PREFIX = ("runtime", "python", "lib", "site-packages")
+
+
+def _is_absolute_local_path(value: str) -> bool:
+    return (
+        PurePosixPath(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+        or bool(PureWindowsPath(value).drive)
+    )
+
+
+def _manifest_absolute_paths(value: object) -> tuple[str, ...]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        for child in value.values():
+            found.extend(_manifest_absolute_paths(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(_manifest_absolute_paths(child))
+    elif isinstance(value, str) and _is_absolute_local_path(value):
+        found.append(value)
+    return tuple(found)
 
 
 def _parts_casefold(path: Path) -> tuple[str, ...]:
@@ -58,6 +85,11 @@ def _is_patched_astrbot(relative: Path) -> bool:
     parts = _distribution_relative_parts(relative)
     prefix = (*TRUSTED_VENDOR_PREFIX, "astrbot")
     return parts[: len(prefix)] == prefix
+
+
+def _is_corresponding_source(relative: Path) -> bool:
+    parts = _distribution_relative_parts(relative)
+    return parts[:2] == ("legal", "corresponding-source")
 
 
 def scan_release(root: Path) -> list[dict[str, str]]:
@@ -98,10 +130,26 @@ def scan_release(root: Path) -> list[dict[str, str]]:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        if path.name.casefold() == "release-manifest.json":
+            try:
+                manifest = json.loads(text)
+            except json.JSONDecodeError:
+                manifest = None
+            if manifest is not None and _manifest_absolute_paths(manifest):
+                findings.append(
+                    {
+                        "path": relative.as_posix(),
+                        "reason": "developer-absolute-path",
+                    }
+                )
         patterns = FORBIDDEN_TEXT
         if trusted_vendor:
             patterns = tuple(
                 item for item in FORBIDDEN_TEXT if item[0] in {"legacy-port", "legacy-loader"}
+            )
+        elif _is_corresponding_source(relative):
+            patterns = tuple(
+                item for item in FORBIDDEN_TEXT if item[0] not in {"legacy-port", "legacy-loader"}
             )
         for reason, pattern in patterns:
             if pattern.search(text):

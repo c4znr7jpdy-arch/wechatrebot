@@ -111,7 +111,6 @@ def _installed_payload_summary(path: Path, payload: dict[str, Any]) -> dict[str,
     files = payload.get("files")
     return {
         "schema_version": payload.get("schema_version"),
-        "source_manifest_status": payload.get("source_manifest_status"),
         "file_count": len(files) if isinstance(files, list) else None,
         "file_list_valid": isinstance(files, list),
         "manifest_size": path.stat().st_size,

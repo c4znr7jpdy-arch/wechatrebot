@@ -79,3 +79,31 @@ def test_staging_manager_pe_check_requires_x64(tmp_path: Path) -> None:
     source.write_bytes(payload)
     with pytest.raises(RuntimeError, match="x64"):
         _builder()._validate_manager_exe(source)
+
+
+def test_staging_provenance_does_not_record_source_machine_path(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "staging"
+    target = output / "manager" / "WeChatReBot.exe"
+
+    assert _builder()._copied_record(target, output) == {
+        "target": "manager/WeChatReBot.exe"
+    }
+
+
+def test_staging_keeps_legacy_update_bootstrap_marker(tmp_path: Path) -> None:
+    module = _builder()
+    source_manifest = tmp_path / "source-manifest.json"
+    source_manifest.write_text("{}", encoding="utf-8")
+
+    manifest = module._release_manifest(
+        version="0.8.6",
+        source_manifest=source_manifest,
+        copied=[],
+        runtime=None,
+        files=[],
+    )
+
+    assert manifest["source_manifest_status"] == "ready"
+    assert manifest["release_version"] == "0.8.6"

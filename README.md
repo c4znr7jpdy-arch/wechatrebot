@@ -2,7 +2,7 @@
 
 这是面向 Windows 客户交付的独立商业仓库，不是开发机 `E:\Project` 的镜像。
 
-商业版只使用 `hook_41827_astrbot_bridge` 新 HOOK。发布门禁会拒绝旧 `Py/main.py`、`NoveLoader.dll`、`NoveHelper.dll`、旧 6199 端口、运行日志、数据库、敏感配置和微信客户端文件。
+商业版只使用 `hook_41827_astrbot_bridge` 新 HOOK。发布扫描会拒绝旧 `Py/main.py`、`NoveLoader.dll`、`NoveHelper.dll`、旧 6199 端口、运行日志、数据库、敏感配置和微信客户端文件。
 
 ## 客户体验
 
@@ -14,15 +14,15 @@
 
 点歌默认使用星之阁在线接口，搜索不到时回退到网易云直连源；商业包不再需要 Node 网易云侧车或 PHP Meting 服务，功能中心不再显示无意义的点歌配置项。短剧默认使用 `E:\project` 已配置的服务端播放中间页，客户侧隐藏服务器地址和令牌，只保留短剧推送计划、内容类型与目标群聊等业务设置。
 
-控制台支持远程更新：启动后和每 6 小时后台检查一次签名清单，发现新版本时显示版本和说明；机器人完全停止后才允许下载、校验并交给独立更新程序安装。更新清单使用 Ed25519 签名，包体同时校验大小、SHA-256、解压路径和逐文件哈希，失败会回滚原版本。断网时自动检查不会弹错打扰客户，仍可在设置页手动重试。
+控制台支持远程更新：启动后和每 6 小时后台检查一次签名清单，发现新版本时显示版本和说明；机器人完全停止后才允许下载、校验并交给独立更新程序安装。更新清单使用 Ed25519 签名，包体同时校验大小、SHA-256、解压路径和逐文件哈希，失败会回滚原版本。断网时自动检查不会弹错打扰客户，仍可在设置页手动重试。服务器同时提供客户手动下载页 `https://ss.xiuxianjyj.xin/wechatrebot-updates/`，展示最新完整安装 ZIP、实际包大小、SHA-256 和三步安装说明。
 
 商业项目不包含微信客户端、微信安装程序或微信安装压缩包。客户必须自行从官方渠道安装受支持版本；管理器只保存客户选定的本机路径。
 
 ## 当前发布状态
 
-Windows 两步安装向导、统一控制台、环境检测、全链路状态机、功能配置、聊天记录、定时任务、结构化事件、签名更新/回滚、冻结 EXE、便携 Python 运行时、固定哈希新 HOOK 接入、客户目录组装器和发布扫描已经实现并通过自动化测试。首批实际载荷已经确定为长期记忆、点歌、短剧、常用指令和定时任务；长期记忆使用 AstrBot 原生会话上下文与天使之心，不再交付 LivingMemory 或 Self Learning。交付清单同时决定功能中心的顺序与配置入口，诊断会拒绝缺少所声明配置资源的空壳功能。统一控制台要求系统具备 Edge WebView2 Runtime；正式发行前仍需在干净 Windows 10/11 环境验证并确定缺失时的一键补齐策略。
+Windows 两步安装向导、统一控制台、环境检测、全链路状态机、功能配置、聊天记录、定时任务、结构化事件、签名更新/回滚、冻结 EXE、便携 Python 运行时、固定哈希新 HOOK 接入、客户目录组装器和发布扫描已经实现并通过自动化测试。0.8.7 实际载荷包含长期记忆、群聊分析、点歌、短剧、常用指令和定时任务；长期记忆使用 AstrBot 原生会话上下文与天使之心，不再交付 LivingMemory 或 Self Learning。交付清单同时决定功能中心的顺序与配置入口，诊断会拒绝缺少所声明配置资源的空壳功能。统一控制台要求系统具备 Edge WebView2 Runtime；正式发行前仍需在干净 Windows 10/11 环境验证并确定缺失时的一键补齐策略。
 
-仓库仍不可直接收费发布，`release/source-manifest.json` 保持 `phase-1-incomplete`。尚未关闭的硬门槛包括：
+构建与安装不再依赖审批状态或 `ready` 标记。以下事项仍记录在仓库中，供发布者根据实际分发范围自行核对：
 
 - 新 HOOK 二进制的商业再分发授权、安全审查与真实微信实机验证；
 - Windows EXE 代码签名；
@@ -31,7 +31,7 @@ Windows 两步安装向导、统一控制台、环境检测、全链路状态机
 - 全新 Windows 虚拟机安装、升级、卸载和杀毒软件兼容验收；
 - 客户许可协议、第三方 NOTICE、源码提供方式和售后边界。
 
-正式安装器默认拒绝不完整载荷。任何 `--allow-incomplete` 参数仅用于研发验收，不能用于交付客户。研发客户目录会写入可校验的 `development_preview` 标记，因此必须双击完整目录顶层的 `WeChatReBot.exe`；单独复制构建中间 EXE 会弹出“启动文件不完整”。
+安装器不再检查载荷的审批状态，但仍会校验清单格式、路径边界和每个文件的 SHA-256。缺失、篡改、越界或试图覆盖用户数据的载荷仍会被拒绝。
 
 ## 开发与测试
 
@@ -47,8 +47,7 @@ C:\Program Files\Python313\python.exe -m venv .venv
 ```powershell
 $env:PYTHONPATH = "src"
 C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
-  --payload .\artifacts\staging `
-  --allow-incomplete-payload
+  --payload .\artifacts\staging
 ```
 
 ## 可重复构建
@@ -73,18 +72,17 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
   --output .\artifacts\manager-build
 ```
 
-组装 staging。受控新 HOOK 只有在对应审核门槛关闭后才应放行：
+组装完整 staging：
 
 ```powershell
 & 'C:\Program Files\Python313\python.exe' scripts\build_staging.py `
   --source-root E:\Project `
   --runtime-root .\artifacts\runtime-build-offline `
   --manager-exe .\artifacts\manager-build\dist\WeChatReBot.exe `
-  --allow-gate hook-binary-redistribution `
   --output .\artifacts\staging
 ```
 
-正式客户包只能从状态为 `ready` 的 staging 构建：
+从 staging 构建客户包：
 
 ```powershell
 & 'C:\Program Files\Python313\python.exe' scripts\build_distribution.py `
@@ -93,17 +91,27 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
   --archive
 ```
 
-远程更新发布使用同一份 `ready` staging。先上传 ZIP，再最后上传签名清单，客户下一次检查即可收到弹窗：
+仅修改管理器、插件中心或管理器内置页面时，使用开发者一键增量发布。脚本会自动测试、构建管理器、签名、上传、切换稳定清单并从公网做安装冒烟，不会构建或扫描完整 staging：
 
 ```powershell
-& 'C:\Program Files\Python313\python.exe' scripts\build_update_release.py `
-  --payload .\artifacts\staging `
-  --output .\artifacts\update-0.8.3 `
-  --private-key .\config\local\update-signing-private.pem `
-  --package-url https://你的更新域名/releases/wechatrebot-0.8.3-update.zip `
-  --note "新增功能配置与设置立即应用" `
-  --note "修复已知问题"
+.\scripts\publish-manager-update.ps1 `
+  --title '插件配置更新' `
+  --note '修复高级配置页面'
 ```
+
+项目版本必须已经高于线上稳定版。默认在上传前要求输入版本号确认；需要无人值守时追加 `--yes`，只生成本地产物时追加 `--dry-run`。如果管理器已经构建完成，可用 `--manager-build <构建目录>` 跳过重复构建。
+
+运行时、AstrBot 插件本体、桥接程序、hook 有变化，或需要修复旧单文件管理器的更新引导时，使用完整载荷一键发布：
+
+```powershell
+.\scripts\publish-full-update.ps1 `
+  --source-root 'E:\Project' `
+  --title '完整载荷稳定性更新' `
+  --note '修复旧版管理器更新回滚' `
+  --yes
+```
+
+该入口在内部完成测试、元数据校验、运行时和管理器构建、完整 staging、签名打包、上传、稳定清单切换与公网冒烟，不需要手工串联子命令。
 
 完整的更新地址绑定、密钥备份、发布顺序和回滚说明见 `docs/remote-updates.md`。私钥只能保存在发布电脑和离线备份中，禁止提交到 Git。
 
@@ -111,11 +119,11 @@ C:\Program Files\Python313\python.exe -m wechatrebot_manager gui `
 
 ## 关键清单
 
-- `release/source-manifest.json`：商业发行白名单与总体状态。
+- `release/source-manifest.json`：发行文件白名单、目标路径和固定哈希。
 - `release/runtime-requirements.lock`：运行时 Python 包精确锁定。
 - `release/runtime-wheelhouse.json`：私有 wheelhouse 汇总指纹。
 - `release/build-requirements.lock`：冻结管理器的构建依赖锁定。
 - `release/hook-binaries.json`：新 HOOK 架构、大小、哈希与审核状态。
-- `release/plugin-manifest.json`：插件归属及许可门禁。
-- `release/RELEASE-CHECKLIST.md`：由 `phase-1-incomplete` 升级为 `ready` 前的放行条件。
+- `release/plugin-manifest.json`：插件归属及许可证信息。
+- `release/RELEASE-CHECKLIST.md`：非阻断式的发布核对建议。
 - `src/wechatrebot_manager/update-channel.json`：客户内置的更新通道、HTTPS 清单地址和签名公钥。

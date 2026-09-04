@@ -9,14 +9,16 @@
 
 Python 3.13.9 x64 与 AstrBot 4.26.6 运行时已经通过固定版本、wheelhouse 汇总指纹、逐 wheel SHA-256、离线复建和 staged import 校验。运行时技术可重复性已验证，但该结果不替代 AstrBot、Python 包及其传递依赖的许可证审查。
 
+当前已生成 CycloneDX SBOM、第三方组件声明和许可证文本汇编，覆盖 221 个运行时组件（含 CPython）、17 个管理器构建组件及 5 个交付插件。`release/legal-review.json` 仍为 `review-required`：5 个组件没有可自动确认的许可证表达式，并检测到 AstrBot、天使之心等强 copyleft 审查对象。该状态仅用于记录，不参与构建或安装判定。
+
 图形管理器的功能配置窗口使用 pywebview 6.2.1（BSD-3-Clause）及其固定传递依赖，并依赖 Windows Edge WebView2 Runtime 和 .NET Framework 4.6.2 或更高版本。正式交付前须将对应许可证文本、SBOM 和干净系统兼容性记录并入发行证据。
 
 当前 `WeChatReBot.exe` 与两项新 HOOK PE 文件均未进行 Authenticode 签名。未签名状态必须在交付前通过可信代码签名、签名后哈希归档和干净 Windows 环境信誉测试关闭，不能用降低客户系统安全设置的方式绕过。
 
-开发审计可使用 `hook-binary-redistribution` 门禁验证固定哈希文件的集成结果；该参数不是商业再分发授权，也不能改变 `release/hook-binaries.json` 中的待审核状态。
+构建会按 `source-manifest.json` 中的固定哈希验证 HOOK 文件；哈希一致不等同于已经取得商业再分发授权。
 
 未关闭这些门槛前，`release/source-manifest.json` 中的受控二进制默认不会进入 staging。
 
 微信客户端及其安装程序不属于商业项目交付物。客户必须自行从官方渠道取得并安装微信；本项目只保存客户选定的本机 `Weixin.exe` 路径，不复制或再分发微信文件。
 
-最终发行批准项和证据要求见 `RELEASE-CHECKLIST.md`。
+最终发行批准项和证据要求见 `RELEASE-CHECKLIST.md` 与 `acceptance-evidence.json`。

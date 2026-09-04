@@ -6,11 +6,15 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 INSTALL_MARKER = ".wechatrebot-install.json"
 DEFAULT_REQUIRED_BYTES = 5 * 1024**3
 MAX_INSTALL_PATH_CHARS = 180
+WINDOWS_LEGACY_MAX_PATH_CHARS = 259
+_TRANSACTION_DIRECTORY_CHARS = len("updates") + 1 + len(".rollback-") + 32
+_TRANSACTION_FILENAME_CHARS = 8
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,7 @@ def validate_install_path(
     value: str | Path,
     *,
     required_bytes: int = DEFAULT_REQUIRED_BYTES,
+    payload_relative_paths: Iterable[str | Path] = (),
 ) -> InstallPathValidation:
     raw = str(value).strip()
     errors: list[str] = []
@@ -84,9 +89,25 @@ def validate_install_path(
     if str(path).startswith("\\\\"):
         errors.append("不支持网络路径或 UNC 路径，请选择本机固定磁盘。")
 
-    if len(str(path)) > MAX_INSTALL_PATH_CHARS:
+    payload_lengths = tuple(
+        len(Path(relative).as_posix()) for relative in payload_relative_paths
+    )
+    longest_payload_path = max(payload_lengths, default=0)
+    final_target_overhead = 1 + longest_payload_path
+    transaction_file_overhead = (
+        1 + _TRANSACTION_DIRECTORY_CHARS + 1 + _TRANSACTION_FILENAME_CHARS
+    )
+    payload_aware_limit = (
+        WINDOWS_LEGACY_MAX_PATH_CHARS
+        - max(final_target_overhead, transaction_file_overhead)
+        if longest_payload_path
+        else MAX_INSTALL_PATH_CHARS
+    )
+    maximum_path_chars = min(MAX_INSTALL_PATH_CHARS, payload_aware_limit)
+    if len(str(path)) > maximum_path_chars:
         errors.append(
-            f"安装路径过长（{len(str(path))} 个字符），最多支持 {MAX_INSTALL_PATH_CHARS} 个字符。"
+            f"安装路径过长（{len(str(path))} 个字符），当前载荷最多支持 "
+            f"{max(0, maximum_path_chars)} 个字符的安装根目录。"
         )
 
     if path.parent == path:
@@ -144,4 +165,3 @@ def prepare_install_layout(path: Path) -> None:
         "updates",
     ):
         (path / child).mkdir(parents=True, exist_ok=True)
-

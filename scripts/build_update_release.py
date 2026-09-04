@@ -21,7 +21,11 @@ SOURCE_ROOT = COMMERCIAL_ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from wechatrebot_manager.payload import sha256_file, verify_payload
+from wechatrebot_manager.payload import (
+    LEGACY_READY_MANIFEST_STATUS,
+    sha256_file,
+    verify_payload,
+)
 from wechatrebot_manager.updates import PRODUCT_ID, canonical_manifest_bytes
 
 
@@ -52,7 +56,7 @@ def _signing_key(path: Path) -> Ed25519PrivateKey:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build and sign a full-payload remote update release."
+        description="Build and sign a full or selected-payload remote update release."
     )
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -60,6 +64,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--package-url", required=True)
     parser.add_argument("--title", default="稳定性与功能更新")
     parser.add_argument("--note", action="append", default=[])
+    parser.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="PAYLOAD_PATH",
+        help="include only this manifest-listed payload path (repeatable)",
+    )
     parser.add_argument("--minimum-supported-version", default="0.7.0")
     args = parser.parse_args(argv)
 
@@ -72,10 +83,23 @@ def main(argv: list[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
 
     payload = args.payload.expanduser().resolve()
-    verified = verify_payload(payload, allow_incomplete=False)
+    verified = verify_payload(payload)
+    verified_by_path = {
+        item.relative_path.as_posix(): item for item in verified.files
+    }
+    if args.include:
+        requested = tuple(dict.fromkeys(item.strip() for item in args.include if item.strip()))
+        missing = tuple(item for item in requested if item not in verified_by_path)
+        if missing:
+            parser.error(
+                "included payload paths are not present in the verified manifest: "
+                + ", ".join(missing)
+            )
+        selected = tuple(verified_by_path[item] for item in requested)
+    else:
+        selected = verified.files
     version = _project_version()
     Version(version)
-    minimum = str(Version(args.minimum_supported_version))
     package_url = _https_url(args.package_url)
     archive = output / f"wechatrebot-{version}-update.zip"
     with zipfile.ZipFile(
@@ -85,10 +109,34 @@ def main(argv: list[str] | None = None) -> int:
         compresslevel=6,
         allowZip64=True,
     ) as package:
-        for path in sorted(payload.rglob("*")):
-            if path.is_file():
-                relative = path.relative_to(payload).as_posix()
-                package.write(path, f"payload/{relative}")
+        if args.include:
+            package_manifest = {
+                "schema_version": 1,
+                "source_manifest_status": LEGACY_READY_MANIFEST_STATUS,
+                "release_version": version,
+                "files": [
+                    {
+                        "path": item.relative_path.as_posix(),
+                        "sha256": item.sha256,
+                    }
+                    for item in selected
+                ],
+            }
+        else:
+            package_manifest = {
+                **verified.manifest,
+                "source_manifest_status": LEGACY_READY_MANIFEST_STATUS,
+                "release_version": version,
+            }
+        package.writestr(
+            "payload/release-manifest.json",
+            json.dumps(package_manifest, ensure_ascii=False, indent=2) + "\n",
+        )
+        for item in selected:
+            package.write(
+                item.source_path,
+                f"payload/{item.relative_path.as_posix()}",
+            )
 
     private_key = _signing_key(args.private_key.expanduser().resolve())
     public_bytes = private_key.public_key().public_bytes(
@@ -101,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         "product": PRODUCT_ID,
         "channel": "stable",
         "version": version,
-        "minimum_supported_version": minimum,
+        "minimum_supported_version": str(Version(args.minimum_supported_version)),
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "title": args.title.strip()[:100] or f"版本 {version}",
         "notes": [item.strip()[:500] for item in args.note if item.strip()][:20],
@@ -110,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             "format": "zip",
             "size": archive.stat().st_size,
             "sha256": sha256_file(archive),
-            "payload_file_count": len(verified.files),
+            "payload_file_count": len(selected),
         },
     }
     signature = private_key.sign(canonical_manifest_bytes(manifest))

@@ -7,16 +7,22 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
+import time
 from typing import BinaryIO, Callable
 import uuid
 import zipfile
 
+from .install_paths import validate_install_path
 from .json_io import write_json_atomic
 
 
 PAYLOAD_MANIFEST = "release-manifest.json"
 PAYLOAD_ARCHIVE = "payload.wrb"
-READY_MANIFEST_STATUS = "ready"
+# Versions through 0.8.3 refuse an otherwise valid update payload unless this
+# legacy marker is present. New readers intentionally do not use it as a
+# completeness/security decision, but publishers keep emitting it so installed
+# legacy managers can bootstrap to a fixed release.
+LEGACY_READY_MANIFEST_STATUS = "ready"
 USER_MANAGED_PATHS = {
     "config/brand.json",
     "config/bridge.json",
@@ -76,14 +82,9 @@ def _is_user_managed(relative_path: Path) -> bool:
 
 def _manifest_file_specs(
     manifest: object,
-    *,
-    allow_incomplete: bool,
 ) -> tuple[tuple[Path, str], ...]:
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
         raise PayloadError("不支持的载荷清单格式。")
-    status = manifest.get("source_manifest_status")
-    if status != READY_MANIFEST_STATUS and not allow_incomplete:
-        raise PayloadError(f"载荷尚未达到可安装状态：{status!r}")
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
         raise PayloadError("载荷清单没有可安装文件。")
@@ -111,13 +112,7 @@ def _manifest_file_specs(
     return tuple(specs)
 
 
-def _payload_plan(
-    payload_root: str | Path,
-    *,
-    allow_incomplete: bool,
-) -> tuple[Path, dict[str, object], tuple[VerifiedPayloadFile, ...]]:
-    """Validate manifest structure and file boundaries without reading file contents."""
-    root = Path(payload_root).expanduser().resolve()
+def _read_directory_manifest(root: Path) -> dict[str, object]:
     manifest_path = root / PAYLOAD_MANIFEST
     if manifest_path.is_symlink() or (
         hasattr(manifest_path, "is_junction") and manifest_path.is_junction()
@@ -129,12 +124,20 @@ def _payload_plan(
         raise PayloadError(f"缺少载荷清单：{manifest_path}") from exc
     except (OSError, json.JSONDecodeError) as exc:
         raise PayloadError(f"载荷清单无法读取：{exc}") from exc
+    if not isinstance(manifest, dict):
+        raise PayloadError("不支持的载荷清单格式。")
+    return manifest
+
+
+def _payload_plan(
+    payload_root: str | Path,
+) -> tuple[Path, dict[str, object], tuple[VerifiedPayloadFile, ...]]:
+    """Validate manifest structure and file boundaries without reading file contents."""
+    root = Path(payload_root).expanduser().resolve()
+    manifest = _read_directory_manifest(root)
     planned: list[VerifiedPayloadFile] = []
     listed: set[str] = set()
-    for relative, expected in _manifest_file_specs(
-        manifest,
-        allow_incomplete=allow_incomplete,
-    ):
+    for relative, expected in _manifest_file_specs(manifest):
         candidate = root / relative
         lineage = [candidate, *candidate.parents]
         for component in lineage:
@@ -175,8 +178,6 @@ def _payload_plan(
 
 def _archive_plan(
     payload_archive: str | Path,
-    *,
-    allow_incomplete: bool,
 ) -> tuple[Path, dict[str, object], tuple[VerifiedPayloadFile, ...]]:
     archive_path = Path(payload_archive).expanduser().resolve()
     if archive_path.is_symlink() or (
@@ -211,10 +212,7 @@ def _archive_plan(
                 manifest = json.loads(archive.read(manifest_info).decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise PayloadError("安装包内的载荷清单无法读取。") from exc
-            specs = _manifest_file_specs(
-                manifest,
-                allow_incomplete=allow_incomplete,
-            )
+            specs = _manifest_file_specs(manifest)
             expected_members = {PAYLOAD_MANIFEST.casefold()}
             planned: list[VerifiedPayloadFile] = []
             for relative, expected in specs:
@@ -234,13 +232,26 @@ def _archive_plan(
 
 def _plan_payload(
     payload_root: str | Path,
-    *,
-    allow_incomplete: bool,
 ) -> tuple[Path, dict[str, object], tuple[VerifiedPayloadFile, ...]]:
     path = Path(payload_root).expanduser().resolve()
     if path.is_file():
-        return _archive_plan(path, allow_incomplete=allow_incomplete)
-    return _payload_plan(path, allow_incomplete=allow_incomplete)
+        return _archive_plan(path)
+    return _payload_plan(path)
+
+
+def payload_relative_paths(
+    payload_root: str | Path,
+) -> tuple[Path, ...]:
+    """Read safe manifest paths without hashing or traversing the full payload."""
+    path = Path(payload_root).expanduser().resolve()
+    if path.is_file():
+        _root, _manifest, planned = _archive_plan(path)
+        return tuple(item.relative_path for item in planned)
+    manifest = _read_directory_manifest(path)
+    return tuple(
+        relative
+        for relative, _expected in _manifest_file_specs(manifest)
+    )
 
 
 def _copy_stream_and_hash(reader: BinaryIO, target: Path) -> str:
@@ -261,16 +272,29 @@ def _copy_and_hash(source: Path, target: Path) -> str:
     return result
 
 
+def _transaction_file(root: Path, index: int) -> Path:
+    return root / f"{index:08X}"
+
+
+def _replace_file(source: Path, target: Path, *, timeout_seconds: float = 30.0) -> None:
+    """Retry transient Windows locks from process teardown and antivirus scans."""
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
+
+
 def verify_payload(
     payload_root: str | Path,
     *,
-    allow_incomplete: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> VerifiedPayload:
-    root, manifest, planned = _plan_payload(
-        payload_root,
-        allow_incomplete=allow_incomplete,
-    )
+    root, manifest, planned = _plan_payload(payload_root)
     verified: list[VerifiedPayloadFile] = []
     entry_count = len(planned)
     archive = zipfile.ZipFile(root) if root.is_file() else None
@@ -299,14 +323,20 @@ def install_payload(
     payload_root: str | Path,
     install_root: str | Path,
     *,
-    allow_incomplete: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> VerifiedPayload:
-    payload_root_path, manifest, planned = _plan_payload(
-        payload_root,
-        allow_incomplete=allow_incomplete,
-    )
+    payload_root_path, manifest, planned = _plan_payload(payload_root)
     root = Path(install_root).expanduser().resolve()
+    # Keep the check here as a final safety boundary for callers that bypass the
+    # setup wizard or InstallRequest validation.
+    path_validation = validate_install_path(
+        root,
+        required_bytes=0,
+        payload_relative_paths=(item.relative_path for item in planned),
+    )
+    length_errors = tuple(error for error in path_validation.errors if "过长" in error)
+    if length_errors:
+        raise PayloadError("；".join(length_errors))
     updates_root = (root / "updates").resolve()
     updates_root.mkdir(parents=True, exist_ok=True)
     try:
@@ -326,7 +356,7 @@ def install_payload(
         archive = zipfile.ZipFile(payload_root_path) if payload_root_path.is_file() else None
         try:
             for index, item in enumerate(planned, start=1):
-                staged = stage_root / item.relative_path
+                staged = _transaction_file(stage_root, index)
                 if archive is None:
                     actual = _copy_and_hash(item.source_path, staged)
                 else:
@@ -356,10 +386,9 @@ def install_payload(
             if target.exists():
                 if not target.is_file() or target.is_symlink():
                     raise PayloadError(f"安装目标不是普通文件：{item.relative_path.as_posix()}")
-                backup = backup_root / item.relative_path
-                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup = _transaction_file(backup_root, index)
                 shutil.copy2(target, backup)
-            os.replace(stage_root / item.relative_path, target)
+            _replace_file(_transaction_file(stage_root, index), target)
             replaced.append((target, backup))
             if progress_callback is not None:
                 progress_callback("install", index, file_count)
@@ -368,7 +397,6 @@ def install_payload(
             root / "config" / "installed-payload.json",
             {
                 "schema_version": 1,
-                "source_manifest_status": manifest.get("source_manifest_status"),
                 "files": [
                     {"path": item.relative_path.as_posix(), "sha256": item.sha256}
                     for item in verified_files
@@ -381,7 +409,7 @@ def install_payload(
                 if backup is None:
                     target.unlink(missing_ok=True)
                 elif backup.exists():
-                    os.replace(backup, target)
+                    _replace_file(backup, target)
             except OSError:
                 pass
         raise

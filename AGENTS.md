@@ -1,19 +1,21 @@
-# Repository instructions
+# 更新发布协作规则
 
-## Remote update policy
+- 完成功能或修复后，只要后续需要向用户发布远程更新，最终答复必须向开发者提供一段可直接复制执行的完整发布命令。
+- 发布命令不得使用“更新内容”“版本号”等占位文字；必须结合本次实际改动填写明确的更新标题，并通过一个或多个 `--note` 参数完整列出更新内容。
+- 同时明确本次应发布的目标版本、采用“管理器增量更新”还是“完整载荷更新”，以及选择该方式的原因。
+- 向开发者交付时，只能提供一段可直接复制执行的简洁 PowerShell 一键发布命令；命令应使用项目的正式 `.ps1` 发布入口，包含已填写的 `--title`、一个或多个 `--note` 以及 `--yes`。
+- 不得再向开发者提供需要手工串联的环境变量、测试、运行时构建、管理器构建、签名、打包或上传命令，也不提供备选发布命令。如果完整载荷发布尚无一键入口，应先在项目中补齐该入口，再交付唯一的调用命令。
+- 仅涉及管理器、插件中心或管理器内置 Web UI 时，优先提供 `scripts\publish-manager-update.ps1` 的完整命令，避免重新构建和扫描完整载荷。不要提供 `.cmd` 入口，`.cmd` 会破坏 PowerShell 传入的中文引号和含空格参数。
+- 涉及运行时、AstrBot 插件本体、桥接程序或 hook 文件时，必须使用能在内部完成全部构建、签名、打包和上传流程的完整载荷一键 `.ps1` 发布入口，不能错误地使用管理器增量包。
+- 除非开发者明确要求 Codex 代为执行，否则不要自行启动耗时的正式构建或上传；由开发者执行所提供的命令。可以运行必要的快速测试、语法检查和本地轻量验证。
+- 发布命令应放在独立的 PowerShell 代码块中，并说明执行前提（例如项目版本必须高于线上稳定版本、签名私钥路径和 SSH 环境必须可用）。
 
-- All customer upgrades after the initial installation must use the signed remote-update path already implemented in `src/wechatrebot_manager/updates.py`. Do not invent a second updater or distribute loose replacement files.
-- Treat every released version as immutable. Any bug fix or feature update for customers must increment the semantic version. Never replace a package while keeping the same version number.
-- Keep the version synchronized in `pyproject.toml`, `src/wechatrebot_manager/__init__.py`, and every numeric and string version field in `release/windows-version-info.txt`. Update customer-facing examples or preview fixtures when they name the current release.
-- Before release, run the automated tests and `scripts/validate_release_metadata.py`, rebuild the frozen manager, and assemble a complete staging payload from the approved sources.
-- A production update payload must have `source_manifest_status` set to `ready` by a genuinely approved `release/source-manifest.json`. Never bypass legal, redistribution, security, code-signing, clean-machine, or real-device gates merely to make the updater accept an audit build.
-- Build and sign the update with `scripts/build_update_release.py` using `config/local/update-signing-private.pem`. The signing private key must remain off Git and must have an encrypted offline backup.
-- The production package URL is under `https://ss.xiuxianjyj.xin/wechatrebot-updates/releases/`, and the signed channel manifest is `https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json`.
-- Publish in this order: upload and verify the immutable versioned ZIP first, then atomically replace `stable.json` last. Never expose a manifest whose package is missing or only partially uploaded.
-- Verify the live HTTPS ZIP size and SHA-256, the signed manifest, and an upgrade from the immediately previous installed release on a clean Windows machine before announcing completion.
-- The customer console must check once shortly after startup and repeat according to the validated client update channel's `check_interval_seconds`; manual checks remain available. Automatic network failures must stay silent, while manual failures may be shown to the customer.
-- Installation remains customer-confirmed and is only allowed while the robot is fully stopped. Do not turn this into an unannounced silent update.
-- Rollbacks also require a higher semantic version containing the restored code. Do not point `stable.json` at an older version because installed clients intentionally ignore downgrades.
-- Key rotation requires a transition release signed by the old key that embeds the new public key. Never replace the pinned public key and server key in one step.
+管理器增量更新命令示例格式如下；实际回复时必须替换成当次真实标题和说明：
 
-The detailed operational runbook is in `docs/remote-updates.md`.
+```powershell
+.\scripts\publish-manager-update.ps1 `
+  --title '插件配置更新' `
+  --note '修复长期记忆高级配置页面加载' `
+  --note '修复定时任务插件接口通信' `
+  --yes
+```

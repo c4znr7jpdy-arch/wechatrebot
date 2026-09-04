@@ -8,7 +8,16 @@ import shutil
 import struct
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
+
+
+COMMERCIAL_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = COMMERCIAL_ROOT / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 
 
 def _copy(source: Path, target: Path, exclude: tuple[str, ...] = ()) -> None:
@@ -45,6 +54,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest().upper()
+
+
+def _copied_record(target: Path, output: Path) -> dict[str, str]:
+    """Record package provenance without exposing developer-machine paths."""
+    return {"target": target.relative_to(output).as_posix()}
+
+
+def _release_manifest(
+    *,
+    version: str,
+    source_manifest: Path,
+    copied: list[dict[str, str]],
+    runtime: dict[str, object] | None,
+    files: list[dict[str, str]],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "source_manifest_status": LEGACY_READY_MANIFEST_STATUS,
+        "release_version": version,
+        "source_manifest_build_sha256": _sha256(source_manifest),
+        "copied": copied,
+        "runtime": runtime,
+        "files": files,
+    }
 
 
 def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[str, object]:
@@ -136,10 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="frozen WeChatReBot.exe created by scripts/build_manager.py",
     )
-    parser.add_argument("--allow-gate", action="append", default=[])
     args = parser.parse_args(argv)
 
-    commercial_root = Path(__file__).resolve().parents[1]
+    commercial_root = COMMERCIAL_ROOT
     source_root = args.source_root.resolve()
     output = (args.output or commercial_root / "artifacts" / "staging").resolve()
     artifacts_root = (commercial_root / "artifacts").resolve()
@@ -151,13 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     manifest = json.loads(
         (commercial_root / "release" / "source-manifest.json").read_text(encoding="utf-8")
     )
+    project = tomllib.loads((commercial_root / "pyproject.toml").read_text(encoding="utf-8"))
     copied: list[dict[str, str]] = []
-    skipped: list[dict[str, str]] = []
     for entry in manifest["entries"]:
-        gate = entry.get("gate")
-        if gate and gate not in args.allow_gate:
-            skipped.append({"source": entry["source"], "gate": gate})
-            continue
         origin = commercial_root if entry["origin"] == "commercial" else source_root
         source = (origin / entry["source"]).resolve()
         if not source.exists():
@@ -179,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         ):
             raise RuntimeError(f"invalid exclude list: {entry['source']}")
         _copy(source, target, tuple(excludes))
-        copied.append({"source": str(source), "target": target.relative_to(output).as_posix()})
+        copied.append(_copied_record(target, output))
 
     runtime_summary: dict[str, object] | None = None
     if args.runtime_root:
@@ -200,12 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         manager_exe = _validate_manager_exe(args.manager_exe)
         manager_target = output / "manager" / "WeChatReBot.exe"
         _copy(manager_exe, manager_target)
-        copied.append(
-            {
-                "source": str(manager_exe),
-                "target": manager_target.relative_to(output).as_posix(),
-            }
-        )
+        copied.append(_copied_record(manager_target, output))
 
     hashes = [
         {"path": path.relative_to(output).as_posix(), "sha256": _sha256(path)}
@@ -214,14 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     ]
     (output / "release-manifest.json").write_text(
         json.dumps(
-            {
-                "schema_version": 1,
-                "source_manifest_status": manifest["status"],
-                "copied": copied,
-                "skipped_gated_entries": skipped,
-                "runtime": runtime_summary,
-                "files": hashes,
-            },
+            _release_manifest(
+                version=project["project"]["version"],
+                source_manifest=commercial_root / "release" / "source-manifest.json",
+                copied=copied,
+                runtime=runtime_summary,
+                files=hashes,
+            ),
             ensure_ascii=False,
             indent=2,
         )

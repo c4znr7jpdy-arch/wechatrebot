@@ -23,6 +23,10 @@ def _metadata_copy(tmp_path: Path) -> Path:
     shutil.copy2(source / "src" / "wechatrebot_manager" / "__init__.py", package)
     shutil.copytree(source / "legal", target / "legal")
     shutil.copytree(source / "config", target / "config")
+    shutil.copytree(source / "assets", target / "assets")
+    shutil.copytree(source / "patches", target / "patches")
+    (target / "scripts").mkdir()
+    shutil.copy2(source / "scripts" / "build_runtime.py", target / "scripts")
     return target
 
 
@@ -31,31 +35,53 @@ def test_current_release_metadata_is_internally_consistent() -> None:
     assert _validator().validate_release_metadata(root) == []
 
 
-def test_ready_status_requires_closed_hook_and_plugin_reviews(tmp_path: Path) -> None:
+def test_legacy_ready_status_does_not_enable_approval_gates(tmp_path: Path) -> None:
     root = _metadata_copy(tmp_path)
     source_path = root / "release" / "source-manifest.json"
     source = json.loads(source_path.read_text(encoding="utf-8"))
     source["status"] = "ready"
     source_path.write_text(json.dumps(source), encoding="utf-8")
 
-    errors = _validator().validate_release_metadata(root)
-
-    assert any("redistribution approval" in item for item in errors)
-    assert any("plugin manifest" in item for item in errors)
+    assert _validator().validate_release_metadata(root) == []
 
 
-def test_hook_hash_must_match_source_manifest_gate(tmp_path: Path) -> None:
+def test_hook_hash_must_match_source_manifest(tmp_path: Path) -> None:
     root = _metadata_copy(tmp_path)
     source_path = root / "release" / "source-manifest.json"
     source = json.loads(source_path.read_text(encoding="utf-8"))
+    hook = json.loads((root / "release" / "hook-binaries.json").read_text(encoding="utf-8"))
+    hook_paths = {item["path"] for item in hook["files"]}
     hook_entry = next(
         item
         for item in source["entries"]
-        if item.get("gate") == "hook-binary-redistribution"
+        if item.get("source") in hook_paths
     )
     hook_entry["sha256"] = "0" * 64
     source_path.write_text(json.dumps(source), encoding="utf-8")
 
     errors = _validator().validate_release_metadata(root)
 
-    assert "source manifest hook gates do not match hook-binaries.json" in errors
+    assert "source manifest hook hashes do not match hook-binaries.json" in errors
+
+
+def test_legal_artifact_hash_change_is_rejected(tmp_path: Path) -> None:
+    root = _metadata_copy(tmp_path)
+    notices = root / "legal" / "THIRD-PARTY-NOTICES.md"
+    notices.write_text(notices.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
+
+    errors = _validator().validate_release_metadata(root)
+
+    assert any("legal review artifact hash mismatch" in item for item in errors)
+
+
+def test_approved_evidence_requires_accountable_artifacts(tmp_path: Path) -> None:
+    root = _metadata_copy(tmp_path)
+    evidence_path = root / "release" / "acceptance-evidence.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["requirements"][0]["status"] = "approved"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    errors = _validator().validate_release_metadata(root)
+
+    assert any("no reviewer or time" in item for item in errors)
+    assert any("has no artifacts" in item for item in errors)

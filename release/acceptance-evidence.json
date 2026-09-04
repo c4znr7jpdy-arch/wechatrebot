@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "release_version": "0.8.7",
+  "status": "pending",
+  "requirements": [
+    {"id": "hook-redistribution", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "hook-security", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "real-device-wechat-4.1.8.27", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "authenticode", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "plugin-license-review", "status": "prepared", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "runtime-license-review", "status": "prepared", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "customer-agreement", "status": "prepared", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "clean-windows", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "antivirus-compatibility", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "upgrade-rollback", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "offline-signing-key-backup", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "release-artifact-hashes", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
+    {"id": "customer-document-scan", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []}
+  ],
+  "evidence_policy": {
+    "allowed_statuses": ["pending", "prepared", "approved", "rejected"],
+    "approval_requires": ["reviewer", "approved_at", "evidence.path", "evidence.sha256"],
+    "sensitive_material_forbidden": ["private key", "certificate password", "API key", "Cookie", "customer message content"]
+  }
+}

@@ -18,7 +18,6 @@ def _payload(root: Path) -> None:
         json.dumps(
             {
                 "schema_version": 1,
-                "source_manifest_status": "ready",
                 "files": [
                     {
                         "path": "app/bridge/src/hook_bridge/__init__.py",
@@ -52,7 +51,9 @@ def test_perform_install_writes_ready_brand_and_provider(
     )
     monkeypatch.setattr(
         "wechatrebot_manager.installer.validate_install_path",
-        lambda path: InstallPathValidation(Path(path), (), (), 10 * 1024**3),
+        lambda path, **_kwargs: InstallPathValidation(
+            Path(path), (), (), 10 * 1024**3
+        ),
     )
 
     phases: list[str] = []
@@ -92,7 +93,9 @@ def test_perform_install_does_not_require_wechat(
     )
     monkeypatch.setattr(
         "wechatrebot_manager.installer.validate_install_path",
-        lambda path: InstallPathValidation(Path(path), (), (), 10 * 1024**3),
+        lambda path, **_kwargs: InstallPathValidation(
+            Path(path), (), (), 10 * 1024**3
+        ),
     )
 
     perform_install(

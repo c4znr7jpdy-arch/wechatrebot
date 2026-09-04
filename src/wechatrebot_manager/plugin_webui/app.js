@@ -79,6 +79,90 @@ async function api(path, options = {}) {
   return payload.data;
 }
 
+const pluginPageChannel = "astrbot-plugin-page";
+
+function encodePluginEndpoint(value) {
+  if (typeof value !== "string") throw new Error("高级配置页请求无效。");
+  const parts = value.trim().replace(/^\/+|\/+$/g, "").split("/");
+  if (!parts.length || parts.some((part) => !part || part === "." || part === ".." || !/^[A-Za-z0-9_.~-]+$/.test(part))) {
+    throw new Error("高级配置页请求无效。");
+  }
+  return parts.map(encodeURIComponent).join("/");
+}
+
+function pluginRequestData(payload) {
+  if (payload && payload.status === "error") {
+    throw new Error(customerText(payload.message || "高级配置页请求失败。"));
+  }
+  if (payload && payload.status === "ok" && Object.prototype.hasOwnProperty.call(payload, "data")) {
+    return payload.data;
+  }
+  return payload;
+}
+
+async function handlePluginPageRequest(message) {
+  if (!state.currentId || !state.detail?.enabled) throw new Error("请先启用这项功能。");
+  const endpoint = encodePluginEndpoint(message.endpoint);
+  const base = `/control/plugins/${encodeURIComponent(state.currentId)}/extension/${endpoint}`;
+  let response;
+  if (message.action === "api:get") {
+    const url = new URL(base, window.location.origin);
+    if (message.params && typeof message.params === "object" && !Array.isArray(message.params)) {
+      Object.entries(message.params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+      });
+    }
+    response = await fetch(url);
+  } else if (message.action === "api:post") {
+    response = await fetch(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(message.body ?? {}),
+    });
+  } else {
+    throw new Error("当前高级配置页使用了尚未支持的操作。");
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    throw new Error("高级配置页返回了无法识别的数据。");
+  }
+  if (!response.ok) throw new Error(customerText(payload?.message || "高级配置页请求失败。"));
+  return pluginRequestData(payload);
+}
+
+window.addEventListener("message", async (event) => {
+  const frame = el("plugin-frame");
+  const message = event.data;
+  if (
+    event.origin !== window.location.origin ||
+    event.source !== frame.contentWindow ||
+    !message ||
+    message.channel !== pluginPageChannel ||
+    message.kind !== "request" ||
+    typeof message.requestId !== "string"
+  ) return;
+  try {
+    const data = await handlePluginPageRequest(message);
+    event.source.postMessage(
+      { channel: pluginPageChannel, kind: "response", requestId: message.requestId, ok: true, data },
+      event.origin,
+    );
+  } catch (error) {
+    event.source.postMessage(
+      {
+        channel: pluginPageChannel,
+        kind: "response",
+        requestId: message.requestId,
+        ok: false,
+        error: customerText(error?.message || "高级配置页请求失败。"),
+      },
+      event.origin,
+    );
+  }
+});
+
 function setBusy(value, activeButton = null, busyText = "处理中…") {
   state.busy = value;
   [el("save-config"), el("toggle-plugin"), el("reload-plugin")].forEach((button) => {
@@ -684,10 +768,12 @@ async function selectPlugin(moduleName, openFirstPage = false) {
     state.revision = detail.revision;
     loadingView.hidden = true;
     detailView.hidden = false;
-    showTab("basic");
     renderDetail();
-    if (openFirstPage && state.detail.pages?.length) {
-      showTab("pages");
+    const shouldOpenFirstPage = Boolean(
+      state.detail.pages?.length && (openFirstPage || !state.detail.configurable),
+    );
+    showTab(shouldOpenFirstPage ? "pages" : "basic");
+    if (shouldOpenFirstPage) {
       const firstPageButton = el("page-picker").querySelector(".page-button");
       if (firstPageButton) await openPluginPage(state.detail.pages[0], firstPageButton);
     }

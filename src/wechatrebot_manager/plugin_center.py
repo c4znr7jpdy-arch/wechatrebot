@@ -28,6 +28,7 @@ from .single_instance import SingleInstanceLock
 
 _PUBLIC_PLUGIN_ID = re.compile(r"^feature-[a-f0-9]{16}$")
 _PAGE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+_PLUGIN_EXTENSION_SEGMENT = re.compile(r"^[A-Za-z0-9_.~-]+$")
 _PROXY_PREFIXES = (
     "/api/plugin/page/",
     "/api/plug/",
@@ -67,6 +68,17 @@ class PluginCatalogItem:
 def _public_plugin_id(module_name: str) -> str:
     digest = hashlib.sha256(module_name.encode("utf-8")).hexdigest()[:16]
     return f"feature-{digest}"
+
+
+def _normalize_plugin_extension_endpoint(endpoint: str) -> str:
+    value = str(endpoint or "").strip().strip("/")
+    parts = value.split("/") if value else []
+    if not parts or any(
+        part in {"", ".", ".."} or not _PLUGIN_EXTENSION_SEGMENT.fullmatch(part)
+        for part in parts
+    ):
+        raise PluginCenterError("高级配置页请求无效。")
+    return "/".join(parts)
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -886,6 +898,15 @@ class PluginCenterService:
             raise PluginCenterError("高级配置页不存在。")
         return {"content_path": self.engine.page_entry(module_name, page_name)}
 
+    def extension_path(self, public_id: str, endpoint: str) -> str:
+        item = self._plugin(public_id)
+        if not item.enabled or not item.pages:
+            raise PluginCenterError("请先启用这项功能，再使用高级配置页。")
+        normalized = _normalize_plugin_extension_endpoint(endpoint)
+        encoded_module = quote(item.module_name, safe="")
+        encoded_endpoint = quote(normalized, safe="/")
+        return f"/api/plug/{encoded_module}/{encoded_endpoint}"
+
 
 def _asset_root() -> Path:
     candidates = [Path(__file__).with_name("plugin_webui")]
@@ -991,11 +1012,43 @@ def _handler(service: PluginCenterService):
                 content_type=self.headers.get("Content-Type", "application/json"),
                 accept_language=self.headers.get("Accept-Language", "zh-CN"),
             )
+            normalized_headers = {key.casefold(): value for key, value in headers.items()}
             self.send_response(status)
             self._security_headers()
             for key in ("Content-Type", "Content-Security-Policy", "Permissions-Policy"):
-                if headers.get(key):
-                    self.send_header(key, headers[key])
+                value = normalized_headers.get(key.casefold())
+                if value:
+                    self.send_header(key, value)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def _proxy_extension(self, public_id: str, endpoint: str) -> None:
+            self._require_same_origin()
+            split = urlsplit(self.path)
+            upstream_path = service.extension_path(public_id, endpoint)
+            if split.query:
+                upstream_path = f"{upstream_path}?{split.query}"
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError as exc:
+                raise PluginCenterError("请求长度无效。") from exc
+            if length > _MAX_BODY_BYTES:
+                raise PluginCenterError("请求内容过大。")
+            body = self.rfile.read(length) if length else None
+            status, headers, raw = service.engine.raw_request(
+                self.command,
+                upstream_path,
+                body=body,
+                content_type=self.headers.get("Content-Type", "application/json"),
+                accept_language=self.headers.get("Accept-Language", "zh-CN"),
+            )
+            normalized_headers = {key.casefold(): value for key, value in headers.items()}
+            self.send_response(status)
+            self._security_headers()
+            content_type = normalized_headers.get("content-type")
+            if content_type:
+                self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -1024,6 +1077,9 @@ def _handler(service: PluginCenterService):
                     return
                 if len(parts) == 6 and parts[:2] == ["control", "plugins"] and parts[3] == "pages" and parts[5] == "entry":
                     self._send_json(HTTPStatus.OK, {"ok": True, "data": service.page_entry(parts[2], parts[4])})
+                    return
+                if len(parts) >= 5 and parts[:2] == ["control", "plugins"] and parts[3] == "extension":
+                    self._proxy_extension(parts[2], "/".join(parts[4:]))
                     return
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面不存在。"})
             except Exception as exc:
@@ -1073,6 +1129,9 @@ def _handler(service: PluginCenterService):
                     self._proxy()
                     return
                 parts = self._parts()
+                if len(parts) >= 5 and parts[:2] == ["control", "plugins"] and parts[3] == "extension":
+                    self._proxy_extension(parts[2], "/".join(parts[4:]))
+                    return
                 if len(parts) != 4 or parts[:2] != ["control", "plugins"] or parts[3] != "reload":
                     self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面不存在。"})
                     return

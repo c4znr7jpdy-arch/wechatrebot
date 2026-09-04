@@ -21,6 +21,7 @@ from .customer_config import (
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog
 from .lifecycle import LifecycleController
+from .payload import PayloadError
 from .plugin_center import (
     PluginCenterError,
     PluginCenterService,
@@ -41,6 +42,7 @@ from .updates import (
     prepare_update,
 )
 from .wechat_path import validate_wechat_executable
+from .windows_tray import WindowsTrayController
 
 
 PUBLIC_API_METHODS = (
@@ -72,6 +74,7 @@ PUBLIC_API_METHODS = (
     "open_install_folder",
     "check_update",
     "install_update",
+    "get_update_status",
 )
 
 
@@ -97,8 +100,19 @@ class ApplicationApi:
         self._schedules = ScheduleService(self._install_root)
         self._catalog = load_error_catalog(self._install_root)
         self._window: Any | None = None
+        self._tray: WindowsTrayController | None = None
         self._action_lock = threading.Lock()
         self._update_lock = threading.Lock()
+        self._update_status_lock = threading.Lock()
+        self._update_status: dict[str, object] = {
+            "state": "idle",
+            "phase": "idle",
+            "completed": 0,
+            "total": 0,
+            "percent": 0,
+            "message": "",
+            "error": None,
+        }
         self._update_channel: UpdateChannel | None = None
         self._available_update: UpdateRelease | None = None
         self._update_result = consume_update_result(self._install_root)
@@ -108,8 +122,19 @@ class ApplicationApi:
             daemon=True,
         ).start()
 
-    def _attach_window(self, window: Any) -> None:
+    def _attach_window(
+        self,
+        window: Any,
+        tray: WindowsTrayController | None = None,
+    ) -> None:
         self._window = window
+        self._tray = tray
+
+    def _close_window_for_update(self) -> None:
+        if self._tray is not None:
+            self._tray.permit_programmatic_close()
+        if self._window is not None:
+            self._window.destroy()
 
     @staticmethod
     def _ok(data: Any = None, *, message: str = "") -> dict[str, object]:
@@ -524,9 +549,101 @@ class ApplicationApi:
         finally:
             self._update_lock.release()
 
+    def _set_update_status(self, **values: object) -> None:
+        with self._update_status_lock:
+            self._update_status = {**self._update_status, **values}
+
+    def _update_progress(self, phase: str, completed: int, total: int) -> None:
+        labels = {
+            "download": "正在下载新版本",
+            "extract": "正在解压更新包",
+            "verify": "正在校验更新文件",
+        }
+        percent = min(100, max(0, round(completed * 100 / total))) if total else 0
+        self._set_update_status(
+            state="running",
+            phase=phase,
+            completed=completed,
+            total=total,
+            percent=percent,
+            message=labels.get(phase, "正在准备更新"),
+            error=None,
+        )
+
+    def get_update_status(self) -> dict[str, object]:
+        with self._update_status_lock:
+            return self._ok(dict(self._update_status))
+
+    def _run_update_install(
+        self, release: UpdateRelease, channel: UpdateChannel
+    ) -> None:
+        try:
+            try:
+                prepared = prepare_update(
+                    release,
+                    channel,
+                    self._install_root,
+                    progress_callback=self._update_progress,
+                )
+            except (OSError, PayloadError, ValueError, UpdateError) as exc:
+                failure = self._failed(exc, "14002")
+                self._set_update_status(
+                    state="failed",
+                    phase="failed",
+                    message="更新下载或校验未能完成。",
+                    error=failure["error"],
+                )
+                return
+
+            self._set_update_status(
+                state="running",
+                phase="launching",
+                completed=1,
+                total=1,
+                percent=100,
+                message="正在启动安装程序",
+                error=None,
+            )
+            try:
+                plan = create_update_plan(prepared, self._install_root)
+                launch_update_helper(plan)
+            except (OSError, ValueError, UpdateError) as exc:
+                failure = self._failed(exc, "14003")
+                self._set_update_status(
+                    state="failed",
+                    phase="failed",
+                    message="更新安装程序未能启动。",
+                    error=failure["error"],
+                )
+                return
+
+            self._set_update_status(
+                state="restarting",
+                phase="restarting",
+                completed=1,
+                total=1,
+                percent=100,
+                message="更新已准备完成，软件正在重启",
+                error=None,
+            )
+            if self._window is not None:
+                threading.Timer(0.35, self._close_window_for_update).start()
+        except Exception as exc:
+            failure = self._failed(exc, "14003")
+            self._set_update_status(
+                state="failed",
+                phase="failed",
+                message="更新过程中发生意外错误。",
+                error=failure["error"],
+            )
+        finally:
+            self._update_lock.release()
+
     def install_update(self, version: str) -> dict[str, object]:
         if not self._update_lock.acquire(blocking=False):
-            return self._ok({"accepted": False}, message="正在处理上一个更新操作。")
+            return self._ok(
+                {"accepted": False}, message="正在处理上一个更新操作。"
+            )
         try:
             view = self._lifecycle.refresh()
             if view.state.value != "STOPPED" or view.online or view.can_stop:
@@ -541,22 +658,28 @@ class ApplicationApi:
                 release = check_for_update(channel, current_version=__version__)
             if release is None or release.version != str(version).strip():
                 raise ValueError("目标版本已不可用，请重新检查更新。")
-            try:
-                prepared = prepare_update(release, channel, self._install_root)
-            except (OSError, ValueError, UpdateError) as exc:
-                return self._failed(exc, "14002")
-            plan = create_update_plan(prepared, self._install_root)
-            launch_update_helper(plan)
-            if self._window is not None:
-                threading.Timer(0.35, self._window.destroy).start()
+            self._set_update_status(
+                state="running",
+                phase="starting",
+                completed=0,
+                total=release.package_size,
+                percent=0,
+                message="正在连接更新服务",
+                error=None,
+            )
+            threading.Thread(
+                target=self._run_update_install,
+                args=(release, channel),
+                daemon=True,
+                name="wechatrebot-update",
+            ).start()
             return self._ok(
                 {"accepted": True, "version": release.version},
-                message="更新已准备完成，软件将自动重启。",
+                message="已经开始下载新版本。",
             )
-        except (OSError, ValueError, UpdateError) as exc:
-            return self._failed(exc, "14003")
-        finally:
+        except (OSError, RuntimeError, ValueError, UpdateError) as exc:
             self._update_lock.release()
+            return self._failed(exc, "14003")
 
 
 def run_application(install_root: str | Path) -> int:
@@ -567,8 +690,9 @@ def run_application(install_root: str | Path) -> int:
 
         api = ApplicationApi(install_root)
         brand = load_robot_settings(install_root).profile
+        title = f"{brand.display_name} · 机器人管理"
         window = webview.create_window(
-            f"{brand.display_name} · 机器人管理",
+            title,
             (_asset_root() / "index.html").resolve().as_uri(),
             width=1380,
             height=860,
@@ -576,7 +700,11 @@ def run_application(install_root: str | Path) -> int:
             background_color="#F3F6FA",
             text_select=True,
         )
-        api._attach_window(window)
+        tray = WindowsTrayController(window, brand.display_name)
+        window.events.shown += tray.start
+        window.events.closing += tray.handle_window_closing
+        window.events.closed += tray.stop
+        api._attach_window(window, tray)
         window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
         webview.start(gui="edgechromium", debug=False, private_mode=True)
         return 0

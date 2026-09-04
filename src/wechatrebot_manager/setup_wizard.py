@@ -59,7 +59,6 @@ class SetupWizard:
         root,
         *,
         payload_root: Path | None,
-        allow_incomplete_payload: bool,
     ) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -68,7 +67,6 @@ class SetupWizard:
         self.ttk = ttk
         self.root = root
         self.payload_root = payload_root
-        self.allow_incomplete_payload = allow_incomplete_payload
         self.page = 0
         self.installing = False
         self.events: queue.Queue[tuple[object, ...]] = queue.Queue()
@@ -205,13 +203,15 @@ class SetupWizard:
 
         if self.page != 0:
             return True
-        result = validate_install_path(self.install_var.get())
-        if result.errors:
+        request_errors = self._request().validate()
+        if request_errors:
             messagebox.showerror(
-                "无法继续", "\n".join(result.errors), parent=self.root
+                "无法继续", "\n".join(request_errors), parent=self.root
             )
             return False
-        self.install_var.set(str(result.path))
+        self.install_var.set(
+            str(validate_install_path(self.install_var.get()).path)
+        )
         return True
 
     def _next(self) -> None:
@@ -233,7 +233,6 @@ class SetupWizard:
             install_root=Path(self.install_var.get()),
             payload_root=self.payload_root,
             brand=DEFAULT_BRAND,
-            allow_incomplete_payload=self.allow_incomplete_payload,
         )
 
     def _start_install(self) -> None:
@@ -368,8 +367,6 @@ class SetupWizard:
 
 def run_setup_wizard(
     payload_root: Path | None,
-    *,
-    allow_incomplete_payload: bool = False,
 ) -> int:
     if os.name != "nt":
         return 2
@@ -379,7 +376,6 @@ def run_setup_wizard(
     SetupWizard(
         root,
         payload_root=payload_root,
-        allow_incomplete_payload=allow_incomplete_payload,
     )
     root.mainloop()
     return 0

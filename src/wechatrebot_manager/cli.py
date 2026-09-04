@@ -10,7 +10,12 @@ from .desktop import run_desktop
 from .install_paths import INSTALL_MARKER, prepare_install_layout, validate_install_path
 from .json_io import write_json_atomic
 from .launcher import ServiceLaunchError, run_services_foreground
-from .payload import PayloadError, install_payload, verify_payload
+from .payload import (
+    PayloadError,
+    install_payload,
+    payload_relative_paths,
+    verify_payload,
+)
 from .plugin_center import PluginCenterError, run_plugin_center
 from .runtime_config import write_runtime_configs
 from .self_test import manager_self_test
@@ -25,17 +30,11 @@ def _parser() -> argparse.ArgumentParser:
     gui = subparsers.add_parser("gui", help="打开安装向导或机器人管理器")
     gui.add_argument("--payload", type=Path)
     gui.add_argument("--install-root", type=Path)
-    gui.add_argument("--allow-incomplete-payload", action="store_true")
 
     self_test = subparsers.add_parser("self-test", help=argparse.SUPPRESS)
     self_test.add_argument("--output", type=Path, required=True)
     bootstrap = subparsers.add_parser("bootstrap", help="运行 Windows 首次配置向导")
     bootstrap.add_argument("--payload", type=Path, help="待校验并展开的商业载荷目录")
-    bootstrap.add_argument(
-        "--allow-incomplete-payload",
-        action="store_true",
-        help="仅开发时允许安装未完成载荷",
-    )
 
     install = subparsers.add_parser("check-install-dir", help="检查安装目录")
     install.add_argument("path")
@@ -47,14 +46,12 @@ def _parser() -> argparse.ArgumentParser:
 
     verify = subparsers.add_parser("verify-payload", help="验证商业载荷哈希和边界")
     verify.add_argument("payload", type=Path)
-    verify.add_argument("--allow-incomplete", action="store_true")
 
     install_payload_parser = subparsers.add_parser(
         "install-payload", help="验证并展开商业载荷"
     )
     install_payload_parser.add_argument("payload", type=Path)
     install_payload_parser.add_argument("install_root", type=Path)
-    install_payload_parser.add_argument("--allow-incomplete", action="store_true")
 
     render = subparsers.add_parser("render-config", help="生成微信连接与控制台配置")
     render.add_argument("install_root", type=Path)
@@ -87,7 +84,6 @@ def main(argv: list[str] | None = None) -> int:
             return run_desktop(
                 payload_root=args.payload,
                 install_root=args.install_root,
-                allow_incomplete_payload=args.allow_incomplete_payload,
             )
         except Exception as exc:
             report_startup_error(exc)
@@ -98,10 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "apply-update":
         return apply_update_plan(args.plan)
     if args.command == "bootstrap":
-        return run_bootstrap(
-            args.payload,
-            allow_incomplete_payload=args.allow_incomplete_payload,
-        )
+        return run_bootstrap(args.payload)
     if args.command == "check-install-dir":
         result = validate_install_path(Path(args.path))
         print(
@@ -139,11 +132,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"verify-payload", "install-payload"}:
         try:
             if args.command == "verify-payload":
-                verified = verify_payload(
-                    args.payload, allow_incomplete=args.allow_incomplete
-                )
+                verified = verify_payload(args.payload)
             else:
-                validation = validate_install_path(args.install_root)
+                relative_paths = payload_relative_paths(args.payload)
+                validation = validate_install_path(
+                    args.install_root,
+                    payload_relative_paths=relative_paths,
+                )
                 if not validation.ok:
                     raise PayloadError("；".join(validation.errors))
                 prepare_install_layout(validation.path)
@@ -154,7 +149,6 @@ def main(argv: list[str] | None = None) -> int:
                 verified = install_payload(
                     args.payload,
                     validation.path,
-                    allow_incomplete=args.allow_incomplete,
                 )
                 write_json_atomic(
                     validation.path / INSTALL_MARKER,
@@ -165,9 +159,6 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "ok": True,
                         "file_count": len(verified.files),
-                        "source_manifest_status": verified.manifest.get(
-                            "source_manifest_status"
-                        ),
                     },
                     ensure_ascii=False,
                     indent=2,

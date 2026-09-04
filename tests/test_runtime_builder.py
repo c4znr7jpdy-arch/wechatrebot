@@ -54,3 +54,29 @@ def test_blessed_wheelhouse_manifest_matches_runtime_lock_size() -> None:
     assert payload["wheel_count"] >= 200
     assert payload["total_bytes"] > 0
     assert len(payload["aggregate_sha256"]) == 64
+
+
+def test_download_wheels_reuses_a_verified_wheelhouse(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _builder()
+    wheelhouse = tmp_path / "wheels"
+    wheelhouse.mkdir()
+    (wheelhouse / "package-1.0-py3-none-any.whl").write_bytes(b"wheel")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(module, "_verify_wheelhouse", lambda *_args: {"ok": True})
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **_kwargs: commands.append(argv),
+    )
+
+    module._download_wheels(
+        Path("python.exe"),
+        tmp_path / "requirements.lock",
+        wheelhouse,
+        offline=False,
+        commercial_root=tmp_path,
+    )
+
+    assert commands == []

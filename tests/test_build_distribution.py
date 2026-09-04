@@ -5,9 +5,6 @@ from pathlib import Path
 import struct
 import zipfile
 
-import pytest
-
-
 def _builder():
     script = Path(__file__).parents[1] / "scripts" / "build_distribution.py"
     spec = importlib.util.spec_from_file_location("build_distribution", script)
@@ -17,7 +14,7 @@ def _builder():
     return module
 
 
-def _payload(root: Path, *, status: str) -> None:
+def _payload(root: Path, *, legacy_status: str | None = None) -> None:
     manager = root / "manager" / "WeChatReBot.exe"
     manager.parent.mkdir(parents=True)
     executable = bytearray(256)
@@ -27,38 +24,43 @@ def _payload(root: Path, *, status: str) -> None:
     struct.pack_into("<H", executable, 0x84, 0x8664)
     manager.write_bytes(executable)
     digest = hashlib.sha256(manager.read_bytes()).hexdigest().upper()
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "files": [{"path": "manager/WeChatReBot.exe", "sha256": digest}],
+    }
+    if legacy_status is not None:
+        manifest["source_manifest_status"] = legacy_status
     (root / "release-manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "source_manifest_status": status,
-                "files": [
-                    {"path": "manager/WeChatReBot.exe", "sha256": digest}
-                ],
-            }
-        ),
+        json.dumps(manifest),
         encoding="utf-8",
     )
 
 
-def test_distribution_requires_ready_payload_by_default(
+def test_distribution_does_not_gate_on_legacy_payload_status(
     tmp_path: Path, monkeypatch
 ) -> None:
     module = _builder()
     commercial = tmp_path / "commercial"
-    (commercial / "artifacts").mkdir(parents=True)
-    monkeypatch.setattr(module, "COMMERCIAL_ROOT", commercial)
+    artifacts = commercial / "artifacts"
+    release = commercial / "release"
+    release.mkdir(parents=True)
+    (release / "START-HERE.txt").write_text("start\n", encoding="utf-8")
     payload = tmp_path / "payload"
-    _payload(payload, status="phase-incomplete")
-    with pytest.raises(Exception, match="尚未达到"):
-        module.main(
-            [
-                "--payload",
-                str(payload),
-                "--output",
-                str(commercial / "artifacts" / "customer-package"),
-            ]
-        )
+    _payload(payload, legacy_status="phase-incomplete")
+    output = artifacts / "customer-package"
+    monkeypatch.setattr(module, "COMMERCIAL_ROOT", commercial)
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: type("Result", (), {"returncode": 0})(),
+    )
+
+    assert module.main(["--payload", str(payload), "--output", str(output)]) == 0
+    manifest = json.loads(
+        (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert "payload_status" not in manifest
+    assert "development_preview" not in manifest
 
 
 def test_distribution_contains_one_click_entry_and_nested_payload(
@@ -71,7 +73,7 @@ def test_distribution_contains_one_click_entry_and_nested_payload(
     release.mkdir(parents=True)
     (release / "START-HERE.txt").write_text("start\n", encoding="utf-8")
     payload = tmp_path / "payload"
-    _payload(payload, status="ready")
+    _payload(payload)
     output = artifacts / "customer-package"
     monkeypatch.setattr(module, "COMMERCIAL_ROOT", commercial)
     monkeypatch.setattr(
@@ -90,47 +92,8 @@ def test_distribution_contains_one_click_entry_and_nested_payload(
         (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
     )
     assert manifest["entrypoint"] == "WeChatReBot.exe"
-    assert manifest["payload_status"] == "ready"
     assert manifest["payload_file"] == "payload.wrb"
     assert manifest["payload_format"] == "zip-v1"
-    assert manifest["development_preview"] is False
-
-
-def test_incomplete_distribution_is_explicitly_marked_as_development_preview(
-    tmp_path: Path, monkeypatch
-) -> None:
-    module = _builder()
-    commercial = tmp_path / "commercial"
-    artifacts = commercial / "artifacts"
-    release = commercial / "release"
-    release.mkdir(parents=True)
-    (release / "START-HERE.txt").write_text("start\n", encoding="utf-8")
-    payload = tmp_path / "payload"
-    _payload(payload, status="phase-incomplete")
-    output = artifacts / "customer-package"
-    monkeypatch.setattr(module, "COMMERCIAL_ROOT", commercial)
-    monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda *args, **kwargs: type("Result", (), {"returncode": 0})(),
-    )
-
-    assert (
-        module.main(
-            [
-                "--payload",
-                str(payload),
-                "--output",
-                str(output),
-                "--allow-incomplete",
-            ]
-        )
-        == 0
-    )
-    manifest = json.loads(
-        (output / "DISTRIBUTION-MANIFEST.json").read_text(encoding="utf-8")
-    )
-    assert manifest["development_preview"] is True
 
 
 def test_outer_archive_preserves_dotted_release_name(tmp_path: Path) -> None:

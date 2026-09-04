@@ -42,9 +42,7 @@ def _validate_pe(path: Path) -> None:
 def _write_distribution_manifest(
     root: Path,
     *,
-    payload_status: object,
     payload_file_count: int,
-    development_preview: bool,
 ) -> Path:
     manager = root / "WeChatReBot.exe"
     payload_archive = root / PAYLOAD_ARCHIVE
@@ -54,9 +52,7 @@ def _write_distribution_manifest(
         "entrypoint": manager.name,
         "payload_file": PAYLOAD_ARCHIVE,
         "payload_format": "zip-v1",
-        "payload_status": payload_status,
         "payload_file_count": payload_file_count,
-        "development_preview": development_preview,
         "files": [
             {
                 "path": manager.name,
@@ -110,11 +106,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--archive", action="store_true")
-    parser.add_argument(
-        "--allow-incomplete",
-        action="store_true",
-        help="development verification only; never use for a paid release",
-    )
     args = parser.parse_args(argv)
 
     artifacts_root = (COMMERCIAL_ROOT / "artifacts").resolve()
@@ -132,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         parser.error("output must not be placed inside the source payload")
 
-    verified = verify_payload(payload, allow_incomplete=args.allow_incomplete)
+    verified = verify_payload(payload)
     source_guard = subprocess.run(
         [sys.executable, str(COMMERCIAL_ROOT / "scripts" / "release_guard.py"), str(payload)],
         check=False,
@@ -150,12 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.copy2(COMMERCIAL_ROOT / "release" / "START-HERE.txt", temp / "START-HERE.txt")
         _write_distribution_manifest(
             temp,
-            payload_status=verified.manifest.get("source_manifest_status"),
             payload_file_count=len(verified.files),
-            development_preview=(
-                args.allow_incomplete
-                and verified.manifest.get("source_manifest_status") != "ready"
-            ),
         )
         guard = subprocess.run(
             [sys.executable, str(COMMERCIAL_ROOT / "scripts" / "release_guard.py"), str(temp)],
@@ -173,7 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     result: dict[str, object] = {
         "schema_version": 1,
         "output": str(output),
-        "payload_status": verified.manifest.get("source_manifest_status"),
         "payload_file_count": len(verified.files),
         "archive": None,
     }

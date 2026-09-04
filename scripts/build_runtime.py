@@ -128,23 +128,28 @@ def _download_wheels(
 ) -> None:
     wheelhouse.mkdir(parents=True, exist_ok=True)
     if not offline:
-        _run(
-            [
-                str(host_python),
-                "-m",
-                "pip",
-                "wheel",
-                "--disable-pip-version-check",
-                "--no-cache-dir",
-                "--no-deps",
-                "--prefer-binary",
-                "--wheel-dir",
-                str(wheelhouse),
-                "--requirement",
-                str(requirements),
-            ],
-            cwd=commercial_root,
-        )
+        try:
+            _verify_wheelhouse(commercial_root, wheelhouse)
+        except (OSError, ValueError, RuntimeError):
+            _run(
+                [
+                    str(host_python),
+                    "-m",
+                    "pip",
+                    "wheel",
+                    "--disable-pip-version-check",
+                    "--no-cache-dir",
+                    "--no-deps",
+                    "--prefer-binary",
+                    "--wheel-dir",
+                    str(wheelhouse),
+                    "--requirement",
+                    str(requirements),
+                ],
+                cwd=commercial_root,
+            )
+        else:
+            print("已复用通过指纹校验的离线 wheelhouse。", flush=True)
     if not tuple(wheelhouse.glob("*.whl")):
         raise RuntimeError("离线 wheelhouse 为空。")
     unexpected = [path.name for path in wheelhouse.iterdir() if path.suffix != ".whl"]

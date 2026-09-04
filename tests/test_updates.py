@@ -21,6 +21,7 @@ from wechatrebot_manager.updates import (
     canonical_manifest_bytes,
     create_update_plan,
     cleanup_stale_update_workdirs,
+    consume_update_result,
     extract_update_archive,
     load_update_channel,
     parse_update_manifest,
@@ -92,7 +93,6 @@ def _ready_payload(root: Path, manager_content: bytes = b"new-manager") -> Path:
         json.dumps(
             {
                 "schema_version": 1,
-                "source_manifest_status": "ready",
                 "files": files,
             }
         ),
@@ -164,6 +164,24 @@ def test_update_archive_must_keep_every_file_under_payload(tmp_path: Path) -> No
     assert not (tmp_path / "outside.txt").exists()
 
 
+def test_update_archive_supports_long_windows_staging_paths(tmp_path: Path) -> None:
+    archive = tmp_path / "long.zip"
+    relative = (
+        "payload/runtime/python/Lib/site-packages/lark_oapi/api/"
+        "security_and_compliance/v2/model/"
+        "p2_security_and_compliance_device_apply_record_device_apply_event_v2.py"
+    )
+    destination = tmp_path / ("staging-" + "x" * 80)
+    assert len(str(destination / Path(*relative.split("/")))) >= 248
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("payload/release-manifest.json", "{}")
+        package.writestr(relative, b"long-path-ok")
+
+    payload = extract_update_archive(archive, destination)
+
+    assert (payload / Path(*relative.split("/")[1:])).read_bytes() == b"long-path-ok"
+
+
 def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     tmp_path: Path,
 ) -> None:
@@ -190,6 +208,8 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     )
 
     assert plan.helper_executable.read_bytes() == b"helper"
+    plan_payload = json.loads(plan.plan_path.read_text(encoding="utf-8"))
+    assert plan_payload["wait_pids"] == [0]
     assert apply_update_plan(plan.plan_path, restart=False) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
     assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "updated"
@@ -223,3 +243,46 @@ def test_stale_update_workdirs_are_cleaned_without_touching_recent_data(
     assert cleanup_stale_update_workdirs(install, minimum_age_seconds=3600) == 1
     assert not old.exists()
     assert recent.exists()
+
+
+def test_update_plan_waits_for_onefile_bootloader(monkeypatch, tmp_path: Path) -> None:
+    from wechatrebot_manager import updates
+
+    executable = tmp_path / "WeChatReBot.exe"
+    executable.write_bytes(b"manager")
+    monkeypatch.setattr(updates.os, "name", "nt")
+    monkeypatch.setattr(updates.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updates.os, "getppid", lambda: 41)
+    monkeypatch.setattr(updates, "_process_executable", lambda _pid: executable)
+
+    assert updates._update_wait_pids(
+        executable,
+        42,
+        include_bootloader=True,
+    ) == (42, 41)
+
+
+def test_legacy_update_result_gets_status_for_webui(tmp_path: Path) -> None:
+    updates = tmp_path / "updates"
+    updates.mkdir()
+    result_path = updates / "update-result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "ok": False,
+                "version": "0.8.7",
+                "message": "文件仍被占用。",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert consume_update_result(tmp_path) == {
+        "schema_version": 1,
+        "ok": False,
+        "status": "failed",
+        "version": "0.8.7",
+        "message": "文件仍被占用。",
+    }
+    assert not result_path.exists()

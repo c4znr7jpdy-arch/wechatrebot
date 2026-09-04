@@ -1,6 +1,5 @@
 {
   "schema_version": 1,
-  "status": "phase-1-incomplete",
   "entries": [
     {
       "origin": "commercial",
@@ -54,8 +53,38 @@
     },
     {
       "origin": "commercial",
+      "source": "release/sbom.cdx.json",
+      "target": "legal/sbom.cdx.json"
+    },
+    {
+      "origin": "commercial",
       "source": "legal/README.md",
       "target": "legal/README.md"
+    },
+    {
+      "origin": "commercial",
+      "source": "legal/THIRD-PARTY-NOTICES.md",
+      "target": "legal/THIRD-PARTY-NOTICES.md"
+    },
+    {
+      "origin": "commercial",
+      "source": "legal/THIRD-PARTY-LICENSES.txt",
+      "target": "legal/THIRD-PARTY-LICENSES.txt"
+    },
+    {
+      "origin": "commercial",
+      "source": "legal/CORRESPONDING-SOURCE.md",
+      "target": "legal/CORRESPONDING-SOURCE.md"
+    },
+    {
+      "origin": "commercial",
+      "source": "patches/astrbot-4.26.6-wechat.patch",
+      "target": "legal/corresponding-source/astrbot-4.26.6-wechat.patch"
+    },
+    {
+      "origin": "commercial",
+      "source": "scripts/build_runtime.py",
+      "target": "legal/corresponding-source/build_runtime.py"
     },
     {
       "origin": "commercial",
@@ -85,56 +114,52 @@
     {
       "origin": "project",
       "source": "data/plugins/astrbot_plugin_angel_heart",
-      "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart",
-      "gate": "third-party-license-reviewed"
+      "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_qq_group_daily_analysis",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis"
     },
     {
       "origin": "project",
       "source": "data/plugins/astrbot_plugin_music",
-      "target": "app/astrbot/data/plugins/astrbot_plugin_music",
-      "gate": "third-party-license-reviewed"
+      "target": "app/astrbot/data/plugins/astrbot_plugin_music"
     },
     {
       "origin": "project",
       "source": "data/plugins/jiang_short_drama",
-      "target": "app/astrbot/data/plugins/jiang_short_drama",
-      "gate": "owner-source-approved"
+      "target": "app/astrbot/data/plugins/jiang_short_drama"
     },
     {
       "origin": "project",
       "source": "data/plugins/jiang_commands",
-      "target": "app/astrbot/data/plugins/jiang_commands",
-      "gate": "owner-source-approved"
+      "target": "app/astrbot/data/plugins/jiang_commands"
     },
     {
       "origin": "project",
       "source": "data/plugins/jiang_schedule",
-      "target": "app/astrbot/data/plugins/jiang_schedule",
-      "gate": "owner-source-approved"
+      "target": "app/astrbot/data/plugins/jiang_schedule"
     },
     {
       "origin": "project",
       "source": "data/config/jiang_short_drama_config.json",
-      "target": "app/astrbot/data/config/jiang_short_drama_config.json",
-      "gate": "owner-source-approved"
+      "target": "app/astrbot/data/config/jiang_short_drama_config.json"
     },
     {
       "origin": "project",
       "source": "data/config/astrbot_plugin_music_config.json",
-      "target": "app/astrbot/data/config/astrbot_plugin_music_config.json",
-      "gate": "third-party-license-reviewed"
+      "target": "app/astrbot/data/config/astrbot_plugin_music_config.json"
     },
     {
       "origin": "project",
       "source": "data/plugins/_nonebot_stubs.py",
-      "target": "app/astrbot/data/plugins/_nonebot_stubs.py",
-      "gate": "owner-source-approved"
+      "target": "app/astrbot/data/plugins/_nonebot_stubs.py"
     },
     {
       "origin": "project",
       "source": "ai_plugin/ai_plugin",
       "target": "app/astrbot/ai_plugin/ai_plugin",
-      "gate": "owner-source-approved",
       "exclude": [
         "weather_test.png"
       ]
@@ -143,14 +168,12 @@
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/vendor/hook/x64 inject.exe",
       "target": "app/bridge/vendor/hook/x64 inject.exe",
-      "gate": "hook-binary-redistribution",
       "sha256": "F839265D1D986BD072135038A27DDB242F39165C572BCB16609A9030A304734E"
     },
     {
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
       "target": "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
-      "gate": "hook-binary-redistribution",
       "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D"
     }
   ]

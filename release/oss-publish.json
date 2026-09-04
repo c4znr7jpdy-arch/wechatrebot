@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "enabled": false,
+  "bucket": "jiangxiaomei-releases-bj",
+  "region": "cn-beijing",
+  "endpoint": "oss-cn-beijing.aliyuncs.com",
+  "object_prefix": "wechatrebot-updates",
+  "public_base_url": "https://download.xiuxianjyj.xin/wechatrebot-updates"
+}

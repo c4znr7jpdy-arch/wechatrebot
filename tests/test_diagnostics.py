@@ -77,7 +77,6 @@ def test_diagnostics_summarize_large_installed_payload(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": 1,
-                "source_manifest_status": "phase-1-incomplete",
                 "files": files,
             }
         ),

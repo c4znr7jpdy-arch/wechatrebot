@@ -1,0 +1,6084 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:dd903e86-362a-5aef-955d-84e26abdf47d",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "WeChatReBot",
+      "version": "0.8.7"
+    },
+    "properties": [
+      {
+        "name": "wechatrebot:runtime_aggregate_sha256",
+        "value": "6ADEBA5B657F105F5A6C8E1C8C880AFE350AD3ACE5F1F06F04D21EA926DF3F96"
+      },
+      {
+        "name": "wechatrebot:optional_ffmpeg_included",
+        "value": "false"
+      },
+      {
+        "name": "wechatrebot:node_runtime_included",
+        "value": "false"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "framework",
+      "group": "runtime",
+      "name": "CPython",
+      "version": "3.13.9",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://www.python.org/ftp/python/3.13.9/python-3.13.9-embed-amd64.zip"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiocqhttp",
+      "version": "1.4.4",
+      "purl": "pkg:pypi/aiocqhttp@1.4.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/nonebot/aiocqhttp"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiodocker",
+      "version": "0.26.0",
+      "purl": "pkg:pypi/aiodocker@0.26.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiofiles",
+      "version": "25.1.0",
+      "purl": "pkg:pypi/aiofiles@25.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Tinche/aiofiles"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiohappyeyeballs",
+      "version": "2.6.1",
+      "purl": "pkg:pypi/aiohappyeyeballs@2.6.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/aiohappyeyeballs"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiohttp",
+      "version": "3.13.5",
+      "purl": "pkg:pypi/aiohttp@3.13.5",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND MIT"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/aiohttp"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiohttp_socks",
+      "version": "0.11.0",
+      "purl": "pkg:pypi/aiohttp-socks@0.11.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiomysql",
+      "version": "0.3.2",
+      "purl": "pkg:pypi/aiomysql@0.3.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "purl": "pkg:pypi/aiosignal@1.4.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/aiosignal"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "aiosqlite",
+      "version": "0.22.1",
+      "purl": "pkg:pypi/aiosqlite@0.22.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "annotated-doc",
+      "version": "0.0.4",
+      "purl": "pkg:pypi/annotated-doc@0.0.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fastapi/annotated-doc"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "annotated-types",
+      "version": "0.7.0",
+      "purl": "pkg:pypi/annotated-types@0.7.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/annotated-types/annotated-types"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "anthropic",
+      "version": "0.102.0",
+      "purl": "pkg:pypi/anthropic@0.102.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/anthropics/anthropic-sdk-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "anyio",
+      "version": "4.13.0",
+      "purl": "pkg:pypi/anyio@4.13.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "api-aggregator",
+      "version": "0.1.3",
+      "purl": "pkg:pypi/api-aggregator@0.1.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Zhalslar/api-aggregator"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "apilmoji",
+      "version": "0.3.1",
+      "purl": "pkg:pypi/apilmoji@0.3.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "NOASSERTION"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fllesser/apilmoji"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "APScheduler",
+      "version": "3.11.2",
+      "purl": "pkg:pypi/apscheduler@3.11.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "ascii_colors",
+      "version": "0.11.21",
+      "purl": "pkg:pypi/ascii-colors@0.11.21",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ParisNeo/ascii_colors"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "AstrBot",
+      "version": "4.26.6",
+      "purl": "pkg:pypi/astrbot@4.26.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-or-later"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/AstrBotDevs/AstrBot"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "asyncpg",
+      "version": "0.31.0",
+      "purl": "pkg:pypi/asyncpg@0.31.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "attrs",
+      "version": "26.1.0",
+      "purl": "pkg:pypi/attrs@26.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "audioop-lts",
+      "version": "0.2.2",
+      "purl": "pkg:pypi/audioop-lts@0.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "backoff",
+      "version": "2.2.1",
+      "purl": "pkg:pypi/backoff@2.2.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/litl/backoff"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "beautifulsoup4",
+      "version": "4.14.3",
+      "purl": "pkg:pypi/beautifulsoup4@4.14.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.crummy.com/software/BeautifulSoup/bs4/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "bilibili-api-python",
+      "version": "17.4.2",
+      "purl": "pkg:pypi/bilibili-api-python@17.4.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Nemo2011/bilibili-api"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "blinker",
+      "version": "1.9.0",
+      "purl": "pkg:pypi/blinker@1.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets-eco/blinker/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "boto3",
+      "version": "1.43.17",
+      "purl": "pkg:pypi/boto3@1.43.17",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/boto/boto3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "botocore",
+      "version": "1.43.17",
+      "purl": "pkg:pypi/botocore@1.43.17",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/boto/botocore"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "brotli",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/brotli@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/google/brotli"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "browser-cookie3",
+      "version": "0.20.1",
+      "purl": "pkg:pypi/browser-cookie3@0.20.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "lgpl"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/borisbabic/browser_cookie3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "cachetools",
+      "version": "7.1.3",
+      "purl": "pkg:pypi/cachetools@7.1.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tkem/cachetools/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "certifi",
+      "version": "2026.4.22",
+      "purl": "pkg:pypi/certifi@2026.4.22",
+      "licenses": [
+        {
+          "license": {
+            "id": "MPL-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/certifi/python-certifi"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "cffi",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/cffi@2.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "chardet",
+      "version": "5.1.0",
+      "purl": "pkg:pypi/chardet@5.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/chardet/chardet"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "charset-normalizer",
+      "version": "3.4.7",
+      "purl": "pkg:pypi/charset-normalizer@3.4.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "click",
+      "version": "8.4.0",
+      "purl": "pkg:pypi/click@8.4.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/click/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "cobble",
+      "version": "0.1.4",
+      "purl": "pkg:pypi/cobble@0.1.4",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://github.com/mwilliamson/python-cobble"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "colorama",
+      "version": "0.4.6",
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tartley/colorama"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "configparser",
+      "version": "7.2.0",
+      "purl": "pkg:pypi/configparser@7.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jaraco/configparser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "cryptography",
+      "version": "48.0.0",
+      "purl": "pkg:pypi/cryptography@48.0.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR BSD-3-Clause"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "curl_cffi",
+      "version": "0.14.0",
+      "purl": "pkg:pypi/curl-cffi@0.14.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "dashscope",
+      "version": "1.25.18",
+      "purl": "pkg:pypi/dashscope@1.25.18",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://dashscope.aliyun.com/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "purl": "pkg:pypi/defusedxml@0.7.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tiran/defusedxml"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Deprecated",
+      "version": "1.3.1",
+      "purl": "pkg:pypi/deprecated@1.3.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/laurent-laporte-pro/deprecated"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "dingtalk-stream",
+      "version": "0.24.3",
+      "purl": "pkg:pypi/dingtalk-stream@0.24.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/open-dingtalk/dingtalk-stream-sdk-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "diskcache",
+      "version": "5.6.3",
+      "purl": "pkg:pypi/diskcache@5.6.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/grantjenks/python-diskcache"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "distro",
+      "version": "1.9.0",
+      "purl": "pkg:pypi/distro@1.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-distro/distro"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "docstring_parser",
+      "version": "0.18.0",
+      "purl": "pkg:pypi/docstring-parser@0.18.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "edge-tts",
+      "version": "7.2.8",
+      "purl": "pkg:pypi/edge-tts@7.2.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "LGPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/rany2/edge-tts"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "emoji",
+      "version": "2.15.0",
+      "purl": "pkg:pypi/emoji@2.15.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "et_xmlfile",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/et-xmlfile@2.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://foss.heptapod.net/openpyxl/et_xmlfile"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "faiss-cpu",
+      "version": "1.14.3",
+      "purl": "pkg:pypi/faiss-cpu@1.14.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/facebookresearch/faiss"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "fastapi",
+      "version": "0.137.1",
+      "purl": "pkg:pypi/fastapi@0.137.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fastapi/fastapi"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "feedparser",
+      "version": "6.0.13",
+      "purl": "pkg:pypi/feedparser@6.0.13",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/kurtmckee/feedparser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "feedparser-sgmllib",
+      "version": "1.0.0",
+      "purl": "pkg:pypi/feedparser-sgmllib@1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-syndication/feedparser-sgmllib"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "filelock",
+      "version": "3.29.0",
+      "purl": "pkg:pypi/filelock@3.29.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tox-dev/py-filelock"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "filetype",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/filetype@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/h2non/filetype.py"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Flask",
+      "version": "3.1.3",
+      "purl": "pkg:pypi/flask@3.1.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/flask/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "purl": "pkg:pypi/frozenlist@1.8.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/frozenlist"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "gallery_dl",
+      "version": "1.32.9",
+      "purl": "pkg:pypi/gallery-dl@1.32.9",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-2.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://codeberg.org/mikf/gallery-dl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "gmssl",
+      "version": "3.2.2",
+      "purl": "pkg:pypi/gmssl@3.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/duanhongyi/gmssl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "google-api-core",
+      "version": "2.30.3",
+      "purl": "pkg:pypi/google-api-core@2.30.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/googleapis/google-cloud-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "google-auth",
+      "version": "2.53.0",
+      "purl": "pkg:pypi/google-auth@2.53.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/googleapis/google-auth-library-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "google-genai",
+      "version": "1.75.0",
+      "purl": "pkg:pypi/google-genai@1.75.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/googleapis/python-genai"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "googleapis-common-protos",
+      "version": "1.75.0",
+      "purl": "pkg:pypi/googleapis-common-protos@1.75.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "greenlet",
+      "version": "3.5.0",
+      "purl": "pkg:pypi/greenlet@3.5.0",
+      "licenses": [
+        {
+          "expression": "MIT AND PSF-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-greenlet/greenlet"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "grpcio",
+      "version": "1.80.0",
+      "purl": "pkg:pypi/grpcio@1.80.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://grpc.io"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "h11",
+      "version": "0.16.0",
+      "purl": "pkg:pypi/h11@0.16.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/h11"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "h2",
+      "version": "4.3.0",
+      "purl": "pkg:pypi/h2@4.3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/h2/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "holidays",
+      "version": "0.97",
+      "purl": "pkg:pypi/holidays@0.97",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vacanza/holidays/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "hpack",
+      "version": "4.1.0",
+      "purl": "pkg:pypi/hpack@4.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/hpack/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "httpcore",
+      "version": "1.0.9",
+      "purl": "pkg:pypi/httpcore@1.0.9",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/encode/httpcore"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "httpx",
+      "version": "0.28.1",
+      "purl": "pkg:pypi/httpx@0.28.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/encode/httpx"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "httpx-sse",
+      "version": "0.4.3",
+      "purl": "pkg:pypi/httpx-sse@0.4.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/florimondmanca/httpx-sse"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Hypercorn",
+      "version": "0.17.3",
+      "purl": "pkg:pypi/hypercorn@0.17.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pgjones/hypercorn/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "purl": "pkg:pypi/hyperframe@6.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/hyperframe/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "idna",
+      "version": "3.15",
+      "purl": "pkg:pypi/idna@3.15",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/kjd/idna"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "importlib_resources",
+      "version": "7.1.0",
+      "purl": "pkg:pypi/importlib-resources@7.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python/importlib_resources"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "itsdangerous",
+      "version": "2.2.0",
+      "purl": "pkg:pypi/itsdangerous@2.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/itsdangerous/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "jieba",
+      "version": "0.42.1",
+      "purl": "pkg:pypi/jieba@0.42.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fxsjy/jieba"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "purl": "pkg:pypi/jinja2@3.1.6",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/jinja/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "jiter",
+      "version": "0.14.0",
+      "purl": "pkg:pypi/jiter@0.14.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pydantic/jiter/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "jmespath",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/jmespath@1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jmespath/jmespath.py"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "joblib",
+      "version": "1.5.3",
+      "purl": "pkg:pypi/joblib@1.5.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/joblib/joblib"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "json5",
+      "version": "0.15.0",
+      "purl": "pkg:pypi/json5@0.15.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/dpranke/pyjson5"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "json_repair",
+      "version": "0.59.10",
+      "purl": "pkg:pypi/json-repair@0.59.10",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mangiucugna/json_repair/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "purl": "pkg:pypi/jsonschema@4.26.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-jsonschema/jsonschema"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "purl": "pkg:pypi/jsonschema-specifications@2025.9.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-jsonschema/jsonschema-specifications"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "lark-oapi",
+      "version": "1.6.5",
+      "purl": "pkg:pypi/lark-oapi@1.6.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/larksuite/oapi-sdk-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "lightrag-hku",
+      "version": "1.4.16",
+      "purl": "pkg:pypi/lightrag-hku@1.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/HKUDS/LightRAG"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "loguru",
+      "version": "0.7.3",
+      "purl": "pkg:pypi/loguru@0.7.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Delgan/loguru"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "lxml",
+      "version": "6.1.1",
+      "purl": "pkg:pypi/lxml@6.1.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/lxml/lxml"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "lz4",
+      "version": "4.4.5",
+      "purl": "pkg:pypi/lz4@4.4.5",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-lz4/python-lz4"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mammoth",
+      "version": "1.12.0",
+      "purl": "pkg:pypi/mammoth@1.12.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mwilliamson/python-mammoth"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Markdown",
+      "version": "3.10.2",
+      "purl": "pkg:pypi/markdown@3.10.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Python-Markdown/markdown"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "purl": "pkg:pypi/markdown-it-py@4.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/executablebooks/markdown-it-py"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "markdownify",
+      "version": "1.2.2",
+      "purl": "pkg:pypi/markdownify@1.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://github.com/matthewwithanm/python-markdownify"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "markitdown-no-magika",
+      "version": "0.1.2",
+      "purl": "pkg:pypi/markitdown-no-magika@0.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/microsoft/markitdown"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "MarkupSafe",
+      "version": "3.0.3",
+      "purl": "pkg:pypi/markupsafe@3.0.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/markupsafe/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mcp",
+      "version": "1.27.1",
+      "purl": "pkg:pypi/mcp@1.27.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/modelcontextprotocol/python-sdk"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mdit-plain",
+      "version": "1.0.1",
+      "purl": "pkg:pypi/mdit-plain@1.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/elespike/mdit_plain"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mdurl",
+      "version": "0.1.2",
+      "purl": "pkg:pypi/mdurl@0.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/executablebooks/mdurl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mem0ai",
+      "version": "2.0.2",
+      "purl": "pkg:pypi/mem0ai@2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "msgspec",
+      "version": "0.21.1",
+      "purl": "pkg:pypi/msgspec@0.21.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jcrist/msgspec"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "multidict",
+      "version": "6.7.1",
+      "purl": "pkg:pypi/multidict@6.7.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache License 2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/multidict"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "mutagen",
+      "version": "1.48.1",
+      "purl": "pkg:pypi/mutagen@1.48.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-2.0-or-later"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/quodlibet/mutagen"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "nano-vectordb",
+      "version": "0.0.4.3",
+      "purl": "pkg:pypi/nano-vectordb@0.0.4.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/gusye1234/nano-vectordb"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "networkx",
+      "version": "3.4.2",
+      "purl": "pkg:pypi/networkx@3.4.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://networkx.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "numpy",
+      "version": "2.2.6",
+      "purl": "pkg:pypi/numpy@2.2.6",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "openai",
+      "version": "2.37.0",
+      "purl": "pkg:pypi/openai@2.37.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/openai/openai-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "openpyxl",
+      "version": "3.1.5",
+      "purl": "pkg:pypi/openpyxl@3.1.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://foss.heptapod.net/openpyxl/openpyxl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "optionaldict",
+      "version": "0.1.2",
+      "purl": "pkg:pypi/optionaldict@0.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/messense/optionaldict"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "orjson",
+      "version": "3.11.9",
+      "purl": "pkg:pypi/orjson@3.11.9",
+      "licenses": [
+        {
+          "expression": "MPL-2.0 AND (Apache-2.0 OR MIT)"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "ormsgpack",
+      "version": "1.12.2",
+      "purl": "pkg:pypi/ormsgpack@1.12.2",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ormsgpack/ormsgpack"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "packaging",
+      "version": "26.2",
+      "purl": "pkg:pypi/packaging@26.2",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR BSD-2-Clause"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/packaging"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pandas",
+      "version": "2.3.3",
+      "purl": "pkg:pypi/pandas@2.3.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pilk",
+      "version": "0.2.4",
+      "purl": "pkg:pypi/pilk@0.2.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/foyoux/pilk"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT-CMU"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-pillow/Pillow"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pip",
+      "version": "25.2",
+      "purl": "pkg:pypi/pip@25.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/pip"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pipmaster",
+      "version": "1.1.12",
+      "purl": "pkg:pypi/pipmaster@1.1.12",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ParisNeo/pipmaster"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "playwright",
+      "version": "1.60.0",
+      "purl": "pkg:pypi/playwright@1.60.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "portalocker",
+      "version": "3.2.0",
+      "purl": "pkg:pypi/portalocker@3.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "posthog",
+      "version": "7.14.2",
+      "purl": "pkg:pypi/posthog@7.14.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/posthog/posthog-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "priority",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/priority@2.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/priority/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "prometheus-async",
+      "version": "26.1.0",
+      "purl": "pkg:pypi/prometheus-async@26.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "prometheus_client",
+      "version": "0.25.0",
+      "purl": "pkg:pypi/prometheus-client@0.25.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND BSD-2-Clause"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/prometheus/client_python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "propcache",
+      "version": "0.5.2",
+      "purl": "pkg:pypi/propcache@0.5.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/propcache"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "proto-plus",
+      "version": "1.28.0",
+      "purl": "pkg:pypi/proto-plus@1.28.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/googleapis/google-cloud-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "protobuf",
+      "version": "6.33.6",
+      "purl": "pkg:pypi/protobuf@6.33.6",
+      "licenses": [
+        {
+          "license": {
+            "name": "3-Clause BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://developers.google.com/protocol-buffers/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "psutil",
+      "version": "7.1.3",
+      "purl": "pkg:pypi/psutil@7.1.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/giampaolo/psutil"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "py-cord",
+      "version": "2.8.0",
+      "purl": "pkg:pypi/py-cord@2.8.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Pycord-Development/pycord"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pyasn1",
+      "version": "0.6.3",
+      "purl": "pkg:pypi/pyasn1@0.6.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pyasn1/pyasn1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pyasn1_modules",
+      "version": "0.4.2",
+      "purl": "pkg:pypi/pyasn1-modules@0.4.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pyasn1/pyasn1-modules"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pycparser",
+      "version": "3.0",
+      "purl": "pkg:pypi/pycparser@3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/eliben/pycparser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pycryptodome",
+      "version": "3.23.0",
+      "purl": "pkg:pypi/pycryptodome@3.23.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Legrandin/pycryptodome/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pycryptodomex",
+      "version": "3.23.0",
+      "purl": "pkg:pypi/pycryptodomex@3.23.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Legrandin/pycryptodome/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pydantic",
+      "version": "2.13.4",
+      "purl": "pkg:pypi/pydantic@2.13.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pydantic/pydantic"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pydantic_core",
+      "version": "2.46.4",
+      "purl": "pkg:pypi/pydantic-core@2.46.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pydantic/pydantic/tree/main/pydantic-core"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pydantic-settings",
+      "version": "2.14.1",
+      "purl": "pkg:pypi/pydantic-settings@2.14.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pydantic/pydantic-settings"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pydub",
+      "version": "0.25.1",
+      "purl": "pkg:pypi/pydub@0.25.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://pydub.com"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pyee",
+      "version": "13.0.1",
+      "purl": "pkg:pypi/pyee@13.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jfhbrook/pyee"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Pygments",
+      "version": "2.20.0",
+      "purl": "pkg:pypi/pygments@2.20.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pygments/pygments"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "PyJWT",
+      "version": "2.12.1",
+      "purl": "pkg:pypi/pyjwt@2.12.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jpadilla/pyjwt"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pymilvus",
+      "version": "2.6.15",
+      "purl": "pkg:pypi/pymilvus@2.6.15",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/milvus-io/pymilvus"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "PyMySQL",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/pymysql@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "PyOTP",
+      "version": "2.10.0",
+      "purl": "pkg:pypi/pyotp@2.10.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pyauth/pyotp"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pypdf",
+      "version": "6.11.0",
+      "purl": "pkg:pypi/pypdf@6.11.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/py-pdf/pypdf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pypdfium2",
+      "version": "5.12.1",
+      "purl": "pkg:pypi/pypdfium2@5.12.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause, Apache-2.0, dependency licenses"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypdfium2-team/pypdfium2"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pypinyin",
+      "version": "0.55.0",
+      "purl": "pkg:pypi/pypinyin@0.55.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mozillazg/python-pinyin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pyromark",
+      "version": "0.9.10",
+      "purl": "pkg:pypi/pyromark@0.9.10",
+      "licenses": [
+        {
+          "license": {
+            "name": "NOASSERTION"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "PySocks",
+      "version": "1.7.1",
+      "purl": "pkg:pypi/pysocks@1.7.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Anorov/PySocks"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "purl": "pkg:pypi/python-dateutil@2.9.0.post0",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/dateutil/dateutil"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-dotenv",
+      "version": "1.2.2",
+      "purl": "pkg:pypi/python-dotenv@1.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/theskumar/python-dotenv"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-multipart",
+      "version": "0.0.29",
+      "purl": "pkg:pypi/python-multipart@0.0.29",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Kludex/python-multipart"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-ripgrep",
+      "version": "0.0.8",
+      "purl": "pkg:pypi/python-ripgrep@0.0.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-socks",
+      "version": "2.8.1",
+      "purl": "pkg:pypi/python-socks@2.8.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-telegram-bot",
+      "version": "22.7",
+      "purl": "pkg:pypi/python-telegram-bot@22.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "LGPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://python-telegram-bot.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pytz",
+      "version": "2026.2",
+      "purl": "pkg:pypi/pytz@2026.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://pythonhosted.org/pytz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pywin32",
+      "version": "311",
+      "purl": "pkg:pypi/pywin32@311",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mhammond/pywin32"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "purl": "pkg:pypi/pyyaml@6.0.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://pyyaml.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "qdrant-client",
+      "version": "1.18.0",
+      "purl": "pkg:pypi/qdrant-client@1.18.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/qdrant/qdrant-client"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "qq-botpy",
+      "version": "1.2.1",
+      "purl": "pkg:pypi/qq-botpy@1.2.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tencent-connect/botpy"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "qrcode",
+      "version": "8.2",
+      "purl": "pkg:pypi/qrcode@8.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/lincolnloop/python-qrcode"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "qrcode-terminal",
+      "version": "0.8",
+      "purl": "pkg:pypi/qrcode-terminal@0.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/alishtory/qrcode-terminal"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Quart",
+      "version": "0.20.0",
+      "purl": "pkg:pypi/quart@0.20.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/quart/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "quart-cors",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/quart-cors@0.8.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "rank-bm25",
+      "version": "0.2.2",
+      "purl": "pkg:pypi/rank-bm25@0.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/dorianbrown/rank_bm25"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "referencing",
+      "version": "0.37.0",
+      "purl": "pkg:pypi/referencing@0.37.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-jsonschema/referencing"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "regex",
+      "version": "2026.5.9",
+      "purl": "pkg:pypi/regex@2026.5.9",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND CNRI-Python"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mrabarnett/mrab-regex"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "requests",
+      "version": "2.34.2",
+      "purl": "pkg:pypi/requests@2.34.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/psf/requests"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "requests-toolbelt",
+      "version": "1.0.0",
+      "purl": "pkg:pypi/requests-toolbelt@1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/requests/toolbelt"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "rich",
+      "version": "15.0.0",
+      "purl": "pkg:pypi/rich@15.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Textualize/rich"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "rpds-py",
+      "version": "0.30.0",
+      "purl": "pkg:pypi/rpds-py@0.30.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/crate-py/rpds"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "s3transfer",
+      "version": "0.18.0",
+      "purl": "pkg:pypi/s3transfer@0.18.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/boto/s3transfer"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "scikit-learn",
+      "version": "1.7.2",
+      "purl": "pkg:pypi/scikit-learn@1.7.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "scipy",
+      "version": "1.17.1",
+      "purl": "pkg:pypi/scipy@1.17.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "setuptools",
+      "version": "82.0.1",
+      "purl": "pkg:pypi/setuptools@82.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/setuptools"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "shadowcopy",
+      "version": "0.0.4",
+      "purl": "pkg:pypi/shadowcopy@0.0.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "shipyard-neo-sdk",
+      "version": "0.2.0",
+      "purl": "pkg:pypi/shipyard-neo-sdk@0.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/AstrBotDevs/shipyard-neo"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "shipyard-python-sdk",
+      "version": "0.2.4",
+      "purl": "pkg:pypi/shipyard-python-sdk@0.2.4",
+      "licenses": [
+        {
+          "license": {
+            "name": "NOASSERTION"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "silk-python",
+      "version": "0.2.8",
+      "purl": "pkg:pypi/silk-python@0.2.8",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/synodriver/pysilk"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "six",
+      "version": "1.17.0",
+      "purl": "pkg:pypi/six@1.17.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/benjaminp/six"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "slack_sdk",
+      "version": "3.42.0",
+      "purl": "pkg:pypi/slack-sdk@3.42.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/slackapi/python-slack-sdk"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "sniffio",
+      "version": "1.3.1",
+      "purl": "pkg:pypi/sniffio@1.3.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-trio/sniffio"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "socksio",
+      "version": "1.0.0",
+      "purl": "pkg:pypi/socksio@1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/sethmlarson/socksio"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "soupsieve",
+      "version": "2.8.3",
+      "purl": "pkg:pypi/soupsieve@2.8.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/facelessuser/soupsieve"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "SQLAlchemy",
+      "version": "2.0.49",
+      "purl": "pkg:pypi/sqlalchemy@2.0.49",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.sqlalchemy.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "sqlmodel",
+      "version": "0.0.38",
+      "purl": "pkg:pypi/sqlmodel@0.0.38",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fastapi/sqlmodel"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "sse-starlette",
+      "version": "3.4.4",
+      "purl": "pkg:pypi/sse-starlette@3.4.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/sysid/sse-starlette"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "starlette",
+      "version": "1.3.1",
+      "purl": "pkg:pypi/starlette@1.3.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Kludex/starlette"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tabulate",
+      "version": "0.10.0",
+      "purl": "pkg:pypi/tabulate@0.10.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/astanin/python-tabulate"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "telegramify-markdown",
+      "version": "1.1.5",
+      "purl": "pkg:pypi/telegramify-markdown@1.1.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tenacity",
+      "version": "9.1.4",
+      "purl": "pkg:pypi/tenacity@9.1.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jd/tenacity"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "threadpoolctl",
+      "version": "3.6.0",
+      "purl": "pkg:pypi/threadpoolctl@3.6.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/joblib/threadpoolctl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tiktoken",
+      "version": "0.13.0",
+      "purl": "pkg:pypi/tiktoken@0.13.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "NOASSERTION"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tqdm",
+      "version": "4.67.3",
+      "purl": "pkg:pypi/tqdm@4.67.3",
+      "licenses": [
+        {
+          "expression": "MPL-2.0 AND MIT"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "typing_extensions",
+      "version": "4.15.0",
+      "purl": "pkg:pypi/typing-extensions@4.15.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python/typing_extensions"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "typing-inspection",
+      "version": "0.4.2",
+      "purl": "pkg:pypi/typing-inspection@0.4.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pydantic/typing-inspection"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tzdata",
+      "version": "2026.2",
+      "purl": "pkg:pypi/tzdata@2026.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python/tzdata"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "tzlocal",
+      "version": "5.3.1",
+      "purl": "pkg:pypi/tzlocal@5.3.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "ulid-py",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/ulid-py@1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ahawker/ulid"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "urllib3",
+      "version": "2.7.0",
+      "purl": "pkg:pypi/urllib3@2.7.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "uvicorn",
+      "version": "0.47.0",
+      "purl": "pkg:pypi/uvicorn@0.47.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Kludex/uvicorn"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "watchfiles",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/watchfiles@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/samuelcolvin/watchfiles"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "wcwidth",
+      "version": "0.7.0",
+      "purl": "pkg:pypi/wcwidth@0.7.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jquast/wcwidth"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "websocket-client",
+      "version": "1.9.0",
+      "purl": "pkg:pypi/websocket-client@1.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/websocket-client/websocket-client/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "websockets",
+      "version": "15.0.1",
+      "purl": "pkg:pypi/websockets@15.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-websockets/websockets"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "wechatpy",
+      "version": "1.8.18",
+      "purl": "pkg:pypi/wechatpy@1.8.18",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jxtech/wechatpy"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "Werkzeug",
+      "version": "3.1.8",
+      "purl": "pkg:pypi/werkzeug@3.1.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pallets/werkzeug/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "win32_setctime",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/win32-setctime@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Delgan/win32-setctime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "WMI",
+      "version": "1.5.1",
+      "purl": "pkg:pypi/wmi@1.5.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "http://www.opensource.org/licenses/mit-license.php"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://timgolden.me.uk/python/wmi.html"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "wrapt",
+      "version": "2.1.2",
+      "purl": "pkg:pypi/wrapt@2.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/GrahamDumpleton/wrapt"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "wsproto",
+      "version": "1.3.2",
+      "purl": "pkg:pypi/wsproto@1.3.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-hyper/wsproto/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "xinference-client",
+      "version": "2.8.0",
+      "purl": "pkg:pypi/xinference-client@2.8.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache License 2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/xorbitsai/inference-client"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "xlrd",
+      "version": "2.0.2",
+      "purl": "pkg:pypi/xlrd@2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://www.python-excel.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "xlsxwriter",
+      "version": "3.2.9",
+      "purl": "pkg:pypi/xlsxwriter@3.2.9",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jmcnamara/XlsxWriter"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "xmltodict",
+      "version": "1.0.4",
+      "purl": "pkg:pypi/xmltodict@1.0.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/martinblech/xmltodict"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "yarl",
+      "version": "1.23.0",
+      "purl": "pkg:pypi/yarl@1.23.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/aio-libs/yarl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "yt-dlp",
+      "version": "2026.8.19",
+      "purl": "pkg:pypi/yt-dlp@2026.8.19",
+      "licenses": [
+        {
+          "license": {
+            "id": "Unlicense"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/yt-dlp/yt-dlp"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "yt-dlp-ejs",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/yt-dlp-ejs@0.8.0",
+      "licenses": [
+        {
+          "expression": "Unlicense AND MIT AND ISC"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/yt-dlp/ejs"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "zhdate",
+      "version": "0.1",
+      "purl": "pkg:pypi/zhdate@0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/CutePandaSh/zhdate"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "altgraph",
+      "version": "0.17.5",
+      "purl": "pkg:pypi/altgraph@0.17.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ronaldoussoren/altgraph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "bottle",
+      "version": "0.13.4",
+      "purl": "pkg:pypi/bottle@0.13.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/bottlepy/bottle"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "cffi",
+      "version": "2.1.1",
+      "purl": "pkg:pypi/cffi@2.1.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT-0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "clr_loader",
+      "version": "0.3.1",
+      "purl": "pkg:pypi/clr-loader@0.3.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "NOASSERTION"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "cryptography",
+      "version": "48.0.0",
+      "purl": "pkg:pypi/cryptography@48.0.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR BSD-3-Clause"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "packaging",
+      "version": "26.3",
+      "purl": "pkg:pypi/packaging@26.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR BSD-2-Clause"
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/packaging"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pefile",
+      "version": "2024.8.26",
+      "purl": "pkg:pypi/pefile@2024.8.26",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/erocarrera/pefile"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pip",
+      "version": "25.2",
+      "purl": "pkg:pypi/pip@25.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/pip"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "proxy_tools",
+      "version": "0.1.0",
+      "purl": "pkg:pypi/proxy-tools@0.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://github.com/jtushman/proxy_tools"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pycparser",
+      "version": "3.0",
+      "purl": "pkg:pypi/pycparser@3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/eliben/pycparser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pyinstaller",
+      "version": "6.22.2",
+      "purl": "pkg:pypi/pyinstaller@6.22.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-2.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://pyinstaller.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pyinstaller-hooks-contrib",
+      "version": "2026.7",
+      "purl": "pkg:pypi/pyinstaller-hooks-contrib@2026.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pyinstaller/pyinstaller-hooks-contrib"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pythonnet",
+      "version": "3.1.0",
+      "purl": "pkg:pypi/pythonnet@3.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://pythonnet.github.io/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pywebview",
+      "version": "6.2.1",
+      "purl": "pkg:pypi/pywebview@6.2.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/r0x0r/pywebview"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "pywin32-ctypes",
+      "version": "0.2.3",
+      "purl": "pkg:pypi/pywin32-ctypes@0.2.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/enthought/pywin32-ctypes"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "setuptools",
+      "version": "84.0.0",
+      "purl": "pkg:pypi/setuptools@84.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pypa/setuptools"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "purl": "pkg:pypi/typing-extensions@4.16.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python/typing_extensions"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "astrbot_plugin_angel_heart",
+      "version": "2.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "third-party"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/kawayiYokami/astrbot_plugin_angel_heart"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "astrbot_plugin_qq_group_daily_analysis",
+      "version": "4.10.9.3 # 本地兼容版：模板 1 更换为姜小妹主题",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "third-party"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis # 插件的仓库地址"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "astrbot_plugin_music",
+      "version": "2.1.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "third-party"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Zhalslar/astrbot_plugin_music"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "jiang_short_drama",
+      "version": "2.5.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "Proprietary"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "owner"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "jiang_commands",
+      "version": "1.1.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "Proprietary"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "owner"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "jiang_schedule",
+      "version": "1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "Proprietary"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "owner"
+        }
+      ]
+    }
+  ]
+}

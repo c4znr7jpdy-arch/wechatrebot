@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "release_version": "0.8.7",
+  "status": "pending",
+  "collected_at": "",
+  "files": [],
+  "all_signatures_valid": false,
+  "defender": {
+    "available": false,
+    "custom_scan_run": false
+  },
+  "antivirus_products": [],
+  "notes": [
+    "Replace this placeholder only with output from scripts/collect_windows_release_evidence.ps1 after final signing.",
+    "A second antivirus product and clean-machine workflow require separate acceptance evidence."
+  ]
+}
