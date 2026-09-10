@@ -9,7 +9,7 @@ from typing import Any
 _GUIDES = {
     "astrbot_plugin_angel_heart": ("协调群聊接话和多人上下文", "打开专属配置页，设置回复节奏和允许接管的会话。", "它不会建立独立长期记忆库；会话上下文仍受回复引擎的上下文范围限制。", ()),
     "astrbot_plugin_bittorrent": ("按关键词查找资源索引", "先填写可用的资源索引站地址，再调整返回数量。", "只检索有权访问和使用的内容；索引站需要可访问。", ("magnet_search.base_url", "magnet_search.max_results", "magnet_search.enable_preview")),
-    "astrbot_plugin_livingmemory": ("记住重要对话并在需要时回忆", "保持智能召回；可补充符合本群说法的强制回忆词。", "需要聊天模型和 Embedding 模型；明确回忆会检索，普通问候默认跳过。", ("recall_engine.auto_recall_mode", "recall_engine.explicit_recall_phrases", "recall_engine.top_k", "reflection_engine.summary_trigger_rounds")),
+    "astrbot_plugin_livingmemory": ("记住重要对话并在需要时回忆", "先在模型设置中选择 Embedding 文本向量模型和聊天模型，再保持智能召回。", "需要单独配置 Embedding 模型；Grok 等聊天模型不能替代。明确回忆会检索，普通问候默认跳过。", ("provider_settings.embedding_provider_id", "provider_settings.llm_provider_id", "recall_engine.auto_recall_mode", "recall_engine.explicit_recall_phrases", "recall_engine.top_k", "reflection_engine.summary_trigger_rounds")),
     "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "填写语音服务密钥，再打开专属配置页管理参考音频和声音。", "需要 MiMo 语音服务；仅使用已获得授权的声音。自动语音会产生服务用量。", ("api_key", "default_context", "auto_tts_enabled", "auto_tts_probability", "auto_tts_group_whitelist", "ai_style_director_provider_id")),
     "astrbot_plugin_mnemosyne": ("从长期记忆中检索相关内容", "先准备记忆数据库和文本向量模型，再填写连接信息。", "这是进阶功能：需要 Milvus 数据库和 Embedding 向量模型，Grok 聊天模型不能替代。", ("address", "embedding_provider_id", "LLM_providers", "num_pairs", "top_k", "use_session_filtering")),
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),

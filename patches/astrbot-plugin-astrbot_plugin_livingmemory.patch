@@ -40,7 +40,25 @@ index e423a1c..c0d817a 100644
              return False, self._get_initialization_status_message()
  
          if not await self._ensure_runtime_components():
-@@ -350,7 +358,9 @@ class LivingMemoryPlugin(Star):
+@@ -327,6 +335,17 @@ class LivingMemoryPlugin(Star):
+                 "init.failed",
+                 error=self.initializer.error_message or t("common.unknown_error"),
+             )
+         else:
++            missing_providers = []
++            if not getattr(self.initializer, "embedding_provider", None):
++                missing_providers.append("Embedding 文本向量模型")
++            if not getattr(self.initializer, "llm_provider", None):
++                missing_providers.append("聊天模型")
++            if missing_providers:
++                return (
++                    "长期记忆尚未就绪：缺少"
++                    f"{'、'.join(missing_providers)}。"
++                    "请先在长期记忆的“模型设置”中完成选择。"
++                )
+             return t(
+                 "init.in_progress",
+@@ -350,7 +369,9 @@ class LivingMemoryPlugin(Star):
      @filter.on_llm_request()
      async def handle_memory_recall(self, event: AstrMessageEvent, req: ProviderRequest):
          """[Event Hook] Query and inject long-term memory before LLM request"""
@@ -51,7 +69,7 @@ index e423a1c..c0d817a 100644
          if not ready:
              logger.debug("插件未完成初始化，跳过记忆召回")
              return
-@@ -365,7 +375,9 @@ class LivingMemoryPlugin(Star):
+@@ -365,7 +386,9 @@ class LivingMemoryPlugin(Star):
          self, event: AstrMessageEvent, resp: LLMResponse
      ):
          """[Event Hook] Check if reflection and memory storage is needed after LLM response"""
@@ -62,7 +80,7 @@ index e423a1c..c0d817a 100644
          if not ready:
              logger.debug("插件未完成初始化，跳过记忆反思")
              return
-@@ -381,7 +393,9 @@ class LivingMemoryPlugin(Star):
+@@ -381,7 +404,9 @@ class LivingMemoryPlugin(Star):
          if not event.get_extra("_clean_ltm_session", False):
              return
  
@@ -73,6 +91,20 @@ index e423a1c..c0d817a 100644
          if not ready:
              return
  
+diff --git a/core/page_api.py b/core/page_api.py
+--- a/core/page_api.py
++++ b/core/page_api.py
+@@ -197,6 +197,8 @@ class PageAPI:
+             - ready_dict: 包含 memory_engine 等组件的字典
+             - error_dict: 错误响应字典（如果有错误）
+         """
+-        ready, message = await self.plugin._ensure_plugin_ready()
++        ready, message = await self.plugin._ensure_plugin_ready(
++            wait_for_initialization=False
++        )
+         if not ready:
+             return None, self.utils.error(message or "插件尚未就绪")
+
 diff --git a/core/event_handler_modules/memory_recall.py b/core/event_handler_modules/memory_recall.py
 index 04b709a..0460693 100644
 --- a/core/event_handler_modules/memory_recall.py

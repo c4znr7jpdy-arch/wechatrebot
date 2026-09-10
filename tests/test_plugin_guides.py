@@ -81,3 +81,32 @@ def test_common_commands_hide_internal_service_fields_from_basic_settings():
 
     assert common_schema("jiang_commands", schema) == {}
     assert advanced_schema("jiang_commands", schema) == {}
+
+
+def test_livingmemory_exposes_required_model_bindings():
+    schema = {
+        "provider_settings": {
+            "type": "object",
+            "items": {
+                "embedding_provider_id": {"type": "string", "default": ""},
+                "llm_provider_id": {
+                    "type": "string",
+                    "default": "",
+                    "_special": "select_provider",
+                },
+            },
+        },
+        "recall_engine": {
+            "type": "object",
+            "items": {
+                "auto_recall_mode": {"type": "string", "default": "smart"},
+            },
+        },
+    }
+
+    projected = common_schema("astrbot_plugin_livingmemory", schema)
+
+    assert list(projected["provider_settings"]["items"]) == [
+        "embedding_provider_id",
+        "llm_provider_id",
+    ]

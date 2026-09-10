@@ -246,3 +246,19 @@ def test_runtime_hooks_never_wait_for_missing_embedding_provider(
     assert ready is False
     assert message == "not ready"
     assert initializer.wait_calls == 0
+
+
+def test_advanced_page_fails_fast_and_reports_missing_models(
+    patched_plugin: Path,
+) -> None:
+    page_api = (patched_plugin / "core" / "page_api.py").read_text(
+        encoding="utf-8"
+    )
+    helper_start = page_api.index("async def _ensure_plugin_ready")
+    helper = page_api[helper_start : page_api.index("return {", helper_start)]
+    main = (patched_plugin / "main.py").read_text(encoding="utf-8")
+
+    assert "wait_for_initialization=False" in helper
+    assert "await self.plugin._ensure_plugin_ready()" not in helper
+    assert "Embedding 文本向量模型" in main
+    assert "请先在长期记忆的“模型设置”中完成选择" in main
