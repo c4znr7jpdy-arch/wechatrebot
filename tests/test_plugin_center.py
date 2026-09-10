@@ -29,6 +29,7 @@ from wechatrebot_manager.plugin_center import (
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
 from wechatrebot_manager.provider import OpenAIProviderProfile
+from wechatrebot_manager.customer_config import load_plugins, set_plugin_enabled
 
 
 def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
@@ -601,6 +602,9 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     )
     calls: list[tuple[object, ...]] = []
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
+    service.engine.plugin_states = lambda: {  # type: ignore[method-assign]
+        "sample_configurable_feature": True
+    }
 
     def save_config(module_name: str, config: dict, base_revision=None) -> dict:
         calls.append(("save", module_name, config))
@@ -608,6 +612,9 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
         return {"verified": True, "state": "applied", "revision": _json_revision(config)}
 
     service.engine.save_config = save_config  # type: ignore[method-assign]
+    service.engine.set_plugin_filter = lambda names: calls.append(  # type: ignore[method-assign]
+        ("filter", tuple(names))
+    )
     service.engine.set_enabled = lambda module, enabled: calls.append(  # type: ignore[method-assign]
         ("enabled", module, enabled)
     )
@@ -627,11 +634,13 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
         "message": "功能状态已立即更新。",
     }
     assert reloaded["reloaded"] is True
-    assert [call[:2] for call in calls] == [
+    assert [call[:2] for call in calls if call[0] != "filter"] == [
         ("save", "sample_configurable_feature"),
         ("enabled", "sample_configurable_feature"),
         ("reload", "sample_configurable_feature"),
     ]
+    filter_call = next(call for call in calls if call[0] == "filter")
+    assert "sample_configurable_feature" in filter_call[1]
 
 
 def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> None:
@@ -639,12 +648,17 @@ def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> N
     client = EngineApiClient(install)
     calls: list[tuple[str, str, object]] = []
     active = True
+    system_config = {"plugin_set": ["example"]}
 
     def request(method: str, path: str, body=None):
-        nonlocal active
+        nonlocal active, system_config
         calls.append((method, path, body))
         if path == "/api/v1/plugins":
             return [{"root_dir_name": "example", "name": "registered-example", "activated": active}]
+        if path == "/api/v1/system-config":
+            if method == "PUT":
+                system_config = dict(body)
+            return {"config": dict(system_config)}
         if path.endswith("/config"):
             if method == "PUT":
                 return {"hot_apply": {"verified": True, "state": "applied", "revision": _json_revision({"enabled": True})}}
@@ -656,12 +670,18 @@ def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> N
         return {}
 
     client.request = request  # type: ignore[method-assign]
+    assert client.plugin_states() == {
+        "example": True,
+        "registered-example": True,
+    }
+    client.set_plugin_filter(["registered-example", "example", "example"])
     client.save_config("example", {"enabled": True})
     client.reload("example")
     client.set_enabled("example", False)
     page = client.page_entry("example", "settings")
 
     assert [call for call in calls if call[0] != "GET"] == [
+        ("PUT", "/api/v1/system-config", {"plugin_set": ["example", "registered-example"]}),
         ("PUT", "/api/v1/plugins/registered-example/config", {"config": {"enabled": True}, "base_revision": _json_revision({"enabled": True})}),
         ("POST", "/api/v1/plugins/registered-example/reload", None),
         ("PATCH", "/api/v1/plugins/registered-example/enabled", {"enabled": False}),
@@ -672,6 +692,7 @@ def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> N
 def test_plugin_extension_path_is_scoped_to_selected_feature(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
 
     assert service.extension_path(public_id, "page/schedules") == (
         "/api/plug/sample_configurable_feature/page/schedules"
@@ -680,6 +701,106 @@ def test_plugin_extension_path_is_scoped_to_selected_feature(tmp_path: Path) -> 
     for endpoint in ("", "../config", "page//config", "https://example.invalid"):
         with pytest.raises(PluginCenterError, match="请求无效"):
             service.extension_path(public_id, endpoint)
+
+
+def test_online_plugin_state_is_authoritative_and_toggle_persists_restart_state(
+    tmp_path: Path,
+) -> None:
+    install, public_id = _install(tmp_path)
+    module_name = "sample_configurable_feature"
+    service = PluginCenterService(install)
+    set_plugin_enabled(install, module_name, False)
+    live = True
+
+    service.engine.is_available = lambda: True  # type: ignore[method-assign]
+    service.engine.plugin_states = lambda: {module_name: live}  # type: ignore[method-assign]
+
+    def set_live(_module_name: str, enabled: bool) -> None:
+        nonlocal live
+        live = enabled
+
+    service.engine.set_enabled = set_live  # type: ignore[method-assign]
+    filters: list[list[str]] = []
+    service.engine.set_plugin_filter = lambda names: filters.append(list(names))  # type: ignore[method-assign]
+
+    assert service.catalog()["plugins"][0]["enabled"] is True
+    assert service.detail(public_id)["enabled"] is True
+    assert service.extension_path(public_id, "page/schedules").endswith(
+        "/page/schedules"
+    )
+
+    service.set_enabled(public_id, False)
+    assert live is False
+    assert load_plugins(install)[0].enabled is False
+    assert module_name not in filters[-1]
+    with pytest.raises(PluginCenterError, match="请先启用"):
+        service.extension_path(public_id, "page/schedules")
+
+    service.set_enabled(public_id, True)
+    assert live is True
+    assert load_plugins(install)[0].enabled is True
+    assert module_name in filters[-1]
+
+
+def test_live_state_requires_activation_and_plugin_filter_membership(
+    tmp_path: Path,
+) -> None:
+    client = EngineApiClient(tmp_path)
+    configured: list[str] = []
+
+    def request(method: str, path: str, body=None):
+        if path == "/api/v1/plugins":
+            return [
+                {
+                    "root_dir_name": "folder-name",
+                    "name": "registered-name",
+                    "activated": True,
+                }
+            ]
+        if path == "/api/v1/system-config":
+            return {"config": {"plugin_set": configured}}
+        return {}
+
+    client.request = request  # type: ignore[method-assign]
+    assert client.plugin_states() == {
+        "folder-name": False,
+        "registered-name": False,
+    }
+    configured.append("folder-name")
+    assert client.plugin_states() == {
+        "folder-name": True,
+        "registered-name": True,
+    }
+
+
+def test_online_toggle_rolls_back_filter_and_persisted_state_on_failure(
+    tmp_path: Path,
+) -> None:
+    install, public_id = _install(tmp_path)
+    module_name = "sample_configurable_feature"
+    service = PluginCenterService(install)
+    set_plugin_enabled(install, module_name, False)
+    filters: list[list[str]] = []
+    activations: list[bool] = []
+
+    service.engine.is_available = lambda: True  # type: ignore[method-assign]
+    service.engine.plugin_states = lambda: {module_name: False}  # type: ignore[method-assign]
+    service.engine.set_plugin_filter = lambda names: filters.append(list(names))  # type: ignore[method-assign]
+
+    def set_live(_module_name: str, enabled: bool) -> None:
+        activations.append(enabled)
+        if enabled:
+            raise PluginCenterError("模拟运行态更新失败")
+
+    service.engine.set_enabled = set_live  # type: ignore[method-assign]
+
+    with pytest.raises(PluginCenterError, match="模拟运行态更新失败"):
+        service.set_enabled(public_id, True)
+
+    assert load_plugins(install)[0].enabled is False
+    assert module_name in filters[0]
+    assert module_name not in filters[-1]
+    assert activations == [True, False]
 
 
 def test_offline_save_can_replace_and_explicitly_clear_secret(tmp_path: Path) -> None:

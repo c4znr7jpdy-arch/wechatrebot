@@ -853,10 +853,59 @@ class EngineApiClient:
 
     def is_available(self) -> bool:
         try:
-            self.request("GET", "/api/v1/plugins")
+            self.plugin_states()
             return True
         except EngineUnavailableError:
             return False
+
+    def plugin_states(self) -> dict[str, bool]:
+        plugins = self.request("GET", "/api/v1/plugins")
+        if not isinstance(plugins, list):
+            raise PluginCenterError("无法确认功能运行状态，请刷新后重试。")
+        system = self.request("GET", "/api/v1/system-config")
+        config = system.get("config") if isinstance(system, dict) else None
+        if not isinstance(config, dict):
+            raise PluginCenterError("无法确认功能启用范围，请刷新后重试。")
+        configured = config.get("plugin_set", ["*"])
+        enabled_names = (
+            {str(item) for item in configured}
+            if isinstance(configured, list)
+            else {"*"}
+        )
+        allow_all = "*" in enabled_names
+        states: dict[str, bool] = {}
+        for plugin in plugins:
+            if not isinstance(plugin, dict):
+                continue
+            identifiers = tuple(
+                str(identifier or "").strip()
+                for identifier in (plugin.get("root_dir_name"), plugin.get("name"))
+                if str(identifier or "").strip()
+            )
+            activated = bool(plugin.get("activated")) and (
+                allow_all or any(identifier in enabled_names for identifier in identifiers)
+            )
+            # AstrBot uses the directory name for delivery/catalog matching and
+            # the registered name for API routes.  They are usually equal, but
+            # third-party plugins may expose different values.  Index both so a
+            # live state is never mistaken for a locally disabled plugin.
+            for module_name in identifiers:
+                states[module_name] = activated
+        return states
+
+    def set_plugin_filter(self, plugin_names: list[str]) -> None:
+        desired = sorted({str(name).strip() for name in plugin_names if str(name).strip()})
+        system = self.request("GET", "/api/v1/system-config")
+        config = system.get("config") if isinstance(system, dict) else None
+        if not isinstance(config, dict):
+            raise PluginCenterError("无法读取当前功能启用范围，请刷新后重试。")
+        config["plugin_set"] = desired
+        self.request("PUT", "/api/v1/system-config", config)
+        verified = self.request("GET", "/api/v1/system-config")
+        verified_config = verified.get("config") if isinstance(verified, dict) else None
+        actual = verified_config.get("plugin_set") if isinstance(verified_config, dict) else None
+        if not isinstance(actual, list) or sorted({str(name) for name in actual}) != desired:
+            raise PluginCenterError("功能启用范围未能保存，请刷新后重试。")
 
     def _provider_records(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         source_data = self.request("GET", "/api/v1/provider-sources")
@@ -1113,7 +1162,17 @@ class PluginCenterService:
         self.install_root = Path(install_root).expanduser().resolve()
         self.engine = EngineApiClient(self.install_root)
 
-    def _catalog_items(self) -> tuple[PluginCatalogItem, ...]:
+    def _runtime_plugin_states(self) -> tuple[bool, dict[str, bool]]:
+        if not self.engine.is_available():
+            return False, {}
+        try:
+            return True, self.engine.plugin_states()
+        except EngineUnavailableError:
+            return False, {}
+
+    def _catalog_items(
+        self, enabled_overrides: dict[str, bool] | None = None
+    ) -> tuple[PluginCatalogItem, ...]:
         root = _plugin_root(self.install_root)
         installed = {item.module_name: item for item in load_plugins(self.install_root)}
         policies = load_delivery_features(self.install_root)
@@ -1156,7 +1215,11 @@ class PluginCenterService:
                 PluginCatalogItem(
                     module_name=module_name,
                     display_name=(policy.display_name if policy else raw_plugin.display_name),
-                    enabled=bool(raw_plugin.enabled),
+                    enabled=(
+                        enabled_overrides.get(module_name, False)
+                        if enabled_overrides is not None
+                        else bool(raw_plugin.enabled)
+                    ),
                     configurable=bool(schema),
                     field_count=_field_count(schema),
                     model_field_count=_field_count(model_schema),
@@ -1169,8 +1232,9 @@ class PluginCenterService:
         return tuple(result)
 
     def catalog(self) -> dict[str, Any]:
+        engine_online, live_states = self._runtime_plugin_states()
         entries = []
-        for plugin in self._catalog_items():
+        for plugin in self._catalog_items(live_states if engine_online else None):
             guide = get_plugin_guide(plugin.module_name)
             entries.append(
                 {
@@ -1190,20 +1254,25 @@ class PluginCenterService:
             )
         return {
             "plugins": entries,
-            "engine_online": self.engine.is_available(),
+            "engine_online": engine_online,
             "product_name": load_robot_settings(self.install_root).profile.display_name,
         }
 
-    def _plugin(self, public_id: str) -> PluginCatalogItem:
+    def _plugin(
+        self,
+        public_id: str,
+        enabled_overrides: dict[str, bool] | None = None,
+    ) -> PluginCatalogItem:
         if not _PUBLIC_PLUGIN_ID.fullmatch(public_id):
             raise PluginCenterError("功能标识无效。")
-        for plugin in self._catalog_items():
+        for plugin in self._catalog_items(enabled_overrides):
             if _public_plugin_id(plugin.module_name) == public_id:
                 return plugin
         raise PluginCenterError("所选功能不存在或尚未交付。")
 
     def detail(self, public_id: str) -> dict[str, Any]:
-        item = self._plugin(public_id)
+        engine_online, live_states = self._runtime_plugin_states()
+        item = self._plugin(public_id, live_states if engine_online else None)
         module_name = item.module_name
         raw_schema = _read_object(
             _plugin_root(self.install_root) / module_name / "_conf_schema.json"
@@ -1301,7 +1370,7 @@ class PluginCenterService:
             "embedding_providers": embedding_providers,
             "rerank_providers": rerank_providers,
             "personas": personas,
-            "engine_online": self.engine.is_available(),
+            "engine_online": engine_online,
         }
 
     def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
@@ -1350,21 +1419,49 @@ class PluginCenterService:
         }
 
     def set_enabled(self, public_id: str, enabled: bool) -> dict[str, Any]:
-        item = self._plugin(public_id)
-        module_name = item.module_name
-        online = self.engine.is_available()
-        if online:
-            self.engine.set_enabled(module_name, enabled)
-        else:
+        with _CONFIG_WRITE_LOCK:
+            item = self._plugin(public_id)
+            module_name = item.module_name
+            online, live_states = self._runtime_plugin_states()
+            previous_live = live_states.get(module_name, item.enabled)
+            # plugin_set is both the message-pipeline allowlist and the
+            # persisted startup state.  Update it before activation so the
+            # feature cannot appear enabled while the pipeline still skips it.
             set_plugin_enabled(self.install_root, module_name, enabled)
-        return {
-            "enabled": enabled,
-            "applied": online,
-            "message": "功能状态已立即更新。" if online else "功能状态已保存，将在下次启动时生效。",
-        }
+            if online:
+                try:
+                    persisted_config = _read_object(_dashboard_path(self.install_root))
+                    desired_plugins = persisted_config.get("plugin_set")
+                    if not isinstance(desired_plugins, list):
+                        raise PluginCenterError("功能启用范围未能保存，请停止机器人后重试。")
+                    self.engine.set_plugin_filter(desired_plugins)
+                    self.engine.set_enabled(module_name, enabled)
+                except PluginCenterError:
+                    # Restore both the on-disk allowlist and the running engine.
+                    try:
+                        set_plugin_enabled(self.install_root, module_name, item.enabled)
+                        rollback_config = _read_object(_dashboard_path(self.install_root))
+                        rollback_plugins = rollback_config.get("plugin_set")
+                        if isinstance(rollback_plugins, list):
+                            self.engine.set_plugin_filter(rollback_plugins)
+                        self.engine.set_enabled(module_name, previous_live)
+                    except (OSError, ValueError, PluginCenterError) as rollback_error:
+                        raise PluginCenterError(
+                            "功能状态更新失败，且无法恢复原状态；请停止机器人后重试。"
+                        ) from rollback_error
+                    raise
+            persisted = self._plugin(public_id).enabled
+            if persisted != enabled:
+                raise PluginCenterError("功能开关未能保存，请停止机器人后重试。")
+            return {
+                "enabled": enabled,
+                "applied": online,
+                "message": "功能状态已立即更新。" if online else "功能状态已保存，将在下次启动时生效。",
+            }
 
     def reload(self, public_id: str) -> dict[str, Any]:
-        item = self._plugin(public_id)
+        engine_online, live_states = self._runtime_plugin_states()
+        item = self._plugin(public_id, live_states if engine_online else None)
         module_name = item.module_name
         if not item.enabled:
             raise PluginCenterError("请先启用这项功能，再重新载入设置。")
@@ -1379,7 +1476,8 @@ class PluginCenterService:
         return {"content_path": self.engine.page_entry(module_name, page_name)}
 
     def extension_path(self, public_id: str, endpoint: str) -> str:
-        item = self._plugin(public_id)
+        engine_online, live_states = self._runtime_plugin_states()
+        item = self._plugin(public_id, live_states if engine_online else None)
         if not item.enabled or not item.pages:
             raise PluginCenterError("请先启用这项功能，再使用高级配置页。")
         normalized = _normalize_plugin_extension_endpoint(endpoint)
