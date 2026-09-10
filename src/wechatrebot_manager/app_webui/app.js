@@ -1168,15 +1168,77 @@
   function renderResponseTraces() {
     const list = $("#responseTraceList");
     const traces = state.responseTraces || [];
-    $("#traceStatus").textContent = traces.length ? `${traces.length} 次最近回复` : "等待消息";
-    list.innerHTML = traces.length ? traces.map((trace) => {
-      const stages = Array.isArray(trace.stages) ? trace.stages : [];
-      const stageMarkup = stages.map((stage) => {
-        const duration = stage.duration_text ? ` · ${stage.duration_text}` : "";
-        return `<span class="trace-stage ${escapeHtml(stage.status || "success")}" title="${escapeHtml(stage.detail || "")}">${escapeHtml(stage.label || stage.code || "处理完成")}${escapeHtml(duration)}</span>`;
-      }).join("");
-      return `<article class="trace-item"><div><strong>${escapeHtml(trace.title || "收到一条消息")}</strong><small>${escapeHtml(fullTime(trace.time))}</small></div><div class="trace-stages">${stageMarkup || '<span class="trace-stage skipped">等待处理详情</span>'}</div><span class="trace-duration">${escapeHtml(trace.duration_text || "已完成")}</span></article>`;
-    }).join("") : '<div class="empty-state compact"><p>收到下一条消息后，这里会显示回复经过的步骤，不显示聊天正文和原始群标识。</p></div>';
+    const latest = traces[0];
+    const rawStages = Array.isArray(latest?.stages) ? latest.stages : [];
+    const hasFailure = rawStages.some((stage) => stage.status === "failed");
+    const hasPending = rawStages.some((stage) => stage.status === "pending");
+    const badge = $("#traceStatus");
+    badge.className = `status-badge ${hasFailure ? "error" : hasPending ? "warning" : traces.length ? "online" : "checking"}`;
+    badge.innerHTML = `<span></span>${hasFailure ? "发送失败" : hasPending ? "正在发送" : traces.length ? "发送完成" : "等待消息"}`;
+    if (!latest) {
+      list.innerHTML = '<div class="empty-state compact"><p>收到下一条消息后，这里会按时间显示回复经过的步骤，不展示聊天正文和原始群标识。</p></div>';
+      return;
+    }
+
+    const numericDuration = (stage) => {
+      const raw = Number(stage.duration_seconds);
+      if (Number.isFinite(raw)) return Math.max(0, raw);
+      const text = String(stage.duration_text || "").trim();
+      const match = text.match(/^(<)?\s*(\d+(?:\.\d+)?)\s*(毫秒|秒)$/);
+      if (!match) return 0;
+      const value = Number(match[2]) * (match[3] === "毫秒" ? .001 : 1);
+      return match[1] ? value / 2 : value;
+    };
+    let fallbackOffset = 0;
+    const stages = rawStages.map((stage) => {
+      const duration = numericDuration(stage);
+      const parsedOffset = Number(stage.offset_seconds);
+      const offset = Number.isFinite(parsedOffset) ? Math.max(0, parsedOffset) : fallbackOffset;
+      fallbackOffset = Math.max(fallbackOffset, offset + duration);
+      return {...stage, duration, offset};
+    });
+    const reportedTotal = Number(latest.duration_seconds);
+    const total = Math.max(
+      Number.isFinite(reportedTotal) ? reportedTotal : 0,
+      ...stages.map((stage) => stage.offset + stage.duration),
+      0.1,
+    );
+    const conciseDuration = (seconds) => seconds <= 0
+      ? "0 秒"
+      : seconds < 0.1
+      ? `${Math.max(1, Math.round(seconds * 1000))} 毫秒`
+      : `${seconds.toFixed(seconds < 10 ? 1 : 0)} 秒`;
+    const statusLabel = {success: "完成", skipped: "已跳过", pending: "发送中", failed: "失败"};
+    const ticks = [0, .25, .5, .75, 1].map((ratio) => (
+      `<span style="left:${ratio * 100}%">${escapeHtml(conciseDuration(total * ratio))}</span>`
+    )).join("");
+    const rows = stages.map((stage, index) => {
+      const status = ["success", "skipped", "pending", "failed"].includes(stage.status) ? stage.status : "success";
+      const start = Math.min(98.5, (stage.offset / total) * 100);
+      const proportionalWidth = (stage.duration / total) * 100;
+      const width = Math.max(1.5, Math.min(100 - start, proportionalWidth));
+      const durationText = stage.duration_text || (stage.duration ? conciseDuration(stage.duration) : "<0.1 秒");
+      const detail = stage.detail || statusLabel[status];
+      const label = stage.label || stage.code || "处理阶段";
+      return `<div class="gantt-row ${escapeHtml(status)}">
+        <div class="gantt-label"><span>${index + 1}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>
+        <div class="gantt-track"><span class="gantt-bar ${escapeHtml(status)}" style="left:${start.toFixed(3)}%;width:${width.toFixed(3)}%" role="img" aria-label="${escapeHtml(`${label}，${statusLabel[status]}，耗时 ${durationText}`)}"></span></div>
+        <strong class="gantt-duration">${escapeHtml(durationText)}</strong>
+      </div>`;
+    }).join("");
+    const resultLabel = hasFailure ? "未完成" : hasPending ? "发送处理中" : "已发送到微信";
+    list.innerHTML = `<article class="trace-gantt-card">
+      <header class="trace-summary">
+        <div><span>最近一次发送</span><strong>${escapeHtml(latest.title || "机器人回复")}</strong><time>${escapeHtml(fullTime(latest.time))}</time></div>
+        <dl><div><dt>总耗时</dt><dd>${escapeHtml(latest.duration_text || conciseDuration(total))}</dd></div><div><dt>结果</dt><dd>${escapeHtml(resultLabel)}</dd></div></dl>
+      </header>
+      <div class="gantt-legend" aria-label="阶段状态说明"><span class="success">完成</span><span class="skipped">已跳过</span><span class="pending">发送中</span><span class="failed">失败</span></div>
+      <div class="gantt-chart" aria-label="机器人消息发送阶段甘特图">
+        <div class="gantt-axis"><span>处理阶段</span><div>${ticks}</div><span>耗时</span></div>
+        ${rows || '<div class="empty-state compact">等待处理详情</div>'}
+      </div>
+      <footer>横条位置表示阶段发生时间，长度表示耗时；仅展示脱敏后的处理步骤。</footer>
+    </article>`;
   }
 
   let modalResolve = null;

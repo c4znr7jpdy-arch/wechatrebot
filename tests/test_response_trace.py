@@ -78,7 +78,11 @@ def test_reply_trace_includes_send_completion_and_stage_durations(tmp_path: Path
     trace = ResponseTraceService(tmp_path).recent()[0]
 
     decision = next(item for item in trace["stages"] if item["code"] == "decision")
+    model = next(item for item in trace["stages"] if item["code"] == "model")
     send = next(item for item in trace["stages"] if item["code"] == "send")
     assert decision["duration_text"] == "0.3 秒"
+    assert decision["offset_seconds"] == 0.0
+    assert model["offset_seconds"] == 0.5
     assert send["status"] == "success"
     assert send["duration_text"] == "0.3 秒"
+    assert send["offset_seconds"] == 1.1

@@ -39,6 +39,7 @@ def _stage(
     status: str = "success",
     detail: str = "",
     duration: float | None = None,
+    offset: float | None = None,
 ) -> dict[str, Any]:
     result = {"code": code, "label": label, "status": status}
     if detail:
@@ -46,6 +47,8 @@ def _stage(
     if duration is not None:
         result["duration_seconds"] = round(max(0.0, duration), 3)
         result["duration_text"] = _duration_text(max(0.0, duration))
+    if offset is not None:
+        result["offset_seconds"] = round(max(0.0, offset), 3)
     return result
 
 
@@ -93,6 +96,9 @@ class ResponseTraceService:
                 return None
             return max(0.0, (finish - begin).total_seconds())
 
+        def offset(moment: datetime | None) -> float | None:
+            return elapsed(start, moment)
+
         direct = any("direct_wake" in line or "命中快路径" in line for line in lines)
         decision_time = first_time(
             lambda line: "direct_wake" in line
@@ -106,10 +112,18 @@ class ResponseTraceService:
                     "点名快路径",
                     detail="已跳过额外回复判断",
                     duration=elapsed(start, decision_time),
+                    offset=0.0 if start is not None else None,
                 )
             )
         elif any("秘书决策 action=reply" in line for line in lines):
-            stages.append(_stage("decision", "回复判断", duration=elapsed(start, decision_time)))
+            stages.append(
+                _stage(
+                    "decision",
+                    "回复判断",
+                    duration=elapsed(start, decision_time),
+                    offset=0.0 if start is not None else None,
+                )
+            )
 
         memory_lines = [line for line in lines if "memory_recall" in line or "记忆召回" in line or "条记忆" in line]
         memory_start = first_time(
@@ -122,34 +136,61 @@ class ResponseTraceService:
         )
         memory_duration = elapsed(memory_start, memory_end)
         if any("short_casual" in line for line in memory_lines):
-            stages.append(_stage("memory", "长期记忆", "skipped", "普通寒暄无需查询", memory_duration))
+            stages.append(_stage("memory", "长期记忆", "skipped", "普通寒暄无需查询", memory_duration, offset(memory_start)))
         elif any("auto_recall_off" in line or "recall_state=disabled" in line for line in memory_lines):
-            stages.append(_stage("memory", "长期记忆已关闭", "skipped", duration=memory_duration))
+            stages.append(_stage("memory", "长期记忆已关闭", "skipped", duration=memory_duration, offset=offset(memory_start)))
         elif any("超过" in line and "检索" in line for line in lines):
-            stages.append(_stage("memory", "长期记忆降级", "skipped", "检索超时，已继续回复", memory_duration))
+            stages.append(_stage("memory", "长期记忆降级", "skipped", "检索超时，已继续回复", memory_duration, offset(memory_start)))
         else:
             counts = [int(match.group(1)) for line in memory_lines if (match := _MEMORY_COUNT.search(line))]
             if counts:
                 count = max(counts)
-                stages.append(_stage("memory", f"长期记忆 {count} 条" if count else "长期记忆无结果", "success" if count else "skipped", duration=memory_duration))
+                stages.append(_stage("memory", f"长期记忆 {count} 条" if count else "长期记忆无结果", "success" if count else "skipped", duration=memory_duration, offset=offset(memory_start)))
             elif any("explicit_memory_request" in line or "recall_state=searching" in line for line in memory_lines):
-                stages.append(_stage("memory", "明确回忆请求", duration=memory_duration))
+                stages.append(_stage("memory", "明确回忆请求", duration=memory_duration, offset=offset(memory_start)))
 
         emotion_time = first_time(lambda line: "compact 情绪上下文已注入" in line)
         if any("compact 情绪上下文已注入" in line for line in lines):
-            stages.append(_stage("emotion", "精简情感", duration=elapsed(decision_time, emotion_time)))
+            emotion_candidates = [
+                value
+                for value in (decision_time, memory_end, start)
+                if value is not None and emotion_time is not None and value <= emotion_time
+            ]
+            emotion_start = max(emotion_candidates) if emotion_candidates else start
+            stages.append(
+                _stage(
+                    "emotion",
+                    "精简情感",
+                    duration=elapsed(emotion_start, emotion_time),
+                    offset=offset(emotion_start),
+                )
+            )
         prepare_time = last_time(lambda line: "Prepare to send" in line)
         model_start_candidates = [value for value in (decision_time, memory_end, emotion_time) if value]
         model_start = max(model_start_candidates) if model_start_candidates else start
-        stages.append(_stage("model", model_label, duration=elapsed(model_start, prepare_time)))
-
         expression_time = first_time(
             lambda line: "表情触发语音" in line or "meme_manager" in line
         )
+        model_finish = (
+            expression_time
+            if expression_time is not None
+            and model_start is not None
+            and prepare_time is not None
+            and model_start <= expression_time <= prepare_time
+            else prepare_time
+        )
+        stages.append(
+            _stage(
+                "model",
+                model_label,
+                duration=elapsed(model_start, model_finish),
+                offset=offset(model_start),
+            )
+        )
         if any("表情触发语音" in line for line in lines):
-            stages.append(_stage("voice", "语音生成", duration=elapsed(model_start, expression_time)))
+            stages.append(_stage("voice", "语音生成", duration=elapsed(expression_time, prepare_time), offset=offset(expression_time)))
         elif any("meme_manager" in line and "[]" not in line for line in lines):
-            stages.append(_stage("expression", "表情选择", duration=elapsed(model_start, expression_time)))
+            stages.append(_stage("expression", "表情选择", duration=elapsed(expression_time, prepare_time), offset=offset(expression_time)))
 
         voice = any("Prepare to send" in line and "ComponentType.Record" in line for line in lines)
         completion_time = first_time(lambda line: "AI回复完成" in line or "发送完成" in line)
@@ -161,6 +202,7 @@ class ResponseTraceService:
                 send_status,
                 "" if completion_time is not None else "已交给微信连接发送",
                 elapsed(prepare_time, completion_time),
+                offset(prepare_time),
             )
         )
         duration = max(0.0, (end - start).total_seconds()) if start and end else None

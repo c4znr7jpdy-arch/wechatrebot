@@ -529,6 +529,24 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
     assert "form.elements.model.value = items[0]" not in model_discovery
 
 
+def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert "机器人消息发送甘特图" in markup
+    assert "stage.offset_seconds" in script
+    assert "const numericDuration = (stage)" in script
+    assert 'class="gantt-track"' in script
+    assert 'class="gantt-duration"' in script
+    assert "横条位置表示阶段发生时间，长度表示耗时" in script
+    assert ".gantt-bar.skipped" in styles
+    assert ".gantt-bar.pending" in styles
+    assert ".gantt-bar.failed" in styles
+    assert "@media (max-width: 880px)" in styles
+
+
 def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
