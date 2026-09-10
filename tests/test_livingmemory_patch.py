@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
 from pathlib import Path
@@ -65,6 +66,42 @@ def _recall_type(source: str) -> type:
     namespace: dict[str, object] = {}
     exec(compile(module, "memory_recall.py", "exec"), namespace)
     return namespace["MemoryRecall"]  # type: ignore[return-value]
+
+
+def _plugin_ready_type(source: str) -> type:
+    tree = ast.parse(source)
+    class_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "LivingMemoryPlugin"
+    )
+    method = next(
+        node
+        for node in class_node.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_ensure_plugin_ready"
+    )
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias(name="annotations")],
+                level=0,
+            ),
+            ast.ClassDef(
+                name="LivingMemoryPlugin",
+                bases=[],
+                keywords=[],
+                body=[method],
+                decorator_list=[],
+            ),
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    namespace: dict[str, object] = {}
+    exec(compile(module, "main.py", "exec"), namespace)
+    return namespace["LivingMemoryPlugin"]  # type: ignore[return-value]
 
 
 class _Config:
@@ -169,3 +206,43 @@ def test_patch_adds_customer_config_and_bounded_observability(
     assert "上次说了什么" in field["default"]
     assert 'event.set_extra("livingmemory_recall_state", state)' in source
     assert 'event.set_extra("livingmemory_recall_reason", reason)' in source
+
+
+def test_runtime_hooks_never_wait_for_missing_embedding_provider(
+    patched_plugin: Path,
+) -> None:
+    source = (patched_plugin / "main.py").read_text(encoding="utf-8")
+    hooks = source[
+        source.index("@filter.on_llm_request()") : source.index(
+            '@filter.command_group("lmem")'
+        )
+    ]
+
+    assert hooks.count("wait_for_initialization=False") == 3
+    assert "ready, _ = await self._ensure_plugin_ready()" not in hooks
+
+    plugin_type = _plugin_ready_type(source)
+
+    class MissingProviderInitializer:
+        is_initialized = False
+
+        def __init__(self) -> None:
+            self.wait_calls = 0
+
+        async def ensure_initialized(self) -> bool:
+            self.wait_calls += 1
+            await asyncio.sleep(30)
+            return False
+
+    initializer = MissingProviderInitializer()
+    plugin = plugin_type()
+    plugin.initializer = initializer
+    plugin._get_initialization_status_message = lambda: "not ready"
+
+    ready, message = asyncio.run(
+        plugin._ensure_plugin_ready(wait_for_initialization=False)
+    )
+
+    assert ready is False
+    assert message == "not ready"
+    assert initializer.wait_calls == 0
