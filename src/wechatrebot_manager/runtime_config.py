@@ -10,7 +10,7 @@ import secrets
 from .brand import BrandProfile
 from .feature_policy import load_delivery_features
 from .json_io import write_json_atomic
-from .provider import OpenAIProviderProfile
+from .provider import OpenAIProviderProfile, PROVIDER_REQUEST_MAX_ATTEMPTS
 
 
 _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
@@ -138,6 +138,7 @@ def astrbot_config_payload(
             "default_personality": "default",
             "context_limit_reached_strategy": "llm_compress",
             "llm_compress_provider_id": "",
+            "request_max_retries": PROVIDER_REQUEST_MAX_ATTEMPTS,
             "max_context_length": -1,
             "dequeue_context_length": 1,
         },
@@ -198,14 +199,34 @@ def _ensure_local_dashboard_credentials(dashboard: dict[str, object]) -> None:
 def _upsert_by_id(
     value: object,
     replacement: dict[str, object],
+    *,
+    updated_fields: tuple[str, ...] | None = None,
 ) -> list[object]:
     existing = value if isinstance(value, list) else []
     replacement_id = replacement["id"]
+    matched = next(
+        (
+            item
+            for item in existing
+            if isinstance(item, dict) and item.get("id") == replacement_id
+        ),
+        None,
+    )
+    merged = replacement
+    if matched is not None and updated_fields is not None:
+        merged = {**replacement, **matched}
+        merged.update(
+            {
+                field: replacement[field]
+                for field in updated_fields
+                if field in replacement
+            }
+        )
     return [
         item
         for item in existing
         if not isinstance(item, dict) or item.get("id") != replacement_id
-    ] + [replacement]
+    ] + [merged]
 
 
 def _apply_brand_to_astrbot(
@@ -247,24 +268,39 @@ def _apply_brand_to_astrbot(
 def _apply_provider_to_astrbot(
     payload: dict[str, object],
     profile: OpenAIProviderProfile,
+    *,
+    make_default: bool = True,
 ) -> None:
     normalized = profile.normalized()
     errors = normalized.validate()
     if errors:
         raise ValueError("；".join(errors))
     payload["provider_sources"] = _upsert_by_id(
-        payload.get("provider_sources"), normalized.astrbot_source()
+        payload.get("provider_sources"),
+        normalized.astrbot_source(),
+        # Keep vendor-specific extras, but never inherit an old unbounded/very
+        # long request timeout: it can make a simple @ reply appear frozen for
+        # minutes. The product timeout is part of the unified provider policy.
+        updated_fields=("id", "key", "api_base", "enable", "timeout"),
     )
     payload["provider"] = _upsert_by_id(
-        payload.get("provider"), normalized.astrbot_model()
+        payload.get("provider"),
+        normalized.astrbot_model(),
+        updated_fields=("id", "provider_source_id", "model", "enable"),
     )
-    provider_settings = payload.get("provider_settings")
-    if not isinstance(provider_settings, dict):
-        provider_settings = {}
-        payload["provider_settings"] = provider_settings
-    provider_settings["default_provider_id"] = normalized.model_id
-    provider_settings["context_limit_reached_strategy"] = "llm_compress"
-    provider_settings["llm_compress_provider_id"] = normalized.model_id
+    if make_default:
+        provider_settings = payload.get("provider_settings")
+        if not isinstance(provider_settings, dict):
+            provider_settings = {}
+            payload["provider_settings"] = provider_settings
+        provider_settings["request_max_retries"] = PROVIDER_REQUEST_MAX_ATTEMPTS
+        # Hidden fallback chains make a short @ message wait through several
+        # providers. Keep services available for manual selection, but execute
+        # only the model the user explicitly chose as the reply model.
+        provider_settings["fallback_chat_models"] = []
+        provider_settings["default_provider_id"] = normalized.model_id
+        provider_settings["context_limit_reached_strategy"] = "llm_compress"
+        provider_settings["llm_compress_provider_id"] = normalized.model_id
 
 
 def _sync_delivery_plugins(
@@ -281,7 +317,7 @@ def _sync_delivery_plugins(
             else {"*"}
         )
         astrbot_payload["plugin_set"] = (
-            allowed
+            [feature.module for feature in features if feature.default_enabled]
             if "*" in configured_names
             else [module for module in allowed if module in configured_names]
         )
@@ -298,9 +334,158 @@ def _sync_angel_heart_model(
         return
     path = astrbot_data_root / "config" / "astrbot_plugin_angel_heart_config.json"
     payload = _load_object(path)
-    if not str(payload.get("analyzer_model") or "").strip():
-        payload["analyzer_model"] = provider_profile.normalized().model_id
+    model_id = provider_profile.normalized().model_id
+    for field in ("analyzer_model", "image_caption_provider_id"):
+        if not str(payload.get(field) or "").strip():
+            payload[field] = model_id
+    if payload:
         write_json_atomic(path, payload)
+
+
+def _nested_defaults(target: dict[str, object], defaults: dict[str, object]) -> None:
+    for key, value in defaults.items():
+        current = target.get(key)
+        if isinstance(value, dict):
+            if not isinstance(current, dict):
+                current = {}
+                target[key] = current
+            _nested_defaults(current, value)
+        else:
+            target.setdefault(key, value)
+
+
+def _sync_living_memory_config(
+    astrbot_data_root: Path,
+    provider_profile: OpenAIProviderProfile | None,
+) -> None:
+    """Seed the one primary long-term-memory engine without replacing user choices."""
+    plugin_dir = astrbot_data_root / "plugins" / "astrbot_plugin_livingmemory"
+    if not plugin_dir.is_dir():
+        return
+    path = astrbot_data_root / "config" / "astrbot_plugin_livingmemory_config.json"
+    payload = _load_object(path)
+    _nested_defaults(
+        payload,
+        {
+            "recall_engine": {
+                "top_k": 3,
+                "auto_recall_mode": "smart",
+                "explicit_recall_phrases": [
+                    "上次说了什么",
+                    "还记得吗",
+                    "之前提到",
+                    "我说过",
+                    "你说过",
+                ],
+                "casual_query_max_chars": 24,
+                "injection_method": "extra_user_content",
+                "inject_with_recent_context": False,
+                "vector_search_timeout_seconds": 0.8,
+            },
+            "filtering_settings": {
+                "use_persona_filtering": True,
+                "use_session_filtering": True,
+            },
+            "reflection_engine": {"summary_trigger_rounds": 10},
+            # The graph route is valuable for advanced installations but adds a
+            # second vector request to every recall. Keep the small-user default fast.
+            "graph_memory": {"enabled": False},
+            "agent_tools": {
+                "enable_recall_tool": True,
+                "enable_memorize_tool": False,
+            },
+        },
+    )
+    if provider_profile is not None:
+        provider_settings = payload.get("provider_settings")
+        if not isinstance(provider_settings, dict):
+            provider_settings = {}
+            payload["provider_settings"] = provider_settings
+        provider_settings.setdefault(
+            "llm_provider_id", provider_profile.normalized().model_id
+        )
+    write_json_atomic(path, payload)
+
+
+def _sync_emotion_config(astrbot_data_root: Path) -> None:
+    """Enable the compact emotion layer with privacy-first learning defaults."""
+    plugin_dir = astrbot_data_root / "plugins" / "astrbot_plugin_self_learning"
+    if not plugin_dir.is_dir():
+        return
+    path = astrbot_data_root / "config" / "astrbot_plugin_self_learning_config.json"
+    payload = _load_object(path)
+    _nested_defaults(
+        payload,
+        {
+            "Self_Learning_Basic": {
+                "enable_message_capture": False,
+                "enable_auto_learning": False,
+                "enable_realtime_learning": False,
+                "enable_jargon_learning": False,
+                "enable_style_learning": False,
+                "enable_realtime_llm_filter": False,
+                "enable_web_interface": False,
+            },
+            "Advanced_Settings": {
+                "save_raw_messages": False,
+                "auto_apply_approved_persona": False,
+            },
+            "Affection_System_Settings": {"enable_affection_system": True},
+            "Mood_System_Settings": {"enable_daily_mood": True},
+            "Social_Context_Settings": {
+                "enable_social_context_injection": True,
+                "include_social_relations": False,
+                "include_affection_info": True,
+                "include_mood_info": True,
+                "context_injection_position": "end",
+            },
+            "Integration_Settings": {
+                "delegate_memory_to_livingmemory": True,
+                "disable_local_memory_when_delegated": True,
+                "delegate_reply_to_group_chat_plus": True,
+            },
+            "Runtime_Internal_Settings": {
+                "enable_llm_hooks": True,
+                "llm_hook_profile": "compact",
+            },
+            "Database_Settings": {"db_type": "sqlite"},
+            "Persona_Evolution_Settings": {
+                "auto_apply_persona_updates": False,
+                "persona_update_backup_enabled": True,
+            },
+        },
+    )
+    basic = payload.get("Self_Learning_Basic")
+    if isinstance(basic, dict):
+        for field in (
+            "enable_message_capture",
+            "enable_auto_learning",
+            "enable_realtime_learning",
+            "enable_jargon_learning",
+            "enable_style_learning",
+            "enable_realtime_llm_filter",
+            "enable_web_interface",
+        ):
+            basic[field] = False
+    advanced = payload.get("Advanced_Settings")
+    if isinstance(advanced, dict):
+        advanced["save_raw_messages"] = False
+        advanced["auto_apply_approved_persona"] = False
+    write_json_atomic(path, payload)
+
+
+def _prefer_one_primary_memory(astrbot_payload: dict[str, object]) -> None:
+    configured = astrbot_payload.get("plugin_set")
+    if not isinstance(configured, list):
+        return
+    names = [str(item) for item in configured]
+    if (
+        "astrbot_plugin_livingmemory" in names
+        and "astrbot_plugin_mnemosyne" in names
+    ):
+        astrbot_payload["plugin_set"] = [
+            name for name in names if name != "astrbot_plugin_mnemosyne"
+        ]
 
 
 def write_runtime_configs(
@@ -311,12 +496,15 @@ def write_runtime_configs(
     ports: RuntimePorts = RuntimePorts(),
     brand_profile: BrandProfile | None = None,
     provider_profile: OpenAIProviderProfile | None = None,
+    provider_make_default: bool = True,
     admin_id: str | None = None,
 ) -> None:
     root = Path(install_root).expanduser().resolve()
     bridge_config = root / "app" / "bridge" / "config.json"
     bridge_payload = _load_object(bridge_config)
     bridge_payload.update(bridge_config_payload(wechat_exe_path, ports=ports))
+    if not isinstance(bridge_payload.get("manager_query_token"), str) or len(bridge_payload["manager_query_token"]) < 32:
+        bridge_payload["manager_query_token"] = secrets.token_urlsafe(32)
     write_json_atomic(
         bridge_config,
         bridge_payload,
@@ -366,7 +554,11 @@ def write_runtime_configs(
         if brand_profile is not None:
             _apply_brand_to_astrbot(astrbot_payload, brand_profile)
         if provider_profile is not None:
-            _apply_provider_to_astrbot(astrbot_payload, provider_profile)
+            _apply_provider_to_astrbot(
+                astrbot_payload,
+                provider_profile,
+                make_default=provider_make_default,
+            )
         normalized_admin = normalize_admin_id(admin_id)
         if normalized_admin is not None:
             astrbot_payload["admins_id"] = (
@@ -375,6 +567,7 @@ def write_runtime_configs(
     else:
         astrbot_payload = generated_astrbot
     _sync_delivery_plugins(root, astrbot_payload)
+    _prefer_one_primary_memory(astrbot_payload)
     dashboard = astrbot_payload.get("dashboard")
     if not isinstance(dashboard, dict):
         dashboard = {}
@@ -386,6 +579,8 @@ def write_runtime_configs(
         astrbot_payload,
     )
     _sync_angel_heart_model(astrbot_data_root, provider_profile)
+    _sync_living_memory_config(astrbot_data_root, provider_profile)
+    _sync_emotion_config(astrbot_data_root)
     manager_path = root / "config" / "manager.json"
     manager_payload = _load_object(manager_path)
     manager_payload.update(

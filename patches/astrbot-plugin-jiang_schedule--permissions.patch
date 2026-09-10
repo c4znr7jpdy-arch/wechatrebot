@@ -1,0 +1,140 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -153,6 +153,62 @@ def _parse_time(hour_str: str, minute_str: Optional[str]) -> tuple[int, int]:
+     return max(0, min(h, 23)), max(0, min(m, 59))
+ 
+ 
++def _can_manage_current_chat(event: AstrMessageEvent) -> bool:
++    """只信任 AstrBot 已确认的管理员语义，并隔离私聊会话。"""
++    sender_id = str(event.get_sender_id() or "").strip()
++    if event.is_private_chat():
++        # aiocqhttp 私聊 session_id 应与 sender_id 相同；不接受来源不明的
++        # 私聊会话，避免任务被写入其他人的发送目标。
++        session_id = str(event.get_session_id() or "").strip()
++        return bool(sender_id) and session_id == sender_id
++
++    # event.is_admin() 由 AstrBot 根据全局 admins_id 设置，是微信适配下
++    # 唯一始终可用的管理员依据。
++    if event.is_admin():
++        return True
++
++    # 其他平台若在框架 Group 对象中明确给出群主/管理员，也可以使用；
++    # 微信适配未提供这些字段时保持拒绝，绝不根据昵称或命令内容猜测。
++    group = getattr(getattr(event, "message_obj", None), "group", None)
++    event_group_id = str(event.get_group_id() or "").strip()
++    declared_group_id = str(getattr(group, "group_id", "") or "").strip()
++    if not sender_id or not group or not event_group_id or declared_group_id != event_group_id:
++        return False
++    owner_id = str(getattr(group, "group_owner", "") or "").strip()
++    if owner_id and sender_id == owner_id:
++        return True
++    admins = getattr(group, "group_admins", None)
++    return isinstance(admins, (list, tuple, set)) and sender_id in {
++        str(item).strip() for item in admins if str(item).strip()
++    }
++
++
++def _is_mutation_command(text: str) -> bool:
++    return any(
++        pattern.search(text)
++        for pattern in (_RE_DEL, _RE_ADD, _RE_BILI_SUB, _RE_BILI_UNSUB)
++    )
++
++
++def _permission_denied_message(event: AstrMessageEvent) -> str:
++    if event.is_private_chat():
++        return (
++            "这条私聊的身份与当前会话不一致，为保护其他聊天的定时任务，"
++            "本次没有修改。请在你和机器人的私聊窗口重新发送。"
++        )
++    return (
++        "只有机器人管理员可以添加、修改或删除群里的定时任务。"
++        "请让机器人管理员操作，或先在机器人后台把你的微信 ID 加入管理员名单。"
++    )
++
++
++def _shared_checkin_denied_message() -> str:
++    return (
++        "每日签到会使用机器人保存的站点账号，因此只有机器人管理员可以设置。"
++        "本次没有修改；如需使用，请联系机器人管理员。"
++    )
++
++
+ # ── 持久化 ──────────────────────────────────────────────
+ 
+ def _load_tasks() -> list[dict]:
+@@ -747,6 +803,11 @@ class Main(star.Star):
+         text = event.get_message_str().strip()
+         session = event.unified_msg_origin
+ 
++        # 列表是当前会话内的只读操作；所有写操作必须先通过权限判断。
++        if _is_mutation_command(text) and not _can_manage_current_chat(event):
++            yield event.plain_result(_permission_denied_message(event))
++            return
++
+         # ── 列表 ──
+         if _RE_LIST.search(text):
+             tasks = _load_tasks()
+@@ -768,7 +829,10 @@ class Main(star.Star):
+                     freq = _DOW_LABEL.get(dow, "") if dow else "每天"
+                     suffix = f" ({location})" if location else ""
+                     lines.append(f"  • {label}{suffix}  {freq} {time_str}")
+-            lines.append("\n发送「/定时删除新闻」可删除")
++            if _can_manage_current_chat(event):
++                lines.append("\n发送「/定时删除新闻」可删除")
++            else:
++                lines.append("\n需要修改时，请联系机器人管理员。")
+             yield event.plain_result("\n".join(lines))
+             return
+ 
+@@ -778,7 +842,11 @@ class Main(star.Star):
+             t = _normalize_type(m.group(1))
+             if t == "checkin":
++                if not event.is_admin():
++                    yield event.plain_result(_shared_checkin_denied_message())
++                    return
+                 schedule = _CHECKIN_MANAGER.public_config()["schedule"]
+-                if schedule.get("enabled") and schedule.get("session") == session:
++                owner_session = str(schedule.get("session") or "")
++                if schedule.get("enabled") and owner_session == session:
+                     _CHECKIN_MANAGER.update_schedule({**schedule, "enabled": False})
+                     _apply_checkin_task_config()
+                     await _sync_jobs(self.context)
+@@ -811,6 +878,17 @@ class Main(star.Star):
+             hour, minute = _parse_time(m.group(4), m.group(5))
+ 
+             if t == "checkin":
++                if not event.is_admin():
++                    yield event.plain_result(_shared_checkin_denied_message())
++                    return
++                schedule = _CHECKIN_MANAGER.public_config()["schedule"]
++                owner_session = str(schedule.get("session") or "")
++                if schedule.get("enabled") and owner_session and owner_session != session:
++                    yield event.plain_result(
++                        "每日签到已在另一个聊天中启用。为避免改动其他聊天的任务，"
++                        "本次没有修改；请先由原聊天的机器人管理员停用。"
++                    )
++                    return
+                 _CHECKIN_MANAGER.update_schedule({
+                     "enabled": True,
+                     "time": f"{hour:02d}:{minute:02d}",
+@@ -944,7 +1023,10 @@ class Main(star.Star):
+                 uid = t.get("extra", {}).get("uid", "?")
+                 interval = t.get("extra", {}).get("interval", 5)
+                 lines.append(f"  • UID:{uid}  每{interval}分钟")
+-            lines.append("\n发送「/取消订阅动态 UID」可取消")
++            if _can_manage_current_chat(event):
++                lines.append("\n发送「/取消订阅动态 UID」可取消")
++            else:
++                lines.append("\n需要修改时，请联系机器人管理员。")
+             yield event.plain_result("\n".join(lines))
+             return
+ 
+@@ -959,4 +1041,5 @@ class Main(star.Star):
+             "  /订阅动态 UID — B站动态订阅\n"
+             "  /取消订阅动态 UID — 取消订阅\n"
+-            "  /订阅列表 — 查看订阅"
++            "  /订阅列表 — 查看订阅\n"
++            "提示：群聊中的添加、修改和删除只允许机器人管理员操作。"
+         )

@@ -280,9 +280,15 @@ def build_service_specs(
         required_files=(
             astrbot_root / ".astrbot",
             astrbot_root / "data" / "cmd_config.json",
+            ffmpeg_bin / "ffmpeg.exe",
+            ffmpeg_bin / "ffprobe.exe",
         ),
         display_name="回复引擎",
     )
+    # The default HOOK API port may belong to an already-open WeChat.  The
+    # managed bridge disables reuse, reserves another port, and launches the
+    # robot's own WeChat instance, so this port must not be a supervisor-level
+    # free-port requirement.
     bridge = ServiceSpec(
         name="new-hook-bridge",
         argv=(
@@ -314,7 +320,6 @@ def build_service_specs(
             / "hook"
             / "libGLESv1-c2c-video-v2.dll",
         ),
-        required_free_ports=(("微信连接", ports.hook_api),),
         required_hashes=hook_integrity_files,
         display_name="微信连接",
     )
@@ -472,6 +477,10 @@ class ProcessSupervisor:
                     )
         if occupied:
             raise ServiceLaunchError("；".join(occupied))
+        # Launch every service before waiting for the slower reply engine.  The
+        # bridge is designed to reconnect to that engine, so this opens WeChat
+        # immediately instead of making a first-time user wait through the full
+        # plugin startup sequence before a login window can appear.
         for spec in self.specs:
             if self._progress_callback is not None:
                 self._progress_callback("starting", spec)
@@ -504,6 +513,9 @@ class ProcessSupervisor:
             except (OSError, ServiceLaunchError) as exc:
                 self.stop()
                 raise ServiceLaunchError(str(exc)) from exc
+        for running in tuple(self.running):
+            spec = running.spec
+            process = running.process
             if not self._readiness_waiter(spec, process):
                 exit_code = process.poll()
                 self.stop()

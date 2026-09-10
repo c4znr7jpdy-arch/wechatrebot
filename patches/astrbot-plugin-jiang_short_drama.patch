@@ -1,0 +1,11 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -454,6 +454,7 @@
+                     await self.context.cron_manager.delete_job(job.job_id)
+         except Exception:
+             logger.exception("[SHORT_DRAMA] failed to remove schedule jobs")
++            raise RuntimeError("原推送计划未能移除，已停止应用新计划，请重试。") from None
+ 
+     async def _sync_schedule_jobs(self) -> None:
+         await self._remove_schedule_jobs()

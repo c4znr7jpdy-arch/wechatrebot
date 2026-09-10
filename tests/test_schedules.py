@@ -1,8 +1,10 @@
 import json
 import sqlite3
+import pytest
 from pathlib import Path
 
 from wechatrebot_manager.schedules import ScheduleService
+from wechatrebot_manager.plugin_center import PluginCenterError
 
 
 def _database(root: Path) -> tuple[Path, str]:
@@ -89,3 +91,48 @@ def test_schedule_update_time_and_delete_offline(
     assert service.list()["items"] == []
     tasks = json.loads(service._schedule_tasks_path().read_text(encoding="utf-8"))
     assert tasks["tasks"] == []
+
+
+def test_removed_plugin_schedule_is_hidden_from_updated_install(tmp_path: Path) -> None:
+    database, _ = _database(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO cron_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "job-legacy-checkin",
+                "yanyun_checkin_daily",
+                "旧版本签到任务",
+                "0 7 * * *",
+                "{}",
+                1,
+                "scheduled",
+                None,
+                "2026-09-10 07:00:00",
+                None,
+            ),
+        )
+
+    listed = ScheduleService(tmp_path).list()
+
+    assert [item["id"] for item in listed["items"]] == ["job-weather"]
+    assert listed["running"] == 1
+
+
+@pytest.mark.parametrize("action", ["time", "toggle", "delete"])
+def test_online_schedule_error_never_falls_back_to_silent_disk_edit(tmp_path, monkeypatch, action):
+    _, job_id = _database(tmp_path)
+    service = ScheduleService(tmp_path)
+    before = service._schedule_tasks_path().read_bytes()
+    monkeypatch.setattr(service.engine, "is_available", lambda: True)
+    def fail(*_args, **_kwargs):
+        raise PluginCenterError("调度器未接受修改")
+    monkeypatch.setattr(service.engine, "request", fail)
+    with pytest.raises(PluginCenterError):
+        if action == "time":
+            service.update_time(job_id, "09:30")
+        elif action == "toggle":
+            service.set_enabled(job_id, False)
+        else:
+            service.delete(job_id)
+    assert service._schedule_tasks_path().read_bytes() == before
+    assert service.list()["items"][0]["cron_expression"] == "0 8 * * *"

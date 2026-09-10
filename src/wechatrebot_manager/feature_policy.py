@@ -24,6 +24,8 @@ class DeliveryFeature:
     display_name: str
     configuration: str
     description: str = ""
+    default_enabled: bool = True
+    visible: bool = True
 
     @property
     def exposes_schema(self) -> bool:
@@ -61,10 +63,16 @@ def load_delivery_features(
         display_name = str(raw.get("display_name") or "").strip()
         configuration = str(raw.get("configuration") or "").strip()
         description = str(raw.get("description") or "").strip()
+        default_enabled = raw.get("default_enabled", True)
+        visible = raw.get("visible", True)
         if not _MODULE_NAME.fullmatch(module) or not display_name:
             raise ValueError("交付功能清单包含无效的功能名称。")
         if configuration not in FEATURE_CONFIGURATION_MODES:
             raise ValueError(f"{display_name} 的配置方式无效。")
+        if not isinstance(default_enabled, bool):
+            raise ValueError(f"{display_name} 的默认启用策略无效。")
+        if not isinstance(visible, bool):
+            raise ValueError(f"{display_name} 的可见性策略无效。")
         if module in seen:
             raise ValueError(f"交付功能清单重复登记了 {display_name}。")
         seen.add(module)
@@ -74,6 +82,8 @@ def load_delivery_features(
                 display_name=display_name,
                 configuration=configuration,
                 description=description,
+                default_enabled=default_enabled,
+                visible=visible,
             )
         )
     return tuple(result)

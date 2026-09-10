@@ -21,6 +21,11 @@ _INTERNAL_MARKERS = (
     "memory_compact",
     "cache_refresh",
 )
+_REMOVED_TASK_NAMES = {
+    # 旧版本可能已把已下架插件的计划写入 cron_jobs。更新后不再把这类
+    # 遗留任务展示成用户创建的计划，也不尝试修改已经移除的插件配置。
+    "yanyun_checkin_daily",
+}
 _TYPE_LABELS = {
     "weather": ("天气预报", "天气"),
     "oilprice": ("油价提醒", "生活服务"),
@@ -29,7 +34,6 @@ _TYPE_LABELS = {
     "bili": ("动态订阅", "动态订阅"),
     "checkin": ("每日签到", "签到"),
     "short_drama": ("短剧推荐", "短剧"),
-    "yanyun": ("燕云签到", "游戏工具"),
 }
 
 
@@ -47,19 +51,27 @@ def _source_kind(name: str) -> str:
             return prefix
     if name.startswith("short_drama_recommend_"):
         return "short_drama"
-    if name == "yanyun_checkin_daily":
-        return "yanyun"
     return "custom"
 
 
 def _target_from_payload(payload: dict[str, Any]) -> str:
+    target_type, target_id = _target_identity(payload)
+    if target_type == "group":
+        return f"微信群 · {target_id[-20:]}"
+    if target_type == "direct":
+        return f"个人聊天 · {target_id.rsplit(':', 1)[-1]}"
+    return "系统任务"
+
+
+def _target_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Return a machine-readable target without relying on the display label."""
     session = str(payload.get("session") or "")
     if "@chatroom" in session:
-        match = re.search(r"([^:]+@chatroom)", session)
-        return f"微信群 · {(match.group(1) if match else session)[-20:]}"
+        match = re.search(r"([A-Za-z0-9_.-]+@chatroom)", session)
+        return "group", match.group(1) if match else ""
     if session:
-        return f"个人聊天 · {session.rsplit(':', 1)[-1]}"
-    return "系统任务"
+        return "direct", session.rsplit(":", 1)[-1]
+    return "system", ""
 
 
 def _schedule_text(expression: str | None) -> str:
@@ -94,6 +106,8 @@ class ScheduleItem:
     source: str
     source_kind: str
     target: str
+    target_type: str
+    target_id: str
     enabled: bool
     status: str
     cron_expression: str
@@ -109,6 +123,8 @@ class ScheduleItem:
             "source": self.source,
             "source_kind": self.source_kind,
             "target": self.target,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
             "enabled": self.enabled,
             "status": self.status,
             "cron_expression": self.cron_expression,
@@ -145,7 +161,9 @@ class ScheduleService:
         items: list[ScheduleItem] = []
         for row in rows:
             raw_name = str(row["name"] or "")
-            if any(marker in raw_name.casefold() for marker in _INTERNAL_MARKERS):
+            if raw_name in _REMOVED_TASK_NAMES or any(
+                marker in raw_name.casefold() for marker in _INTERNAL_MARKERS
+            ):
                 continue
             kind = _source_kind(raw_name)
             label, source = _TYPE_LABELS.get(
@@ -159,6 +177,7 @@ class ScheduleService:
             if not isinstance(payload, dict):
                 payload = {}
             cron = str(row["cron_expression"] or "")
+            target_type, target_id = _target_identity(payload)
             items.append(
                 ScheduleItem(
                     id=str(row["job_id"]),
@@ -166,6 +185,8 @@ class ScheduleService:
                     source=source,
                     source_kind=kind,
                     target=_target_from_payload(payload),
+                    target_type=target_type,
+                    target_id=target_id,
                     enabled=bool(row["enabled"]),
                     status="运行中" if bool(row["enabled"]) else "已暂停",
                     cron_expression=cron,
@@ -194,15 +215,12 @@ class ScheduleService:
         return row
 
     def _engine_update(self, job_id: str, payload: dict[str, object]) -> bool:
-        try:
-            if not self.engine.is_available():
-                return False
-            self.engine.request(
-                "PATCH", f"/api/v1/cron/jobs/{quote(job_id, safe='')}", payload
-            )
-            return True
-        except PluginCenterError:
+        if not self.engine.is_available():
             return False
+        self.engine.request(
+            "PATCH", f"/api/v1/cron/jobs/{quote(job_id, safe='')}", payload
+        )
+        return True
 
     def _offline_update(self, job_id: str, **values: object) -> None:
         allowed = {"enabled", "cron_expression", "status", "next_run_time"}
@@ -287,26 +305,20 @@ class ScheduleService:
                 kept.append(item)
             payload["tasks"] = kept
             write_json_atomic(path, payload)
-        elif kind == "yanyun":
-            path = self.data_root / "config" / "jiang_yanyun_checkin_config.json"
-            payload = self._read_tasks(path)
-            if enabled is not None or delete:
-                payload["enabled"] = False if delete else enabled
-            if clock is not None:
-                payload["schedule_time"] = f"{clock[0]:02d}:{clock[1]:02d}"
-            write_json_atomic(path, payload)
 
     def set_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
         row = self._job(job_id)
+        online = self._engine_update(job_id, {"enabled": enabled})
         self._update_source(str(row["name"]), enabled=enabled)
-        if not self._engine_update(job_id, {"enabled": enabled}):
+        if not online:
             self._offline_update(
                 job_id,
                 enabled=int(enabled),
                 status="scheduled" if enabled else "paused",
                 next_run_time=None if not enabled else None,
             )
-        return {"updated": True, "enabled": enabled}
+        return {"updated": True, "enabled": enabled, "applied": online,
+                "message": "任务状态已生效。" if online else "任务状态已保存，启动机器人后使用。"}
 
     def update_time(self, job_id: str, value: str) -> dict[str, object]:
         match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", value)
@@ -320,23 +332,19 @@ class ScheduleService:
         if len(parts) != 5:
             raise ValueError("这个任务暂不支持修改执行时间。")
         expression = " ".join((str(minute), str(hour), *parts[2:]))
+        online = self._engine_update(job_id, {"cron_expression": expression})
         self._update_source(str(row["name"]), clock=(hour, minute))
-        if not self._engine_update(job_id, {"cron_expression": expression}):
+        if not online:
             self._offline_update(job_id, cron_expression=expression)
-        return {"updated": True, "cron_expression": expression}
+        return {"updated": True, "cron_expression": expression, "applied": online,
+                "message": "执行时间已生效。" if online else "执行时间已保存，启动机器人后使用。"}
 
     def delete(self, job_id: str) -> dict[str, object]:
         row = self._job(job_id)
+        deleted_online = self.engine.is_available()
+        if deleted_online:
+            self.engine.request("DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}")
         self._update_source(str(row["name"]), delete=True)
-        deleted_online = False
-        try:
-            if self.engine.is_available():
-                self.engine.request(
-                    "DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}"
-                )
-                deleted_online = True
-        except PluginCenterError:
-            deleted_online = False
         if not deleted_online:
             with self._connect() as connection:
                 connection.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))

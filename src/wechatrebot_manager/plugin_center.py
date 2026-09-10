@@ -23,6 +23,12 @@ from urllib.request import Request, urlopen
 from .customer_config import PluginEntry, load_plugins, load_robot_settings, set_plugin_enabled
 from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
+from .plugin_guides import advanced_schema, common_schema, get_plugin_guide
+from .provider import (
+    OpenAIProviderProfile,
+    PROVIDER_REQUEST_MAX_ATTEMPTS,
+    provider_display_name,
+)
 from .single_instance import SingleInstanceLock
 
 
@@ -34,6 +40,7 @@ _PROXY_PREFIXES = (
     "/api/plug/",
 )
 _MAX_BODY_BYTES = 4 * 1024 * 1024
+_CONFIG_WRITE_LOCK = threading.RLock()
 _SECRET_FIELD = re.compile(
     r"(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)",
     re.IGNORECASE,
@@ -63,6 +70,198 @@ class PluginCatalogItem:
     pages: tuple[str, ...]
     configuration: str = "schema-and-page"
     description: str = ""
+    simplified: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerSchemaProfile:
+    sections: tuple[
+        tuple[str, str, tuple[tuple[str, dict[str, Any]], ...]], ...
+    ]
+    note: str
+    setup_steps: tuple[str, ...] = ()
+
+
+_GROUP_ANALYSIS_MODULE = "astrbot_plugin_qq_group_daily_analysis"
+_GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
+    sections=(
+        (
+            "basic",
+            "报告设置",
+            (
+                (
+                    "report_template",
+                    {
+                        "description": "报告样式",
+                        "hint": "“手账风”就是示例截图中的长图样式。",
+                        "_option_labels": {
+                            "scrapbook": "手账风（示例样式）",
+                            "姜小妹": "姜小妹主题",
+                            "simple": "简洁风",
+                            "spring_festival": "新春风",
+                            "BlueArchive": "蔚蓝档案",
+                            "HatsuneMiku": "初音未来",
+                            "retro_futurism": "复古未来",
+                            "hack": "极客终端",
+                            "format": "通用排版",
+                        },
+                    },
+                ),
+                (
+                    "analysis_days",
+                    {
+                        "description": "统计最近几天",
+                        "hint": "一般保持 1 天；需要周报时可改为 7 天。",
+                        "min": 1,
+                        "max": 30,
+                    },
+                ),
+                (
+                    "min_messages_threshold",
+                    {
+                        "description": "最少消息数",
+                        "hint": "低于这个数量时跳过报告，建议保持 200。",
+                        "min": 1,
+                        "max": 10000,
+                    },
+                ),
+            ),
+        ),
+        (
+            "auto_analysis",
+            "自动日报",
+            (
+                (
+                    "scheduled_group_list",
+                    {
+                        "description": "自动日报群",
+                        "hint": "点击“从群聊列表添加”选择群；多个群一行一个。留空时不自动发送。",
+                        "_ui_control": "line-list",
+                        "_group_selector": True,
+                        "placeholder": "例如：123456@chatroom",
+                    },
+                ),
+                (
+                    "auto_analysis_time",
+                    {
+                        "description": "每天生成时间",
+                        "hint": "使用 24 小时制；需要多个时间时一行一个。",
+                        "_ui_control": "time-list",
+                        "placeholder": "23:00",
+                    },
+                ),
+            ),
+        ),
+        (
+            "analysis_features",
+            "报告内容",
+            (
+                (
+                    "topic_analysis_enabled",
+                    {
+                        "description": "热门话题",
+                        "hint": "整理当天讨论最多的话题。",
+                    },
+                ),
+                (
+                    "user_title_analysis_enabled",
+                    {
+                        "description": "群友画像",
+                        "hint": "生成群友称号和简短画像。",
+                    },
+                ),
+                (
+                    "golden_quote_analysis_enabled",
+                    {
+                        "description": "群聊金句",
+                        "hint": "挑选有代表性的精彩发言。",
+                    },
+                ),
+                (
+                    "chat_quality_analysis_enabled",
+                    {
+                        "description": "聊天质量点评",
+                        "hint": "从多个角度总结当天群聊质量。",
+                    },
+                ),
+            ),
+        ),
+        (
+            "llm",
+            "分析模型",
+            (
+                (
+                    "llm_provider_id",
+                    {
+                        "description": "用于分析的模型",
+                        "hint": "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。",
+                    },
+                ),
+            ),
+        ),
+    ),
+    note=(
+        "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数"
+        "继续使用推荐值，保存时不会被重置。"
+    ),
+    setup_steps=(
+        "在“自动日报群”旁点击“从群聊列表添加”，无需在群里发送命令",
+        "选择需要生成日报的群；多个群可以继续添加",
+        "确认生成时间和分析模型后保存",
+    ),
+)
+_CUSTOMER_SCHEMA_PROFILES = {
+    _GROUP_ANALYSIS_MODULE: _GROUP_ANALYSIS_PROFILE,
+}
+
+
+def _project_customer_schema(
+    module_name: str,
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], CustomerSchemaProfile | None]:
+    """Project complex engine schemas into a small customer-facing form."""
+    profile = _CUSTOMER_SCHEMA_PROFILES.get(module_name)
+    if profile is None:
+        projected = common_schema(module_name, schema)
+        guide = get_plugin_guide(module_name)
+        if guide and projected != schema:
+            return projected, CustomerSchemaProfile((), "先改常用项即可；专业设置保留原值，可按需展开。", guide["setup_steps"])
+        return schema, None
+
+    result: dict[str, Any] = {}
+    for section_key, section_title, selected_fields in profile.sections:
+        raw_section = schema.get(section_key)
+        if not isinstance(raw_section, dict):
+            continue
+        raw_items = raw_section.get("items")
+        if raw_section.get("type") != "object" or not isinstance(raw_items, dict):
+            continue
+        projected_items: dict[str, Any] = {}
+        for field_key, overrides in selected_fields:
+            raw_field = raw_items.get(field_key)
+            if not isinstance(raw_field, dict) or raw_field.get("invisible") is True:
+                continue
+            field_overrides = copy.deepcopy(overrides)
+            option_labels = field_overrides.pop("_option_labels", None)
+            projected_field = {
+                **copy.deepcopy(raw_field),
+                **field_overrides,
+            }
+            if isinstance(option_labels, dict) and isinstance(
+                projected_field.get("options"), list
+            ):
+                projected_field["labels"] = [
+                    option_labels.get(str(option), str(option))
+                    for option in projected_field["options"]
+                ]
+            projected_items[field_key] = projected_field
+        if projected_items:
+            result[section_key] = {
+                **copy.deepcopy(raw_section),
+                "description": section_title,
+                "items": projected_items,
+            }
+    return result, profile
 
 
 def _public_plugin_id(module_name: str) -> str:
@@ -124,7 +323,9 @@ def _model_field_kind(key: str, field: dict[str, Any]) -> str | None:
         return "embedding"
     if provider_type == "rerank" or "rerank" in normalized:
         return "rerank"
-    if special == "select_provider" or normalized.endswith("provider_id"):
+    if special == "select_provider" or normalized.endswith(
+        ("provider_id", "provider_ids", "_provider", "_providers")
+    ):
         return "chat"
     if "persona" in normalized and normalized.endswith(("_id", "_name")):
         return "persona"
@@ -267,6 +468,13 @@ def _customer_schema(
             continue
         field = copy.deepcopy(raw_field)
         current = stored.get(key)
+        if field.get("type") == "list" and not field.get("options") and key in {
+            "whitelist", "blacklist", "session_list", "scheduled_push_groups",
+            "allowed_group_ids", "alarm_target_sessions", "whitelist_users",
+            "auto_tts_group_whitelist",
+        }:
+            field["_ui_control"] = "line-list"
+            field["hint"] = "每行填写一个标识；群聊可在“群聊管理”复制群标识，私人会话请按本功能说明填写。留空的作用请按本功能说明确认。"
         if field.get("type") == "object" and isinstance(field.get("items"), dict):
             nested_stored = current if isinstance(current, dict) else {}
             field["items"] = _customer_schema(field["items"], nested_stored)
@@ -300,6 +508,7 @@ def _customer_schema(
         if _is_secret_field(str(key), field):
             field["secret"] = True
             field["_secret_configured"] = bool(current)
+            field["default"] = ""
         result[str(key)] = field
     return _white_label_schema(result)
 
@@ -617,7 +826,7 @@ class EngineApiClient:
             headers["Content-Type"] = content_type
         request = Request(self._url(path), data=body, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(request, timeout=max(self.timeout, 60) if method in {"PUT", "PATCH", "POST"} else self.timeout) as response:
                 return response.status, dict(response.headers.items()), response.read()
         except HTTPError as exc:
             return exc.code, dict(exc.headers.items()), exc.read()
@@ -646,20 +855,249 @@ class EngineApiClient:
         try:
             self.request("GET", "/api/v1/plugins")
             return True
-        except PluginCenterError:
+        except EngineUnavailableError:
             return False
 
-    def save_config(self, module_name: str, config: dict[str, Any]) -> None:
-        encoded = quote(module_name, safe="")
-        self.request("PUT", f"/api/v1/plugins/{encoded}/config", {"config": config})
+    def _provider_records(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        source_data = self.request("GET", "/api/v1/provider-sources")
+        provider_data = self.request("GET", "/api/v1/providers")
+        sources = (
+            source_data.get("provider_sources", [])
+            if isinstance(source_data, dict)
+            else []
+        )
+        providers = (
+            provider_data.get("providers", [])
+            if isinstance(provider_data, dict)
+            else []
+        )
+        return (
+            [item for item in sources if isinstance(item, dict)],
+            [item for item in providers if isinstance(item, dict)],
+        )
+
+    def set_default_provider(self, provider_id: str) -> None:
+        system = self.request("GET", "/api/v1/system-config")
+        config = system.get("config") if isinstance(system, dict) else None
+        if not isinstance(config, dict):
+            raise PluginCenterError("无法读取当前模型设置，请刷新后重试。")
+        settings = config.get("provider_settings")
+        if not isinstance(settings, dict):
+            settings = {}
+            config["provider_settings"] = settings
+        settings["request_max_retries"] = PROVIDER_REQUEST_MAX_ATTEMPTS
+        settings["fallback_chat_models"] = []
+        settings["default_provider_id"] = provider_id
+        settings["context_limit_reached_strategy"] = "llm_compress"
+        settings["llm_compress_provider_id"] = provider_id
+        self.request("PUT", "/api/v1/system-config", config)
+        verified = self.request("GET", "/api/v1/system-config")
+        verified_config = verified.get("config") if isinstance(verified, dict) else None
+        verified_settings = (
+            verified_config.get("provider_settings")
+            if isinstance(verified_config, dict)
+            else None
+        )
+        if not isinstance(verified_settings, dict) or str(
+            verified_settings.get("default_provider_id") or ""
+        ) != provider_id:
+            raise PluginCenterError("模型设置已提交，但没有收到生效确认，请刷新后重试。")
+
+    def save_provider(
+        self,
+        profile: OpenAIProviderProfile,
+        *,
+        original_provider_id: str | None = None,
+        make_default: bool = True,
+    ) -> None:
+        normalized = profile.normalized()
+        errors = normalized.validate()
+        if errors:
+            raise ValueError("；".join(errors))
+        sources, providers = self._provider_records()
+        source_existing = next(
+            (item for item in sources if item.get("id") == normalized.source_id),
+            None,
+        )
+        source_payload = normalized.astrbot_source()
+        if source_existing is not None:
+            source_payload = {**source_payload, **source_existing}
+            source_payload.update(
+                {
+                    "id": normalized.source_id,
+                    "key": [normalized.api_key],
+                    "api_base": normalized.api_base,
+                    "timeout": normalized.astrbot_source()["timeout"],
+                    "enable": True,
+                }
+            )
+            self.request(
+                "PUT",
+                "/api/v1/provider-sources/by-id",
+                {"source_id": normalized.source_id, "config": source_payload},
+            )
+        else:
+            self.request("POST", "/api/v1/provider-sources", {"config": source_payload})
+
+        known_ids = {str(item.get("id") or "") for item in providers}
+        target = str(original_provider_id or "").strip()
+        if target not in known_ids:
+            target = normalized.model_id if normalized.model_id in known_ids else ""
+        model_payload = normalized.astrbot_model()
+        if target:
+            current_model = dict(
+                next(item for item in providers if item.get("id") == target)
+            )
+            for inherited_field in (
+                "key",
+                "api_base",
+                "timeout",
+                "proxy",
+                "custom_headers",
+                "provider",
+                "type",
+                "provider_type",
+            ):
+                current_model.pop(inherited_field, None)
+            model_payload = {**model_payload, **current_model}
+            model_payload.update(
+                {
+                    "id": normalized.model_id,
+                    "provider_source_id": normalized.source_id,
+                    "model": normalized.model,
+                    "enable": True,
+                }
+            )
+            self.request(
+                "PUT",
+                "/api/v1/providers/by-id",
+                {"provider_id": target, "config": model_payload},
+            )
+        else:
+            self.request("POST", "/api/v1/providers", {"config": model_payload})
+        if make_default:
+            self.set_default_provider(normalized.model_id)
+
+        verified_sources, verified_providers = self._provider_records()
+        source = next(
+            (item for item in verified_sources if item.get("id") == normalized.source_id),
+            None,
+        )
+        provider = next(
+            (item for item in verified_providers if item.get("id") == normalized.model_id),
+            None,
+        )
+        if (
+            not isinstance(source, dict)
+            or str(source.get("api_base") or "").rstrip("/") != normalized.api_base
+            or not isinstance(provider, dict)
+            or str(provider.get("model") or "") != normalized.model
+        ):
+            raise PluginCenterError("模型服务已提交，但没有收到生效确认，请刷新后重试。")
+
+    def test_provider(self, provider_id: str) -> dict[str, Any]:
+        result = self.request(
+            "POST",
+            "/api/v1/providers/test",
+            {"provider_id": provider_id},
+        )
+        return result if isinstance(result, dict) else {"result": result}
+
+    def delete_provider(self, provider_id: str, source_id: str) -> None:
+        _sources, providers = self._provider_records()
+        if provider_id not in {str(item.get("id") or "") for item in providers}:
+            raise PluginCenterError("所选模型服务不存在，请刷新后重试。")
+        self.request(
+            "DELETE",
+            f"/api/v1/providers/by-id?provider_id={quote(provider_id, safe='')}",
+        )
+        remaining_sources, remaining_providers = self._provider_records()
+        if any(item.get("id") == provider_id for item in remaining_providers):
+            raise PluginCenterError(
+                "模型服务删除后仍然存在，没有收到生效确认，请刷新后重试。"
+            )
+        remaining = [
+            item
+            for item in remaining_providers
+            if item.get("provider_source_id") == source_id
+        ]
+        if not remaining and any(
+            item.get("id") == source_id for item in remaining_sources
+        ):
+            self.request(
+                "DELETE",
+                f"/api/v1/provider-sources/by-id?source_id={quote(source_id, safe='')}",
+            )
+            verified_sources, _ = self._provider_records()
+            if any(item.get("id") == source_id for item in verified_sources):
+                raise PluginCenterError(
+                    "模型服务已删除，但服务连接清理未确认，请刷新后重试。"
+                )
+
+    def _registered_plugin(self, module_name: str) -> dict[str, Any]:
+        plugins = self.request("GET", "/api/v1/plugins")
+        if not isinstance(plugins, list):
+            raise PluginCenterError("无法确认功能运行状态，请刷新后重试。")
+        matches = [p for p in plugins if isinstance(p, dict) and
+                   (p.get("root_dir_name") == module_name or p.get("name") == module_name)]
+        if len(matches) != 1 or not matches[0].get("name"):
+            raise PluginCenterError("这项功能尚未正确加载，请检查运行记录；没有修改其他功能。")
+        return matches[0]
+
+    def get_config(self, module_name: str) -> dict[str, Any]:
+        """Return a plugin configuration snapshot with its revision.
+
+        Product-level settings pages use this to merge a small set of friendly
+        controls into the full plugin configuration without discarding advanced
+        fields owned by the plugin.
+        """
+        registered = self._registered_plugin(module_name)
+        encoded = quote(str(registered["name"]), safe="")
+        result = self.request("GET", f"/api/v1/plugins/{encoded}/config")
+        if not isinstance(result, dict) or not isinstance(result.get("config"), dict):
+            raise PluginCenterError("无法读取当前功能设置，请刷新后重试。")
+        return {
+            "config": result["config"],
+            "revision": str(result.get("revision") or _json_revision(result["config"])),
+            "hot_apply_supported": result.get("hot_apply_supported") is True,
+            "activated": bool(registered.get("activated")),
+        }
+
+    def save_config(self, module_name: str, config: dict[str, Any], base_revision: str | None = None) -> dict[str, Any]:
+        registered = self._registered_plugin(module_name)
+        encoded = quote(str(registered["name"]), safe="")
+        endpoint = f"/api/v1/plugins/{encoded}/config"
+        before = self.request("GET", endpoint)
+        if not isinstance(before, dict) or before.get("hot_apply_supported") is not True:
+            raise PluginCenterError("当前运行版本不支持可靠热更新，请先安装完整软件更新后再保存。")
+        try:
+            result = self.request("PUT", endpoint, {"config": config, "base_revision": base_revision or _json_revision(before.get("config") or {})})
+        except EngineUnavailableError:
+            raise PluginCenterError("保存确认超时，生效状态尚未确认。请稍后重新读取设置，不要连续重复提交。") from None
+        receipt = result.get("hot_apply", {}) if isinstance(result, dict) else {}
+        expected_state = "applied" if registered.get("activated") else "pending_enable"
+        allowed_states = {"applied", "pending_setup"} if expected_state == "applied" else {"pending_enable"}
+        if receipt.get("verified") is not True or receipt.get("state") not in allowed_states:
+            raise PluginCenterError("设置已提交，但未收到生效确认，请重新读取设置并检查运行记录。")
+        after = self.request("GET", endpoint)
+        active = self._registered_plugin(module_name)
+        if (not isinstance(after, dict) or not isinstance(after.get("config"), dict)
+                or _json_revision(after["config"]) != receipt.get("revision")
+                or bool(active.get("activated")) != bool(registered.get("activated"))):
+            raise ConfigConflictError("保存后检测到配置或功能状态变化，请重新读取设置确认。")
+        return receipt
 
     def set_enabled(self, module_name: str, enabled: bool) -> None:
-        encoded = quote(module_name, safe="")
+        encoded = quote(str(self._registered_plugin(module_name)["name"]), safe="")
         self.request("PATCH", f"/api/v1/plugins/{encoded}/enabled", {"enabled": enabled})
+        if bool(self._registered_plugin(module_name).get("activated")) != enabled:
+            raise PluginCenterError("功能开关未能生效，请检查运行记录后重试。")
 
     def reload(self, module_name: str) -> None:
-        encoded = quote(module_name, safe="")
+        encoded = quote(str(self._registered_plugin(module_name)["name"]), safe="")
         self.request("POST", f"/api/v1/plugins/{encoded}/reload")
+        if not self._registered_plugin(module_name).get("activated"):
+            raise PluginCenterError("功能尚未恢复运行，请检查设置和运行记录。")
 
     def page_entry(self, module_name: str, page_name: str) -> str:
         encoded_plugin = quote(module_name, safe="")
@@ -686,7 +1124,7 @@ class PluginCenterService:
             ordered = [
                 (installed[policy.module], policy)
                 for policy in policies
-                if policy.module in installed
+                if policy.module in installed and policy.visible
             ]
 
         result: list[PluginCatalogItem] = []
@@ -696,7 +1134,9 @@ class PluginCenterService:
             raw_schema = _read_object(plugin_dir / "_conf_schema.json")
             exposes_schema = policy is None or policy.exposes_schema
             exposes_pages = policy is None or policy.exposes_pages
-            schema = raw_schema if exposes_schema else {}
+            schema, profile = _project_customer_schema(
+                module_name, raw_schema if exposes_schema else {}
+            )
             _, model_schema = _split_schema(schema)
             pages_root = plugin_dir / "pages"
             pages = (
@@ -723,6 +1163,7 @@ class PluginCenterService:
                     pages=pages,
                     configuration=(policy.configuration if policy else "schema-and-page"),
                     description=(policy.description if policy else ""),
+                    simplified=profile is not None,
                 )
             )
         return tuple(result)
@@ -730,6 +1171,7 @@ class PluginCenterService:
     def catalog(self) -> dict[str, Any]:
         entries = []
         for plugin in self._catalog_items():
+            guide = get_plugin_guide(plugin.module_name)
             entries.append(
                 {
                     "id": _public_plugin_id(plugin.module_name),
@@ -741,6 +1183,9 @@ class PluginCenterService:
                     "pages": plugin.pages,
                     "configuration": plugin.configuration,
                     "description": plugin.description,
+                    "simplified": plugin.simplified,
+                    "audience": guide.get("audience", "按需使用"),
+                    "readiness": guide.get("readiness", "请按说明准备"),
                 }
             )
         return {
@@ -771,8 +1216,16 @@ class PluginCenterService:
         embedding_providers: list[dict[str, str]] = []
         rerank_providers: list[dict[str, str]] = []
         configured_providers = engine_config.get("provider", [])
+        configured_sources = engine_config.get("provider_sources", [])
         if not isinstance(configured_providers, list):
             configured_providers = []
+        source_ids = {
+            str(source.get("id") or "")
+            for source in (
+                configured_sources if isinstance(configured_sources, list) else []
+            )
+            if isinstance(source, dict)
+        }
         for provider in configured_providers:
             if not isinstance(provider, dict) or provider.get("enable") is False:
                 continue
@@ -780,10 +1233,10 @@ class PluginCenterService:
             if not provider_id:
                 continue
             model_name = str(provider.get("model") or "").strip()
-            label = (
-                f"{model_name} · {provider_id}"
-                if model_name and model_name != provider_id
-                else provider_id
+            source_id = str(provider.get("provider_source_id") or "").strip()
+            label = provider_display_name(
+                source_id if source_id in source_ids else "",
+                model_name or provider_id,
             )
             choice = {"value": provider_id, "label": str(_white_label_schema(label))}
             provider_kind = " ".join(
@@ -814,8 +1267,10 @@ class PluginCenterService:
             rerank_providers=rerank_providers,
             personas=personas,
         )
-        clean_schema = _customer_schema(runtime_schema, config)
-        customer_config = _customer_config(schema, config)
+        customer_schema, profile = _project_customer_schema(module_name, runtime_schema)
+        clean_schema = _customer_schema(customer_schema, config)
+        customer_config = _customer_config(customer_schema, config)
+        guide = get_plugin_guide(module_name)
         clean_basic_schema, clean_model_schema = _split_schema(clean_schema)
         return {
             "id": public_id,
@@ -827,6 +1282,16 @@ class PluginCenterService:
             "pages": item.pages,
             "configuration": item.configuration,
             "description": item.description,
+            "simplified": item.simplified,
+            "configuration_note": profile.note if profile else "",
+            "setup_steps": profile.setup_steps if profile else (),
+            "guide": guide,
+            "advanced_schema": _customer_schema(
+                advanced_schema(module_name, runtime_schema), config
+            ),
+            "advanced_config": _customer_config(
+                advanced_schema(module_name, runtime_schema), config
+            ),
             "schema": clean_schema,
             "basic_schema": clean_basic_schema,
             "model_schema": clean_model_schema,
@@ -840,6 +1305,10 @@ class PluginCenterService:
         }
 
     def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
+        with _CONFIG_WRITE_LOCK:
+            return self._save_locked(public_id, config, base_revision)
+
+    def _save_locked(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
         item = self._plugin(public_id)
         module_name = item.module_name
         if not item.configurable:
@@ -856,17 +1325,28 @@ class PluginCenterService:
         _validate_config(schema, normalized)
         online = self.engine.is_available()
         reloaded = False
-        if online and item.enabled:
-            self.engine.save_config(module_name, normalized)
-            reloaded = True
+        apply_state = "pending_start" if not online else "pending_enable"
+        receipt = {}
+        if online:
+            receipt = self.engine.save_config(module_name, normalized, _json_revision(stored))
+            if not isinstance(receipt, dict) or receipt.get("verified") is not True:
+                raise PluginCenterError("未收到配置生效确认，请重新读取设置检查结果。")
+            apply_state = receipt["state"]
+            reloaded = apply_state == "applied"
         else:
             write_json_atomic(path, normalized)
         saved = _read_object(path)
+        if receipt and _json_revision(saved) != receipt.get("revision"):
+            raise ConfigConflictError("保存后配置发生变化，请重新读取设置确认。")
         return {
             "saved": True,
             "reloaded": reloaded,
+            "apply_state": apply_state,
             "revision": _json_revision(saved),
-            "message": "设置已保存并立即生效。" if reloaded else "设置已保存，将在下次启动时生效。",
+            "message": ("已保存并确认生效，后续请求使用新设置。" if reloaded else
+                        "已保存并加载新设置；所需服务尚未就绪，请按使用指引完成配置后再验证。" if apply_state == "pending_setup" else
+                        "已保存，启用此功能后使用新设置。" if online else
+                        "已保存到本机，尚未确认生效。机器人启动后加载；若仍在运行，请恢复连接后重新保存。"),
         }
 
     def set_enabled(self, public_id: str, enabled: bool) -> dict[str, Any]:

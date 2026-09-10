@@ -11,23 +11,48 @@ import webbrowser
 
 from . import __version__
 from .chat_history import ChatHistoryService
+from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     RobotSettings,
+    delete_provider_profile,
     load_provider_profile,
+    load_provider_services,
     load_robot_settings,
+    provider_reference_modules,
+    replace_provider_references,
+    replace_provider_value,
     save_provider_profile,
     save_robot_settings,
+    set_default_provider,
+)
+from .customer_maintenance import (
+    CustomerMaintenanceService,
+    MaintenanceError,
 )
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog
+from .experience import ExperienceError, ExperienceService
+from .group_policy import GroupPolicyError, GroupPolicyService
 from .lifecycle import LifecycleController
 from .payload import PayloadError
 from .plugin_center import (
+    EngineApiClient,
+    EngineUnavailableError,
     PluginCenterError,
     PluginCenterService,
     launch_plugin_center,
 )
-from .provider import OpenAIProviderProfile
+from .provider import (
+    DEEPSEEK_PROVIDER_API_BASE,
+    DEEPSEEK_PROVIDER_MODEL,
+    DEFAULT_PROVIDER_API_BASE,
+    DEFAULT_PROVIDER_MODEL,
+    DEFAULT_PROVIDER_SOURCE_ID,
+    OpenAIProviderProfile,
+    discover_openai_models,
+    provider_source_id,
+)
+from .response_trace import ResponseTraceService
 from .schedules import ScheduleService
 from .updates import (
     UpdateChannel,
@@ -41,6 +66,7 @@ from .updates import (
     load_update_channel,
     prepare_update,
 )
+from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
 
@@ -60,6 +86,10 @@ PUBLIC_API_METHODS = (
     "reload_feature",
     "open_feature_center",
     "get_conversations",
+    "get_groups",
+    "get_group_members",
+    "get_group_policy",
+    "save_group_policy",
     "get_messages",
     "delete_conversation",
     "delete_history_before",
@@ -69,9 +99,26 @@ PUBLIC_API_METHODS = (
     "update_schedule_time",
     "delete_schedule",
     "get_activity",
+    "get_response_traces",
+    "save_persona_settings",
+    "save_memory_settings",
+    "save_emotion_settings",
+    "complete_onboarding",
     "save_brand",
+    "get_providers",
     "save_provider",
+    "set_default_provider",
+    "test_provider",
+    "discover_provider_models",
+    "delete_provider",
+    "get_maintenance",
+    "create_backup",
+    "validate_restore",
+    "restore_backup",
+    "get_diagnostics",
+    "export_diagnostics",
     "open_install_folder",
+    "open_uninstaller",
     "check_update",
     "install_update",
     "get_update_status",
@@ -97,7 +144,17 @@ class ApplicationApi:
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
         self._history = ChatHistoryService(self._install_root)
+        self._groups = GroupDirectoryService(self._install_root)
         self._schedules = ScheduleService(self._install_root)
+        self._response_traces = ResponseTraceService(self._install_root)
+        self._group_policies = GroupPolicyService(
+            self._install_root, schedules=self._schedules
+        )
+        self._experience = ExperienceService(self._install_root)
+        self._maintenance = CustomerMaintenanceService(
+            self._install_root,
+            is_running=self._runtime_active,
+        )
         self._catalog = load_error_catalog(self._install_root)
         self._window: Any | None = None
         self._tray: WindowsTrayController | None = None
@@ -121,6 +178,22 @@ class ApplicationApi:
             args=(self._install_root,),
             daemon=True,
         ).start()
+
+    def _runtime_active(self) -> bool:
+        status = self._lifecycle.refresh()
+        state = getattr(getattr(status, "state", ""), "value", getattr(status, "state", ""))
+        return str(state) != "STOPPED"
+
+    def _experience_service(self) -> ExperienceService:
+        service = getattr(self, "_experience", None)
+        return service if service is not None else ExperienceService(self._install_root)
+
+    def _group_policy_service(self) -> GroupPolicyService:
+        service = getattr(self, "_group_policies", None)
+        if service is not None:
+            return service
+        schedules = getattr(self, "_schedules", None)
+        return GroupPolicyService(self._install_root, schedules=schedules)
 
     def _attach_window(
         self,
@@ -157,6 +230,7 @@ class ApplicationApi:
         try:
             settings = load_robot_settings(self._install_root)
             provider = load_provider_profile(self._install_root)
+            providers = load_provider_services(self._install_root)
             channel = self._load_update_channel()
             return self._ok(
                 {
@@ -169,10 +243,41 @@ class ApplicationApi:
                     },
                     "provider": {
                         "configured": provider is not None,
-                        "api_base": provider.api_base if provider else "",
-                        "model": provider.model if provider else "",
+                        "api_base": (
+                            provider.api_base
+                            if provider
+                            else DEFAULT_PROVIDER_API_BASE
+                        ),
+                        "model": (
+                            provider.model if provider else DEFAULT_PROVIDER_MODEL
+                        ),
                         "api_key_configured": bool(provider and provider.api_key),
                     },
+                    "providers": [item.to_public_dict() for item in providers],
+                    "experience": self._experience_service().snapshot(),
+                    "provider_presets": [
+                        {
+                            "id": "free_grok",
+                            "name": "免费 Grok 4.6（推荐）",
+                            "api_base": DEFAULT_PROVIDER_API_BASE,
+                            "model": DEFAULT_PROVIDER_MODEL,
+                            "description": "面向普通用户的默认回复服务。",
+                        },
+                        {
+                            "id": "deepseek",
+                            "name": "DeepSeek（自用）",
+                            "api_base": DEEPSEEK_PROVIDER_API_BASE,
+                            "model": DEEPSEEK_PROVIDER_MODEL,
+                            "description": "适合在你自己的设备上使用。",
+                        },
+                        {
+                            "id": "custom",
+                            "name": "其他兼容服务",
+                            "api_base": "",
+                            "model": "",
+                            "description": "填写兼容接口地址、模型名称和密钥。",
+                        },
+                    ],
                     "update": {
                         "enabled": bool(channel and channel.enabled),
                         "channel": channel.channel if channel else "stable",
@@ -331,29 +436,137 @@ class ApplicationApi:
             parsed = parsed.replace(hour=23, minute=59, second=59)
         return parsed.astimezone().timestamp()
 
+    def _history_account_id(self) -> str:
+        """Return the last verified bot account without starting a new probe."""
+        try:
+            view = self._lifecycle.view()
+            runtime = getattr(view, "runtime", None)
+            return str(getattr(runtime, "wechat_identity", "") or "").strip()
+        except (AttributeError, OSError, ValueError):
+            return ""
+
     def get_conversations(self, filters: dict[str, Any] | None = None) -> dict[str, object]:
         try:
             values = filters or {}
+            kind = str(values.get("kind") or "all")
+            search = str(values.get("search") or "").strip()
+            start_time = self._date_timestamp(values.get("start"))
+            end_time = self._date_timestamp(values.get("end"), end=True)
+            directory = {"items": []}
+            if kind in {"all", "group"} and start_time is None and end_time is None:
+                directory = self._groups.list(False)
+            account_id = str(
+                directory.get("account_id") or self._history_account_id()
+            ).strip()
+            history = self._history.conversations(
+                kind=kind,
+                search=search,
+                start_time=start_time,
+                end_time=end_time,
+                account_id=account_id,
+            )
+            items = list(history.get("items") or [])
+            if kind in {"all", "group"} and start_time is None and end_time is None:
+                known = {
+                    str(item.get("conversation_id") or ""): item
+                    for item in items
+                    if isinstance(item, dict)
+                }
+                keyword = search.casefold()
+                for group in directory.get("items") or []:
+                    if not isinstance(group, dict):
+                        continue
+                    group_id = str(group.get("group_id") or "").strip()
+                    group_name = str(group.get("name") or "").strip()
+                    if not group_id or (
+                        keyword
+                        and keyword not in group_id.casefold()
+                        and keyword not in group_name.casefold()
+                    ):
+                        continue
+                    if group_id in known:
+                        known[group_id]["display_name"] = group_name or known[group_id].get("display_name")
+                        # History rows carry the sender's portrait. A group may
+                        # only use the portrait returned for that group.
+                        known[group_id]["avatar"] = str(group.get("avatar") or "")
+                        known[group_id]["member_count"] = group.get("member_count")
+                        continue
+                    item = {
+                        "conversation_id": group_id,
+                        "type": "group",
+                        "display_name": group_name or f"微信群 · {group_id.removesuffix('@chatroom')[-8:]}",
+                        "message_count": 0,
+                        "last_timestamp": 0,
+                        "avatar": str(group.get("avatar") or ""),
+                        "member_count": group.get("member_count"),
+                    }
+                    items.append(item)
+                    known[group_id] = item
+                items.sort(
+                    key=lambda item: (
+                        -float(item.get("last_timestamp") or 0),
+                        str(item.get("display_name") or "").casefold(),
+                    )
+                )
+            summary = dict(history.get("summary") or {})
+            summary["visible_conversations"] = len(items)
+            summary["directory_groups"] = len(directory.get("items") or [])
+            return self._ok({"items": items, "summary": summary})
+        except (OSError, ValueError) as exc:
+            return self._failed(exc)
+
+    def get_groups(self, refresh: bool = False) -> dict[str, object]:
+        return self._ok(self._groups.list(bool(refresh)))
+
+    def get_group_members(self, group_id: str) -> dict[str, object]:
+        try:
+            return self._ok(self._groups.members(group_id))
+        except GroupDirectoryError as exc:
+            return {"ok": False, "error": {"title": "成员信息未更新", "message": str(exc)}}
+
+    def get_group_policy(self, account_id: str, group_id: str) -> dict[str, object]:
+        try:
+            return self._ok(self._group_policy_service().overview(account_id, group_id))
+        except (OSError, ValueError, GroupPolicyError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_group_policy(
+        self,
+        account_id: str,
+        group_id: str,
+        values: dict[str, Any],
+        revision: str = "",
+    ) -> dict[str, object]:
+        try:
+            saved = self._group_policy_service().save(
+                account_id,
+                group_id,
+                values,
+                expected_revision=revision or None,
+            )
+            return self._ok(saved, message=str(saved.get("message") or "群聊策略已保存。"))
+        except (OSError, ValueError, GroupPolicyError) as exc:
+            return self._failed(exc, "15001")
+
+    def get_messages(self, conversation_id: str) -> dict[str, object]:
+        try:
             return self._ok(
-                self._history.conversations(
-                    kind=str(values.get("kind") or "all"),
-                    search=str(values.get("search") or ""),
-                    start_time=self._date_timestamp(values.get("start")),
-                    end_time=self._date_timestamp(values.get("end"), end=True),
+                list(
+                    self._history.messages(
+                        conversation_id,
+                        account_id=self._history_account_id(),
+                    )
                 )
             )
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def get_messages(self, conversation_id: str) -> dict[str, object]:
-        try:
-            return self._ok(list(self._history.messages(conversation_id)))
-        except (OSError, ValueError) as exc:
-            return self._failed(exc)
-
     def delete_conversation(self, conversation_id: str) -> dict[str, object]:
         try:
-            count = self._history.delete_conversation(conversation_id)
+            count = self._history.delete_conversation(
+                conversation_id,
+                account_id=self._history_account_id(),
+            )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
@@ -363,7 +576,10 @@ class ApplicationApi:
             timestamp = self._date_timestamp(value)
             if timestamp is None:
                 raise ValueError("请选择清理日期。")
-            count = self._history.delete_before(timestamp)
+            count = self._history.delete_before(
+                timestamp,
+                account_id=self._history_account_id(),
+            )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
@@ -388,7 +604,11 @@ class ApplicationApi:
             if not result:
                 return self._ok({"cancelled": True})
             selected = result[0] if isinstance(result, (list, tuple)) else result
-            target = self._history.export(selected, format=suffix)
+            target = self._history.export(
+                selected,
+                format=suffix,
+                account_id=self._history_account_id(),
+            )
             return self._ok({"path": str(target)})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
@@ -445,6 +665,69 @@ class ApplicationApi:
             )
         return self._ok(items)
 
+    def get_response_traces(self) -> dict[str, object]:
+        try:
+            service = getattr(self, "_response_traces", None)
+            if service is None:
+                service = ResponseTraceService(self._install_root)
+            return self._ok(service.recent())
+        except (OSError, ValueError) as exc:
+            return self._failed(exc)
+
+    def get_experience(self) -> dict[str, object]:
+        try:
+            return self._ok(self._experience_service().snapshot())
+        except (OSError, ExperienceError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_persona_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        try:
+            result = self._experience_service().save_persona(values)
+            return self._ok(
+                result,
+                message=(
+                    "人格设置已热更新，下一条消息立即使用。"
+                    if result.get("apply_state") == "applied"
+                    else "人格设置已保存，机器人下次启动时使用。"
+                ),
+            )
+        except (OSError, ExperienceError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_memory_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        try:
+            result = self._experience_service().save_memory(values)
+            return self._ok(
+                result,
+                message=(
+                    "长期记忆设置已热更新，下一条消息立即使用。"
+                    if result.get("apply_state") == "applied"
+                    else "长期记忆设置已保存，机器人下次启动时使用。"
+                ),
+            )
+        except (OSError, ExperienceError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_emotion_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        try:
+            result = self._experience_service().save_emotion(values)
+            return self._ok(
+                result,
+                message=(
+                    "情感设置已热更新，下一条消息立即使用。"
+                    if result.get("apply_state") == "applied"
+                    else "情感设置已保存，机器人下次启动时使用。"
+                ),
+            )
+        except (OSError, ExperienceError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def complete_onboarding(self) -> dict[str, object]:
+        try:
+            return self._ok(self._experience_service().finish_onboarding(), message="基础设置已完成。")
+        except (OSError, ExperienceError) as exc:
+            return self._failed(exc, "15001")
+
     def save_brand(self, values: dict[str, Any]) -> dict[str, object]:
         try:
             current = load_robot_settings(self._install_root)
@@ -473,28 +756,312 @@ class ApplicationApi:
 
     def save_provider(self, values: dict[str, Any]) -> dict[str, object]:
         try:
+            services = load_provider_services(self._install_root)
+            original_id = str(values.get("provider_id") or "").strip()
+            selected = next(
+                (item for item in services if item.provider_id == original_id),
+                None,
+            )
             current = load_provider_profile(self._install_root)
             api_key = str(values.get("api_key") or "").strip()
-            if not api_key and current is not None:
+            if not api_key and selected is not None:
+                api_key = selected.api_key
+            elif not api_key and not original_id and current is not None:
                 api_key = current.api_key
-            saved = save_provider_profile(
-                self._install_root,
-                OpenAIProviderProfile(
-                    api_key=api_key,
-                    api_base=str(values.get("api_base") or ""),
-                    model=str(values.get("model") or ""),
+            api_base = str(values.get("api_base") or "").strip()
+            model = str(values.get("model") or "").strip()
+            profile = OpenAIProviderProfile(
+                api_key=api_key,
+                api_base=api_base,
+                model=model,
+                source_id=(
+                    selected.source_id
+                    if (
+                        selected is not None
+                        and selected.api_base.rstrip("/") == api_base.rstrip("/")
+                    )
+                    else provider_source_id(api_base, model)
                 ),
             )
+            errors = profile.validate()
+            if errors:
+                raise ValueError("；".join(errors))
+            client = EngineApiClient(self._install_root)
+            hot_applied = client.is_available()
+            if hot_applied:
+                client.save_provider(
+                    profile,
+                    original_provider_id=(
+                        original_id
+                        if selected is not None and selected.model == model
+                        else None
+                    ),
+                    make_default=True,
+                )
+                saved = profile.normalized()
+            else:
+                saved = save_provider_profile(self._install_root, profile)
             return self._ok(
                 {
+                    "id": saved.model_id,
+                    "name": next(
+                        (
+                            item.display_name
+                            for item in load_provider_services(self._install_root)
+                            if item.provider_id == saved.model_id
+                        ),
+                        saved.model,
+                    ),
                     "configured": True,
                     "api_base": saved.api_base,
                     "model": saved.model,
                     "api_key_configured": bool(saved.api_key),
+                    "is_default": True,
+                    "is_recommended": (
+                        saved.source_id == DEFAULT_PROVIDER_SOURCE_ID
+                        and saved.model == DEFAULT_PROVIDER_MODEL
+                    ),
+                    "apply_state": "applied" if hot_applied else "saved_for_start",
                 },
-                message="回复模型已保存，下次启动后应用。",
+                message=(
+                    "回复模型已热更新并立即生效。"
+                    if hot_applied
+                    else "回复模型已保存，机器人启动时会直接使用。"
+                ),
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def get_providers(self) -> dict[str, object]:
+        try:
+            return self._ok(
+                [
+                    item.to_public_dict()
+                    for item in load_provider_services(self._install_root)
+                ]
             )
         except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
+    def set_default_provider(self, provider_id: str) -> dict[str, object]:
+        try:
+            services = load_provider_services(self._install_root)
+            selected = next(
+                (item for item in services if item.provider_id == provider_id),
+                None,
+            )
+            if selected is None or not selected.configured:
+                raise ValueError("所选模型服务不存在或尚未完成配置。")
+            client = EngineApiClient(self._install_root)
+            hot_applied = client.is_available()
+            if hot_applied:
+                client.set_default_provider(provider_id)
+            else:
+                set_default_provider(self._install_root, provider_id)
+            return self._ok(
+                {
+                    "id": provider_id,
+                    "apply_state": "applied" if hot_applied else "saved_for_start",
+                },
+                message=(
+                    "默认回复模型已切换并立即生效。"
+                    if hot_applied
+                    else "默认回复模型已保存，机器人启动时会直接使用。"
+                ),
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def test_provider(self, provider_id: str) -> dict[str, object]:
+        try:
+            client = EngineApiClient(self._install_root)
+            if not client.is_available():
+                raise EngineUnavailableError("请先启动机器人，再测试模型服务。")
+            return self._ok(
+                client.test_provider(provider_id),
+                message="模型服务连接正常。",
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def discover_provider_models(self, values: dict[str, Any]) -> dict[str, object]:
+        try:
+            provider_id = str(values.get("provider_id") or "").strip()
+            selected = next(
+                (
+                    item
+                    for item in load_provider_services(self._install_root)
+                    if item.provider_id == provider_id
+                ),
+                None,
+            )
+            api_key = str(values.get("api_key") or "").strip()
+            if not api_key and selected is not None:
+                api_key = selected.api_key
+            models = discover_openai_models(
+                api_key=api_key,
+                api_base=str(values.get("api_base") or "").strip(),
+            )
+            return self._ok(
+                {"items": list(models), "total": len(models)},
+                message=f"已读取 {len(models)} 个可用模型。",
+            )
+        except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
+    def delete_provider(
+        self, provider_id: str, replacement_provider_id: str = ""
+    ) -> dict[str, object]:
+        try:
+            services = load_provider_services(self._install_root)
+            selected = next(
+                (item for item in services if item.provider_id == provider_id),
+                None,
+            )
+            if selected is None:
+                raise ValueError("所选模型服务不存在，请刷新后重试。")
+            reference_modules = provider_reference_modules(
+                self._install_root, provider_id, strict=True
+            )
+            needs_replacement = selected.is_default or bool(reference_modules)
+            if needs_replacement:
+                replacement = next(
+                    (
+                        item
+                        for item in services
+                        if item.provider_id == replacement_provider_id
+                        and item.provider_id != provider_id
+                        and item.configured
+                    ),
+                    None,
+                )
+                if replacement is None:
+                    raise ValueError("请先选择一个已配置的模型接替当前服务及相关功能。")
+            client = EngineApiClient(self._install_root)
+            if client.is_available():
+                snapshots: dict[str, dict[str, Any]] = {}
+                prepared: dict[str, dict[str, Any]] = {}
+                for module_name in reference_modules:
+                    snapshot = client.get_config(module_name)
+                    updated, count = replace_provider_value(
+                        snapshot["config"], provider_id, replacement_provider_id
+                    )
+                    if count:
+                        snapshots[module_name] = snapshot
+                        prepared[module_name] = updated
+
+                applied: list[tuple[str, str]] = []
+                try:
+                    for module_name, updated in prepared.items():
+                        receipt = client.save_config(
+                            module_name,
+                            updated,
+                            base_revision=str(snapshots[module_name]["revision"]),
+                        )
+                        applied.append(
+                            (module_name, str(receipt.get("revision") or ""))
+                        )
+                except PluginCenterError:
+                    for module_name, revision in reversed(applied):
+                        try:
+                            client.save_config(
+                                module_name,
+                                snapshots[module_name]["config"],
+                                base_revision=revision or None,
+                            )
+                        except PluginCenterError:
+                            pass
+                    raise
+                if selected.is_default:
+                    client.set_default_provider(replacement_provider_id)
+                client.delete_provider(provider_id, selected.source_id)
+                hot_applied = True
+            else:
+                if reference_modules:
+                    replace_provider_references(
+                        self._install_root,
+                        provider_id,
+                        replacement_provider_id,
+                    )
+                if selected.is_default:
+                    set_default_provider(self._install_root, replacement_provider_id)
+                delete_provider_profile(self._install_root, provider_id)
+                hot_applied = False
+            if hot_applied and reference_modules:
+                message = "模型服务已删除，相关功能已切换并立即生效。"
+            elif hot_applied:
+                message = "模型服务已删除并立即生效。"
+            elif reference_modules:
+                message = "模型服务已删除，相关功能已切换。"
+            else:
+                message = "模型服务已删除。"
+            return self._ok(
+                {
+                    "id": provider_id,
+                    "updated_features": list(reference_modules),
+                },
+                message=message,
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def _maintenance_service(self) -> CustomerMaintenanceService:
+        return getattr(
+            self,
+            "_maintenance",
+            CustomerMaintenanceService(self._install_root, is_running=self._runtime_active),
+        )
+
+    def get_maintenance(self) -> dict[str, object]:
+        try:
+            service = self._maintenance_service()
+            return self._ok(
+                {
+                    "preview": service.preview_backup(),
+                    "backups": service.list_backups(),
+                    "diagnostics": service.diagnostic_summary(),
+                }
+            )
+        except (OSError, ValueError, MaintenanceError) as exc:
+            return self._failed(exc, "15001")
+
+    def create_backup(self) -> dict[str, object]:
+        try:
+            return self._ok(
+                self._maintenance_service().create_backup(),
+                message="设置、人格和长期记忆已备份。",
+            )
+        except (OSError, ValueError, MaintenanceError) as exc:
+            return self._failed(exc, "15001")
+
+    def validate_restore(self, backup_id: str) -> dict[str, object]:
+        try:
+            return self._ok(self._maintenance_service().validate_restore(backup_id))
+        except (OSError, ValueError, MaintenanceError) as exc:
+            return self._failed(exc, "15001")
+
+    def restore_backup(self, backup_id: str) -> dict[str, object]:
+        try:
+            return self._ok(
+                self._maintenance_service().restore_backup(backup_id),
+                message="备份已经恢复，并已保留恢复前副本。",
+            )
+        except (OSError, ValueError, MaintenanceError) as exc:
+            return self._failed(exc, "15001")
+
+    def get_diagnostics(self) -> dict[str, object]:
+        try:
+            return self._ok(self._maintenance_service().diagnostic_summary())
+        except (OSError, ValueError, MaintenanceError) as exc:
+            return self._failed(exc, "15001")
+
+    def export_diagnostics(self) -> dict[str, object]:
+        try:
+            return self._ok(
+                self._maintenance_service().export_diagnostics(),
+                message="安全诊断摘要已导出。",
+            )
+        except (OSError, ValueError, MaintenanceError) as exc:
             return self._failed(exc, "15001")
 
     def open_install_folder(self) -> dict[str, object]:
@@ -503,6 +1070,23 @@ class ApplicationApi:
                 os.startfile(self._install_root)  # type: ignore[attr-defined]
             return self._ok({"opened": True})
         except OSError as exc:
+            return self._failed(exc)
+
+    def open_uninstaller(self) -> dict[str, object]:
+        try:
+            display_name = load_robot_settings(
+                self._install_root
+            ).profile.display_name
+            provision_uninstaller(
+                self._install_root,
+                display_name=display_name,
+            )
+            launch_installed_uninstaller(self._install_root)
+            return self._ok(
+                {"opened": True},
+                message="卸载程序已经打开。",
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
             return self._failed(exc)
 
     def _load_update_channel(self) -> UpdateChannel | None:
@@ -688,8 +1272,15 @@ def run_application(install_root: str | Path) -> int:
     try:
         import webview
 
-        api = ApplicationApi(install_root)
         brand = load_robot_settings(install_root).profile
+        try:
+            provision_uninstaller(
+                install_root,
+                display_name=brand.display_name,
+            )
+        except (OSError, RuntimeError, ValueError):
+            pass
+        api = ApplicationApi(install_root)
         title = f"{brand.display_name} · 机器人管理"
         window = webview.create_window(
             title,

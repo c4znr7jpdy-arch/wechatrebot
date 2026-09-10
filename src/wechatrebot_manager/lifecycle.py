@@ -131,6 +131,7 @@ class LifecycleController:
         self._runtime = self._snapshotter()
         self._running_events_emitted = False
         self._wechat_closed_confirmations = 0
+        self._start_in_progress = False
         self.events.emit("APP_START", "success")
         if self._uses_default_supervisor:
             try:
@@ -151,10 +152,10 @@ class LifecycleController:
                         self._mark_running()
                     elif self._runtime.connection_ready and not self._runtime.wechat_identity:
                         self.state = LifecycleState.WAITING_WECHAT
-                        self._error = self.catalog.get("11003")
+                        self._error = None
                     else:
                         self.state = LifecycleState.VERIFYING_CONNECTION
-                        self._error = self.catalog.get("13002")
+                        self._error = None
             except (OSError, ServiceLaunchError, ValueError):
                 self._supervisor = None
 
@@ -206,6 +207,8 @@ class LifecycleController:
 
     def start(self) -> LifecycleView:
         with self._lock:
+            if self._start_in_progress:
+                return self.view()
             if self._supervisor is not None and self._supervisor.running:
                 return self.refresh()
             environment = self.check_environment()
@@ -217,26 +220,43 @@ class LifecycleController:
                 preflight_errors = self._preflight(self.install_root)
                 if preflight_errors:
                     return self._set_error("13001", detail="；".join(preflight_errors))
-                self._supervisor = self._supervisor_factory(self._on_progress)
-                self._supervisor.start()
+                supervisor = self._supervisor_factory(self._on_progress)
+                self._supervisor = supervisor
+                self._start_in_progress = True
             except (OSError, ServiceLaunchError, ValueError) as exc:
+                self._supervisor = None
+                self._start_in_progress = False
+                return self._set_error("13001", detail=str(exc))
+
+        # Service readiness can take over a minute on first run.  It must not
+        # hold the lifecycle lock, otherwise status polling cannot show the
+        # bridge launch or tell the user to log in to WeChat.
+        try:
+            supervisor.start()
+        except (OSError, ServiceLaunchError, ValueError) as exc:
+            with self._lock:
                 code = (
                     "12001"
                     if self.state == LifecycleState.CONNECTION_STARTING
                     else "13001"
                 )
-                self._supervisor = None
+                if self._supervisor is supervisor:
+                    self._supervisor = None
+                self._start_in_progress = False
                 return self._set_error(code, detail=str(exc))
+
+        with self._lock:
+            self._start_in_progress = False
             self._runtime = self._snapshotter()
             self._error = None
             if self._runtime.online:
                 self._mark_running()
             elif not self._runtime.wechat_identity:
                 self.state = LifecycleState.WAITING_WECHAT
-                self._error = self.catalog.get("11003")
+                self._error = None
             else:
                 self.state = LifecycleState.VERIFYING_CONNECTION
-                self._error = self.catalog.get("13002")
+                self._error = None
             return self.view()
 
     def _mark_running(self) -> None:
@@ -251,6 +271,10 @@ class LifecycleController:
         with self._lock:
             self._environment = self._environment_checker(self.install_root)
             self._runtime = self._snapshotter()
+            if self._start_in_progress:
+                if self._runtime.online:
+                    self._mark_running()
+                return self.view()
             if self.state == LifecycleState.STOP_WAIT_WECHAT:
                 wechat_active = self._bot_wechat_active()
                 if wechat_active:
@@ -274,10 +298,10 @@ class LifecycleController:
                     self._mark_running()
                 elif self._runtime.connection_ready and not self._runtime.wechat_identity:
                     self.state = LifecycleState.WAITING_WECHAT
-                    self._error = self.catalog.get("11003")
+                    self._error = None
                 elif self._runtime.connection_ready:
                     self.state = LifecycleState.VERIFYING_CONNECTION
-                    self._error = self.catalog.get("13002")
+                    self._error = None
             elif self._runtime.online:
                 self.state = LifecycleState.RUNNING
                 self._error = None
@@ -335,7 +359,10 @@ class LifecycleController:
             LifecycleState.CHECKING: ("正在检查环境", "正在确认微信和运行文件。"),
             LifecycleState.CORE_STARTING: ("正在启动机器人", "正在准备核心功能。"),
             LifecycleState.CORE_READY: ("核心功能已就绪", "正在准备微信连接。"),
-            LifecycleState.CONNECTION_STARTING: ("正在连接微信", "微信窗口可能会自动打开。"),
+            LifecycleState.CONNECTION_STARTING: (
+                "正在打开机器人微信",
+                "微信窗口打开后请完成登录，机器人功能会在后台继续准备。",
+            ),
             LifecycleState.WAITING_WECHAT: ("等待登录微信", "请在微信窗口完成登录。"),
             LifecycleState.VERIFYING_CONNECTION: ("正在确认连接", "正在检查消息通信是否正常。"),
             LifecycleState.RUNNING: ("机器人可用", "微信连接和全部功能运行正常。"),
@@ -344,7 +371,14 @@ class LifecycleController:
             LifecycleState.ERROR: ("机器人启动失败", "请根据错误提示处理后重试。"),
         }
         title, message = titles[self.state]
-        busy = self.state in {
+        if (
+            self._start_in_progress
+            and self._runtime.wechat_identity
+            and not self._runtime.online
+        ):
+            title = "微信已登录，正在启动机器人功能"
+            message = "账号连接成功，剩余功能正在后台加载，完成后会自动变为可用。"
+        busy = self._start_in_progress or self.state in {
             LifecycleState.CHECKING,
             LifecycleState.CORE_STARTING,
             LifecycleState.CORE_READY,

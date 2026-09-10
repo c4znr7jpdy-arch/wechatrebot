@@ -23,6 +23,7 @@ from .provider import OpenAIProviderProfile
 from .runtime_config import write_runtime_configs
 from .runtime_config import normalize_admin_id
 from .shortcuts import create_windows_shortcuts
+from .uninstaller import provision_uninstaller
 from .wechat_path import WechatExecutable
 
 
@@ -113,6 +114,10 @@ def perform_install(
                 "schema_version": 1,
                 "state": "ready" if verified is not None else "configured",
             },
+        )
+        provision_uninstaller(
+            root,
+            display_name=normalized_brand.display_name,
         )
         if save_locator:
             try:

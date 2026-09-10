@@ -1,0 +1,75 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -4,6 +4,7 @@
+ """
+ 
+ import asyncio
++import sys
+ import time
+ from typing import Any, cast
+ 
+@@ -85,15 +86,30 @@
+ 
+         logger.info("开始初始化 Mnemosyne 插件...")
+         # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
+-        asyncio.create_task(self._initialize_plugin_async())
++        self._commercial_init_task = asyncio.create_task(self._initialize_plugin_async())
+ 
+         # 延迟加载 Embedding Provider，只在需要时才加载
+         self._embedding_provider_task = None
+ 
++    async def _commercial_verify_hot_config(self):
++        await self._commercial_init_task
++        if self._commercial_setup_pending():
++            return "pending_setup"
++        if not self._initialization_successful:
++            raise RuntimeError("记忆功能初始化失败")
++        if not self._milvus_manager_ready.is_set() or not self.embedding_provider:
++            return "pending_setup"
++        return "applied"
++
++    def _commercial_setup_pending(self) -> bool:
++        return sys.platform == "win32" and not str(self.config.get("address") or "").strip()
++
+     def _is_memory_disabled_for_event(self, event: AstrMessageEvent) -> bool:
+         """
+         判断当前事件是否应跳过记忆能力（平台黑名单）。
+         """
++        if self._commercial_setup_pending():
++            return True
+         platform_id = get_event_platform_id(event)
+         if platform_id and platform_id in self.platform_blacklist:
+             logger.debug(f"平台 '{platform_id}' 在记忆黑名单中，跳过记忆流程。")
+@@ -307,6 +323,8 @@
+         ):
+             return
+ 
++        if self._commercial_setup_pending():
++            return
+         self._post_load_tasks_started = True
+ 
+         # 启动 Embedding Provider 后台加载任务（静默模式）
+@@ -386,6 +404,9 @@
+         非阻塞的异步初始化流程
+         """
+         try:
++            if self._commercial_setup_pending():
++                logger.info("记忆管理已安装，等待在功能中心配置 Milvus 地址和 Embedding 模型；基础长期记忆不受影响。")
++                return
+             # 0. 先在主模块中获取数据目录并保存到实例
+             plugin_data_dir = None
+             try:
+@@ -860,6 +881,12 @@
+         确保所有资源正确释放
+         """
+         logger.info("Mnemosyne 插件正在停止...")
++        if not self._commercial_init_task.done():
++            self._commercial_init_task.cancel()
++            try:
++                await self._commercial_init_task
++            except asyncio.CancelledError:
++                pass
+ 
+         # 标记 Milvus 不再可用；先 clear，避免新的逻辑误判为 ready
+         self._milvus_manager_ready.clear()

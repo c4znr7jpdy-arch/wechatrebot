@@ -1,0 +1,72 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -1,4 +1,22 @@
+ {
++  "notify_join": {
++    "description": "成员加入时发送提示",
++    "type": "bool",
++    "hint": "关闭后不发送入群欢迎；保存后立即作用于下一条成员变动。",
++    "default": true
++  },
++  "notify_leave": {
++    "description": "成员退出时发送提示",
++    "type": "bool",
++    "hint": "包含主动退出和被移出；接口无法区分时按离开群聊提示。",
++    "default": true
++  },
++  "notify_profile_change": {
++    "description": "群昵称变化时发送提示",
++    "type": "bool",
++    "hint": "关闭后不提示成员修改群昵称。",
++    "default": true
++  },
+   "welcome_title": {
+     "description": "入群卡片大标题",
+     "type": "string",
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -119,6 +119,12 @@ class Main(star.Star):
+             value = default
+         return str(value if value is not None else default)
+ 
++    def _is_enabled(self, key: str, default: bool = True) -> bool:
++        try:
++            return bool(self.config.get(key, default))
++        except Exception:
++            return default
++
+     @staticmethod
+     def _format_card_text(template: str, *, group_name: str, display_name: str, nickname: str, user_id: str) -> str:
+         values = {
+@@ -136,6 +142,9 @@ class Main(star.Star):
+     @filter.custom_filter(GroupIncreaseFilter, priority=1000)
+     async def on_member_joined(self, event: AstrMessageEvent):
+         """入群欢迎卡片"""
++        if not self._is_enabled("notify_join"):
++            event.stop_event()
++            return
+         raw = event.message_obj.raw_message
+         user_id = str(raw.get("user_id", ""))
+         group_id = str(raw.get("group_id", ""))
+@@ -192,6 +201,9 @@ class Main(star.Star):
+     @filter.custom_filter(GroupMemberUpdateFilter, priority=1000)
+     async def on_member_updated(self, event: AstrMessageEvent):
+         """群成员昵称/资料修改卡片"""
++        if not self._is_enabled("notify_profile_change"):
++            event.stop_event()
++            return
+         raw = event.message_obj.raw_message
+         old_display_name = str(raw.get("wx_old_display_name", "") or "")
+         old_nickname = str(raw.get("wx_old_nickname", "") or "")
+@@ -226,6 +238,9 @@ class Main(star.Star):
+     @filter.custom_filter(GroupDecreaseFilter, priority=1000)
+     async def on_member_left(self, event: AstrMessageEvent):
+         """退群告别卡片"""
++        if not self._is_enabled("notify_leave"):
++            event.stop_event()
++            return
+         raw = event.message_obj.raw_message
+         user_id = str(raw.get("user_id", ""))
+         wx_nickname = raw.get("wx_nickname", "某成员")

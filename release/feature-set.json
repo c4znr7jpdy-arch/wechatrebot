@@ -1,62 +1,35 @@
 {
   "schema_version": 1,
   "features": [
-    {
-      "module": "astrbot_plugin_angel_heart",
-      "display_name": "长期记忆",
-      "ownership": "third-party",
-      "configuration": "page",
-      "description": "由回复引擎的原生会话上下文与天使之心共同维护连续对话，可在专属页面管理群聊和私聊记忆。"
-    },
-    {
-      "module": "astrbot_plugin_qq_group_daily_analysis",
-      "display_name": "群聊分析",
-      "ownership": "third-party",
-      "configuration": "schema",
-      "description": "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与按群定时生成报告。"
-    },
-    {
-      "module": "astrbot_plugin_music",
-      "display_name": "点歌",
-      "ownership": "third-party",
-      "configuration": "none",
-      "description": "点歌能力已按交付环境完成适配，无需额外配置。"
-    },
-    {
-      "module": "jiang_short_drama",
-      "display_name": "短剧",
-      "ownership": "owner",
-      "configuration": "page-and-global-schedule-center",
-      "description": "播放中间页由服务端统一提供；专属页面保留短剧推送定时任务、内容类型和目标群聊等设置。"
-    },
-    {
-      "module": "jiang_commands",
-      "display_name": "常用指令",
-      "ownership": "owner",
-      "configuration": "schema"
-    },
-    {
-      "module": "jiang_schedule",
-      "display_name": "定时任务",
-      "ownership": "owner",
-      "configuration": "page-and-global-schedule-center"
-    }
+    {"module": "astrbot_plugin_angel_heart", "display_name": "群聊上下文", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "调节群聊回复节奏、多发言人上下文和接话方式；它不是长期记忆库。"},
+    {"module": "astrbot_plugin_livingmemory", "display_name": "长期记忆", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。"},
+    {"module": "astrbot_plugin_self_learning", "display_name": "情感与关系", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "提供好感度、情绪和精简社交上下文；默认不抓取原始消息、不自动学习或覆盖人格。"},
+    {"module": "astrbot_plugin_bittorrent", "display_name": "资源检索", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"},
+    {"module": "astrbot_plugin_mimo_tts_clone", "display_name": "语音克隆", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": false, "description": "管理授权音色，让文字回复按需要转换为语音。"},
+    {"module": "astrbot_plugin_mnemosyne", "display_name": "外部向量记忆（进阶替代）", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "需要 Milvus 和 Embedding 模型，只作为长期记忆的进阶替代；启用时会自动停用基础长期记忆，不能同时作为主记忆。"},
+    {"module": "astrbot_plugin_music", "display_name": "点歌", "ownership": "third-party", "configuration": "none", "default_enabled": true, "description": "默认使用在线接口并自动回退到直连音源，无需额外配置。"},
+    {"module": "astrbot_plugin_parser", "display_name": "链接解析", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "识别常见内容平台链接并整理视频、图集和音频信息。"},
+    {"module": "astrbot_plugin_patch_at_wxid", "display_name": "群聊兼容", "ownership": "local-patch", "configuration": "none", "default_enabled": true, "visible": false, "description": "自动兼容微信群成员标识，无需额外配置。"},
+    {"module": "astrbot_plugin_proactive_chat", "display_name": "主动聊天", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "按活跃度、时间段和会话上下文主动发起合适的消息。"},
+    {"module": "astrbot_plugin_qq_group_daily_analysis", "display_name": "群聊分析", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。"},
+    {"module": "astrbot_plugin_self_iterative_core", "display_name": "自动改代码（实验）", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "可读写并重新加载功能代码的实验维护能力，不建议普通用户或新安装默认启用。"},
+    {"module": "jiang_capability_router", "display_name": "功能调度", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "识别自然语言意图并把请求交给合适的功能处理。"},
+    {"module": "jiang_commands", "display_name": "常用指令", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。"},
+    {"module": "jiang_group_notice", "display_name": "群成员变动通知", "ownership": "owner", "configuration": "schema", "default_enabled": false, "description": "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"},
+    {"module": "jiang_image", "display_name": "图片生成", "ownership": "owner", "configuration": "schema-and-page", "default_enabled": false, "description": "提供文生图、图生图和模型管理能力。"},
+    {"module": "jiang_mimo_emoji_voice", "display_name": "表情语音", "ownership": "owner", "configuration": "schema", "default_enabled": false, "description": "把选中的表情回复转换为匹配情绪的语音。"},
+    {"module": "jiang_mystool", "display_name": "米游社签到", "ownership": "owner", "configuration": "none", "default_enabled": false, "description": "提供米游社账号绑定、查询和签到能力。"},
+    {"module": "jiang_repeater", "display_name": "复读功能", "ownership": "owner", "configuration": "none", "default_enabled": false, "description": "在群内出现连续相同消息时进行轻量互动。"},
+    {"module": "jiang_rocom", "display_name": "洛克王国助手", "ownership": "owner", "configuration": "none", "default_enabled": false, "description": "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"},
+    {"module": "jiang_schedule", "display_name": "定时任务", "ownership": "owner", "configuration": "page-and-global-schedule-center", "default_enabled": false, "description": "集中管理新闻、天气、内容推送和多站点签到计划。"},
+    {"module": "jiang_short_drama", "display_name": "短剧", "ownership": "owner", "configuration": "page-and-global-schedule-center", "default_enabled": false, "description": "搜索影视与体育内容，并管理面向微信群的短剧推送计划。"},
+    {"module": "jiang_video_understanding", "display_name": "视频理解", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "从微信短视频提取关键帧和音轨，生成时间线摘要。"},
+    {"module": "meme_manager", "display_name": "表情管理", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "管理多套表情包、会话绑定、资源目录和同步设置。"}
   ],
   "shared_runtime": [
-    {
-      "source": "data/plugins/_nonebot_stubs.py",
-      "purpose": "legacy module compatibility"
-    },
-    {
-      "source": "ai_plugin/ai_plugin",
-      "purpose": "command and schedule function library",
-      "excluded": [
-        ".env.prod",
-        "legacy_nonebot2",
-        "venv",
-        "logs",
-        "test files"
-      ]
-    }
+    {"source": "data/plugins/_nonebot_stubs.py", "purpose": "legacy module compatibility"},
+    {"source": "ai_plugin/ai_plugin", "purpose": "command and schedule function library", "excluded": [".env.prod", "legacy_nonebot2", "venv", "logs", "test files"]},
+    {"source": "nonebot-plugin-mystool/src/nonebot_plugin_mystool", "purpose": "game account and mission API library", "name": "nonebot-plugin-mystool", "version": "2.10.2", "license": "MIT", "license_file": "nonebot-plugin-mystool/LICENSE"},
+    {"source": "ai_plugin/nonebot_plugin_rocom", "purpose": "Rocom API and report assets", "name": "nonebot_plugin_rocom", "version": "local", "license": "NOASSERTION", "review_status": "source-rights-review-required"}
   ]
 }

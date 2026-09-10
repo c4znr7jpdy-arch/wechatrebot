@@ -10,3 +10,10 @@ def test_shortcut_creation_skips_when_manager_is_missing(tmp_path: Path) -> None
 def test_shortcut_script_does_not_interpolate_customer_values() -> None:
     assert "$env:WECHATREBOT_SHORTCUT_TARGET" in shortcuts._SHORTCUT_SCRIPT
     assert "$env:WECHATREBOT_SHORTCUT_DESCRIPTION" in shortcuts._SHORTCUT_SCRIPT
+    assert "$env:WECHATREBOT_UNINSTALL_TARGET" in shortcuts._SHORTCUT_SCRIPT
+    assert "卸载微信机器人.lnk" in shortcuts._SHORTCUT_SCRIPT
+
+
+def test_shortcut_cleanup_removes_launch_and_uninstall_entries() -> None:
+    assert "WeChat ReBot.lnk" in shortcuts._REMOVE_SHORTCUT_SCRIPT
+    assert "卸载微信机器人.lnk" in shortcuts._REMOVE_SHORTCUT_SCRIPT

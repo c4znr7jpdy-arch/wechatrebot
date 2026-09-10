@@ -129,6 +129,47 @@ def test_guard_distinguishes_secret_literals_from_variable_assignment(
     assert {item["reason"] for item in findings} == {"assigned-secret"}
 
 
+def test_guard_rejects_embedded_cookie_authorization_and_session_literals(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "accounts.py").write_text(
+        "ACCOUNTS = [{\"cookie\": \"private-cookie-value-123456\", "
+        "\"authorization\": \"Bearer private-token-value-123456\"}]\n"
+        "session_token = \"private-session-value-123456\"\n",
+        encoding="utf-8",
+    )
+
+    findings = _load_guard()(tmp_path)
+
+    assert {item["reason"] for item in findings} == {"assigned-secret"}
+
+
+def test_guard_allows_empty_and_documented_credential_placeholders(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "accounts.py").write_text(
+        "cookie = \"\"\n"
+        "authorization = \"your-authorization-token\"\n"
+        "session_token = \"${SESSION_TOKEN}\"\n",
+        encoding="utf-8",
+    )
+
+    assert _load_guard()(tmp_path) == []
+
+
+def test_guard_allows_environment_variable_name_mappings(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "settings.py").write_text(
+        'MAPPING = {"content_api_key": "JIANG_CONTENT_API_KEY"}\n',
+        encoding="utf-8",
+    )
+
+    assert _load_guard()(tmp_path) == []
+
+
 def test_guard_rejects_developer_paths_in_payload_manifest(tmp_path: Path) -> None:
     (tmp_path / "release-manifest.json").write_text(
         '{"copied":[{"source":"E:\\\\workspace\\\\private\\\\file.py"}]}',

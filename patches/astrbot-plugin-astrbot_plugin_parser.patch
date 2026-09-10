@@ -1,0 +1,61 @@
+--- a/core/download.py
++++ b/core/download.py
+@@ -25,6 +25,18 @@
+ 
+ P = ParamSpec("P")
+ T = TypeVar("T")
++
++
++def _bundled_node_runtimes() -> dict:
++    """Reuse the pinned Playwright wheel's Node without a separate installation."""
++    import playwright
++
++    node = Path(playwright.__file__).parent / "driver" / "node.exe"
++    if not node.is_file():
++        import shutil
++        fallback = shutil.which("node")
++        return {"node": {"path": fallback}} if fallback else {}
++    return {"node": {"path": str(node)}}
+ 
+ 
+ def auto_task(func: Callable[P, Coroutine[Any, Any, T]]) -> Callable[P, Task[T]]:
+@@ -284,6 +296,7 @@
+             opts["cookiefile"] = str(cookiefile)
+         if format:
+             opts["format"] = format
++        opts["js_runtimes"] = _bundled_node_runtimes()
+         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
+             raw = await to_thread(ydl.extract_info, url, download=False)
+             if not raw:
+@@ -313,6 +326,7 @@
+         if format:
+             opts["format"] = format
+ 
++        opts["js_runtimes"] = _bundled_node_runtimes()
+         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
+             raw = await to_thread(ydl.extract_info, url, download=False)
+             if not isinstance(raw, dict):
+@@ -358,6 +372,7 @@
+         if node:
+             opts["js_runtimes"] = {"node": {}}
+ 
++        opts["js_runtimes"] = _bundled_node_runtimes()
+         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
+             await to_thread(ydl.download, [url])
+         return video_path
+@@ -398,6 +413,7 @@
+         if node:
+             opts["js_runtimes"] = {"node": {}}
+ 
++        opts["js_runtimes"] = _bundled_node_runtimes()
+         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
+             await to_thread(ydl.download, [url])
+         if video_path.exists():
+@@ -441,6 +457,7 @@
+         if cookiefile and cookiefile.is_file():
+             opts["cookiefile"] = str(cookiefile)
+ 
++        opts["js_runtimes"] = _bundled_node_runtimes()
+         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
+             await to_thread(ydl.download, [url])
+         return audio_path

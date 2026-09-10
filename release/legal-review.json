@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
   "status": "review-required",
-  "runtime_component_count": 221,
+  "runtime_component_count": 223,
+  "shared_runtime_component_count": 2,
   "manager_build_component_count": 17,
-  "delivered_plugin_count": 6,
+  "delivered_plugin_count": 24,
   "unresolved_license_components": [
     "apilmoji 0.3.1",
     "pyromark 0.9.10",
     "shipyard-python-sdk 0.2.4",
     "tiktoken 0.13.0",
-    "clr_loader 0.3.1"
+    "clr_loader 0.3.1",
+    "nonebot_plugin_rocom local"
   ],
   "strong_copyleft_components": [
     "api-aggregator 0.1.3",
@@ -18,7 +20,13 @@
     "mutagen 1.48.1",
     "pilk 0.2.4",
     "pyinstaller 6.22.2",
-    "astrbot_plugin_angel_heart 2.2.2"
+    "astrbot_plugin_angel_heart 2.2.2",
+    "astrbot_plugin_livingmemory 2.3.6",
+    "astrbot_plugin_self_learning 3.4.5",
+    "astrbot_plugin_bittorrent 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1",
+    "astrbot_plugin_mnemosyne 2.1.5",
+    "astrbot_plugin_proactive_chat 1.2.4",
+    "astrbot_plugin_self_iterative_core 1.1.1"
   ],
   "required_human_approvals": [
     "open-source-license-counsel",
@@ -28,19 +36,19 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "B383D86D31DD6E39C25768D668906A5245830116AAA351A8E461505BCC893507"
+      "sha256": "6E14547812D3D60B3C4706FA11FC70C403743D977D71F9FAB80CAE6C71DCDDC6"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
-      "sha256": "70BB4EA88035A27FEE032DCA47C7811FCBAE1CBB0832C2FF13905800357C3BFE"
+      "sha256": "815429C9E22124DE9BDBF87E8C61194F756202ED6BCCDF454701B59914085652"
     },
     "license_texts": {
       "path": "legal/THIRD-PARTY-LICENSES.txt",
-      "sha256": "2CA38D893824B28585FCFA1636693F6D80F80A29F3250A053CAC8F0EEA169F4E"
+      "sha256": "82D1CB527B932A3C8C9CD73B8FE6BC1E72E3B57EF24084E7B899C5192F6D31D9"
     },
     "corresponding_source": {
       "path": "legal/CORRESPONDING-SOURCE.md",
-      "sha256": "CC0BEA7E5E5F1B4D19AE6F0BC3128F614F9982A29081CA6B77145F749FD3AE80"
+      "sha256": "11B662E63525C8C2E10673E4B2AC681BCCA77DD5F2E96823871ED69CFDBAD2A7"
     }
   }
 }

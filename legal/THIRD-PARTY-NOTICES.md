@@ -9,11 +9,29 @@
 | 分组 | 组件 | 版本 | 许可证 |
 |---|---|---:|---|
 | delivered-plugin | astrbot_plugin_angel_heart | 2.2.2 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_bittorrent | 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_livingmemory | 2.3.6 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_mimo_tts_clone | 0.7.2 | MIT |
+| delivered-plugin | astrbot_plugin_mnemosyne | 2.1.5 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_music | 2.1.1 | MIT |
+| delivered-plugin | astrbot_plugin_parser | 1.5.6 | MIT |
+| delivered-plugin | astrbot_plugin_patch_at_wxid | UNKNOWN | Proprietary |
+| delivered-plugin | astrbot_plugin_proactive_chat | 1.2.4 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 4.10.9.3 # 本地兼容版：模板 1 更换为姜小妹主题 | MIT |
+| delivered-plugin | astrbot_plugin_self_iterative_core | 1.1.1 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_self_learning | 3.4.5 | AGPL-3.0-only |
+| delivered-plugin | jiang_capability_router | 1.1.0 | Proprietary |
 | delivered-plugin | jiang_commands | 1.1.2 | Proprietary |
+| delivered-plugin | jiang_group_notice | 1.0.0 | Proprietary |
+| delivered-plugin | jiang_image | 2.1.0 | Proprietary |
+| delivered-plugin | jiang_mimo_emoji_voice | 0.1.0 | Proprietary |
+| delivered-plugin | jiang_mystool | 2.7.1 | Proprietary |
+| delivered-plugin | jiang_repeater | 1.1.0 | Proprietary |
+| delivered-plugin | jiang_rocom | 1.0.0 | Proprietary |
 | delivered-plugin | jiang_schedule | 1.2.0 | Proprietary |
 | delivered-plugin | jiang_short_drama | 2.5.3 | Proprietary |
+| delivered-plugin | jiang_video_understanding | 1.0.0 | Proprietary |
+| delivered-plugin | meme_manager | 4.03 | MIT |
 | manager-build | altgraph | 0.17.5 | MIT |
 | manager-build | bottle | 0.13.4 | MIT |
 | manager-build | cffi | 2.1.1 | MIT-0 |
@@ -86,6 +104,7 @@
 | runtime | fastapi | 0.137.1 | MIT |
 | runtime | feedparser | 6.0.13 | BSD-2-Clause |
 | runtime | feedparser-sgmllib | 1.0.0 | PSF-2.0 |
+| runtime | FFmpeg | n8.1.2-50-g1a748fe2cd | LGPL-3.0-or-later |
 | runtime | filelock | 3.29.0 | MIT |
 | runtime | filetype | 1.2.0 | MIT |
 | runtime | Flask | 3.1.3 | BSD-3-Clause |
@@ -139,6 +158,7 @@
 | runtime | mutagen | 1.48.1 | GPL-2.0-or-later |
 | runtime | nano-vectordb | 0.0.4.3 | MIT |
 | runtime | networkx | 3.4.2 | BSD License |
+| runtime | Node.js (Playwright bundled) | 24.15.0 | MIT |
 | runtime | numpy | 2.2.6 | BSD License |
 | runtime | openai | 2.37.0 | Apache-2.0 |
 | runtime | openpyxl | 3.1.5 | MIT |
@@ -252,3 +272,5 @@
 | runtime | yt-dlp | 2026.8.19 | Unlicense |
 | runtime | yt-dlp-ejs | 0.8.0 | Unlicense AND MIT AND ISC |
 | runtime | zhdate | 0.1 | License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+) |
+| shared-plugin-runtime | nonebot-plugin-mystool | 2.10.2 | MIT |
+| shared-plugin-runtime | nonebot_plugin_rocom | local | NOASSERTION |

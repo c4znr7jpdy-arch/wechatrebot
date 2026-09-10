@@ -1,0 +1,556 @@
+from __future__ import annotations
+
+import ast
+import asyncio
+import importlib
+import importlib.util
+import json
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import sys
+from types import ModuleType, SimpleNamespace
+from typing import Any
+
+from aiohttp.test_utils import TestClient, TestServer
+import pytest
+
+
+PROJECT_ROOT = Path(r"E:\Project")
+BRIDGE_ROOT = PROJECT_ROOT / "hook_41827_astrbot_bridge"
+PATCH_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "patches"
+    / "hook-bridge-group-directory.patch"
+)
+
+
+@pytest.fixture(scope="module")
+def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("group-bridge-patch")
+    copied_bridge = root / "hook_41827_astrbot_bridge"
+    package_dir = copied_bridge / "src" / "hook_bridge"
+    shutil.copytree(BRIDGE_ROOT / "src" / "hook_bridge", package_dir)
+
+    subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+    applied = subprocess.run(
+        ["git", "apply", "--whitespace=error-all", str(PATCH_PATH)],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert applied.returncode == 0, applied.stderr
+
+    package_name = "_isolated_group_bridge"
+    package_spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_dir / "__init__.py",
+        submodule_search_locations=[str(package_dir)],
+    )
+    assert package_spec is not None and package_spec.loader is not None
+    package = importlib.util.module_from_spec(package_spec)
+    sys.modules[package_name] = package
+    package_spec.loader.exec_module(package)
+    callback_server = importlib.import_module(f"{package_name}.callback_server")
+    history_store = importlib.import_module(f"{package_name}.history_store")
+    hook_client = importlib.import_module(f"{package_name}.hook_client")
+    config = importlib.import_module(f"{package_name}.config")
+
+    yield {
+        "root": copied_bridge,
+        "callback_server": callback_server,
+        "history_store": history_store,
+        "hook_client": hook_client,
+        "config": config,
+    }
+
+    for module_name in list(sys.modules):
+        if module_name == package_name or module_name.startswith(f"{package_name}."):
+            sys.modules.pop(module_name, None)
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _headers(
+    *, token: str = "local-secret", account: str = "wxid_bot"
+) -> dict[str, str]:
+    return {
+        "X-WeChatReBot-Token": token,
+        "X-WeChatReBot-Account": account,
+    }
+
+
+async def _with_client(app, exercise) -> None:
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        await exercise(client)
+    finally:
+        await client.close()
+
+
+def test_patch_adds_default_token_and_passes_current_hook(
+    patched_bridge: dict[str, Any], tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    settings = patched_bridge["config"].Settings.load(config_path)
+    assert settings.manager_query_token == ""
+
+    app_path = patched_bridge["root"] / "src" / "hook_bridge" / "app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "create_callback_app"
+    ]
+    assert len(calls) == 1
+    keywords = {keyword.arg: ast.unparse(keyword.value) for keyword in calls[0].keywords}
+    assert keywords["manager_hook"] == "self.hook"
+    assert keywords["manager_query_token"] == "self.settings.manager_query_token"
+
+
+def test_group_directory_auth_origin_normalization_and_no_store(
+    patched_bridge: dict[str, Any]
+) -> None:
+    callback_server: ModuleType = patched_bridge["callback_server"]
+
+    class Hook:
+        async def get_groups_strict(
+            self, *, force_refresh: bool = False
+        ) -> list[dict[str, Any]]:
+            assert force_refresh is True
+            return [
+                {
+                    "contact": {
+                        "userName": {"String": "room@chatroom"},
+                        "nickName": {"String": "真实群名"},
+                    },
+                    "memberCount": {"String": "12"},
+                },
+                {
+                    "wxid": {"String": "second@chatroom"},
+                    "nickname": {"String": "成员数未知的群"},
+                },
+                {
+                    "wxid": "third@chatroom",
+                    "nickname": "另一种成员数字段",
+                    "memberNum": {"String": "8"},
+                },
+                {
+                    "username": "snake@chatroom",
+                    "nick_name": "真实微信字段群",
+                    "small_head_url": "https://example.invalid/group-avatar",
+                },
+                {"wxid": "wxid_friend", "nickname": "不是群"},
+            ]
+
+    async def status() -> dict[str, str]:
+        return {"wechat_identity": "wxid_bot"}
+
+    app = callback_server.create_callback_app(
+        asyncio.Queue(),
+        1024,
+        manager_hook=Hook(),
+        manager_query_token="local-secret",
+        status_provider=status,
+    )
+
+    async def exercise(client: TestClient) -> None:
+        missing = await client.get("/api/manager/groups")
+        assert missing.status == 401
+        assert (await missing.json()) == {
+            "ok": False,
+            "error": "群聊目录访问凭证无效",
+        }
+        assert missing.headers["Cache-Control"] == "no-store"
+
+        cross_site = await client.get(
+            "/api/manager/groups",
+            headers={**_headers(), "Origin": "https://example.invalid"},
+        )
+        assert cross_site.status == 403
+        assert "data" not in await cross_site.json()
+
+        response = await client.get("/api/manager/groups", headers=_headers())
+        assert response.status == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert await response.json() == {
+            "ok": True,
+            "data": {
+                "account_id": "wxid_bot",
+                "items": [
+                    {
+                        "group_id": "room@chatroom",
+                        "name": "真实群名",
+                        "member_count": 12,
+                        "avatar": "",
+                    },
+                    {
+                        "group_id": "second@chatroom",
+                        "name": "成员数未知的群",
+                        "member_count": None,
+                        "avatar": "",
+                    },
+                    {
+                        "group_id": "third@chatroom",
+                        "name": "另一种成员数字段",
+                        "member_count": 8,
+                        "avatar": "",
+                    },
+                    {
+                        "group_id": "snake@chatroom",
+                        "name": "真实微信字段群",
+                        "member_count": None,
+                        "avatar": "https://example.invalid/group-avatar",
+                    },
+                ],
+                "total": 4,
+                "truncated": False,
+                "source": "wechat_cache",
+            },
+        }
+
+    _run(_with_client(app, exercise))
+
+
+def test_nonempty_unrecognized_group_payload_is_not_reported_as_empty_success(
+    patched_bridge: dict[str, Any]
+) -> None:
+    callback_server: ModuleType = patched_bridge["callback_server"]
+
+    class Hook:
+        async def get_groups_strict(
+            self, *, force_refresh: bool = False
+        ) -> list[dict[str, Any]]:
+            assert force_refresh is True
+            return [{"unknown_id": "room@chatroom", "unknown_name": "未知结构"}]
+
+    async def status() -> dict[str, str]:
+        return {"wechat_identity": "wxid_bot"}
+
+    app = callback_server.create_callback_app(
+        asyncio.Queue(),
+        1024,
+        manager_hook=Hook(),
+        manager_query_token="local-secret",
+        status_provider=status,
+    )
+
+    async def exercise(client: TestClient) -> None:
+        response = await client.get("/api/manager/groups", headers=_headers())
+        body = await response.json()
+        assert response.status == 502
+        assert body == {"ok": False, "error": "读取群聊目录失败，请稍后重试"}
+
+    _run(_with_client(app, exercise))
+
+
+def test_empty_token_and_account_change_never_return_cached_data(
+    patched_bridge: dict[str, Any]
+) -> None:
+    callback_server: ModuleType = patched_bridge["callback_server"]
+    identity = {"value": "wxid_bot"}
+
+    async def status() -> dict[str, str]:
+        return {"wechat_identity": identity["value"]}
+
+    class Hook:
+        async def get_groups_strict(
+            self, *, force_refresh: bool = False
+        ) -> list[dict[str, Any]]:
+            assert force_refresh is True
+            identity["value"] = "wxid_other"
+            return [{"wxid": "room@chatroom", "nickname": "不可泄露"}]
+
+    disabled_app = callback_server.create_callback_app(
+        asyncio.Queue(), 1024, manager_hook=Hook(), status_provider=status
+    )
+
+    async def disabled(client: TestClient) -> None:
+        response = await client.get("/api/manager/groups", headers=_headers())
+        assert response.status == 503
+        assert "data" not in await response.json()
+
+    _run(_with_client(disabled_app, disabled))
+
+    identity["value"] = "wxid_bot"
+    app = callback_server.create_callback_app(
+        asyncio.Queue(),
+        1024,
+        manager_hook=Hook(),
+        manager_query_token="local-secret",
+        status_provider=status,
+    )
+
+    async def changed(client: TestClient) -> None:
+        response = await client.get("/api/manager/groups", headers=_headers())
+        body = await response.json()
+        assert response.status == 409
+        assert body["ok"] is False
+        assert "data" not in body
+        assert "不可泄露" not in json.dumps(body, ensure_ascii=False)
+
+    _run(_with_client(app, changed))
+
+
+def test_member_directory_validates_group_and_caps_real_fields_at_500(
+    patched_bridge: dict[str, Any]
+) -> None:
+    callback_server: ModuleType = patched_bridge["callback_server"]
+
+    class Hook:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get_group_members_strict(
+            self, room_id: str
+        ) -> list[dict[str, Any]]:
+            self.calls.append(room_id)
+            return [
+                {
+                    "userName": {"String": f"wxid_{index}"},
+                    "nickName": {"String": f"成员{index}"},
+                    "displayName": {"String": f"群昵称{index}"},
+                    "owner": True,
+                    "avatar": "https://sensitive.invalid/avatar",
+                }
+                for index in range(501)
+            ]
+
+    hook = Hook()
+
+    async def status() -> dict[str, str]:
+        return {"wechat_identity": "wxid_bot"}
+
+    app = callback_server.create_callback_app(
+        asyncio.Queue(),
+        1024,
+        manager_hook=hook,
+        manager_query_token="local-secret",
+        status_provider=status,
+    )
+
+    async def exercise(client: TestClient) -> None:
+        invalid = await client.get(
+            "/api/manager/groups/not-a-group/members", headers=_headers()
+        )
+        assert invalid.status == 400
+        assert hook.calls == []
+
+        response = await client.get(
+            "/api/manager/groups/room@chatroom/members", headers=_headers()
+        )
+        body = await response.json()
+        assert response.status == 200
+        assert body["data"]["account_id"] == "wxid_bot"
+        assert body["data"]["total"] == 501
+        assert body["data"]["truncated"] is True
+        assert len(body["data"]["items"]) == 500
+        assert body["data"]["items"][0] == {
+            "user_id": "wxid_0",
+            "name": "成员0",
+            "group_nickname": "群昵称0",
+            "avatar": "https://sensitive.invalid/avatar",
+        }
+        assert set(body["data"]["items"][0]) == {
+            "user_id",
+            "name",
+            "group_nickname",
+            "avatar",
+        }
+        assert body["data"]["source"] == "wechat_cache"
+
+    _run(_with_client(app, exercise))
+
+
+def test_strict_hook_reads_reject_malformed_shapes_without_changing_legacy_read(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+
+    async def malformed_groups(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert path == "/api/get_chatroom_list"
+        assert payload == {}
+        return {"unexpected": []}
+
+    client._read_data = malformed_groups
+    assert _run(client.get_groups()) == []
+    with pytest.raises(hook_client.HookApiError):
+        _run(client.get_groups_strict())
+
+    async def malformed_members(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert path == "/api/get_room_members"
+        assert payload == {"room_id": "room@chatroom"}
+        return {"newChatroomData": {"chatRoomMember": "not-a-list"}}
+
+    client._read_data = malformed_members
+    with pytest.raises(hook_client.HookApiError):
+        _run(client.get_group_members_strict("room@chatroom"))
+
+
+def test_legacy_group_read_populates_empty_hook_cache_with_bounded_retry(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    client._group_auto_refresh_failures = 0
+    client._group_auto_refresh_next_at = 0.0
+    calls: list[str] = []
+    group_reads = 0
+
+    async def read(path: str, payload: dict[str, Any]):
+        nonlocal group_reads
+        assert payload == {}
+        calls.append(path)
+        if path == "/api/update_all_friend":
+            return {}
+        assert path == "/api/get_chatroom_list"
+        group_reads += 1
+        if group_reads == 1:
+            return []
+        return [{"userName": "family@chatroom", "nickName": "爱人们"}]
+
+    client._read_data = read
+
+    groups = _run(client.get_groups())
+
+    assert groups == [{"userName": "family@chatroom", "nickName": "爱人们"}]
+    assert calls == [
+        "/api/get_chatroom_list",
+        "/api/update_all_friend",
+        "/api/get_chatroom_list",
+    ]
+    assert client._group_auto_refresh_failures == 0
+
+
+def test_explicit_group_refresh_is_never_permanently_locked_after_empty_result(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    client._group_auto_refresh_failures = 0
+    client._group_auto_refresh_next_at = float("inf")
+    refresh_count = 0
+
+    async def read(path: str, payload: dict[str, Any]):
+        nonlocal refresh_count
+        assert payload == {}
+        if path == "/api/update_all_friend":
+            refresh_count += 1
+            return {}
+        assert path == "/api/get_chatroom_list"
+        if refresh_count < 2:
+            return []
+        return [{"userName": "family@chatroom", "nickName": "爱人们"}]
+
+    client._read_data = read
+
+    assert _run(client.get_groups_strict(force_refresh=True)) == []
+    assert _run(client.get_groups_strict(force_refresh=True)) == [
+        {"userName": "family@chatroom", "nickName": "爱人们"}
+    ]
+    assert refresh_count == 2
+
+
+def test_group_refresh_uses_chatrooms_returned_directly_by_contact_refresh(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    client._group_auto_refresh_failures = 0
+    client._group_auto_refresh_next_at = 0.0
+
+    async def read(path: str, payload: dict[str, Any]):
+        assert payload == {}
+        if path == "/api/update_all_friend":
+            return {
+                "contact_list": [
+                    {"username": {"String": "family@chatroom"}, "nick_name": "爱人们"},
+                    {"userName": {"String": "wxid_friend"}, "nickName": "好友"},
+                ]
+            }
+        assert path == "/api/get_chatroom_list"
+        return []
+
+    client._read_data = read
+
+    assert _run(client.get_groups_strict(force_refresh=True)) == [
+        {"username": {"String": "family@chatroom"}, "nick_name": "爱人们"}
+    ]
+
+
+def test_history_migration_keeps_legacy_rows_unassigned_and_records_account(
+    patched_bridge: dict[str, Any], tmp_path: Path
+) -> None:
+    history_store: ModuleType = patched_bridge["history_store"]
+    database = tmp_path / "legacy-message-history.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                dedup_key TEXT NOT NULL UNIQUE
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO messages (
+                session_id, role, content, sender_id, sender_name,
+                group_id, platform, timestamp, metadata, dedup_key
+            ) VALUES (?, 'user', ?, ?, ?, ?, 'hook_bridge', ?, '{}', ?)
+            """,
+            (
+                "hook_bridge:GroupMessage:room@chatroom",
+                "旧消息",
+                "wxid_legacy",
+                "旧成员",
+                "room@chatroom",
+                100.0,
+                "in:legacy",
+            ),
+        )
+
+    store = history_store.MessageHistoryStore(database)
+    event = SimpleNamespace(
+        account_id="wxid_current_bot",
+        conversation_id="room@chatroom",
+        message_id="new-message",
+        group_name="客户群",
+        group_nickname="群昵称",
+        wechat_name="微信昵称",
+        sender_name="成员",
+        sender_id="wxid_member",
+        content="新消息",
+        create_time=101,
+    )
+    assert store.record_inbound(event) is True
+
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            "SELECT account_id, content FROM messages ORDER BY id"
+        ).fetchall()
+        indexes = {
+            row[1]
+            for row in connection.execute("PRAGMA index_list(messages)").fetchall()
+        }
+    assert rows == [("", "旧消息"), ("wxid_current_bot", "新消息")]
+    assert "idx_bridge_history_account_group" in indexes

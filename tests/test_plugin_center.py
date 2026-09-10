@@ -21,11 +21,21 @@ from wechatrebot_manager.plugin_center import (
     PluginCenterService,
     _asset_root,
     _handler,
+    _model_field_kind,
     _normalize_config,
+    _json_revision,
     _normalize_plugin_extension_endpoint,
     plugin_center_command,
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
+from wechatrebot_manager.provider import OpenAIProviderProfile
+
+
+def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
+    assert _model_field_kind("llm_provider_id", {}) == "chat"
+    assert _model_field_kind("LLM_providers", {"type": "list"}) == "chat"
+    assert _model_field_kind("embedding_provider_id", {}) == "embedding"
+    assert _model_field_kind("rerank_provider_id", {}) == "rerank"
 
 
 def _install(tmp_path: Path) -> tuple[Path, str]:
@@ -117,6 +127,100 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
     return install, public_id
 
 
+class _ProviderHotApplyClient(EngineApiClient):
+    def __init__(self, install_root: Path) -> None:
+        super().__init__(install_root)
+        self.sources = [
+            {
+                "id": "jyjapi",
+                "api_base": "https://old.example.test/v1",
+                "key": ["old-key"],
+                "custom_headers": {"X-Route": "keep"},
+            }
+        ]
+        self.providers = [
+            {
+                "id": "jyjapi/grok-4.6",
+                "provider_source_id": "jyjapi",
+                "model": "grok-4.6",
+                "enable": True,
+                "custom_extra_body": {"thinking": True},
+                "key": ["merged-source-key"],
+                "api_base": "https://old.example.test/v1",
+            }
+        ]
+        self.config = {
+            "provider_settings": {
+                "default_provider_id": "jyjapi/grok-4.6",
+                "fallback_chat_models": ["legacy/slow-a", "legacy/slow-b"],
+            },
+            "unrelated": {"keep": True},
+        }
+
+    def request(self, method: str, path: str, payload=None):  # type: ignore[override]
+        if method == "GET" and path == "/api/v1/provider-sources":
+            return {"provider_sources": self.sources}
+        if method == "GET" and path == "/api/v1/providers":
+            return {"providers": self.providers}
+        if method == "GET" and path == "/api/v1/system-config":
+            return {"config": self.config}
+        if method == "PUT" and path == "/api/v1/provider-sources/by-id":
+            self.sources = [payload["config"]]
+            return {}
+        if method == "PUT" and path == "/api/v1/providers/by-id":
+            self.providers = [payload["config"]]
+            return {}
+        if method == "PUT" and path == "/api/v1/system-config":
+            self.config = payload
+            return {}
+        if method == "DELETE" and path.startswith("/api/v1/providers/by-id?"):
+            self.providers = []
+            return {}
+        if method == "DELETE" and path.startswith(
+            "/api/v1/provider-sources/by-id?"
+        ):
+            self.sources = []
+            return {}
+        raise AssertionError((method, path, payload))
+
+
+def test_provider_hot_apply_preserves_extended_fields_and_verifies_default(
+    tmp_path: Path,
+) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+    client.save_provider(
+        OpenAIProviderProfile(
+            api_key="new-key",
+            api_base="https://api.xiuxianjyj.xin/v1",
+            model="grok-4.6",
+            source_id="jyjapi",
+        )
+    )
+
+    assert client.sources[0]["key"] == ["new-key"]
+    assert client.sources[0]["custom_headers"] == {"X-Route": "keep"}
+    assert client.providers[0]["custom_extra_body"] == {"thinking": True}
+    assert "key" not in client.providers[0]
+    assert "api_base" not in client.providers[0]
+    assert client.config["provider_settings"]["default_provider_id"] == (
+        "jyjapi/grok-4.6"
+    )
+    assert client.config["provider_settings"]["request_max_retries"] == 1
+    assert client.config["provider_settings"]["fallback_chat_models"] == []
+    assert client.config["unrelated"] == {"keep": True}
+
+
+def test_provider_hot_delete_is_read_back_and_cleans_unused_source(
+    tmp_path: Path,
+) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+
+    client.delete_provider("jyjapi/grok-4.6", "jyjapi")
+
+    assert client.providers == []
+    assert client.sources == []
+
+
 def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)
@@ -134,8 +238,11 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "model_field_count": 2,
             "pages": ("dashboard",),
             "configuration": "schema-and-page",
-            "description": "",
-        }
+                "description": "",
+                "simplified": False,
+                "audience": "按需使用",
+                "readiness": "请按说明准备",
+            }
     ]
     assert public_id.startswith("feature-")
     assert "module_name" not in catalog["plugins"][0]
@@ -162,7 +269,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     assert detail["providers"] == [
         {
             "value": "vendor/reasoning-model",
-            "label": "推理模型 · vendor/reasoning-model",
+            "label": "推理模型",
         }
     ]
     assert detail["embedding_providers"] == [
@@ -184,6 +291,185 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
         "",
         "vector_private",
     ]
+
+
+def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    module_name = "astrbot_plugin_qq_group_daily_analysis"
+    plugin = install / "app" / "astrbot" / "data" / "plugins" / module_name
+    plugin.mkdir(parents=True)
+    schema = {
+        "basic": {
+            "description": "基础设置",
+            "type": "object",
+            "items": {
+                "report_template": {
+                    "description": "报告模板",
+                    "type": "string",
+                    "default": "scrapbook",
+                    "options": ["scrapbook", "simple"],
+                },
+                "analysis_days": {"type": "int", "default": 1},
+                "min_messages_threshold": {"type": "int", "default": 200},
+                "max_messages": {"type": "int", "default": 1000},
+            },
+        },
+        "auto_analysis": {
+            "description": "自动分析",
+            "type": "object",
+            "items": {
+                "auto_analysis_time": {
+                    "type": "list",
+                    "items": {"type": "string"},
+                    "default": ["23:00"],
+                },
+                "scheduled_group_list_mode": {
+                    "type": "string",
+                    "default": "whitelist",
+                },
+                "scheduled_group_list": {
+                    "type": "list",
+                    "items": {"type": "string"},
+                    "default": [],
+                },
+            },
+        },
+        "analysis_features": {
+            "description": "分析内容",
+            "type": "object",
+            "items": {
+                "topic_analysis_enabled": {"type": "bool", "default": True},
+                "user_title_analysis_enabled": {"type": "bool", "default": True},
+                "golden_quote_analysis_enabled": {"type": "bool", "default": True},
+                "chat_quality_analysis_enabled": {"type": "bool", "default": True},
+                "max_topics": {"type": "int", "default": 5},
+            },
+        },
+        "llm": {
+            "description": "模型设置",
+            "type": "object",
+            "items": {
+                "llm_provider_id": {
+                    "type": "string",
+                    "default": "",
+                    "_special": "select_provider",
+                },
+                "topic_provider_id": {
+                    "type": "string",
+                    "default": "",
+                    "_special": "select_provider",
+                },
+                "llm_retries": {"type": "int", "default": 2},
+            },
+        },
+        "prompts": {
+            "description": "提示词",
+            "type": "object",
+            "items": {"topic_prompt": {"type": "text", "default": "advanced"}},
+        },
+    }
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps(schema, ensure_ascii=False), encoding="utf-8"
+    )
+    config_path = install / "app" / "astrbot" / "data" / "config"
+    config_path.mkdir(parents=True, exist_ok=True)
+    stored_path = config_path / f"{module_name}_config.json"
+    stored_path.write_text(
+        json.dumps(
+            {
+                "basic": {
+                    "report_template": "scrapbook",
+                    "analysis_days": 1,
+                    "min_messages_threshold": 200,
+                    "max_messages": 4321,
+                },
+                "auto_analysis": {
+                    "auto_analysis_time": ["23:00"],
+                    "scheduled_group_list_mode": "whitelist",
+                    "scheduled_group_list": ["123456@chatroom"],
+                },
+                "analysis_features": {
+                    "topic_analysis_enabled": True,
+                    "user_title_analysis_enabled": True,
+                    "golden_quote_analysis_enabled": True,
+                    "chat_quality_analysis_enabled": True,
+                    "max_topics": 9,
+                },
+                "llm": {
+                    "llm_provider_id": "",
+                    "topic_provider_id": "special/topic-model",
+                    "llm_retries": 3,
+                },
+                "prompts": {"topic_prompt": "keep this advanced prompt"},
+                "future_setting": {"keep": True},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+
+    catalog_item = service.catalog()["plugins"][0]
+    detail = service.detail(catalog_item["id"])
+
+    assert catalog_item["display_name"] == "群聊分析"
+    assert catalog_item["field_count"] == 10
+    assert catalog_item["model_field_count"] == 1
+    assert catalog_item["simplified"] is True
+    assert list(detail["basic_schema"]) == [
+        "basic",
+        "auto_analysis",
+        "analysis_features",
+    ]
+    assert list(detail["model_schema"]) == ["llm"]
+    assert list(detail["basic_schema"]["basic"]["items"]) == [
+        "report_template",
+        "analysis_days",
+        "min_messages_threshold",
+    ]
+    assert detail["basic_schema"]["basic"]["items"]["report_template"][
+        "labels"
+    ] == ["手账风（示例样式）", "简洁风"]
+    assert (
+        detail["basic_schema"]["auto_analysis"]["items"]["scheduled_group_list"][
+            "_ui_control"
+        ]
+        == "line-list"
+    )
+    assert (
+        detail["basic_schema"]["auto_analysis"]["items"]["scheduled_group_list"][
+            "_group_selector"
+        ]
+        is True
+    )
+    assert "/sid" not in detail["setup_steps"][0]
+    assert (
+        detail["basic_schema"]["auto_analysis"]["items"]["auto_analysis_time"][
+            "_ui_control"
+        ]
+        == "time-list"
+    )
+    assert "prompts" not in detail["schema"]
+    assert "专业参数" in detail["configuration_note"]
+    assert len(detail["setup_steps"]) == 3
+
+    detail["config"]["basic"]["min_messages_threshold"] = 300
+    service.save(catalog_item["id"], detail["config"], detail["revision"])
+    saved = json.loads(stored_path.read_text(encoding="utf-8"))
+
+    assert saved["basic"]["min_messages_threshold"] == 300
+    assert saved["basic"]["max_messages"] == 4321
+    assert saved["auto_analysis"]["scheduled_group_list_mode"] == "whitelist"
+    assert saved["analysis_features"]["max_topics"] == 9
+    assert saved["llm"]["topic_provider_id"] == "special/topic-model"
+    assert saved["prompts"]["topic_prompt"] == "keep this advanced prompt"
+    assert saved["future_setting"] == {"keep": True}
 
 
 def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path) -> None:
@@ -316,9 +602,10 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     calls: list[tuple[object, ...]] = []
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
 
-    def save_config(module_name: str, config: dict) -> None:
+    def save_config(module_name: str, config: dict, base_revision=None) -> dict:
         calls.append(("save", module_name, config))
         config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        return {"verified": True, "state": "applied", "revision": _json_revision(config)}
 
     service.engine.save_config = save_config  # type: ignore[method-assign]
     service.engine.set_enabled = lambda module, enabled: calls.append(  # type: ignore[method-assign]
@@ -351,24 +638,33 @@ def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> N
     install, _ = _install(tmp_path)
     client = EngineApiClient(install)
     calls: list[tuple[str, str, object]] = []
+    active = True
 
     def request(method: str, path: str, body=None):
+        nonlocal active
         calls.append((method, path, body))
+        if path == "/api/v1/plugins":
+            return [{"root_dir_name": "example", "name": "registered-example", "activated": active}]
+        if path.endswith("/config"):
+            if method == "PUT":
+                return {"hot_apply": {"verified": True, "state": "applied", "revision": _json_revision({"enabled": True})}}
+            return {"hot_apply_supported": True, "config": {"enabled": True}}
+        if path.endswith("/enabled"):
+            active = body["enabled"]
         if path.endswith("/pages/settings"):
             return {"content_path": "/api/v1/plugins/example/pages/settings/content/index.html"}
         return {}
 
     client.request = request  # type: ignore[method-assign]
     client.save_config("example", {"enabled": True})
-    client.set_enabled("example", False)
     client.reload("example")
+    client.set_enabled("example", False)
     page = client.page_entry("example", "settings")
 
-    assert calls == [
-        ("PUT", "/api/v1/plugins/example/config", {"config": {"enabled": True}}),
-        ("PATCH", "/api/v1/plugins/example/enabled", {"enabled": False}),
-        ("POST", "/api/v1/plugins/example/reload", None),
-        ("GET", "/api/v1/plugins/example/pages/settings", None),
+    assert [call for call in calls if call[0] != "GET"] == [
+        ("PUT", "/api/v1/plugins/registered-example/config", {"config": {"enabled": True}, "base_revision": _json_revision({"enabled": True})}),
+        ("POST", "/api/v1/plugins/registered-example/reload", None),
+        ("PATCH", "/api/v1/plugins/registered-example/enabled", {"enabled": False}),
     ]
     assert page.endswith("/content/index.html")
 

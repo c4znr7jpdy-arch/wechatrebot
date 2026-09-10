@@ -545,6 +545,37 @@ def main(argv: list[str] | None = None) -> int:
         _run(
             [
                 sys.executable,
+                str(SCRIPTS_ROOT / "build_legal_inventory.py"),
+                "--runtime-root",
+                str(runtime_build),
+                "--manager-site-packages",
+                str(manager_build / "build-venv" / "Lib" / "site-packages"),
+                "--project-root",
+                str(source_root),
+                "--sbom",
+                "release/sbom.cdx.json",
+                "--notices",
+                "legal/THIRD-PARTY-NOTICES.md",
+                "--licenses",
+                "legal/THIRD-PARTY-LICENSES.txt",
+                "--review",
+                "release/legal-review.json",
+                "--corresponding-source",
+                "legal/CORRESPONDING-SOURCE.md",
+            ]
+        )
+        _run(
+            [
+                sys.executable,
+                str(SCRIPTS_ROOT / "validate_release_metadata.py"),
+                "--root",
+                str(COMMERCIAL_ROOT),
+            ],
+            env=build_env,
+        )
+        _run(
+            [
+                sys.executable,
                 str(SCRIPTS_ROOT / "build_staging.py"),
                 "--source-root",
                 str(source_root),

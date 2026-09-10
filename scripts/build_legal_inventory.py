@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import tomllib
 from urllib.parse import quote
 import uuid
@@ -36,6 +37,19 @@ _LICENSE_VALUES = {
     "PSF-2.0": "PSF-2.0",
 }
 _LICENSE_FILE = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:[._-].*)?$", re.I)
+_FFMPEG_METADATA_FIELDS = (
+    "version",
+    "architecture",
+    "distribution",
+    "archive_filename",
+    "archive_url",
+    "archive_sha256",
+    "license",
+    "source_commit",
+    "source_url",
+    "build_tag",
+    "build_source_url",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -194,6 +208,84 @@ def _plugin_components(
     return components, documents
 
 
+def _validated_ffmpeg_metadata(
+    runtime_root: Path,
+    runtime_manifest: dict[str, object],
+    definition: dict[str, object],
+) -> dict[str, object]:
+    metadata = runtime_manifest.get("ffmpeg")
+    if not isinstance(metadata, dict):
+        raise RuntimeError("runtime manifest does not include the pinned FFmpeg runtime")
+    for field in _FFMPEG_METADATA_FIELDS:
+        expected = definition.get(field)
+        if not isinstance(expected, str) or not expected:
+            raise RuntimeError(f"FFmpeg release definition is missing {field}")
+        actual = metadata.get(field)
+        if field == "archive_sha256" and isinstance(actual, str):
+            actual, expected = actual.upper(), expected.upper()
+        if actual != expected:
+            raise RuntimeError(f"FFmpeg runtime does not match release definition: {field}")
+    license_file = runtime_root / "ffmpeg" / "LICENSE.txt"
+    if not license_file.is_file():
+        raise RuntimeError("FFmpeg runtime license text is missing")
+    files = metadata.get("files")
+    license_records = [
+        item
+        for item in files if isinstance(item, dict) and item.get("path") == "LICENSE.txt"
+    ] if isinstance(files, list) else []
+    if len(license_records) != 1 or (
+        str(license_records[0].get("sha256", "")).upper() != _sha256(license_file)
+        or license_records[0].get("size") != license_file.stat().st_size
+    ):
+        raise RuntimeError("FFmpeg runtime license text does not match its file manifest")
+    return metadata
+
+
+def _ffmpeg_component(metadata: dict[str, object]) -> dict[str, object]:
+    """Describe the exact redistributable FFmpeg archive in CycloneDX form."""
+    return {
+        "type": "application",
+        "group": "runtime",
+        "name": "FFmpeg",
+        "version": str(metadata["version"]),
+        "hashes": [
+            {
+                "alg": "SHA-256",
+                "content": str(metadata["archive_sha256"]).upper(),
+            }
+        ],
+        "licenses": [_license_entry(str(metadata["license"]))],
+        "externalReferences": [
+            {"type": "distribution", "url": str(metadata["archive_url"])},
+            {"type": "vcs", "url": str(metadata["source_url"])},
+            {"type": "build-system", "url": str(metadata["build_source_url"])},
+        ],
+        "properties": [
+            {"name": "wechatrebot:inventory_group", "value": "runtime"},
+            {
+                "name": "wechatrebot:archive_filename",
+                "value": str(metadata["archive_filename"]),
+            },
+            {
+                "name": "wechatrebot:architecture",
+                "value": str(metadata["architecture"]),
+            },
+            {
+                "name": "wechatrebot:distribution",
+                "value": str(metadata["distribution"]),
+            },
+            {
+                "name": "wechatrebot:source_commit",
+                "value": str(metadata["source_commit"]),
+            },
+            {
+                "name": "wechatrebot:build_tag",
+                "value": str(metadata["build_tag"]),
+            },
+        ],
+    }
+
+
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -258,6 +350,47 @@ def _write_notices(path: Path, components: list[dict[str, object]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _bundled_node_inventory(site_packages: Path) -> tuple[list[dict[str, object]], list[tuple[str, Path]]]:
+    driver = site_packages / "playwright" / "driver"
+    executable = driver / "node.exe"
+    license_path = driver / "LICENSE"
+    if not executable.is_file() or not license_path.is_file():
+        raise RuntimeError("Playwright bundled Node runtime or license text is missing")
+    version = subprocess.check_output([str(executable), "--version"], text=True).strip().removeprefix("v")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise RuntimeError("Playwright bundled Node version is invalid")
+    component = {
+        "type": "application", "group": "runtime", "name": "Node.js (Playwright bundled)",
+        "version": version, "licenses": [_license_entry("MIT")],
+        "hashes": [{"alg": "SHA-256", "content": _sha256(executable)}],
+        "externalReferences": [{"type": "website", "url": "https://nodejs.org/"}],
+        "properties": [{"name": "wechatrebot:purpose", "value": "Playwright and YouTube JavaScript runtime; no music sidecar"}],
+    }
+    return [component], [(f"Node.js {version} and bundled dependencies", license_path)]
+
+
+def _shared_components(project_root: Path, feature_set: dict[str, object]) -> tuple[list[dict[str, object]], list[tuple[str, Path]]]:
+    components = []
+    documents = []
+    for item in feature_set.get("shared_runtime", []):
+        if not item.get("name"):
+            continue
+        source = project_root / item["source"]
+        if not source.exists():
+            raise RuntimeError(f"shared runtime source is missing: {item['source']}")
+        components.append({
+            "type": "library", "group": "shared-plugin-runtime", "name": item["name"],
+            "version": item["version"], "licenses": [_license_entry(item["license"])],
+            "properties": [{"name": "wechatrebot:purpose", "value": item["purpose"]}],
+        })
+        if item.get("license_file"):
+            document = project_root / item["license_file"]
+            if not document.is_file():
+                raise RuntimeError(f"shared runtime license is missing: {item['name']}")
+            documents.append((f"{item['name']} {item['version']}", document))
+    return components, documents
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build release SBOM and NOTICE inputs.")
     parser.add_argument("--runtime-root", type=Path, required=True)
@@ -287,6 +420,12 @@ def main(argv: list[str] | None = None) -> int:
     runtime_manifest = json.loads(
         (runtime_root / "runtime-manifest.json").read_text(encoding="utf-8")
     )
+    ffmpeg_definition = json.loads(
+        (repository / "release" / "ffmpeg-runtime.json").read_text(encoding="utf-8")
+    )
+    ffmpeg_manifest = _validated_ffmpeg_metadata(
+        runtime_root, runtime_manifest, ffmpeg_definition
+    )
     runtime_components, runtime_documents = _python_components(
         runtime_site_packages,
         group="runtime",
@@ -304,7 +443,11 @@ def main(argv: list[str] | None = None) -> int:
         args.project_root.resolve(),
         feature_set,
     )
+    node_components, node_documents = _bundled_node_inventory(runtime_site_packages)
+    shared_components, shared_documents = _shared_components(args.project_root.resolve(), feature_set)
     python_license = runtime_root / "python" / "LICENSE.txt"
+    ffmpeg_license = runtime_root / "ffmpeg" / "LICENSE.txt"
+    ffmpeg_component = _ffmpeg_component(ffmpeg_manifest)
     components = [
         {
             "type": "framework",
@@ -316,13 +459,17 @@ def main(argv: list[str] | None = None) -> int:
                 {"type": "distribution", "url": runtime_manifest["python"]["source_url"]}
             ],
         },
+        ffmpeg_component,
         *runtime_components,
         *manager_components,
         *plugin_components,
+        *node_components,
+        *shared_components,
     ]
     serial_seed = "|".join(
         [
             runtime_manifest["wheelhouse"]["aggregate_sha256"],
+            str(ffmpeg_manifest["archive_sha256"]),
             *(f"{item['name']}@{item.get('version', '')}" for item in components),
         ]
     )
@@ -342,8 +489,12 @@ def main(argv: list[str] | None = None) -> int:
                     "name": "wechatrebot:runtime_aggregate_sha256",
                     "value": runtime_manifest["wheelhouse"]["aggregate_sha256"],
                 },
-                {"name": "wechatrebot:optional_ffmpeg_included", "value": "false"},
-                {"name": "wechatrebot:node_runtime_included", "value": "false"},
+                {"name": "wechatrebot:ffmpeg_included", "value": "true"},
+                {
+                    "name": "wechatrebot:ffmpeg_archive_sha256",
+                    "value": str(ffmpeg_manifest["archive_sha256"]).upper(),
+                },
+                {"name": "wechatrebot:node_runtime_included", "value": "true"},
             ],
         },
         "components": components,
@@ -352,9 +503,12 @@ def main(argv: list[str] | None = None) -> int:
     _write_notices(args.notices, components)
     documents = [
         (f"CPython {runtime_manifest['python']['version']}", python_license),
+        (f"FFmpeg {ffmpeg_manifest['version']}", ffmpeg_license),
         *runtime_documents,
         *manager_documents,
         *plugin_documents,
+        *node_documents,
+        *shared_documents,
     ]
     _write_license_bundle(args.licenses, documents)
 
@@ -370,7 +524,8 @@ def main(argv: list[str] | None = None) -> int:
     review = {
         "schema_version": 1,
         "status": "review-required",
-        "runtime_component_count": len(runtime_components) + 1,
+        "runtime_component_count": len(runtime_components) + len(node_components) + 2,
+        "shared_runtime_component_count": len(shared_components),
         "manager_build_component_count": len(manager_components),
         "delivered_plugin_count": len(plugin_components),
         "unresolved_license_components": unresolved,

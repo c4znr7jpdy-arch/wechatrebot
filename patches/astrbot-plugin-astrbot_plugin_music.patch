@@ -1,0 +1,123 @@
+warning: in the working copy of 'astrbot_plugin_music/main.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/core/sender.py b/core/sender.py
+index 341a985..9887dcf 100644
+--- a/core/sender.py
++++ b/core/sender.py
+@@ -421,6 +421,8 @@ class MusicSender:
+         payload = {
+             "content": xml,
+             "send_type": 11214,
++            "_wechatrebot_delivery": "reply",
++            "_wechatrebot_wake": True,
+         }
+         self_id = event.get_self_id()
+         if self_id:
+@@ -462,6 +464,8 @@ class MusicSender:
+         payload = {
+             "content": xml,
+             "send_type": 11214,
++            "_wechatrebot_delivery": "reply",
++            "_wechatrebot_wake": True,
+         }
+         if event.is_private_chat():
+             payload["user_id"] = event.get_sender_id()
+diff --git a/main.py b/main.py
+index 25e44dd..0b04812 100644
+--- a/main.py
++++ b/main.py
+@@ -1,4 +1,5 @@
+ import asyncio
++import re
+ import traceback
+ 
+ from astrbot.api import logger
+@@ -82,9 +83,13 @@ class MusicPlugin(Star):
+         if not text:
+             return None
+ 
+-        cmd, sep, arg = text.partition(" ")
+-        arg = arg.strip()
+-        if not sep or not arg:
++        # WeChat may place U+2005 and other Unicode whitespace between the
++        # command and title. Split on any whitespace, not only ASCII space.
++        parts = re.split(r"\s+", text, maxsplit=1)
++        if len(parts) != 2:
++            return None
++        cmd, arg = parts[0], parts[1].strip()
++        if not arg:
+             return None
+ 
+         if cmd == "点歌" or cmd in self.keywords:
+@@ -125,12 +130,17 @@ class MusicPlugin(Star):
+         if not parsed_command:
+             return
+         cmd, arg = parsed_command
++        # A point-song command is a reply to the current message even when the
++        # group allows commands without mentioning the bot.
++        event.is_at_or_wake_command = True
+         is_qishui_source = QishuiMusic.looks_like_qishui_source(arg)
+         explicit_player = cmd != "点歌" or is_qishui_source
+         player = self.get_player(word=cmd) if cmd != "点歌" else self.get_player(default=True)
+         if is_qishui_source:
+             player = self.get_player(name="qishui") or player
+         if not player:
++            yield event.plain_result("点歌服务暂时不可用，请稍后再试。")
++            event.stop_event()
+             return
+         if player.platform.name == "qishui" and is_qishui_source:
+             index = 1
+@@ -141,6 +151,7 @@ class MusicPlugin(Star):
+             song_name = arg.removesuffix(str(index))
+         if not song_name:
+             yield event.plain_result("未指定歌名")
++            event.stop_event()
+             return
+         # 搜索歌曲
+         logger.debug(f"正在通过{player.platform.display_name}搜索歌曲：{song_name}")
+@@ -150,21 +161,33 @@ class MusicPlugin(Star):
+             and player.platform.name in {"netease", "netease_nodejs", "meting"}
+         ):
+             search_limit = max(int(self.cfg.song_limit or 5), 5)
+-        songs = await player.fetch_songs(keyword=song_name, limit=search_limit, extra=None)
+-        songs = await self._pick_playable_single(player, songs)
+-        if not songs and player.platform.name != "netease" and not explicit_player:
+-            fallback_player = self.get_player(name="netease")
+-            if fallback_player:
+-                logger.warning(
+-                    f"{player.platform.display_name} 搜索无结果，改用网易云音乐重试：{song_name}"
+-                )
+-                player = fallback_player
+-                if "single" in self.cfg.select_mode:
+-                    search_limit = max(int(self.cfg.song_limit or 5), 5)
+-                songs = await player.fetch_songs(keyword=song_name, limit=search_limit, extra=None)
+-                songs = await self._pick_playable_single(player, songs)
++        try:
++            songs = await player.fetch_songs(
++                keyword=song_name, limit=search_limit, extra=None
++            )
++            songs = await self._pick_playable_single(player, songs)
++            if not songs and player.platform.name != "netease" and not explicit_player:
++                fallback_player = self.get_player(name="netease")
++                if fallback_player:
++                    logger.warning(
++                        f"{player.platform.display_name} 搜索无结果，"
++                        f"改用网易云音乐重试：{song_name}"
++                    )
++                    player = fallback_player
++                    if "single" in self.cfg.select_mode:
++                        search_limit = max(int(self.cfg.song_limit or 5), 5)
++                    songs = await player.fetch_songs(
++                        keyword=song_name, limit=search_limit, extra=None
++                    )
++                    songs = await self._pick_playable_single(player, songs)
++        except Exception as exc:
++            logger.error(f"点歌搜索失败: {type(exc).__name__}")
++            yield event.plain_result("点歌服务暂时不可用，请稍后再试。")
++            event.stop_event()
++            return
+         if not songs:
+             yield event.plain_result(f"搜索【{song_name}】无结果")
++            event.stop_event()
+             return
+ 
+         # 单曲模式

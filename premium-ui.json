@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sourceRoots": [
+    "src/wechatrebot_manager/app_webui"
+  ],
+  "ownership": {
+    "Date": "native",
+    "Select/Listbox": "native"
+  }
+}

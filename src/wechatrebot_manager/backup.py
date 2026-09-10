@@ -14,7 +14,14 @@ from .install_paths import INSTALL_MARKER
 from .payload import sha256_file
 
 
-BACKUP_ROOTS = ("config", "data")
+BACKUP_ROOTS = (
+    "config",
+    "data",
+    "app/astrbot/data/config",
+    "app/astrbot/data/plugin_data/astrbot_plugin_livingmemory",
+    "app/astrbot/data/plugin_data/astrbot_plugin_angel_heart",
+    "app/astrbot/data/self_learning_data",
+)
 MAX_RESTORE_BYTES = 10 * 1024**3
 MAX_RESTORE_FILES = 100_000
 
@@ -43,12 +50,18 @@ def backup_source_files(install_root: str | Path) -> tuple[tuple[Path, Path], ..
 
     files: list[tuple[Path, Path]] = []
     for name in BACKUP_ROOTS:
-        source_root = root / name
+        source_root = root.joinpath(*PurePosixPath(name).parts)
         if not source_root.exists():
             continue
         if not source_root.is_dir() or _is_link(source_root):
             raise BackupError(f"备份目录不是安全的普通目录：{name}")
         for path in sorted(source_root.rglob("*")):
+            relative_to_source = path.relative_to(source_root)
+            if "backups" in relative_to_source.parts:
+                # The memory backend keeps its own rolling snapshots. Including
+                # those inside a product backup causes exponential growth and
+                # does not improve recoverability of the active database.
+                continue
             if _is_link(path):
                 raise BackupError(
                     f"备份数据不能包含符号链接或目录联接：{path.relative_to(root)}"
@@ -66,7 +79,8 @@ def create_customer_backup(
     target = Path(destination).expanduser().resolve()
     if target.suffix.casefold() != ".zip":
         raise BackupError("备份文件必须使用 .zip 扩展名。")
-    for managed_root in (root / "config", root / "data"):
+    for name in BACKUP_ROOTS:
+        managed_root = root.joinpath(*PurePosixPath(name).parts)
         try:
             target.relative_to(managed_root)
         except ValueError:
@@ -139,7 +153,11 @@ def _safe_restore_path(value: object) -> Path:
         or windows.drive
         or any(part in {"", ".", ".."} for part in posix.parts)
         or any(os.path.isreserved(part) for part in posix.parts)
-        or posix.parts[0].casefold() not in BACKUP_ROOTS
+        or not any(
+            tuple(part.casefold() for part in posix.parts[: len(PurePosixPath(root).parts)])
+            == tuple(part.casefold() for part in PurePosixPath(root).parts)
+            for root in BACKUP_ROOTS
+        )
     ):
         raise BackupError(f"备份清单包含不安全路径：{value}")
     return Path(*posix.parts)
@@ -220,7 +238,8 @@ def restore_customer_backup(
     source = Path(backup_path).expanduser().resolve()
     if not source.is_file():
         raise BackupError("所选备份文件不存在。")
-    for managed_root in (root / "config", root / "data"):
+    for name in BACKUP_ROOTS:
+        managed_root = root.joinpath(*PurePosixPath(name).parts)
         try:
             source.relative_to(managed_root)
         except ValueError:

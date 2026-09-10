@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from .bootstrap import run_bootstrap
 from .diagnostics import collect_diagnostics
@@ -21,6 +22,11 @@ from .runtime_config import write_runtime_configs
 from .self_test import manager_self_test
 from .startup_errors import report_startup_error
 from .updates import apply_update_plan
+from .uninstaller import (
+    apply_uninstall_plan,
+    is_uninstall_entrypoint,
+    run_uninstaller,
+)
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
 
 
@@ -68,11 +74,25 @@ def _parser() -> argparse.ArgumentParser:
     plugin_center.add_argument("feature_id", nargs="?")
     apply_update = subparsers.add_parser("apply-update", help=argparse.SUPPRESS)
     apply_update.add_argument("--plan", type=Path, required=True)
+    uninstall = subparsers.add_parser("uninstall", help="彻底卸载软件和本机数据")
+    uninstall.add_argument("--install-root", type=Path, required=True)
+    apply_uninstall = subparsers.add_parser(
+        "apply-uninstall", help=argparse.SUPPRESS
+    )
+    apply_uninstall.add_argument("--plan", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    values = list(sys.argv[1:] if argv is None else argv)
+    if not values and is_uninstall_entrypoint():
+        from .desktop import install_root_from_executable
+
+        root = install_root_from_executable()
+        if root is None:
+            raise FileNotFoundError("未找到可卸载的机器人安装目录。")
+        return run_uninstaller(root)
+    args = _parser().parse_args(values)
     if args.command is None:
         try:
             return run_desktop()
@@ -93,6 +113,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "apply-update":
         return apply_update_plan(args.plan)
+    if args.command == "uninstall":
+        return run_uninstaller(args.install_root)
+    if args.command == "apply-uninstall":
+        return apply_uninstall_plan(args.plan)
     if args.command == "bootstrap":
         return run_bootstrap(args.payload)
     if args.command == "check-install-dir":

@@ -1,0 +1,11 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -645,6 +645,7 @@
+         logger.info(f"[SCHEDULE] 注册: {name} → {cron_expr}")
+     except Exception as e:
+         logger.exception(f"[SCHEDULE] 注册失败: {name} → {e}")
++        raise RuntimeError("定时任务未能加载，设置尚未确认生效，请重试。") from None
+ 
+ 
+ # ── AstrBot Star 插件 ───────────────────────────────────

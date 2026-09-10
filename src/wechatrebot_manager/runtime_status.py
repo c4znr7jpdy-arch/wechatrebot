@@ -13,6 +13,7 @@ from .runtime_config import RuntimePorts
 @dataclass(frozen=True, slots=True)
 class BridgeHealth:
     service_ready: bool = False
+    status_available: bool = False
     hook_ready: bool = False
     wechat_logged_in: bool = False
     wechat_identity: str = ""
@@ -54,6 +55,7 @@ def probe_bridge_health(
         return BridgeHealth()
     return BridgeHealth(
         service_ready=payload.get("service_ready") is True,
+        status_available=payload.get("status_available") is True,
         hook_ready=payload.get("hook_ready") is True,
         wechat_logged_in=payload.get("wechat_logged_in") is True,
         wechat_identity=str(payload.get("wechat_identity") or "").strip(),
@@ -137,7 +139,12 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
     connection = port_accepting("127.0.0.1", ports.bridge_callback)
     health = probe_bridge_health(port=ports.bridge_callback) if connection else BridgeHealth()
     identity = health.wechat_identity
-    if connection and not identity:
+    # A current bridge explicitly reports whether its status is authoritative.
+    # Do not call HOOK profile APIs before login: HOOK 4.1.8.27 may dereference
+    # an uninitialised account object and crash the newly opened WeChat process.
+    # Keep the direct profile probe only for legacy bridges that do not expose
+    # the status_available capability flag.
+    if connection and not identity and not health.status_available:
         identity = probe_wechat_identity(port=ports.hook_api)
     return RuntimeSnapshot(
         engine,

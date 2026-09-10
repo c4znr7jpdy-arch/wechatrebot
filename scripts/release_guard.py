@@ -35,11 +35,16 @@ FORBIDDEN_TEXT = (
     (
         "assigned-secret",
         re.compile(
-            r"(?i)\b(?:api[_-]?key|access[_-]?token|secret)\b\s*[=:]\s*"
-            r"[\"'](?!<|\$\{|your-|example|xxx)[^\"'\r\n]{8,}[\"']"
+            r"(?i)[\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+            r"secret|cookie|authorization|session(?:[_-]?(?:id|token))?)[\"']?\s*[=:]\s*"
+            r"[\"'](?P<assigned_secret_value>"
+            r"(?!<|\$\{|your[-_]|example[-_]|sample[-_]|placeholder|xxx|test[-_])"
+            r"[^\"'\r\n]{16,})[\"']"
         ),
     ),
 )
+
+ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 
 TRUSTED_VENDOR_PREFIX = ("runtime", "python", "lib", "site-packages")
 
@@ -152,7 +157,15 @@ def scan_release(root: Path) -> list[dict[str, str]]:
                 item for item in FORBIDDEN_TEXT if item[0] not in {"legacy-port", "legacy-loader"}
             )
         for reason, pattern in patterns:
-            if pattern.search(text):
+            matches = pattern.finditer(text)
+            if reason == "assigned-secret":
+                matches = (
+                    match for match in matches
+                    if not ENVIRONMENT_NAME.fullmatch(
+                        match.group("assigned_secret_value")
+                    )
+                )
+            if next(matches, None) is not None:
                 findings.append({"path": relative.as_posix(), "reason": reason})
     return findings
 

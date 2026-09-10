@@ -1,0 +1,42 @@
+diff --git a/web_api/__init__.py b/web_api/__init__.py
+--- a/web_api/__init__.py
++++ b/web_api/__init__.py
+@@ -474,21 +474,23 @@
+         if errors:
+             return _err("；".join(errors))
+ 
+-        # 原地更新顶层键：保持 dict 引用，运行时组件动态读取即时生效
+-        for key, value in converted.items():
+-            self._config[key] = value
+-        try:
++        import copy
++        previous = copy.deepcopy(dict(self._config))
++        hook = getattr(self._plugin, "on_config_saved", None)
++        try:
++            if not callable(hook):
++                raise ValueError("missing apply hook")
++            self._config.update(converted)
+             self._config.save_config()
+-        except Exception as e:
+-            logger.error(f"AngelHeart: 配置落盘失败: {e}", exc_info=True)
+-            return _err(f"配置落盘失败: {e}")
+-
+-        hook = getattr(self._plugin, "on_config_saved", None)
+-        if callable(hook):
++            hook()
++        except Exception:
++            self._config.clear()
++            self._config.update(previous)
+             try:
+-                hook()
+-            except Exception as e:
+-                logger.error(f"AngelHeart: 配置热生效钩子失败: {e}", exc_info=True)
+-                return _err(f"配置已保存，但热生效刷新失败: {e}")
+-
++                self._config.save_config()
++                if callable(hook):
++                    hook()
++            except Exception:
++                return _err("新设置未生效，恢复原设置失败。请查看运行记录后重试。")
++            return _err("新设置未生效，已恢复原设置。请检查输入和磁盘权限后重试。")
+         return _ok(message="已保存并即时生效")

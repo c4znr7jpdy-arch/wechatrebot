@@ -1,0 +1,90 @@
+diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+index 1f68163..866f1f9 100644
+--- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
++++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+@@ -121,9 +121,14 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+         is_group: bool,
+         session_id: str | None,
+         messages: list[dict],
++        delivery: str,
++        wake: bool,
+     ) -> None:
+         # session_id: QQ 协议为纯数字，WeChat 为 wxid 或 xxx@chatroom
+-        routing_params = {}
++        routing_params = {
++            "_wechatrebot_delivery": delivery,
++            "_wechatrebot_wake": wake,
++        }
+         if isinstance(event, Event) and event.get("self_id"):
+             routing_params["self_id"] = event["self_id"]
+ 
+@@ -157,6 +162,8 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+         event: Event | None = None,
+         is_group: bool = False,
+         session_id: str | None = None,
++        delivery: str = "reply",
++        wake: bool = True,
+     ) -> None:
+         """发送消息至 QQ 协议端（aiocqhttp）。
+ 
+@@ -176,7 +183,9 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+             ret = await cls._parse_onebot_json(message_chain)
+             if not ret:
+                 return
+-            await cls._dispatch_send(bot, event, is_group, session_id, ret)
++            await cls._dispatch_send(
++                bot, event, is_group, session_id, ret, delivery, wake
++            )
+             return
+         for seg in message_chain.chain:
+             if isinstance(seg, Node | Nodes):
+@@ -189,6 +198,8 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+ 
+                 if is_group:
+                     payload["group_id"] = session_id
++                    payload["_wechatrebot_delivery"] = delivery
++                    payload["_wechatrebot_wake"] = wake
+                     if isinstance(event, Event) and event.get("self_id"):
+                         payload["self_id"] = event["self_id"]
+                     await bot.call_action("send_group_forward_msg", **payload)
+@@ -199,12 +210,16 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+                     await bot.call_action("send_private_forward_msg", **payload)
+             elif isinstance(seg, File):
+                 d = await cls._from_segment_to_dict(seg)
+-                await cls._dispatch_send(bot, event, is_group, session_id, [d])
++                await cls._dispatch_send(
++                    bot, event, is_group, session_id, [d], delivery, wake
++                )
+             else:
+                 messages = await cls._parse_onebot_json(MessageChain([seg]))
+                 if not messages:
+                     continue
+-                await cls._dispatch_send(bot, event, is_group, session_id, messages)
++                await cls._dispatch_send(
++                    bot, event, is_group, session_id, messages, delivery, wake
++                )
+                 await asyncio.sleep(0.5)
+ 
+     async def send(self, message: MessageChain) -> None:
+@@ -220,6 +235,8 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
+             event=event,  # 不强制要求一定是 Event
+             is_group=is_group,
+             session_id=session_id,
++            delivery="reply",
++            wake=bool(self.is_at_or_wake_command),
+         )
+         await super().send(message)
+ 
+diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
+index ddf4774..f2ba226 100644
+--- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
++++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
+@@ -122,6 +122,8 @@ class AiocqhttpAdapter(Platform):
+             event=None,  # 这里不需要 event，因为是通过 session 发送的
+             is_group=is_group,
+             session_id=session_id,
++            delivery="proactive",
++            wake=False,
+         )
+         await super().send_by_session(session, message_chain)
+ 

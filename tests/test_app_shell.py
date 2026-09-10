@@ -64,6 +64,307 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
     assert result["ok"] is True
     assert result["data"]["update"]["enabled"] is True
     assert result["data"]["update"]["check_interval_seconds"] == 21_600
+    assert result["data"]["provider"] == {
+        "configured": False,
+        "api_base": "https://api.xiuxianjyj.xin/v1",
+        "model": "grok-4.6",
+        "api_key_configured": False,
+    }
+
+
+def test_first_provider_save_uses_jyjapi_grok_source(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+
+    def fake_save(_root, profile):
+        captured["profile"] = profile.normalized()
+        return captured["profile"]
+
+    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+
+    result = api.save_provider(
+        {
+            "api_key": "customer-secret",
+            "api_base": "https://api.xiuxianjyj.xin/v1",
+            "model": "grok-4.6",
+        }
+    )
+
+    assert result["ok"] is True
+    assert captured["profile"].source_id == "jyjapi"
+    assert captured["profile"].model_id == "jyjapi/grok-4.6"
+
+
+def test_switching_an_existing_service_preset_uses_the_new_source(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    selected = SimpleNamespace(
+        provider_id="deepseek/deepseek-v4-flash",
+        source_id="deepseek",
+        api_base="https://api.deepseek.com/v1",
+        model="deepseek-v4-flash",
+        api_key="developer-key",
+    )
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(
+        app_shell,
+        "EngineApiClient",
+        lambda _root: SimpleNamespace(is_available=lambda: False),
+    )
+
+    def fake_save(_root, profile):
+        captured["profile"] = profile.normalized()
+        return captured["profile"]
+
+    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+
+    result = api.save_provider(
+        {
+            "provider_id": selected.provider_id,
+            "api_key": "customer-secret",
+            "api_base": "https://api.xiuxianjyj.xin/v1",
+            "model": "grok-4.6",
+        }
+    )
+
+    assert result["ok"] is True
+    assert captured["profile"].source_id == "jyjapi"
+
+
+def test_model_discovery_reuses_saved_key_without_exposing_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    selected = SimpleNamespace(
+        provider_id="deepseek/deepseek-chat",
+        api_key="saved-secret",
+    )
+    captured = {}
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: (selected,))
+
+    def fake_discover(**values):
+        captured.update(values)
+        return ("deepseek-chat", "deepseek-reasoner")
+
+    monkeypatch.setattr(app_shell, "discover_openai_models", fake_discover)
+
+    result = api.discover_provider_models(
+        {
+            "provider_id": selected.provider_id,
+            "api_base": "https://api.deepseek.com/v1",
+            "api_key": "",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["items"] == ["deepseek-chat", "deepseek-reasoner"]
+    assert captured["api_key"] == "saved-secret"
+
+
+def test_deleting_current_provider_requires_and_applies_replacement(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    current = SimpleNamespace(
+        provider_id="jyjapi/grok-4.6",
+        source_id="jyjapi",
+        configured=True,
+        is_default=True,
+    )
+    replacement = SimpleNamespace(
+        provider_id="deepseek/deepseek-chat",
+        source_id="deepseek",
+        configured=True,
+        is_default=False,
+    )
+    calls = []
+    monkeypatch.setattr(
+        app_shell, "load_provider_services", lambda _root: (current, replacement)
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "EngineApiClient",
+        lambda _root: SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "set_default_provider",
+        lambda _root, provider_id: calls.append(("default", provider_id)),
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "delete_provider_profile",
+        lambda _root, provider_id: calls.append(("delete", provider_id)),
+    )
+
+    rejected = api.delete_provider(current.provider_id)
+    assert rejected["ok"] is False
+
+    result = api.delete_provider(current.provider_id, replacement.provider_id)
+    assert result["ok"] is True
+    assert calls == [
+        ("default", replacement.provider_id),
+        ("delete", current.provider_id),
+    ]
+
+
+def test_deleting_referenced_provider_hot_migrates_feature_config(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    current = SimpleNamespace(
+        provider_id="jyjapi/grok-4.6",
+        source_id="jyjapi",
+        configured=True,
+        is_default=False,
+    )
+    replacement = SimpleNamespace(
+        provider_id="deepseek/deepseek-chat",
+        source_id="deepseek",
+        configured=True,
+        is_default=True,
+    )
+    calls = []
+
+    class FakeClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def get_config(module_name: str):
+            calls.append(("read", module_name))
+            return {
+                "config": {
+                    "provider_id": current.provider_id,
+                    "nested": [current.provider_id, "unchanged"],
+                },
+                "revision": "before",
+            }
+
+        @staticmethod
+        def save_config(module_name: str, config, base_revision=None):
+            calls.append(("save", module_name, config, base_revision))
+            return {"revision": "after"}
+
+        @staticmethod
+        def set_default_provider(_provider_id: str) -> None:
+            raise AssertionError("非默认服务不应切换机器人回复模型")
+
+        @staticmethod
+        def delete_provider(provider_id: str, source_id: str) -> None:
+            calls.append(("delete", provider_id, source_id))
+
+    monkeypatch.setattr(
+        app_shell, "load_provider_services", lambda _root: (current, replacement)
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "provider_reference_modules",
+        lambda _root, _provider_id, strict=False: ("astrbot_plugin_livingmemory",),
+    )
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: FakeClient())
+
+    rejected = api.delete_provider(current.provider_id)
+    assert rejected["ok"] is False
+
+    result = api.delete_provider(current.provider_id, replacement.provider_id)
+    assert result["ok"] is True
+    assert result["data"]["updated_features"] == ["astrbot_plugin_livingmemory"]
+    assert calls == [
+        ("read", "astrbot_plugin_livingmemory"),
+        (
+            "save",
+            "astrbot_plugin_livingmemory",
+            {
+                "provider_id": replacement.provider_id,
+                "nested": [replacement.provider_id, "unchanged"],
+            },
+            "before",
+        ),
+        ("delete", current.provider_id, current.source_id),
+    ]
+
+
+def test_conversations_merge_current_group_directory_including_empty_groups(
+    tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+    api._history = SimpleNamespace(
+        conversations=lambda **_filters: {
+            "items": [
+                {
+                    "conversation_id": "active@chatroom",
+                    "type": "group",
+                    "display_name": "旧群名",
+                    "message_count": 2,
+                    "last_timestamp": 100,
+                    "avatar": "",
+                }
+            ],
+            "summary": {"messages": 2},
+        }
+    )
+    api._groups = SimpleNamespace(
+        list=lambda _refresh: {
+            "items": [
+                {
+                    "group_id": "active@chatroom",
+                    "name": "现在的群名",
+                    "avatar": "https://example.test/active.jpg",
+                    "member_count": 3,
+                },
+                {
+                    "group_id": "empty@chatroom",
+                    "name": "还没有消息的群",
+                    "avatar": "https://example.test/empty.jpg",
+                    "member_count": 5,
+                },
+            ]
+        }
+    )
+
+    result = api.get_conversations({"kind": "group"})
+
+    assert result["ok"] is True
+    items = result["data"]["items"]
+    assert [item["conversation_id"] for item in items] == [
+        "active@chatroom",
+        "empty@chatroom",
+    ]
+    assert items[0]["display_name"] == "现在的群名"
+    assert items[0]["avatar"] == "https://example.test/active.jpg"
+    assert items[1]["message_count"] == 0
+    assert items[1]["member_count"] == 5
+    assert result["data"]["summary"]["directory_groups"] == 2
+
+
+def test_conversation_search_matches_group_without_local_messages(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._history = SimpleNamespace(
+        conversations=lambda **_filters: {"items": [], "summary": {"messages": 0}}
+    )
+    api._groups = SimpleNamespace(
+        list=lambda _refresh: {
+            "items": [
+                {"group_id": "family@chatroom", "name": "爱人们"},
+                {"group_id": "work@chatroom", "name": "工作群"},
+            ]
+        }
+    )
+
+    result = api.get_conversations({"kind": "all", "search": "爱人"})
+
+    assert result["ok"] is True
+    assert [item["conversation_id"] for item in result["data"]["items"]] == [
+        "family@chatroom"
+    ]
 
 
 def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path) -> None:
@@ -208,6 +509,89 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
 
 
+def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+    feature_loader = script[
+        script.index("async function openFeature") : script.index(
+            "function getAtPath"
+        )
+    ]
+    model_discovery = script[
+        script.index("async function discoverProviderModels") : script.index(
+            "function deleteSelectedProvider"
+        )
+    ]
+
+    assert "if (!force) return;" in feature_loader
+    assert 'await api("get_feature", featureId)' in feature_loader
+    assert "form.elements.model.value = items[0]" not in model_discovery
+
+
+def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'data-page="groups"' in markup
+    assert 'id="refreshGroups"' in markup
+    assert "查看和刷新都不会向群里发送消息" in markup
+    assert 'api("get_groups", refresh)' in script
+    assert 'api("get_group_members", groupId)' in script
+    assert 'previousAccount !== state.groupAccount' in script
+    assert "当前接口未提供" in script
+    assert "从群聊列表添加" in script
+    assert "无需在群里发送命令" in script
+    assert "群聊数量暂不可用" in script
+    assert "等待读取群聊" in markup
+    assert ".group-table { min-width: 620px; table-layout: fixed; }" in styles
+
+
+def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert "void hydrateGroupMemberCounts" in script
+    assert "Promise.all" in script
+    assert "group.member_count = total" in script
+    assert 'class="member-count-state loading">读取中' in script
+    assert 'content.classList.toggle("history-active", page === "history")' in script
+    assert ".content-scroll.history-active { overflow: hidden; }" in styles
+    assert "#page-history.active" in styles
+    assert "flex: 1 1 0; min-height: 0; overflow: hidden;" in styles
+    assert 'return imageXml.test(content) ? "[图片]" : content;' in script
+
+
+def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        app_shell,
+        "load_robot_settings",
+        lambda _root: SimpleNamespace(
+            profile=SimpleNamespace(display_name="测试机器人")
+        ),
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "provision_uninstaller",
+        lambda root, **kwargs: calls.append(("provision", (root, kwargs))) or True,
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "launch_installed_uninstaller",
+        lambda root: calls.append(("launch", root)),
+    )
+
+    result = api.open_uninstaller()
+
+    assert result["ok"] is True
+    assert [name for name, _value in calls] == ["provision", "launch"]
+
+
 def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
@@ -222,6 +606,9 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     assert handler.index("state.startPending = true") < handler.index("await api(")
     assert 'current === "STOPPED" && status?.environment?.ready' in script
     assert '"启动中…"' in script
+    assert "const wechatLoggedIn = Boolean(runtime.wechat_identity);" in script
+    assert 'wechatLoggedIn ? "已登录"' in script
+    assert 'wechatLoggedIn ? "已登录，功能启动中"' in script
     assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
     assert '.status-orbit[data-state="starting"] .power-button' in styles
 
@@ -252,14 +639,20 @@ def test_webui_keeps_update_progress_and_errors_visible() -> None:
     assert "failureDetail" in script
 
 
-def test_087_preview_lists_group_analysis_without_checkin_task() -> None:
+def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
     ).read_text(encoding="utf-8")
 
-    assert 'display_name: "群聊分析"' in script
+    assert 'previewFeature("feature-group-analysis", "群聊分析"' in script
+    assert 'fieldCount: 10, modelFieldCount: 1' in script
+    assert 'simplified: true' in script
+    assert '_ui_control: "line-list"' in script
+    assert '_ui_control: "time-list"' in script
+    assert '手账风（示例样式）' in script
+    assert '渲染、重试、并发和提示词等专业参数继续使用推荐值' in script
     assert 'name: "每日签到"' not in script
-    assert 'version: "0.8.7"' in script
+    assert 'version: "0.9.0"' in script
 
 
 def test_run_application_uses_explicit_webview_api_allowlist(

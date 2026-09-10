@@ -4,7 +4,7 @@
   "python_version": "3.13.9",
   "platform": "win_amd64",
   "wheel_count": 220,
-  "total_bytes": 257104039,
-  "aggregate_sha256": "6ADEBA5B657F105F5A6C8E1C8C880AFE350AD3ACE5F1F06F04D21EA926DF3F96",
+  "total_bytes": 257104037,
+  "aggregate_sha256": "75AC05C668E4A6FE33C0500A96BCE46A460C3E7326435BA525A80E9045CA7835",
   "distribution": "The wheelhouse is a separate private release artifact and is not committed to Git."
 }

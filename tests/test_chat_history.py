@@ -54,16 +54,17 @@ def _bridge_source(root: Path) -> Path:
         connection.execute(
             """
             CREATE TABLE messages (
-                id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+                id INTEGER PRIMARY KEY, account_id TEXT, session_id TEXT, role TEXT, content TEXT,
                 sender_id TEXT, sender_name TEXT, group_id TEXT, platform TEXT,
                 timestamp REAL, metadata TEXT, dedup_key TEXT UNIQUE
             )
             """
         )
         connection.execute(
-            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 1,
+                "wxid_bot",
                 "hook_bridge:GroupMessage:456@chatroom",
                 "user",
                 "点歌 发如雪",

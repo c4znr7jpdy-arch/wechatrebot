@@ -9,7 +9,7 @@
 
 Python 3.13.9 x64 与 AstrBot 4.26.6 运行时已经通过固定版本、wheelhouse 汇总指纹、逐 wheel SHA-256、离线复建和 staged import 校验。运行时技术可重复性已验证，但该结果不替代 AstrBot、Python 包及其传递依赖的许可证审查。
 
-当前已生成 CycloneDX SBOM、第三方组件声明和许可证文本汇编，覆盖 221 个运行时组件（含 CPython）、17 个管理器构建组件及 5 个交付插件。`release/legal-review.json` 仍为 `review-required`：5 个组件没有可自动确认的许可证表达式，并检测到 AstrBot、天使之心等强 copyleft 审查对象。该状态仅用于记录，不参与构建或安装判定。
+完整发布入口按实际构建结果重新生成 CycloneDX SBOM、第三方组件声明和许可证文本汇编，当前应包含 24 个交付模块、CPython、FFmpeg/FFprobe、Playwright 自带 Node、全部 wheel 与共享游戏工具库。现有静态清单可能来自上一版，应以本次完整构建生成并随包提供的结果为准。`release/legal-review.json` 仍保留 `review-required`，包括 Rocom 等未确认授权的源码和资产及强 copyleft 组件；技术验证不替代来源权利和许可证审查。
 
 图形管理器的功能配置窗口使用 pywebview 6.2.1（BSD-3-Clause）及其固定传递依赖，并依赖 Windows Edge WebView2 Runtime 和 .NET Framework 4.6.2 或更高版本。正式交付前须将对应许可证文本、SBOM 和干净系统兼容性记录并入发行证据。
 
@@ -17,7 +17,7 @@ Python 3.13.9 x64 与 AstrBot 4.26.6 运行时已经通过固定版本、wheelho
 
 构建会按 `source-manifest.json` 中的固定哈希验证 HOOK 文件；哈希一致不等同于已经取得商业再分发授权。
 
-未关闭这些门槛前，`release/source-manifest.json` 中的受控二进制默认不会进入 staging。
+构建会验证来源路径与固定哈希；审核状态是发行记录，不自动阻断 staging。发布者仍须完成上述实际分发审查。
 
 微信客户端及其安装程序不属于商业项目交付物。客户必须自行从官方渠道取得并安装微信；本项目只保存客户选定的本机 `Weixin.exe` 路径，不复制或再分发微信文件。
 

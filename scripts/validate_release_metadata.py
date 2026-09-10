@@ -97,6 +97,61 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def _validate_ffmpeg_definition(
+    definition: dict[str, object], errors: list[str]
+) -> None:
+    if definition.get("schema_version") != 1 or definition.get("status") != "pinned":
+        errors.append("FFmpeg runtime definition must use schema 1 and pinned status")
+    if (
+        definition.get("name") != "FFmpeg"
+        or definition.get("architecture") != "win64"
+        or definition.get("distribution") != "lgpl-shared"
+        or definition.get("license") != "LGPL-3.0-or-later"
+    ):
+        errors.append("FFmpeg runtime must be the win64 LGPL shared distribution")
+    version = definition.get("version")
+    if not isinstance(version, str) or not re.fullmatch(
+        r"n\d+(?:\.\d+){1,2}-\d+-g[0-9a-f]{7,40}", version
+    ):
+        errors.append("FFmpeg runtime version must identify a fixed source revision")
+    filename = definition.get("archive_filename")
+    valid_filename = isinstance(filename, str) and bool(
+        re.fullmatch(
+            rf"ffmpeg-{re.escape(str(version))}-win64-lgpl-shared-\d+\.\d+\.zip",
+            filename,
+        )
+    )
+    if not valid_filename:
+        errors.append("FFmpeg runtime archive filename does not match its version")
+    if not valid_filename or definition.get("archive_root") != filename.removesuffix(".zip"):
+        errors.append("FFmpeg runtime archive root does not match its filename")
+    digest = definition.get("archive_sha256")
+    if not isinstance(digest, str) or not _HASH.fullmatch(digest.upper()) or digest == "0" * 64:
+        errors.append("FFmpeg runtime archive SHA-256 is invalid")
+    build_tag = definition.get("build_tag")
+    if not isinstance(build_tag, str) or not re.fullmatch(
+        r"autobuild-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}", build_tag
+    ):
+        errors.append("FFmpeg runtime build tag must be a fixed autobuild release")
+    if definition.get("archive_url") != (
+        f"https://github.com/BtbN/FFmpeg-Builds/releases/download/{build_tag}/{filename}"
+    ):
+        errors.append("FFmpeg runtime archive URL does not match its pinned build")
+    if definition.get("build_source_url") != (
+        f"https://github.com/BtbN/FFmpeg-Builds/tree/{build_tag}"
+    ):
+        errors.append("FFmpeg runtime build source URL does not match its pinned build")
+    source_commit = definition.get("source_commit")
+    if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{7,40}", source_commit):
+        errors.append("FFmpeg runtime source commit is invalid")
+    elif not isinstance(version, str) or not source_commit.startswith(version.rsplit("-g", 1)[-1]):
+        errors.append("FFmpeg runtime source commit does not match its version")
+    if definition.get("source_url") != (
+        f"https://github.com/FFmpeg/FFmpeg/archive/{source_commit}.tar.gz"
+    ):
+        errors.append("FFmpeg runtime source URL does not match its pinned source commit")
+
+
 def _version_consistency(root: Path, errors: list[str]) -> str | None:
     try:
         project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
@@ -293,6 +348,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     plugins = _load_object(release / "plugin-manifest.json", errors)
     feature_set = _load_object(release / "feature-set.json", errors)
     wheelhouse = _load_object(release / "runtime-wheelhouse.json", errors)
+    ffmpeg = _load_object(release / "ffmpeg-runtime.json", errors)
     legal_review = _load_object(release / "legal-review.json", errors)
     acceptance_evidence = _load_object(release / "acceptance-evidence.json", errors)
     signing_evidence = _load_object(release / "signing-evidence.json", errors)
@@ -344,6 +400,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         "legal/corresponding-source/astrbot-4.26.6-wechat.patch",
         "legal/corresponding-source/build_runtime.py",
         "legal/feature-set.json",
+        "legal/ffmpeg-runtime.json",
         "legal/hook-binaries.json",
         "legal/plugin-manifest.json",
         "legal/sbom.cdx.json",
@@ -356,6 +413,14 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     missing_targets = sorted(required_targets - commercial_targets)
     if missing_targets:
         errors.append(f"required commercial targets are missing: {missing_targets}")
+    if not any(
+        isinstance(entry, dict)
+        and entry.get("origin") == "commercial"
+        and entry.get("source") == "release/ffmpeg-runtime.json"
+        and entry.get("target") == "legal/ffmpeg-runtime.json"
+        for entry in entries
+    ):
+        errors.append("source manifest must ship the pinned FFmpeg runtime definition")
 
     hook_files = hook.get("files")
     expected_hook_entries: dict[str, str] = {}
@@ -440,6 +505,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         str(wheelhouse.get("aggregate_sha256", "")).upper()
     ):
         errors.append("runtime wheelhouse aggregate SHA-256 is invalid")
+    _validate_ffmpeg_definition(ffmpeg, errors)
 
     _exact_lock(release / "runtime-requirements.lock", errors)
     _exact_lock(release / "build-requirements.lock", errors)

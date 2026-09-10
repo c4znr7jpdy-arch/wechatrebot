@@ -43,7 +43,7 @@ def _identity_metadata(value: object) -> dict[str, str]:
         return {}
     return {
         key: str(payload.get(key) or "").strip()
-        for key in ("group_name", "group_nickname", "wechat_name")
+        for key in ("group_name", "group_nickname", "wechat_name", "avatar")
     }
 
 
@@ -86,12 +86,14 @@ class ChatHistoryService:
                 CREATE TABLE IF NOT EXISTS import_sources (
                     source_key TEXT PRIMARY KEY,
                     last_message_id INTEGER NOT NULL DEFAULT 0,
+                    account_backfill_complete INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_key TEXT NOT NULL,
                     source_message_id INTEGER NOT NULL,
+                    account_id TEXT NOT NULL DEFAULT '',
                     session_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
                     conversation_type TEXT NOT NULL,
@@ -102,6 +104,7 @@ class ChatHistoryService:
                     group_name TEXT NOT NULL DEFAULT '',
                     group_nickname TEXT NOT NULL DEFAULT '',
                     wechat_name TEXT NOT NULL DEFAULT '',
+                    avatar TEXT NOT NULL DEFAULT '',
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
                     UNIQUE(source_key, source_message_id)
@@ -116,11 +119,32 @@ class ChatHistoryService:
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(messages)").fetchall()
             }
-            for column in ("group_name", "group_nickname", "wechat_name"):
+            for column in (
+                "account_id",
+                "group_name",
+                "group_nickname",
+                "wechat_name",
+                "avatar",
+            ):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE messages ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                     )
+            import_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(import_sources)"
+                ).fetchall()
+            }
+            if "account_backfill_complete" not in import_columns:
+                connection.execute(
+                    "ALTER TABLE import_sources ADD COLUMN "
+                    "account_backfill_complete INTEGER NOT NULL DEFAULT 0"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_history_account_conversation "
+                "ON messages(account_id, conversation_id, timestamp)"
+            )
 
     def sync(self) -> int:
         source = self.bridge_source if self.bridge_source.is_file() else self.source
@@ -132,26 +156,66 @@ class ChatHistoryService:
         source_key = str(source_path.resolve()).casefold()
         with self._connect() as target:
             row = target.execute(
-                "SELECT last_message_id FROM import_sources WHERE source_key = ?",
+                "SELECT last_message_id, account_backfill_complete "
+                "FROM import_sources WHERE source_key = ?",
                 (source_key,),
             ).fetchone()
             last_id = int(row[0]) if row else 0
+            backfill_complete = bool(row[1]) if row else False
             source_uri = f"file:{source_path.resolve().as_posix()}?mode=ro"
             try:
                 source = sqlite3.connect(source_uri, uri=True, timeout=2)
                 source.row_factory = sqlite3.Row
+                source_columns = {
+                    str(column[1])
+                    for column in source.execute(
+                        "PRAGMA table_info(messages)"
+                    ).fetchall()
+                }
+                account_expression = (
+                    "COALESCE(account_id, '')"
+                    if "account_id" in source_columns
+                    else "''"
+                )
                 rows = source.execute(
-                    """
-                    SELECT id, session_id, role, content, sender_id,
+                    f"""
+                    SELECT id, {account_expression} AS account_id,
+                           session_id, role, content, sender_id,
                            COALESCE(sender_name, '') AS sender_name,
                            COALESCE(group_id, '') AS group_id, timestamp,
-                           COALESCE(metadata, '{}') AS metadata
+                           COALESCE(metadata, '{{}}') AS metadata
                     FROM messages
                     WHERE id > ?
                     ORDER BY id
                     """,
                     (last_id,),
                 ).fetchall()
+                if "account_id" in source_columns and not backfill_complete:
+                    unassigned = target.execute(
+                        "SELECT source_message_id FROM messages "
+                        "WHERE source_key = ? AND account_id = ''",
+                        (source_key,),
+                    ).fetchall()
+                    source_ids = [int(item[0]) for item in unassigned]
+                    for offset in range(0, len(source_ids), 500):
+                        batch = source_ids[offset : offset + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        account_rows = source.execute(
+                            "SELECT id, COALESCE(account_id, '') AS account_id "
+                            f"FROM messages WHERE id IN ({placeholders})",
+                            batch,
+                        ).fetchall()
+                        target.executemany(
+                            "UPDATE messages SET account_id = ? "
+                            "WHERE source_key = ? AND source_message_id = ? "
+                            "AND account_id = ''",
+                            (
+                                (str(item["account_id"] or "").strip(), source_key, int(item["id"]))
+                                for item in account_rows
+                                if str(item["account_id"] or "").strip()
+                            ),
+                        )
+                    backfill_complete = True
             except sqlite3.Error:
                 return 0
             finally:
@@ -166,15 +230,16 @@ class ChatHistoryService:
                 target.execute(
                     """
                     INSERT OR IGNORE INTO messages (
-                        source_key, source_message_id, session_id,
+                        source_key, source_message_id, account_id, session_id,
                         conversation_id, conversation_type, role, sender_id,
                         sender_name, group_id, group_name, group_nickname,
-                        wechat_name, content, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        wechat_name, avatar, content, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_key,
                         int(item["id"]),
+                        str(item["account_id"] or "").strip(),
                         str(item["session_id"]),
                         conversation_id,
                         kind,
@@ -185,6 +250,7 @@ class ChatHistoryService:
                         identity.get("group_name", ""),
                         identity.get("group_nickname", ""),
                         identity.get("wechat_name", ""),
+                        identity.get("avatar", ""),
                         str(item["content"]),
                         float(item["timestamp"]),
                     ),
@@ -192,13 +258,20 @@ class ChatHistoryService:
                 highest = max(highest, int(item["id"]))
             target.execute(
                 """
-                INSERT INTO import_sources(source_key, last_message_id, updated_at)
-                VALUES (?, ?, ?)
+                INSERT INTO import_sources(
+                    source_key, last_message_id, account_backfill_complete, updated_at
+                ) VALUES (?, ?, ?, ?)
                 ON CONFLICT(source_key) DO UPDATE SET
                     last_message_id = excluded.last_message_id,
+                    account_backfill_complete = excluded.account_backfill_complete,
                     updated_at = excluded.updated_at
                 """,
-                (source_key, highest, datetime.now().astimezone().isoformat()),
+                (
+                    source_key,
+                    highest,
+                    int(backfill_complete),
+                    datetime.now().astimezone().isoformat(),
+                ),
             )
             return len(rows)
 
@@ -209,11 +282,16 @@ class ChatHistoryService:
         search: str = "",
         start_time: float | None = None,
         end_time: float | None = None,
+        account_id: str = "",
         limit: int = 200,
     ) -> dict[str, Any]:
         self.sync()
         clauses: list[str] = []
         params: list[object] = []
+        normalized_account = str(account_id or "").strip()
+        if normalized_account:
+            clauses.append("account_id = ?")
+            params.append(normalized_account)
         if kind in {"private", "group"}:
             clauses.append("conversation_type = ?")
             params.append(kind)
@@ -234,7 +312,9 @@ class ChatHistoryService:
             SELECT conversation_id, conversation_type, COUNT(*) AS message_count,
                    MAX(timestamp) AS last_timestamp,
                    MAX(CASE WHEN role = 'user' THEN sender_name ELSE '' END) AS sender_name,
-                   MAX(group_name) AS group_name
+                   MAX(group_name) AS group_name,
+                   MAX(CASE WHEN conversation_type = 'private' AND role = 'user'
+                            THEN avatar ELSE '' END) AS avatar
             FROM messages
             {where}
             GROUP BY conversation_id, conversation_type
@@ -244,14 +324,18 @@ class ChatHistoryService:
         params.append(max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
+            total_where = "WHERE account_id = ?" if normalized_account else ""
+            total_params = (normalized_account,) if normalized_account else ()
             totals = connection.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS messages,
                        COUNT(DISTINCT conversation_id) AS conversations,
                        SUM(CASE WHEN conversation_type = 'private' THEN 1 ELSE 0 END) AS private_messages,
                        SUM(CASE WHEN conversation_type = 'group' THEN 1 ELSE 0 END) AS group_messages
                 FROM messages
-                """
+                {total_where}
+                """,
+                total_params,
             ).fetchone()
         return {
             "items": [
@@ -266,6 +350,7 @@ class ChatHistoryService:
                     ),
                     "message_count": row["message_count"],
                     "last_timestamp": row["last_timestamp"],
+                    "avatar": row["avatar"] or "",
                 }
                 for row in rows
             ],
@@ -282,11 +367,16 @@ class ChatHistoryService:
         conversation_id: str,
         *,
         before: float | None = None,
+        account_id: str = "",
         limit: int = 200,
     ) -> tuple[dict[str, Any], ...]:
         self.sync()
         clauses = ["conversation_id = ?"]
         params: list[object] = [conversation_id]
+        normalized_account = str(account_id or "").strip()
+        if normalized_account:
+            clauses.append("account_id = ?")
+            params.append(normalized_account)
         if before is not None:
             clauses.append("timestamp < ?")
             params.append(float(before))
@@ -296,7 +386,7 @@ class ChatHistoryService:
                 f"""
                 SELECT id, conversation_type, role, sender_id, sender_name,
                        group_id, group_name, group_nickname, wechat_name,
-                       content, timestamp
+                       avatar, content, timestamp
                 FROM messages
                 WHERE {' AND '.join(clauses)}
                 ORDER BY timestamp DESC
@@ -319,37 +409,61 @@ class ChatHistoryService:
                 "group_name": row["group_name"],
                 "group_nickname": row["group_nickname"],
                 "wechat_name": row["wechat_name"],
+                "avatar": row["avatar"],
                 "content": row["content"],
                 "timestamp": row["timestamp"],
             }
             for row in reversed(rows)
         )
 
-    def delete_conversation(self, conversation_id: str) -> int:
+    def delete_conversation(self, conversation_id: str, *, account_id: str = "") -> int:
+        clauses = ["conversation_id = ?"]
+        params: list[object] = [conversation_id]
+        normalized_account = str(account_id or "").strip()
+        if normalized_account:
+            clauses.append("account_id = ?")
+            params.append(normalized_account)
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
+                f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
             )
             return max(0, cursor.rowcount)
 
-    def delete_before(self, timestamp: float) -> int:
+    def delete_before(self, timestamp: float, *, account_id: str = "") -> int:
+        clauses = ["timestamp < ?"]
+        params: list[object] = [float(timestamp)]
+        normalized_account = str(account_id or "").strip()
+        if normalized_account:
+            clauses.append("account_id = ?")
+            params.append(normalized_account)
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM messages WHERE timestamp < ?", (float(timestamp),)
+                f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
             )
             return max(0, cursor.rowcount)
 
-    def export(self, target: str | Path, *, format: str = "csv") -> Path:
+    def export(
+        self,
+        target: str | Path,
+        *,
+        format: str = "csv",
+        account_id: str = "",
+    ) -> Path:
         output = Path(target).expanduser().resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        normalized_account = str(account_id or "").strip()
+        where = "WHERE account_id = ?" if normalized_account else ""
+        params = (normalized_account,) if normalized_account else ()
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT conversation_type, conversation_id, role, sender_id,
                        sender_name, group_name, group_nickname, wechat_name,
-                       content, timestamp
-                FROM messages ORDER BY timestamp
-                """
+                       content, timestamp FROM messages
+                {where}
+                ORDER BY timestamp
+                """,
+                params,
             ).fetchall()
         if format.casefold() == "json":
             output.write_text(

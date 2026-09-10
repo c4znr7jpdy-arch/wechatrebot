@@ -1,0 +1,641 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index bed7bba7e9625e267ccb5f9b6e44d46343176668..fcfcc03709e8b80d3b9da62e49e9b739fecdd51a 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -190,6 +190,8 @@ class BridgeApplication:
+             self.settings.callback_path,
+             action_router=self.router,
+             status_provider=self._health_snapshot,
++            manager_hook=self.hook,
++            manager_query_token=self.settings.manager_query_token,
+         )
+         self._callback_runner = web.AppRunner(app, access_log=None)
+         await self._callback_runner.setup()
+@@ -626,6 +628,7 @@ class BridgeApplication:
+             event,
+             wechat_name=event.wechat_name or cached.wechat_name,
+             group_nickname=event.group_nickname or cached.group_nickname,
++            member_avatar=event.member_avatar or cached.avatar,
+         )
+ 
+     async def _resolve_group_member_notice(self, event):
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf3770b485 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+@@ -1,15 +1,156 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import hmac
+ import inspect
++import ipaddress
+ from json import JSONDecodeError
+ import logging
++from collections.abc import Mapping
+ from typing import Any
+ 
+ from aiohttp import ContentTypeError, web
+ 
+ 
+ logger = logging.getLogger(__name__)
++_MANAGER_MEMBER_LIMIT = 500
++_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
++
++
++def _manager_response(payload: dict[str, Any], status: int = 200) -> web.Response:
++    return web.json_response(payload, status=status, headers=_NO_STORE_HEADERS)
++
++
++def _manager_error(message: str, status: int) -> web.Response:
++    return _manager_response({"ok": False, "error": message}, status)
++
++
++def _manager_text(value: Any) -> str:
++    for _ in range(3):
++        if not isinstance(value, Mapping):
++            break
++        value = value.get("String", "")
++    return "" if value is None else str(value).strip()
++
++
++def _manager_record(value: Any) -> Mapping[str, Any]:
++    if not isinstance(value, Mapping):
++        return {}
++    contact = value.get("contact")
++    return contact if isinstance(contact, Mapping) else value
++
++
++def _record_value(
++    raw: Mapping[str, Any], record: Mapping[str, Any], *keys: str
++) -> Any:
++    for source in (record, raw):
++        for key in keys:
++            if key in source and source[key] not in (None, ""):
++                return source[key]
++    return None
++
++
++def _valid_group_id(value: str) -> bool:
++    prefix, separator, suffix = value.partition("@")
++    return bool(
++        prefix
++        and separator
++        and suffix == "chatroom"
++        and "/" not in prefix
++        and "\\" not in prefix
++        and not any(character.isspace() for character in value)
++    )
++
++
++def _optional_count(value: Any) -> int | None:
++    text = _manager_text(value)
++    if not text:
++        return None
++    try:
++        count = int(text)
++    except (TypeError, ValueError):
++        return None
++    return count if count >= 0 else None
++
++
++def _normalize_group(value: Any) -> dict[str, Any] | None:
++    if not isinstance(value, Mapping):
++        return None
++    record = _manager_record(value)
++    group_id = _manager_text(
++        _record_value(
++            value,
++            record,
++            "group_id",
++            "room_id",
++            "roomId",
++            "wxid",
++            "userName",
++            "username",
++        )
++    )
++    if not _valid_group_id(group_id):
++        return None
++    name = _manager_text(
++        _record_value(
++            value,
++            record,
++            "name",
++            "nickname",
++            "nickName",
++            "nick_name",
++            "remark",
++        )
++    )
++    member_count = _optional_count(
++        _record_value(
++            value, record, "member_count", "memberCount", "member_num", "memberNum"
++        )
++    )
++    avatar = _manager_text(
++        _record_value(
++            value,
++            record,
++            "avatar",
++            "avatar_url",
++            "smallHeadImgUrl",
++            "bigHeadImgUrl",
++            "small_head_url",
++            "big_head_url",
++        )
++    )
++    return {
++        "group_id": group_id,
++        "name": name,
++        "member_count": member_count,
++        "avatar": avatar,
++    }
++
++
++def _normalize_member(value: Any) -> dict[str, str] | None:
++    if not isinstance(value, Mapping):
++        return None
++    record = _manager_record(value)
++    user_id = _manager_text(
++        _record_value(value, record, "user_id", "wxid", "userName")
++    )
++    if not user_id:
++        return None
++    name = _manager_text(_record_value(value, record, "name", "nickname", "nickName"))
++    group_nickname = _manager_text(
++        _record_value(value, record, "group_nickname", "display_name", "displayName")
++    )
++    avatar = _manager_text(
++        _record_value(
++            value, record, "avatar", "avatar_url", "smallHeadImgUrl", "bigHeadImgUrl"
++        )
++    )
++    return {
++        "user_id": user_id,
++        "name": name,
++        "group_nickname": group_nickname,
++        "avatar": avatar,
++    }
+ 
+ 
+ def create_callback_app(
+@@ -18,9 +159,136 @@ def create_callback_app(
+     callback_path: str = "/api/recvMsg",
+     action_router: Any | None = None,
+     status_provider: Any | None = None,
++    manager_hook: Any | None = None,
++    manager_query_token: str = "",
+ ) -> web.Application:
+     app = web.Application(client_max_size=max_body_bytes)
+ 
++    async def current_account() -> str:
++        if status_provider is None:
++            return ""
++        payload = status_provider()
++        if inspect.isawaitable(payload):
++            payload = await payload
++        if not isinstance(payload, Mapping):
++            return ""
++        return _manager_text(payload.get("wechat_identity"))
++
++    async def authorize_manager(
++        request: web.Request,
++    ) -> tuple[str, web.Response | None]:
++        if "Origin" in request.headers:
++            return "", _manager_error("已拒绝浏览器跨站请求", 403)
++        remote = (request.remote or "").split("%", 1)[0]
++        try:
++            loopback = ipaddress.ip_address(remote).is_loopback
++        except ValueError:
++            loopback = False
++        if not loopback:
++            return "", _manager_error("群聊目录仅允许本机访问", 403)
++        expected_token = str(manager_query_token or "")
++        if not expected_token:
++            return "", _manager_error("群聊目录访问凭证尚未配置", 503)
++        provided_token = request.headers.get("X-WeChatReBot-Token", "")
++        if not hmac.compare_digest(
++            provided_token.encode("utf-8"), expected_token.encode("utf-8")
++        ):
++            return "", _manager_error("群聊目录访问凭证无效", 401)
++        claimed_account = _manager_text(
++            request.headers.get("X-WeChatReBot-Account", "")
++        )
++        try:
++            account_id = await current_account()
++        except Exception:
++            logger.exception("manager account status lookup failed")
++            return "", _manager_error("当前微信账号状态不可用", 409)
++        if not claimed_account or not account_id or not hmac.compare_digest(
++            claimed_account.encode("utf-8"), account_id.encode("utf-8")
++        ):
++            return "", _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        return account_id, None
++
++    async def account_still_current(account_id: str) -> bool:
++        try:
++            after = await current_account()
++        except Exception:
++            logger.exception("manager account status recheck failed")
++            return False
++        return bool(after) and hmac.compare_digest(
++            account_id.encode("utf-8"), after.encode("utf-8")
++        )
++
++    async def manager_groups(request: web.Request) -> web.Response:
++        account_id, denied = await authorize_manager(request)
++        if denied is not None:
++            return denied
++        if manager_hook is None or not hasattr(manager_hook, "get_groups_strict"):
++            return _manager_error("群聊目录暂不可用", 503)
++        try:
++            # This endpoint is called only when the manager needs a fresh
++            # snapshot (initial load or the user's explicit refresh action).
++            # Bypass the automatic empty-cache cooldown for that operation.
++            raw_items = await manager_hook.get_groups_strict(force_refresh=True)
++            items = [
++                normalized
++                for raw in raw_items
++                if (normalized := _normalize_group(raw)) is not None
++            ]
++            if raw_items and not items:
++                raise ValueError("group records were returned but none could be normalized")
++        except Exception:
++            logger.exception("manager group cache read failed")
++            return _manager_error("读取群聊目录失败，请稍后重试", 502)
++        if not await account_still_current(account_id):
++            return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        return _manager_response(
++            {
++                "ok": True,
++                "data": {
++                    "account_id": account_id,
++                    "items": items,
++                    "total": len(items),
++                    "truncated": False,
++                    "source": "wechat_cache",
++                },
++            }
++        )
++
++    async def manager_group_members(request: web.Request) -> web.Response:
++        account_id, denied = await authorize_manager(request)
++        if denied is not None:
++            return denied
++        group_id = _manager_text(request.match_info.get("group_id", ""))
++        if not _valid_group_id(group_id):
++            return _manager_error("群聊标识无效", 400)
++        if manager_hook is None or not hasattr(manager_hook, "get_group_members_strict"):
++            return _manager_error("群成员目录暂不可用", 503)
++        try:
++            raw_items = await manager_hook.get_group_members_strict(group_id)
++            all_items = [
++                normalized
++                for raw in raw_items
++                if (normalized := _normalize_member(raw)) is not None
++            ]
++        except Exception:
++            logger.exception("manager group member cache read failed")
++            return _manager_error("读取群成员目录失败，请稍后重试", 502)
++        if not await account_still_current(account_id):
++            return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        items = all_items[:_MANAGER_MEMBER_LIMIT]
++        return _manager_response(
++            {
++                "ok": True,
++                "data": {
++                    "account_id": account_id,
++                    "items": items,
++                    "total": len(all_items),
++                    "truncated": len(all_items) > len(items),
++                    "source": "wechat_cache",
++                },
++            }
++        )
++
+     async def receive(request: web.Request) -> web.Response:
+         try:
+             payload = await request.json()
+@@ -123,5 +391,9 @@ def create_callback_app(
+     app.router.add_put(callback_path, receive)
+     app.router.add_post(callback_path, receive)
+     app.router.add_get("/api/health", health)
++    app.router.add_get("/api/manager/groups", manager_groups)
++    app.router.add_get(
++        "/api/manager/groups/{group_id}/members", manager_group_members
++    )
+     app.router.add_post("/send_raw_xml", send_raw_xml)
+     return app
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/config.py b/hook_41827_astrbot_bridge/src/hook_bridge/config.py
+index 8ec67693068b849eb8d7c64b56c6245ea2de3269..1ebfe8579f8df50cdf67792a6129c21340e55028 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/config.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/config.py
+@@ -59,6 +59,7 @@ class Settings:
+     callback_port: int
+     callback_path: str
+     astrbot_ws_url: str
++    manager_query_token: str
+     queue_size: int
+     request_timeout_seconds: float
+     video_download_timeout_seconds: float
+@@ -151,6 +152,7 @@ class Settings:
+             callback_port=callback_port,
+             callback_path=callback_path,
+             astrbot_ws_url=astrbot_ws_url,
++            manager_query_token=str(raw.get("manager_query_token") or "").strip(),
+             queue_size=int(_positive_number(raw.get("queue_size", 256), "queue_size", int)),
+             request_timeout_seconds=float(_positive_number(raw.get("request_timeout_seconds", 10), "request_timeout_seconds", float)),
+             video_download_timeout_seconds=float(
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a601cb653 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+@@ -65,6 +65,7 @@ class MessageHistoryStore:
+                 """
+                 CREATE TABLE IF NOT EXISTS messages (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
++                    account_id TEXT NOT NULL DEFAULT '',
+                     session_id TEXT NOT NULL,
+                     role TEXT NOT NULL,
+                     content TEXT NOT NULL,
+@@ -82,6 +83,20 @@ class MessageHistoryStore:
+                     ON messages(timestamp DESC);
+                 """
+             )
++            columns = {
++                str(row[1])
++                for row in connection.execute("PRAGMA table_info(messages)").fetchall()
++            }
++            if "account_id" not in columns:
++                # 旧库没有可靠账号信息，只能标为未归属，不得猜测回填。
++                connection.execute(
++                    "ALTER TABLE messages "
++                    "ADD COLUMN account_id TEXT NOT NULL DEFAULT ''"
++                )
++            connection.execute(
++                "CREATE INDEX IF NOT EXISTS idx_bridge_history_account_group "
++                "ON messages(account_id, group_id, timestamp DESC)"
++            )
+ 
+     def record_inbound(self, event: NormalizedEvent) -> bool:
+         is_group = event.conversation_id.endswith("@chatroom")
+@@ -96,11 +111,13 @@ class MessageHistoryStore:
+                 "group_name": event.group_name,
+                 "group_nickname": event.group_nickname,
+                 "wechat_name": event.wechat_name,
++                "avatar": getattr(event, "member_avatar", ""),
+             },
+             ensure_ascii=False,
+             separators=(",", ":"),
+         )
+         return self._insert(
++            account_id=event.account_id,
+             session_id=(
+                 f"hook_bridge:GroupMessage:{event.conversation_id}"
+                 if is_group
+@@ -139,11 +156,13 @@ class MessageHistoryStore:
+                 "group_name": "",
+                 "group_nickname": "",
+                 "wechat_name": sender_name,
++                "avatar": "",
+             },
+             ensure_ascii=False,
+             separators=(",", ":"),
+         )
+         return self._insert(
++            account_id=sender_id,
+             session_id=(
+                 f"hook_bridge:GroupMessage:{target}"
+                 if is_group
+@@ -162,6 +181,7 @@ class MessageHistoryStore:
+     def _insert(
+         self,
+         *,
++        account_id: str,
+         session_id: str,
+         role: str,
+         content: str,
+@@ -176,11 +196,12 @@ class MessageHistoryStore:
+             cursor = connection.execute(
+                 """
+                 INSERT OR IGNORE INTO messages (
+-                    session_id, role, content, sender_id, sender_name,
++                    account_id, session_id, role, content, sender_id, sender_name,
+                     group_id, platform, timestamp, metadata, dedup_key
+-                ) VALUES (?, ?, ?, ?, ?, ?, 'hook_bridge', ?, ?, ?)
++                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'hook_bridge', ?, ?, ?)
+                 """,
+                 (
++                    str(account_id or "").strip(),
+                     session_id,
+                     role,
+                     content,
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+index 372190f106f848035500d21ef09f4c5a6cd02906..a0ea2f079427c587e70e284326b304a7499a1ad5 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -14,6 +14,10 @@ from aiohttp import ClientConnectionError, ClientResponse, ClientSession, Client
+ from .cgi_offsets import cgi_offset_summary
+ from .models import SendResult, VideoUpload
+ 
++_GROUP_AUTO_REFRESH_COOLDOWN_SECONDS = 10.0
++_GROUP_AUTO_REFRESH_MAX_FAILURES = 3
++_GROUP_AUTO_REFRESH_BACKOFF_SECONDS = 60.0
++
+ 
+ class HookApiError(RuntimeError):
+     def __init__(
+@@ -330,6 +334,9 @@ class HookClient:
+         self.retry_delay = max(0.0, retry_delay)
+         self.image_path_field = image_path_field
+         self._friend_refresh_attempted = False
++        self._group_refresh_lock = asyncio.Lock()
++        self._group_auto_refresh_failures = 0
++        self._group_auto_refresh_next_at = 0.0
+ 
+     async def _response_json(
+         self,
+@@ -756,12 +763,181 @@ class HookClient:
+ 
+     async def get_groups(self) -> list[dict[str, Any]]:
+         data = await self._read_data("/api/get_chatroom_list", {})
+-        return list(data) if isinstance(data, list) else []
++        if not isinstance(data, list):
++            return []
++        groups = list(data)
++        if groups:
++            return groups
++
++        # The member-change watcher polls this legacy method. Empty-cache
++        # recovery is rate limited and backs off after repeated failures
++        # instead of permanently disabling refresh after one attempt.
++        refreshed = await self._refresh_group_cache(force=False)
++        return list(refreshed) if isinstance(refreshed, list) else []
++
++    def _group_refresh_lock_for_current_loop(self) -> asyncio.Lock:
++        lock = getattr(self, "_group_refresh_lock", None)
++        if lock is None:
++            # Keep object.__new__ based diagnostics and upgrades from an older
++            # in-memory instance safe; production instances initialize it.
++            lock = asyncio.Lock()
++            self._group_refresh_lock = lock
++        return lock
++
++    def _record_group_auto_refresh_result(self, *, populated: bool) -> None:
++        now = asyncio.get_running_loop().time()
++        if populated:
++            self._group_auto_refresh_failures = 0
++            self._group_auto_refresh_next_at = (
++                now + _GROUP_AUTO_REFRESH_COOLDOWN_SECONDS
++            )
++            return
++        failures = min(
++            _GROUP_AUTO_REFRESH_MAX_FAILURES,
++            int(getattr(self, "_group_auto_refresh_failures", 0)) + 1,
++        )
++        self._group_auto_refresh_failures = failures
++        delay = (
++            _GROUP_AUTO_REFRESH_BACKOFF_SECONDS
++            if failures >= _GROUP_AUTO_REFRESH_MAX_FAILURES
++            else _GROUP_AUTO_REFRESH_COOLDOWN_SECONDS
++        )
++        self._group_auto_refresh_next_at = now + delay
++
++    @staticmethod
++    def _groups_from_contact_refresh(data: Any) -> list[dict[str, Any]]:
++        contacts = data.get("contact_list") if isinstance(data, Mapping) else None
++        if not isinstance(contacts, list):
++            return []
++
++        groups: list[dict[str, Any]] = []
++        for value in contacts:
++            if not isinstance(value, Mapping):
++                continue
++            record = value.get("contact")
++            record = record if isinstance(record, Mapping) else value
++            group_id: Any = ""
++            for source in (record, value):
++                for key in (
++                    "group_id",
++                    "room_id",
++                    "roomId",
++                    "wxid",
++                    "userName",
++                    "username",
++                ):
++                    if source.get(key) not in (None, ""):
++                        group_id = source[key]
++                        break
++                if group_id not in (None, ""):
++                    break
++            for _ in range(3):
++                if not isinstance(group_id, Mapping):
++                    break
++                group_id = group_id.get("String", "")
++            if str(group_id or "").strip().endswith("@chatroom"):
++                groups.append(dict(value))
++        return groups
++
++    async def _refresh_group_cache(self, *, force: bool) -> Any | None:
++        loop = asyncio.get_running_loop()
++        if not force and loop.time() < float(
++            getattr(self, "_group_auto_refresh_next_at", 0.0)
++        ):
++            return None
++
++        # The lock is held only for the refresh request and cache reread.
++        # async-with releases it on timeout, cancellation, and every error, so
++        # an unfinished first attempt cannot lock out later explicit refreshes.
++        async with self._group_refresh_lock_for_current_loop():
++            now = loop.time()
++            if not force and now < float(
++                getattr(self, "_group_auto_refresh_next_at", 0.0)
++            ):
++                return None
++            if not force:
++                # Reserve the cooldown before awaiting I/O to coalesce
++                # concurrent automatic empty-cache polls.
++                self._group_auto_refresh_next_at = (
++                    now + _GROUP_AUTO_REFRESH_COOLDOWN_SECONDS
++                )
++            try:
++                refreshed_contacts = await self._read_data(
++                    "/api/update_all_friend", {}
++                )
++                refreshed = await self._read_data("/api/get_chatroom_list", {})
++            except (HookApiError, ClientConnectionError, asyncio.TimeoutError):
++                if force:
++                    raise
++                self._record_group_auto_refresh_result(populated=False)
++                return None
++
++            if not refreshed:
++                # Some hook builds return the freshly loaded contacts directly
++                # but populate get_chatroom_list later. Use only @chatroom
++                # records from that response so the first manual refresh does
++                # not misleadingly show an empty directory.
++                refreshed = self._groups_from_contact_refresh(refreshed_contacts)
++
++            self._record_group_auto_refresh_result(
++                populated=isinstance(refreshed, list) and bool(refreshed)
++            )
++            return refreshed
++
++    @staticmethod
++    def _strict_group_records(
++        data: Any, *, after_refresh: bool
++    ) -> list[dict[str, Any]]:
++        if not isinstance(data, list) or not all(
++            isinstance(item, Mapping) for item in data
++        ):
++            suffix = " after refresh" if after_refresh else ""
++            raise HookApiError(
++                "/api/get_chatroom_list",
++                None,
++                f"group cache response shape is invalid{suffix}",
++                diagnostics={"json_type": type(data).__name__},
++            )
++        return [dict(item) for item in data]
++
++    async def get_groups_strict(
++        self, *, force_refresh: bool = False
++    ) -> list[dict[str, Any]]:
++        data = await self._read_data("/api/get_chatroom_list", {})
++        groups = self._strict_group_records(data, after_refresh=False)
++        if groups and not force_refresh:
++            return groups
++        refreshed = await self._refresh_group_cache(force=force_refresh)
++        if refreshed is None:
++            return groups
++        return self._strict_group_records(refreshed, after_refresh=True)
+ 
+     async def get_group_members(self, room_id: str) -> list[dict[str, Any]]:
+         data = await self._read_data("/api/get_room_members", {"room_id": room_id})
+         return _chatroom_members(data)
+ 
++    async def get_group_members_strict(
++        self, room_id: str
++    ) -> list[dict[str, Any]]:
++        data = await self._read_data("/api/get_room_members", {"room_id": room_id})
++        members: Any = data
++        if isinstance(data, Mapping):
++            chatroom_data = data.get("newChatroomData")
++            if isinstance(chatroom_data, Mapping):
++                members = chatroom_data.get("chatRoomMember")
++            else:
++                members = data.get("chatRoomMember")
++        if not isinstance(members, list) or not all(
++            isinstance(item, Mapping) for item in members
++        ):
++            raise HookApiError(
++                "/api/get_room_members",
++                None,
++                "group member cache response shape is invalid",
++                diagnostics={"json_type": type(data).__name__},
++            )
++        return [dict(item) for item in members]
++
+     async def get_group_detail_members(self, room_id: str) -> list[dict[str, Any]]:
+         data = await self._read_data(
+             "/api/get_chatroom_detail_cache", {"room_id": room_id}

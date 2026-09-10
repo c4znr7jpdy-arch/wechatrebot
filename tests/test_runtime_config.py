@@ -142,6 +142,7 @@ def test_runtime_config_applies_brand_and_customer_provider(tmp_path: Path) -> N
     assert astrbot["provider_settings"]["default_provider_id"] == (
         "commercial_openai/chat-model"
     )
+    assert astrbot["provider_settings"]["request_max_retries"] == 1
     assert astrbot["persona"][0]["name"] == "commercial_brand"
     assert "群聊管家" in astrbot["persona"][0]["prompt"]
     assert astrbot["provider_sources"][0]["key"] == ["customer-secret"]
@@ -245,3 +246,151 @@ def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path
     )
     assert preserved["analyzer_model"] == "custom/model"
     assert updated_astrbot["plugin_set"] == ["astrbot_plugin_angel_heart"]
+
+
+def test_delivery_seeds_fast_single_memory_and_private_emotion_defaults(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+    data = install / "app" / "astrbot" / "data"
+    for module in (
+        "astrbot_plugin_livingmemory",
+        "astrbot_plugin_mnemosyne",
+        "astrbot_plugin_self_learning",
+    ):
+        (data / "plugins" / module).mkdir(parents=True)
+    (install / "legal").mkdir(parents=True)
+    (install / "legal" / "feature-set.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                        {
+                            "module": "astrbot_plugin_livingmemory",
+                            "display_name": "长期记忆",
+                            "configuration": "schema-and-page",
+                            "description": "长期记忆",
+                            "default_enabled": True,
+                        },
+                        {
+                            "module": "astrbot_plugin_mnemosyne",
+                            "display_name": "外部向量记忆",
+                            "configuration": "schema",
+                            "description": "进阶替代",
+                            "default_enabled": True,
+                        },
+                        {
+                            "module": "astrbot_plugin_self_learning",
+                            "display_name": "情感与关系",
+                            "configuration": "page",
+                            "description": "精简情感上下文",
+                            "default_enabled": True,
+                        },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = OpenAIProviderProfile(
+        api_key="customer-secret",
+        api_base="https://api.example.com/v1",
+        model="chat-model",
+    )
+
+    write_runtime_configs(install, provider_profile=provider)
+
+    engine = json.loads((data / "cmd_config.json").read_text(encoding="utf-8"))
+    living = json.loads(
+        (data / "config" / "astrbot_plugin_livingmemory_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    emotion = json.loads(
+        (data / "config" / "astrbot_plugin_self_learning_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert "astrbot_plugin_livingmemory" in engine["plugin_set"]
+    assert "astrbot_plugin_mnemosyne" not in engine["plugin_set"]
+    assert living["provider_settings"]["llm_provider_id"] == provider.model_id
+    assert living["recall_engine"]["auto_recall_mode"] == "smart"
+    assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8
+    assert living["graph_memory"]["enabled"] is False
+    assert "上次说了什么" in living["recall_engine"]["explicit_recall_phrases"]
+    assert emotion["Self_Learning_Basic"]["enable_message_capture"] is False
+    assert emotion["Advanced_Settings"]["save_raw_messages"] is False
+    assert emotion["Runtime_Internal_Settings"]["llm_hook_profile"] == "compact"
+    assert emotion["Integration_Settings"]["delegate_memory_to_livingmemory"] is True
+
+    living["recall_engine"]["auto_recall_mode"] = "always"
+    (data / "config" / "astrbot_plugin_livingmemory_config.json").write_text(
+        json.dumps(living), encoding="utf-8"
+    )
+    write_runtime_configs(install, provider_profile=provider)
+    preserved = json.loads(
+        (data / "config" / "astrbot_plugin_livingmemory_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert preserved["recall_engine"]["auto_recall_mode"] == "always"
+
+
+def test_provider_update_preserves_extensions_but_enforces_reply_timeout(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+    path = install / "app" / "astrbot" / "data" / "cmd_config.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "provider_sources": [
+                    {
+                        "id": "jyjapi",
+                        "key": ["old-secret"],
+                        "api_base": "https://old.example/v1",
+                        "custom_headers": {"X-Customer": "preserved"},
+                        "timeout": 240,
+                    }
+                ],
+                "provider": [
+                    {
+                        "id": "jyjapi/grok-4.6",
+                        "provider_source_id": "jyjapi",
+                        "model": "grok-4.6",
+                        "modalities": ["text", "image", "audio", "tool_use"],
+                        "max_context_tokens": 262144,
+                        "custom_extra_body": {"reasoning_effort": "high"},
+                    }
+                ],
+                "provider_settings": {
+                    "default_provider_id": "jyjapi/grok-4.6",
+                    "fallback_chat_models": ["legacy/slow-a", "legacy/slow-b"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    profile = OpenAIProviderProfile(
+        api_key="new-secret",
+        api_base="https://api.xiuxianjyj.xin/v1",
+        model="grok-4.6",
+        source_id="jyjapi",
+    )
+
+    write_runtime_configs(install, provider_profile=profile)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    source = payload["provider_sources"][0]
+    model = payload["provider"][0]
+    assert source["key"] == ["new-secret"]
+    assert source["api_base"] == "https://api.xiuxianjyj.xin/v1"
+    assert source["custom_headers"] == {"X-Customer": "preserved"}
+    assert source["timeout"] == 35
+    assert model["max_context_tokens"] == 262144
+    assert model["custom_extra_body"] == {"reasoning_effort": "high"}
+    assert payload["provider_settings"]["default_provider_id"] == (
+        "jyjapi/grok-4.6"
+    )
+    assert payload["provider_settings"]["request_max_retries"] == 1
+    assert payload["provider_settings"]["fallback_chat_models"] == []

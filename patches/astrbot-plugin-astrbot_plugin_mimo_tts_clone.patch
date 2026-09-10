@@ -1,0 +1,63 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -74,7 +74,7 @@
+         self._config_file = pathlib.Path(self.data_dir) / "config.json"
+         native_config = self._coerce_config(config)
+         persisted_config = self._load_persisted_config()
+-        self.config = normalize_config({**native_config, **persisted_config})
++        self.config = normalize_config({**persisted_config, **native_config})
+         self.plugin_config = build_plugin_config(self.config)
+         self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
+         self.voice_store = VoiceStore(self.data_dir)
+@@ -156,8 +156,33 @@
+                 if key == "api_key" and not str(changes[key] or "").strip():
+                     continue
+                 merged[key] = changes[key]
+-        self.config = normalize_config(merged)
+-        self.plugin_config = build_plugin_config(self.config)
++        candidate = normalize_config(merged)
++        candidate_config = build_plugin_config(candidate)
++        candidate_queue_settings = (
++            candidate_config.background_queue_size,
++            candidate_config.max_concurrency,
++            candidate_config.job_persistence_enabled,
++            candidate_config.job_recovery_max_age_hours,
++            candidate_config.job_history_size,
++        )
++        if self._job_manager is not None and candidate_queue_settings != previous_queue_settings:
++            queue = self._job_manager.snapshot()
++            if queue["queued_jobs"] or queue["running_jobs"]:
++                raise ValueError("语音队列仍有任务，请等待任务结束后再修改队列设置；本次未保存。")
++        previous_config = self.config
++        self.config = candidate
++        try:
++            if self._native_config is not None:
++                self._native_config.save_config(candidate)
++            else:
++                self._persist_local_config()
++        except Exception:
++            self.config = previous_config
++            if self._native_config is not None:
++                self._native_config.clear()
++                self._native_config.update(previous_config)
++            raise ValueError("配置无法保存，已保留原设置。请检查磁盘空间和写入权限。") from None
++        self.plugin_config = candidate_config
+         self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
+         self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
+         self._style_director_cache.clear()
+diff --git a/pages_api.py b/pages_api.py
+--- a/pages_api.py
++++ b/pages_api.py
+@@ -151,7 +151,10 @@
+         data = dict(data)
+         if not str(data.get("api_key") or "").strip():
+             data.pop("api_key", None)
+-        persisted = self._update_runtime_config(data)
++        try:
++            persisted = self._update_runtime_config(data)
++        except ValueError as exc:
++            return jsonify({"success": False, "error": str(exc)}), 400
+         if not persisted.get("local") and not persisted.get("native"):
+             return jsonify(
+                 {

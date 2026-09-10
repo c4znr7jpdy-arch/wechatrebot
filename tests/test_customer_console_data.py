@@ -4,12 +4,17 @@ from pathlib import Path
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.customer_config import (
     RobotSettings,
+    delete_provider_profile,
     load_plugins,
     load_provider_profile,
+    load_provider_services,
     load_robot_settings,
+    provider_reference_modules,
+    replace_provider_references,
     save_provider_profile,
     save_robot_settings,
     set_plugin_enabled,
+    set_default_provider,
 )
 from wechatrebot_manager.customer_logs import sanitize_log_text, tail_log
 from wechatrebot_manager.diagnostics import white_label_terms
@@ -52,6 +57,109 @@ def test_robot_and_provider_settings_round_trip(tmp_path: Path) -> None:
     assert loaded.model == "chat-model"
 
 
+def test_multiple_model_services_share_one_catalog_and_default(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    grok = OpenAIProviderProfile(
+        api_key="free-service-key",
+        api_base="https://api.xiuxianjyj.xin/v1",
+        model="grok-4.6",
+        source_id="jyjapi",
+    )
+    deepseek = OpenAIProviderProfile(
+        api_key="developer-key",
+        api_base="https://api.deepseek.com/v1",
+        model="deepseek-v4-flash",
+        source_id="deepseek",
+    )
+    save_provider_profile(install, grok)
+    save_provider_profile(install, deepseek, make_default=False)
+
+    services = load_provider_services(install)
+    assert [item.display_name for item in services] == [
+        "免费 Grok 4.6",
+        "DeepSeek · v4-flash",
+    ]
+    assert services[0].is_default is True
+    assert all("api_key" not in item.to_public_dict() for item in services)
+
+    set_default_provider(install, deepseek.model_id)
+    assert load_provider_profile(install) == deepseek.normalized()
+    engine = json.loads(
+        (install / "app/astrbot/data/cmd_config.json").read_text(encoding="utf-8")
+    )
+    assert engine["provider_settings"]["request_max_retries"] == 1
+    assert engine["provider_settings"]["fallback_chat_models"] == []
+    delete_provider_profile(install, grok.model_id)
+    assert [item.provider_id for item in load_provider_services(install)] == [
+        deepseek.model_id
+    ]
+
+
+def test_provider_references_are_named_and_migrated_before_deletion(
+    tmp_path: Path,
+) -> None:
+    install, _ = _install(tmp_path)
+    grok = OpenAIProviderProfile(
+        api_key="free-service-key",
+        api_base="https://api.xiuxianjyj.xin/v1",
+        model="grok-4.6",
+        source_id="jyjapi",
+    )
+    deepseek = OpenAIProviderProfile(
+        api_key="developer-key",
+        api_base="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        source_id="deepseek",
+    )
+    save_provider_profile(install, grok)
+    save_provider_profile(install, deepseek, make_default=False)
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "astrbot_plugin_livingmemory_config.json"
+    )
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "summary_provider_id": grok.model_id,
+                "nested": {"providers": [grok.model_id, deepseek.model_id]},
+                "description": f"不要替换包含 {grok.model_id} 的普通文字",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    services = load_provider_services(install)
+    current = next(item for item in services if item.provider_id == grok.model_id)
+    assert current.reference_modules == ("astrbot_plugin_livingmemory",)
+    assert current.to_public_dict()["references"] == ["长期记忆"]
+    assert provider_reference_modules(install, grok.model_id, strict=True) == (
+        "astrbot_plugin_livingmemory",
+    )
+
+    assert replace_provider_references(
+        install, grok.model_id, deepseek.model_id
+    ) == ("astrbot_plugin_livingmemory",)
+    updated = json.loads(config_path.read_text(encoding="utf-8"))
+    assert updated["summary_provider_id"] == deepseek.model_id
+    assert updated["nested"]["providers"] == [
+        deepseek.model_id,
+        deepseek.model_id,
+    ]
+    assert updated["description"] == f"不要替换包含 {grok.model_id} 的普通文字"
+
+    set_default_provider(install, deepseek.model_id)
+    delete_provider_profile(install, grok.model_id)
+    assert [item.provider_id for item in load_provider_services(install)] == [
+        deepseek.model_id
+    ]
+
+
 def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path) -> None:
     install, _ = _install(tmp_path)
     plugin_root = install / "app" / "astrbot" / "data" / "plugins"
@@ -69,6 +177,34 @@ def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path
         (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(encoding="utf-8")
     )
     assert "astrbot_plugin_music" not in config["plugin_set"]
+
+
+def test_plugin_toggle_preserves_hidden_foundations_and_memory_is_exclusive(
+    tmp_path: Path,
+) -> None:
+    install, _ = _install(tmp_path)
+    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+    for module in (
+        "astrbot_plugin_music",
+        "astrbot_plugin_livingmemory",
+        "astrbot_plugin_self_learning",
+        "astrbot_plugin_mnemosyne",
+    ):
+        (plugin_root / module).mkdir(parents=True, exist_ok=True)
+    config_path = install / "app" / "astrbot" / "data" / "cmd_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["plugin_set"] = ["*"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    set_plugin_enabled(install, "astrbot_plugin_music", False)
+    updated = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "astrbot_plugin_livingmemory" in updated["plugin_set"]
+    assert "astrbot_plugin_self_learning" in updated["plugin_set"]
+
+    set_plugin_enabled(install, "astrbot_plugin_mnemosyne", True)
+    switched = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "astrbot_plugin_mnemosyne" in switched["plugin_set"]
+    assert "astrbot_plugin_livingmemory" not in switched["plugin_set"]
 
 
 def test_logs_and_diagnostics_remove_implementation_brand(tmp_path: Path) -> None:

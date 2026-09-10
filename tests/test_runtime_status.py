@@ -1,3 +1,4 @@
+from wechatrebot_manager import runtime_status
 from wechatrebot_manager.runtime_status import BridgeHealth, RuntimeSnapshot
 
 
@@ -37,3 +38,39 @@ def test_bridge_health_connected_requires_every_signal() -> None:
         upstream_connected=True,
         heartbeat_fresh=True,
     ).connected
+
+
+def test_authoritative_prelogin_health_never_calls_unsafe_profile_api(monkeypatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda host, port: True)
+    monkeypatch.setattr(
+        runtime_status,
+        "probe_bridge_health",
+        lambda **kwargs: BridgeHealth(service_ready=True, status_available=True),
+    )
+    monkeypatch.setattr(
+        runtime_status,
+        "probe_wechat_identity",
+        lambda **kwargs: calls.append(int(kwargs["port"])) or "unsafe",
+    )
+
+    snapshot = runtime_status.runtime_snapshot()
+
+    assert snapshot.wechat_identity == ""
+    assert calls == []
+
+
+def test_legacy_bridge_can_still_use_profile_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda host, port: True)
+    monkeypatch.setattr(
+        runtime_status,
+        "probe_bridge_health",
+        lambda **kwargs: BridgeHealth(service_ready=True, status_available=False),
+    )
+    monkeypatch.setattr(
+        runtime_status,
+        "probe_wechat_identity",
+        lambda **kwargs: "wxid_legacy",
+    )
+
+    assert runtime_status.runtime_snapshot().wechat_identity == "wxid_legacy"

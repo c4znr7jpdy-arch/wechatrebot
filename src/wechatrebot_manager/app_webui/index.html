@@ -6,12 +6,14 @@
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=0.9.0">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
     <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5zM9 21v-7h6v7"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M15 4.3a3.5 3.5 0 0 1 0 6.4M17 14.8a4 4 0 0 1 4 4V20"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4zm4 4h8M8 13h5"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
@@ -31,12 +33,13 @@
         <div class="brand-copy"><strong id="brandName">姜小妹机器人</strong><span>微信机器人管理</span></div>
       </div>
       <nav class="main-nav" aria-label="主导航">
-        <button class="nav-item active" data-page="home"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
-        <button class="nav-item" data-page="features"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
-        <button class="nav-item" data-page="history"><svg><use href="#i-chat"/></svg><span>聊天记录</span></button>
-        <button class="nav-item" data-page="schedules"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
-        <button class="nav-item" data-page="activity"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
-        <button class="nav-item" data-page="settings"><svg><use href="#i-settings"/></svg><span>设置</span></button>
+            <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
+            <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
+            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="群聊管理" title="群聊管理"><svg><use href="#i-users"/></svg><span>群聊管理</span></button>
+            <button class="nav-item" data-page="history" data-action-bound disabled aria-label="聊天记录" title="聊天记录"><svg><use href="#i-chat"/></svg><span>聊天记录</span></button>
+            <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
+            <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
+            <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
       </nav>
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
@@ -48,7 +51,7 @@
       <header class="topbar">
         <div><span class="eyebrow">控制台</span><strong id="pageTitle">运行中心</strong></div>
         <div class="top-actions">
-          <button class="button ghost small" id="globalRefresh"><svg><use href="#i-refresh"/></svg>刷新状态</button>
+          <button class="button ghost small" id="globalRefresh" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新状态</button>
           <span class="status-badge checking" id="globalStatus"><span></span>正在检查</span>
         </div>
       </header>
@@ -64,9 +67,9 @@
             <div class="alert-code"><span>环境检查</span><strong id="environmentCode">11001</strong></div>
             <div class="alert-copy"><h2 id="environmentTitle">未检测到微信</h2><p id="environmentMessage"></p><ol id="environmentSolutions"></ol></div>
             <div class="alert-actions">
-              <button class="button primary" id="downloadWechat">下载安装微信</button>
-              <button class="button secondary" id="chooseWechat">选择本机微信</button>
-              <button class="button ghost" id="retryEnvironment"><svg><use href="#i-refresh"/></svg>重新检测</button>
+                <button class="button primary" id="downloadWechat" data-action-bound disabled>下载安装微信</button>
+                <button class="button secondary" id="chooseWechat" data-action-bound disabled>选择本机微信</button>
+                <button class="button ghost" id="retryEnvironment" data-action-bound disabled><svg><use href="#i-refresh"/></svg>重新检测</button>
             </div>
           </section>
 
@@ -107,27 +110,55 @@
         </section>
 
         <section class="page" id="page-features" aria-labelledby="featureHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>每项功能都可以单独启停并查看说明；需要设置时会提供对应入口。</p></div></div>
+          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>每项功能都可以单独启停，并明确显示使用前还需要准备什么。</p></div><button class="button ghost" id="refreshFeatures" data-action-bound disabled><svg><use href="#i-refresh"/></svg>检查准备情况</button></div>
           <div class="feature-layout">
             <aside class="feature-catalog panel">
-              <label class="search-box" id="featureSearchBox"><svg><use href="#i-search"/></svg><input id="featureSearch" type="search" placeholder="搜索功能" autocomplete="off"><button type="button" class="clear-search" aria-label="清空搜索">×</button></label>
+            <label class="search-box" id="featureSearchBox"><svg><use href="#i-search"/></svg><input id="featureSearch" type="search" placeholder="搜索功能" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
+            <div class="segmented feature-filters" id="featureAudience" aria-label="功能分类"><button class="active" data-audience="common" data-action-bound disabled>常用</button><button data-audience="optional" data-action-bound disabled>按需</button><button data-audience="advanced" data-action-bound disabled>进阶</button><button data-audience="all" data-action-bound disabled>全部</button></div>
               <div class="feature-summary" id="featureSummary">正在读取功能…</div>
               <div class="feature-list" id="featureList"></div>
             </aside>
             <section class="feature-detail panel" id="featureDetail">
-              <div class="empty-state"><div class="empty-symbol">功</div><h2>选择一项功能</h2><p>在左侧选择后，可查看开关、使用说明和全部设置。</p></div>
+              <div class="empty-state"><div class="empty-symbol">功</div><h2>选择一项功能</h2><p>在左侧选择后，可查看开关、使用说明和常用设置。</p></div>
             </section>
           </div>
         </section>
 
+        <section class="page" id="page-groups" aria-labelledby="groupHeading">
+          <div class="page-heading compact">
+            <div><span class="eyebrow">群主管理</span><h1 id="groupHeading">群聊管理</h1><p>从当前登录微信读取群信息；查看和刷新都不会向群里发送消息。</p></div>
+              <button class="button secondary" id="refreshGroups" data-action-bound disabled><svg><use href="#i-refresh"/></svg><span>刷新群列表</span></button>
+          </div>
+          <section class="directory-status" id="groupDirectoryStatus" role="status" aria-live="polite">
+            <div><strong>尚未读取群聊</strong><span>打开本页后会读取一次，也可以随时手动刷新。</span></div>
+          </section>
+          <div class="group-toolbar panel">
+              <label class="search-box wide" id="groupSearchBox"><svg><use href="#i-search"/></svg><input id="groupSearch" type="search" placeholder="搜索群名称或群标识" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
+            <div class="group-meta"><strong id="groupCount">等待读取群聊</strong><span id="groupUpdated">尚未更新</span></div>
+          </div>
+          <div class="group-layout">
+            <section class="group-table-panel panel" aria-label="群聊列表">
+              <div class="group-table-scroll">
+                <table class="group-table">
+                  <thead><tr><th>群名称</th><th>群标识</th><th>成员数</th><th class="actions-column">操作</th></tr></thead>
+                  <tbody id="groupRows"><tr><td colspan="4" class="table-empty">正在准备群聊列表…</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+            <aside class="group-inspector panel" id="groupInspector" aria-live="polite">
+              <span class="eyebrow">群聊详情</span><h2>选择一个群聊</h2><p>可查看接口实际返回的群信息和成员；未提供的权限信息会明确标为未知。</p>
+            </aside>
+          </div>
+        </section>
+
         <section class="page" id="page-history" aria-labelledby="historyHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">本机数据</span><h1 id="historyHeading">聊天记录</h1><p>记录仅保存在这台电脑，可搜索、筛选、导出和清理。</p></div><button class="button secondary" id="exportHistory"><svg><use href="#i-download"/></svg>导出记录</button></div>
+          <div class="page-heading compact"><div><span class="eyebrow">本机数据</span><h1 id="historyHeading">聊天记录</h1><p>这里是便于查看的本机聊天副本；删除记录不会让机器人忘记长期记忆。</p></div><button class="button secondary" id="exportHistory" data-action-bound disabled><svg><use href="#i-download"/></svg>导出记录</button></div>
           <div class="history-toolbar panel">
-            <div class="segmented" id="historyKinds"><button class="active" data-kind="all">全部</button><button data-kind="private">个人聊天</button><button data-kind="group">群聊</button></div>
-            <label class="search-box wide" id="historySearchBox"><svg><use href="#i-search"/></svg><input id="historySearch" type="search" placeholder="搜索昵称、微信号或内容" autocomplete="off"><button type="button" class="clear-search" aria-label="清空搜索">×</button></label>
+              <div class="segmented" id="historyKinds"><button class="active" data-kind="all" data-action-bound disabled>全部</button><button data-kind="private" data-action-bound disabled>个人聊天</button><button data-kind="group" data-action-bound disabled>群聊</button></div>
+              <label class="search-box wide" id="historySearchBox"><svg><use href="#i-search"/></svg><input id="historySearch" type="search" placeholder="搜索昵称、微信号或内容" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
             <label class="date-field"><span>从</span><input type="date" id="historyStart"></label>
             <label class="date-field"><span>到</span><input type="date" id="historyEnd"></label>
-            <button class="button ghost small" id="historyFilter">筛选</button>
+                <button class="button ghost small" id="historyFilter" data-action-bound disabled>筛选</button>
           </div>
           <div class="history-summary" id="historySummary"></div>
           <div class="history-layout panel">
@@ -135,13 +166,15 @@
             <section class="message-pane">
               <header id="conversationHeader"><div><strong>请选择聊天</strong><span>消息内容会显示在这里</span></div></header>
               <div class="message-list" id="messageList"><div class="empty-state compact"><div class="empty-symbol">聊</div><p>选择左侧聊天对象查看记录</p></div></div>
+              <button class="new-message-button" id="newMessageButton" type="button" data-action-bound disabled hidden>查看新消息</button>
             </section>
             <aside class="conversation-inspector" id="conversationInspector"><span class="eyebrow">聊天信息</span><h2>尚未选择</h2><p>选择一个聊天后，可以查看分类、微信号与消息数量。</p></aside>
           </div>
         </section>
 
         <section class="page" id="page-schedules" aria-labelledby="scheduleHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">自动运行</span><h1 id="scheduleHeading">定时任务</h1><p>汇总各项功能创建的业务任务，内部维护任务不会出现在这里。</p></div><button class="button ghost" id="refreshSchedules"><svg><use href="#i-refresh"/></svg>刷新</button></div>
+          <div class="page-heading compact"><div><span class="eyebrow">自动运行</span><h1 id="scheduleHeading">定时任务</h1><p>汇总各项功能创建的业务任务，内部维护任务不会出现在这里。</p></div><button class="button ghost" id="refreshSchedules" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
+          <section class="proactive-control panel" id="proactiveControl"><div><span class="eyebrow">主动消息总控</span><h2>默认不主动打扰群聊</h2><p id="proactiveSummary">选择群聊后，可单独允许主动消息、设置安静时段和每日上限。</p></div><button class="button secondary" id="manageGroupPolicies" data-action-bound disabled>去管理群聊规则</button></section>
           <div class="metric-row"><article><span>全部任务</span><strong id="scheduleTotal">0</strong></article><article><span>运行中</span><strong id="scheduleRunning">0</strong></article><article><span>已暂停</span><strong id="schedulePaused">0</strong></article></div>
           <section class="table-panel panel">
             <table><thead><tr><th>任务名称</th><th>来源</th><th>发送到</th><th>执行时间</th><th>下次运行</th><th>状态</th><th class="actions-column">操作</th></tr></thead><tbody id="scheduleRows"><tr><td colspan="7" class="table-empty">正在读取定时任务…</td></tr></tbody></table>
@@ -149,42 +182,82 @@
         </section>
 
         <section class="page" id="page-activity" aria-labelledby="activityHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">清晰可追溯</span><h1 id="activityHeading">运行记录</h1><p>仅展示用户可理解的关键事件；技术信息默认隐藏。</p></div><button class="button ghost" id="refreshActivity"><svg><use href="#i-refresh"/></svg>刷新</button></div>
+          <div class="page-heading compact"><div><span class="eyebrow">清晰可追溯</span><h1 id="activityHeading">运行记录</h1><p>可以看到一次回复是否经过点名快路径、长期记忆、情感上下文和语音处理。</p></div><button class="button ghost" id="refreshActivity" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
+          <section class="trace-panel panel"><div class="panel-heading"><div><span class="eyebrow">最近回复</span><h2>消息处理链路</h2></div><span class="status-badge" id="traceStatus">等待消息</span></div><div class="trace-list" id="responseTraceList"><div class="loading-row">正在读取最近回复链路…</div></div></section>
           <section class="activity-panel panel"><div class="activity-list" id="activityList"><div class="loading-row">正在读取运行记录…</div></div></section>
         </section>
 
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>一次保存即可同步机器人名称、回复身份和欢迎语。</p></div></div>
+          <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>机器人身份和模型服务都在这里统一管理，相关功能会自动读取同一份配置。</p></div></div>
           <div class="settings-grid">
+            <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
+              <div class="panel-heading"><div><span class="eyebrow">统一模型服务</span><h2>模型服务中心</h2></div><span class="status-badge success" id="providerStatus">免费 Grok 优先</span></div>
+              <p class="settings-copy">普通用户保持免费 Grok 即可；你自己的设备可以添加 DeepSeek。功能中心里需要模型的功能，会自动显示这里已经配置好的服务。</p>
+              <div class="provider-service-list" id="providerServiceList" aria-live="polite"><div class="loading-row">正在读取模型服务…</div></div>
+              <div class="provider-editor-heading"><div><strong id="providerEditorTitle">添加模型服务</strong><span id="providerEditorSubtitle">选择预设后只需填写服务密钥</span></div><button class="button ghost small" id="addProvider" type="button" data-action-bound disabled>添加新服务</button></div>
+              <input name="provider_id" type="hidden">
+              <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
+              <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.xiuxianjyj.xin/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><input name="model" list="providerModelOptions" autocomplete="off" placeholder="grok-4.6" required><datalist id="providerModelOptions"></datalist><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
+              <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="留空则保留当前密钥"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">尚未配置</small></label>
+              <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除</button><button class="button primary" type="submit">保存并设为回复模型</button></div></div>
+            </form>
+
+            <form class="settings-card assistant-settings-card panel" id="personaForm" novalidate>
+              <div class="panel-heading"><div><span class="eyebrow">人格与回复</span><h2>她是谁、什么时候说话</h2></div><span class="status-badge" id="personaStatus">等待读取</span></div>
+              <p class="settings-copy">被点名时走快速回应，不再额外调用一次判断模型；群聊里默认只处理最相关的一件事。</p>
+              <div class="field-pair"><label><span>说话风格</span><select name="tone"><option value="natural">自然熟人</option><option value="warm">温柔陪伴</option><option value="professional">专业助理</option><option value="lively">活泼群友</option></select></label><label><span>日常回复长度</span><select name="reply_length"><option value="brief">简短，适合群聊</option><option value="balanced">均衡</option><option value="detailed">详细</option></select></label></div>
+              <label><span>机器人昵称</span><input name="alias" maxlength="200" placeholder="姜小妹|小妹"><small>多个昵称用 | 分隔，被直接叫到昵称时也算点名。</small></label>
+              <div class="option-grid compact-options"><label class="option-check"><input name="mention_only" type="checkbox"><span>离场时只在被点名后加入聊天</span></label><label class="option-check"><input name="fast_reply" type="checkbox"><span>点名或引用时直接交给回复模型</span></label></div>
+              <details class="advanced-details"><summary>调整人格文字</summary><label><span>身份定位</span><textarea class="resize-none" name="identity_prompt" rows="4" maxlength="3000"></textarea></label><label><span>接话与边界</span><textarea class="resize-none" name="reply_guide" rows="4" maxlength="3000"></textarea></label></details>
+              <div class="form-actions"><span class="form-note" id="personaNote" role="status"></span><button class="button primary" type="submit">保存人格设置</button></div>
+            </form>
+
+            <form class="settings-card panel" id="memoryForm" novalidate>
+              <div class="panel-heading"><div><span class="eyebrow">长期记忆</span><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
+              <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
+              <label class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select><small>“在吗、你好”等短寒暄会直接回复，不等待记忆检索。</small></label>
+              <label class="toggle-line"><span><strong>明确问起往事时优先回忆</strong><small>例如“上次说了什么”“你还记得吗”</small></span><span class="toggle"><input name="explicit_recall_enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <label><span>回忆触发说法</span><textarea class="resize-none" name="explicit_recall_phrases" rows="3" placeholder="上次说了什么，还记得吗，之前提到"></textarea><small>用逗号分隔，最多 20 条。</small></label>
+              <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
+              <input name="casual_query_max_chars" type="hidden" value="24">
+              <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
+            </form>
+
+            <form class="settings-card panel" id="emotionForm" novalidate>
+              <div class="panel-heading"><div><span class="eyebrow">情感成长</span><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
+              <p class="settings-copy">只把精简的关系、好感度和心情放进回复上下文，不把完整学习记录塞给模型。</p>
+              <label class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <div class="option-grid compact-options"><label class="option-check"><input name="daily_mood" type="checkbox"><span>每天自然更换心情</span></label><label class="option-check"><input name="include_affection" type="checkbox"><span>回复时参考好感度</span></label><label class="option-check"><input name="include_mood" type="checkbox"><span>回复时参考当前心情</span></label></div>
+              <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
+            </form>
+
             <form class="settings-card panel" id="brandForm" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">一键替换</span><h2>机器人名称与身份</h2></div></div>
               <label><span>软件与机器人名称</span><input name="display_name" maxlength="32" required><small>显示在窗口标题、功能页和回复身份中</small></label>
               <div class="field-pair"><label><span>简称</span><input name="short_name" maxlength="32" required></label><label><span>人格称呼</span><input name="persona_name" maxlength="32" required></label></div>
-              <label><span>欢迎语</span><textarea name="welcome_text" rows="3"></textarea></label>
+              <label><span>欢迎语</span><textarea class="resize-none" name="welcome_text" rows="3"></textarea></label>
               <label><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..."><small>留空表示暂不设置管理员</small></label>
               <div class="form-actions"><span class="form-note" id="brandNote"></span><button class="button primary" type="submit">保存并统一替换</button></div>
-            </form>
-
-            <form class="settings-card panel" id="providerForm" autocomplete="off" novalidate>
-              <div class="panel-heading"><div><span class="eyebrow">智能回复</span><h2>回复模型</h2></div></div>
-              <label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label>
-              <label><span>模型名称</span><input name="model" autocomplete="off" placeholder="模型 ID" required></label>
-              <label><span>API Key</span><input name="api_key" type="password" autocomplete="new-password" placeholder="留空则保留当前 Key"><small id="apiKeyHint">尚未配置</small></label>
-              <div class="form-actions"><span class="form-note" id="providerNote"></span><button class="button primary" type="submit">保存模型</button></div>
             </form>
 
             <section class="settings-card panel">
               <div class="panel-heading"><div><span class="eyebrow">微信环境</span><h2>客户端位置</h2></div></div>
               <div class="path-box"><span>当前路径</span><code id="wechatPath">尚未选择</code></div>
               <p class="settings-copy">软件每次打开都会重新检查版本。自动发现失败时，可以手动选择 Weixin.exe。</p>
-              <div class="button-row"><button class="button secondary" id="settingsChooseWechat">重新选择</button><button class="button ghost" id="settingsCheckWechat">重新检测</button></div>
+              <div class="button-row"><button class="button secondary" id="settingsChooseWechat" data-action-bound disabled>重新选择</button><button class="button ghost" id="settingsCheckWechat" data-action-bound disabled>重新检测</button></div>
             </section>
 
             <section class="settings-card panel">
               <div class="panel-heading"><div><span class="eyebrow">数据与版本</span><h2>维护</h2></div></div>
-              <div class="maintenance-row"><div><strong>安装目录</strong><span id="installPath"></span></div><button class="button ghost small" id="openInstall"><svg><use href="#i-folder"/></svg>打开目录</button></div>
-              <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory">按日期清理</button></div>
-              <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate">检查更新</button></div>
+              <div class="maintenance-row"><div><strong>安装目录</strong><span id="installPath"></span></div><button class="button ghost small" id="openInstall" data-action-bound disabled><svg><use href="#i-folder"/></svg>打开目录</button></div>
+              <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
+              <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
+              <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
+              <div class="maintenance-row"><div><strong>新手引导</strong><span>重新查看连接微信、选择模型和管理群聊的三步说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>重新查看</button></div>
+              <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
+              <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
+              <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、聊天记录、日志、备份及全部本机残留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
             </section>
           </div>
         </section>
@@ -198,9 +271,17 @@
       <div class="modal-icon" id="modalIcon">!</div><h2 id="modalTitle">确认操作</h2><p id="modalMessage"></p><div id="modalField"></div>
       <div class="modal-progress" id="modalProgress" hidden><span id="modalProgressBar"></span></div>
       <div class="modal-error" id="modalError" role="alert" hidden></div>
-      <div class="modal-actions"><button class="button ghost" id="modalCancel">取消</button><button class="button danger" id="modalConfirm">确认</button></div>
+        <div class="modal-actions"><button class="button ghost" id="modalCancel" data-action-bound disabled>取消</button><button class="button danger" id="modalConfirm" data-action-bound disabled>确认</button></div>
     </section>
   </div>
-  <script src="app.js"></script>
+  <div class="onboarding-backdrop" id="onboardingBackdrop" hidden>
+    <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+      <span class="eyebrow">第一次使用</span><h2 id="onboardingTitle">先用推荐设置跑起来</h2><p>不用理解插件或命令。连接微信、确认回复模型，再按群设置机器人是否主动说话。</p>
+      <div class="onboarding-steps"><article><span>1</span><div><strong>连接微信</strong><small>软件会自动检查兼容版本</small></div></article><article><span>2</span><div><strong>选择回复模型</strong><small>普通用户使用免费 Grok，你可在本机添加 DeepSeek</small></div></article><article><span>3</span><div><strong>管理群聊</strong><small>默认只在被点名时回复，不主动打扰</small></div></article></div>
+      <div class="onboarding-note">长期记忆会在明确问起往事时优先召回；普通寒暄走快速回复。</div>
+      <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
+    </section>
+  </div>
+  <script src="app.js?v=0.9.0"></script>
 </body>
 </html>

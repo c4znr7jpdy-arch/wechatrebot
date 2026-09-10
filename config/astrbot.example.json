@@ -26,6 +26,7 @@
     "default_personality": "default",
     "context_limit_reached_strategy": "llm_compress",
     "llm_compress_provider_id": "",
+    "request_max_retries": 1,
     "max_context_length": -1,
     "dequeue_context_length": 1
   },
@@ -48,10 +49,15 @@
   "persona": [],
   "plugin_set": [
     "astrbot_plugin_angel_heart",
+    "astrbot_plugin_livingmemory",
     "astrbot_plugin_music",
-    "jiang_short_drama",
+    "astrbot_plugin_parser",
+    "astrbot_plugin_patch_at_wxid",
+    "astrbot_plugin_self_learning",
+    "jiang_capability_router",
     "jiang_commands",
-    "jiang_schedule"
+    "jiang_video_understanding",
+    "meme_manager"
   ],
   "timezone": "Asia/Shanghai",
   "log_level": "INFO",

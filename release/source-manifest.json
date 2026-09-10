@@ -43,6 +43,11 @@
     },
     {
       "origin": "commercial",
+      "source": "release/ffmpeg-runtime.json",
+      "target": "legal/ffmpeg-runtime.json"
+    },
+    {
+      "origin": "commercial",
       "source": "release/build-requirements.lock",
       "target": "legal/build-requirements.lock"
     },
@@ -83,6 +88,11 @@
     },
     {
       "origin": "commercial",
+      "source": "patches/astrbot-4.26.6-outbound-policy.patch",
+      "target": "legal/corresponding-source/astrbot-4.26.6-outbound-policy.patch"
+    },
+    {
+      "origin": "commercial",
       "source": "scripts/build_runtime.py",
       "target": "legal/corresponding-source/build_runtime.py"
     },
@@ -118,6 +128,16 @@
     },
     {
       "origin": "project",
+      "source": "data/plugins/astrbot_plugin_livingmemory",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_livingmemory"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_self_learning",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_self_learning"
+    },
+    {
+      "origin": "project",
       "source": "data/plugins/astrbot_plugin_qq_group_daily_analysis",
       "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis"
     },
@@ -143,6 +163,95 @@
     },
     {
       "origin": "project",
+      "source": "data/plugins/astrbot_plugin_bittorrent",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_bittorrent"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_mimo_tts_clone",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_mimo_tts_clone"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_mnemosyne",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_mnemosyne",
+      "exclude": [
+        "WINDOWS_TUTORIAL.md"
+      ]
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_parser",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_parser",
+      "exclude": [
+        "example.py"
+      ]
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_patch_at_wxid",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_patch_at_wxid"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_proactive_chat",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_proactive_chat"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/astrbot_plugin_self_iterative_core",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_self_iterative_core"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_capability_router",
+      "target": "app/astrbot/data/plugins/jiang_capability_router"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_group_notice",
+      "target": "app/astrbot/data/plugins/jiang_group_notice"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_image",
+      "target": "app/astrbot/data/plugins/jiang_image"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_mimo_emoji_voice",
+      "target": "app/astrbot/data/plugins/jiang_mimo_emoji_voice"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_mystool",
+      "target": "app/astrbot/data/plugins/jiang_mystool"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_repeater",
+      "target": "app/astrbot/data/plugins/jiang_repeater"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_rocom",
+      "target": "app/astrbot/data/plugins/jiang_rocom"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/jiang_video_understanding",
+      "target": "app/astrbot/data/plugins/jiang_video_understanding"
+    },
+    {
+      "origin": "project",
+      "source": "data/plugins/meme_manager",
+      "target": "app/astrbot/data/plugins/meme_manager",
+      "exclude": [
+        "config.json"
+      ]
+    },
+    {
+      "origin": "project",
       "source": "data/config/jiang_short_drama_config.json",
       "target": "app/astrbot/data/config/jiang_short_drama_config.json"
     },
@@ -163,6 +272,21 @@
       "exclude": [
         "weather_test.png"
       ]
+    },
+    {
+      "origin": "project",
+      "source": "nonebot-plugin-mystool/src/nonebot_plugin_mystool",
+      "target": "app/astrbot/nonebot-plugin-mystool/src/nonebot_plugin_mystool"
+    },
+    {
+      "origin": "project",
+      "source": "nonebot-plugin-mystool/LICENSE",
+      "target": "app/astrbot/nonebot-plugin-mystool/LICENSE"
+    },
+    {
+      "origin": "project",
+      "source": "ai_plugin/nonebot_plugin_rocom",
+      "target": "app/astrbot/ai_plugin/nonebot_plugin_rocom"
     },
     {
       "origin": "project",

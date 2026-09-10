@@ -306,3 +306,219 @@ index a69cb91..f60f2b7 100644
  
          coro = self.bot.run_task(
              host=self.host,
+diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/astrbot/dashboard/services/config_service.py
+--- a/official/astrbot/dashboard/services/config_service.py
++++ b/expected/astrbot/dashboard/services/config_service.py
+@@ -762,7 +762,7 @@
+         }
+ 
+     def get_plugin_config(self, plugin_name: str) -> dict:
+-        result: dict = {"metadata": None, "config": None, "i18n": {}}
++        result: dict = {"metadata": None, "config": None, "i18n": {}, "hot_apply_supported": True}
+ 
+         for plugin_md in star_registry:
+             if plugin_md.name != plugin_name:
+@@ -906,16 +906,30 @@
+ 
+         return scope, name, key_path, metadata, metadata.config
+ 
++    async def _verify_hot_config(self, metadata, active):
++        if metadata is None:
++            raise RuntimeError("功能未加载")
++        if not active:
++            return "pending_enable"
++        hook = getattr(metadata.star_cls, "_commercial_verify_hot_config", None)
++        if not callable(hook):
++            return "applied"
++        state = await asyncio.wait_for(hook(), timeout=35)
++        if state not in {"applied", "pending_setup"}:
++            raise RuntimeError("功能未确认新配置")
++        return state
++
+     async def save_plugin_configs(
+         self,
+         post_configs: dict,
+         plugin_name: str,
+-    ) -> None:
++        base_revision: str | None = None,
++    ) -> dict:
+         metadata = self.get_plugin_metadata_by_name(plugin_name)
+         if not metadata:
+             raise ValueError(f"插件 {plugin_name} 不存在")
+-        if not metadata.config:
+-            raise ValueError(f"插件 {plugin_name} 没有注册配置")
++        if metadata.config is None:
++            raise ValueError("这项功能没有可编辑的配置。")
+ 
+         errors, post_configs = validate_config(
+             post_configs,
+@@ -924,8 +938,72 @@
+         )
+         if errors:
+             raise ValueError(f"格式校验未通过: {errors}")
+-        metadata.config.save_config(post_configs)
+-        await self.core_lifecycle.plugin_manager.reload(plugin_name)
++        # A request-scoped service cannot own this lock: share it on the lifecycle.
++        lock = getattr(self.core_lifecycle, "_customer_config_lock", None)
++        if lock is None:
++            lock = asyncio.Lock()
++            self.core_lifecycle._customer_config_lock = lock
++        async with lock:
++            metadata = self.get_plugin_metadata_by_name(plugin_name)
++            if metadata is None or metadata.config is None:
++                raise ValueError("功能状态已改变，请刷新设置后重试。")
++            manager = self.core_lifecycle.plugin_manager
++            previous = copy.deepcopy(dict(metadata.config))
++            import hashlib
++            import json
++            if base_revision and hashlib.sha256(json.dumps(
++                    previous, ensure_ascii=False, sort_keys=True,
++                    separators=(",", ":")).encode("utf-8")).hexdigest() != base_revision:
++                raise ValueError("配置已被其他页面修改，请重新读取后再保存。")
++            previous_instance = metadata.star_cls
++            was_active = metadata.activated
++            module_path = metadata.module_path
++            config_object = metadata.config
++            try:
++                config_object.save_config(post_configs)
++                expected = copy.deepcopy(dict(config_object))
++                success, _ = await manager.reload(plugin_name)
++                current = self.get_plugin_metadata_by_name(plugin_name)
++                apply_state = await self._verify_hot_config(current, was_active) if success else None
++                if (not success or current is None or current.config is None
++                        or dict(current.config) != expected
++                        or current.activated != was_active
++                        or (was_active and (current.star_cls is None
++                            or current.star_cls is previous_instance))):
++                    raise RuntimeError("hot configuration verification failed")
++            except Exception:
++                # Restore the last working settings, including removed/unknown keys.
++                try:
++                    config_object.clear()
++                    config_object.update(previous)
++                    config_object.save_config()
++                except Exception:
++                    raise ValueError("新设置未能生效，旧设置也未能写回。请检查磁盘空间与写入权限，重新读取配置后再处理。") from None
++                try:
++                    current = self.get_plugin_metadata_by_name(plugin_name)
++                    if current is not None:
++                        restored, _ = await manager.reload(plugin_name)
++                    else:
++                        # Explicit path only: never fall through to reload all.
++                        restored, _ = await manager.load(specified_module_path=module_path)
++                    current = self.get_plugin_metadata_by_name(plugin_name)
++                    if restored:
++                        await self._verify_hot_config(current, was_active)
++                    if (not restored or current is None or current.config is None
++                            or dict(current.config) != previous
++                            or current.activated != was_active):
++                        raise RuntimeError("rollback verification failed")
++                except Exception:
++                    raise ValueError("新设置未能生效，旧设置已写回，但功能恢复失败。请查看运行记录后重试。") from None
++                raise ValueError("新设置未能生效，已恢复原设置。请检查填写内容后重试。") from None
++            import hashlib
++            import json
++            revision = hashlib.sha256(json.dumps(
++                expected, ensure_ascii=False, sort_keys=True,
++                separators=(",", ":"),
++            ).encode("utf-8")).hexdigest()
++            return {"hot_apply": {"verified": True, "revision": revision,
++                    "state": apply_state}}
+ 
+     async def save_plugin_configs_from_dashboard_payload(
+         self,
+@@ -935,7 +1013,7 @@
+     ) -> str:
+         post_configs = payload if isinstance(payload, dict) else {}
+         await self.save_plugin_configs(post_configs, plugin_name)
+-        return f"保存插件 {plugin_name} 成功~ 机器人正在热重载插件。"
++        return "设置已保存，功能配置已重新加载。"
+ 
+     async def upload_config_file(
+         self,
+diff --git a/official/astrbot/dashboard/api/plugins.py b/expected/astrbot/dashboard/api/plugins.py
+--- a/official/astrbot/dashboard/api/plugins.py
++++ b/expected/astrbot/dashboard/api/plugins.py
+@@ -726,10 +726,8 @@
+     config = body.get("config")
+     config = config if isinstance(config, dict) else {}
+     return ok(
+-        message=await service.save_plugin_configs_from_dashboard_payload(
+-            config,
+-            plugin_name=plugin_id,
+-        )
++        await service.save_plugin_configs(config, plugin_id, body.get("base_revision")),
++        message="设置已保存，配置已重新加载。",
+     )
+ 
+ 
+@@ -970,10 +968,8 @@
+     config = body.get("config")
+     config = config if isinstance(config, dict) else body
+     return ok(
+-        message=await service.save_plugin_configs_from_dashboard_payload(
+-            config,
+-            plugin_name=plugin_id,
+-        )
++        await service.save_plugin_configs(config, plugin_id, body.get("base_revision")),
++        message="设置已保存，配置已重新加载。",
+     )
+ 
+ 
+diff --git a/official/astrbot/core/star/star_manager.py b/expected/astrbot/core/star/star_manager.py
+--- a/official/astrbot/core/star/star_manager.py
++++ b/expected/astrbot/core/star/star_manager.py
+@@ -985,6 +985,9 @@
+                         specified_module_path = smd.module_path
+                         break
+ 
++            if specified_plugin_name and not specified_module_path:
++                return False, "指定功能不存在，已取消重载"
++
+             # 终止插件
+             if not specified_module_path:
+                 # 重载所有插件
+@@ -1013,6 +1016,7 @@
+                         logger.warning(
+                             f"插件 {smd.name} 未被正常终止: {e!s}, 可能会导致该插件运行不正常。",
+                         )
++                        return False, "功能仍有未结束的工作，无法安全重新加载"
+                     if smd.name and smd.activated:
+                         await self._unbind_plugin(smd.name, specified_module_path)
+
+diff --git a/official/astrbot/core/provider/sources/openai_source.py b/expected/astrbot/core/provider/sources/openai_source.py
+--- a/official/astrbot/core/provider/sources/openai_source.py
++++ b/expected/astrbot/core/provider/sources/openai_source.py
+@@ -374,8 +374,9 @@
+             self.client = AsyncAzureOpenAI(
+                 api_key=self.chosen_api_key,
+                 api_version=provider_config.get("api_version", None),
+                 default_headers=self.custom_headers,
+                 base_url=provider_config.get("api_base", ""),
+                 timeout=self.timeout,
++                max_retries=0,
+                 http_client=self._create_http_client(provider_config),
+             )
+@@ -384,7 +385,8 @@
+             self.client = AsyncOpenAI(
+                 api_key=self.chosen_api_key,
+                 base_url=provider_config.get("api_base", None),
+                 default_headers=self.custom_headers,
+                 timeout=self.timeout,
++                max_retries=0,
+                 http_client=self._create_http_client(provider_config),
+             )
+
+diff --git a/official/astrbot/core/provider/sources/request_retry.py b/expected/astrbot/core/provider/sources/request_retry.py
+--- a/official/astrbot/core/provider/sources/request_retry.py
++++ b/expected/astrbot/core/provider/sources/request_retry.py
+@@ -16,7 +16,7 @@
+ 
+ T = TypeVar("T")
+ 
+-REQUEST_RETRY_ATTEMPTS = 5  # default value
++REQUEST_RETRY_ATTEMPTS = 1  # product latency budget: callers opt in to retries
+ REQUEST_RETRY_WAIT_MIN_S = 0.2
+ REQUEST_RETRY_WAIT_MAX_S = 30
+ REQUEST_RETRY_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504, 529}
+ 

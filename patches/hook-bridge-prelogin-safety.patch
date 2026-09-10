@@ -1,0 +1,18 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -827,6 +827,14 @@ class BridgeApplication:
+ 
+     async def _poll_group_member_changes_once(self) -> int:
+         """Refresh documented group-member lists and emit snapshot diffs."""
++        # HOOK 4.1.8.27 exposes its local HTTP port before WeChat has a logged-in
++        # account when start_server_while_login is enabled.  Contact and group
++        # APIs dereference account state inside the injected DLL; calling them
++        # during that window can crash WeChat with a null-pointer read.  Login
++        # callbacks populate bot_wxid, so use that as the hard readiness gate.
++        if not self.state.bot_wxid:
++            return 0
++
+         groups = await self.hook.get_groups()
+         emitted = 0
+         for raw_group in groups:

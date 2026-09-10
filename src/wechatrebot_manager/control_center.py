@@ -23,7 +23,12 @@ from .customer_config import (
 from .customer_logs import log_sources, sanitize_log_text, tail_log
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import ProcessSupervisor, ServiceLaunchError, ServiceSpec, build_service_specs
-from .provider import OpenAIProviderProfile
+from .provider import (
+    DEFAULT_PROVIDER_API_BASE,
+    DEFAULT_PROVIDER_MODEL,
+    DEFAULT_PROVIDER_SOURCE_ID,
+    OpenAIProviderProfile,
+)
 from .plugin_center import launch_plugin_center
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
 from .ui_theme import COLORS, FONT_MONO, FONT_SMALL, GEOMETRY, apply_product_theme
@@ -667,16 +672,28 @@ class ControlCenter:
         self.model_notice_var = self.tk.StringVar()
         self.ttk.Label(surface, textvariable=self.model_notice_var, style="SurfaceMuted.TLabel", wraplength=760).pack(anchor="w", pady=(0, 12))
         self.model_vars = {
-            "preset": self.tk.StringVar(value="DeepSeek" if profile and "deepseek" in profile.api_base.casefold() else "自定义"),
-            "api_base": self.tk.StringVar(value=profile.api_base if profile else "https://api.deepseek.com"),
-            "model": self.tk.StringVar(value=profile.model if profile else "deepseek-v4-flash"),
+            "preset": self.tk.StringVar(
+                value=(
+                    "Grok 4.6"
+                    if profile
+                    and profile.source_id == DEFAULT_PROVIDER_SOURCE_ID
+                    and profile.model == DEFAULT_PROVIDER_MODEL
+                    else "自定义"
+                )
+            ),
+            "api_base": self.tk.StringVar(
+                value=profile.api_base if profile else DEFAULT_PROVIDER_API_BASE
+            ),
+            "model": self.tk.StringVar(
+                value=profile.model if profile else DEFAULT_PROVIDER_MODEL
+            ),
             "api_key": self.tk.StringVar(value=profile.api_key if profile else ""),
             "show_key": self.tk.BooleanVar(value=False),
         }
         preset_row = self.ttk.Frame(surface, style="Surface.TFrame")
         preset_row.pack(fill="x", pady=7)
         self.ttk.Label(preset_row, text="模型类型", style="Surface.TLabel", width=15).pack(side="left")
-        combo = self.ttk.Combobox(preset_row, textvariable=self.model_vars["preset"], values=("DeepSeek", "自定义"), state="readonly")
+        combo = self.ttk.Combobox(preset_row, textvariable=self.model_vars["preset"], values=("Grok 4.6", "自定义"), state="readonly")
         combo.pack(side="left", fill="x", expand=True)
         combo.bind("<<ComboboxSelected>>", self._model_preset_changed)
         self._form_row(surface, "API 地址", self.model_vars["api_base"])
@@ -1189,19 +1206,25 @@ class ControlCenter:
             self.robot_notice_var.set(f"保存失败：{exc}")
 
     def _model_preset_changed(self, _event=None) -> None:
-        if self.model_vars["preset"].get() == "DeepSeek":
-            self.model_vars["api_base"].set("https://api.deepseek.com")
-            self.model_vars["model"].set("deepseek-v4-flash")
+        if self.model_vars["preset"].get() == "Grok 4.6":
+            self.model_vars["api_base"].set(DEFAULT_PROVIDER_API_BASE)
+            self.model_vars["model"].set(DEFAULT_PROVIDER_MODEL)
 
     def _toggle_api_key(self) -> None:
         self.api_key_entry.configure(show="" if self.model_vars["show_key"].get() else "●")
 
     def _save_model(self) -> None:
         try:
+            current = load_provider_profile(self.install_root)
             profile = OpenAIProviderProfile(
                 api_key=self.model_vars["api_key"].get(),
                 api_base=self.model_vars["api_base"].get(),
                 model=self.model_vars["model"].get(),
+                source_id=(
+                    current.source_id
+                    if current is not None
+                    else DEFAULT_PROVIDER_SOURCE_ID
+                ),
             )
             save_provider_profile(self.install_root, profile)
             self.model_notice_var.set("模型配置已保存。机器人正在运行时，下次重新启动后生效。")

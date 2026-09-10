@@ -49,6 +49,7 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
     monkeypatch.setattr(module, "COMMERCIAL_ROOT", root)
     monkeypatch.setattr(module, "SCRIPTS_ROOT", scripts)
     monkeypatch.setattr(module, "SOURCE_ROOT", root / "src")
+    monkeypatch.setattr(module, "_project_version", lambda: "0.8.7")
     monkeypatch.setattr(module, "load_update_channel", lambda: channel)
     monkeypatch.setattr(module.publisher, "_signing_key", lambda *_args: object())
     monkeypatch.setattr(
@@ -123,11 +124,16 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
         "validate_release_metadata.py",
         "build_manager.py",
         "build_runtime.py",
+        "build_legal_inventory.py",
+        "validate_release_metadata.py",
         "build_staging.py",
         "build_update_release.py",
         "build_distribution.py",
     ]
     assert "--include" not in commands[-2]
+    inventory = next(command for command in commands if "build_legal_inventory.py" in command[1])
+    assert inventory[inventory.index("--notices") + 1] == "legal/THIRD-PARTY-NOTICES.md"
+    assert inventory[inventory.index("--licenses") + 1] == "legal/THIRD-PARTY-LICENSES.txt"
     assert "--archive" in commands[-1]
     assert published == [release]
 

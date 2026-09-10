@@ -49,6 +49,36 @@ def test_backup_contains_only_config_data_and_hash_manifest(tmp_path: Path) -> N
         assert all(len(item["sha256"]) == 64 for item in manifest["files"])
 
 
+def test_backup_includes_active_long_term_memory_but_not_nested_snapshots(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+    _install(install)
+    memory = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "plugin_data"
+        / "astrbot_plugin_livingmemory"
+    )
+    memory.mkdir(parents=True)
+    (memory / "livingmemory.db").write_bytes(b"active-memory")
+    (memory / "backups").mkdir()
+    (memory / "backups" / "old.db").write_bytes(b"old-snapshot")
+    target = tmp_path / "customer-backup.zip"
+
+    create_customer_backup(install, target)
+
+    with zipfile.ZipFile(target) as archive:
+        names = set(archive.namelist())
+    assert (
+        "app/astrbot/data/plugin_data/astrbot_plugin_livingmemory/livingmemory.db"
+        in names
+    )
+    assert not any("/backups/" in name for name in names)
+
+
 def test_backup_refuses_destination_inside_customer_data(tmp_path: Path) -> None:
     install = tmp_path / "install"
     _install(install)

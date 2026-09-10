@@ -46,6 +46,10 @@ class _FakeProcess:
 def _layout(root: Path) -> None:
     (root / "runtime" / "python").mkdir(parents=True)
     (root / "runtime" / "python" / "python.exe").write_bytes(b"runtime")
+    ffmpeg_bin = root / "runtime" / "ffmpeg" / "bin"
+    ffmpeg_bin.mkdir(parents=True)
+    (ffmpeg_bin / "ffmpeg.exe").write_bytes(b"ffmpeg")
+    (ffmpeg_bin / "ffprobe.exe").write_bytes(b"ffprobe")
     (root / "app" / "astrbot").mkdir(parents=True)
     (root / "app" / "astrbot" / ".astrbot").touch()
     (root / "app" / "astrbot" / "data").mkdir()
@@ -83,7 +87,7 @@ def _layout(root: Path) -> None:
     )
 
 
-def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
+def test_specs_share_one_python_and_include_both_services(tmp_path: Path) -> None:
     _layout(tmp_path)
     specs = build_service_specs(tmp_path)
     assert [item.name for item in specs] == ["astrbot", "new-hook-bridge"]
@@ -98,6 +102,12 @@ def test_specs_share_one_python_and_start_astrbot_first(tmp_path: Path) -> None:
         "runtime\\ffmpeg\\bin"
     )
     assert specs[1].environment["PATH"] == specs[0].environment["PATH"]
+    assert tmp_path / "runtime" / "ffmpeg" / "bin" / "ffmpeg.exe" in specs[
+        0
+    ].required_files
+    assert tmp_path / "runtime" / "ffmpeg" / "bin" / "ffprobe.exe" in specs[
+        0
+    ].required_files
     assert specs[0].environment["PYTHONDONTWRITEBYTECODE"] == "1"
     assert specs[1].environment["PYTHONDONTWRITEBYTECODE"] == "1"
 
@@ -141,8 +151,8 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
 
     assert events[:4] == [
         "start:astrbot",
-        "ready:astrbot",
         "start:new-hook-bridge",
+        "ready:astrbot",
         "ready:new-hook-bridge",
     ]
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
@@ -167,25 +177,53 @@ def test_preflight_rejects_missing_hook_before_any_process_starts(
     assert starts == []
 
 
-def test_preflight_checks_wechat_connection_port_before_start(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize("executable", ["ffmpeg.exe", "ffprobe.exe"])
+def test_preflight_rejects_missing_bundled_media_tool_before_start(
+    tmp_path: Path, monkeypatch, executable: str,
 ) -> None:
     _layout(tmp_path)
+    (tmp_path / "runtime" / "ffmpeg" / "bin" / executable).unlink()
     starts: list[list[str]] = []
 
     def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
         starts.append(argv)
         return _FakeProcess("unexpected", [])
 
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
+
+    with pytest.raises(ServiceLaunchError, match=executable):
+        supervisor.start()
+    assert starts == []
+
+
+def test_preflight_allows_occupied_hook_port_for_dedicated_bot_wechat(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    starts: list[list[str]] = []
+    specs = build_service_specs(tmp_path)
+    assert specs[1].required_free_ports == ()
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        starts.append(argv)
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        return _FakeProcess(name, [])
+
     monkeypatch.setattr(
         "wechatrebot_manager.launcher.port_accepting",
         lambda host, port: port == 19088,
     )
-    supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=popen)
+    supervisor = ProcessSupervisor(
+        specs,
+        popen_factory=popen,
+        readiness_waiter=lambda spec, process: True,
+    )
 
-    with pytest.raises(ServiceLaunchError, match="19088"):
-        supervisor.start()
-    assert starts == []
+    supervisor.start()
+    supervisor.stop()
+
+    assert len(starts) == 2
 
 
 def test_preflight_rejects_tampered_hook_before_any_process_starts(

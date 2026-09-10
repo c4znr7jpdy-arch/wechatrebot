@@ -1,0 +1,381 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/outbound_policy.py b/hook_41827_astrbot_bridge/src/hook_bridge/outbound_policy.py
+new file mode 100644
+index 0000000..7a29a10
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/outbound_policy.py
+@@ -0,0 +1,239 @@
++from __future__ import annotations
++
++import asyncio
++from dataclasses import dataclass
++from datetime import datetime
++import json
++import os
++from pathlib import Path
++import re
++import tempfile
++from typing import Any, Callable
++from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
++
++
++_ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
++_GROUP_ID = re.compile(r"^[A-Za-z0-9_.-]+@chatroom$")
++_CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
++_DELIVERY_TYPES = frozenset({"reply", "proactive"})
++
++
++@dataclass(frozen=True, slots=True)
++class OutboundDecision:
++    allowed: bool
++    delivery: str
++    message: str
++
++
++def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    descriptor, temporary_name = tempfile.mkstemp(
++        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
++    )
++    try:
++        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
++            json.dump(payload, handle, ensure_ascii=False, indent=2)
++            handle.write("\n")
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(temporary_name, path)
++    except Exception:
++        try:
++            os.unlink(temporary_name)
++        except FileNotFoundError:
++            pass
++        raise
++
++
++def _minutes(value: str) -> int:
++    hour, minute = value.split(":", 1)
++    return int(hour) * 60 + int(minute)
++
++
++class OutboundGroupPolicy:
++    """Hot-read, fail-closed policy for group deliveries."""
++
++    def __init__(
++        self,
++        policy_path: str | Path,
++        *,
++        usage_path: str | Path | None = None,
++        now: Callable[[ZoneInfo], datetime] | None = None,
++    ) -> None:
++        self.policy_path = Path(policy_path).expanduser().resolve()
++        self.usage_path = (
++            Path(usage_path).expanduser().resolve()
++            if usage_path is not None
++            else self.policy_path.with_name("group-policy-usage.json")
++        )
++        self._now = now or (lambda zone: datetime.now(zone))
++        self._lock = asyncio.Lock()
++
++    @staticmethod
++    def _default() -> dict[str, Any]:
++        return {
++            "bot_enabled": True,
++            "reply_mode": "mention",
++            "proactive_enabled": False,
++            "quiet_hours": {
++                "enabled": False,
++                "start": "22:00",
++                "end": "08:00",
++                "timezone": "Asia/Shanghai",
++            },
++            "daily_limit": 3,
++        }
++
++    def _policy(self, account_id: str, group_id: str) -> dict[str, Any] | None:
++        try:
++            payload = json.loads(self.policy_path.read_text(encoding="utf-8-sig"))
++        except FileNotFoundError:
++            return self._default()
++        except (OSError, json.JSONDecodeError):
++            return None
++        if (
++            not isinstance(payload, dict)
++            or payload.get("schema_version") != 1
++            or not isinstance(payload.get("accounts"), dict)
++        ):
++            return None
++        account = payload["accounts"].get(account_id)
++        groups = account.get("groups") if isinstance(account, dict) else None
++        raw = groups.get(group_id) if isinstance(groups, dict) else None
++        if raw is None:
++            return self._default()
++        if not isinstance(raw, dict):
++            return None
++
++        policy = self._default()
++        for key in ("bot_enabled", "proactive_enabled"):
++            if key in raw:
++                if not isinstance(raw[key], bool):
++                    return None
++                policy[key] = raw[key]
++        if "reply_mode" in raw:
++            if raw["reply_mode"] not in {"mention", "natural", "off"}:
++                return None
++            policy["reply_mode"] = raw["reply_mode"]
++        if "daily_limit" in raw:
++            value = raw["daily_limit"]
++            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
++                return None
++            policy["daily_limit"] = value
++        if "quiet_hours" in raw:
++            quiet = raw["quiet_hours"]
++            if not isinstance(quiet, dict):
++                return None
++            merged = dict(policy["quiet_hours"])
++            merged.update(quiet)
++            if (
++                not isinstance(merged.get("enabled"), bool)
++                or not isinstance(merged.get("start"), str)
++                or not _CLOCK.fullmatch(merged["start"])
++                or not isinstance(merged.get("end"), str)
++                or not _CLOCK.fullmatch(merged["end"])
++                or not isinstance(merged.get("timezone"), str)
++            ):
++                return None
++            policy["quiet_hours"] = merged
++        return policy
++
++    @staticmethod
++    def _in_quiet_hours(policy: dict[str, Any], now: datetime) -> bool:
++        quiet = policy["quiet_hours"]
++        if not quiet["enabled"]:
++            return False
++        start = _minutes(quiet["start"])
++        end = _minutes(quiet["end"])
++        current = now.hour * 60 + now.minute
++        if start == end:
++            return True
++        if start < end:
++            return start <= current < end
++        return current >= start or current < end
++
++    def _reserve(self, account_id: str, group_id: str, day: str, limit: int) -> bool:
++        try:
++            payload = json.loads(self.usage_path.read_text(encoding="utf-8-sig"))
++        except FileNotFoundError:
++            payload = {"schema_version": 1, "counts": {}}
++        except (OSError, json.JSONDecodeError):
++            return False
++        if (
++            not isinstance(payload, dict)
++            or payload.get("schema_version") != 1
++            or not isinstance(payload.get("counts"), dict)
++        ):
++            return False
++        counts = payload["counts"]
++        account = counts.setdefault(account_id, {})
++        if not isinstance(account, dict):
++            return False
++        group = account.setdefault(group_id, {})
++        if not isinstance(group, dict):
++            return False
++        value = group.get(day, 0)
++        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
++            return False
++        if value >= limit:
++            return False
++        group[day] = value + 1
++        if len(group) > 60:
++            for old_day in sorted(group)[:-60]:
++                group.pop(old_day, None)
++        try:
++            _atomic_json(self.usage_path, payload)
++        except OSError:
++            return False
++        return True
++
++    async def authorize(
++        self,
++        account_id: str,
++        group_id: str,
++        *,
++        delivery: str,
++        wake: bool = False,
++    ) -> OutboundDecision:
++        delivery = str(delivery or "").casefold()
++        if delivery not in _DELIVERY_TYPES:
++            delivery = "proactive"
++        account_id = str(account_id or "").strip()
++        group_id = str(group_id or "").strip()
++        if not _ACCOUNT_ID.fullmatch(account_id) or not _GROUP_ID.fullmatch(group_id):
++            return OutboundDecision(False, delivery, "无法确认当前机器人账号或目标群，消息已取消。")
++
++        async with self._lock:
++            # Read on every attempt so a manager save takes effect immediately.
++            policy = self._policy(account_id, group_id)
++            if policy is None:
++                return OutboundDecision(False, delivery, "群聊策略无法确认，消息已取消。")
++            if not policy["bot_enabled"]:
++                return OutboundDecision(False, delivery, "本群的机器人功能已关闭。")
++
++            if delivery == "reply":
++                mode = policy["reply_mode"]
++                if mode == "off":
++                    return OutboundDecision(False, delivery, "本群当前不允许机器人回复。")
++                if mode == "mention" and not wake:
++                    return OutboundDecision(False, delivery, "本群仅在明确点名时回复。")
++                return OutboundDecision(True, delivery, "reply allowed")
++
++            if not policy["proactive_enabled"]:
++                return OutboundDecision(False, delivery, "本群的主动消息总控已关闭。")
++            limit = policy["daily_limit"]
++            if limit <= 0:
++                return OutboundDecision(False, delivery, "本群的每日主动消息上限为零。")
++            try:
++                zone = ZoneInfo(policy["quiet_hours"]["timezone"])
++                current = self._now(zone)
++            except (ZoneInfoNotFoundError, ValueError, OSError):
++                return OutboundDecision(False, delivery, "群聊时区无法确认，主动消息已取消。")
++            if self._in_quiet_hours(policy, current):
++                return OutboundDecision(False, delivery, "当前处于本群的安静时段。")
++            if not self._reserve(account_id, group_id, current.date().isoformat(), limit):
++                return OutboundDecision(False, delivery, "本群今日主动消息已达上限或用量无法确认。")
++            return OutboundDecision(True, delivery, "proactive delivery reserved")
++
++
++__all__ = ["OutboundDecision", "OutboundGroupPolicy"]
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -158,5 +158,8 @@ class BridgeApplication:
+                 video_send_mode=self.settings.video_send_mode,
+                 history=self.history,
++                policy_path=(
++                    self.settings.project_root.parent.parent / "data/manager/group-policies.json"
++                ),
+             )
+         if self.onebot is None:
+             self.onebot = OneBotClient(
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+@@ -82,5 +82,7 @@ def create_callback_app(
+                         "send_type": payload.get("send_type"),
+                         "type": payload.get("type"),
++                        "_wechatrebot_delivery": payload.get("_wechatrebot_delivery"),
++                        "_wechatrebot_wake": payload.get("_wechatrebot_wake"),
+                     },
+                 }
+             )
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -15,5 +15,6 @@ from .media import MediaError, MediaStore
+ from .message_codec import UnsupportedSegmentError, decode_outbound
+ from .models import OutboundCommand, RecallRecord, ReplyTarget, SendResult
++from .outbound_policy import OutboundGroupPolicy
+ from .state import BridgeState
+ 
+ 
+@@ -207,6 +208,7 @@ class OneBotActionRouter:
+         *,
+         video_send_mode: str = "native",
+         history: Any = None,
++        policy_path: str | Path | None = None,
+     ) -> None:
+         self.hook = hook
+         self.media = media
+@@ -217,5 +219,8 @@ class OneBotActionRouter:
+             raise ValueError("video_send_mode must be file or native")
+         self.video_send_mode = video_send_mode
++        self.outbound_policy = OutboundGroupPolicy(
++            policy_path or Path("data/manager/group-policies.json")
++        )
+         self._scheduled: set[asyncio.Task[None]] = set()
+         self._pending_image_receipts: dict[
+             str, deque[asyncio.Future[RecallRecord]]
+@@ -558,19 +563,41 @@ class OneBotActionRouter:
+         if not commands:
+             return self._failed("message is empty", echo, 10003)
+ 
++        explicit_delivery = str(params.get("_wechatrebot_delivery") or "").casefold()
+         reply_target: ReplyTarget | None = None
+-        if commands[0].kind == "text":
++        if is_group and explicit_delivery != "proactive":
+             explicit_reply_id = _outbound_reply_message_id(message)
+             if explicit_reply_id is not None:
+-                # AstrBot's result decorator supplies the exact inbound
+-                # OneBot message id.  Never fall back to a different message
+-                # when that explicit id is unknown.
+                 reply_target = self.state.take_reply_target_by_message_id(
+                     explicit_reply_id
+                 )
+             else:
+                 reply_target = self.state.take_reply_target(target)
+ 
++        if is_group:
++            delivery = (
++                explicit_delivery
++                if explicit_delivery in {"reply", "proactive"}
++                else "reply" if reply_target is not None else "proactive"
++            )
++            wake_value = _safe_boolean(params.get("_wechatrebot_wake"))
++            wake = wake_value if wake_value is not None else reply_target is not None
++            decision = await self.outbound_policy.authorize(
++                self.state.bot_wxid,
++                target,
++                delivery=delivery,
++                wake=wake,
++            )
++            if not decision.allowed:
++                logger.info(
++                    "group outbound blocked account=%s target=%s delivery=%s reason=%s",
++                    self.state.bot_wxid,
++                    target,
++                    decision.delivery,
++                    decision.message,
++                )
++                return self._failed(decision.message, echo, 1403)
++
+         auto_recall_delay: float | None = None
+         if "auto_recall_delay" in params:
+             try:
+@@ -736,8 +765,13 @@ class OneBotActionRouter:
+             send_action = "send_group_msg" if is_group else "send_private_msg"
+             for index, node_message in enumerate(nodes, start=1):
+                 response = await self._send_message(
+                     send_action,
+-                    {target_key: target, "message": node_message},
++                    {
++                        target_key: target,
++                        "message": node_message,
++                        "_wechatrebot_delivery": params.get("_wechatrebot_delivery"),
++                        "_wechatrebot_wake": params.get("_wechatrebot_wake"),
++                    },
+                     echo,
+                 )
+                 if response["status"] != "ok":
+@@ -777,6 +812,15 @@ class OneBotActionRouter:
+         if action == "send_raw_xml":
+-            target, _ = self._target(action, params)
++            target, is_group = self._target(action, params)
+             if not target or not params.get("content"):
+                 return self._failed("to_wxid and content are required", echo, 10003)
++            if is_group:
++                decision = await self.outbound_policy.authorize(
++                    self.state.bot_wxid,
++                    target,
++                    delivery=str(params.get("_wechatrebot_delivery") or "proactive"),
++                    wake=bool(_safe_boolean(params.get("_wechatrebot_wake"))),
++                )
++                if not decision.allowed:
++                    return self._failed(decision.message, echo, 1403)
+             content = str(params["content"])
+             explicit_type = params.get("type")
+@@ -795,5 +843,7 @@ class OneBotActionRouter:
+                 "send_group_msg",
+                 {
+                     "group_id": _normalize_group_id(params.get("group_id")),
++                    "_wechatrebot_delivery": params.get("_wechatrebot_delivery"),
++                    "_wechatrebot_wake": params.get("_wechatrebot_wake"),
+                     "message": [
+                         {

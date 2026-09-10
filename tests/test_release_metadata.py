@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import shutil
 
+import pytest
+
 
 def _validator():
     script = Path(__file__).parents[1] / "scripts" / "validate_release_metadata.py"
@@ -85,3 +87,39 @@ def test_approved_evidence_requires_accountable_artifacts(tmp_path: Path) -> Non
 
     assert any("no reviewer or time" in item for item in errors)
     assert any("has no artifacts" in item for item in errors)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("archive_sha256", "Z" * 64, "archive SHA-256 is invalid"),
+        ("archive_root", "../ffmpeg", "archive root does not match"),
+        ("archive_url", "https://example.com/latest.zip", "archive URL does not match"),
+        ("license", "GPL-3.0-only", "win64 LGPL shared distribution"),
+        ("source_commit", "0123456789", "source commit does not match its version"),
+        ("build_source_url", "https://github.com/BtbN/FFmpeg-Builds", "build source URL does not match"),
+    ],
+)
+def test_ffmpeg_pin_rejects_inconsistent_metadata(field: str, value: str, message: str) -> None:
+    root = Path(__file__).parents[1]
+    definition = json.loads((root / "release" / "ffmpeg-runtime.json").read_text(encoding="utf-8"))
+    definition[field] = value
+    errors: list[str] = []
+
+    _validator()._validate_ffmpeg_definition(definition, errors)
+
+    assert any(message in error for error in errors)
+
+
+def test_ffmpeg_pin_must_be_shipped_with_payload(tmp_path: Path) -> None:
+    root = _metadata_copy(tmp_path)
+    source_path = root / "release" / "source-manifest.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["entries"] = [
+        item for item in source["entries"] if item["target"] != "legal/ffmpeg-runtime.json"
+    ]
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    errors = _validator().validate_release_metadata(root)
+
+    assert "source manifest must ship the pinned FFmpeg runtime definition" in errors

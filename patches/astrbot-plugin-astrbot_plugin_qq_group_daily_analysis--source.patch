@@ -1,0 +1,312 @@
+diff --git a/src/infrastructure/platform/adapters/onebot_adapter.py b/src/infrastructure/platform/adapters/onebot_adapter.py
+index 2efaffd..e4eb21b 100644
+--- a/src/infrastructure/platform/adapters/onebot_adapter.py
++++ b/src/infrastructure/platform/adapters/onebot_adapter.py
+@@ -9,7 +9,9 @@ import base64
+ import os
+ from dataclasses import replace
+ import time
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++import sqlite3
+ from typing import Any
+ from urllib.parse import urlparse
+ 
+@@ -72,10 +74,9 @@ class OneBotAdapter(PlatformAdapter):
+         self._is_snowluma = False
+         self._snowluma_checked = False
+ 
+-        # WeChat 回退支持
+-        self._wechat_adapter = None
+-        self._db_path = None
+-        self._init_wechat_fallback()
++        # 桥接在消息进入 AstrBot 前已持久化，因此即使本插件之后才启用，
++        # 仍可以读到已收到的群消息，不依赖可选 Self Learning 插件。
++        self._bridge_history_path = self._locate_bridge_history()
+ 
+         # 禁言状态缓存 (group_id -> timestamp)
+         self._muted_groups_cache = {}
+@@ -122,25 +123,41 @@ class OneBotAdapter(PlatformAdapter):
+             self._is_snowluma = False
+         self._snowluma_checked = True
+ 
+-    def _init_wechat_fallback(self):
+-        """初始化微信回退数据库路径"""
+-        from pathlib import Path
+-
+-        possible_paths = [
+-            Path("data/self_learning_data/messages.db"),
+-            Path("E:/Project/data/self_learning_data/messages.db"),
+-        ]
+-
+-        for path in possible_paths:
+-            if path.exists():
+-                self._db_path = str(path)
+-                logger.debug(f"[OneBot] 找到 WeChat 回退数据库: {self._db_path}")
+-                return
++    @staticmethod
++    def _locate_bridge_history() -> Path | None:
++        """仅在商业包的 ``app/astrbot`` 布局中定位桥接消息库。"""
++        for parent in Path(__file__).resolve().parents:
++            if (
++                parent.name.casefold() == "astrbot"
++                and parent.parent.name.casefold() == "app"
++            ):
++                return parent.parent / "bridge" / "var" / "message-history.db"
++        return None
+ 
+     def _is_wechat_group(self, group_id: str) -> bool:
+         """检测是否为微信群（带 @chatroom 后缀）"""
+         return "@chatroom" in group_id
+ 
++    def _current_wechat_account(self) -> str:
++        """从当前 OneBot 连接取得机器人账号；不确定时拒绝查询。"""
++        for attribute in ("self_id", "user_id", "id"):
++            value = getattr(self.bot, attribute, None)
++            if isinstance(value, (str, int)) and not isinstance(value, bool):
++                account_id = str(value).strip()
++                if account_id:
++                    return account_id
++
++        known_ids = {
++            str(value).strip()
++            for value in self.bot_self_ids
++            if isinstance(value, (str, int))
++            and not isinstance(value, bool)
++            and str(value).strip()
++        }
++        if len(known_ids) == 1:
++            return known_ids.pop()
++        return ""
++
+     def _get_nearest_size(self, requested_size: int) -> int:
+         """从支持的尺寸列表中找到最接近请求尺寸的一个。"""
+         return min(self.AVAILABLE_SIZES, key=lambda x: abs(x - requested_size))
+@@ -311,9 +328,11 @@ class OneBotAdapter(PlatformAdapter):
+         Returns:
+             list[UnifiedMessage]: 统一格式的消息列表
+         """
+-        # 微信群回退到数据库读取
++        # 新微信桥接不提供历史消息 API，从桥接的持久化消息库读取。
+         if self._is_wechat_group(group_id):
+-            return await self._fetch_from_database(group_id, days, max_count, since_ts)
++            return await self._fetch_from_bridge_history(
++                group_id, days, max_count, before_id, since_ts
++            )
+ 
+         if not hasattr(self.bot, "call_action"):
+             return []
+@@ -484,99 +503,135 @@ class OneBotAdapter(PlatformAdapter):
+             logger.warning(f"OneBot 分页获取消息失败: {e}")
+             return []
+ 
+-    async def _fetch_from_database(
+-        self, group_id: str, days: int, max_count: int, since_ts: int | None
++    async def _fetch_from_bridge_history(
++        self,
++        group_id: str,
++        days: int,
++        max_count: int,
++        before_id: str | None,
++        since_ts: int | None,
+     ) -> list[UnifiedMessage]:
+-        """从 self-learning 数据库读取微信群消息"""
+-        if not self._db_path:
+-            logger.warning("[OneBot->WeChat] 数据库路径未初始化")
++        """在工作线程中只读新微信桥接持续写入的 WAL 数据库。"""
++        if self._bridge_history_path is None:
++            logger.warning("[OneBot->WeChat] 当前不在商业包运行布局中")
+             return []
+ 
+         try:
+-            import sqlite3
+-
+-            # 计算时间范围 - 从今天0点往前推N天
+-            if since_ts:
+-                start_timestamp = since_ts
++            account_id = self._current_wechat_account()
++            if not account_id:
++                logger.warning("[OneBot->WeChat] 当前机器人账号无法确认，拒绝读取历史")
++                return []
++            if since_ts and since_ts > 0:
++                cutoff_timestamp = int(since_ts)
+             else:
+-                # 获取今天0点的时间戳
+-                now = datetime.now()
+-                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+-                # 往前推N天
+-                start_time_dt = today_start - timedelta(days=days)
+-                start_timestamp = int(start_time_dt.timestamp())
+-
+-            # 查询数据库
+-            conn = sqlite3.connect(self._db_path)
+-            conn.row_factory = sqlite3.Row
+-            cursor = conn.cursor()
+-
+-            query = """
+-                SELECT * FROM raw_messages
+-                WHERE group_id = ? AND timestamp >= ?
+-                ORDER BY timestamp DESC
+-                LIMIT ?
+-            """
+-
+-            cursor.execute(query, (group_id, start_timestamp, max_count))
+-            rows = cursor.fetchall()
+-            conn.close()
++                cutoff_timestamp = int(
++                    (
++                        datetime.now(timezone.utc)
++                        - timedelta(days=max(1, int(days)))
++                    ).timestamp()
++                )
+ 
++            before_id_int = None
++            if before_id:
++                try:
++                    before_id_int = int(before_id)
++                except (TypeError, ValueError):
++                    logger.warning(f"[OneBot->WeChat] before_id 无效: {before_id}")
++
++            messages = await asyncio.to_thread(
++                self._read_bridge_history,
++                self._bridge_history_path,
++                account_id,
++                group_id,
++                cutoff_timestamp,
++                max(1, int(max_count)),
++                before_id_int,
++            )
+             logger.info(
+-                f"[OneBot->WeChat] 从数据库拉取消息: 群 {group_id}, "
+-                f"时间范围 {datetime.fromtimestamp(start_timestamp)}, "
+-                f"获取 {len(rows)} 条"
++                f"[OneBot->WeChat] 从桥接消息库获取群 {group_id} 消息: "
++                f"{len(messages)} 条"
+             )
++            return messages
++        except Exception as e:
++            logger.error(
++                f"[OneBot->WeChat] 读取桥接群消息失败: {e}", exc_info=True
++            )
++            return []
+ 
+-            # 转换为 UnifiedMessage
+-            # 批量获取群成员昵称映射，用于替换 wxid 格式的昵称
+-            nickname_map = await self._build_nickname_mapping(group_id)
+-
+-            messages = []
+-            for row in rows:
+-                from ....domain.value_objects.unified_message import (
+-                    MessageContent,
+-                    MessageContentType,
+-                    UnifiedMessage,
+-                )
+-
+-                content_text = row["message"] or ""
+-                contents = [
+-                    MessageContent(
+-                        type=MessageContentType.TEXT, text=content_text, raw_data={}
+-                    )
+-                ]
+-
+-                sender_name = row["sender_name"] or row["sender_id"]
+-                sender_id = row["sender_id"]
++    def _read_bridge_history(
++        self,
++        database: Path,
++        account_id: str,
++        group_id: str,
++        cutoff_timestamp: int,
++        max_count: int,
++        before_id: int | None,
++    ) -> list[UnifiedMessage]:
++        """用 SQLite 只读 URI 查询桥接日志，不干扰桥接的 WAL 写入。"""
++        if not database.is_file():
++            return []
+ 
+-                # 用真实昵称替换 wxid 格式的 sender_name
+-                if (
+-                    nickname_map
+-                    and sender_id in nickname_map
+-                    and self._is_placeholder_name(sender_name, sender_id)
+-                ):
+-                    sender_name = nickname_map[sender_id]
++        clauses = [
++            "role = 'user'",
++            "account_id = ?",
++            "group_id = ?",
++            "timestamp >= ?",
++            "TRIM(sender_id) <> ''",
++            "TRIM(content) <> ''",
++        ]
++        params: list[Any] = [account_id, group_id, int(cutoff_timestamp)]
++        if before_id is not None:
++            clauses.append("id < ?")
++            params.append(int(before_id))
++        ignored_senders = {
++            str(value) for value in self.bot_self_ids if str(value)
++        }
++        ignored_senders.add(account_id)
++        if ignored_senders:
++            placeholders = ",".join("?" for _ in ignored_senders)
++            clauses.append(f"sender_id NOT IN ({placeholders})")
++            params.extend(sorted(ignored_senders))
++        params.append(max(1, int(max_count)))
+ 
+-                msg = UnifiedMessage(
++        database_uri = f"file:{database.resolve().as_posix()}?mode=ro"
++        with sqlite3.connect(database_uri, uri=True, timeout=2) as connection:
++            connection.row_factory = sqlite3.Row
++            rows = connection.execute(
++                f"""
++                SELECT id, content, sender_id, sender_name, timestamp
++                FROM messages
++                WHERE {' AND '.join(clauses)}
++                ORDER BY timestamp DESC, id DESC
++                LIMIT ?
++                """,
++                params,
++            ).fetchall()
++
++        messages = []
++        for row in reversed(rows):
++            sender_id = str(row["sender_id"] or "").strip()
++            if not sender_id or sender_id in self.bot_self_ids:
++                continue
++            content = str(row["content"] or "").strip()
++            if not content:
++                continue
++            messages.append(
++                UnifiedMessage(
+                     message_id=str(row["id"]),
+                     sender_id=sender_id,
+-                    sender_name=sender_name,
+-                    sender_card=nickname_map.get(sender_id) if nickname_map else None,
++                    sender_name=str(row["sender_name"] or "").strip() or sender_id,
++                    sender_card=None,
+                     group_id=group_id,
+-                    text_content=content_text,
+-                    contents=tuple(contents),
+-                    timestamp=row["timestamp"],
++                    text_content=content,
++                    contents=(
++                        MessageContent(type=MessageContentType.TEXT, text=content),
++                    ),
++                    timestamp=int(float(row["timestamp"])),
+                     platform="wechat",
+-                    raw_data={"reply_to": row["reply_to"], "platform": row["platform"]},
++                    reply_to_id=None,
+                 )
+-                messages.append(msg)
+-
+-            return messages
+-
+-        except Exception as e:
+-            logger.error(f"[OneBot->WeChat] 从数据库拉取消息失败: {e}", exc_info=True)
+-            return []
++            )
++        return messages
+ 
+     def _convert_message(self, raw_msg: dict, group_id: str) -> UnifiedMessage | None:
+         """内部方法：将 OneBot 原生原始消息字典转换为 UnifiedMessage 值对象。"""
