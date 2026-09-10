@@ -11,6 +11,7 @@ import webbrowser
 
 from . import __version__
 from .chat_history import ChatHistoryService
+from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     RobotSettings,
@@ -144,6 +145,7 @@ class ApplicationApi:
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
         self._history = ChatHistoryService(self._install_root)
+        self._contacts = ContactDirectoryService(self._install_root)
         self._groups = GroupDirectoryService(self._install_root)
         self._schedules = ScheduleService(self._install_root)
         self._response_traces = ResponseTraceService(self._install_root)
@@ -445,6 +447,17 @@ class ApplicationApi:
         except (AttributeError, OSError, ValueError):
             return ""
 
+    def _history_contacts(self, user_ids: list[str]) -> dict[str, dict[str, str]]:
+        resolver = getattr(getattr(self, "_contacts", None), "contacts", None)
+        if not callable(resolver) or not user_ids:
+            return {}
+        try:
+            return resolver(user_ids)
+        except (OSError, ValueError, GroupDirectoryError):
+            # History remains usable while WeChat is offline; stored portraits
+            # or the stable text fallback continue to render in that state.
+            return {}
+
     def get_conversations(self, filters: dict[str, Any] | None = None) -> dict[str, object]:
         try:
             values = filters or {}
@@ -466,6 +479,22 @@ class ApplicationApi:
                 account_id=account_id,
             )
             items = list(history.get("items") or [])
+            private_contacts = self._history_contacts(
+                [
+                    str(item.get("conversation_id") or "")
+                    for item in items
+                    if isinstance(item, dict) and item.get("type") == "private"
+                ]
+            )
+            for item in items:
+                if not isinstance(item, dict) or item.get("type") != "private":
+                    continue
+                contact = private_contacts.get(
+                    str(item.get("conversation_id") or ""), {}
+                )
+                item["avatar"] = str(
+                    contact.get("avatar") or item.get("avatar") or ""
+                )
             if kind in {"all", "group"} and start_time is None and end_time is None:
                 known = {
                     str(item.get("conversation_id") or ""): item
@@ -550,14 +579,29 @@ class ApplicationApi:
 
     def get_messages(self, conversation_id: str) -> dict[str, object]:
         try:
-            return self._ok(
-                list(
-                    self._history.messages(
-                        conversation_id,
-                        account_id=self._history_account_id(),
-                    )
+            messages = list(
+                self._history.messages(
+                    conversation_id,
+                    account_id=self._history_account_id(),
                 )
             )
+            if not conversation_id.endswith("@chatroom") and any(
+                message.get("role") != "assistant" and not message.get("avatar")
+                for message in messages
+            ):
+                contact = self._history_contacts([conversation_id]).get(
+                    conversation_id, {}
+                )
+                avatar = str(contact.get("avatar") or "")
+                wechat_name = str(contact.get("name") or "")
+                for message in messages:
+                    if message.get("role") == "assistant":
+                        continue
+                    if not message.get("avatar"):
+                        message["avatar"] = avatar
+                    if not message.get("wechat_name"):
+                        message["wechat_name"] = wechat_name
+            return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 

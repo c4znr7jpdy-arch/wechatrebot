@@ -28,7 +28,18 @@ def _source(root: Path) -> Path:
         connection.executemany(
             "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                (1, "source:FriendMessage:wxid_a", "user", "你好", "wxid_a", "张三", "", "source", 100.0, "{}"),
+                (
+                    1,
+                    "source:FriendMessage:wxid_a",
+                    "user",
+                    "你好",
+                    "wxid_a",
+                    "张三",
+                    "",
+                    "source",
+                    100.0,
+                    '{"avatar":"https://example.test/zhangsan.jpg"}',
+                ),
                 (2, "source:FriendMessage:wxid_a", "assistant", "你好呀", "bot", "", "", "source", 101.0, "{}"),
                 (
                     3,
@@ -90,12 +101,16 @@ def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:
     assert result["summary"]["messages"] == 3
     assert len(result["items"]) == 2
     assert private["items"][0]["display_name"] == "张三"
+    assert private["items"][0]["avatar"] == "https://example.test/zhangsan.jpg"
     group = next(item for item in result["items"] if item["type"] == "group")
     assert group["display_name"] == "客户交流群"
     group_message = service.messages("123@chatroom")[0]
     assert group_message["group_name"] == "客户交流群"
     assert group_message["group_nickname"] == "客服小李"
     assert group_message["wechat_name"] == "李四"
+    assert service.messages("wxid_a")[0]["avatar"] == (
+        "https://example.test/zhangsan.jpg"
+    )
     assert service.messages("wxid_a")[1]["sender_name"] == "机器人"
     assert service.delete_conversation("wxid_a") == 2
     assert service.conversations()["summary"]["messages"] == 1

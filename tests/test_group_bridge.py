@@ -58,6 +58,7 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     history_store = importlib.import_module(f"{package_name}.history_store")
     hook_client = importlib.import_module(f"{package_name}.hook_client")
     config = importlib.import_module(f"{package_name}.config")
+    event_normalizer = importlib.import_module(f"{package_name}.event_normalizer")
 
     yield {
         "root": copied_bridge,
@@ -65,6 +66,7 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "history_store": history_store,
         "hook_client": hook_client,
         "config": config,
+        "event_normalizer": event_normalizer,
     }
 
     for module_name in list(sys.modules):
@@ -251,6 +253,98 @@ def test_nonempty_unrecognized_group_payload_is_not_reported_as_empty_success(
         assert body == {"ok": False, "error": "读取群聊目录失败，请稍后重试"}
 
     _run(_with_client(app, exercise))
+
+
+def test_contact_directory_returns_requested_private_avatar(
+    patched_bridge: dict[str, Any]
+) -> None:
+    callback_server: ModuleType = patched_bridge["callback_server"]
+
+    class Hook:
+        async def get_friends(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "contact": {
+                        "username": "wxid_friend",
+                        "nick_name": "微信好友",
+                        "small_head_url": "https://example.invalid/friend-avatar",
+                    }
+                },
+                {
+                    "username": "other@chatroom",
+                    "nick_name": "群聊不应返回",
+                    "small_head_url": "https://example.invalid/group-avatar",
+                },
+                {
+                    "username": "wxid_other",
+                    "nick_name": "未请求联系人",
+                    "small_head_url": "https://example.invalid/other-avatar",
+                },
+            ]
+
+    async def status() -> dict[str, str]:
+        return {"wechat_identity": "wxid_bot"}
+
+    app = callback_server.create_callback_app(
+        asyncio.Queue(),
+        1024,
+        manager_hook=Hook(),
+        manager_query_token="local-secret",
+        status_provider=status,
+    )
+
+    async def exercise(client: TestClient) -> None:
+        invalid = await client.get(
+            "/api/manager/contacts?id=..%2Fprivate",
+            headers=_headers(),
+        )
+        assert invalid.status == 400
+
+        response = await client.get(
+            "/api/manager/contacts?id=wxid_friend",
+            headers=_headers(),
+        )
+        assert response.status == 200
+        assert await response.json() == {
+            "ok": True,
+            "data": {
+                "account_id": "wxid_bot",
+                "items": [
+                    {
+                        "user_id": "wxid_friend",
+                        "name": "微信好友",
+                        "avatar": "https://example.invalid/friend-avatar",
+                    }
+                ],
+                "total": 1,
+                "truncated": False,
+                "source": "wechat_cache",
+            },
+        }
+
+    _run(_with_client(app, exercise))
+
+
+def test_private_sender_profile_avatar_is_saved_on_normalized_event(
+    patched_bridge: dict[str, Any]
+) -> None:
+    event = patched_bridge["event_normalizer"].normalize_event(
+        {
+            "messageType": "私聊消息",
+            "account_wxid": "wxid_bot",
+            "fromUserName": {"String": "wxid_friend"},
+            "toUserName": {"String": "wxid_bot"},
+            "sender_profile": {
+                "nickName": {"String": "微信好友"},
+                "small_head_url": "https://example.invalid/friend-avatar",
+            },
+            "content": {"String": "你好"},
+            "msgType": 1,
+            "newMsgId": "private-avatar-1",
+        }
+    )
+
+    assert event.member_avatar == "https://example.invalid/friend-avatar"
 
 
 def test_empty_token_and_account_change_never_return_cached_data(

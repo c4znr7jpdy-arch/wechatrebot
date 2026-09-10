@@ -20,10 +20,10 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..fcfcc03709e8b80d3b9da62e49e9b739
  
      async def _resolve_group_member_notice(self, event):
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
-index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf3770b485 100644
+index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..3fbd38550b73e1ad59d7acee5bac8897e7507585 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
-@@ -1,15 +1,156 @@
+@@ -1,15 +1,208 @@
  from __future__ import annotations
  
  import asyncio
@@ -40,6 +40,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf
  
  logger = logging.getLogger(__name__)
 +_MANAGER_MEMBER_LIMIT = 500
++_MANAGER_CONTACT_LIMIT = 40
 +_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 +
 +
@@ -177,10 +178,61 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf
 +        "group_nickname": group_nickname,
 +        "avatar": avatar,
 +    }
++
++
++def _valid_contact_id(value: str) -> bool:
++    return bool(
++        value
++        and len(value) <= 128
++        and all(
++            character.isascii()
++            and (character.isalnum() or character in "_.@-")
++            for character in value
++        )
++        and not value.endswith("@chatroom")
++    )
++
++
++def _normalize_contact(value: Any) -> dict[str, str] | None:
++    if not isinstance(value, Mapping):
++        return None
++    record = _manager_record(value)
++    user_id = _manager_text(
++        _record_value(value, record, "user_id", "wxid", "userName", "username")
++    )
++    if not _valid_contact_id(user_id):
++        return None
++    name = _manager_text(
++        _record_value(
++            value,
++            record,
++            "remark",
++            "remarkName",
++            "name",
++            "nickname",
++            "nickName",
++            "nick_name",
++        )
++    )
++    avatar = _manager_text(
++        _record_value(
++            value,
++            record,
++            "avatar",
++            "avatar_url",
++            "smallHeadImgUrl",
++            "bigHeadImgUrl",
++            "small_head_img_url",
++            "big_head_img_url",
++            "small_head_url",
++            "big_head_url",
++        )
++    )
++    return {"user_id": user_id, "name": name, "avatar": avatar}
  
  
  def create_callback_app(
-@@ -18,9 +159,136 @@ def create_callback_app(
+@@ -18,9 +211,178 @@ def create_callback_app(
      callback_path: str = "/api/recvMsg",
      action_router: Any | None = None,
      status_provider: Any | None = None,
@@ -314,10 +366,52 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf
 +            }
 +        )
 +
++    async def manager_contacts(request: web.Request) -> web.Response:
++        account_id, denied = await authorize_manager(request)
++        if denied is not None:
++            return denied
++        requested: list[str] = []
++        for raw in request.query.getall("id", []):
++            user_id = _manager_text(raw)
++            if not _valid_contact_id(user_id):
++                return _manager_error("联系人标识无效", 400)
++            if user_id not in requested:
++                requested.append(user_id)
++        if not requested or len(requested) > _MANAGER_CONTACT_LIMIT:
++            return _manager_error("联系人查询数量无效", 400)
++        if manager_hook is None or not hasattr(manager_hook, "get_friends"):
++            return _manager_error("联系人资料暂不可用", 503)
++        try:
++            wanted = set(requested)
++            contacts = {
++                normalized["user_id"]: normalized
++                for raw in await manager_hook.get_friends()
++                if (normalized := _normalize_contact(raw)) is not None
++                and normalized["user_id"] in wanted
++            }
++        except Exception:
++            logger.exception("manager contact cache read failed")
++            return _manager_error("读取联系人资料失败，请稍后重试", 502)
++        if not await account_still_current(account_id):
++            return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        items = [contacts[user_id] for user_id in requested if user_id in contacts]
++        return _manager_response(
++            {
++                "ok": True,
++                "data": {
++                    "account_id": account_id,
++                    "items": items,
++                    "total": len(items),
++                    "truncated": False,
++                    "source": "wechat_cache",
++                },
++            }
++        )
++
      async def receive(request: web.Request) -> web.Response:
          try:
              payload = await request.json()
-@@ -123,5 +391,9 @@ def create_callback_app(
+@@ -123,5 +485,10 @@ def create_callback_app(
      app.router.add_put(callback_path, receive)
      app.router.add_post(callback_path, receive)
      app.router.add_get("/api/health", health)
@@ -325,6 +419,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..fc692c6fe5b3938e21d4c49fe6ebaaaf
 +    app.router.add_get(
 +        "/api/manager/groups/{group_id}/members", manager_group_members
 +    )
++    app.router.add_get("/api/manager/contacts", manager_contacts)
      app.router.add_post("/send_raw_xml", send_raw_xml)
      return app
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/config.py b/hook_41827_astrbot_bridge/src/hook_bridge/config.py
@@ -347,6 +442,28 @@ index 8ec67693068b849eb8d7c64b56c6245ea2de3269..1ebfe8579f8df50cdf67792a6129c213
              queue_size=int(_positive_number(raw.get("queue_size", 256), "queue_size", int)),
              request_timeout_seconds=float(_positive_number(raw.get("request_timeout_seconds", 10), "request_timeout_seconds", float)),
              video_download_timeout_seconds=float(
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+index 9e1015b71244968b14d8bb54494212bdb00419fd..31041a3541ef4d6c407814bcfc5742d5c2aaae4d 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+@@ -537,6 +537,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+         sender_name=sender_name,
+         wechat_name=wechat_name,
+         group_nickname=group_nickname,
++        member_avatar=_member_scalar(
++            member_mapping if is_group else profile_mapping,
++            "smallHeadImgUrl",
++            "bigHeadImgUrl",
++            "small_head_img_url",
++            "big_head_img_url",
++            "small_head_url",
++            "big_head_url",
++            "avatar",
++            "avatar_url",
++        ),
+         message_type=message_type,
+         content=content,
+         mentions=mentions,
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
 index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a601cb653 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
