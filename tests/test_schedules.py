@@ -93,6 +93,89 @@ def test_schedule_update_time_and_delete_offline(
     assert tasks["tasks"] == []
 
 
+def _checkin_database(root: Path) -> tuple[Path, str]:
+    database, _ = _database(root)
+    job_id = "job-checkin"
+    session = "source:GroupMessage:456@chatroom"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO cron_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                job_id,
+                f"checkin_{session}",
+                "每日签到 定时推送",
+                "30 8 * * *",
+                json.dumps({"session": session}),
+                1,
+                "scheduled",
+                None,
+                "2026-09-11 00:30:00",
+                None,
+            ),
+        )
+    tasks_path = root / "app" / "astrbot" / "data" / "jiang_schedule" / "tasks.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"].append(
+        {
+            "type": "checkin",
+            "session": session,
+            "hour": 8,
+            "minute": 30,
+            "extra": {},
+        }
+    )
+    tasks_path.write_text(json.dumps(tasks, ensure_ascii=False), encoding="utf-8")
+    checkin_config = tasks_path.with_name("checkin_config.json")
+    checkin_config.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "schedule": {
+                    "enabled": True,
+                    "time": "08:30",
+                    "session": session,
+                },
+                "accounts": [{"id": "site-1", "name": "站点一"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return database, job_id
+
+
+def test_checkin_changes_persist_to_own_config_across_restart(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, job_id = _checkin_database(tmp_path)
+    service = ScheduleService(tmp_path)
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+
+    service.update_time(job_id, "09:35")
+    service.set_enabled(job_id, False)
+
+    config = json.loads(service._checkin_config_path().read_text(encoding="utf-8"))
+    assert config["schedule"]["time"] == "09:35"
+    assert config["schedule"]["enabled"] is False
+    assert config["accounts"] == [{"id": "site-1", "name": "站点一"}]
+
+
+def test_checkin_delete_disables_source_so_restart_does_not_restore_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, job_id = _checkin_database(tmp_path)
+    service = ScheduleService(tmp_path)
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+
+    service.delete(job_id)
+
+    config = json.loads(service._checkin_config_path().read_text(encoding="utf-8"))
+    tasks = json.loads(service._schedule_tasks_path().read_text(encoding="utf-8"))
+    assert config["schedule"]["enabled"] is False
+    assert not any(task.get("type") == "checkin" for task in tasks["tasks"])
+    assert service.list()["items"][0]["id"] == "job-weather"
+
+
 def test_removed_plugin_schedule_is_hidden_from_updated_install(tmp_path: Path) -> None:
     database, _ = _database(tmp_path)
     with sqlite3.connect(database) as connection:

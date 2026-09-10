@@ -237,6 +237,9 @@ class ScheduleService:
     def _schedule_tasks_path(self) -> Path:
         return self.data_root / "jiang_schedule" / "tasks.json"
 
+    def _checkin_config_path(self) -> Path:
+        return self.data_root / "jiang_schedule" / "checkin_config.json"
+
     def _drama_tasks_path(self) -> Path:
         return (
             self.data_root
@@ -263,6 +266,12 @@ class ScheduleService:
     ) -> None:
         kind = _source_kind(name)
         if kind in {"weather", "oilprice", "kfc", "news", "bili", "checkin"}:
+            if kind == "checkin":
+                self._update_checkin_config(
+                    enabled=enabled,
+                    clock=clock,
+                    delete=delete,
+                )
             path = self._schedule_tasks_path()
             payload = self._read_tasks(path)
             tasks = payload.get("tasks")
@@ -305,6 +314,41 @@ class ScheduleService:
                 kept.append(item)
             payload["tasks"] = kept
             write_json_atomic(path, payload)
+
+    def _update_checkin_config(
+        self,
+        *,
+        enabled: bool | None = None,
+        clock: tuple[int, int] | None = None,
+        delete: bool = False,
+    ) -> None:
+        path = self._checkin_config_path()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            # A registered check-in job normally means the plugin has already
+            # created this file.  Keep a valid disabled configuration for old
+            # installations too, otherwise plugin startup seeds an enabled
+            # default task and makes a deleted job reappear.
+            payload = {"version": 1, "accounts": [], "schedule": {}}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("签到定时配置读取失败，请先在签到设置中重新保存。") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("签到定时配置格式不正确，请先在签到设置中重新保存。")
+        schedule = payload.get("schedule")
+        schedule = dict(schedule) if isinstance(schedule, dict) else {}
+        if delete:
+            schedule["enabled"] = False
+        elif enabled is not None:
+            schedule["enabled"] = enabled
+        if clock is not None:
+            schedule["time"] = f"{clock[0]:02d}:{clock[1]:02d}"
+        payload["schedule"] = schedule
+        accounts = payload.get("accounts")
+        if not isinstance(accounts, list):
+            payload["accounts"] = []
+        payload.setdefault("version", 1)
+        write_json_atomic(path, payload)
 
     def set_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
         row = self._job(job_id)
