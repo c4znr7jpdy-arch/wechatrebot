@@ -905,24 +905,67 @@ def test_history_migration_keeps_legacy_rows_unassigned_and_records_account(
     assert "idx_bridge_history_account_group" in indexes
 
 
-def test_inbound_emoji_history_stores_a_label_instead_of_xml(
-    patched_bridge: dict[str, Any], tmp_path: Path
+@pytest.mark.parametrize(
+    ("case_id", "message_type", "content", "expected"),
+    (
+        ("emoji", 47, '<msg><emoji md5="abc" /></msg>', "[表情]"),
+        ("image", 3, '<msg><img cdnmidimgurl="abc" /></msg>', "[图片]"),
+        (
+            "file",
+            49,
+            '<msg><appmsg><title>报价单.pdf</title><type>6</type></appmsg></msg>',
+            "[文件] 报价单.pdf",
+        ),
+        (
+            "link",
+            49,
+            '<msg><appmsg><title>项目说明</title><type>5</type></appmsg></msg>',
+            "[链接卡片] 项目说明",
+        ),
+        (
+            "records",
+            49,
+            '<msg><appmsg><title>聊天记录</title><type>19</type><recorditem /></appmsg></msg>',
+            "[聊天记录] 聊天记录",
+        ),
+        (
+            "quote",
+            49,
+            '<msg><appmsg><title><![CDATA[收到，我来处理]]></title><type>57</type><refermsg /></appmsg></msg>',
+            "[引用回复] 收到，我来处理",
+        ),
+        (
+            "unknown-card",
+            49,
+            '<msg><appmsg><title>活动邀请</title><type>2001</type></appmsg></msg>',
+            "[卡片消息] 活动邀请",
+        ),
+        ("unknown-xml", 1, '<msg><unknown value="1" /></msg>', "[特殊消息]"),
+    ),
+)
+def test_inbound_structured_history_stores_a_summary_instead_of_xml(
+    patched_bridge: dict[str, Any],
+    tmp_path: Path,
+    case_id: str,
+    message_type: int,
+    content: str,
+    expected: str,
 ) -> None:
     history_store: ModuleType = patched_bridge["history_store"]
-    database = tmp_path / "emoji-message-history.db"
+    database = tmp_path / f"{case_id}-message-history.db"
     store = history_store.MessageHistoryStore(database)
     event = SimpleNamespace(
         account_id="wxid_bot",
         conversation_id="room@chatroom",
-        message_id="emoji-message",
-        group_name="表情测试群",
+        message_id=f"{case_id}-message",
+        group_name="结构化消息测试群",
         group_nickname="群成员",
         wechat_name="微信成员",
         member_avatar="",
         sender_name="群成员",
         sender_id="wxid_member",
-        message_type=47,
-        content='<msg><emoji md5="abc" cdnurl="https://example.invalid/emoji" /></msg>',
+        message_type=message_type,
+        content=content,
         create_time=100,
     )
 
@@ -931,6 +974,7 @@ def test_inbound_emoji_history_stores_a_label_instead_of_xml(
     with sqlite3.connect(database) as connection:
         content = connection.execute(
             "SELECT content FROM messages WHERE dedup_key = ?",
-            ("in:wxid_bot:emoji-message",),
+            (f"in:wxid_bot:{case_id}-message",),
         ).fetchone()[0]
-    assert content == "[表情]"
+    assert content == expected
+    assert "<" not in content and ">" not in content

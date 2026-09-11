@@ -650,8 +650,9 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
     assert ".content-scroll.history-active { overflow: hidden; }" in styles
     assert "#page-history.active" in styles
     assert "flex: 1 1 0; min-height: 0; overflow: hidden;" in styles
-    assert 'if (emojiXml.test(content)) return "[表情]";' in script
-    assert 'return imageXml.test(content) ? "[图片]" : content;' in script
+    assert 'if (/<emoji\\b/i.test(content)) return "[表情]";' in script
+    assert 'if (appType === "6") return withTitle("[文件]");' in script
+    assert 'return withTitle("[卡片消息]");' in script
     assert "item.last_content ? displayMessageContent(item.last_content)" in script
 
 

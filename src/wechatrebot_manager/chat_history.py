@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
+from html import unescape
 import json
 from pathlib import Path
 import re
@@ -10,9 +11,35 @@ from typing import Any
 
 
 _GROUP_ID = re.compile(r"([^:]+@chatroom)")
-_MESSAGE_XML = re.compile(r"^\s*(?:<\?xml[^>]*>\s*)?<msg\b", re.IGNORECASE)
+_MESSAGE_XML = re.compile(
+    r"^\s*(?:<\?xml[^>]*>\s*)?<(?:msg|appmsg|sysmsg)\b",
+    re.IGNORECASE,
+)
 _EMOJI_XML = re.compile(r"<emoji\b", re.IGNORECASE)
 _IMAGE_XML = re.compile(r"<img\b", re.IGNORECASE)
+_APP_MESSAGE_XML = re.compile(r"<appmsg\b", re.IGNORECASE)
+
+
+def _xml_text(content: str, tag: str) -> str:
+    match = re.search(
+        rf"<{tag}\b[^>]*>(.*?)</{tag}>",
+        content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    value = match.group(1).strip()
+    if value.startswith("<![CDATA[") and value.endswith("]]>"):
+        value = value[9:-3]
+    value = unescape(value)
+    if "<" in value or ">" in value:
+        return ""
+    return " ".join(value.split())[:80]
+
+
+def _message_label(content: str, label: str) -> str:
+    title = _xml_text(content, "title")
+    return f"{label} {title}" if title else label
 
 
 def _display_content(value: object) -> str:
@@ -23,7 +50,32 @@ def _display_content(value: object) -> str:
         return "[表情]"
     if _IMAGE_XML.search(content):
         return "[图片]"
-    return content
+    if re.search(r"<voicemsg\b", content, re.IGNORECASE):
+        return "[语音]"
+    if re.search(r"<videomsg\b", content, re.IGNORECASE):
+        return "[视频]"
+    if re.search(r"<location\b", content, re.IGNORECASE):
+        return "[位置]"
+    if re.search(r"<revokemsg\b", content, re.IGNORECASE):
+        return "[撤回消息]"
+    if _APP_MESSAGE_XML.search(content):
+        app_type = _xml_text(content, "type")
+        if app_type == "6":
+            return _message_label(content, "[文件]")
+        if app_type == "5":
+            return _message_label(content, "[链接卡片]")
+        if app_type in {"33", "36"}:
+            return _message_label(content, "[小程序]")
+        if app_type == "19" or re.search(
+            r"<recorditem\b", content, re.IGNORECASE
+        ):
+            return _message_label(content, "[聊天记录]")
+        if app_type == "57" or re.search(
+            r"<refermsg\b", content, re.IGNORECASE
+        ):
+            return _message_label(content, "[引用回复]")
+        return _message_label(content, "[卡片消息]")
+    return "[特殊消息]"
 
 
 def _plain_conversation_id(session_id: str, group_id: str) -> tuple[str, str]:

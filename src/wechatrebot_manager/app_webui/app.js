@@ -1510,10 +1510,40 @@
 
   function displayMessageContent(value) {
     const content = String(value ?? "");
-    const emojiXml = /^\s*(?:<\?xml[^>]*>\s*)?<msg\b[\s\S]*?<emoji\b/i;
-    const imageXml = /^\s*(?:<\?xml[^>]*>\s*)?<msg\b[\s\S]*?<img\b/i;
-    if (emojiXml.test(content)) return "[表情]";
-    return imageXml.test(content) ? "[图片]" : content;
+    const structuredXml = /^\s*(?:<\?xml[^>]*>\s*)?<(?:msg|appmsg|sysmsg)\b/i;
+    if (!structuredXml.test(content)) return content;
+    const folded = content.toLowerCase();
+    if (/<emoji\b/i.test(content)) return "[表情]";
+    if (/<img\b/i.test(content)) return "[图片]";
+    if (/<voicemsg\b/i.test(content)) return "[语音]";
+    if (/<videomsg\b/i.test(content)) return "[视频]";
+    if (/<location\b/i.test(content)) return "[位置]";
+    if (/<revokemsg\b/i.test(content)) return "[撤回消息]";
+    if (!/<appmsg\b/i.test(content)) return "[特殊消息]";
+
+    const xmlText = (tag) => {
+      const match = content.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+      if (!match) return "";
+      let text = match[1].trim();
+      if (text.startsWith("<![CDATA[") && text.endsWith("]]>")) text = text.slice(9, -3);
+      if (/[<>]/.test(text)) return "";
+      const decoded = text
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, '"')
+        .replace(/&apos;/gi, "'");
+      return /[<>]/.test(decoded) ? "" : decoded.replace(/\s+/g, " ").trim().slice(0, 80);
+    };
+    const withTitle = (label) => {
+      const title = xmlText("title");
+      return title ? `${label} ${title}` : label;
+    };
+    const appType = xmlText("type");
+    if (appType === "6") return withTitle("[文件]");
+    if (appType === "5") return withTitle("[链接卡片]");
+    if (["33", "36"].includes(appType)) return withTitle("[小程序]");
+    if (appType === "19" || folded.includes("<recorditem")) return withTitle("[聊天记录]");
+    if (appType === "57" || folded.includes("<refermsg")) return withTitle("[引用回复]");
+    return withTitle("[卡片消息]");
   }
 
   function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
