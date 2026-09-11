@@ -739,6 +739,48 @@ def test_explicit_contact_refresh_returns_the_complete_refresh_payload(
     assert calls == ["/api/update_all_friend"]
 
 
+@pytest.mark.parametrize("list_key", ["contactList", "contact_list"])
+def test_get_contact_unwraps_single_contact_response(
+    patched_bridge: dict[str, Any], list_key: str
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    calls: list[tuple[str, dict[str, Any]]] = []
+    contact = {
+        "userName": {"String": "wxid_friend"},
+        "nickName": {"String": "微信好友"},
+        "alias": "friend_88",
+    }
+
+    async def read(path: str, payload: dict[str, Any]):
+        calls.append((path, payload))
+        return {
+            "baseResponse": {"ret": 0},
+            "contactCount": 1,
+            list_key: [contact],
+        }
+
+    client._read_data = read
+
+    assert _run(client.get_contact("wxid_friend")) == contact
+    assert calls == [("/api/get_contact", {"wxid": "wxid_friend"})]
+
+
+def test_get_contact_keeps_legacy_direct_record_response(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    contact = {"userName": "wxid_friend", "nickName": "微信好友"}
+
+    async def read(_path: str, _payload: dict[str, Any]):
+        return contact
+
+    client._read_data = read
+
+    assert _run(client.get_contact("wxid_friend")) == contact
+
+
 def test_explicit_group_refresh_is_never_permanently_locked_after_empty_result(
     patched_bridge: dict[str, Any]
 ) -> None:

@@ -991,6 +991,34 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
      async def get_group_detail_members(self, room_id: str) -> list[dict[str, Any]]:
          data = await self._read_data(
              "/api/get_chatroom_detail_cache", {"room_id": room_id}
+@@ -771,10 +964,24 @@ class HookClient:
+     async def get_profile(self) -> dict[str, Any]:
+         data = await self._read_data("/api/get_profile_cache", {})
+         return dict(data) if isinstance(data, Mapping) else {}
+-
++
+     async def get_contact(self, wxid: str) -> dict[str, Any]:
+         data = await self._read_data("/api/get_contact", {"wxid": wxid})
+-        return dict(data) if isinstance(data, Mapping) else {}
++        if not isinstance(data, Mapping):
++            return {}
++
++        # Current HOOK builds wrap the single requested contact in a
++        # camel-case contactList; older builds may use contact_list or return
++        # the contact record directly.
++        for key in ("contactList", "contact_list"):
++            contacts = data.get(key)
++            if not isinstance(contacts, list):
++                continue
++            return next(
++                (dict(item) for item in contacts if isinstance(item, Mapping)),
++                {},
++            )
++        return dict(data)
+-
++
+     async def download_image(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+         return await self._post("/api/download_img", payload, retry_read=True)
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py b/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py
 index f96cec016d37efbea7571468db641f939f2bf1e2..bbe1b8eddf858c46e703de3ccfabeb36b59e60ce 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py
