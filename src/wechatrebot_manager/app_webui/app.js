@@ -1488,7 +1488,7 @@
     list.innerHTML = state.conversations.length ? state.conversations.map((item) => `
       <button class="conversation-item ${state.selectedConversation?.conversation_id === item.conversation_id ? "active" : ""}" data-conversation="${escapeHtml(item.conversation_id)}" data-type="${escapeHtml(item.type)}">
         ${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}
-        <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${item.last_timestamp ? escapeHtml(new Date(item.last_timestamp * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})) : "—"}</time></span><small class="conversation-id">${escapeHtml(item.conversation_id)}</small><small class="conversation-preview">${escapeHtml(item.last_content || (item.message_count ? `${item.message_count} 条本机消息` : "暂无本机消息"))}</small></span>
+        <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${item.last_timestamp ? escapeHtml(new Date(item.last_timestamp * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})) : "—"}</time></span><small class="conversation-id">${escapeHtml(item.conversation_id)}</small><small class="conversation-preview">${escapeHtml(item.last_content ? displayMessageContent(item.last_content) : (item.message_count ? `${item.message_count} 条本机消息` : "暂无本机消息"))}</small></span>
       </button>`).join("") : '<div class="empty-state compact"><div class="empty-symbol">空</div><h2>没有找到聊天记录</h2><p>调整筛选条件或启动机器人接收新消息。</p></div>';
     $$(".conversation-item", list).forEach((button) => button.addEventListener("click", () => selectConversation(button.dataset.conversation)));
     bindAvatarFallbacks(list);
@@ -1510,7 +1510,9 @@
 
   function displayMessageContent(value) {
     const content = String(value ?? "");
+    const emojiXml = /^\s*(?:<\?xml[^>]*>\s*)?<msg\b[\s\S]*?<emoji\b/i;
     const imageXml = /^\s*(?:<\?xml[^>]*>\s*)?<msg\b[\s\S]*?<img\b/i;
+    if (emojiXml.test(content)) return "[表情]";
     return imageXml.test(content) ? "[图片]" : content;
   }
 

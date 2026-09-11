@@ -903,3 +903,34 @@ def test_history_migration_keeps_legacy_rows_unassigned_and_records_account(
         }
     assert rows == [("", "旧消息"), ("wxid_current_bot", "新消息")]
     assert "idx_bridge_history_account_group" in indexes
+
+
+def test_inbound_emoji_history_stores_a_label_instead_of_xml(
+    patched_bridge: dict[str, Any], tmp_path: Path
+) -> None:
+    history_store: ModuleType = patched_bridge["history_store"]
+    database = tmp_path / "emoji-message-history.db"
+    store = history_store.MessageHistoryStore(database)
+    event = SimpleNamespace(
+        account_id="wxid_bot",
+        conversation_id="room@chatroom",
+        message_id="emoji-message",
+        group_name="表情测试群",
+        group_nickname="群成员",
+        wechat_name="微信成员",
+        member_avatar="",
+        sender_name="群成员",
+        sender_id="wxid_member",
+        message_type=47,
+        content='<msg><emoji md5="abc" cdnurl="https://example.invalid/emoji" /></msg>',
+        create_time=100,
+    )
+
+    assert store.record_inbound(event) is True
+
+    with sqlite3.connect(database) as connection:
+        content = connection.execute(
+            "SELECT content FROM messages WHERE dedup_key = ?",
+            ("in:wxid_bot:emoji-message",),
+        ).fetchone()[0]
+    assert content == "[表情]"

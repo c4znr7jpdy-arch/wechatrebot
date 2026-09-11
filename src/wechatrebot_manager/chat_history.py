@@ -10,6 +10,20 @@ from typing import Any
 
 
 _GROUP_ID = re.compile(r"([^:]+@chatroom)")
+_MESSAGE_XML = re.compile(r"^\s*(?:<\?xml[^>]*>\s*)?<msg\b", re.IGNORECASE)
+_EMOJI_XML = re.compile(r"<emoji\b", re.IGNORECASE)
+_IMAGE_XML = re.compile(r"<img\b", re.IGNORECASE)
+
+
+def _display_content(value: object) -> str:
+    content = str(value or "")
+    if not _MESSAGE_XML.search(content):
+        return content
+    if _EMOJI_XML.search(content):
+        return "[表情]"
+    if _IMAGE_XML.search(content):
+        return "[图片]"
+    return content
 
 
 def _plain_conversation_id(session_id: str, group_id: str) -> tuple[str, str]:
@@ -410,7 +424,7 @@ class ChatHistoryService:
                 "group_nickname": row["group_nickname"],
                 "wechat_name": row["wechat_name"],
                 "avatar": row["avatar"],
-                "content": row["content"],
+                "content": _display_content(row["content"]),
                 "timestamp": row["timestamp"],
             }
             for row in reversed(rows)
@@ -466,8 +480,13 @@ class ChatHistoryService:
                 params,
             ).fetchall()
         if format.casefold() == "json":
+            exported = []
+            for row in rows:
+                item = dict(row)
+                item["content"] = _display_content(item.get("content"))
+                exported.append(item)
             output.write_text(
-                json.dumps([dict(row) for row in rows], ensure_ascii=False, indent=2)
+                json.dumps(exported, ensure_ascii=False, indent=2)
                 + "\n",
                 encoding="utf-8",
             )
@@ -490,7 +509,7 @@ class ChatHistoryService:
                             row["sender_id"],
                             row["wechat_name"] or row["sender_name"],
                             row["group_nickname"],
-                            row["content"],
+                            _display_content(row["content"]),
                             datetime.fromtimestamp(
                                 row["timestamp"], tz=timezone.utc
                             ).astimezone().isoformat(timespec="seconds"),

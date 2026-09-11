@@ -720,7 +720,20 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
              session_id=(
                  f"hook_bridge:GroupMessage:{event.conversation_id}"
                  if is_group
-@@ -139,11 +156,13 @@ class MessageHistoryStore:
+@@ -107,7 +124,11 @@ class MessageHistoryStore:
+                 else f"hook_bridge:FriendMessage:{event.conversation_id}"
+             ),
+             role="user",
+-            content=event.content,
++            content=(
++                "[表情]"
++                if getattr(event, "message_type", 0) == 47
++                else event.content
++            ),
+             sender_id=event.sender_id,
+             sender_name=(
+                 event.group_nickname or event.wechat_name or event.sender_name
+@@ -139,11 +160,13 @@ class MessageHistoryStore:
                  "group_name": "",
                  "group_nickname": "",
                  "wechat_name": sender_name,
@@ -734,7 +747,7 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
              session_id=(
                  f"hook_bridge:GroupMessage:{target}"
                  if is_group
-@@ -162,6 +181,7 @@ class MessageHistoryStore:
+@@ -162,6 +185,7 @@ class MessageHistoryStore:
      def _insert(
          self,
          *,
@@ -742,7 +755,7 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
          session_id: str,
          role: str,
          content: str,
-@@ -176,11 +196,12 @@ class MessageHistoryStore:
+@@ -176,11 +200,12 @@ class MessageHistoryStore:
              cursor = connection.execute(
                  """
                  INSERT OR IGNORE INTO messages (

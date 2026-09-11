@@ -138,3 +138,36 @@ def test_history_prefers_bridge_journal_without_memory_plugin(tmp_path: Path) ->
     assert result["items"][0]["conversation_id"] == "456@chatroom"
     assert result["items"][0]["display_name"] == "测试群"
     assert service.messages("456@chatroom")[0]["content"] == "点歌 发如雪"
+
+
+def test_history_hides_inbound_emoji_xml_in_views_and_exports(tmp_path: Path) -> None:
+    path = _bridge_source(tmp_path)
+    emoji_xml = '<msg><emoji md5="abc" cdnurl="https://example.invalid/emoji" /></msg>'
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                2,
+                "wxid_bot",
+                "hook_bridge:GroupMessage:456@chatroom",
+                "user",
+                emoji_xml,
+                "wxid_c",
+                "王五",
+                "456@chatroom",
+                "hook_bridge",
+                104.0,
+                '{"group_name":"测试群","wechat_name":"王五"}',
+                "in:message-2",
+            ),
+        )
+    service = ChatHistoryService(tmp_path)
+
+    assert service.messages("456@chatroom")[-1]["content"] == "[表情]"
+
+    csv_path = service.export(tmp_path / "emoji-history.csv")
+    json_path = service.export(tmp_path / "emoji-history.json", format="json")
+    csv_text = csv_path.read_text(encoding="utf-8-sig")
+    json_text = json_path.read_text(encoding="utf-8")
+    assert "[表情]" in csv_text and "<emoji" not in csv_text
+    assert "[表情]" in json_text and "<emoji" not in json_text
