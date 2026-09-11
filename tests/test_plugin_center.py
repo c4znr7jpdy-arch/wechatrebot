@@ -13,6 +13,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from wechatrebot_manager import plugin_center
+
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.plugin_center import (
     ConfigConflictError,
@@ -38,6 +40,12 @@ def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
     assert _model_field_kind("LLM_providers", {"type": "list"}) == "chat"
     assert _model_field_kind("embedding_provider_id", {}) == "embedding"
     assert _model_field_kind("rerank_provider_id", {}) == "rerank"
+
+
+def test_secret_detection_does_not_treat_secretary_timing_as_a_password() -> None:
+    assert plugin_center._is_secret_field("secretary_debounce_time", {}) is False
+    assert plugin_center._is_secret_field("api_secret", {}) is True
+    assert plugin_center._is_secret_field("access_token", {}) is True
 
 
 def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
@@ -122,6 +130,27 @@ def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
     assert "secretary_debounce_time" not in projected["timing"]["items"]
     assert "energy" not in projected
     assert "完整配置页" in profile.note
+
+
+def test_group_notice_exposes_join_leave_and_profile_sections() -> None:
+    schema = {
+        key: {"type": "bool" if key.startswith("notify_") else "string", "default": True if key.startswith("notify_") else key}
+        for key in (
+            "notify_join", "notify_leave", "notify_profile_change",
+            "welcome_title", "welcome_tail", "leave_title", "leave_body",
+            "profile_change_title", "profile_change_body",
+        )
+    }
+
+    projected, profile = _project_customer_schema("jiang_group_notice", schema)
+
+    assert profile is not None
+    assert list(projected) == list(schema)
+    assert projected["notify_join"]["_ui_group"] == "要提示的成员事件"
+    assert projected["welcome_title"]["_ui_group"] == "成员加入"
+    assert projected["leave_title"]["_ui_group"] == "成员退出"
+    assert projected["profile_change_title"]["_ui_group"] == "群昵称变化"
+    assert "加入、退出和群昵称变化" in profile.note
 
 
 def _install(tmp_path: Path) -> tuple[Path, str]:

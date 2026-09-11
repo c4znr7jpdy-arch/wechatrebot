@@ -51,6 +51,8 @@ def test_save_persona_preserves_advanced_plugin_fields_when_offline(tmp_path: Pa
     assert saved["timing"]["waiting_time"] == 7
     assert saved["personality"]["advanced"] == "keep"
     assert saved["personality"]["reply_strategy_guide"].startswith("语气温柔")
+    assert "一次只处理当前最相关的话题" in saved["personality"]["reply_strategy_guide"]
+    assert result["reply_guide"] == "被点名或引用时回应；一次只处理当前最相关的话题，不抢话，不连续刷屏。"
     assert saved["reply_length"]["normal_reply_max_chars"] == 80
     assert saved["wake_interaction"]["direct_wake_fast_path"] is True
 

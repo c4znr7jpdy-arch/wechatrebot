@@ -80,11 +80,18 @@ def test_group_member_notice_has_independent_hot_read_switches(tmp_path: Path) -
         "notify_join",
         "notify_leave",
         "notify_profile_change",
+        "leave_title",
+        "leave_body",
+        "profile_change_title",
+        "profile_change_body",
     } <= set(schema)
     assert schema["notify_leave"]["default"] is True
     assert 'self._is_enabled("notify_join")' in source
     assert 'self._is_enabled("notify_leave")' in source
     assert 'self._is_enabled("notify_profile_change")' in source
+    assert 'self._get_config_value("leave_title"' in source
+    assert 'self._get_config_value("profile_change_body"' in source
+    assert "old_label=old_label" in source
 
 
 def test_music_command_accepts_wechat_whitespace_and_marks_card_as_reply(

@@ -15,6 +15,7 @@
     featureDirty: false,
     featureSaving: false,
     featureLoad: 0,
+    featurePrefetch: 0,
     featureDetails: {},
     featureFeedback: "",
     groupsLoaded: false,
@@ -50,6 +51,8 @@
     providerDirty: false,
     providerBaseline: "",
     providerCleanStatus: "尚未保存",
+    providerModels: [],
+    providerModelFocus: -1,
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -135,6 +138,19 @@
     return new Intl.DateTimeFormat("zh-CN", {
       year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     }).format(date);
+  }
+
+  function localDateInputValue(value = new Date()) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function initializeHistoryDates() {
+    const today = localDateInputValue();
+    if (!$("#historyStart").value) $("#historyStart").value = today;
+    if (!$("#historyEnd").value) $("#historyEnd").value = today;
   }
 
   function setStage(element, mode, label) {
@@ -290,7 +306,7 @@
     schedules: "定时任务", activity: "运行记录", settings: "设置",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory", "system"]);
+  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory"]);
 
   function providerFormSnapshot() {
     const form = $("#providerForm");
@@ -417,6 +433,7 @@
       $("#featureSummary").textContent = `${state.features.length} 项功能 · ${data.engine_online ? "设置可立即应用" : "设置将在下次启动时应用"}`;
       renderFeatureList();
       if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
+      void prefetchFeatureDetails(++state.featurePrefetch);
     } catch (error) {
       list.innerHTML = '<div class="loading-row">功能暂时无法读取</div>';
       reportError(error);
@@ -424,12 +441,34 @@
   }
 
   async function refreshFeatures() {
+    state.featurePrefetch += 1;
     state.featuresLoaded = false;
     state.selectedFeature = null;
     state.featureDetail = null;
     state.featureDetails = {};
     await loadFeatures();
     toast("功能准备情况已重新检查。 ");
+  }
+
+  async function prefetchFeatureDetails(generation) {
+    const pending = state.features
+      .map((item) => item.id)
+      .filter((featureId) => featureId && !state.featureDetails[featureId]);
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length && generation === state.featurePrefetch) {
+        const featureId = pending[next++];
+        try {
+          const detail = await api("get_feature", featureId);
+          if (generation !== state.featurePrefetch) return;
+          if (!state.featureDetails[featureId]) state.featureDetails[featureId] = structuredClone(detail);
+        } catch (_error) {
+          // Background warming is intentionally quiet; opening the feature
+          // still reports a useful error and offers the normal retry path.
+        }
+      }
+    };
+    await Promise.all(Array.from({length: Math.min(3, pending.length)}, () => worker()));
   }
 
   function renderFeatureList() {
@@ -461,25 +500,29 @@
     }});
   }
 
-  function useFeatureDetail(source, afterSave = false) {
+  function useFeatureDetail(source, afterSave = false, preserveTab = false) {
     const detail = structuredClone(source);
     detail.config = structuredClone(detail.advanced_config || detail.config || {});
     state.featureDetail = detail;
     state.featureBaseline = structuredClone(detail.config);
     state.featureDirty = false;
     if (!afterSave) state.featureFeedback = "";
-    state.featureTab = Object.keys(detail.basic_schema || {}).length ? "basic" : "models";
+    const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
+    if (!preserveTab || !Object.keys(schemas[state.featureTab] || {}).length) {
+      state.featureTab = Object.keys(schemas.basic).length ? "basic" : "models";
+    }
   }
 
   async function openFeature(featureId, afterSave = false, force = false) {
     if (state.featureSaving && !afterSave) return;
     if (state.featureDirty && !afterSave) { discardFeatureChanges(() => openFeature(featureId, false, force)); return; }
     const load = ++state.featureLoad;
+    const preserveTab = state.selectedFeature === featureId;
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
     if (cached) {
-      useFeatureDetail(cached, afterSave);
+      useFeatureDetail(cached, afterSave, preserveTab);
       renderFeatureDetail();
       const note = $("#featureNote");
       if (note && force) note.textContent = "正在重新读取最新设置…";
@@ -495,7 +538,7 @@
       if (load !== state.featureLoad) return;
       state.featureDetails[featureId] = structuredClone(detail);
       if (cached && state.featureDirty) return;
-      useFeatureDetail(detail, afterSave);
+      useFeatureDetail(detail, afterSave, preserveTab);
       renderFeatureDetail();
     } catch (error) {
       if (load !== state.featureLoad) return;
@@ -568,14 +611,36 @@
   }
 
   function schemaMarkup(schema, config, prefix = []) {
-    return Object.entries(schema || {}).map(([key, field]) => {
+    const markup = [];
+    let groupTitle = "";
+    let groupFields = [];
+    const flushGroup = () => {
+      if (!groupFields.length) return;
+      markup.push(`<section class="config-section"><h3>${escapeHtml(groupTitle)}</h3><div class="config-section-grid">${groupFields.join("")}</div></section>`);
+      groupTitle = "";
+      groupFields = [];
+    };
+    Object.entries(schema || {}).forEach(([key, field]) => {
       if (!field || typeof field !== "object") return "";
       const path = [...prefix, key];
       if (field.type === "object" && field.items && typeof field.items === "object") {
-        return `<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path)}</div></section>`;
+        flushGroup();
+        markup.push(`<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path)}</div></section>`);
+        return;
       }
-      return fieldMarkup(key, field, getAtPath(config, path), path);
-    }).join("");
+      const fieldHtml = fieldMarkup(key, field, getAtPath(config, path), path);
+      const nextGroup = String(field._ui_group || "").trim();
+      if (!nextGroup) {
+        flushGroup();
+        markup.push(fieldHtml);
+        return;
+      }
+      if (groupFields.length && groupTitle !== nextGroup) flushGroup();
+      groupTitle = nextGroup;
+      groupFields.push(fieldHtml);
+    });
+    flushGroup();
+    return markup.join("");
   }
 
   function renderFeatureDetail() {
@@ -927,7 +992,7 @@
             : '<span class="member-count-state loading">读取中</span>';
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
-        <td><span class="group-name-cell"><span class="group-avatar tone-${avatarTone}">${escapeHtml((item.name || "群").slice(0, 1))}</span><span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
+        <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
         <td><code class="group-id">${escapeHtml(item.group_id)}</code></td>
         <td>${memberCount}</td>
         <td><div class="row-actions"><button class="row-action copy-group" type="button" data-group-id="${escapeHtml(item.group_id)}">复制</button><button class="row-action inspect-group ${selected ? "active" : ""}" type="button" data-group-id="${escapeHtml(item.group_id)}">${selected ? "正在查看" : "查看"}</button></div></td>
@@ -940,6 +1005,7 @@
     });
     $$(".inspect-group").forEach((button) => button.addEventListener("click", () => selectGroup(button.dataset.groupId)));
     $$(".copy-group").forEach((button) => button.addEventListener("click", () => copyText(button.dataset.groupId)));
+    bindAvatarFallbacks($("#groupRows"));
     renderGroupInspector();
     if (scroll) scroll.scrollTop = previousScroll;
   }
@@ -968,8 +1034,10 @@
   function renderGroupInspector() {
     const panel = $("#groupInspector");
     const group = state.groups.find((item) => item.group_id === state.selectedGroup);
+    panel.classList.toggle("empty", !group);
     if (!group) {
-      panel.innerHTML = '<span class="eyebrow">群聊详情</span><h2>选择一个群聊</h2><p>可查看接口实际返回的群信息和成员；未提供的权限信息会明确标为未知。</p>';
+      const message = state.groups.length ? "选择左侧群聊后，可查看群规则和群成员。" : "刷新并读取到群聊后，可在这里查看群规则和群成员。";
+      panel.innerHTML = `<div class="group-inspector-empty"><div class="empty-symbol">群</div><span class="eyebrow">群聊详情</span><h2>${state.groups.length ? "选择一个群聊" : "暂时没有群聊"}</h2><p>${message}</p></div>`;
       return;
     }
     const memberData = state.groupMembers[group.group_id];
@@ -982,7 +1050,7 @@
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
-    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title"><span class="group-avatar tone-0">${escapeHtml((group.name || "群").slice(0, 1))}</span><div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div></header>`;
+    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div></header>`;
     const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
     const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
     const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">群主、管理员和头像等微信接口未提供的信息保持“未知”，不会推断。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
@@ -1427,20 +1495,6 @@
     return true;
   }
 
-  async function saveBrand(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    if (!requiredValues(form)) return;
-    const button = $('button[type="submit"]', form); button.disabled = true;
-    try {
-      const data = await api("save_brand", Object.fromEntries(new FormData(form)));
-      state.bootstrap.brand = data;
-      applyBrand(data);
-      $("#brandNote").textContent = "已保存并统一更新。 ";
-    } catch (error) { reportError(error); $("#brandNote").textContent = error.message; }
-    finally { button.disabled = false; }
-  }
-
   async function saveProvider(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1480,7 +1534,7 @@
     if (!preset) return;
     form.elements.api_base.value = preset.api_base || "";
     form.elements.model.value = preset.model || "";
-    $("#providerModelOptions").innerHTML = "";
+    clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
     $("#providerPresetHint").textContent = preset.description || "填写模型服务信息";
   }
@@ -1511,7 +1565,7 @@
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
-    $("#providerModelOptions").innerHTML = "";
+    clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
     $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
@@ -1588,8 +1642,10 @@
     try {
       const data = await api("discover_provider_models", Object.fromEntries(new FormData(form)));
       const items = Array.isArray(data.items) ? data.items : [];
-      $("#providerModelOptions").innerHTML = items.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
-      $("#providerModelHint").textContent = `已读取 ${items.length} 个模型；点击输入框即可选择，也可以继续手动填写。`;
+      state.providerModels = [...new Set(items.map((model) => String(model).trim()).filter(Boolean))];
+      state.providerModelFocus = -1;
+      renderProviderModelOptions(true);
+      $("#providerModelHint").textContent = `已读取 ${state.providerModels.length} 个模型；可从下方完整列表选择，也可以继续手动填写。`;
     } catch (error) {
       reportError(error);
       $("#providerModelHint").textContent = error.message;
@@ -1597,6 +1653,85 @@
       button.disabled = false;
       button.textContent = original;
     }
+  }
+
+  function clearProviderModels() {
+    state.providerModels = [];
+    state.providerModelFocus = -1;
+    const options = $("#providerModelOptions");
+    const input = $("#providerModelInput");
+    if (options) {
+      options.innerHTML = "";
+      options.hidden = true;
+    }
+    input?.setAttribute("aria-expanded", "false");
+  }
+
+  function providerModelMatches() {
+    const keyword = $("#providerModelInput")?.value.trim().toLocaleLowerCase("zh-CN") || "";
+    return state.providerModels.filter((model) => !keyword || model.toLocaleLowerCase("zh-CN").includes(keyword));
+  }
+
+  function renderProviderModelOptions(open = false) {
+    const input = $("#providerModelInput");
+    const options = $("#providerModelOptions");
+    if (!input || !options) return;
+    const items = providerModelMatches();
+    state.providerModelFocus = Math.min(state.providerModelFocus, items.length - 1);
+    options.innerHTML = items.length ? items.map((model, index) => `
+      <button type="button" role="option" aria-selected="${input.value === model}" class="model-option ${state.providerModelFocus === index ? "focused" : ""}" data-model="${escapeHtml(model)}">${escapeHtml(model)}</button>
+    `).join("") : '<span class="model-option-empty">没有匹配的模型，可继续手动填写</span>';
+    const expanded = open && state.providerModels.length > 0;
+    options.hidden = !expanded;
+    input.setAttribute("aria-expanded", String(expanded));
+    if (expanded && state.providerModelFocus >= 0) {
+      $(".model-option.focused", options)?.scrollIntoView({block: "nearest"});
+    }
+  }
+
+  function chooseProviderModel(model) {
+    const input = $("#providerModelInput");
+    if (!input) return;
+    input.value = model;
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+    state.providerModelFocus = -1;
+    renderProviderModelOptions(false);
+    input.focus();
+  }
+
+  function bindProviderModelCombobox() {
+    const input = $("#providerModelInput");
+    const options = $("#providerModelOptions");
+    if (!input || !options) return;
+    input.addEventListener("focus", () => renderProviderModelOptions(true));
+    input.addEventListener("input", () => { state.providerModelFocus = -1; renderProviderModelOptions(true); });
+    input.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) return;
+      if (event.key === "Escape") {
+        renderProviderModelOptions(false);
+        return;
+      }
+      const items = providerModelMatches();
+      if (!items.length) return;
+      if (event.key === "Enter") {
+        if (state.providerModelFocus < 0) return;
+        event.preventDefault();
+        chooseProviderModel(items[state.providerModelFocus]);
+        return;
+      }
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      state.providerModelFocus = (state.providerModelFocus + direction + items.length) % items.length;
+      renderProviderModelOptions(true);
+    });
+    options.addEventListener("mousedown", (event) => event.preventDefault());
+    options.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-model]");
+      if (option) chooseProviderModel(option.dataset.model);
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#providerModelCombobox")) renderProviderModelOptions(false);
+    });
   }
 
   function deleteSelectedProvider() {
@@ -1642,8 +1777,8 @@
     $("#brandName").textContent = brand.display_name;
     $("#brandMark").textContent = (brand.short_name || brand.display_name || "机").slice(0, 1);
     document.title = `${brand.display_name} · 机器人管理`;
-    const form = $("#brandForm");
-    for (const key of ["display_name", "short_name", "persona_name", "welcome_text", "admin_id"]) if (form.elements[key]) form.elements[key].value = brand[key] || "";
+    const form = $("#personaForm");
+    for (const key of ["display_name", "admin_id"]) if (form?.elements[key]) form.elements[key].value = brand[key] || "";
     updatePersonaPreview();
   }
 
@@ -1654,7 +1789,8 @@
     const tone = {natural: "自然熟人", warm: "温柔陪伴", professional: "专业助理", lively: "活泼群友"}[form.elements.tone.value] || "自然熟人";
     const length = {brief: "简短回复", balanced: "均衡回复", detailed: "详细回复"}[form.elements.reply_length.value] || "简短回复";
     summary.textContent = `当前组合：${tone} · ${length} · ${form.elements.mention_only.checked ? "仅点名参与" : "自然参与"}`;
-    const robotName = state.bootstrap?.brand?.short_name || state.bootstrap?.brand?.persona_name || "机器人";
+    const robotName = String(form.elements.alias.value || "").split("|").map((item) => item.trim()).find(Boolean)
+      || state.bootstrap?.brand?.short_name || "机器人";
     const names = $$(".preview-message.mine small, .preview-message.mine .preview-avatar");
     if (names[0]) names[0].textContent = robotName;
     if (names[1]) names[1].textContent = robotName.slice(0, 1);
@@ -1672,7 +1808,7 @@
     const capabilities = state.experience.capabilities || {};
     const persona = state.experience.persona || {};
     const personaForm = $("#personaForm");
-    for (const key of ["tone", "reply_length", "alias", "identity_prompt", "reply_guide"]) {
+    for (const key of ["tone", "reply_length", "alias", "identity_prompt"]) {
       if (personaForm.elements[key]) personaForm.elements[key].value = persona[key] ?? "";
     }
     personaForm.elements.mention_only.checked = Boolean(persona.mention_only);
@@ -1732,7 +1868,56 @@
     }
   }
 
-  const savePersonaExperience = (event) => saveExperience(event, (values) => api("save_persona_settings", values), "persona", "#personaNote");
+  async function savePersonaAndIdentity(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!requiredValues(form)) return;
+    const button = $("button[type='submit']", form);
+    const note = $("#personaNote");
+    const values = Object.fromEntries(new FormData(form));
+    $$('input[type="checkbox"]', form).forEach((input) => { values[input.name] = input.checked; });
+    const primaryAlias = String(values.alias || "").split("|").map((item) => item.trim()).find(Boolean) || "";
+    if (!primaryAlias || primaryAlias.length > 32) {
+      form.elements.alias.focus();
+      toast("第一个机器人昵称不能为空且不能超过 32 个字符。", "error");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "正在保存…";
+    note.textContent = "正在统一更新人格与身份…";
+    try {
+      const personaValues = {
+        tone: values.tone,
+        reply_length: values.reply_length,
+        mention_only: values.mention_only,
+        fast_reply: values.fast_reply,
+        alias: values.alias,
+        identity_prompt: values.identity_prompt,
+      };
+      const savedPersona = await api("save_persona_settings", personaValues);
+      const displayName = String(values.display_name || "").trim();
+      const savedBrand = await api("save_brand", {
+        display_name: displayName,
+        short_name: primaryAlias,
+        persona_name: primaryAlias,
+        welcome_text: `你好，我是${displayName}。`,
+        admin_id: values.admin_id || "",
+      });
+      state.experience.persona = savedPersona;
+      state.bootstrap.brand = savedBrand;
+      applyBrand(savedBrand);
+      note.textContent = savedPersona.apply_state === "applied"
+        ? "人格与身份已统一更新，下一条消息生效。"
+        : "人格与身份已保存，机器人下次启动时生效。";
+    } catch (error) {
+      note.textContent = error.message || "保存失败";
+      reportError(error);
+    } finally {
+      button.disabled = false;
+      button.textContent = "保存人格与身份";
+    }
+  }
+
   const saveMemoryExperience = (event) => saveExperience(event, (values) => api("save_memory_settings", values), "memory", "#memoryNote");
   const saveEmotionExperience = (event) => saveExperience(event, (values) => api("save_emotion_settings", values), "emotion", "#emotionNote");
 
@@ -1964,8 +2149,7 @@
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     $("#personaForm").addEventListener("input", updatePersonaPreview);
     $("#personaForm").addEventListener("change", updatePersonaPreview);
-    $("#brandForm").addEventListener("submit", saveBrand);
-    $("#personaForm").addEventListener("submit", savePersonaExperience);
+    $("#personaForm").addEventListener("submit", savePersonaAndIdentity);
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
@@ -1977,6 +2161,7 @@
     $("#cancelProviderEdit").addEventListener("click", requestProviderOverview);
     $("#testProvider").addEventListener("click", testSelectedProvider);
     $("#discoverProviderModels").addEventListener("click", discoverProviderModels);
+    bindProviderModelCombobox();
     $("#deleteProvider").addEventListener("click", deleteSelectedProvider);
     $("#revealProviderKey").addEventListener("click", (event) => {
       const input = $("#providerApiKey");
@@ -2028,6 +2213,7 @@
 
   async function initialize() {
     bindEvents();
+    initializeHistoryDates();
     setSettingsSection("model");
     try {
       state.bootstrap = await api("bootstrap");

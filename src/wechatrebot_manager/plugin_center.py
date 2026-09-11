@@ -42,7 +42,7 @@ _PROXY_PREFIXES = (
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _CONFIG_WRITE_LOCK = threading.RLock()
 _SECRET_FIELD = re.compile(
-    r"(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)",
+    r"(?:^|[^a-z0-9])(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)(?:$|[^a-z0-9])",
     re.IGNORECASE,
 )
 
@@ -355,9 +355,31 @@ _ANGEL_HEART_PROFILE = CustomerSchemaProfile(
         "保存并查看生效确认；需要按群设置时再打开完整配置页",
     ),
 )
+_GROUP_NOTICE_MODULE = "jiang_group_notice"
+_GROUP_NOTICE_PROFILE = CustomerSchemaProfile(
+    root_fields=(
+        ("notify_join", {"_ui_group": "要提示的成员事件"}),
+        ("notify_leave", {"_ui_group": "要提示的成员事件"}),
+        ("notify_profile_change", {"_ui_group": "要提示的成员事件"}),
+        ("welcome_title", {"_ui_group": "成员加入"}),
+        ("welcome_tail", {"_ui_group": "成员加入"}),
+        ("leave_title", {"_ui_group": "成员退出"}),
+        ("leave_body", {"_ui_group": "成员退出"}),
+        ("profile_change_title", {"_ui_group": "群昵称变化"}),
+        ("profile_change_body", {"_ui_group": "群昵称变化"}),
+    ),
+    sections=(),
+    note="设置按成员加入、退出和群昵称变化分区展示；未修改的文案会继续使用推荐值。",
+    setup_steps=(
+        "先选择需要提示的成员事件",
+        "分别检查加入、退出和群昵称变化文案",
+        "保存后在测试群触发一次对应事件",
+    ),
+)
 _CUSTOMER_SCHEMA_PROFILES = {
     _GROUP_ANALYSIS_MODULE: _GROUP_ANALYSIS_PROFILE,
     _ANGEL_HEART_MODULE: _ANGEL_HEART_PROFILE,
+    _GROUP_NOTICE_MODULE: _GROUP_NOTICE_PROFILE,
 }
 # Older full installations declare AngelHeart as page-only.  Manager delta
 # updates cannot replace legal/feature-set.json, so keep this narrow UI policy

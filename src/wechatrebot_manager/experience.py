@@ -203,13 +203,13 @@ class ExperienceService:
             raise ExperienceError("请选择有效的回复长度。")
         alias = str(values.get("alias") or "").strip()
         identity = str(values.get("identity_prompt") or "").strip()
-        guide = str(values.get("reply_guide") or "").strip()
+        guide = str(_DEFAULT_STATE["persona"]["reply_guide"])
         if not alias:
             raise ExperienceError("请至少填写一个机器人昵称。")
         if not identity:
             raise ExperienceError("请填写机器人的身份定位。")
-        if len(identity) > 3000 or len(guide) > 3000:
-            raise ExperienceError("身份定位和接话原则分别不能超过 3000 字。")
+        if len(identity) > 3000:
+            raise ExperienceError("身份定位不能超过 3000 字。")
         persona = {
             "tone": tone,
             "reply_length": reply_length,

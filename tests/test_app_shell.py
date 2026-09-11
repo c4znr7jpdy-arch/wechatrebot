@@ -529,6 +529,25 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
     assert "form.elements.model.value = items[0]" not in model_discovery
 
 
+def test_feature_details_are_warmed_in_the_background() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "async function prefetchFeatureDetails(generation)" in script
+    assert "void prefetchFeatureDetails(++state.featurePrefetch);" in script
+    assert "Math.min(3, pending.length)" in script
+
+
+def test_feature_save_actions_do_not_shift_with_status_copy() -> None:
+    styles = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.css"
+    ).read_text(encoding="utf-8")
+
+    assert ".feature-savebar #featureNote" in styles
+    assert ".feature-save-actions { display: flex; align-items: center; justify-self: start;" in styles
+
+
 def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
@@ -536,6 +555,8 @@ def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> 
 
     assert "async function refreshVisibleFeatureState()" in script
     assert 'window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });' in script
+    assert "const preserveTab = state.selectedFeature === featureId;" in script
+    assert "useFeatureDetail(detail, afterSave, preserveTab);" in script
 
 
 def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
@@ -590,6 +611,28 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
     assert "#page-history.active" in styles
     assert "flex: 1 1 0; min-height: 0; overflow: hidden;" in styles
     assert 'return imageXml.test(content) ? "[图片]" : content;' in script
+
+
+def test_091_history_and_group_layout_regressions_are_covered() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert "function initializeHistoryDates()" in script
+    assert '$("#historyStart").value = today' in script
+    assert '$("#historyEnd").value = today' in script
+    assert 'class="group-inspector panel empty"' in markup
+    assert 'class="group-inspector-empty"' in markup
+    assert 'avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)' in script
+    assert 'avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)' in script
+    assert 'bindAvatarFallbacks($("#groupRows"));' in script
+    assert ".group-inspector.empty" in styles
+    assert '.group-policy-form input[type="time"]' in styles
+    assert ".message-pane > header > .status-badge" in styles
+    assert "flex-basis: 36px" in styles
+    assert "width: fit-content; max-width: 100%" in styles
+    assert "max-width: min(68%, 560px)" in styles
 
 
 def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -> None:

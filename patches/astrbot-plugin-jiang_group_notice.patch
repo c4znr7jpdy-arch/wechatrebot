@@ -1,7 +1,8 @@
 diff --git a/_conf_schema.json b/_conf_schema.json
+index b357250..a181b5a 100644
 --- a/_conf_schema.json
 +++ b/_conf_schema.json
-@@ -1,4 +1,22 @@
+@@ -1,2 +1,44 @@
  {
 +  "notify_join": {
 +    "description": "成员加入时发送提示",
@@ -21,16 +22,38 @@ diff --git a/_conf_schema.json b/_conf_schema.json
 +    "hint": "关闭后不提示成员修改群昵称。",
 +    "default": true
 +  },
++  "leave_title": {
++    "description": "退群卡片大标题",
++    "type": "string",
++    "hint": "支持占位符：{group_name} 群名，{display_name} 群昵称，{nickname} 名称，{user_id} WxID。",
++    "default": "👋 有成员离开了群聊"
++  },
++  "leave_body": {
++    "description": "退群提示内容",
++    "type": "text",
++    "hint": "支持群名、群昵称、名称和 WxID 占位符；无法区分主动退出或被移除时使用本提示。",
++    "default": "离开了 {group_name}"
++  },
++  "profile_change_title": {
++    "description": "改群昵称卡片大标题",
++    "type": "string",
++    "hint": "成员修改群昵称时显示；支持群名、群昵称、名称和 WxID 占位符。",
++    "default": "✏️ 有成员修改了群昵称"
++  },
++  "profile_change_body": {
++    "description": "改群昵称提示内容",
++    "type": "text",
++    "hint": "另支持 {old_label} 原群昵称和 {new_label} 新群昵称占位符。",
++    "default": "原群昵称：{old_label}\n新群昵称：{new_label}"
++  },
    "welcome_title": {
-     "description": "入群卡片大标题",
-     "type": "string",
 diff --git a/main.py b/main.py
+index 53c265f..1ddc8be 100644
 --- a/main.py
 +++ b/main.py
-@@ -119,6 +119,12 @@ class Main(star.Star):
-             value = default
-         return str(value if value is not None else default)
- 
+@@ -132,4 +132,10 @@ class Main(star.Star):
+-
++
 +    def _is_enabled(self, key: str, default: bool = True) -> bool:
 +        try:
 +            return bool(self.config.get(key, default))
@@ -38,35 +61,76 @@ diff --git a/main.py b/main.py
 +            return default
 +
      @staticmethod
-     def _format_card_text(template: str, *, group_name: str, display_name: str, nickname: str, user_id: str) -> str:
+-    def _format_card_text(template: str, *, group_name: str, display_name: str, nickname: str, user_id: str) -> str:
++    def _format_card_text(template: str, *, group_name: str, display_name: str, nickname: str, user_id: str, **extra_values: str) -> str:
          values = {
-@@ -136,6 +142,9 @@ class Main(star.Star):
-     @filter.custom_filter(GroupIncreaseFilter, priority=1000)
-     async def on_member_joined(self, event: AstrMessageEvent):
+@@ -139,2 +145,3 @@ class Main(star.Star):
+             "user_id": user_id,
++            **extra_values,
+         }
+@@ -149,2 +156,5 @@ class Main(star.Star):
          """入群欢迎卡片"""
 +        if not self._is_enabled("notify_join"):
 +            event.stop_event()
 +            return
          raw = event.message_obj.raw_message
-         user_id = str(raw.get("user_id", ""))
-         group_id = str(raw.get("group_id", ""))
-@@ -192,6 +201,9 @@ class Main(star.Star):
-     @filter.custom_filter(GroupMemberUpdateFilter, priority=1000)
-     async def on_member_updated(self, event: AstrMessageEvent):
+@@ -206,2 +216,5 @@ class Main(star.Star):
          """群成员昵称/资料修改卡片"""
 +        if not self._is_enabled("notify_profile_change"):
 +            event.stop_event()
 +            return
          raw = event.message_obj.raw_message
-         old_display_name = str(raw.get("wx_old_display_name", "") or "")
-         old_nickname = str(raw.get("wx_old_nickname", "") or "")
-@@ -226,6 +238,9 @@ class Main(star.Star):
-     @filter.custom_filter(GroupDecreaseFilter, priority=1000)
-     async def on_member_left(self, event: AstrMessageEvent):
+@@ -217,4 +230,22 @@ class Main(star.Star):
+         new_label = wx_display_name or wx_nickname or "未设置"
+-        title = "✏️ 有成员修改了群昵称"
+-        desc = f"原群昵称: {old_label}\n新群昵称: {new_label}"
++        title_template = self._get_config_value("profile_change_title", "✏️ 有成员修改了群昵称")
++        body_template = self._get_config_value("profile_change_body", "原群昵称：{old_label}\n新群昵称：{new_label}")
++        title = self._format_card_text(
++            title_template,
++            group_name=wx_group_name,
++            display_name=wx_display_name,
++            nickname=wx_nickname,
++            user_id=user_id,
++            old_label=old_label,
++            new_label=new_label,
++        )
++        desc = self._format_card_text(
++            body_template,
++            group_name=wx_group_name,
++            display_name=wx_display_name,
++            nickname=wx_nickname,
++            user_id=user_id,
++            old_label=old_label,
++            new_label=new_label,
++        )
+         url = "https://weixin.qq.com"
+@@ -228,2 +259,5 @@ class Main(star.Star):
          """退群告别卡片"""
 +        if not self._is_enabled("notify_leave"):
 +            event.stop_event()
 +            return
          raw = event.message_obj.raw_message
-         user_id = str(raw.get("user_id", ""))
-         wx_nickname = raw.get("wx_nickname", "某成员")
+@@ -236,4 +270,19 @@ class Main(star.Star):
+-
++
+-        title = "👋 有成员离开了群聊"
+-        desc = _member_desc(wx_display_name, wx_nickname or user_id, f"离开了 {wx_group_name}")
++        title_template = self._get_config_value("leave_title", "👋 有成员离开了群聊")
++        body_template = self._get_config_value("leave_body", "离开了 {group_name}")
++        title = self._format_card_text(
++            title_template,
++            group_name=wx_group_name,
++            display_name=wx_display_name,
++            nickname=wx_nickname,
++            user_id=user_id,
++        )
++        body_line = self._format_card_text(
++            body_template,
++            group_name=wx_group_name,
++            display_name=wx_display_name,
++            nickname=wx_nickname,
++            user_id=user_id,
++        )
++        desc = _member_desc(wx_display_name, wx_nickname or user_id, body_line)
+         url = "https://weixin.qq.com"
