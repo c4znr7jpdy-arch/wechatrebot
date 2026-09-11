@@ -539,6 +539,23 @@ def test_feature_details_are_warmed_in_the_background() -> None:
     assert "Math.min(3, pending.length)" in script
 
 
+def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    audience = markup[markup.index('id="featureAudience"'):markup.index('</div>', markup.index('id="featureAudience"'))]
+
+    assert 'featureAudience: "all"' in script
+    assert audience.index('data-audience="all"') < audience.index('data-audience="common"')
+    assert ">全部<" in audience and ">常用<" in audience
+    assert 'data-audience="optional"' not in audience
+    assert 'data-audience="advanced"' not in audience
+    assert 'previewFeature("feature-parser", "链接解析", "none"' in script
+    assert 'primary_api_key: {description: "首选生图 API Key"' in script
+    assert 'advanced_schema: {}' in script
+    assert '.filter(([key]) => Object.keys(schemas[key]).length)' in script
+
+
 def test_feature_save_actions_do_not_shift_with_status_copy() -> None:
     styles = (
         Path(app_shell.__file__).with_name("app_webui") / "app.css"

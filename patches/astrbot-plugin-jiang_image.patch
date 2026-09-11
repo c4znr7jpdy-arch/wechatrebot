@@ -1,0 +1,91 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -5,6 +5,12 @@
+     "type": "string",
+     "default": "https://api.hostcentral.cc/"
+   },
++  "primary_api_key": {
++    "description": "首选生图 API Key",
++    "hint": "密钥仅保存在本机；已保存时留空不会覆盖。",
++    "type": "string",
++    "default": ""
++  },
+   "primary_model": {
+     "description": "\u9996\u9009\u751f\u56fe\u6a21\u578b",
+     "hint": "\u4f8b\u5982 gpt-image-2\u3002",
+@@ -23,6 +29,12 @@
+     "type": "string",
+     "default": "https://api.gemai.cc/v1"
+   },
++  "secondary_api_key": {
++    "description": "次选生图 API Key",
++    "hint": "不使用次选服务时可以留空。",
++    "type": "string",
++    "default": ""
++  },
+   "secondary_model": {
+     "description": "\u6b21\u9009\u751f\u56fe\u6a21\u578b",
+     "type": "string",
+@@ -40,6 +52,12 @@
+     "type": "string",
+     "default": "https://api.minimaxi.com/v1"
+   },
++  "tertiary_api_key": {
++    "description": "第三顺位生图 API Key",
++    "hint": "不使用第三顺位服务时可以留空。",
++    "type": "string",
++    "default": ""
++  },
+   "tertiary_model": {
+     "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u6a21\u578b",
+     "type": "string",
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -166,9 +166,9 @@ class Main(star.Star):
+         if not self.config:
+             return
+         slots = (
+-            ("primary_base_url", "primary_model", None),
+-            ("secondary_base_url", "secondary_model", "secondary_enabled"),
+-            ("tertiary_base_url", "tertiary_model", "tertiary_enabled"),
++            ("primary_base_url", "primary_model", None, "primary_api_key"),
++            ("secondary_base_url", "secondary_model", "secondary_enabled", "secondary_api_key"),
++            ("tertiary_base_url", "tertiary_model", "tertiary_enabled", "tertiary_api_key"),
+         )
+         public = self.model_manager.public_config()
+         active_id = str(public.get("active_model") or "")
+@@ -189,12 +189,13 @@ class Main(star.Star):
+             ),
+         )
+         chain = ([active] if active else []) + fallbacks
+-        for index, (base_key, model_key, enabled_key) in enumerate(slots):
++        for index, (base_key, model_key, enabled_key, api_key_key) in enumerate(slots):
+             if index >= len(chain):
+                 break
+             profile = chain[index]
+             base_url = str(self.config.get(base_key) or "").strip()
+             model = str(self.config.get(model_key) or "").strip()
++            api_key = str(self.config.get(api_key_key) or "").strip()
+             enabled = (
+                 profile.get("enabled", True)
+                 if enabled_key is None
+@@ -205,6 +206,7 @@ class Main(star.Star):
+                 and (not model or model == profile.get("model"))
+                 and enabled == profile.get("enabled", True)
+                 and int(profile.get("fallback_priority", 0)) == index
++                and not api_key
+             ):
+                 continue
+             payload = dict(profile)
+@@ -212,6 +214,9 @@ class Main(star.Star):
+                 payload["base_url"] = base_url
+             if model:
+                 payload["model"] = model
++            if api_key:
++                payload["api_key_source"] = {"type": "stored"}
++                payload["api_key"] = api_key
+             payload["enabled"] = enabled
+             payload["fallback_priority"] = index
+             self.model_manager.upsert_profile(payload)

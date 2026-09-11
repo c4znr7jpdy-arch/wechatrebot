@@ -62,10 +62,10 @@ def test_curated_paths_match_local_delivered_schemas():
 
 
 def test_projection_preserves_advanced_values_and_masks_secret_defaults():
-    schema = {"require_at_in_group": {"type": "bool", "default": True},
+    schema = {"primary_base_url": {"type": "string", "default": "https://images.example/v1"},
               "private_token": {"type": "string", "default": "never-show"}}
-    projected = common_schema("astrbot_plugin_parser", schema)
-    assert list(projected) == ["require_at_in_group"]
+    projected = common_schema("jiang_image", schema)
+    assert list(projected) == ["primary_base_url"]
     full = _customer_schema(schema, {"private_token": "stored"})
     assert full["private_token"]["default"] == ""
     assert _customer_config(schema, {"private_token": "stored"})["private_token"] == ""
@@ -81,6 +81,34 @@ def test_common_commands_hide_internal_service_fields_from_basic_settings():
 
     assert common_schema("jiang_commands", schema) == {}
     assert advanced_schema("jiang_commands", schema) == {}
+
+
+def test_link_parser_uses_defaults_and_only_exposes_the_feature_switch():
+    schema = {
+        "require_at_in_group": {"type": "bool", "default": False},
+        "parsers_template": {"type": "template_list", "default": []},
+    }
+
+    assert common_schema("astrbot_plugin_parser", schema) == {}
+    assert advanced_schema("astrbot_plugin_parser", schema) == {}
+
+
+def test_image_generation_moves_all_service_fields_to_common_settings():
+    fields = (
+        "primary_api_key", "primary_base_url", "primary_model",
+        "secondary_enabled", "secondary_api_key", "secondary_base_url",
+        "secondary_model", "tertiary_enabled", "tertiary_api_key",
+        "tertiary_base_url", "tertiary_model",
+    )
+    schema = {key: {"type": "string", "default": ""} for key in fields}
+
+    assert tuple(common_schema("jiang_image", schema)) == fields
+    assert advanced_schema("jiang_image", schema) == {}
+    clean_schema = _customer_schema(schema, {"primary_api_key": "stored-secret"})
+    clean_config = _customer_config(schema, {"primary_api_key": "stored-secret"})
+    assert clean_schema["primary_api_key"]["secret"] is True
+    assert clean_schema["primary_api_key"]["default"] == ""
+    assert clean_config["primary_api_key"] == ""
 
 
 def test_livingmemory_exposes_required_model_bindings():

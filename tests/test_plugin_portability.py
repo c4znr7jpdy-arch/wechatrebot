@@ -94,6 +94,58 @@ def test_group_member_notice_has_independent_hot_read_switches(tmp_path: Path) -
     assert "old_label=old_label" in source
 
 
+def test_image_generation_common_config_applies_stored_api_keys(tmp_path: Path) -> None:
+    source = _patched(tmp_path, "jiang_image", "main.py")
+    schema = json.loads((tmp_path / "_conf_schema.json").read_text(encoding="utf-8"))
+    assert {
+        "primary_api_key",
+        "secondary_api_key",
+        "tertiary_api_key",
+    } <= set(schema)
+    assert all(schema[key]["default"] == "" for key in (
+        "primary_api_key", "secondary_api_key", "tertiary_api_key"
+    ))
+
+    apply_config = _function(source, "_apply_plugin_config", {})
+    updates = []
+    manager = SimpleNamespace(
+        public_config=lambda: {
+            "active_model": "primary",
+            "models": [{
+                "id": "primary", "name": "Primary", "enabled": True,
+                "base_url": "https://old.invalid/v1", "model": "old-image",
+                "fallback_priority": 0, "api_key_source": {"type": "environment", "env_name": "OLD_KEY"},
+            }],
+        },
+        upsert_profile=lambda payload: updates.append(payload),
+    )
+    plugin = SimpleNamespace(
+        config={
+            "primary_api_key": "new-secret",
+            "primary_base_url": "https://images.example/v1",
+            "primary_model": "image-model",
+        },
+        model_manager=manager,
+    )
+
+    apply_config(plugin)
+
+    assert updates[0]["api_key_source"] == {"type": "stored"}
+    assert updates[0]["api_key"] == "new-secret"
+    assert updates[0]["base_url"] == "https://images.example/v1"
+    assert updates[0]["model"] == "image-model"
+
+
+def test_link_parser_default_template_enables_douyin_without_customer_config() -> None:
+    template_path = PROJECT_PLUGINS / "astrbot_plugin_parser" / "default_template.json"
+    if not template_path.is_file():
+        pytest.skip("Local plugin source checkout is unavailable")
+    templates = json.loads(template_path.read_text(encoding="utf-8-sig"))
+    douyin = next(item for item in templates if item.get("__template_key") == "douyin")
+
+    assert douyin["enable"] is True
+
+
 def test_music_command_accepts_wechat_whitespace_and_marks_card_as_reply(
     tmp_path: Path,
 ) -> None:

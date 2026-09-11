@@ -8,7 +8,7 @@
     featuresLoaded: false,
     featuresEngineOnline: false,
     features: [],
-    featureAudience: "common",
+    featureAudience: "all",
     selectedFeature: null,
     featureDetail: null,
     featureTab: "basic",
@@ -476,9 +476,7 @@
     const audienceMatch = (item) => {
       const label = item.audience || "";
       if (state.featureAudience === "all") return true;
-      if (state.featureAudience === "common") return label.includes("常用");
-      if (state.featureAudience === "optional") return /场景|兴趣|地域/.test(label);
-      return /进阶|不建议|底层/.test(label);
+      return label.includes("常用");
     };
     const items = state.features.filter((item) => audienceMatch(item) && (!keyword || item.display_name.toLocaleLowerCase("zh-CN").includes(keyword)));
     const onlineText = state.featuresEngineOnline ? "设置可立即应用" : "设置将在下次启动时应用";
@@ -663,7 +661,7 @@
       </section>
       ${(guide.prerequisites || []).map((item) => `<p class="feature-prerequisite"><strong>使用前确认</strong> ${escapeHtml(item)}</p>`).join("")}
       ${detail.configurable ? `
-        <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}" ${!Object.keys(schemas[key]).length ? "disabled" : ""}>${label}</button>`).join("")}</div>
+        <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
         <form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema).length ? '<div class="empty-state compact"><p>此分类无需配置</p></div>' : ""}</form>
         <div class="feature-savebar"><span class="form-note" id="featureNote" role="status">${escapeHtml(state.featureFeedback || (state.featureDirty ? "有修改尚未保存。" : defaultNote))}</span><div class="feature-save-actions">
@@ -2276,14 +2274,14 @@
       previewFeature("feature-voice-clone", "语音克隆", "schema-and-page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
       previewFeature("feature-memory-manager", "记忆管理", "schema", "提供向量记忆存储与召回；Windows 需配置 Milvus 服务和 Embedding 模型，未配置时保持待配置状态。基础长期记忆可独立使用。"),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
-      previewFeature("feature-parser", "链接解析", "schema", "识别常见内容平台链接并整理视频、图集和音频信息。"),
+      previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
       previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true}),
       previewFeature("feature-self-iterative", "自动改代码（实验）", "schema", "可读写并重新加载功能代码的实验维护能力，不建议普通用户或新安装默认启用。"),
       previewFeature("feature-router", "功能调度", "schema", "识别自然语言意图并把请求交给合适的功能处理。"),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。"),
       previewFeature("feature-group-notice", "群成员变动通知", "schema", "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"),
-      previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models"}),
+      previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models", fieldCount: 11}),
       previewFeature("feature-emoji-voice", "表情语音", "schema", "把选中的表情回复转换为匹配情绪的语音。"),
       previewFeature("feature-mystool", "米游社签到", "none", "提供米游社账号绑定、查询和签到能力。"),
       previewFeature("feature-repeater", "复读功能", "none", "在群内出现连续相同消息时进行轻量互动。"),
@@ -2320,6 +2318,24 @@
       llm: {llm_provider_id: "jyjapi/grok-4.6"},
       performance: {max_concurrent: 1},
     };
+    const imageBasicSchema = {
+      primary_api_key: {description: "首选生图 API Key", type: "string", secret: true, hint: "密钥仅保存在本机；已保存时留空不会覆盖。"},
+      primary_base_url: {description: "首选生图 API Base URL", type: "string", hint: "例如 https://api.hostcentral.cc/。"},
+      primary_model: {description: "首选生图模型", type: "string", hint: "例如 gpt-image-2。"},
+      secondary_enabled: {description: "启用次选生图地址", type: "bool"},
+      secondary_api_key: {description: "次选生图 API Key", type: "string", secret: true, hint: "不使用次选服务时可以留空。"},
+      secondary_base_url: {description: "次选生图 API Base URL", type: "string"},
+      secondary_model: {description: "次选生图模型", type: "string"},
+      tertiary_enabled: {description: "启用第三顺位生图地址", type: "bool"},
+      tertiary_api_key: {description: "第三顺位生图 API Key", type: "string", secret: true, hint: "不使用第三顺位服务时可以留空。"},
+      tertiary_base_url: {description: "第三顺位生图 API Base URL", type: "string"},
+      tertiary_model: {description: "第三顺位生图模型", type: "string"},
+    };
+    const imageConfig = {
+      primary_api_key: "", primary_base_url: "https://api.hostcentral.cc/", primary_model: "gpt-image-2",
+      secondary_enabled: true, secondary_api_key: "", secondary_base_url: "https://api.gemai.cc/v1", secondary_model: "gpt-image-2-2K",
+      tertiary_enabled: true, tertiary_api_key: "", tertiary_base_url: "https://api.minimaxi.com/v1", tertiary_model: "image-01",
+    };
     const previewGuides = {};
     const previewGuideOverrides = {
       "群聊上下文": {summary: "协调群聊接话和多人上下文", setup_steps: ["设置回复节奏和允许接管的会话。"], prerequisites: ["它不是长期记忆库。"], audience: "群聊常用", readiness: "可用但已纠正名称", recommendation: "保留。适合多人群聊的接话与上下文协调，但不应宣传为长期记忆。"},
@@ -2327,12 +2343,28 @@
       "定时任务": {summary: "安排内容推送和签到", setup_steps: ["打开专属配置页创建计划，再到定时任务中心调整。"], prerequisites: ["写操作仅允许可靠管理员身份；共享账号签到仅允许机器人管理员。"], audience: "群管理常用", readiness: "权限已加固", recommendation: "建议保留；任务按当前会话隔离，微信无法确认群角色时默认拒绝修改。"},
       "自动改代码（实验）": {summary: "实验性的功能代码维护", setup_steps: ["仅由了解代码与回滚的维护人员使用。"], prerequisites: ["可读写并重新加载功能代码。"], audience: "不建议默认启用", readiness: "实验性高风险", recommendation: "不属于群主管理刚需，应从小白默认界面和新安装默认项移除。"},
       "群成员变动通知": {summary: "提示入群、退群和群昵称变化", setup_steps: ["设置提示文案后在测试群验证。"], prerequisites: ["不能发布或编辑微信群公告。"], audience: "群管理常用", readiness: "收到成员事件即可用", recommendation: "建议保留，并始终使用准确名称。"},
+      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["填写首选生图服务的 API Key、地址和模型。", "需要回退服务时再启用并填写次选或第三顺位。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
       "洛克王国助手": {summary: "使用洛克王国游戏助手", setup_steps: ["通过二维码或已有凭据绑定游戏账号。"], prerequisites: ["账号凭据不要发到群里。"], audience: "兴趣选配", readiness: "需要游戏账号绑定", recommendation: "仅洛克王国用户群有必要，不是运势功能。"},
     };
     const previewSavedConfigs = new Map();
     function previewFeatureDetail(id) {
       const found = features.find((value) => value.id === id);
       const item = {...found, guide: previewGuideOverrides[found?.display_name] || previewGuides[found?.display_name] || {}};
+      if (id === "feature-image") return {
+        ...item,
+        basic_schema: imageBasicSchema,
+        model_schema: {},
+        schema: imageBasicSchema,
+        advanced_schema: {},
+        config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
+        advanced_config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
+        configuration_note: "生图服务配置已合并到常用设置，密钥保存后不会回显。",
+        setup_steps: item.guide.setup_steps,
+        revision: "preview",
+        providers: [],
+        personas: [],
+        engine_online: true,
+      };
       if (id !== "feature-group-analysis") return {...item, basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true};
       return {
         ...item,

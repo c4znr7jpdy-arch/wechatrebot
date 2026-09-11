@@ -158,6 +158,54 @@ def test_unknown_reload_target_never_falls_through_to_reload_all(tmp_path):
     asyncio.run(run())
 
 
+def test_enabling_disabled_plugin_unbinds_stale_handlers_before_reload(tmp_path):
+    relative = Path("astrbot/core/star/star_manager.py")
+    if not (SOURCE / relative).is_file():
+        pytest.skip("Pinned AstrBot source unavailable")
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    shutil.copy2(SOURCE / relative, target)
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "apply", "-p2", "--include=astrbot/core/star/star_manager.py",
+                    str(ROOT / "patches/astrbot-4.26.6-wechat.patch")], cwd=tmp_path, check=True, capture_output=True)
+    tree = ast.parse(target.read_text("utf-8-sig"))
+    node = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "reload")
+    metadata = SimpleNamespace(
+        name="jiang_short_drama",
+        module_path="data.plugins.jiang_short_drama.main",
+        activated=False,
+    )
+    scope = {
+        "star_registry": [metadata],
+        "star_map": {metadata.module_path: metadata},
+    }
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "patched-reload", "exec"), scope)
+    calls = []
+
+    async def terminate(item):
+        calls.append(("terminate", item.name))
+
+    async def unbind(name, module_path):
+        calls.append(("unbind", name, module_path))
+
+    async def load(module_path):
+        calls.append(("load", module_path))
+        return True, None
+
+    instance = SimpleNamespace(
+        _pm_lock=asyncio.Lock(),
+        _terminate_plugin=terminate,
+        _unbind_plugin=unbind,
+        load=load,
+    )
+    assert asyncio.run(scope["reload"](instance, "jiang_short_drama")) == (True, None)
+    assert calls == [
+        ("terminate", "jiang_short_drama"),
+        ("unbind", "jiang_short_drama", metadata.module_path),
+        ("load", metadata.module_path),
+    ]
+
+
 def test_old_runtime_is_rejected_before_any_write(tmp_path):
     client = EngineApiClient(tmp_path)
     calls = []

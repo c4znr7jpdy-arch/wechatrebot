@@ -483,7 +483,8 @@ diff --git a/official/astrbot/core/star/star_manager.py b/expected/astrbot/core/
                              f"插件 {smd.name} 未被正常终止: {e!s}, 可能会导致该插件运行不正常。",
                          )
 +                        return False, "功能仍有未结束的工作，无法安全重新加载"
-                     if smd.name and smd.activated:
+-                    if smd.name and smd.activated:
++                    if smd.name:
                          await self._unbind_plugin(smd.name, specified_module_path)
 
 diff --git a/official/astrbot/core/provider/sources/openai_source.py b/expected/astrbot/core/provider/sources/openai_source.py

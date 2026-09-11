@@ -13,7 +13,7 @@ _GUIDES = {
     "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "填写语音服务密钥，再打开专属配置页管理参考音频和声音。", "需要 MiMo 语音服务；仅使用已获得授权的声音。自动语音会产生服务用量。", ("api_key", "default_context", "auto_tts_enabled", "auto_tts_probability", "auto_tts_group_whitelist", "ai_style_director_provider_id")),
     "astrbot_plugin_mnemosyne": ("从长期记忆中检索相关内容", "先准备记忆数据库和文本向量模型，再填写连接信息。", "这是进阶功能：需要 Milvus 数据库和 Embedding 向量模型，Grok 聊天模型不能替代。", ("address", "embedding_provider_id", "LLM_providers", "num_pairs", "top_k", "use_session_filtering")),
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),
-    "astrbot_plugin_parser": ("读取聊天中的链接内容", "先决定群聊是否需要点名机器人，再设置下载大小限制。", "部分平台需要登录信息；下载上限会影响等待时间和网络用量。", ("require_at_in_group", "whitelist", "blacklist", "source_max_size", "source_max_minute", "show_download_fail_tip")),
+    "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
     "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "只填写允许主动联系的会话，再打开对应的群聊或私聊开关。", "主动消息会发送给真实联系人；先在测试会话试用，避免打扰。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.session_list", "group_settings.group_idle_trigger_minutes")),
     "astrbot_plugin_qq_group_daily_analysis": ("把一天群聊整理成日报", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
@@ -22,7 +22,7 @@ _GUIDES = {
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
     "jiang_commands": ("查询天气、新闻等信息", "启用后直接在群聊中询问天气、新闻、油价或 Epic 免费游戏。", "所需服务参数已随功能封装，普通用户无需理解热点服务号或备用天气服务号。", ()),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
-    "jiang_image": ("用文字或参考图生成图片", "打开专属配置页添加生图服务密钥并选择默认模型。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_base_url", "primary_model", "secondary_enabled")),
+    "jiang_image": ("用文字或参考图生成图片", "在常用设置填写生图服务密钥、地址和模型；备用服务可直接在同一页配置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "tertiary_enabled", "tertiary_api_key", "tertiary_base_url", "tertiary_model")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
@@ -63,7 +63,8 @@ _ASSESSMENTS = {
     "meme_manager": ("群聊常用", "可本地使用", "建议保留。小白只需管理表情包和会话绑定，云同步保持选配。"),
 }
 
-_HIDE_ALL_SETTINGS = frozenset({"jiang_commands"})
+_HIDE_ALL_SETTINGS = frozenset({"jiang_commands", "astrbot_plugin_parser"})
+_HIDE_ADVANCED_SETTINGS = frozenset({"jiang_image"})
 
 
 def get_plugin_guide(module_name: str) -> dict[str, Any]:
@@ -112,6 +113,6 @@ def common_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
 
 def advanced_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
     """Hide发行方维护的内部参数 from every customer-facing settings tab."""
-    if module_name in _HIDE_ALL_SETTINGS:
+    if module_name in _HIDE_ALL_SETTINGS or module_name in _HIDE_ADVANCED_SETTINGS:
         return {}
     return schema
