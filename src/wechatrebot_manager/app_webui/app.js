@@ -2578,7 +2578,7 @@
       runtime: {engine_ready: true, connection_ready: true, wechat_identity: "wxid_demo_account", hook_ready: true, upstream_connected: true, heartbeat_fresh: true},
     };
     const previewAudience = {
-      "feature-memory": "群聊常用", "feature-long-memory": "群聊常用", "feature-bittorrent": "不建议默认启用",
+      "feature-memory": "群聊常用", "feature-long-memory": "群聊常用", "feature-bittorrent": "群聊常用",
       "feature-voice-clone": "进阶选配", "feature-memory-manager": "进阶选配",
       "feature-music": "群聊常用", "feature-parser": "群聊常用",
       "feature-proactive": "进阶选配", "feature-group-analysis": "群管理常用", "feature-self-iterative": "不建议默认启用",

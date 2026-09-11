@@ -49,6 +49,7 @@
   "persona": [],
   "plugin_set": [
     "astrbot_plugin_angel_heart",
+    "astrbot_plugin_bittorrent",
     "astrbot_plugin_livingmemory",
     "astrbot_plugin_music",
     "astrbot_plugin_parser",

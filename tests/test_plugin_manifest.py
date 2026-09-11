@@ -181,6 +181,7 @@ def test_new_install_enables_only_low_setup_group_basics() -> None:
 
     assert enabled == {
         "astrbot_plugin_angel_heart",
+        "astrbot_plugin_bittorrent",
         "astrbot_plugin_livingmemory",
         "astrbot_plugin_music",
         "astrbot_plugin_parser",

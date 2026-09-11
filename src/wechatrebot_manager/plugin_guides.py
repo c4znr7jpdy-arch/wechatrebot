@@ -38,7 +38,7 @@ _GUIDES = {
 # toggles, deletes, or rewrites a customer's existing plugin configuration.
 _ASSESSMENTS = {
     "astrbot_plugin_angel_heart": ("群聊常用", "可用但已纠正名称", "保留。适合多人群聊的接话与上下文协调，但不应宣传为长期记忆。"),
-    "astrbot_plugin_bittorrent": ("不建议默认启用", "依赖外部索引", "普通群管理没有必要默认提供；仅在确认内容授权和当地规则后选用。"),
+    "astrbot_plugin_bittorrent": ("群聊常用", "默认开启", "可直接使用 /bt 加关键词检索；结果来自外部索引，请确认内容授权并遵守当地规则。"),
     "astrbot_plugin_livingmemory": ("对话基础", "需要 Embedding 模型", "保留为唯一主长期记忆；普通寒暄跳过，明确回忆请求必须尝试检索。"),
     "astrbot_plugin_mimo_tts_clone": ("进阶选配", "需要外部服务", "只有确实需要授权音色和语音回复时使用；默认文字回复更省成本。"),
     "astrbot_plugin_mnemosyne": ("进阶选配", "需要数据库与向量模型", "普通群主无需默认启用；仅在已部署 Milvus 和 Embedding 服务时保留。"),
