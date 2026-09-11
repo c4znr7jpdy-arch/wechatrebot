@@ -439,7 +439,7 @@ def test_staging_removes_embedded_checkin_account_seeds(tmp_path: Path) -> None:
         "]\n"
         "class Manager:\n"
         "    def _seed_config(self):\n"
-        "        return {\"schedule\": {\"session\": \"private-chat-session-123456\"}}\n"
+        "        return {\"schedule\": {\"enabled\": True, \"time\": \"08:30\", \"session\": \"private-chat-session-123456\"}}\n"
         "def account_count():\n"
         "    return len(ACCOUNTS)\n",
         encoding="utf-8",
@@ -454,6 +454,11 @@ def test_staging_removes_embedded_checkin_account_seeds(tmp_path: Path) -> None:
     namespace: dict[str, object] = {}
     exec(compile(sanitized, str(source), "exec"), namespace)
     assert namespace["account_count"]() == 0
+    assert namespace["Manager"]()._seed_config()["schedule"] == {
+        "enabled": False,
+        "time": "08:30",
+        "session": "",
+    }
 
 
 def test_staging_sanitizes_active_and_documented_project_credentials(

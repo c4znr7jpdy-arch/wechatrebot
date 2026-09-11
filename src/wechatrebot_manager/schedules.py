@@ -39,7 +39,9 @@ _TYPE_LABELS = {
 
 def _task_name(task: dict[str, Any]) -> str:
     task_type = str(task.get("type") or "")
-    session = str(task.get("session") or "default")
+    # Match jiang_schedule._make_job_name exactly: an explicitly blank session
+    # remains blank, which is how the obsolete packaged check-in was named.
+    session = str(task.get("session", "default"))
     if task_type == "bili_dynamic":
         return f"bili_{session}_{task.get('extra', {}).get('uid', '')}"
     return f"{task_type}_{session}"
@@ -72,6 +74,17 @@ def _target_identity(payload: dict[str, Any]) -> tuple[str, str]:
     if session:
         return "direct", session.rsplit(":", 1)[-1]
     return "system", ""
+
+
+def _is_obsolete_default_checkin(row: sqlite3.Row) -> bool:
+    """Recognize the invalid check-in job seeded by older customer builds."""
+    if str(row["name"] or "") not in {"checkin_", "checkin_default"}:
+        return False
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return not isinstance(payload, dict) or not str(payload.get("session") or "").strip()
 
 
 def _schedule_text(expression: str | None) -> str:
@@ -150,6 +163,7 @@ class ScheduleService:
     def list(self) -> dict[str, object]:
         if not self.database.is_file():
             return {"items": [], "running": 0, "paused": 0}
+        self._remove_obsolete_default_checkins()
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -201,6 +215,28 @@ class ScheduleService:
             "running": sum(1 for item in items if item.enabled),
             "paused": sum(1 for item in items if not item.enabled),
         }
+
+    def _remove_obsolete_default_checkins(self) -> None:
+        """Permanently remove the target-less job created by pre-fix packages."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT job_id, name, payload FROM cron_jobs "
+                "WHERE name IN ('checkin_', 'checkin_default')"
+            ).fetchall()
+        obsolete = [row for row in rows if _is_obsolete_default_checkin(row)]
+        for row in obsolete:
+            job_id = str(row["job_id"])
+            name = str(row["name"] or "")
+            if self.engine.is_available():
+                self.engine.request(
+                    "DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}"
+                )
+            else:
+                with self._connect() as connection:
+                    connection.execute(
+                        "DELETE FROM cron_jobs WHERE job_id = ?", (job_id,)
+                    )
+            self._update_source(name, delete=True)
 
     def _job(self, job_id: str) -> sqlite3.Row:
         if not self.database.is_file():

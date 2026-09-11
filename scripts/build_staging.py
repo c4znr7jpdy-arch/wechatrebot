@@ -189,18 +189,47 @@ def _remove_embedded_checkin_accounts(output: Path) -> None:
     replacements = [
         (*span(assignments[0]), "ACCOUNTS = []  # Customers add their own credentials after installation.")
     ]
-    for function in (
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_seed_config"
+    seed_functions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_seed_config"
+    ]
+    if len(seed_functions) != 1:
+        raise RuntimeError("shared check-in module must declare exactly one _seed_config")
+    schedule_mappings = [
+        value
+        for mapping in ast.walk(seed_functions[0])
+        if isinstance(mapping, ast.Dict)
+        for key, value in zip(mapping.keys, mapping.values)
+        if isinstance(key, ast.Constant)
+        and key.value == "schedule"
+        and isinstance(value, ast.Dict)
+    ]
+    if len(schedule_mappings) != 1:
+        raise RuntimeError("shared check-in seed must declare exactly one schedule mapping")
+    schedule_fields = {
+        key.value: value
+        for key, value in zip(
+            schedule_mappings[0].keys, schedule_mappings[0].values
+        )
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    enabled_value = schedule_fields.get("enabled")
+    session_value = schedule_fields.get("session")
+    if not isinstance(enabled_value, ast.Constant) or not isinstance(
+        enabled_value.value, bool
     ):
-        for mapping in (node for node in ast.walk(function) if isinstance(node, ast.Dict)):
-            for key, value in zip(mapping.keys, mapping.values):
-                if (
-                    isinstance(key, ast.Constant)
-                    and key.value == "session"
-                    and isinstance(value, ast.Constant)
-                    and isinstance(value.value, str)
-                ):
-                    replacements.append((*span(value), '""'))
+        raise RuntimeError("shared check-in seed must declare a boolean enabled field")
+    if not isinstance(session_value, ast.Constant) or not isinstance(
+        session_value.value, str
+    ):
+        raise RuntimeError("shared check-in seed must declare a string session field")
+    replacements.extend(
+        (
+            (*span(enabled_value), "False"),
+            (*span(session_value), '""'),
+        )
+    )
 
     sanitized = source
     for start, end, replacement in sorted(replacements, reverse=True):

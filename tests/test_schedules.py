@@ -176,6 +176,68 @@ def test_checkin_delete_disables_source_so_restart_does_not_restore_it(
     assert service.list()["items"][0]["id"] == "job-weather"
 
 
+def test_obsolete_targetless_default_checkin_is_removed_permanently(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database, _ = _database(tmp_path)
+    data = database.parent
+    tasks_path = data / "jiang_schedule" / "tasks.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"].append(
+        {
+            "type": "checkin",
+            "session": "",
+            "hour": 8,
+            "minute": 30,
+            "extra": {},
+        }
+    )
+    tasks_path.write_text(json.dumps(tasks, ensure_ascii=False), encoding="utf-8")
+    checkin_config = tasks_path.with_name("checkin_config.json")
+    checkin_config.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "schedule": {"enabled": True, "time": "08:30", "session": ""},
+                "accounts": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO cron_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "job-default-checkin",
+                "checkin_",
+                "每日签到 定时推送",
+                "30 8 * * *",
+                json.dumps({"session": ""}),
+                1,
+                "scheduled",
+                None,
+                "2026-09-12 00:30:00",
+                None,
+            ),
+        )
+
+    service = ScheduleService(tmp_path)
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+
+    listed = service.list()
+
+    assert [item["id"] for item in listed["items"]] == ["job-weather"]
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM cron_jobs WHERE job_id = 'job-default-checkin'"
+        ).fetchone() is None
+    config = json.loads(checkin_config.read_text(encoding="utf-8"))
+    persisted_tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    assert config["schedule"]["enabled"] is False
+    assert not any(task.get("type") == "checkin" for task in persisted_tasks["tasks"])
+
+
 def test_removed_plugin_schedule_is_hidden_from_updated_install(tmp_path: Path) -> None:
     database, _ = _database(tmp_path)
     with sqlite3.connect(database) as connection:
