@@ -27,6 +27,7 @@
     groupMembers: {},
     groupMemberLoad: 0,
     groupPolicies: {},
+    groupInspectorView: "policy",
     historyKind: "all",
     conversations: [],
     selectedConversation: null,
@@ -44,6 +45,11 @@
     availableUpdate: null,
     updateChecking: false,
     updateCheckTimer: 0,
+    settingsSection: "model",
+    providerScreen: "overview",
+    providerDirty: false,
+    providerBaseline: "",
+    providerCleanStatus: "尚未保存",
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -284,9 +290,98 @@
     schedules: "定时任务", activity: "运行记录", settings: "设置",
   };
 
+  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory", "system"]);
+
+  function providerFormSnapshot() {
+    const form = $("#providerForm");
+    if (!form) return "";
+    const values = Object.fromEntries(new FormData(form));
+    delete values.api_key;
+    return JSON.stringify(values);
+  }
+
+  function markProviderClean(status = "尚未保存") {
+    state.providerBaseline = providerFormSnapshot();
+    state.providerDirty = false;
+    state.providerCleanStatus = status;
+    const badge = $("#providerEditorStatus");
+    if (badge) {
+      badge.className = `status-badge ${status === "已保存" ? "success" : "checking"}`;
+      badge.textContent = status;
+    }
+  }
+
+  function updateProviderDirty() {
+    if (state.providerScreen !== "editor") return;
+    const form = $("#providerForm");
+    const keyChanged = Boolean(form?.elements.api_key.value);
+    state.providerDirty = keyChanged || providerFormSnapshot() !== state.providerBaseline;
+    const badge = $("#providerEditorStatus");
+    badge.className = `status-badge ${state.providerDirty ? "warning" : state.providerCleanStatus === "已保存" ? "success" : "checking"}`;
+    badge.textContent = state.providerDirty ? "有未保存修改" : state.providerCleanStatus;
+  }
+
+  function showProviderOverview(focus = false) {
+    state.providerScreen = "overview";
+    state.providerDirty = false;
+    $("#providerOverview").hidden = false;
+    $("#providerEditorPage").hidden = true;
+    if (focus) $("#providerOverviewTitle")?.focus();
+  }
+
+  function showProviderEditor(focus = true) {
+    state.providerScreen = "editor";
+    $("#providerOverview").hidden = true;
+    $("#providerEditorPage").hidden = false;
+    if (focus) $("#providerEditorTitle")?.focus();
+  }
+
+  function guardProviderDraft(next) {
+    if (!state.providerDirty || state.providerScreen !== "editor") return false;
+    confirmAction({
+      title: "放弃模型配置？",
+      message: "接口地址、模型名称或密钥还没有保存。返回后这些修改会被清空。",
+      confirmText: "放弃修改",
+      onConfirm: async () => {
+        showProviderOverview();
+        await next();
+      },
+    });
+    return true;
+  }
+
+  function requestProviderOverview() {
+    if (guardProviderDraft(() => showProviderOverview(true))) return;
+    showProviderOverview(true);
+  }
+
+  function selectSettingsSection(section) {
+    if (section !== "model" && guardProviderDraft(() => setSettingsSection(section, true))) return;
+    setSettingsSection(section, true);
+  }
+
+  function setSettingsSection(section, focus = false) {
+    if (!SETTINGS_SECTIONS.has(section)) return;
+    state.settingsSection = section;
+    const page = $("#page-settings");
+    page.dataset.settingsSection = section;
+    $$('[data-settings-section]', page).forEach((item) => { item.hidden = item.dataset.settingsSection !== section; });
+    $$("#settingsTabs [data-settings-tab]").forEach((button) => {
+      const active = button.dataset.settingsTab === section;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+      if (focus && active) button.focus();
+    });
+    if (section === "model") {
+      $("#providerOverview").hidden = state.providerScreen !== "overview";
+      $("#providerEditorPage").hidden = state.providerScreen !== "editor";
+    }
+  }
+
   async function navigate(page) {
     if (!PAGE_TITLES[page] || state.featureSaving) return;
     if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
+    if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     state.activePage = page;
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
@@ -305,7 +400,10 @@
     }
     if (page === "schedules") await loadSchedules();
     if (page === "activity") await loadActivity();
-    if (page === "settings" && !state.maintenance) await loadMaintenance();
+    if (page === "settings") {
+      setSettingsSection(state.settingsSection);
+      if (!state.maintenance) await loadMaintenance();
+    }
   }
 
   async function loadFeatures() {
@@ -318,6 +416,7 @@
       state.featuresLoaded = true;
       $("#featureSummary").textContent = `${state.features.length} 项功能 · ${data.engine_online ? "设置可立即应用" : "设置将在下次启动时应用"}`;
       renderFeatureList();
+      if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
     } catch (error) {
       list.innerHTML = '<div class="loading-row">功能暂时无法读取</div>';
       reportError(error);
@@ -674,6 +773,17 @@
     finally { button.disabled = false; }
   }
 
+  async function refreshVisibleFeatureState() {
+    if (
+      document.hidden ||
+      state.activePage !== "features" ||
+      !state.selectedFeature ||
+      state.featureDirty ||
+      state.featureSaving
+    ) return;
+    await openFeature(state.selectedFeature, false, true);
+  }
+
   async function copyText(value, label = "群标识") {
     const text = String(value || "");
     if (!text) return;
@@ -815,11 +925,12 @@
           : memberData?.error
             ? '<span class="member-count-state error">读取失败</span>'
             : '<span class="member-count-state loading">读取中</span>';
+      const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
-        <td><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong></td>
+        <td><span class="group-name-cell"><span class="group-avatar tone-${avatarTone}">${escapeHtml((item.name || "群").slice(0, 1))}</span><span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
         <td><code class="group-id">${escapeHtml(item.group_id)}</code></td>
         <td>${memberCount}</td>
-        <td><div class="row-actions"><button class="row-action copy-group" type="button" data-group-id="${escapeHtml(item.group_id)}">复制标识</button><button class="row-action inspect-group" type="button" data-group-id="${escapeHtml(item.group_id)}">查看详情</button></div></td>
+        <td><div class="row-actions"><button class="row-action copy-group" type="button" data-group-id="${escapeHtml(item.group_id)}">复制</button><button class="row-action inspect-group ${selected ? "active" : ""}" type="button" data-group-id="${escapeHtml(item.group_id)}">${selected ? "正在查看" : "查看"}</button></div></td>
       </tr>`;
     }).join("") : `<tr><td colspan="4" class="table-empty">${escapeHtml(empty)}</td></tr>`;
     $$(".group-row").forEach((row) => {
@@ -835,6 +946,7 @@
 
   function selectGroup(groupId) {
     state.selectedGroup = groupId;
+    state.groupInspectorView = "policy";
     renderGroups();
     $("#groupInspector").scrollIntoView({block: "nearest", behavior: "smooth"});
     loadGroupPolicy(groupId);
@@ -865,19 +977,22 @@
     const memberCount = memberData?.loading ? "读取中"
       : Number.isInteger(group.member_count) ? `${group.member_count} 人`
       : memberData?.error ? "读取失败" : "待读取";
-    const memberMarkup = !memberData ? '<div class="member-empty">成员列表会在后台自动读取，也可点击按钮重新读取。</div>'
+    const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
-    panel.innerHTML = `
-      <span class="eyebrow">群聊详情</span><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)}</code>
-      <dl class="group-facts"><div><dt>成员数</dt><dd>${escapeHtml(memberCount)}</dd></div><div><dt>信息来源</dt><dd>当前微信缓存</dd></div><div><dt>群主 / 管理权限</dt><dd>当前接口未提供</dd></div></dl>
-      <div class="button-row"><button class="button ghost small" id="copySelectedGroup" type="button">${icon("i-copy")}复制群标识</button><button class="button secondary small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : memberData ? "重新读取成员" : "读取成员"}</button></div>
-      ${groupPolicyMarkup(policyData)}
-      <section class="members-section"><div class="members-heading"><strong>群成员</strong><span>${memberData && !memberData.loading && !memberData.error ? `${memberData.total ?? memberData.items.length} 人` : "按需读取"}</span></div>${memberMarkup}</section>`;
-    $("#copySelectedGroup").addEventListener("click", () => copyText(group.group_id));
-    $("#loadGroupMembers").addEventListener("click", () => loadGroupMembers(group.group_id));
+    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title"><span class="group-avatar tone-0">${escapeHtml((group.name || "群").slice(0, 1))}</span><div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div></header>`;
+    const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
+    const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
+    const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">群主、管理员和头像等微信接口未提供的信息保持“未知”，不会推断。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
+    panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
+    $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
+      state.groupInspectorView = button.dataset.inspectorView;
+      renderGroupInspector();
+      if (state.groupInspectorView === "members" && !state.groupMembers[group.group_id]) loadGroupMembers(group.group_id);
+    }));
+    $("#loadGroupMembers")?.addEventListener("click", () => loadGroupMembers(group.group_id));
     bindAvatarFallbacks(panel);
     const policyForm = $("#groupPolicyForm");
     if (policyForm) {
@@ -898,7 +1013,7 @@
     const sourceText = proactive.total
       ? `${proactive.total} 个主动来源，${proactive.running || 0} 个正在运行`
       : "本群还没有主动消息来源";
-    return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}">
+    return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <h3>本群机器人规则</h3>
       <label class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></label>
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>只在被点名时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select></label>
@@ -907,15 +1022,15 @@
       <label class="toggle-line"><span><strong>安静时段</strong><small>此时段内不应主动打扰</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
       <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label><span>每日主动消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示本群不允许主动消息。</small></label>
-      <div class="policy-summary">${escapeHtml(proactive.message || "本群当前策略不允许主动消息。")} 微信接口没有可靠返回群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
-      <button class="button primary" type="submit">保存本群规则</button>
+      <div class="policy-summary">${escapeHtml(proactive.message || "本群当前策略不允许主动消息。")} 当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
     </form>`;
   }
 
   async function saveGroupPolicy(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const button = $("button[type='submit']", form);
+    const button = $('button[form="groupPolicyForm"]');
+    if (!button) return;
     button.disabled = true;
     button.textContent = "正在保存…";
     try {
@@ -997,7 +1112,7 @@
       state.conversations = data.items || [];
       if (state.selectedConversation) {
         const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
-        if (refreshed) state.selectedConversation = refreshed;
+        state.selectedConversation = refreshed || null;
       }
       const summary = data.summary || {};
       const visible = summary.visible_conversations ?? summary.conversations ?? 0;
@@ -1006,6 +1121,8 @@
       if (state.selectedConversation) {
         renderConversationHeader(state.selectedConversation);
         renderConversationInspector(state.selectedConversation);
+      } else if (state.conversations.length) {
+        await selectConversation(state.conversations[0].conversation_id, {silent: true});
       }
     } catch (error) { if (!silent) reportError(error); }
   }
@@ -1016,7 +1133,7 @@
     list.innerHTML = state.conversations.length ? state.conversations.map((item) => `
       <button class="conversation-item ${state.selectedConversation?.conversation_id === item.conversation_id ? "active" : ""}" data-conversation="${escapeHtml(item.conversation_id)}" data-type="${escapeHtml(item.type)}">
         ${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}
-        <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${escapeHtml(shortTime(item.last_timestamp * 1000))}</time></span><small>${item.type === "group" ? "群聊" : "个人聊天"} · ${item.message_count} 条</small></span>
+        <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${item.last_timestamp ? escapeHtml(new Date(item.last_timestamp * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})) : "—"}</time></span><small class="conversation-id">${escapeHtml(item.conversation_id)}</small><small class="conversation-preview">${escapeHtml(item.last_content || (item.message_count ? `${item.message_count} 条本机消息` : "暂无本机消息"))}</small></span>
       </button>`).join("") : '<div class="empty-state compact"><div class="empty-symbol">空</div><h2>没有找到聊天记录</h2><p>调整筛选条件或启动机器人接收新消息。</p></div>';
     $$(".conversation-item", list).forEach((button) => button.addEventListener("click", () => selectConversation(button.dataset.conversation)));
     bindAvatarFallbacks(list);
@@ -1024,7 +1141,8 @@
   }
 
   function renderConversationHeader(item) {
-    $("#conversationHeader").innerHTML = `<div><strong>${escapeHtml(item.display_name)}</strong><span>${item.type === "group" ? "群聊" : "个人聊天"} · ${item.message_count} 条消息${item.message_count ? " · 自动更新中" : " · 暂无消息"}</span></div>`;
+    $("#conversationHeader").innerHTML = `<div class="conversation-header-main">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><strong>${escapeHtml(item.display_name)}</strong><span>${escapeHtml(item.conversation_id)}</span></div></div><span class="status-badge online"><span></span>${item.message_count} 条消息${item.message_count ? " · 自动更新中" : " · 暂无消息"}</span>`;
+    bindAvatarFallbacks($("#conversationHeader"));
   }
 
   function messagesSignature(messages) {
@@ -1101,7 +1219,12 @@
   }
 
   function renderConversationInspector(item) {
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><h2>${escapeHtml(item.display_name)}</h2><p>${item.type === "group" ? "微信群聊记录" : "个人聊天记录"}</p><dl class="inspector-list"><div><dt>分类</dt><dd>${item.type === "group" ? "群聊" : "个人聊天"}</dd></div><div><dt>${item.type === "group" ? "群 ID" : "微信号"}</dt><dd>${escapeHtml(item.conversation_id)}</dd></div><div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
+    const senderName = latestSender ? (latestSender.group_nickname || latestSender.wechat_name || latestSender.sender_name || "未知发送者") : "尚无发送者";
+    const senderId = latestSender?.sender_id || "标识未提供";
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, latestSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制</button></div></section><dl class="inspector-list"><div><dt>分类</dt><dd>${item.type === "group" ? "群聊" : "个人聊天"}</dd></div><div><dt>群成员身份</dt><dd>头像 + 群昵称 + wxid</dd></div><div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, "发送者标识"));
+    bindAvatarFallbacks($("#conversationInspector"));
     $("#deleteConversation")?.addEventListener("click", () => confirmAction({
       title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
       onConfirm: async () => {
@@ -1161,7 +1284,7 @@
       ]);
       state.responseTraces = Array.isArray(traces) ? traces : (traces?.items || []);
       renderResponseTraces();
-      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node">${item.status === "failed" ? "!" : "✓"}</span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
+      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
     } catch (error) { reportError(error); }
   }
 
@@ -1335,10 +1458,11 @@
       $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
       form.elements.api_key.value = "";
       renderProviderServices();
-      editProvider(data.id);
-      $("#providerNote").textContent = data.apply_state === "applied"
-        ? "已热更新，当前回复和相关功能立即使用这个模型。"
-        : "已保存；机器人启动时会直接使用这个模型。";
+      markProviderClean();
+      showProviderOverview(true);
+      toast(data.apply_state === "applied"
+        ? "模型服务已保存，并已设为当前回复模型。"
+        : "模型服务已保存，机器人启动时会使用它。");
     } catch (error) { reportError(error); $("#providerNote").textContent = error.message; }
     finally { button.disabled = false; button.textContent = originalText; }
   }
@@ -1367,13 +1491,15 @@
     form.elements.provider_id.value = "";
     form.elements.preset.value = presetId;
     applyProviderPreset(presetId);
-    $("#providerEditorTitle").textContent = "添加模型服务";
-    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "仅添加到当前设备" : "选择预设后只需填写服务密钥";
+    $("#providerEditorEyebrow").textContent = "新建服务";
+    $("#providerEditorTitle").textContent = "新建模型服务";
+    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一种服务，然后确认连接信息。";
     $("#apiKeyHint").textContent = "密钥只保存在本机，不会回显";
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
     $("#providerNote").textContent = "";
-    renderProviderServices();
+    markProviderClean("尚未保存");
+    showProviderEditor();
   }
 
   function editProvider(providerId) {
@@ -1387,6 +1513,7 @@
     form.elements.api_key.value = "";
     $("#providerModelOptions").innerHTML = "";
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
+    $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
     $("#providerEditorSubtitle").textContent = service.is_default ? "当前回复模型" : "已配置，可切换为回复模型";
     $("#providerPresetHint").textContent = service.is_recommended ? "面向普通用户的默认回复服务" : "此服务仅保存在当前设备";
@@ -1394,23 +1521,34 @@
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
     $("#providerNote").textContent = "";
-    renderProviderServices();
+    markProviderClean("已保存");
+    showProviderEditor();
   }
 
   function renderProviderServices() {
     const items = state.bootstrap?.providers || [];
-    const selectedId = $("#providerForm")?.elements.provider_id.value || "";
-    $("#providerStatus").textContent = items.some((item) => item.is_default)
-      ? `${items.find((item) => item.is_default).name} 使用中`
-      : "等待配置";
-    $("#providerServiceList").innerHTML = items.length ? items.map((item) => `
-      <article class="provider-service ${selectedId === item.id ? "active" : ""}">
-        <div class="provider-service-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.is_default ? "当前回复模型 · 配置已统一共享" : item.configured ? "已配置 · 可供相关功能选择" : "缺少服务密钥")}</span></div>
-        <div class="provider-service-actions">
-          ${item.is_default ? '<span class="status-badge online">使用中</span>' : `<button class="button ghost small" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
-          <button class="button secondary small" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
-        </div>
-      </article>`).join("") : '<div class="empty-state compact"><p>还没有可用的模型服务。先添加免费 Grok 或你的 DeepSeek。</p></div>';
+    const status = $("#providerStatus");
+    const defaultProvider = items.find((item) => item.is_default);
+    status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
+    status.textContent = defaultProvider ? `${items.length} 项服务` : "0 项服务";
+    $("#providerServiceList").innerHTML = items.length ? `
+      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>服务配置只保存在当前设备。</span></div><button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button></div>
+      <div class="provider-service-cards">${items.map((item) => `
+        <article class="provider-service ${item.is_default ? "active" : ""}">
+          <div class="provider-service-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.is_default ? "当前回复模型 · 配置已统一共享" : item.configured ? "已配置 · 可供相关功能选择" : "缺少服务密钥")}</span></div>
+          <div class="provider-service-actions">
+            ${item.is_default ? '<span class="status-badge online">使用中</span>' : `<button class="button ghost small" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
+            <button class="button secondary small" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
+          </div>
+        </article>`).join("")}</div>` : `
+      <div class="provider-empty-state">
+        <div class="provider-empty-visual" aria-hidden="true"><span></span><i></i><span></span></div>
+        <span class="eyebrow">从这里开始</span>
+        <h3>还没有模型服务</h3>
+        <p>新建一个服务后，机器人才能生成回复。第一次使用建议选择免费 Grok 4.6。</p>
+        <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
+        <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
+      </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
   }
 
@@ -1423,8 +1561,7 @@
       state.bootstrap.providers = await api("get_providers");
       state.featureDetails = {};
       renderProviderServices();
-      editProvider(providerId);
-      $("#providerNote").textContent = result.apply_state === "applied" ? "已热更新并立即生效。" : "已保存，机器人启动时生效。";
+      toast(result.apply_state === "applied" ? "回复模型已切换并立即生效。" : "回复模型已切换，将在启动时生效。");
     } catch (error) { reportError(error); }
     finally { button.disabled = false; button.textContent = original; }
   }
@@ -1493,10 +1630,10 @@
         await api("delete_provider", providerId, replacementId || "");
         state.bootstrap.providers = await api("get_providers");
         state.featureDetails = {};
-        const replacement = state.bootstrap.providers.find((item) => item.id === replacementId)
-          || state.bootstrap.providers.find((item) => item.is_default);
-        if (replacement) editProvider(replacement.id);
-        else beginNewProvider("deepseek");
+        renderProviderServices();
+        markProviderClean();
+        showProviderOverview(true);
+        toast("模型服务已删除。");
       },
     });
   }
@@ -1507,6 +1644,20 @@
     document.title = `${brand.display_name} · 机器人管理`;
     const form = $("#brandForm");
     for (const key of ["display_name", "short_name", "persona_name", "welcome_text", "admin_id"]) if (form.elements[key]) form.elements[key].value = brand[key] || "";
+    updatePersonaPreview();
+  }
+
+  function updatePersonaPreview() {
+    const form = $("#personaForm");
+    const summary = $("#personaPreviewSummary");
+    if (!form || !summary) return;
+    const tone = {natural: "自然熟人", warm: "温柔陪伴", professional: "专业助理", lively: "活泼群友"}[form.elements.tone.value] || "自然熟人";
+    const length = {brief: "简短回复", balanced: "均衡回复", detailed: "详细回复"}[form.elements.reply_length.value] || "简短回复";
+    summary.textContent = `当前组合：${tone} · ${length} · ${form.elements.mention_only.checked ? "仅点名参与" : "自然参与"}`;
+    const robotName = state.bootstrap?.brand?.short_name || state.bootstrap?.brand?.persona_name || "机器人";
+    const names = $$(".preview-message.mine small, .preview-message.mine .preview-avatar");
+    if (names[0]) names[0].textContent = robotName;
+    if (names[1]) names[1].textContent = robotName.slice(0, 1);
   }
 
   function updateToggleCopy(event) {
@@ -1554,6 +1705,7 @@
       input.removeEventListener("change", updateToggleCopy);
       input.addEventListener("change", updateToggleCopy);
     });
+    updatePersonaPreview();
   }
 
   async function saveExperience(event, save, section, noteSelector) {
@@ -1672,9 +1824,7 @@
     applyBrand(data.brand);
     fillExperience(data.experience);
     renderProviderServices();
-    const defaultProvider = (data.providers || []).find((item) => item.is_default);
-    if (defaultProvider) editProvider(defaultProvider.id);
-    else beginNewProvider("free_grok");
+    showProviderOverview();
     $("#versionText").textContent = `v${data.version}`;
     $("#settingsVersion").textContent = `v${data.version}`;
     $("#installPath").textContent = data.install_root;
@@ -1811,14 +1961,20 @@
     $("#refreshSchedules").addEventListener("click", loadSchedules);
     $("#manageGroupPolicies").addEventListener("click", () => navigate("groups"));
     $("#refreshActivity").addEventListener("click", loadActivity);
+    $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
+    $("#personaForm").addEventListener("input", updatePersonaPreview);
+    $("#personaForm").addEventListener("change", updatePersonaPreview);
     $("#brandForm").addEventListener("submit", saveBrand);
     $("#personaForm").addEventListener("submit", savePersonaExperience);
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
-    $("#providerPreset").addEventListener("change", (event) => applyProviderPreset(event.currentTarget.value));
-    $("#addProvider").addEventListener("click", () => beginNewProvider("free_grok"));
+    $("#providerForm").addEventListener("input", updateProviderDirty);
+    $("#providerForm").addEventListener("change", updateProviderDirty);
+    $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
+    $("#closeProviderEditor").addEventListener("click", requestProviderOverview);
+    $("#cancelProviderEdit").addEventListener("click", requestProviderOverview);
     $("#testProvider").addEventListener("click", testSelectedProvider);
     $("#discoverProviderModels").addEventListener("click", discoverProviderModels);
     $("#deleteProvider").addEventListener("click", deleteSelectedProvider);
@@ -1830,6 +1986,8 @@
       event.currentTarget.setAttribute("aria-pressed", String(!showing));
     });
     $("#providerServiceList").addEventListener("click", (event) => {
+      const create = event.target.closest("[data-provider-create]");
+      if (create) { beginNewProvider("free_grok"); return; }
       const edit = event.target.closest("[data-provider-edit]");
       if (edit) { editProvider(edit.dataset.providerEdit); return; }
       const makeDefault = event.target.closest("[data-provider-default]");
@@ -1844,7 +2002,8 @@
     $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
       const targets = $$("button:not(:disabled), input:not(:disabled)", $("#modalBackdrop"));
@@ -1869,10 +2028,16 @@
 
   async function initialize() {
     bindEvents();
+    setSettingsSection("model");
     try {
       state.bootstrap = await api("bootstrap");
       fillSettings(state.bootstrap);
       renderStatus(state.bootstrap.status);
+      const previewParams = new URLSearchParams(window.location.search);
+      if (previewParams.has("preview") && previewParams.get("demo") === "model-services") {
+        state.bootstrap.experience.onboarding_complete = true;
+        await navigate("settings");
+      }
       showOnboarding();
       window.setInterval(refreshStatus, 1500);
       window.setInterval(pollHistory, 1500);
@@ -1999,10 +2164,7 @@
         engine_online: true,
       };
     }
-    let previewProviders = [
-      {id: "jyjapi/grok-4.6", name: "免费 Grok 4.6", api_base: "https://api.xiuxianjyj.xin/v1", model: "grok-4.6", configured: true, api_key_configured: true, is_default: true, is_recommended: true},
-      {id: "deepseek/deepseek-v4-flash", name: "DeepSeek · v4-flash", api_base: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", configured: true, api_key_configured: true, is_default: false, is_recommended: false},
-    ];
+    let previewProviders = [];
     const previewPresets = [
       {id: "free_grok", name: "免费 Grok 4.6（推荐）", api_base: "https://api.xiuxianjyj.xin/v1", model: "grok-4.6", description: "面向普通用户的默认回复服务。"},
       {id: "deepseek", name: "DeepSeek（自用）", api_base: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", description: "适合在你自己的设备上使用。"},
@@ -2022,15 +2184,17 @@
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: [], proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
-      bootstrap: () => ok({version: "0.9.0", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: true, api_base: "https://api.xiuxianjyj.xin/v1", model: "grok-4.6", api_key_configured: true}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
+      bootstrap: () => ok({version: "0.9.1", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_feature: (id) => ok(previewFeatureDetail(id)),
-      get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 4, items: [
-        {group_id: "51632940287@chatroom", name: "旅行交流群", member_count: 86},
-        {group_id: "18310516375@chatroom", name: "短剧分享群", member_count: 42},
+      get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 6, items: [
+        {group_id: "51632940287@chatroom", name: "旅行交流群", member_count: 128},
+        {group_id: "81263495012@chatroom", name: "短剧分享群", member_count: 76},
         {group_id: "22001983641@chatroom", name: "业主交流群", member_count: null},
-        {group_id: "70933126018@chatroom", name: "周末羽毛球", member_count: 19},
+        {group_id: "34902765188@chatroom", name: "周末羽毛球", member_count: 42},
+        {group_id: "82765043912@chatroom", name: "同学交流群", member_count: 93},
+        {group_id: "45871023498@chatroom", name: "社区团购通知", member_count: 210},
       ], message: "预览数据：正式版本从当前登录微信读取，刷新不会发送群消息。"}),
       get_group_members: (groupId) => ok({account_id: "wxid_demo_account", group_id: groupId, source: "wechat_cache", total: 3, truncated: false, items: [
         {user_id: "wxid_demo_01", name: "张三", group_nickname: "张三｜3栋"},
@@ -2040,10 +2204,16 @@
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
       save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok(previewPolicyOverview(groupId).policy, "群聊策略已保存；未向群内发送消息。"); },
       set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: (id, config) => { previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
-      get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600}, {conversation_id: "18310516375@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200}, {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0}, {conversation_id: "70933126018@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0}], summary: {messages: 238, conversations: 3, visible_conversations: 5, directory_groups: 4, private_messages: 34, group_messages: 204}}),
-      get_messages: () => ok([{id: 1, role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {id: 2, role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {id: 3, role: "user", sender_id: "wxid_lisi", sender_name: "李四", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
+      get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000, last_content: "张三｜3栋：帮我找一下今天更新的短剧"}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600, last_content: "明天杭州会下雨吗？"}, {conversation_id: "81263495012@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200, last_content: "李四｜摄影：收到，这样看起来很方便"}, {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0}, {conversation_id: "34902765188@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0}], summary: {messages: 238, conversations: 3, visible_conversations: 5, directory_groups: 6, private_messages: 34, group_messages: 204}}),
+      get_messages: () => ok([{id: 1, role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", group_nickname: "张三｜3栋", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {id: 2, role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {id: 3, role: "user", sender_id: "wxid_lisi", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
-      get_schedules: () => ok({running: 0, paused: 0, items: []}),
+      get_schedules: () => ok({running: 4, paused: 1, items: [
+        {id: "daily-report", name: "每日群聊日报", source: "群聊分析", target: "旅行交流群", target_type: "group", schedule_text: "每天 21:30", next_run_time: new Date(new Date().setHours(21, 30, 0, 0)).toISOString(), status: "运行中", enabled: true, cron_expression: "30 21 * * *"},
+        {id: "weather", name: "早间天气提醒", source: "常用指令", target: "业主交流群", target_type: "group", schedule_text: "工作日 07:40", next_run_time: new Date(Date.now() + 86400000).toISOString(), status: "运行中", enabled: true, cron_expression: "40 7 * * 1-5"},
+        {id: "drama", name: "短剧更新推送", source: "短剧", target: "短剧分享群", target_type: "group", schedule_text: "每天 12:00", next_run_time: new Date(new Date().setHours(12, 0, 0, 0)).toISOString(), status: "已暂停", enabled: false, cron_expression: "0 12 * * *"},
+        {id: "sports", name: "周末活动提醒", source: "定时任务", target: "周末羽毛球", target_type: "group", schedule_text: "每周五 18:00", next_run_time: new Date(Date.now() + 172800000).toISOString(), status: "运行中", enabled: true, cron_expression: "0 18 * * 5"},
+        {id: "checkin", name: "米游社签到", source: "米游社签到", target: "个人账号", target_type: "private", schedule_text: "每天 06:30", next_run_time: new Date(Date.now() + 86400000).toISOString(), status: "运行中", enabled: true, cron_expression: "30 6 * * *"},
+      ]}),
       set_schedule_enabled: (_id, enabled) => ok({updated: true, enabled}), update_schedule_time: () => ok({updated: true}), delete_schedule: () => ok({deleted: true}),
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       get_response_traces: () => ok([{time: new Date(Date.now() - 18000).toISOString(), title: "群聊点名", duration_text: "3.4 秒", stages: [{label: "点名快路径", status: "success", detail: "已跳过额外判断", duration_text: "0.4 秒"}, {label: "长期记忆", status: "skipped", detail: "普通寒暄无需回忆", duration_text: "<0.1 秒"}, {label: "精简情感", status: "success", detail: "已加入好感度与心情", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "2.6 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}, {time: new Date(Date.now() - 82000).toISOString(), title: "询问上次内容", duration_text: "5.1 秒", stages: [{label: "点名快路径", status: "success", duration_text: "0.4 秒"}, {label: "长期记忆 3 条", status: "success", detail: "命中明确回忆说法", duration_text: "0.8 秒"}, {label: "精简情感", status: "success", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "3.5 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}]),

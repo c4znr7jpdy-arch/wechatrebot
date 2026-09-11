@@ -55,7 +55,18 @@ class GroupDirectoryService:
             self._account, self._snapshot = account, None
         return port, token, account
 
-    def _request(self, port, token, account, path):
+    def _clear_current_account(self, account: str, *, state_locked: bool) -> None:
+        def clear() -> None:
+            if self._account == account:
+                self._account, self._snapshot = "", None
+
+        if state_locked:
+            clear()
+            return
+        with self._lock:
+            clear()
+
+    def _request(self, port, token, account, path, *, state_locked: bool = False):
         request = Request(f"http://127.0.0.1:{port}{path}", headers={
             "X-WeChatReBot-Token": token, "X-WeChatReBot-Account": account,
             "Accept": "application/json", "Cache-Control": "no-cache",
@@ -68,7 +79,7 @@ class GroupDirectoryService:
                 body = json.loads(raw.decode("utf-8"))
         except HTTPError as exc:
             if exc.code == 409:
-                self._account, self._snapshot = "", None
+                self._clear_current_account(account, state_locked=state_locked)
                 raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。") from None
             if exc.code in {401, 403, 404, 503}:
                 raise GroupDirectoryError("群目录接口尚不可用，请确认已安装完整更新并连接微信。") from None
@@ -82,7 +93,7 @@ class GroupDirectoryService:
             raise GroupDirectoryError("群信息格式不正确，请稍后重试。")
         after = probe_bridge_health(port=port)
         if not after.wechat_logged_in or after.wechat_identity != account:
-            self._account, self._snapshot = "", None
+            self._clear_current_account(account, state_locked=state_locked)
             raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
         return data
 
@@ -91,7 +102,13 @@ class GroupDirectoryService:
             try:
                 port, token, account = self._connection()
                 if refresh or self._snapshot is None:
-                    data = self._request(port, token, account, "/api/manager/groups")
+                    data = self._request(
+                        port,
+                        token,
+                        account,
+                        "/api/manager/groups",
+                        state_locked=True,
+                    )
                     self._snapshot = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
                 return {**copy.deepcopy(self._snapshot), "stale": False,
                         "message": "读取的是当前微信可提供的群信息，不会向群里发送消息。"}

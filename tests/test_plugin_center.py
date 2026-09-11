@@ -25,6 +25,7 @@ from wechatrebot_manager.plugin_center import (
     _normalize_config,
     _json_revision,
     _normalize_plugin_extension_endpoint,
+    _project_customer_schema,
     plugin_center_command,
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
@@ -37,6 +38,90 @@ def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
     assert _model_field_kind("LLM_providers", {"type": "list"}) == "chat"
     assert _model_field_kind("embedding_provider_id", {}) == "embedding"
     assert _model_field_kind("rerank_provider_id", {}) == "rerank"
+
+
+def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
+    schema = {
+        "analyzer_model": {
+            "type": "string",
+            "_special": "select_provider",
+            "default": "",
+        },
+        "image_caption_provider_id": {
+            "type": "string",
+            "_special": "select_provider",
+            "default": "",
+        },
+        "is_reasoning_model": {"type": "bool", "default": True},
+        "personality": {
+            "type": "object",
+            "items": {
+                "ai_self_identity": {"type": "text", "default": "identity"},
+                "reply_strategy_guide": {"type": "text", "default": "guide"},
+            },
+        },
+        "wake_interaction": {
+            "type": "object",
+            "items": {
+                "alias": {"type": "string", "default": "AI|助手"},
+                "enter_on_mention_only": {"type": "bool", "default": True},
+                "direct_wake_fast_path": {"type": "bool", "default": True},
+                "silence_duration": {"type": "int", "default": 600},
+            },
+        },
+        "timing": {
+            "type": "object",
+            "items": {
+                "assistant_debounce_time": {"type": "float", "default": 1.0},
+                "waiting_time": {"type": "float", "default": 30.0},
+                "observation_timeout": {"type": "int", "default": 60},
+                "secretary_debounce_time": {"type": "float", "default": 30.0},
+            },
+        },
+        "reply_length": {
+            "type": "object",
+            "items": {
+                "normal_reply_max_chars": {"type": "int", "default": 20},
+                "focus_reply_max_chars": {"type": "int", "default": 200},
+                "focus_instructions": {"type": "string", "default": "分析"},
+            },
+        },
+        "access_control": {
+            "type": "object",
+            "items": {
+                "group_chat_enhancement": {"type": "bool", "default": True},
+                "takeover_private_chat_context": {"type": "bool", "default": False},
+            },
+        },
+        "energy": {
+            "type": "object",
+            "items": {"initial_energy": {"type": "float", "default": 100.0}},
+        },
+    }
+
+    projected, profile = _project_customer_schema(
+        "astrbot_plugin_angel_heart", schema
+    )
+
+    assert profile is not None
+    assert list(projected) == [
+        "analyzer_model",
+        "image_caption_provider_id",
+        "personality",
+        "wake_interaction",
+        "timing",
+        "reply_length",
+        "access_control",
+    ]
+    assert projected["analyzer_model"]["_blank_label"].startswith("请选择模型")
+    assert list(projected["wake_interaction"]["items"]) == [
+        "alias",
+        "enter_on_mention_only",
+        "direct_wake_fast_path",
+    ]
+    assert "secretary_debounce_time" not in projected["timing"]["items"]
+    assert "energy" not in projected
+    assert "完整配置页" in profile.note
 
 
 def _install(tmp_path: Path) -> tuple[Path, str]:
@@ -235,7 +320,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "display_name": "Sample Configurable Feature",
             "enabled": True,
             "configurable": True,
-            "field_count": 4,
+            "field_count": 2,
             "model_field_count": 2,
             "pages": ("dashboard",),
             "configuration": "schema-and-page",
@@ -420,7 +505,7 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     detail = service.detail(catalog_item["id"])
 
     assert catalog_item["display_name"] == "群聊分析"
-    assert catalog_item["field_count"] == 10
+    assert catalog_item["field_count"] == 9
     assert catalog_item["model_field_count"] == 1
     assert catalog_item["simplified"] is True
     assert list(detail["basic_schema"]) == [
@@ -488,8 +573,32 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     for module, pages in modules.items():
         directory = plugin_root / module
         directory.mkdir(parents=True)
+        schema = {"technical_value": {"type": "string", "default": "hidden"}}
+        if module == "astrbot_plugin_angel_heart":
+            schema.update(
+                {
+                    "analyzer_model": {
+                        "type": "string",
+                        "default": "",
+                        "_special": "select_provider",
+                    },
+                    "personality": {
+                        "type": "object",
+                        "items": {
+                            "ai_self_identity": {
+                                "type": "text",
+                                "default": "identity",
+                            },
+                            "reply_strategy_guide": {
+                                "type": "text",
+                                "default": "guide",
+                            },
+                        },
+                    },
+                }
+            )
         (directory / "_conf_schema.json").write_text(
-            json.dumps({"technical_value": {"type": "string", "default": "hidden"}}),
+            json.dumps(schema),
             encoding="utf-8",
         )
         for page in pages:
@@ -528,13 +637,19 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     catalog = service.catalog()["plugins"]
 
     assert [item["display_name"] for item in catalog] == ["长期记忆", "点歌", "短剧"]
-    assert all(item["configurable"] is False for item in catalog)
     by_name = {item["display_name"]: item for item in catalog}
+    assert by_name["长期记忆"]["configurable"] is True
+    assert by_name["长期记忆"]["model_field_count"] == 1
+    assert by_name["点歌"]["configurable"] is False
+    assert by_name["短剧"]["configurable"] is False
     assert by_name["点歌"]["pages"] == ()
     assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
     assert by_name["长期记忆"]["pages"] == ("chat-config",)
+    angel = service.detail(by_name["长期记忆"]["id"])
     music = service.detail(by_name["点歌"]["id"])
     drama = service.detail(by_name["短剧"]["id"])
+    assert list(angel["model_schema"]) == ["analyzer_model"]
+    assert list(angel["basic_schema"]) == ["personality"]
     assert music["schema"] == music["config"] == {}
     assert drama["schema"] == drama["config"] == {}
     with pytest.raises(PluginCenterError, match="没有可编辑"):
@@ -976,6 +1091,7 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     visible = f"{html}\n{javascript}\n{css}".casefold()
     assert "重新载入设置" in visible
     assert "保存并立即应用" in visible
+    assert "打开完整配置页" in visible
     assert "热重载" not in visible
     assert "模型绑定" in visible
     assert "template-card" in visible
@@ -986,6 +1102,8 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     assert "astrbot-plugin-page" in javascript
     assert 'message.action === "api:get"' in javascript
     assert 'message.action === "api:post"' in javascript
+    assert "async function refreshCurrentPluginState()" in javascript
+    assert 'window.addEventListener("focus", () => { refreshCurrentPluginState(); });' in javascript
 
 
 def test_original_engine_home_is_replaced_with_neutral_local_page() -> None:

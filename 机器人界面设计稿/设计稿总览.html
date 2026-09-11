@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>姜小妹机器人 · 设计稿总览</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;color:#10243d;background:#eef3f8;font:14px/1.6 "Microsoft YaHei UI","Segoe UI",sans-serif}header{position:sticky;top:0;z-index:2;padding:24px 4vw;color:white;background:#071a2f;box-shadow:0 8px 28px rgba(6,24,43,.18)}header h1{margin:0;font-size:25px}header p{margin:5px 0 0;color:#aac0d3}main{padding:28px 4vw 48px}.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}.filters button{padding:8px 13px;border:1px solid #cbd7e4;border-radius:9px;background:white;color:#31465e;font-weight:700;cursor:pointer}.filters button.active{color:white;border-color:#2f6bff;background:#2f6bff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:18px}.card{overflow:hidden;border:1px solid #d7e1eb;border-radius:14px;background:white;box-shadow:0 8px 24px rgba(21,45,73,.07)}.card img{display:block;width:100%;height:auto;background:#f3f6fb}.meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px}.meta strong{font-size:13px}.meta span{color:#74869a;font-size:11px}@media(max-width:520px){.grid{grid-template-columns:1fr}header,main{padding-left:18px;padding-right:18px}}
+  </style>
+</head>
+<body>
+  <header><h1>姜小妹机器人 · 界面设计稿</h1><p>7 个主页面、全部关键弹窗与下拉状态，共 39 张设计稿。</p></header>
+  <main>
+    <div class="filters"><button class="active" data-filter="all">全部</button><button data-filter="page">主页面</button><button data-filter="modal">弹窗</button><button data-filter="dropdown">下拉与反馈</button><button data-filter="responsive">适配</button></div>
+    <div class="grid" id="grid"></div>
+  </main>
+  <script>
+    const files = [
+      ['00-视觉规范与组件.png','视觉规范与组件','page'],['01-运行中心-机器人可用.png','运行中心 · 机器人可用','page'],['02-运行中心-已停止.png','运行中心 · 已停止','page'],['03-运行中心-微信环境异常.png','运行中心 · 微信环境异常','page'],['04-功能中心-功能概览.png','功能中心 · 功能概览','page'],['05-功能中心-常用设置.png','功能中心 · 常用设置','page'],['06-功能中心-专业设置.png','功能中心 · 专业设置','page'],['07-群聊管理-列表.png','群聊管理 · 列表','page'],['08-群聊管理-群规则.png','群聊管理 · 群规则','page'],['09-群聊管理-群成员.png','群聊管理 · 群成员','page'],['10-聊天记录-三栏详情.png','聊天记录 · 三栏详情','page'],['11-聊天记录-空状态.png','聊天记录 · 空状态','page'],['12-定时任务.png','定时任务','page'],['13-运行记录.png','运行记录','page'],['14-设置-模型服务.png','设置 · 模型服务','page'],['15-设置-人格与回复.png','设置 · 人格与回复','page'],['16-设置-记忆与情感.png','设置 · 记忆与情感','page'],['17-设置-身份与维护.png','设置 · 身份与维护','page'],
+      ['18-弹窗-首次使用引导.png','弹窗 · 首次使用引导','modal'],['19-弹窗-未保存设置.png','弹窗 · 未保存设置','modal'],['20-弹窗-选择群聊.png','弹窗 · 选择群聊','modal'],['21-弹窗-删除聊天记录.png','弹窗 · 删除聊天记录','modal'],['22-弹窗-修改定时任务.png','弹窗 · 修改定时任务','modal'],['23-弹窗-删除定时任务.png','弹窗 · 删除定时任务','modal'],['24-弹窗-删除模型服务.png','弹窗 · 删除模型服务','modal'],['25-弹窗-创建备份.png','弹窗 · 创建备份','modal'],['26-弹窗-恢复备份.png','弹窗 · 恢复备份','modal'],['27-弹窗-清理聊天记录.png','弹窗 · 清理聊天记录','modal'],['28-弹窗-发现新版本.png','弹窗 · 发现新版本','modal'],['29-弹窗-更新进度.png','弹窗 · 更新进度','modal'],
+      ['30-下拉-模型服务类型.png','下拉 · 模型服务类型','dropdown'],['31-下拉-模型名称.png','下拉 · 模型名称','dropdown'],['32-下拉-群聊回复方式.png','下拉 · 群聊回复方式','dropdown'],['33-下拉-人格语气.png','下拉 · 人格语气','dropdown'],['34-下拉-功能选项.png','下拉 · 功能选项','dropdown'],['35-日期选择器.png','日期选择器','dropdown'],['36-反馈-提示消息.png','反馈 · 成功、离线与失败','dropdown'],['37-适配-1080x680-运行中心.png','1080×680 · 运行中心','responsive'],['38-适配-1080x680-功能中心.png','1080×680 · 功能中心','responsive']
+    ];
+    const grid=document.querySelector('#grid');
+    function render(filter='all'){grid.innerHTML=files.filter(x=>filter==='all'||x[2]===filter).map(x=>`<article class="card"><img src="screens/${x[0]}" alt="${x[1]}" loading="lazy"><div class="meta"><strong>${x[1]}</strong><span>${x[0]}</span></div></article>`).join('')}
+    document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(b.dataset.filter)});render();
+  </script>
+</body>
+</html>

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="app.css?v=0.9.0">
+  <link rel="stylesheet" href="app.css?v=0.9.1-model-empty">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -32,6 +32,7 @@
         <div class="brand-mark" id="brandMark">姜</div>
         <div class="brand-copy"><strong id="brandName">姜小妹机器人</strong><span>微信机器人管理</span></div>
       </div>
+      <div class="nav-label">机器人管理</div>
       <nav class="main-nav" aria-label="主导航">
             <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
             <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
@@ -41,6 +42,7 @@
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
             <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
       </nav>
+      <div class="sidebar-help"><strong>第一次使用？</strong><span>跟着运行中心的步骤操作，不需要理解技术名词。</span></div>
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
         <span id="versionText">v0.0.0</span>
@@ -59,7 +61,7 @@
       <div class="content-scroll">
         <section class="page active" id="page-home" aria-labelledby="homeHeading">
           <div class="page-heading">
-            <div><span class="eyebrow">今日运行</span><h1 id="homeHeading">机器人控制台</h1><p>从环境检查到消息可用，状态会在这里逐步确认。</p></div>
+            <div><span class="eyebrow">今日运行</span><h1 id="homeHeading">机器人控制台</h1><p>先看结果，再按步骤处理；不需要接触命令或后台组件。</p></div>
             <div class="account-chip"><span>当前账号</span><strong id="accountText">尚未连接</strong></div>
           </div>
 
@@ -132,12 +134,12 @@
           <section class="directory-status" id="groupDirectoryStatus" role="status" aria-live="polite">
             <div><strong>尚未读取群聊</strong><span>打开本页后会读取一次，也可以随时手动刷新。</span></div>
           </section>
-          <div class="group-toolbar panel">
-              <label class="search-box wide" id="groupSearchBox"><svg><use href="#i-search"/></svg><input id="groupSearch" type="search" placeholder="搜索群名称或群标识" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
-            <div class="group-meta"><strong id="groupCount">等待读取群聊</strong><span id="groupUpdated">尚未更新</span></div>
-          </div>
           <div class="group-layout">
             <section class="group-table-panel panel" aria-label="群聊列表">
+              <div class="group-toolbar">
+                <label class="search-box wide" id="groupSearchBox"><svg><use href="#i-search"/></svg><input id="groupSearch" type="search" placeholder="搜索群名称或群标识" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
+                <div class="group-meta"><strong id="groupCount">等待读取群聊</strong><span id="groupUpdated">尚未更新</span></div>
+              </div>
               <div class="group-table-scroll">
                 <table class="group-table">
                   <thead><tr><th>群名称</th><th>群标识</th><th>成员数</th><th class="actions-column">操作</th></tr></thead>
@@ -177,6 +179,7 @@
           <section class="proactive-control panel" id="proactiveControl"><div><span class="eyebrow">主动消息总控</span><h2>默认不主动打扰群聊</h2><p id="proactiveSummary">选择群聊后，可单独允许主动消息、设置安静时段和每日上限。</p></div><button class="button secondary" id="manageGroupPolicies" data-action-bound disabled>去管理群聊规则</button></section>
           <div class="metric-row"><article><span>全部任务</span><strong id="scheduleTotal">0</strong></article><article><span>运行中</span><strong id="scheduleRunning">0</strong></article><article><span>已暂停</span><strong id="schedulePaused">0</strong></article></div>
           <section class="table-panel panel">
+            <div class="table-panel-heading"><div><h2>任务列表</h2><p>暂停、改时间和删除都会先确认，不会误触。</p></div><span class="status-badge checking">Asia/Shanghai</span></div>
             <table><thead><tr><th>任务名称</th><th>来源</th><th>发送到</th><th>执行时间</th><th>下次运行</th><th>状态</th><th class="actions-column">操作</th></tr></thead><tbody id="scheduleRows"><tr><td colspan="7" class="table-empty">正在读取定时任务…</td></tr></tbody></table>
           </section>
         </section>
@@ -188,21 +191,54 @@
         </section>
 
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>机器人身份和模型服务都在这里统一管理，相关功能会自动读取同一份配置。</p></div></div>
+          <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>先完成推荐项，只有需要时再展开高级设置。</p></div></div>
+          <div class="settings-tabs" id="settingsTabs" aria-label="设置分类">
+            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>模型服务</button>
+            <button type="button" data-settings-tab="persona" data-action-bound disabled>人格与回复</button>
+            <button type="button" data-settings-tab="memory" data-action-bound disabled>记忆与情感</button>
+            <button type="button" data-settings-tab="system" data-action-bound disabled>身份与维护</button>
+            <span>修改后会明确提示“已应用”或“启动时使用”</span>
+          </div>
           <div class="settings-grid">
-            <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
-              <div class="panel-heading"><div><span class="eyebrow">统一模型服务</span><h2>模型服务中心</h2></div><span class="status-badge success" id="providerStatus">免费 Grok 优先</span></div>
-              <p class="settings-copy">普通用户保持免费 Grok 即可；你自己的设备可以添加 DeepSeek。功能中心里需要模型的功能，会自动显示这里已经配置好的服务。</p>
-              <div class="provider-service-list" id="providerServiceList" aria-live="polite"><div class="loading-row">正在读取模型服务…</div></div>
-              <div class="provider-editor-heading"><div><strong id="providerEditorTitle">添加模型服务</strong><span id="providerEditorSubtitle">选择预设后只需填写服务密钥</span></div><button class="button ghost small" id="addProvider" type="button" data-action-bound disabled>添加新服务</button></div>
-              <input name="provider_id" type="hidden">
-              <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
-              <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.xiuxianjyj.xin/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><input name="model" list="providerModelOptions" autocomplete="off" placeholder="grok-4.6" required><datalist id="providerModelOptions"></datalist><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
-              <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="留空则保留当前密钥"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">尚未配置</small></label>
-              <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除</button><button class="button primary" type="submit">保存并设为回复模型</button></div></div>
-            </form>
+            <section class="provider-workspace" data-settings-section="model">
+              <section class="provider-overview-card panel" id="providerOverview" aria-labelledby="providerOverviewTitle">
+                <div class="provider-overview-heading">
+                  <div><span class="eyebrow">统一模型服务</span><h2 id="providerOverviewTitle" tabindex="-1">模型服务</h2><p>机器人和需要模型的功能共用这里的服务。</p></div>
+                  <span class="status-badge" id="providerStatus">正在读取</span>
+                </div>
+                <div class="provider-service-list" id="providerServiceList" aria-live="polite"><div class="loading-row">正在读取模型服务…</div></div>
+              </section>
 
-            <form class="settings-card assistant-settings-card panel" id="personaForm" novalidate>
+              <section class="provider-editor-page" id="providerEditorPage" hidden aria-labelledby="providerEditorTitle">
+                <div class="provider-editor-nav">
+                  <button class="provider-back-button" id="closeProviderEditor" type="button" data-action-bound disabled><span aria-hidden="true">←</span>返回模型服务</button>
+                  <span class="status-badge checking" id="providerEditorStatus">尚未保存</span>
+                </div>
+                <div class="provider-editor-layout">
+                  <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
+                    <div class="panel-heading"><div><span class="eyebrow" id="providerEditorEyebrow">新建服务</span><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2><p id="providerEditorSubtitle">选择一种服务，然后确认连接信息。</p></div></div>
+                    <input name="provider_id" type="hidden">
+                    <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
+                    <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><input name="model" list="providerModelOptions" autocomplete="off" placeholder="例如 grok-4.6" required><datalist id="providerModelOptions"></datalist><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
+                    <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="粘贴服务密钥；已保存的密钥不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">密钥只保存在本机</small></label>
+                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong>保存后直接设为回复模型</strong><small>如果机器人正在运行，会先确认热更新成功；失败时保留当前表单。</small></p></div>
+                    <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" type="submit">保存并设为回复模型</button></div></div>
+                  </form>
+
+                  <aside class="provider-editor-guide panel" aria-label="填写说明">
+                    <span class="eyebrow">填写说明</span><h2>只需要三步</h2>
+                    <ol>
+                      <li><span>1</span><div><strong>选择服务</strong><small>第一次使用建议选择免费 Grok 4.6。</small></div></li>
+                      <li><span>2</span><div><strong>确认连接信息</strong><small>推荐服务会自动带出接口地址和模型名称。</small></div></li>
+                      <li><span>3</span><div><strong>保存并使用</strong><small>成功后返回服务列表，并标记当前回复模型。</small></div></li>
+                    </ol>
+                    <div class="provider-local-note"><strong>密钥仅存本机</strong><span>界面、诊断和导出内容都不会回显完整密钥。</span></div>
+                  </aside>
+                </div>
+              </section>
+            </section>
+
+            <form class="settings-card assistant-settings-card panel" id="personaForm" data-settings-section="persona" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">人格与回复</span><h2>她是谁、什么时候说话</h2></div><span class="status-badge" id="personaStatus">等待读取</span></div>
               <p class="settings-copy">被点名时走快速回应，不再额外调用一次判断模型；群聊里默认只处理最相关的一件事。</p>
               <div class="field-pair"><label><span>说话风格</span><select name="tone"><option value="natural">自然熟人</option><option value="warm">温柔陪伴</option><option value="professional">专业助理</option><option value="lively">活泼群友</option></select></label><label><span>日常回复长度</span><select name="reply_length"><option value="brief">简短，适合群聊</option><option value="balanced">均衡</option><option value="detailed">详细</option></select></label></div>
@@ -212,7 +248,17 @@
               <div class="form-actions"><span class="form-note" id="personaNote" role="status"></span><button class="button primary" type="submit">保存人格设置</button></div>
             </form>
 
-            <form class="settings-card panel" id="memoryForm" novalidate>
+            <aside class="settings-card settings-preview-card panel" data-settings-section="persona">
+              <div class="panel-heading"><div><span class="eyebrow">回复预览</span><h2>设置会怎样影响回复</h2></div><span class="status-badge checking">示例，不会发送</span></div>
+              <div class="persona-preview">
+                <div class="preview-summary" id="personaPreviewSummary">当前组合：自然熟人 · 简短回复 · 仅点名参与</div>
+                <div class="preview-message"><span class="preview-avatar blue">张</span><div><small>张三</small><p>小妹，明天杭州会下雨吗？</p></div></div>
+                <div class="preview-message mine"><div><small>姜小妹</small><p>明天杭州有阵雨，出门带把伞更稳妥。</p></div><span class="preview-avatar">姜</span></div>
+                <div class="preview-note">没有点名时默认不插话；被点名后优先快速回应。</div>
+              </div>
+            </aside>
+
+            <form class="settings-card panel" id="memoryForm" data-settings-section="memory" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">长期记忆</span><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
               <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
               <label class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
@@ -224,7 +270,7 @@
               <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
             </form>
 
-            <form class="settings-card panel" id="emotionForm" novalidate>
+            <form class="settings-card panel" id="emotionForm" data-settings-section="memory" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">情感成长</span><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
               <p class="settings-copy">只把精简的关系、好感度和心情放进回复上下文，不把完整学习记录塞给模型。</p>
               <label class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
@@ -232,7 +278,7 @@
               <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
             </form>
 
-            <form class="settings-card panel" id="brandForm" novalidate>
+            <form class="settings-card panel" id="brandForm" data-settings-section="system" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">一键替换</span><h2>机器人名称与身份</h2></div></div>
               <label><span>软件与机器人名称</span><input name="display_name" maxlength="32" required><small>显示在窗口标题、功能页和回复身份中</small></label>
               <div class="field-pair"><label><span>简称</span><input name="short_name" maxlength="32" required></label><label><span>人格称呼</span><input name="persona_name" maxlength="32" required></label></div>
@@ -241,6 +287,7 @@
               <div class="form-actions"><span class="form-note" id="brandNote"></span><button class="button primary" type="submit">保存并统一替换</button></div>
             </form>
 
+            <div class="settings-system-stack" data-settings-section="system">
             <section class="settings-card panel">
               <div class="panel-heading"><div><span class="eyebrow">微信环境</span><h2>客户端位置</h2></div></div>
               <div class="path-box"><span>当前路径</span><code id="wechatPath">尚未选择</code></div>
@@ -259,6 +306,7 @@
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
               <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、聊天记录、日志、备份及全部本机残留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
             </section>
+            </div>
           </div>
         </section>
       </div>
@@ -282,6 +330,6 @@
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
     </section>
   </div>
-  <script src="app.js?v=0.9.0"></script>
+  <script src="app.js?v=0.9.1-model-empty"></script>
 </body>
 </html>

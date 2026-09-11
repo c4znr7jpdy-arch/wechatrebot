@@ -529,6 +529,15 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
     assert "form.elements.model.value = items[0]" not in model_discovery
 
 
+def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "async function refreshVisibleFeatureState()" in script
+    assert 'window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });' in script
+
+
 def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
@@ -657,6 +666,23 @@ def test_webui_keeps_update_progress_and_errors_visible() -> None:
     assert "failureDetail" in script
 
 
+def test_model_service_starts_empty_and_opens_a_dedicated_editor() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="providerOverview"' in markup
+    assert 'id="providerEditorPage" hidden' in markup
+    assert "let previewProviders = [];" in script
+    assert "还没有模型服务" in script
+    assert "data-provider-create" in script
+    assert "function showProviderEditor" in script
+    assert "function requestProviderOverview" in script
+    assert "放弃模型配置？" in script
+    assert "showProviderOverview(true);" in script
+    assert 'previewParams.get("demo") === "model-services"' in script
+
+
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
@@ -670,7 +696,7 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert '手账风（示例样式）' in script
     assert '渲染、重试、并发和提示词等专业参数继续使用推荐值' in script
     assert 'name: "每日签到"' not in script
-    assert 'version: "0.9.0"' in script
+    assert 'version: "0.9.1"' in script
 
 
 def test_run_application_uses_explicit_webview_api_allowlist(

@@ -110,6 +110,17 @@ textarea:focus-visible,
 .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--primary); }
 .tab-panel { padding-top: 20px; }
 
+.basic-config-intro,
+.full-config-callout { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid #cfe0fb; border-radius: 8px; background: #eef5ff; }
+.basic-config-intro { display: grid; gap: 5px; }
+.basic-config-intro strong,
+.full-config-callout strong { color: #164d9f; }
+.basic-config-intro span,
+.full-config-callout span { color: #45617f; font-size: 12px; line-height: 1.65; }
+.full-config-callout { margin: 14px 0 0; background: #f7faff; }
+.full-config-callout > div { display: grid; gap: 4px; }
+.full-config-callout .button { flex: 0 0 auto; }
+
 .config-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .config-search { width: min(440px, 100%); height: 40px; display: flex; align-items: center; border: 1px solid #c7d1de; border-radius: 6px; background: white; }
 .config-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(23,105,232,.12); }
@@ -198,6 +209,7 @@ textarea:focus-visible,
   .field-label { padding-top: 0; }
   .template-card-body .field { grid-template-columns: 1fr; row-gap: 7px; }
   .config-toolbar { align-items: flex-start; flex-direction: column; }
+  .full-config-callout { align-items: flex-start; flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -27,7 +27,7 @@ const pageLabels = {
   settings: "专属设置",
   catalog: "内容目录",
   "model-manager": "模型管理",
-  "chat-config": "对话设置",
+  "chat-config": "完整对话配置",
   "checkin-manager": "签到任务",
   "recommendation-schedules": "推荐计划",
   subscriptions: "订阅管理",
@@ -165,7 +165,7 @@ window.addEventListener("message", async (event) => {
 
 function setBusy(value, activeButton = null, busyText = "处理中…") {
   state.busy = value;
-  [el("save-config"), el("toggle-plugin"), el("reload-plugin")].forEach((button) => {
+  [el("save-config"), el("toggle-plugin"), el("reload-plugin"), el("open-full-config")].forEach((button) => {
     button.disabled = value || button.dataset.locked === "true";
   });
   if (activeButton) {
@@ -254,7 +254,8 @@ function choicesFor(key, schema, current) {
   return { choices, role };
 }
 
-function blankChoiceLabel(role) {
+function blankChoiceLabel(role, schema = {}) {
+  if (schema._blank_label) return customerText(schema._blank_label);
   if (role === "persona") return "跟随默认人格";
   if (["chat", "embedding", "rerank"].includes(role)) return "跟随机器人默认模型";
   return "请选择";
@@ -515,7 +516,7 @@ function renderPrimitive(key, schema, path, parentPath) {
       input.className = "select-input";
       const blank = document.createElement("option");
       blank.value = "";
-      blank.textContent = blankChoiceLabel(role);
+      blank.textContent = blankChoiceLabel(role, schema);
       input.appendChild(blank);
       choices.forEach(({ value, label: choiceLabel, unavailable }) => {
         const option = document.createElement("option");
@@ -682,6 +683,13 @@ function updateDetailHeader() {
   el("reload-plugin").title = !detail.engine_online ? "请先在运行中心启动机器人" : (!detail.enabled ? "请先启用功能" : "立即重新载入这项功能");
   setEngineState(detail.engine_online);
   el("save-config").textContent = detail.engine_online && detail.enabled ? "保存并立即应用" : "保存设置";
+  const fullConfigButton = el("open-full-config");
+  const fullConfigLocked = !detail.engine_online || !detail.enabled;
+  fullConfigButton.dataset.locked = fullConfigLocked.toString();
+  fullConfigButton.disabled = state.busy || fullConfigLocked;
+  fullConfigButton.title = !detail.engine_online
+    ? "请先在运行中心启动机器人"
+    : (!detail.enabled ? "请先启用功能" : "打开这项功能的完整配置页");
 }
 
 function applyConfigSearch() {
@@ -706,6 +714,9 @@ function renderConfigPanels() {
   const basicSchema = state.detail.basic_schema || state.detail.schema || {};
   const modelSchema = state.detail.model_schema || {};
   const hasBasic = state.detail.configurable && Object.keys(basicSchema).length > 0;
+  const configurationNote = customerText(state.detail.configuration_note || "");
+  el("basic-config-intro").hidden = !hasBasic || !configurationNote;
+  el("basic-config-note").textContent = configurationNote;
   fields.hidden = !hasBasic;
   configSearch.closest(".config-toolbar").hidden = !hasBasic;
   el("no-config").hidden = hasBasic;
@@ -714,6 +725,12 @@ function renderConfigPanels() {
   const modelFields = el("model-fields");
   modelFields.replaceChildren();
   const hasModels = Object.keys(modelSchema).length > 0;
+  const hasRequiredModel = Object.values(modelSchema).some((field) =>
+    customerText(field?._blank_label || "").includes("必需"),
+  );
+  el("model-config-note").textContent = hasRequiredModel
+    ? "群聊分析模型是完整使用这项功能所必需的；图片理解模型可以按需留空。这里的选择不会改变日常回复模型。"
+    : "这里只影响当前功能，不会改变机器人的日常对话模型。留空时跟随机器人默认设置。";
   el("models-tab").hidden = !hasModels;
   modelFields.hidden = !hasModels;
   el("no-model-config").hidden = hasModels;
@@ -722,6 +739,7 @@ function renderConfigPanels() {
   const hasConfig = hasBasic || hasModels;
   el("save-config").dataset.locked = (!hasConfig).toString();
   el("save-config").disabled = !hasConfig;
+  el("full-config-callout").hidden = !(hasBasic && state.detail.pages?.length);
   refreshConditions();
   applyConfigSearch();
 }
@@ -911,6 +929,26 @@ async function openPluginPage(pageName, button) {
   }
 }
 
+async function openFullConfigPage() {
+  if (!state.detail?.pages?.length) return;
+  if (!state.detail.engine_online || !state.detail.enabled) {
+    setNotice(!state.detail.engine_online
+      ? "完整配置页需要机器人在线，请先在运行中心启动机器人。"
+      : "请先启用这项功能，再打开完整配置页。", "error");
+    return;
+  }
+  const openPage = async () => {
+    showTab("pages");
+    const firstPageButton = el("page-picker").querySelector(".page-button");
+    if (firstPageButton) await openPluginPage(state.detail.pages[0], firstPageButton);
+  };
+  if (state.dirty) {
+    showDiscardModal(openPage);
+    return;
+  }
+  await openPage();
+}
+
 async function loadCatalog() {
   loadingView.hidden = false;
   emptyView.hidden = true;
@@ -938,6 +976,23 @@ async function loadCatalog() {
   }
 }
 
+async function refreshCurrentPluginState() {
+  if (document.hidden || state.busy || !state.currentId || !state.detail) return;
+  const selectedId = state.currentId;
+  try {
+    const detail = await api(`/control/plugins/${encodeURIComponent(selectedId)}`);
+    if (state.currentId !== selectedId || !state.detail) return;
+    state.detail.enabled = detail.enabled;
+    state.detail.engine_online = detail.engine_online;
+    const item = state.catalog.find((plugin) => plugin.id === selectedId);
+    if (item) item.enabled = detail.enabled;
+    renderCatalog();
+    updateDetailHeader();
+  } catch (error) {
+    setNotice(error.message, "error");
+  }
+}
+
 search.addEventListener("input", renderCatalog);
 el("clear-search").addEventListener("click", () => { search.value = ""; renderCatalog(); search.focus(); });
 configSearch.addEventListener("input", applyConfigSearch);
@@ -945,6 +1000,7 @@ el("clear-config-search").addEventListener("click", () => { configSearch.value =
 el("config-form").addEventListener("submit", saveConfig);
 el("toggle-plugin").addEventListener("click", togglePlugin);
 el("reload-plugin").addEventListener("click", reloadPlugin);
+el("open-full-config").addEventListener("click", openFullConfigPage);
 el("basic-tab").addEventListener("click", () => showTab("basic"));
 el("models-tab").addEventListener("click", () => showTab("models"));
 el("pages-tab").addEventListener("click", () => showTab("pages"));
@@ -961,6 +1017,7 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("beforeunload", (event) => {
   if (state.dirty) event.preventDefault();
 });
+window.addEventListener("focus", () => { refreshCurrentPluginState(); });
 
 ["clear-search", "clear-config-search", "basic-tab", "models-tab", "pages-tab", "modal-cancel", "modal-confirm"].forEach((id) => {
   el(id).disabled = false;

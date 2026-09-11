@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "features": [
-    {"module": "astrbot_plugin_angel_heart", "display_name": "群聊上下文", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "调节群聊回复节奏、多发言人上下文和接话方式；它不是长期记忆库。"},
+    {"module": "astrbot_plugin_angel_heart", "display_name": "群聊上下文", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "调节群聊回复节奏、多发言人上下文和接话方式；它不是长期记忆库。"},
     {"module": "astrbot_plugin_livingmemory", "display_name": "长期记忆", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。"},
     {"module": "astrbot_plugin_self_learning", "display_name": "情感与关系", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "提供好感度、情绪和精简社交上下文；默认不抓取原始消息、不自动学习或覆盖人格。"},
     {"module": "astrbot_plugin_bittorrent", "display_name": "资源检索", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"},

@@ -16,7 +16,7 @@ def service(tmp_path, monkeypatch):
         wechat_logged_in=bool(account[0]), wechat_identity=account[0]))
     obj = directory.GroupDirectoryService(tmp_path)
     calls = []
-    def request(port, token, identity, path):
+    def request(port, token, identity, path, **_options):
         calls.append(path)
         return {"account_id": identity, "items": [{"group_id": "test@chatroom", "group_name": "测试群"}], "total": 1}
     monkeypatch.setattr(obj, "_request", request)
@@ -35,7 +35,7 @@ def test_directory_manual_refresh_requeries_without_messages(tmp_path, monkeypat
 def test_failed_refresh_preserves_same_account_snapshot(tmp_path, monkeypatch):
     obj, _, _ = service(tmp_path, monkeypatch)
     original = obj.list()
-    def failure(*args):
+    def failure(*args, **kwargs):
         raise directory.GroupDirectoryError("读取失败")
     monkeypatch.setattr(obj, "_request", failure)
     result = obj.list(True)
@@ -49,7 +49,7 @@ def test_identity_change_never_exposes_previous_groups(tmp_path, monkeypatch, ne
     obj, account, _ = service(tmp_path, monkeypatch)
     obj.list()
     account[0] = new_account
-    def failure(*args):
+    def failure(*args, **kwargs):
         raise directory.GroupDirectoryError("读取失败")
     monkeypatch.setattr(obj, "_request", failure)
     assert obj.list(True)["items"] == []
@@ -80,6 +80,17 @@ def test_member_request_releases_directory_lock_before_network_io(tmp_path, monk
     monkeypatch.setattr(obj, "_request", request_without_directory_lock)
 
     assert obj.members("test@chatroom")["total"] == 0
+
+
+def test_late_member_request_cannot_clear_a_new_account_snapshot(tmp_path, monkeypatch):
+    obj, _, _ = service(tmp_path, monkeypatch)
+    obj._account = "new-account"
+    obj._snapshot = {"account_id": "new-account", "items": []}
+
+    obj._clear_current_account("old-account", state_locked=False)
+
+    assert obj._account == "new-account"
+    assert obj._snapshot == {"account_id": "new-account", "items": []}
 
 
 def test_query_credential_generated_once_and_preserved(tmp_path):

@@ -80,6 +80,7 @@ class CustomerSchemaProfile:
     ]
     note: str
     setup_steps: tuple[str, ...] = ()
+    root_fields: tuple[tuple[str, dict[str, Any]], ...] = ()
 
 
 _GROUP_ANALYSIS_MODULE = "astrbot_plugin_qq_group_daily_analysis"
@@ -210,9 +211,158 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
         "确认生成时间和分析模型后保存",
     ),
 )
+
+_ANGEL_HEART_MODULE = "astrbot_plugin_angel_heart"
+_ANGEL_HEART_PROFILE = CustomerSchemaProfile(
+    root_fields=(
+        (
+            "analyzer_model",
+            {
+                "description": "群聊分析模型",
+                "hint": (
+                    "用于判断是否接话和整理群聊上下文。建议选择与日常回复相同的模型；"
+                    "不选择时只能处理明确点名，无法主动判断其他群聊消息。"
+                ),
+                "_blank_label": "请选择模型（完整使用所必需）",
+            },
+        ),
+        (
+            "image_caption_provider_id",
+            {
+                "description": "图片理解模型（可选）",
+                "hint": "仅在需要理解历史图片时使用；请选择支持图片输入的模型。",
+                "_blank_label": "不启用图片理解",
+            },
+        ),
+    ),
+    sections=(
+        (
+            "personality",
+            "身份与接话原则",
+            (
+                (
+                    "ai_self_identity",
+                    {
+                        "description": "群聊身份",
+                        "hint": "说明机器人是谁、擅长什么，供群聊接话判断使用。",
+                    },
+                ),
+                (
+                    "reply_strategy_guide",
+                    {
+                        "description": "接话原则",
+                        "hint": "说明哪些话题适合回应，以及什么情况下不要打扰群聊。",
+                    },
+                ),
+            ),
+        ),
+        (
+            "wake_interaction",
+            "点名与唤醒",
+            (
+                (
+                    "alias",
+                    {
+                        "description": "可识别的昵称",
+                        "hint": "多个昵称用 | 分隔，例如：姜小妹|小妹。",
+                    },
+                ),
+                (
+                    "enter_on_mention_only",
+                    {
+                        "description": "仅在被点名后参与",
+                        "hint": "建议开启，避免机器人在尚未被邀请时加入聊天。",
+                    },
+                ),
+                (
+                    "direct_wake_fast_path",
+                    {
+                        "description": "点名时快速回应",
+                        "hint": "被点名或引用时跳过额外判断，直接生成回复。",
+                    },
+                ),
+            ),
+        ),
+        (
+            "timing",
+            "回复节奏",
+            (
+                (
+                    "assistant_debounce_time",
+                    {
+                        "description": "点名后等待补充（秒）",
+                        "hint": "短暂等待同一位群友补充完整问题，建议保持 1 秒。",
+                    },
+                ),
+                (
+                    "waiting_time",
+                    {
+                        "description": "回复后休息（秒）",
+                        "hint": "一次回复后暂停普通巡检，避免连续插话。",
+                    },
+                ),
+                (
+                    "observation_timeout",
+                    {
+                        "description": "持续参与时长（秒）",
+                        "hint": "超过该时间后恢复为仅在被点名时参与。",
+                    },
+                ),
+            ),
+        ),
+        (
+            "reply_length",
+            "回复长度",
+            (
+                (
+                    "normal_reply_max_chars",
+                    {
+                        "description": "普通回复参考字数",
+                        "hint": "用于提醒模型保持简短，不会强行截断回复。",
+                    },
+                ),
+                (
+                    "focus_reply_max_chars",
+                    {
+                        "description": "分析类回复参考字数",
+                        "hint": "分析、总结等问题可以使用更长回复，不能小于普通回复字数。",
+                    },
+                ),
+            ),
+        ),
+        (
+            "access_control",
+            "使用范围",
+            (
+                (
+                    "group_chat_enhancement",
+                    {
+                        "description": "启用群聊上下文协调",
+                        "hint": "开启后才会整理多人上下文并协调接话。",
+                    },
+                ),
+            ),
+        ),
+    ),
+    note=(
+        "请先在“模型绑定”中选择群聊分析模型，再调整下方常用设置。"
+        "机器人在线时，保存后会立即应用。"
+        "按群设置、能量、离场应答和上下文压缩等细致配置可在完整配置页中调整。"
+    ),
+    setup_steps=(
+        "先选择群聊分析模型",
+        "确认群聊身份、点名方式和回复节奏",
+        "保存并查看生效确认；需要按群设置时再打开完整配置页",
+    ),
+)
 _CUSTOMER_SCHEMA_PROFILES = {
     _GROUP_ANALYSIS_MODULE: _GROUP_ANALYSIS_PROFILE,
+    _ANGEL_HEART_MODULE: _ANGEL_HEART_PROFILE,
 }
+# Older full installations declare AngelHeart as page-only.  Manager delta
+# updates cannot replace legal/feature-set.json, so keep this narrow UI policy
+# override until those installations have received a newer full payload.
+_MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
 
 
 def _project_customer_schema(
@@ -229,6 +379,14 @@ def _project_customer_schema(
         return schema, None
 
     result: dict[str, Any] = {}
+    for field_key, overrides in profile.root_fields:
+        raw_field = schema.get(field_key)
+        if not isinstance(raw_field, dict) or raw_field.get("invisible") is True:
+            continue
+        result[field_key] = {
+            **copy.deepcopy(raw_field),
+            **copy.deepcopy(overrides),
+        }
     for section_key, section_title, selected_fields in profile.sections:
         raw_section = schema.get(section_key)
         if not isinstance(raw_section, dict):
@@ -1191,12 +1349,16 @@ class PluginCenterService:
             module_name = str(raw_plugin.module_name)
             plugin_dir = root / module_name
             raw_schema = _read_object(plugin_dir / "_conf_schema.json")
-            exposes_schema = policy is None or policy.exposes_schema
+            exposes_schema = (
+                policy is None
+                or policy.exposes_schema
+                or module_name in _MANAGER_SCHEMA_POLICY_OVERRIDES
+            )
             exposes_pages = policy is None or policy.exposes_pages
             schema, profile = _project_customer_schema(
                 module_name, raw_schema if exposes_schema else {}
             )
-            _, model_schema = _split_schema(schema)
+            basic_schema, model_schema = _split_schema(schema)
             pages_root = plugin_dir / "pages"
             pages = (
                 tuple(
@@ -1221,7 +1383,7 @@ class PluginCenterService:
                         else bool(raw_plugin.enabled)
                     ),
                     configurable=bool(schema),
-                    field_count=_field_count(schema),
+                    field_count=_field_count(basic_schema),
                     model_field_count=_field_count(model_schema),
                     pages=pages,
                     configuration=(policy.configuration if policy else "schema-and-page"),
