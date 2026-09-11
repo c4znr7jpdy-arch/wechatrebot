@@ -64,6 +64,52 @@ def test_windows_memory_waits_for_milvus_configuration(tmp_path: Path) -> None:
     assert pending(instance) is False
 
 
+def test_memory_hot_reload_stops_partially_initialized_instance(tmp_path: Path) -> None:
+    source = _patched(tmp_path, "astrbot_plugin_mnemosyne", "main.py")
+
+    def ignore(*_args, **_kwargs):
+        return None
+
+    terminate = _function(
+        source,
+        "terminate",
+        {
+            "asyncio": __import__("asyncio"),
+            "logger": SimpleNamespace(
+                info=ignore,
+                warning=ignore,
+                debug=ignore,
+                error=ignore,
+            ),
+        },
+    )
+
+    async def scenario() -> None:
+        import asyncio
+
+        init_task = asyncio.create_task(asyncio.Event().wait())
+        await asyncio.sleep(0)
+        ready = asyncio.Event()
+        ready.set()
+        plugin = SimpleNamespace(
+            _commercial_init_task=init_task,
+            _milvus_manager_ready=ready,
+            _ensure_milvus_connection_task=None,
+            _embedding_provider_task=None,
+            admin_panel_server=None,
+            msg_counter=None,
+            milvus_manager=None,
+        )
+
+        await terminate(plugin)
+
+        assert init_task.cancelled()
+        assert not ready.is_set()
+        assert plugin._summary_check_task is None
+
+    __import__("asyncio").run(scenario())
+
+
 def test_report_patch_preserves_browser_fallback(tmp_path: Path) -> None:
     source = _patched(tmp_path, "astrbot_plugin_qq_group_daily_analysis", "src/infrastructure/reporting/generators.py")
     tree = ast.parse(source)

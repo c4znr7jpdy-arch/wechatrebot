@@ -17,6 +17,49 @@ ROOT = Path(__file__).parents[1]
 SOURCE = Path("E:/Project/astrbot_venv/Lib/site-packages")
 
 
+def _patched_runtime_source(tmp_path: Path, relative: Path) -> str:
+    source = SOURCE / relative
+    if not source.is_file():
+        pytest.skip("Pinned AstrBot source unavailable")
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "apply",
+            "-p2",
+            f"--include={relative.as_posix()}",
+            str(ROOT / "patches/astrbot-4.26.6-wechat.patch"),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    return target.read_text("utf-8-sig")
+
+
+def _runtime_function(source: str, name: str, namespace: dict, *, last: bool = False):
+    matches = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+    ]
+    node = copy.deepcopy(matches[-1] if last else matches[0])
+    node.decorator_list = []
+    node.returns = None
+    for argument in [
+        *node.args.posonlyargs,
+        *node.args.args,
+        *node.args.kwonlyargs,
+    ]:
+        argument.annotation = None
+    module = ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[]))
+    exec(compile(module, "patched-runtime", "exec"), namespace)
+    return namespace[name]
+
+
 @pytest.fixture
 def service_class(tmp_path):
     relative = Path("astrbot/dashboard/services/config_service.py")
@@ -204,6 +247,85 @@ def test_enabling_disabled_plugin_unbinds_stale_handlers_before_reload(tmp_path)
         ("unbind", "jiang_short_drama", metadata.module_path),
         ("load", metadata.module_path),
     ]
+
+
+def test_plugin_allowlist_accepts_directory_identity_across_runtime_filters(tmp_path):
+    root_name = "astrbot_plugin_bittorrent"
+    registered_name = "astrbot_plugin_BitTorrent"
+    module_path = "data.plugins.astrbot_plugin_bittorrent.main"
+    plugin = SimpleNamespace(
+        name=registered_name,
+        root_dir_name=root_name,
+        activated=True,
+        reserved=False,
+    )
+
+    handler_source = _patched_runtime_source(
+        tmp_path / "handler",
+        Path("astrbot/core/star/star_handler.py"),
+    )
+    event_type = object()
+    event_types = SimpleNamespace(
+        AdapterMessageEvent=event_type,
+        OnAstrBotLoadedEvent=object(),
+        OnPlatformLoadedEvent=object(),
+        OnPluginLoadedEvent=object(),
+        OnPluginUnloadedEvent=object(),
+    )
+    handler_scope = {
+        "EventType": event_types,
+        "star_map": {module_path: plugin},
+    }
+    get_handlers = _runtime_function(
+        handler_source,
+        "get_handlers_by_event_type",
+        handler_scope,
+        last=True,
+    )
+    handler = SimpleNamespace(
+        event_type=event_type,
+        enabled=True,
+        handler_module_path=module_path,
+    )
+    registry = SimpleNamespace(_handlers=[handler])
+    assert get_handlers(registry, event_type, True, [root_name]) == [handler]
+    assert get_handlers(registry, event_type, True, [registered_name]) == [handler]
+    assert get_handlers(registry, event_type, True, ["unrelated_plugin"]) == []
+
+    agent_source = _patched_runtime_source(
+        tmp_path / "agent",
+        Path("astrbot/core/astr_main_agent.py"),
+    )
+    skill_scope = {"star_registry": [plugin]}
+    filter_skills = _runtime_function(
+        agent_source,
+        "_filter_skills_for_current_config",
+        skill_scope,
+    )
+    skill = SimpleNamespace(source_type="plugin", plugin_name=root_name)
+    assert filter_skills([skill], {"plugin_set": [root_name]}) == [skill]
+    assert filter_skills([skill], {"plugin_set": ["unrelated_plugin"]}) == []
+
+    class ToolSet:
+        def __init__(self):
+            self.tools = []
+
+        def add_tool(self, tool):
+            self.tools.append(tool)
+
+    class MCPTool:
+        pass
+
+    tool_scope = {
+        "MCPTool": MCPTool,
+        "ToolSet": ToolSet,
+        "star_map": {module_path: plugin},
+    }
+    filter_tools = _runtime_function(agent_source, "_plugin_tool_fix", tool_scope)
+    tool = SimpleNamespace(handler_module_path=module_path)
+    request = SimpleNamespace(func_tool=SimpleNamespace(tools=[tool]))
+    filter_tools(SimpleNamespace(plugins_name=[root_name]), request)
+    assert request.func_tool.tools == [tool]
 
 
 def test_old_runtime_is_rejected_before_any_write(tmp_path):

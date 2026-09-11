@@ -522,4 +522,41 @@ diff --git a/official/astrbot/core/provider/sources/request_retry.py b/expected/
  REQUEST_RETRY_WAIT_MIN_S = 0.2
  REQUEST_RETRY_WAIT_MAX_S = 30
  REQUEST_RETRY_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504, 529}
- 
+
+diff --git a/official/astrbot/core/star/star_handler.py b/expected/astrbot/core/star/star_handler.py
+--- a/official/astrbot/core/star/star_handler.py
++++ b/expected/astrbot/core/star/star_handler.py
+@@ -171,6 +171,7 @@ class StarHandlerRegistry(Generic[T]):
+                 if (
+                     plugin.name not in plugins_name
++                    and plugin.root_dir_name not in plugins_name
+                     and event_type
+                     not in (
+                         EventType.OnAstrBotLoadedEvent,
+                         EventType.OnPlatformLoadedEvent,
+diff --git a/official/astrbot/core/astr_main_agent.py b/expected/astrbot/core/astr_main_agent.py
+--- a/official/astrbot/core/astr_main_agent.py
++++ b/expected/astrbot/core/astr_main_agent.py
+@@ -476,6 +476,9 @@ def _filter_skills_for_current_config(
+         if plugin.reserved or allowed_plugins is None:
+             filtered.append(skill)
+             continue
+-        if plugin.name is not None and plugin.name in allowed_plugins:
++        if (
++            plugin.name in allowed_plugins
++            or plugin.root_dir_name in allowed_plugins
++        ):
+             filtered.append(skill)
+     return filtered
+@@ -1042,6 +1045,10 @@ def _plugin_tool_fix(event: AstrMessageEvent, req: ProviderRequest) -> None:
+                 # 无法解析插件归属时，保守保留工具，避免误过滤。
+                 new_tool_set.add_tool(tool)
+                 continue
+-            if plugin.name in event.plugins_name or plugin.reserved:
++            if (
++                plugin.name in event.plugins_name
++                or plugin.root_dir_name in event.plugins_name
++                or plugin.reserved
++            ):
+                 new_tool_set.add_tool(tool)
+         req.func_tool = new_tool_set

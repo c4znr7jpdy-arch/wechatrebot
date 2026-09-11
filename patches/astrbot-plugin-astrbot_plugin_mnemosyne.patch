@@ -9,7 +9,13 @@ diff --git a/main.py b/main.py
  import time
  from typing import Any, cast
  
-@@ -85,15 +86,30 @@
+@@ -73,4 +74,5 @@
+         self._warned_missing_provider_ids: set[str] = set()
+         self._post_load_tasks_started = False
+         self._ensure_milvus_connection_task: asyncio.Task | None = None
++        self._summary_check_task: asyncio.Task | None = None
+         self._milvus_manager_ready = asyncio.Event()
+@@ -85,15 +87,30 @@
  
          logger.info("开始初始化 Mnemosyne 插件...")
          # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
@@ -41,7 +47,7 @@ diff --git a/main.py b/main.py
          platform_id = get_event_platform_id(event)
          if platform_id and platform_id in self.platform_blacklist:
              logger.debug(f"平台 '{platform_id}' 在记忆黑名单中，跳过记忆流程。")
-@@ -307,6 +323,8 @@
+@@ -307,6 +324,8 @@
          ):
              return
  
@@ -50,7 +56,7 @@ diff --git a/main.py b/main.py
          self._post_load_tasks_started = True
  
          # 启动 Embedding Provider 后台加载任务（静默模式）
-@@ -386,6 +404,9 @@
+@@ -386,6 +405,9 @@
          非阻塞的异步初始化流程
          """
          try:
@@ -60,16 +66,37 @@ diff --git a/main.py b/main.py
              # 0. 先在主模块中获取数据目录并保存到实例
              plugin_data_dir = None
              try:
-@@ -860,6 +881,12 @@
+@@ -860,6 +882,17 @@
          确保所有资源正确释放
          """
          logger.info("Mnemosyne 插件正在停止...")
-+        if not self._commercial_init_task.done():
-+            self._commercial_init_task.cancel()
++        init_task = getattr(self, "_commercial_init_task", None)
++        if init_task and not init_task.done():
++            init_task.cancel()
 +            try:
-+                await self._commercial_init_task
++                await asyncio.wait_for(init_task, timeout=5.0)
 +            except asyncio.CancelledError:
 +                pass
++            except asyncio.TimeoutError:
++                logger.warning("等待 Mnemosyne 初始化任务取消超时。")
++            except Exception as e:
++                logger.debug(f"Mnemosyne 初始化任务停止时返回异常: {e}")
  
          # 标记 Milvus 不再可用；先 clear，避免新的逻辑误判为 ready
          self._milvus_manager_ready.clear()
+@@ -901,11 +934,12 @@
+         # --- 停止后台总结检查任务 ---
+-        if self._summary_check_task and not self._summary_check_task.done():
++        summary_check_task = getattr(self, "_summary_check_task", None)
++        if summary_check_task and not summary_check_task.done():
+             logger.info("正在取消后台总结检查任务...")
+-            self._summary_check_task.cancel()
++            summary_check_task.cancel()
+             try:
+                 # 等待任务实际取消完成，设置一个超时避免卡住
+-                await asyncio.wait_for(self._summary_check_task, timeout=5.0)
++                await asyncio.wait_for(summary_check_task, timeout=5.0)
+             except asyncio.CancelledError:
+                 logger.info("后台总结检查任务已成功取消。")
+             except asyncio.TimeoutError:
+                 logger.warning("等待后台总结检查任务取消超时。")
