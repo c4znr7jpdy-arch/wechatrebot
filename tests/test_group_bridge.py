@@ -59,6 +59,9 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     hook_client = importlib.import_module(f"{package_name}.hook_client")
     config = importlib.import_module(f"{package_name}.config")
     event_normalizer = importlib.import_module(f"{package_name}.event_normalizer")
+    message_codec = importlib.import_module(f"{package_name}.message_codec")
+    onebot_client = importlib.import_module(f"{package_name}.onebot_client")
+    state = importlib.import_module(f"{package_name}.state")
 
     yield {
         "root": copied_bridge,
@@ -67,6 +70,9 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "hook_client": hook_client,
         "config": config,
         "event_normalizer": event_normalizer,
+        "message_codec": message_codec,
+        "onebot_client": onebot_client,
+        "state": state,
     }
 
     for module_name in list(sys.modules):
@@ -347,6 +353,127 @@ def test_private_sender_profile_avatar_is_saved_on_normalized_event(
     assert event.member_avatar == "https://example.invalid/friend-avatar"
 
 
+def test_group_identity_and_avatar_are_available_to_plugins(
+    patched_bridge: dict[str, Any]
+) -> None:
+    event = patched_bridge["event_normalizer"].normalize_event(
+        {
+            "event_type": 2000,
+            "account_wxid": "wxid_bot",
+            "fromUserName": {"String": "room@chatroom"},
+            "toUserName": {"String": "wxid_bot"},
+            "content": {"String": "wxid_member:\n你好"},
+            "real_content": "你好",
+            "member_info": {
+                "userName": "wxid_member",
+                "nickName": "微信名称",
+                "displayName": "群昵称",
+                "small_head_url": "https://wx.qlogo.cn/member.jpg",
+            },
+            "msgType": 1,
+            "newMsgId": "group-avatar-1",
+        }
+    )
+    encoded = patched_bridge["message_codec"].encode_inbound(
+        event, "wxid_bot", 1
+    )
+
+    assert encoded["sender"]["nickname"] == "微信名称"
+    assert encoded["sender"]["card"] == "群昵称"
+    assert encoded["sender"]["avatar"] == "https://wx.qlogo.cn/member.jpg"
+    assert encoded["wx_avatar"] == "https://wx.qlogo.cn/member.jpg"
+
+
+def test_onebot_member_and_contact_queries_include_avatar(
+    patched_bridge: dict[str, Any]
+) -> None:
+    class Hook:
+        async def get_group_members(self, _room_id: str) -> list[dict[str, str]]:
+            return [
+                {
+                    "userName": "wxid_member",
+                    "nickName": "微信名称",
+                    "displayName": "群昵称",
+                    "small_head_url": "https://wx.qlogo.cn/member.jpg",
+                }
+            ]
+
+        async def get_contact(self, user_id: str) -> dict[str, str]:
+            return {
+                "userName": user_id,
+                "nick_name": "联系人",
+                "big_head_url": "https://wx.qlogo.cn/contact.jpg",
+            }
+
+    router = patched_bridge["onebot_client"].OneBotActionRouter(
+        Hook(),
+        SimpleNamespace(),
+        patched_bridge["state"].BridgeState(60, 100),
+    )
+    member = _run(
+        router.handle(
+            {
+                "action": "get_group_member_info",
+                "params": {
+                    "group_id": "room@chatroom",
+                    "user_id": "wxid_member",
+                },
+            }
+        )
+    )["data"]
+    contact = _run(
+        router.handle(
+            {"action": "get_user_info", "params": {"user_id": "wxid_member"}}
+        )
+    )["data"]
+
+    assert member["nickname"] == "微信名称"
+    assert member["card"] == "群昵称"
+    assert member["avatar"] == "https://wx.qlogo.cn/member.jpg"
+    assert contact["nickname"] == "联系人"
+    assert contact["avatar"] == "https://wx.qlogo.cn/contact.jpg"
+
+
+def test_group_member_update_notice_preserves_old_and_new_identity(
+    patched_bridge: dict[str, Any]
+) -> None:
+    app_source = (
+        patched_bridge["root"] / "src" / "hook_bridge" / "app.py"
+    ).read_text(encoding="utf-8")
+    assert "encode_group_member_update_notice(" in app_source
+    assert "old_wechat_name=previous.wechat_name" in app_source
+    assert "old_group_nickname=previous.group_nickname" in app_source
+
+    event = patched_bridge["event_normalizer"].normalize_event(
+        {
+            "event_type": 1012,
+            "account_wxid": "wxid_bot",
+            "data": {
+                "roomid": "room@chatroom",
+                "memberlist": {
+                    "userName": "wxid_member",
+                    "nickName": "新微信名称",
+                    "displayName": "新群昵称",
+                    "small_head_url": "https://wx.qlogo.cn/new.jpg",
+                },
+            },
+        }
+    )
+    notice = patched_bridge["message_codec"].encode_group_member_update_notice(
+        event,
+        "wxid_bot",
+        old_wechat_name="旧微信名称",
+        old_group_nickname="旧群昵称",
+    )
+
+    assert notice["notice_type"] == "group_member_update"
+    assert notice["wx_old_nickname"] == "旧微信名称"
+    assert notice["wx_old_display_name"] == "旧群昵称"
+    assert notice["wx_nickname"] == "新微信名称"
+    assert notice["wx_display_name"] == "新群昵称"
+    assert notice["wx_avatar"] == "https://wx.qlogo.cn/new.jpg"
+
+
 def test_empty_token_and_account_change_never_return_cached_data(
     patched_bridge: dict[str, Any]
 ) -> None:
@@ -414,7 +541,7 @@ def test_member_directory_validates_group_and_caps_real_fields_at_500(
                     "nickName": {"String": f"成员{index}"},
                     "displayName": {"String": f"群昵称{index}"},
                     "owner": True,
-                    "avatar": "https://sensitive.invalid/avatar",
+                    "small_head_url": "https://sensitive.invalid/avatar",
                 }
                 for index in range(501)
             ]

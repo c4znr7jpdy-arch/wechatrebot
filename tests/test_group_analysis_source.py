@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import re
 import shutil
@@ -124,9 +125,11 @@ def _adapter_methods(source: str):
         "Any": Any,
         "asyncio": asyncio,
         "datetime": datetime,
+        "json": json,
         "timedelta": timedelta,
         "timezone": timezone,
         "Path": Path,
+        "replace": replace,
         "sqlite3": sqlite3,
         "logger": _Logger(),
         "MessageContent": _Content,
@@ -176,22 +179,23 @@ def test_bridge_history_is_group_scoped_filtered_ordered_and_read_only(
                 sender_id TEXT NOT NULL,
                 sender_name TEXT NOT NULL,
                 group_id TEXT NOT NULL,
-                timestamp REAL NOT NULL
+                timestamp REAL NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
         connection.executemany(
-            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                (1, "wxid_bot", "user", "过期", "wxid_old", "旧成员", "123@chatroom", now - 172800),
-                (2, "wxid_bot", "user", "第一条", "wxid_a", "群主", "123@chatroom", now - 120),
-                (3, "wxid_bot", "assistant", "机器人回复", "wxid_bot", "机器人", "123@chatroom", now - 90),
-                (4, "wxid_bot", "user", "自己发的", "wxid_bot", "机器人", "123@chatroom", now - 80),
-                (5, "wxid_bot", "user", "其他群", "wxid_x", "其他人", "999@chatroom", now - 70),
-                (6, "wxid_bot", "user", "   ", "wxid_blank", "空消息", "123@chatroom", now - 60),
-                (7, "wxid_bot", "user", "第二条", "wxid_b", "小白", "123@chatroom", now - 30),
-                (8, "wxid_other_bot", "user", "其他账号的同群", "wxid_c", "其他人", "123@chatroom", now - 20),
-                (9, "", "user", "旧库未归属", "wxid_legacy", "旧成员", "123@chatroom", now - 10),
+                (1, "wxid_bot", "user", "过期", "wxid_old", "旧成员", "123@chatroom", now - 172800, "{}"),
+                (2, "wxid_bot", "user", "第一条", "wxid_a", "wxid_a", "123@chatroom", now - 120, '{"avatar":"https://wx.qlogo.cn/a.jpg"}'),
+                (3, "wxid_bot", "assistant", "机器人回复", "wxid_bot", "机器人", "123@chatroom", now - 90, "{}"),
+                (4, "wxid_bot", "user", "自己发的", "wxid_bot", "机器人", "123@chatroom", now - 80, "{}"),
+                (5, "wxid_bot", "user", "其他群", "wxid_x", "其他人", "999@chatroom", now - 70, "{}"),
+                (6, "wxid_bot", "user", "   ", "wxid_blank", "空消息", "123@chatroom", now - 60, "{}"),
+                (7, "wxid_bot", "user", "第二条", "wxid_b", "小白", "123@chatroom", now - 30, "{}"),
+                (8, "wxid_other_bot", "user", "其他账号的同群", "wxid_c", "其他人", "123@chatroom", now - 20, "{}"),
+                (9, "", "user", "旧库未归属", "wxid_legacy", "旧成员", "123@chatroom", now - 10, "{}"),
             ),
         )
 
@@ -202,9 +206,24 @@ def test_bridge_history_is_group_scoped_filtered_ordered_and_read_only(
         _read_bridge_history = read
         _current_wechat_account = current_account
 
+        def __init__(self) -> None:
+            self.avatars: dict[str, str] = {}
+
+        def _cache_member_avatar(self, user_id: str, avatar: str | None) -> None:
+            if avatar:
+                self.avatars[user_id] = avatar
+
+        @staticmethod
+        def _is_placeholder_name(name: str, user_id: str) -> bool:
+            return not name or name == user_id or name.startswith("wxid_")
+
+        async def _build_nickname_mapping(self, _group_id: str) -> dict[str, str]:
+            return {"wxid_a": "群主群昵称", "wxid_b": "小白群昵称"}
+
+    adapter = Adapter()
     messages = asyncio.run(
         fetch(
-            Adapter(),
+            adapter,
             "123@chatroom",
             days=1,
             max_count=2,
@@ -214,13 +233,19 @@ def test_bridge_history_is_group_scoped_filtered_ordered_and_read_only(
     )
 
     assert [message.text_content for message in messages] == ["第一条", "第二条"]
+    assert [message.sender_name for message in messages] == ["群主群昵称", "小白"]
+    assert [message.sender_card for message in messages] == [
+        "群主群昵称",
+        "小白群昵称",
+    ]
+    assert adapter.avatars == {"wxid_a": "https://wx.qlogo.cn/a.jpg"}
     assert all(message.platform == "wechat" for message in messages)
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 9
 
     older = asyncio.run(
         fetch(
-            Adapter(),
+            adapter,
             "123@chatroom",
             days=1,
             max_count=10,
@@ -260,6 +285,64 @@ def test_history_query_fails_closed_when_current_account_is_ambiguous(
         )
         == []
     )
+
+
+def test_bridge_history_without_avatar_metadata_remains_readable(
+    tmp_path: Path,
+) -> None:
+    patched = _patched_plugin(tmp_path)
+    source = (
+        patched / "src/infrastructure/platform/adapters/onebot_adapter.py"
+    ).read_text(encoding="utf-8")
+    read, _, _ = _adapter_methods(source)
+    database = tmp_path / "legacy-message-history.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                timestamp REAL NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "wxid_bot",
+                "user",
+                "旧记录",
+                "wxid_member",
+                "旧成员",
+                "123@chatroom",
+                100.0,
+            ),
+        )
+
+    class Adapter:
+        bot_self_ids: list[str] = []
+
+        @staticmethod
+        def _cache_member_avatar(_user_id: str, _avatar: str | None) -> None:
+            raise AssertionError("legacy rows have no avatar metadata")
+
+    messages = read(
+        Adapter(),
+        database,
+        "wxid_bot",
+        "123@chatroom",
+        0,
+        10,
+        None,
+    )
+
+    assert [message.sender_name for message in messages] == ["旧成员"]
 
 
 def test_bridge_history_path_is_derived_from_commercial_layout(

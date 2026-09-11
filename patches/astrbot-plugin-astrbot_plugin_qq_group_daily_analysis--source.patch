@@ -1,8 +1,12 @@
 diff --git a/src/infrastructure/platform/adapters/onebot_adapter.py b/src/infrastructure/platform/adapters/onebot_adapter.py
-index 2efaffd..e4eb21b 100644
+index 2efaffdc04d62a3991e48dd2078fed276d331f33..236a666fd93012c4e8c084f7bac4d69466711ead 100644
 --- a/src/infrastructure/platform/adapters/onebot_adapter.py
 +++ b/src/infrastructure/platform/adapters/onebot_adapter.py
-@@ -9,7 +9,9 @@ import base64
+@@ -6,10 +6,13 @@ OneBot v11 平台适配器
+ 
+ import asyncio
+ import base64
++import json
  import os
  from dataclasses import replace
  import time
@@ -13,7 +17,7 @@ index 2efaffd..e4eb21b 100644
  from typing import Any
  from urllib.parse import urlparse
  
-@@ -72,10 +74,9 @@ class OneBotAdapter(PlatformAdapter):
+@@ -72,10 +75,9 @@ class OneBotAdapter(PlatformAdapter):
          self._is_snowluma = False
          self._snowluma_checked = False
  
@@ -27,7 +31,7 @@ index 2efaffd..e4eb21b 100644
  
          # 禁言状态缓存 (group_id -> timestamp)
          self._muted_groups_cache = {}
-@@ -122,25 +123,41 @@ class OneBotAdapter(PlatformAdapter):
+@@ -122,25 +124,41 @@ class OneBotAdapter(PlatformAdapter):
              self._is_snowluma = False
          self._snowluma_checked = True
  
@@ -83,7 +87,7 @@ index 2efaffd..e4eb21b 100644
      def _get_nearest_size(self, requested_size: int) -> int:
          """从支持的尺寸列表中找到最接近请求尺寸的一个。"""
          return min(self.AVAILABLE_SIZES, key=lambda x: abs(x - requested_size))
-@@ -311,9 +328,11 @@ class OneBotAdapter(PlatformAdapter):
+@@ -311,9 +329,11 @@ class OneBotAdapter(PlatformAdapter):
          Returns:
              list[UnifiedMessage]: 统一格式的消息列表
          """
@@ -97,7 +101,7 @@ index 2efaffd..e4eb21b 100644
  
          if not hasattr(self.bot, "call_action"):
              return []
-@@ -484,99 +503,135 @@ class OneBotAdapter(PlatformAdapter):
+@@ -484,99 +504,171 @@ class OneBotAdapter(PlatformAdapter):
              logger.warning(f"OneBot 分页获取消息失败: {e}")
              return []
  
@@ -161,6 +165,10 @@ index 2efaffd..e4eb21b 100644
 +                    ).timestamp()
 +                )
  
+-            logger.info(
+-                f"[OneBot->WeChat] 从数据库拉取消息: 群 {group_id}, "
+-                f"时间范围 {datetime.fromtimestamp(start_timestamp)}, "
+-                f"获取 {len(rows)} 条"
 +            before_id_int = None
 +            if before_id:
 +                try:
@@ -176,24 +184,14 @@ index 2efaffd..e4eb21b 100644
 +                cutoff_timestamp,
 +                max(1, int(max_count)),
 +                before_id_int,
-+            )
-             logger.info(
--                f"[OneBot->WeChat] 从数据库拉取消息: 群 {group_id}, "
--                f"时间范围 {datetime.fromtimestamp(start_timestamp)}, "
--                f"获取 {len(rows)} 条"
-+                f"[OneBot->WeChat] 从桥接消息库获取群 {group_id} 消息: "
-+                f"{len(messages)} 条"
              )
-+            return messages
-+        except Exception as e:
-+            logger.error(
-+                f"[OneBot->WeChat] 读取桥接群消息失败: {e}", exc_info=True
-+            )
-+            return []
- 
+-
 -            # 转换为 UnifiedMessage
 -            # 批量获取群成员昵称映射，用于替换 wxid 格式的昵称
--            nickname_map = await self._build_nickname_mapping(group_id)
++            # This also fills the WeChat avatar cache used by report rendering.
++            # Restore human-readable names for legacy rows whose sender_name
++            # was saved as wxid before bridge-side identity enrichment existed.
+             nickname_map = await self._build_nickname_mapping(group_id)
 -
 -            messages = []
 -            for row in rows:
@@ -207,11 +205,43 @@ index 2efaffd..e4eb21b 100644
 -                contents = [
 -                    MessageContent(
 -                        type=MessageContentType.TEXT, text=content_text, raw_data={}
--                    )
--                ]
--
++            if nickname_map:
++                messages = [
++                    replace(
++                        message,
++                        sender_name=(
++                            nickname_map[message.sender_id]
++                            if message.sender_id in nickname_map
++                            and self._is_placeholder_name(
++                                message.sender_name, message.sender_id
++                            )
++                            else message.sender_name
++                        ),
++                        sender_card=nickname_map.get(message.sender_id),
+                     )
++                    for message in messages
+                 ]
++            logger.info(
++                f"[OneBot->WeChat] 从桥接消息库获取群 {group_id} 消息: "
++                f"{len(messages)} 条"
++            )
++            return messages
++        except Exception as e:
++            logger.error(
++                f"[OneBot->WeChat] 读取桥接群消息失败: {e}", exc_info=True
++            )
++            return []
+ 
 -                sender_name = row["sender_name"] or row["sender_id"]
 -                sender_id = row["sender_id"]
+-
+-                # 用真实昵称替换 wxid 格式的 sender_name
+-                if (
+-                    nickname_map
+-                    and sender_id in nickname_map
+-                    and self._is_placeholder_name(sender_name, sender_id)
+-                ):
+-                    sender_name = nickname_map[sender_id]
 +    def _read_bridge_history(
 +        self,
 +        database: Path,
@@ -225,13 +255,7 @@ index 2efaffd..e4eb21b 100644
 +        if not database.is_file():
 +            return []
  
--                # 用真实昵称替换 wxid 格式的 sender_name
--                if (
--                    nickname_map
--                    and sender_id in nickname_map
--                    and self._is_placeholder_name(sender_name, sender_id)
--                ):
--                    sender_name = nickname_map[sender_id]
+-                msg = UnifiedMessage(
 +        clauses = [
 +            "role = 'user'",
 +            "account_id = ?",
@@ -253,14 +277,21 @@ index 2efaffd..e4eb21b 100644
 +            clauses.append(f"sender_id NOT IN ({placeholders})")
 +            params.extend(sorted(ignored_senders))
 +        params.append(max(1, int(max_count)))
- 
--                msg = UnifiedMessage(
++
 +        database_uri = f"file:{database.resolve().as_posix()}?mode=ro"
 +        with sqlite3.connect(database_uri, uri=True, timeout=2) as connection:
 +            connection.row_factory = sqlite3.Row
++            columns = {
++                str(row[1])
++                for row in connection.execute("PRAGMA table_info(messages)").fetchall()
++            }
++            metadata_column = (
++                "metadata" if "metadata" in columns else "'' AS metadata"
++            )
 +            rows = connection.execute(
 +                f"""
-+                SELECT id, content, sender_id, sender_name, timestamp
++                SELECT id, content, sender_id, sender_name, timestamp,
++                       {metadata_column}
 +                FROM messages
 +                WHERE {' AND '.join(clauses)}
 +                ORDER BY timestamp DESC, id DESC
@@ -277,6 +308,14 @@ index 2efaffd..e4eb21b 100644
 +            content = str(row["content"] or "").strip()
 +            if not content:
 +                continue
++            try:
++                metadata = json.loads(str(row["metadata"] or "{}"))
++            except (TypeError, ValueError):
++                metadata = {}
++            if isinstance(metadata, dict):
++                avatar = metadata.get("avatar")
++                if avatar:
++                    self._cache_member_avatar(sender_id, avatar)
 +            messages.append(
 +                UnifiedMessage(
                      message_id=str(row["id"]),

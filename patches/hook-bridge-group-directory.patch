@@ -1,8 +1,21 @@
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
-index bed7bba7e9625e267ccb5f9b6e44d46343176668..fcfcc03709e8b80d3b9da62e49e9b739fecdd51a 100644
+index bed7bba7e9625e267ccb5f9b6e44d46343176668..72f85ab91d1dc5a56c83497c9c67983c7a99058b 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
-@@ -190,6 +190,8 @@ class BridgeApplication:
+@@ -30,7 +30,11 @@ from .inbound_image import (
+ )
+ from .launcher import start_injector
+ from .media import MediaStore
+-from .message_codec import encode_group_member_notice, encode_inbound
++from .message_codec import (
++    encode_group_member_notice,
++    encode_group_member_update_notice,
++    encode_inbound,
++)
+ from .models import GroupMemberIdentity, NormalizedEvent, RecallRecord, ReplyTarget
+ from .onebot_client import OneBotActionRouter, OneBotClient
+ from .state import BridgeState
+@@ -190,6 +194,8 @@ class BridgeApplication:
              self.settings.callback_path,
              action_router=self.router,
              status_provider=self._health_snapshot,
@@ -11,7 +24,70 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..fcfcc03709e8b80d3b9da62e49e9b739
          )
          self._callback_runner = web.AppRunner(app, access_log=None)
          await self._callback_runner.setup()
-@@ -626,6 +628,7 @@ class BridgeApplication:
+@@ -362,14 +368,51 @@ class BridgeApplication:
+                         )
+                     await self.onebot.send_event(onebot_event)
+                 elif event.kind == "group_member_update":
++                    previous = self.state.group_member_identity(
++                        event.conversation_id, event.sender_id
++                    )
++                    avatar = event.member_avatar or (
++                        previous.avatar if previous is not None else ""
++                    )
+                     self.state.remember_group_member_identity(
+                         event.conversation_id,
+                         event.sender_id,
+                         GroupMemberIdentity(
+                             event.wechat_name,
+                             event.group_nickname,
++                            avatar,
+                         ),
+                     )
++                    names_changed = previous is not None and (
++                        previous.wechat_name != event.wechat_name
++                        or previous.group_nickname != event.group_nickname
++                    )
++                    if names_changed:
++                        event = replace(
++                            event,
++                            account_id=self.state.bot_wxid or event.account_id,
++                            group_name=self._polled_group_names.get(
++                                event.conversation_id, ""
++                            ),
++                            member_avatar=avatar,
++                        )
++                        dedup_key = (
++                            "group-member-update:"
++                            f"{event.conversation_id}:{event.sender_id}:"
++                            f"{previous.wechat_name}:{previous.group_nickname}:"
++                            f"{event.wechat_name}:{event.group_nickname}"
++                        )
++                        if self.state.accept_message(dedup_key):
++                            await self.onebot.send_event(
++                                encode_group_member_update_notice(
++                                    event,
++                                    self.state.bot_wxid
++                                    or event.account_id
++                                    or "wechat_bot",
++                                    old_wechat_name=previous.wechat_name,
++                                    old_group_nickname=previous.group_nickname,
++                                )
++                            )
+                 elif event.kind in {"group_increase", "group_decrease"}:
+                     event = await self._resolve_group_member_notice(event)
+                     if not event.conversation_id or not event.sender_id:
+@@ -575,6 +618,10 @@ class BridgeApplication:
+                 avatar=scalar(
+                     member.get("smallHeadImgUrl")
+                     or member.get("bigHeadImgUrl")
++                    or member.get("small_head_img_url")
++                    or member.get("big_head_img_url")
++                    or member.get("small_head_url")
++                    or member.get("big_head_url")
+                     or member.get("avatar")
+                     or member.get("avatar_url")
+                 ).strip(),
+@@ -626,6 +673,7 @@ class BridgeApplication:
              event,
              wechat_name=event.wechat_name or cached.wechat_name,
              group_nickname=event.group_nickname or cached.group_nickname,
@@ -20,10 +96,10 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..fcfcc03709e8b80d3b9da62e49e9b739
  
      async def _resolve_group_member_notice(self, event):
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
-index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..3fbd38550b73e1ad59d7acee5bac8897e7507585 100644
+index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..18404160ba1baea7a62b659d1528459f1fa98b80 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
-@@ -1,15 +1,208 @@
+@@ -1,15 +1,217 @@
  from __future__ import annotations
  
  import asyncio
@@ -169,7 +245,16 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..3fbd38550b73e1ad59d7acee5bac8897
 +    )
 +    avatar = _manager_text(
 +        _record_value(
-+            value, record, "avatar", "avatar_url", "smallHeadImgUrl", "bigHeadImgUrl"
++            value,
++            record,
++            "avatar",
++            "avatar_url",
++            "smallHeadImgUrl",
++            "bigHeadImgUrl",
++            "small_head_img_url",
++            "big_head_img_url",
++            "small_head_url",
++            "big_head_url",
 +        )
 +    )
 +    return {
@@ -232,7 +317,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..3fbd38550b73e1ad59d7acee5bac8897
  
  
  def create_callback_app(
-@@ -18,9 +211,178 @@ def create_callback_app(
+@@ -18,9 +220,178 @@ def create_callback_app(
      callback_path: str = "/api/recvMsg",
      action_router: Any | None = None,
      status_provider: Any | None = None,
@@ -411,7 +496,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..3fbd38550b73e1ad59d7acee5bac8897
      async def receive(request: web.Request) -> web.Response:
          try:
              payload = await request.json()
-@@ -123,5 +485,10 @@ def create_callback_app(
+@@ -123,5 +494,10 @@ def create_callback_app(
      app.router.add_put(callback_path, receive)
      app.router.add_post(callback_path, receive)
      app.router.add_get("/api/health", health)
@@ -443,10 +528,28 @@ index 8ec67693068b849eb8d7c64b56c6245ea2de3269..1ebfe8579f8df50cdf67792a6129c213
              request_timeout_seconds=float(_positive_number(raw.get("request_timeout_seconds", 10), "request_timeout_seconds", float)),
              video_download_timeout_seconds=float(
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
-index 9e1015b71244968b14d8bb54494212bdb00419fd..31041a3541ef4d6c407814bcfc5742d5c2aaae4d 100644
+index 9e1015b71244968b14d8bb54494212bdb00419fd..bf91fb0973acd0c82363e7de5f809208b07e3d75 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
-@@ -537,6 +537,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+@@ -471,6 +471,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+             sender_id=scalar(member.get("userName") or member.get("wxid")),
+             wechat_name=scalar(member.get("nickName")).strip(),
+             group_nickname=scalar(member.get("displayName")).strip(),
++            member_avatar=_member_scalar(
++                member,
++                "smallHeadImgUrl",
++                "bigHeadImgUrl",
++                "small_head_img_url",
++                "big_head_img_url",
++                "small_head_url",
++                "big_head_url",
++                "avatar",
++                "avatar_url",
++            ),
+             raw=dict(payload),
+         )
+     if envelope_type != 2004:
+@@ -537,6 +548,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
          sender_name=sender_name,
          wechat_name=wechat_name,
          group_nickname=group_nickname,
@@ -756,3 +859,114 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a0ea2f079427c587e70e284326b304a7
      async def get_group_detail_members(self, room_id: str) -> list[dict[str, Any]]:
          data = await self._read_data(
              "/api/get_chatroom_detail_cache", {"room_id": room_id}
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py b/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py
+index f96cec016d37efbea7571468db641f939f2bf1e2..bbe1b8eddf858c46e703de3ccfabeb36b59e60ce 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py
+@@ -245,6 +245,9 @@ def encode_inbound(
+         "wx_display_name": group_nickname,
+         "wx_group_name": event.group_name.strip(),
+     }
++    if event.member_avatar:
++        result["sender"]["avatar"] = event.member_avatar
++        result["wx_avatar"] = event.member_avatar
+     if is_group:
+         result["group_id"] = event.conversation_id
+     return result
+@@ -276,3 +279,30 @@ def encode_group_member_notice(
+         "wx_group_name": event.group_name,
+         "wx_avatar": event.member_avatar,
+     }
++
++
++def encode_group_member_update_notice(
++    event: NormalizedEvent,
++    self_id: str,
++    *,
++    old_wechat_name: str = "",
++    old_group_nickname: str = "",
++) -> dict[str, Any]:
++    """Encode a cached group-name change for the notification plugin."""
++    if event.kind != "group_member_update":
++        raise ValueError("event is not a group member update")
++    return {
++        "time": event.create_time or int(time.time()),
++        "self_id": self_id or event.account_id or "wechat_bot",
++        "post_type": "notice",
++        "notice_type": "group_member_update",
++        "sub_type": "name_change",
++        "group_id": event.conversation_id,
++        "user_id": event.sender_id,
++        "wx_old_nickname": old_wechat_name,
++        "wx_old_display_name": old_group_nickname,
++        "wx_nickname": event.wechat_name,
++        "wx_display_name": event.group_nickname,
++        "wx_group_name": event.group_name,
++        "wx_avatar": event.member_avatar,
++    }
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index 421fc4fa757744175f0f6ed3d3b75c64a8b6678f..dc6898921a76e5cd4b1b44cfd17a1e4a663aec3c 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -941,10 +941,28 @@ class OneBotActionRouter:
+         if action in {"get_stranger_info", "get_user_info"}:
+             user_id = str(params.get("user_id", ""))
+             item = await self.hook.get_contact(user_id)
++            contact = item.get("contact") if isinstance(item, Mapping) else None
++            if not isinstance(contact, Mapping):
++                contact = item
+             return self._ok(
+                 {
+                     "user_id": user_id,
+-                    "nickname": _value(item, "nickname", "nickName") or user_id,
++                    "nickname": _value(
++                        contact, "nickname", "nickName", "nick_name", "name"
++                    )
++                    or user_id,
++                    "remark": _value(contact, "remark", "remarkName"),
++                    "avatar": _value(
++                        contact,
++                        "avatar",
++                        "avatar_url",
++                        "smallHeadImgUrl",
++                        "bigHeadImgUrl",
++                        "small_head_img_url",
++                        "big_head_img_url",
++                        "small_head_url",
++                        "big_head_url",
++                    ),
+                     "sex": "unknown",
+                 },
+                 echo,
+@@ -963,6 +981,17 @@ class OneBotActionRouter:
+                     "sex": "unknown",
+                     "age": 0,
+                     "role": "member",
++                    "avatar": _value(
++                        item,
++                        "avatar",
++                        "avatar_url",
++                        "smallHeadImgUrl",
++                        "bigHeadImgUrl",
++                        "small_head_img_url",
++                        "big_head_img_url",
++                        "small_head_url",
++                        "big_head_url",
++                    ),
+                 }
+                 for item in members
+             ]
+@@ -996,8 +1025,13 @@ class OneBotActionRouter:
+                     "avatar": _value(
+                         item,
+                         "avatar",
++                        "avatar_url",
+                         "smallHeadImgUrl",
++                        "bigHeadImgUrl",
+                         "small_head_img_url",
++                        "big_head_img_url",
++                        "small_head_url",
++                        "big_head_url",
+                     ),
+                 }
+             return self._ok(
