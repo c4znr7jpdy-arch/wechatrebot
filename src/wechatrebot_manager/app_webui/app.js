@@ -52,6 +52,7 @@
     providerBaseline: "",
     providerCleanStatus: "尚未保存",
     providerModels: [],
+    providerModelFiltering: false,
     providerModelFocus: -1,
   };
 
@@ -1641,6 +1642,7 @@
       const data = await api("discover_provider_models", Object.fromEntries(new FormData(form)));
       const items = Array.isArray(data.items) ? data.items : [];
       state.providerModels = [...new Set(items.map((model) => String(model).trim()).filter(Boolean))];
+      state.providerModelFiltering = false;
       state.providerModelFocus = -1;
       renderProviderModelOptions(true);
       $("#providerModelHint").textContent = `已读取 ${state.providerModels.length} 个模型；可从下方完整列表选择，也可以继续手动填写。`;
@@ -1655,6 +1657,7 @@
 
   function clearProviderModels() {
     state.providerModels = [];
+    state.providerModelFiltering = false;
     state.providerModelFocus = -1;
     const options = $("#providerModelOptions");
     const input = $("#providerModelInput");
@@ -1662,18 +1665,23 @@
       options.innerHTML = "";
       options.hidden = true;
     }
+    $("#providerModelCombobox")?.classList.remove("open-above");
     input?.setAttribute("aria-expanded", "false");
   }
 
   function providerModelMatches() {
-    const keyword = $("#providerModelInput")?.value.trim().toLocaleLowerCase("zh-CN") || "";
+    const keyword = state.providerModelFiltering
+      ? $("#providerModelInput")?.value.trim().toLocaleLowerCase("zh-CN") || ""
+      : "";
     return state.providerModels.filter((model) => !keyword || model.toLocaleLowerCase("zh-CN").includes(keyword));
   }
 
   function renderProviderModelOptions(open = false) {
     const input = $("#providerModelInput");
     const options = $("#providerModelOptions");
+    const combobox = $("#providerModelCombobox");
     if (!input || !options) return;
+    const wasExpanded = input.getAttribute("aria-expanded") === "true";
     const items = providerModelMatches();
     state.providerModelFocus = Math.min(state.providerModelFocus, items.length - 1);
     options.innerHTML = items.length ? items.map((model, index) => `
@@ -1682,6 +1690,18 @@
     const expanded = open && state.providerModels.length > 0;
     options.hidden = !expanded;
     input.setAttribute("aria-expanded", String(expanded));
+    if (!expanded) {
+      combobox?.classList.remove("open-above");
+    } else if (!wasExpanded && combobox) {
+      const triggerRect = input.getBoundingClientRect();
+      const scrollOwnerRect = input.closest(".content-scroll")?.getBoundingClientRect();
+      const boundaryTop = Math.max(0, scrollOwnerRect?.top ?? 0);
+      const boundaryBottom = Math.min(window.innerHeight, scrollOwnerRect?.bottom ?? window.innerHeight);
+      const listHeight = Math.min(options.scrollHeight, 252);
+      const spaceAbove = triggerRect.top - boundaryTop - 6;
+      const spaceBelow = boundaryBottom - triggerRect.bottom - 6;
+      combobox.classList.toggle("open-above", spaceBelow < listHeight && spaceAbove > spaceBelow);
+    }
     if (expanded && state.providerModelFocus >= 0) {
       $(".model-option.focused", options)?.scrollIntoView({block: "nearest"});
     }
@@ -1692,6 +1712,7 @@
     if (!input) return;
     input.value = model;
     input.dispatchEvent(new Event("input", {bubbles: true}));
+    state.providerModelFiltering = false;
     state.providerModelFocus = -1;
     renderProviderModelOptions(false);
     input.focus();
@@ -1701,9 +1722,24 @@
     const input = $("#providerModelInput");
     const options = $("#providerModelOptions");
     if (!input || !options) return;
-    input.addEventListener("focus", () => renderProviderModelOptions(true));
-    input.addEventListener("input", () => { state.providerModelFocus = -1; renderProviderModelOptions(true); });
+    input.addEventListener("focus", () => {
+      state.providerModelFiltering = false;
+      state.providerModelFocus = -1;
+      renderProviderModelOptions(true);
+    });
+    input.addEventListener("click", () => {
+      if (!options.hidden) return;
+      state.providerModelFiltering = false;
+      state.providerModelFocus = -1;
+      renderProviderModelOptions(true);
+    });
+    input.addEventListener("input", () => {
+      state.providerModelFiltering = true;
+      state.providerModelFocus = -1;
+      renderProviderModelOptions(true);
+    });
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
       if (!["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) return;
       if (event.key === "Escape") {
         renderProviderModelOptions(false);
@@ -2445,7 +2481,7 @@
       save_provider: (values) => { const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`; previewProviders = previewProviders.map((item) => ({...item, is_default: false})).filter((item) => item.id !== values.provider_id && item.id !== id); const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: true, is_recommended: values.preset === "free_grok", apply_state: "applied"}; previewProviders.unshift(saved); return ok(saved, "回复模型已热更新并立即生效。"); },
       set_default_provider: (id) => { previewProviders = previewProviders.map((item) => ({...item, is_default: item.id === id})); return ok({id, apply_state: "applied"}, "默认回复模型已切换并立即生效。"); },
       test_provider: () => ok({ok: true}, "模型服务连接正常。"),
-      discover_provider_models: () => ok({items: ["grok-4.6", "grok-4.6-fast", "grok-4.6-vision"], total: 3}, "已读取 3 个可用模型。"),
+      discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}, "已读取 6 个可用模型。"),
       delete_provider: (id) => { previewProviders = previewProviders.filter((item) => item.id !== id); return ok({id}, "模型服务已删除并立即生效。"); },
       get_maintenance: () => ok({preview: {file_count: 18, uncompressed_size: 39636172, can_create: true}, backups: [{id: "robot-backup-preview.zip", file_name: "robot-backup-preview.zip", size: 12740121, modified_at: new Date(Date.now() - 86400000).toISOString()}], diagnostics: {summary: {error_count: 0, warning_count: 1, check_count: 14}}}),
       create_backup: () => ok({id: "robot-backup-new.zip"}, "设置、人格和长期记忆已备份。"),

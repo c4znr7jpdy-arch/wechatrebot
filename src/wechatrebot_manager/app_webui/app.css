@@ -332,6 +332,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .model-combobox > input { padding-right: 34px; }
 .model-combobox::after { content: ""; position: absolute; top: 50%; right: 13px; width: 7px; height: 7px; border-right: 2px solid #50627a; border-bottom: 2px solid #50627a; pointer-events: none; transform: translateY(-65%) rotate(45deg); }
 .model-options { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; left: 0; max-height: 252px; overflow-y: auto; padding: 6px; border: 1px solid #b9c9dc; border-radius: 10px; background: #fff; box-shadow: 0 14px 34px rgba(20, 43, 72, .18); scrollbar-gutter: stable; }
+.model-combobox.open-above .model-options { top: auto; bottom: calc(100% + 6px); }
 .model-option { display: block; width: 100%; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 7px; color: var(--ink); background: transparent; cursor: pointer; text-align: left; overflow-wrap: anywhere; transition: color .16s, background .16s; }
 .model-option:hover,
 .model-option.focused { color: var(--blue-700); background: var(--blue-100); }

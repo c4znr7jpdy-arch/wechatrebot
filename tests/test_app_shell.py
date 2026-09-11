@@ -743,6 +743,20 @@ def test_model_service_starts_empty_and_opens_a_dedicated_editor() -> None:
     assert 'previewParams.get("demo") === "model-services"' in script
 
 
+def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert "providerModelFiltering: false" in script
+    assert "state.providerModelFiltering = false;\n      state.providerModelFocus = -1;\n      renderProviderModelOptions(true);" in script
+    assert "const keyword = state.providerModelFiltering" in script
+    assert "if (event.isComposing) return;" in script
+    assert 'combobox.classList.toggle("open-above"' in script
+    assert ".model-combobox.open-above .model-options" in styles
+    assert 'discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}' in script
+
+
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
