@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from wechatrebot_manager import contact_directory, group_directory
 from wechatrebot_manager.app_shell import ApplicationApi
 
@@ -80,6 +82,85 @@ def test_missing_contact_uses_cooldown_before_retry(tmp_path: Path, monkeypatch)
         "/api/manager/contacts?id=wxid_missing",
         "/api/manager/contacts?id=wxid_missing",
     ]
+
+
+def test_private_directory_is_account_scoped_refreshable_and_kept_in_memory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service, account, calls = _contact_service(tmp_path, monkeypatch)
+
+    def request(_port, _token, identity, path, **_options):
+        calls.append(path)
+        return {
+            "account_id": identity,
+            "items": [
+                {
+                    "user_id": "wxid_friend",
+                    "name": "好友备注",
+                    "nickname": "微信昵称",
+                    "remark": "好友备注",
+                    "alias": "friend-account",
+                    "avatar": "https://example.test/friend.jpg",
+                    "gender": "女",
+                    "gender_code": 2,
+                    "province": "Zhejiang",
+                    "city": "Hangzhou",
+                    "country": "CN",
+                    "contact_type": "微信好友",
+                }
+            ],
+            "total": 1,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "_request", request)
+
+    first = service.list()
+    second = service.list()
+    refreshed = service.list(True)
+
+    assert first["items"][0]["alias"] == "friend-account"
+    assert second["items"] == first["items"]
+    assert refreshed["stale"] is False
+    assert calls == [
+        "/api/manager/contacts?directory=1",
+        "/api/manager/contacts?directory=1&refresh=1",
+    ]
+
+    account[0] = "different-account"
+    service.list(True)
+    assert service._contact_account == "different-account"
+
+
+def test_private_profile_requires_current_directory_selection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service, _, calls = _contact_service(tmp_path, monkeypatch)
+
+    def request(_port, _token, identity, path, **_options):
+        calls.append(path)
+        item = {
+            "user_id": "wxid_friend",
+            "name": "好友",
+            "nickname": "微信好友",
+            "remark": "好友",
+            "alias": "friend-account",
+            "avatar": "",
+            "gender": "未知",
+            "contact_type": "微信好友",
+        }
+        if path.startswith("/api/manager/contacts/"):
+            return {"account_id": identity, "items": [item], "item": item, "total": 1}
+        return {"account_id": identity, "items": [item], "total": 1}
+
+    monkeypatch.setattr(service, "_request", request)
+
+    with pytest.raises(group_directory.GroupDirectoryError):
+        service.profile("wxid_friend")
+    service.list()
+    assert service.profile("wxid_friend")["item"]["nickname"] == "微信好友"
+    with pytest.raises(group_directory.GroupDirectoryError):
+        service.profile("../private")
 
 
 def test_private_conversation_and_old_messages_use_current_contact_avatar() -> None:

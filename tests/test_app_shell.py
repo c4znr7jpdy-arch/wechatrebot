@@ -602,7 +602,7 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
 
     assert 'data-page="groups"' in markup
     assert 'id="refreshGroups"' in markup
-    assert "查看和刷新都不会向群里发送消息" in markup
+    assert "管理机器人所在群聊的回复规则、可用功能和成员信息" in markup
     assert 'api("get_groups", refresh)' in script
     assert 'api("get_group_members", groupId)' in script
     assert 'previousAccount !== state.groupAccount' in script
@@ -612,6 +612,29 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert "群聊数量暂不可用" in script
     assert "等待读取群聊" in markup
     assert ".group-table { min-width: 620px; table-layout: fixed; }" in styles
+
+
+def test_chat_management_adds_private_directory_profile_and_feature_scope() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert '>聊天管理</span>' in markup
+    assert 'role="tablist" aria-label="聊天管理分类"' in markup
+    assert 'data-chat-management-tab="private"' in markup
+    assert 'id="privateManagementPanel" role="tabpanel"' in markup
+    assert 'id="contactSearch"' in markup
+    assert 'id="contactInspector"' in markup
+    assert 'api("get_contacts", refresh)' in script
+    assert 'api("get_contact_detail", contactId)' in script
+    assert 'api("get_private_policy", state.contactAccount, contactId)' in script
+    assert '"save_private_policy"' in script
+    assert "CONTACT_PAGE_SIZE = 100" in script
+    assert "资料只在当前运行期间保存在内存中" in script
+    assert ".contact-layout" in styles
+    assert ".contact-facts" in styles
+    assert ".private-feature-options" in styles
 
 
 def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() -> None:

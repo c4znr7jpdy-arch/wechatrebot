@@ -36,6 +36,7 @@ from .experience import ExperienceError, ExperienceService
 from .group_policy import GroupPolicyError, GroupPolicyService
 from .lifecycle import LifecycleController
 from .payload import PayloadError
+from .private_policy import PrivateChatPolicyService, PrivatePolicyError
 from .plugin_center import (
     EngineApiClient,
     EngineUnavailableError,
@@ -91,6 +92,10 @@ PUBLIC_API_METHODS = (
     "get_group_members",
     "get_group_policy",
     "save_group_policy",
+    "get_contacts",
+    "get_contact_detail",
+    "get_private_policy",
+    "save_private_policy",
     "get_messages",
     "delete_conversation",
     "delete_history_before",
@@ -152,6 +157,7 @@ class ApplicationApi:
         self._group_policies = GroupPolicyService(
             self._install_root, schedules=self._schedules
         )
+        self._private_policies = PrivateChatPolicyService(self._install_root)
         self._experience = ExperienceService(self._install_root)
         self._maintenance = CustomerMaintenanceService(
             self._install_root,
@@ -576,6 +582,47 @@ class ApplicationApi:
             return self._ok(saved, message=str(saved.get("message") or "群聊策略已保存。"))
         except (OSError, ValueError, GroupPolicyError) as exc:
             return self._failed(exc, "15001")
+
+    def get_contacts(self, refresh: bool = False) -> dict[str, object]:
+        return self._ok(self._contacts.list(bool(refresh)))
+
+    def get_contact_detail(self, contact_id: str) -> dict[str, object]:
+        try:
+            return self._ok(self._contacts.profile(contact_id))
+        except GroupDirectoryError as exc:
+            return {
+                "ok": False,
+                "error": {"title": "联系人详情未更新", "message": str(exc)},
+            }
+
+    def get_private_policy(
+        self, account_id: str, contact_id: str
+    ) -> dict[str, object]:
+        try:
+            return self._ok(self._private_policies.overview(account_id, contact_id))
+        except (OSError, ValueError, PrivatePolicyError) as exc:
+            return self._failed(exc, "15002")
+
+    def save_private_policy(
+        self,
+        account_id: str,
+        contact_id: str,
+        values: dict[str, Any],
+        revision: str = "",
+    ) -> dict[str, object]:
+        try:
+            saved = self._private_policies.save(
+                account_id,
+                contact_id,
+                values,
+                expected_revision=revision or None,
+            )
+            return self._ok(
+                saved,
+                message=str(saved.get("message") or "联系人可用功能已保存。"),
+            )
+        except (OSError, ValueError, PrivatePolicyError) as exc:
+            return self._failed(exc, "15002")
 
     def get_messages(self, conversation_id: str) -> dict[str, object]:
         try:

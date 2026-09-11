@@ -265,15 +265,25 @@ def test_contact_directory_returns_requested_private_avatar(
     patched_bridge: dict[str, Any]
 ) -> None:
     callback_server: ModuleType = patched_bridge["callback_server"]
+    refreshes: list[bool] = []
 
     class Hook:
-        async def get_friends(self) -> list[dict[str, Any]]:
+        async def get_friends(
+            self, *, force_refresh: bool = False
+        ) -> list[dict[str, Any]]:
+            refreshes.append(force_refresh)
             return [
                 {
                     "contact": {
                         "username": "wxid_friend",
                         "nick_name": "微信好友",
+                        "remark": {"String": "张三"},
+                        "alias": "zhangsan_88",
                         "small_head_url": "https://example.invalid/friend-avatar",
+                        "sex": 1,
+                        "country": "CN",
+                        "province": "Zhejiang",
+                        "city": "Hangzhou",
                     }
                 },
                 {
@@ -287,6 +297,21 @@ def test_contact_directory_returns_requested_private_avatar(
                     "small_head_url": "https://example.invalid/other-avatar",
                 },
             ]
+
+        async def get_contact(self, user_id: str) -> dict[str, Any]:
+            assert user_id == "wxid_friend"
+            return {
+                "userName": user_id,
+                "nickName": "微信好友",
+                "remark": "张三",
+                "alias": "zhangsan_88",
+                "smallHeadImgUrl": "https://example.invalid/friend-avatar",
+                "sex": 1,
+                "country": "CN",
+                "province": "Zhejiang",
+                "city": "Hangzhou",
+                "signature": "周末去爬山",
+            }
 
     async def status() -> dict[str, str]:
         return {"wechat_identity": "wxid_bot"}
@@ -318,8 +343,18 @@ def test_contact_directory_returns_requested_private_avatar(
                 "items": [
                     {
                         "user_id": "wxid_friend",
-                        "name": "微信好友",
+                        "name": "张三",
+                        "nickname": "微信好友",
+                        "remark": "张三",
+                        "alias": "zhangsan_88",
                         "avatar": "https://example.invalid/friend-avatar",
+                        "gender": "男",
+                        "gender_code": 1,
+                        "province": "Zhejiang",
+                        "city": "Hangzhou",
+                        "country": "CN",
+                        "signature": "",
+                        "contact_type": "微信好友",
                     }
                 ],
                 "total": 1,
@@ -327,6 +362,30 @@ def test_contact_directory_returns_requested_private_avatar(
                 "source": "wechat_cache",
             },
         }
+
+        directory = await client.get(
+            "/api/manager/contacts?directory=1&refresh=1",
+            headers=_headers(),
+        )
+        assert directory.status == 200
+        assert directory.headers["Cache-Control"] == "no-store"
+        directory_body = await directory.json()
+        assert directory_body["data"]["total"] == 2
+        assert {item["user_id"] for item in directory_body["data"]["items"]} == {
+            "wxid_friend",
+            "wxid_other",
+        }
+        assert refreshes == [False, True]
+
+        detail = await client.get(
+            "/api/manager/contacts/wxid_friend",
+            headers=_headers(),
+        )
+        assert detail.status == 200
+        assert detail.headers["Cache-Control"] == "no-store"
+        detail_body = await detail.json()
+        assert detail_body["data"]["item"]["signature"] == "周末去爬山"
+        assert detail_body["data"]["item"]["alias"] == "zhangsan_88"
 
     _run(_with_client(app, exercise))
 
@@ -651,6 +710,33 @@ def test_legacy_group_read_populates_empty_hook_cache_with_bounded_retry(
         "/api/get_chatroom_list",
     ]
     assert client._group_auto_refresh_failures == 0
+
+
+def test_explicit_contact_refresh_returns_the_complete_refresh_payload(
+    patched_bridge: dict[str, Any]
+) -> None:
+    hook_client: ModuleType = patched_bridge["hook_client"]
+    client = object.__new__(hook_client.HookClient)
+    client._friend_refresh_attempted = False
+    calls: list[str] = []
+
+    async def read(path: str, payload: dict[str, Any]):
+        assert payload == {}
+        calls.append(path)
+        if path == "/api/update_all_friend":
+            return {
+                "contact_list": [
+                    {"userName": {"String": "wxid_friend"}, "nickName": "好友"}
+                ]
+            }
+        raise AssertionError(path)
+
+    client._read_data = read
+
+    assert _run(client.get_friends(force_refresh=True)) == [
+        {"userName": {"String": "wxid_friend"}, "nickName": "好友"}
+    ]
+    assert calls == ["/api/update_all_friend"]
 
 
 def test_explicit_group_refresh_is_never_permanently_locked_after_empty_result(

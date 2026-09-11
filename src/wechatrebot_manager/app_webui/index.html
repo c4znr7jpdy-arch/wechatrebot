@@ -36,7 +36,7 @@
       <nav class="main-nav" aria-label="主导航">
             <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
             <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
-            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="群聊管理" title="群聊管理"><svg><use href="#i-users"/></svg><span>群聊管理</span></button>
+            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="聊天管理" title="聊天管理"><svg><use href="#i-users"/></svg><span>聊天管理</span></button>
             <button class="nav-item" data-page="history" data-action-bound disabled aria-label="聊天记录" title="聊天记录"><svg><use href="#i-chat"/></svg><span>聊天记录</span></button>
             <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
@@ -128,28 +128,65 @@
 
         <section class="page" id="page-groups" aria-labelledby="groupHeading">
           <div class="page-heading compact">
-            <div><span class="eyebrow">群主管理</span><h1 id="groupHeading">群聊管理</h1><p>从当前登录微信读取群信息；查看和刷新都不会向群里发送消息。</p></div>
+            <div><span class="eyebrow">会话范围</span><h1 id="groupHeading">聊天管理</h1><p id="chatManagementDescription">管理机器人所在群聊的回复规则、可用功能和成员信息。</p></div>
+            <div class="directory-actions">
               <button class="button secondary" id="refreshGroups" data-action-bound disabled><svg><use href="#i-refresh"/></svg><span>刷新群列表</span></button>
+              <button class="button secondary" id="refreshContacts" data-action-bound disabled hidden><svg><use href="#i-refresh"/></svg><span>刷新联系人</span></button>
+            </div>
           </div>
-          <section class="directory-status" id="groupDirectoryStatus" role="status" aria-live="polite">
-            <div><strong>尚未读取群聊</strong><span>打开本页后会读取一次，也可以随时手动刷新。</span></div>
-          </section>
-          <div class="group-layout">
-            <section class="group-table-panel panel" aria-label="群聊列表">
-              <div class="group-toolbar">
-                <label class="search-box wide" id="groupSearchBox"><svg><use href="#i-search"/></svg><input id="groupSearch" type="search" placeholder="搜索群名称或群标识" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
-                <div class="group-meta"><strong id="groupCount">等待读取群聊</strong><span id="groupUpdated">尚未更新</span></div>
-              </div>
-              <div class="group-table-scroll">
-                <table class="group-table">
-                  <thead><tr><th>群名称</th><th>群标识</th><th>成员数</th><th class="actions-column">操作</th></tr></thead>
-                  <tbody id="groupRows"><tr><td colspan="4" class="table-empty">正在准备群聊列表…</td></tr></tbody>
-                </table>
+          <div class="management-tabs" role="tablist" aria-label="聊天管理分类">
+            <button type="button" id="groupManagementTab" role="tab" aria-controls="groupManagementPanel" aria-selected="true" tabindex="0" data-chat-management-tab="groups" class="active" data-action-bound disabled>群聊管理</button>
+            <button type="button" id="privateManagementTab" role="tab" aria-controls="privateManagementPanel" aria-selected="false" tabindex="-1" data-chat-management-tab="private" data-action-bound disabled>私聊管理</button>
+          </div>
+          <div class="chat-management-panels">
+            <section class="chat-tab-panel" id="groupManagementPanel" role="tabpanel" aria-labelledby="groupManagementTab">
+              <section class="directory-status" id="groupDirectoryStatus" role="status" aria-live="polite">
+                <div><strong>尚未读取群聊</strong><span>打开本页后会读取一次，也可以随时手动刷新。</span></div>
+              </section>
+              <div class="group-layout">
+                <section class="group-table-panel panel" aria-label="群聊列表">
+                  <div class="group-toolbar">
+                    <label class="search-box wide" id="groupSearchBox"><svg><use href="#i-search"/></svg><input id="groupSearch" type="search" placeholder="搜索群名称或群标识" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
+                    <div class="group-meta"><strong id="groupCount">等待读取群聊</strong><span id="groupUpdated">尚未更新</span></div>
+                  </div>
+                  <div class="group-table-scroll">
+                    <table class="group-table">
+                      <thead><tr><th>群名称</th><th>群标识</th><th>成员数</th><th class="actions-column">操作</th></tr></thead>
+                      <tbody id="groupRows"><tr><td colspan="4" class="table-empty">正在准备群聊列表…</td></tr></tbody>
+                    </table>
+                  </div>
+                </section>
+                <aside class="group-inspector panel empty" id="groupInspector" aria-live="polite">
+                  <div class="group-inspector-empty"><div class="empty-symbol">群</div><span class="eyebrow">群聊详情</span><h2>选择一个群聊</h2><p>选择左侧群聊后，可查看群规则和群成员。</p></div>
+                </aside>
               </div>
             </section>
-            <aside class="group-inspector panel empty" id="groupInspector" aria-live="polite">
-              <div class="group-inspector-empty"><div class="empty-symbol">群</div><span class="eyebrow">群聊详情</span><h2>选择一个群聊</h2><p>选择左侧群聊后，可查看群规则和群成员。</p></div>
-            </aside>
+            <section class="chat-tab-panel" id="privateManagementPanel" role="tabpanel" aria-labelledby="privateManagementTab" hidden>
+              <section class="directory-status" id="contactDirectoryStatus" role="status" aria-live="polite">
+                <div><strong>尚未读取联系人</strong><span>切换到私聊管理后读取当前微信通讯录，不会发送消息。</span></div>
+              </section>
+              <div class="contact-layout">
+                <section class="contact-table-panel panel" aria-label="私聊联系人列表">
+                  <div class="group-toolbar">
+                    <label class="search-box wide" id="contactSearchBox"><svg><use href="#i-search"/></svg><input id="contactSearch" type="search" placeholder="搜索昵称、备注、微信号或地区" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空联系人搜索">×</button></label>
+                    <div class="group-meta"><strong id="contactCount">等待读取联系人</strong><span id="contactUpdated">尚未更新</span></div>
+                  </div>
+                  <div class="contact-table-scroll">
+                    <table class="contact-table">
+                      <thead><tr><th>联系人</th><th>微信号</th><th>地区</th><th class="actions-column">操作</th></tr></thead>
+                      <tbody id="contactRows"><tr><td colspan="4" class="table-empty">正在准备联系人列表…</td></tr></tbody>
+                    </table>
+                  </div>
+                  <nav class="contact-pagination" aria-label="联系人分页">
+                    <span id="contactRange">第 0–0 项</span>
+                    <div><button class="row-action" type="button" id="contactPrevious" data-action-bound disabled>上一页</button><button class="row-action" type="button" id="contactNext" data-action-bound disabled>下一页</button></div>
+                  </nav>
+                </section>
+                <aside class="contact-inspector panel empty" id="contactInspector" aria-live="polite">
+                  <div class="group-inspector-empty"><div class="empty-symbol">友</div><span class="eyebrow">个人详情</span><h2>选择一个联系人</h2><p>选择左侧联系人后，可查看微信资料并配置可用功能。</p></div>
+                </aside>
+              </div>
+            </section>
           </div>
         </section>
 

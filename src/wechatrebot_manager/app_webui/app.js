@@ -29,6 +29,19 @@
     groupMemberLoad: 0,
     groupPolicies: {},
     groupInspectorView: "policy",
+    chatManagementTab: "groups",
+    contactsLoaded: false,
+    contactsBusy: false,
+    contacts: [],
+    contactAccount: "",
+    contactUpdatedAt: "",
+    contactStale: false,
+    contactTruncated: false,
+    contactPage: 1,
+    selectedContact: null,
+    contactDetails: {},
+    privatePolicies: {},
+    contactLoad: 0,
     historyKind: "all",
     conversations: [],
     selectedConversation: null,
@@ -58,6 +71,7 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const CONTACT_PAGE_SIZE = 100;
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -303,7 +317,7 @@
   }
 
   const PAGE_TITLES = {
-    home: "运行中心", features: "功能中心", groups: "群聊管理", history: "聊天记录",
+    home: "运行中心", features: "功能中心", groups: "聊天管理", history: "聊天记录",
     schedules: "定时任务", activity: "运行记录", settings: "设置",
   };
 
@@ -410,7 +424,10 @@
       content.scrollTop = 0;
     }
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
-    if (page === "groups" && !state.groupsLoaded) await loadGroups(false);
+    if (page === "groups") {
+      if (state.chatManagementTab === "groups" && !state.groupsLoaded) await loadGroups(false);
+      if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
+    }
     if (page === "history") {
       await loadConversations();
       if (state.selectedConversation) await selectConversation(state.selectedConversation.conversation_id, {silent: true});
@@ -897,6 +914,27 @@
     });
   }
 
+  async function selectChatManagementTab(tab, focus = false) {
+    if (!new Set(["groups", "private"]).has(tab)) return;
+    state.chatManagementTab = tab;
+    $$('[data-chat-management-tab]').forEach((button) => {
+      const active = button.dataset.chatManagementTab === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && focus) button.focus();
+    });
+    $("#groupManagementPanel").hidden = tab !== "groups";
+    $("#privateManagementPanel").hidden = tab !== "private";
+    $("#refreshGroups").hidden = tab !== "groups";
+    $("#refreshContacts").hidden = tab !== "private";
+    $("#chatManagementDescription").textContent = tab === "groups"
+      ? "管理机器人所在群聊的回复规则、可用功能和成员信息。"
+      : "读取当前微信通讯录，查看个人资料并配置每位联系人的可用功能。";
+    if (tab === "groups" && !state.groupsLoaded) await loadGroups(false);
+    if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
+  }
+
   function groupDirectoryStatus(data, failed = false) {
     const panel = $("#groupDirectoryStatus");
     const stale = Boolean(data?.stale || failed);
@@ -1163,6 +1201,256 @@
       if (!background) reportError(error);
     }
     renderGroups();
+  }
+
+  function contactDisplayName(contact) {
+    return contact?.remark || contact?.nickname || contact?.name || contact?.alias || contact?.user_id || "未命名联系人";
+  }
+
+  function contactRegion(contact) {
+    return [contact?.country, contact?.province, contact?.city].filter(Boolean).join(" · ") || "未提供";
+  }
+
+  function contactDirectoryStatus(data, failed = false) {
+    const panel = $("#contactDirectoryStatus");
+    const stale = Boolean(data?.stale || failed);
+    panel.className = `directory-status ${stale ? "warning" : "success"}`;
+    const title = stale
+      ? (state.contacts.length ? "本次未更新，正在显示上次结果" : "联系人暂时无法读取")
+      : "联系人列表已更新";
+    const message = data?.message || (failed
+      ? "请确认机器人已连接微信，再重新刷新。"
+      : "查看和刷新不会向任何联系人发送消息。");
+    panel.innerHTML = `<div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
+  }
+
+  async function loadContacts(refresh = false) {
+    if (state.contactsBusy) return;
+    state.contactsBusy = true;
+    const generation = ++state.contactLoad;
+    const button = $("#refreshContacts");
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
+    if (!state.contacts.length) $("#contactRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信通讯录…</td></tr>';
+    try {
+      const data = await api("get_contacts", refresh);
+      if (generation !== state.contactLoad) return;
+      const previousAccount = state.contactAccount;
+      state.contacts = Array.isArray(data.items) ? data.items : [];
+      state.contactAccount = data.account_id || "";
+      if (previousAccount && previousAccount !== state.contactAccount) {
+        state.selectedContact = null;
+        state.contactDetails = {};
+        state.privatePolicies = {};
+      }
+      state.contactUpdatedAt = data.updated_at || "";
+      state.contactStale = Boolean(data.stale);
+      state.contactTruncated = Boolean(data.truncated);
+      state.contactsLoaded = true;
+      state.contactPage = 1;
+      if (state.selectedContact && !state.contacts.some((item) => item.user_id === state.selectedContact)) {
+        state.selectedContact = null;
+      }
+      contactDirectoryStatus(data);
+      renderContacts();
+    } catch (error) {
+      if (generation !== state.contactLoad) return;
+      state.contactStale = true;
+      contactDirectoryStatus({message: error?.message}, true);
+      renderContacts();
+      reportError(error);
+    } finally {
+      if (generation === state.contactLoad) {
+        state.contactsBusy = false;
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.innerHTML = `${icon("i-refresh")}<span>刷新联系人</span>`;
+      }
+    }
+  }
+
+  function filteredContacts() {
+    const keyword = $("#contactSearch").value.trim().toLocaleLowerCase("zh-CN");
+    return state.contacts.filter((item) => {
+      const haystack = [
+        item.name, item.nickname, item.remark, item.alias, item.user_id,
+        item.country, item.province, item.city, item.contact_type,
+      ].filter(Boolean).join("\n").toLocaleLowerCase("zh-CN");
+      return !keyword || haystack.includes(keyword);
+    });
+  }
+
+  function renderContacts() {
+    const scroll = $(".contact-table-scroll");
+    const previousScroll = scroll?.scrollTop || 0;
+    const items = filteredContacts();
+    const pageCount = Math.max(1, Math.ceil(items.length / CONTACT_PAGE_SIZE));
+    state.contactPage = Math.min(Math.max(1, state.contactPage), pageCount);
+    const start = (state.contactPage - 1) * CONTACT_PAGE_SIZE;
+    const visible = items.slice(start, start + CONTACT_PAGE_SIZE);
+    const keyword = Boolean($("#contactSearch").value.trim());
+    const countUnavailable = state.contactStale && !state.contactUpdatedAt && !state.contacts.length;
+    $("#contactCount").textContent = countUnavailable
+      ? "联系人数量暂不可用"
+      : keyword ? `${items.length} / ${state.contacts.length} 位联系人` : `${state.contacts.length} 位联系人`;
+    $("#contactUpdated").textContent = state.contactUpdatedAt
+      ? `${state.contactStale ? "上次成功" : "更新于"} ${fullTime(state.contactUpdatedAt)}`
+      : "尚无可用结果";
+    const empty = state.contacts.length
+      ? "没有符合条件的联系人"
+      : (state.contactStale ? "尚未读取到联系人，请连接微信后重试" : "当前账号没有可显示的联系人");
+    $("#contactRows").innerHTML = visible.length ? visible.map((item) => {
+      const selected = item.user_id === state.selectedContact;
+      const displayName = contactDisplayName(item);
+      const account = item.alias || "未设置微信号";
+      return `<tr class="contact-row ${selected ? "selected" : ""}" data-contact-id="${escapeHtml(item.user_id)}" tabindex="0" aria-selected="${selected}">
+        <td><span class="group-name-cell">${avatarMarkup("contact-avatar", displayName, item.avatar)}<span><strong class="group-name">${escapeHtml(displayName)}</strong><small>${escapeHtml(item.contact_type || item.nickname || "微信联系人")}</small></span></span></td>
+        <td><span class="contact-account">${escapeHtml(account)}</span><code class="contact-id">${escapeHtml(item.user_id)}</code></td>
+        <td>${escapeHtml(contactRegion(item))}</td>
+        <td><button class="row-action inspect-contact ${selected ? "active" : ""}" type="button" data-contact-id="${escapeHtml(item.user_id)}">${selected ? "正在查看" : "查看"}</button></td>
+      </tr>`;
+    }).join("") : `<tr><td colspan="4" class="table-empty">${escapeHtml(empty)}</td></tr>`;
+    const first = items.length ? start + 1 : 0;
+    const last = Math.min(start + visible.length, items.length);
+    $("#contactRange").textContent = `第 ${first}–${last} 项，共 ${items.length} 项${state.contactTruncated ? " · 接口结果已截断" : ""}`;
+    $("#contactPrevious").disabled = state.contactPage <= 1;
+    $("#contactNext").disabled = state.contactPage >= pageCount;
+    $$(".contact-row").forEach((row) => {
+      const select = () => selectContact(row.dataset.contactId);
+      row.addEventListener("click", (event) => { if (!event.target.closest("button")) select(); });
+      row.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); select(); } });
+    });
+    $$(".inspect-contact").forEach((button) => button.addEventListener("click", () => selectContact(button.dataset.contactId)));
+    bindAvatarFallbacks($("#contactRows"));
+    renderContactInspector();
+    if (scroll) scroll.scrollTop = previousScroll;
+  }
+
+  async function selectContact(contactId) {
+    state.selectedContact = contactId;
+    renderContacts();
+    $("#contactInspector").scrollIntoView({block: "nearest", behavior: "smooth"});
+    await Promise.all([loadContactDetail(contactId), loadPrivatePolicy(contactId)]);
+  }
+
+  async function loadContactDetail(contactId) {
+    state.contactDetails[contactId] = {loading: true};
+    renderContactInspector();
+    try {
+      const data = await api("get_contact_detail", contactId);
+      if (state.selectedContact !== contactId) return;
+      const detail = data?.item || {};
+      state.contactDetails[contactId] = detail;
+      const index = state.contacts.findIndex((item) => item.user_id === contactId);
+      if (index >= 0) state.contacts[index] = {...state.contacts[index], ...detail};
+    } catch (error) {
+      if (state.selectedContact !== contactId) return;
+      state.contactDetails[contactId] = {error: error?.message || "联系人详情暂时无法读取。"};
+      reportError(error);
+    }
+    if (state.selectedContact === contactId) renderContactInspector();
+  }
+
+  async function loadPrivatePolicy(contactId) {
+    if (!state.contactAccount || !contactId) return;
+    state.privatePolicies[contactId] = {loading: true};
+    renderContactInspector();
+    try {
+      state.privatePolicies[contactId] = await api("get_private_policy", state.contactAccount, contactId);
+    } catch (error) {
+      state.privatePolicies[contactId] = {error: error?.message || "联系人可用功能暂时无法读取。"};
+      reportError(error);
+    }
+    if (state.selectedContact === contactId) renderContactInspector();
+  }
+
+  function contactFact(label, value, options = {}) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const rendered = options.code ? `<code>${escapeHtml(text)}</code>` : escapeHtml(text);
+    return `<div><dt>${escapeHtml(label)}</dt><dd>${rendered}</dd></div>`;
+  }
+
+  function privatePolicyMarkup(data) {
+    if (!data || data.loading) return '<section class="private-feature-policy"><h3>该联系人可用功能</h3><div class="loading-row">正在读取功能范围…</div></section>';
+    if (data.error) return `<section class="private-feature-policy"><h3>该联系人可用功能</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
+    const policy = data.policy || {};
+    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong>${feature.globally_enabled_by_default ? "" : "<small>新安装默认关闭，可先预设范围</small>"}</span></label>`).join("");
+    return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
+      <h3>该联系人可用功能</h3>
+      <p>勾选机器人在这段私聊中可以使用的功能。未单独配置的联系人沿用新安装默认启用范围。</p>
+      <div class="option-grid compact-options private-feature-options">${choices || "<span class='subtle'>当前没有可分配的功能</span>"}</div>
+    </form>`;
+  }
+
+  function renderContactInspector() {
+    const panel = $("#contactInspector");
+    const contact = state.contacts.find((item) => item.user_id === state.selectedContact);
+    panel.classList.toggle("empty", !contact);
+    if (!contact) {
+      const message = state.contacts.length
+        ? "选择左侧联系人后，可查看微信资料并配置可用功能。"
+        : "刷新并读取到联系人后，可在这里查看个人资料和可用功能。";
+      panel.innerHTML = `<div class="group-inspector-empty"><div class="empty-symbol">友</div><span class="eyebrow">个人详情</span><h2>${state.contacts.length ? "选择一个联系人" : "暂时没有联系人"}</h2><p>${message}</p></div>`;
+      return;
+    }
+    const detailState = state.contactDetails[contact.user_id];
+    const detail = detailState && !detailState.loading && !detailState.error ? {...contact, ...detailState} : contact;
+    const displayName = contactDisplayName(detail);
+    const facts = [
+      contactFact("昵称", detail.nickname),
+      contactFact("备注", detail.remark),
+      contactFact("微信号", detail.alias, {code: true}),
+      contactFact("微信标识", detail.user_id, {code: true}),
+      contactFact("性别", detail.gender),
+      contactFact("地区", contactRegion(detail) === "未提供" ? "" : contactRegion(detail)),
+      contactFact("联系人类型", detail.contact_type),
+      contactFact("个性签名", detail.signature),
+    ].filter(Boolean).join("");
+    const detailsMessage = detailState?.loading
+      ? '<div class="profile-state">正在读取最新个人资料…</div>'
+      : detailState?.error
+        ? `<div class="profile-state error">${escapeHtml(detailState.error)}</div>`
+        : facts ? `<dl class="contact-facts">${facts}</dl>` : '<div class="profile-state">当前接口没有返回更多个人资料。</div>';
+    const policyData = state.privatePolicies[contact.user_id];
+    const saveDisabled = !policyData || policyData.loading || policyData.error;
+    panel.innerHTML = `<header class="inspector-hero"><span class="eyebrow">当前联系人</span><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div></header>
+      <div class="inspector-scroll contact-detail-scroll"><section class="contact-profile"><div class="contact-section-heading"><h3>个人详情</h3><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</section>${privatePolicyMarkup(policyData)}</div>
+      <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存可用功能</button></footer>`;
+    $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
+    bindAvatarFallbacks(panel);
+    $("#privatePolicyForm")?.addEventListener("submit", savePrivatePolicy);
+  }
+
+  async function savePrivatePolicy(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $('button[form="privatePolicyForm"]');
+    if (!button || !state.selectedContact) return;
+    const contactId = state.selectedContact;
+    const accountId = state.contactAccount;
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "正在保存…";
+    try {
+      await api("save_private_policy",
+        accountId,
+        contactId,
+        {allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value)},
+        form.dataset.revision || "",
+      );
+      if (state.selectedContact === contactId && state.contactAccount === accountId) {
+        await loadPrivatePolicy(contactId);
+      }
+    } catch (error) { reportError(error); }
+    finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.textContent = "保存可用功能";
+      }
+    }
   }
 
   async function loadConversations(options = {}) {
@@ -2159,8 +2447,22 @@
       renderFeatureList();
     }));
     bindSearch("#groupSearchBox", "#groupSearch", renderGroups);
+    bindSearch("#contactSearchBox", "#contactSearch", () => { state.contactPage = 1; renderContacts(); });
     bindSearch("#historySearchBox", "#historySearch", loadConversations);
     $("#refreshGroups").addEventListener("click", () => loadGroups(true));
+    $("#refreshContacts").addEventListener("click", () => loadContacts(true));
+    $$('[data-chat-management-tab]').forEach((button, index, tabs) => {
+      button.addEventListener("click", () => selectChatManagementTab(button.dataset.chatManagementTab));
+      button.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        let next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : index + (event.key === "ArrowRight" ? 1 : -1);
+        next = (next + tabs.length) % tabs.length;
+        selectChatManagementTab(tabs[next].dataset.chatManagementTab, true);
+      });
+    });
+    $("#contactPrevious").addEventListener("click", () => { state.contactPage -= 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
+    $("#contactNext").addEventListener("click", () => { state.contactPage += 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
     $$("#historyKinds button").forEach((button) => button.addEventListener("click", () => {
       state.historyKind = button.dataset.kind;
       $$("#historyKinds button").forEach((item) => item.classList.toggle("active", item === button));
@@ -2178,7 +2480,7 @@
     });
     $("#exportHistory").addEventListener("click", async () => { try { const result = await api("export_history", "csv"); if (!result?.cancelled) toast(`已导出到 ${result.path}`); } catch (error) { reportError(error); } });
     $("#refreshSchedules").addEventListener("click", loadSchedules);
-    $("#manageGroupPolicies").addEventListener("click", () => navigate("groups"));
+    $("#manageGroupPolicies").addEventListener("click", async () => { await selectChatManagementTab("groups"); await navigate("groups"); });
     $("#refreshActivity").addEventListener("click", loadActivity);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     $("#personaForm").addEventListener("input", updatePersonaPreview);
@@ -2436,6 +2738,15 @@
     };
     let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: [], proactive_enabled: false, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: [], proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
+    let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], revision: "preview-private-1", configured: false};
+    const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
+    const previewContacts = [
+      {user_id: "wxid_zhangsan", name: "张三", nickname: "山川与海", remark: "张三", alias: "zhangsan_88", avatar: "", gender: "男", gender_code: 1, country: "CN", province: "Zhejiang", city: "Hangzhou", contact_type: "微信好友", signature: "周末去爬山"},
+      {user_id: "wxid_lisi", name: "李四｜摄影", nickname: "光影之间", remark: "李四｜摄影", alias: "lisi_photo", avatar: "", gender: "女", gender_code: 2, country: "CN", province: "Shanghai", city: "Shanghai", contact_type: "微信好友"},
+      {user_id: "wxid_wangwu", name: "王五", nickname: "王五", remark: "", alias: "", avatar: "", gender: "未知", country: "CN", province: "Jiangsu", city: "Nanjing", contact_type: "微信好友"},
+      {user_id: "gh_service", name: "社区服务", nickname: "社区服务", remark: "", alias: "community_service", avatar: "", gender: "", country: "CN", province: "", city: "", contact_type: "公众号"},
+      {user_id: "filehelper", name: "文件传输助手", nickname: "文件传输助手", remark: "", alias: "", avatar: "", gender: "", country: "", province: "", city: "", contact_type: "系统联系人"},
+    ];
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
@@ -2457,6 +2768,10 @@
       ]}),
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
       save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok(previewPolicyOverview(groupId).policy, "群聊策略已保存；未向群内发送消息。"); },
+      get_contacts: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: previewContacts.length, truncated: false, items: structuredClone(previewContacts), message: "预览数据：正式版本从当前登录微信通讯录读取，刷新不会发送消息。"}),
+      get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
+      get_private_policy: (_accountId, contactId) => ok(previewPrivatePolicyOverview(contactId)),
+      save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok(previewPrivatePolicyOverview(contactId).policy, "联系人可用功能已保存。"); },
       set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: (id, config) => { previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000, last_content: "张三｜3栋：帮我找一下今天更新的短剧"}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600, last_content: "明天杭州会下雨吗？"}, {conversation_id: "81263495012@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200, last_content: "李四｜摄影：收到，这样看起来很方便"}, {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0}, {conversation_id: "34902765188@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0}], summary: {messages: 238, conversations: 3, visible_conversations: 5, directory_groups: 6, private_messages: 34, group_messages: 204}}),
       get_messages: () => ok([{id: 1, role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", group_nickname: "张三｜3栋", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {id: 2, role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {id: 3, role: "user", sender_id: "wxid_lisi", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),

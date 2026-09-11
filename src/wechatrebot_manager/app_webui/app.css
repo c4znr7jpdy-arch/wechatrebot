@@ -859,6 +859,60 @@ tbody tr:hover { background: #fbfdff; }
 .persona-maintenance { grid-column: 1 / -1; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: none; }
 .form-actions { margin-top: auto; }
 
+.directory-actions { display: flex; align-items: center; gap: 8px; }
+.management-tabs { display: flex; flex: 0 0 44px; align-items: stretch; min-height: 44px; margin-bottom: 14px; padding: 0 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.management-tabs button { position: relative; min-width: 118px; padding: 0 18px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; font-weight: 800; }
+.management-tabs button::after { content: ""; position: absolute; right: 18px; bottom: -1px; left: 18px; height: 2px; border-radius: 2px; background: transparent; }
+.management-tabs button:hover { color: var(--blue-700); }
+.management-tabs button.active { color: var(--blue-700); }
+.management-tabs button.active::after { background: var(--blue-600); }
+.chat-management-panels { flex: 1 1 0; min-height: 0; }
+.chat-tab-panel:not([hidden]) { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+#groupManagementPanel .group-layout,
+#privateManagementPanel .contact-layout { flex: 1 1 0; min-height: 0; }
+.contact-layout { display: grid; grid-template-columns: minmax(560px,1.16fr) minmax(400px,.84fr); gap: 14px; align-items: stretch; }
+.contact-table-panel,
+.contact-inspector { height: 100%; min-height: 0; border-color: #cedaea; box-shadow: 0 8px 24px rgba(31,63,98,.055); }
+.contact-table-panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.contact-table-scroll { flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.contact-table { min-width: 0; table-layout: fixed; }
+.contact-table th:nth-child(1) { width: 27%; }
+.contact-table th:nth-child(2) { width: 29%; }
+.contact-table th:nth-child(3) { width: 28%; }
+.contact-table th:nth-child(4) { width: 16%; }
+.contact-table thead { position: sticky; top: 0; z-index: 1; }
+.contact-row { cursor: pointer; }
+.contact-row:hover { background: #f7faff; }
+.contact-row:focus-visible { outline: 3px solid rgba(11,111,232,.22); outline-offset: -3px; }
+.contact-row.selected { background: var(--blue-100); box-shadow: inset 3px 0 var(--blue-600); }
+.contact-avatar { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; color: #fff; background: #477aa2; font-size: 12px; font-weight: 800; }
+.contact-avatar.large { flex-basis: 46px; width: 46px; height: 46px; font-size: 14px; }
+.contact-account { display: block; color: #31465f; font-size: 12px; overflow-wrap: anywhere; }
+.contact-id { display: block; margin-top: 2px; color: var(--subtle); font: 10px "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.contact-pagination { display: flex; flex: 0 0 52px; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 9px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.contact-pagination > div { display: flex; gap: 7px; }
+.contact-inspector { display: grid; grid-template-rows: auto minmax(0,1fr) auto; min-width: 0; padding: 0; overflow: hidden; }
+.contact-inspector.empty { display: flex; align-items: center; justify-content: center; padding: 28px; }
+.contact-detail-scroll { padding-top: 2px; }
+.contact-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.contact-section-heading h3,
+.private-feature-policy h3 { margin: 0; font-size: 13px; }
+.contact-profile { padding-top: 14px; }
+.contact-facts { margin: 0; }
+.contact-facts div { display: grid; grid-template-columns: 88px minmax(0,1fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.contact-facts dt { color: var(--muted); font-size: 11px; }
+.contact-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.contact-facts code { color: #435268; font: 11px "Cascadia Mono", Consolas, monospace; }
+.profile-state { min-height: 70px; padding: 16px; border-radius: 8px; color: var(--muted); background: #f5f8fc; font-size: 11px; }
+.profile-state.error { color: var(--red-700); background: var(--red-100); }
+.private-feature-policy { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.private-feature-policy > p { margin: 5px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.private-feature-options { grid-template-columns: 1fr; }
+.private-feature-options .option-check { align-items: flex-start; }
+.private-feature-options .option-check > span { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.private-feature-options .option-check strong { font-size: 11px; }
+.private-feature-options .option-check small { color: var(--subtle); font-size: 9px; font-weight: 400; }
+
 @media (max-width: 1220px) {
   .app-shell { grid-template-columns: 78px minmax(0,1fr); }
   .brand-block { justify-content: center; padding-inline: 9px; }
@@ -889,7 +943,8 @@ tbody tr:hover { background: #fbfdff; }
   .feature-form,
   .config-section-grid,
   .feature-guide { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .group-layout { grid-template-columns: minmax(470px,1.25fr) minmax(320px,.75fr); }
+  .group-layout,
+  .contact-layout { grid-template-columns: minmax(470px,1.25fr) minmax(320px,.75fr); }
   .group-table-scroll { min-height: 0; max-height: none; }
   .group-table { min-width: 520px; }
   .history-layout { grid-template-columns: 250px minmax(380px,1fr); }
@@ -907,6 +962,7 @@ tbody tr:hover { background: #fbfdff; }
   .runtime-grid,
   .feature-layout,
   .group-layout,
+  .contact-layout,
   .history-layout,
   .settings-grid { grid-template-columns: 1fr; }
   #page-home.active,
@@ -918,7 +974,9 @@ tbody tr:hover { background: #fbfdff; }
   .runtime-grid { min-height: 0; }
   .feature-catalog { max-height: 330px; }
   .group-table-panel,
-  .group-inspector { min-height: 440px; }
+  .group-inspector,
+  .contact-table-panel,
+  .contact-inspector { min-height: 440px; }
   .conversation-list { max-height: 250px; border-right: 0; border-bottom: 1px solid var(--line); }
   .trace-summary { align-items: flex-start; }
   .trace-summary dl { display: grid; gap: 5px; }
@@ -938,4 +996,25 @@ tbody tr:hover { background: #fbfdff; }
   .provider-editor-guide { height: auto; overflow: visible; }
   .provider-empty-state { min-height: 330px; padding: 30px 20px; }
   .provider-empty-assurances { flex-wrap: wrap; row-gap: 8px; }
+}
+
+@media (max-width: 680px) {
+  .page-heading.compact { align-items: flex-start; flex-direction: column; }
+  .directory-actions { width: 100%; }
+  .directory-actions .button { flex: 1; }
+  .management-tabs { padding-inline: 8px; }
+  .management-tabs button { flex: 1; min-width: 0; padding-inline: 9px; }
+  .contact-table { min-width: 0; }
+  .contact-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .contact-table tbody,
+  .contact-table tr,
+  .contact-table td { display: block; width: 100%; }
+  .contact-table .contact-row { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .contact-table .contact-row td { display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 8px; padding: 4px 0; border: 0; }
+  .contact-table .contact-row td::before { color: var(--subtle); font-size: 11px; }
+  .contact-table .contact-row td:nth-child(1)::before { content: "联系人"; }
+  .contact-table .contact-row td:nth-child(2)::before { content: "微信号"; }
+  .contact-table .contact-row td:nth-child(3)::before { content: "地区"; }
+  .contact-table .contact-row td:nth-child(4)::before { content: "操作"; }
+  .contact-pagination { flex-basis: auto; align-items: flex-start; flex-direction: column; min-height: 76px; }
 }
