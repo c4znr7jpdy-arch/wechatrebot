@@ -35,7 +35,7 @@ if (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET) {
 
 
 _REMOVE_SHORTCUT_SCRIPT = r"""
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
 $targets = @(
@@ -44,7 +44,10 @@ $targets = @(
     (Join-Path $programs '卸载微信机器人.lnk')
 )
 foreach ($shortcutPath in $targets) {
-    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $shortcutPath)) {
+        continue
+    }
+    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
 }
 """.strip()
 

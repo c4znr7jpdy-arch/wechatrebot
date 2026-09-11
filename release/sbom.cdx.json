@@ -7,7 +7,7 @@
     "component": {
       "type": "application",
       "name": "WeChatReBot",
-      "version": "0.9.1"
+      "version": "0.9.2"
     },
     "properties": [
       {

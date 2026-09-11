@@ -696,7 +696,7 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert '手账风（示例样式）' in script
     assert '渲染、重试、并发和提示词等专业参数继续使用推荐值' in script
     assert 'name: "每日签到"' not in script
-    assert 'version: "0.9.1"' in script
+    assert 'version: "0.9.2"' in script
 
 
 def test_run_application_uses_explicit_webview_api_allowlist(

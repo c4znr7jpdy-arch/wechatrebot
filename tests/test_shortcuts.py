@@ -17,3 +17,6 @@ def test_shortcut_script_does_not_interpolate_customer_values() -> None:
 def test_shortcut_cleanup_removes_launch_and_uninstall_entries() -> None:
     assert "WeChat ReBot.lnk" in shortcuts._REMOVE_SHORTCUT_SCRIPT
     assert "卸载微信机器人.lnk" in shortcuts._REMOVE_SHORTCUT_SCRIPT
+    assert "if (-not (Test-Path -LiteralPath $shortcutPath))" in shortcuts._REMOVE_SHORTCUT_SCRIPT
+    assert "Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop" in shortcuts._REMOVE_SHORTCUT_SCRIPT
+    assert "$ErrorActionPreference = 'SilentlyContinue'" not in shortcuts._REMOVE_SHORTCUT_SCRIPT
