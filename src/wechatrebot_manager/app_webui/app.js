@@ -1504,46 +1504,102 @@
     return JSON.stringify(messages.map((message) => [
       message.id, message.timestamp, message.role, message.sender_id,
       message.sender_name, message.group_nickname, message.wechat_name,
-      message.avatar, message.content,
+      message.avatar, message.content, message.message_kind,
+      message.quote_sender, message.quote_content,
     ]));
   }
 
-  function displayMessageContent(value) {
+  function xmlFragment(content, tag) {
+    const match = content.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+    return match ? match[1] : "";
+  }
+
+  function xmlText(content, tag, limit = 80) {
+    let text = xmlFragment(content, tag).trim();
+    if (text.startsWith("<![CDATA[") && text.endsWith("]]>")) text = text.slice(9, -3);
+    if (/[<>]/.test(text)) return "";
+    const decoded = text
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'");
+    return /[<>]/.test(decoded) ? "" : decoded.replace(/\s+/g, " ").trim().slice(0, limit);
+  }
+
+  function quotedMessageContent(refermsg) {
+    const labels = {3: "[图片]", 34: "[语音]", 42: "[名片]", 43: "[视频]", 47: "[表情]", 48: "[位置]", 49: "[卡片消息]"};
+    const quoteType = xmlText(refermsg, "type");
+    return labels[quoteType] || xmlText(refermsg, "content", 160) || "原消息不可用";
+  }
+
+  function rawMessagePresentation(value) {
     const content = String(value ?? "");
     const structuredXml = /^\s*(?:<\?xml[^>]*>\s*)?<(?:msg|appmsg|sysmsg)\b/i;
-    if (!structuredXml.test(content)) return content;
+    const plain = {content, messageKind: "", quoteSender: "", quoteContent: "", preview: content};
+    if (!structuredXml.test(content)) return plain;
     const folded = content.toLowerCase();
-    if (/<emoji\b/i.test(content)) return "[表情]";
-    if (/<img\b/i.test(content)) return "[图片]";
-    if (/<voicemsg\b/i.test(content)) return "[语音]";
-    if (/<videomsg\b/i.test(content)) return "[视频]";
-    if (/<location\b/i.test(content)) return "[位置]";
-    if (/<revokemsg\b/i.test(content)) return "[撤回消息]";
-    if (!/<appmsg\b/i.test(content)) return "[特殊消息]";
+    const summary = (text) => ({...plain, content: text, preview: text});
+    if (/<revokemsg\b/i.test(content)) {
+      const notice = xmlText(content, "replacemsg", 160) || "消息已撤回";
+      return {...plain, content: notice, messageKind: "revoke", preview: `[撤回] ${notice}`};
+    }
+    if (/<appmsg\b/i.test(content)) {
+      const withTitle = (label) => {
+        const title = xmlText(content, "title");
+        return summary(title ? `${label} ${title}` : label);
+      };
+      const appType = xmlText(content, "type");
+      if (appType === "57" || folded.includes("<refermsg")) {
+        const reply = xmlText(content, "title", 160) || "回复了一条消息";
+        const refermsg = xmlFragment(content, "refermsg");
+        const quoteSender = xmlText(refermsg, "displayname");
+        const quoteContent = quotedMessageContent(refermsg);
+        const attribution = quoteSender ? `引用 ${quoteSender}` : "引用消息";
+        return {content: reply, messageKind: "quote", quoteSender, quoteContent, preview: `${reply} · ${attribution}：${quoteContent}`};
+      }
+      if (appType === "6") return withTitle("[文件]");
+      if (appType === "5") return withTitle("[链接卡片]");
+      if (["33", "36"].includes(appType)) return withTitle("[小程序]");
+      if (appType === "19" || folded.includes("<recorditem")) return withTitle("[聊天记录]");
+      return withTitle("[卡片消息]");
+    }
+    if (/<emoji\b/i.test(content)) return summary("[表情]");
+    if (/<img\b/i.test(content)) return summary("[图片]");
+    if (/<voicemsg\b/i.test(content)) return summary("[语音]");
+    if (/<videomsg\b/i.test(content)) return summary("[视频]");
+    if (/<location\b/i.test(content)) return summary("[位置]");
+    return summary("[特殊消息]");
+  }
 
-    const xmlText = (tag) => {
-      const match = content.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-      if (!match) return "";
-      let text = match[1].trim();
-      if (text.startsWith("<![CDATA[") && text.endsWith("]]>")) text = text.slice(9, -3);
-      if (/[<>]/.test(text)) return "";
-      const decoded = text
-        .replace(/&amp;/gi, "&")
-        .replace(/&quot;/gi, '"')
-        .replace(/&apos;/gi, "'");
-      return /[<>]/.test(decoded) ? "" : decoded.replace(/\s+/g, " ").trim().slice(0, 80);
-    };
-    const withTitle = (label) => {
-      const title = xmlText("title");
-      return title ? `${label} ${title}` : label;
-    };
-    const appType = xmlText("type");
-    if (appType === "6") return withTitle("[文件]");
-    if (appType === "5") return withTitle("[链接卡片]");
-    if (["33", "36"].includes(appType)) return withTitle("[小程序]");
-    if (appType === "19" || folded.includes("<recorditem")) return withTitle("[聊天记录]");
-    if (appType === "57" || folded.includes("<refermsg")) return withTitle("[引用回复]");
-    return withTitle("[卡片消息]");
+  function messagePresentation(message) {
+    if (message?.message_kind === "quote") {
+      const content = String(message.content || "").trim() || "回复了一条消息";
+      const quoteSender = String(message.quote_sender || "").trim();
+      const quoteContent = String(message.quote_content || "").trim() || "原消息不可用";
+      const attribution = quoteSender ? `引用 ${quoteSender}` : "引用消息";
+      return {content, messageKind: "quote", quoteSender, quoteContent, preview: `${content} · ${attribution}：${quoteContent}`};
+    }
+    if (message?.message_kind === "revoke") {
+      const content = String(message.content || "").trim() || "消息已撤回";
+      return {content, messageKind: "revoke", quoteSender: "", quoteContent: "", preview: `[撤回] ${content}`};
+    }
+    return rawMessagePresentation(message?.content);
+  }
+
+  function displayMessageContent(value) {
+    return rawMessagePresentation(value).preview;
+  }
+
+  function messageBubbleMarkup(message) {
+    const presentation = messagePresentation(message);
+    if (presentation.messageKind === "quote") {
+      const attribution = presentation.quoteSender ? `引用 · ${presentation.quoteSender}` : "引用消息";
+      return `<div class="message-bubble message-bubble-quote"><p>${escapeHtml(presentation.content)}</p><blockquote><strong>${escapeHtml(attribution)}</strong><span>${escapeHtml(presentation.quoteContent)}</span></blockquote></div>`;
+    }
+    if (presentation.messageKind === "revoke") {
+      const detail = presentation.content === "消息已撤回" ? "" : `<span>${escapeHtml(presentation.content)}</span>`;
+      return `<div class="message-bubble message-bubble-notice" role="note"><strong>消息已撤回</strong>${detail}</div>`;
+    }
+    return `<div class="message-bubble">${escapeHtml(presentation.content)}</div>`;
   }
 
   function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
@@ -1555,7 +1611,7 @@
       const assistant = message.role === "assistant";
       const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
       const identity = !assistant && message.sender_id ? message.sender_id : "";
-      return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div><div class="message-bubble">${escapeHtml(displayMessageContent(message.content))}</div></div></article>`;
+      return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
     }).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
     bindAvatarFallbacks(list);
     state.selectedMessages = messages;

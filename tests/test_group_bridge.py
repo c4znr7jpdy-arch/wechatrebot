@@ -443,6 +443,40 @@ def test_group_identity_and_avatar_are_available_to_plugins(
     assert encoded["wx_avatar"] == "https://wx.qlogo.cn/member.jpg"
 
 
+def test_revoke_callback_is_history_only_and_not_forwarded_to_astrbot(
+    patched_bridge: dict[str, Any]
+) -> None:
+    revoke_xml = (
+        '<sysmsg type="revokemsg"><revokemsg><msgid>1</msgid>'
+        '<replacemsg>群成员撤回了一条消息</replacemsg>'
+        '</revokemsg></sysmsg>'
+    )
+    event = patched_bridge["event_normalizer"].normalize_event(
+        {
+            "event_type": 2000,
+            "account_wxid": "wxid_bot",
+            "fromUserName": {"String": "room@chatroom"},
+            "toUserName": {"String": "wxid_bot"},
+            "content": {"String": f"wxid_member:\n{revoke_xml}"},
+            "real_content": revoke_xml,
+            "member_info": {
+                "userName": "wxid_member",
+                "nickName": "群成员",
+            },
+            "msgType": 10002,
+            "newMsgId": "revoke-1",
+        }
+    )
+    app_source = (
+        patched_bridge["root"] / "src" / "hook_bridge" / "app.py"
+    ).read_text(encoding="utf-8")
+
+    assert event.kind == "history"
+    assert event.content == revoke_xml
+    assert 'elif event.kind == "history":' in app_source
+    assert "await self._record_inbound_history(event)" in app_source
+
+
 def test_onebot_member_and_contact_queries_include_avatar(
     patched_bridge: dict[str, Any]
 ) -> None:
@@ -931,14 +965,24 @@ def test_history_migration_keeps_legacy_rows_unassigned_and_records_account(
         (
             "quote",
             49,
-            '<msg><appmsg><title><![CDATA[收到，我来处理]]></title><type>57</type><refermsg /></appmsg></msg>',
-            "[引用回复] 收到，我来处理",
+            '<msg><appmsg><title><![CDATA[收到，我来处理]]></title><type>57</type>'
+            '<refermsg><type>1</type><displayname>张三</displayname>'
+            '<content><![CDATA[周六算你的]]></content></refermsg></appmsg></msg>',
+            "收到，我来处理",
         ),
         (
             "unknown-card",
             49,
             '<msg><appmsg><title>活动邀请</title><type>2001</type></appmsg></msg>',
             "[卡片消息] 活动邀请",
+        ),
+        (
+            "revoke",
+            10002,
+            '<sysmsg type="revokemsg"><revokemsg><msgid>1</msgid>'
+            '<replacemsg><![CDATA[“张三”撤回了一条消息]]></replacemsg>'
+            '</revokemsg></sysmsg>',
+            "“张三”撤回了一条消息",
         ),
         ("unknown-xml", 1, '<msg><unknown value="1" /></msg>', "[特殊消息]"),
     ),
@@ -972,9 +1016,16 @@ def test_inbound_structured_history_stores_a_summary_instead_of_xml(
     assert store.record_inbound(event) is True
 
     with sqlite3.connect(database) as connection:
-        content = connection.execute(
-            "SELECT content FROM messages WHERE dedup_key = ?",
+        content, metadata_json = connection.execute(
+            "SELECT content, metadata FROM messages WHERE dedup_key = ?",
             (f"in:wxid_bot:{case_id}-message",),
-        ).fetchone()[0]
+        ).fetchone()
     assert content == expected
     assert "<" not in content and ">" not in content
+    metadata = json.loads(metadata_json)
+    if case_id == "quote":
+        assert metadata["message_kind"] == "quote"
+        assert metadata["quote_sender"] == "张三"
+        assert metadata["quote_content"] == "周六算你的"
+    elif case_id == "revoke":
+        assert metadata["message_kind"] == "revoke"

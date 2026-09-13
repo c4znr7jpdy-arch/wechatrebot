@@ -24,9 +24,14 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..72f85ab91d1dc5a56c83497c9c67983c
          )
          self._callback_runner = web.AppRunner(app, access_log=None)
          await self._callback_runner.setup()
-@@ -362,14 +368,51 @@ class BridgeApplication:
+@@ -362,14 +368,56 @@ class BridgeApplication:
                          )
                      await self.onebot.send_event(onebot_event)
++                elif event.kind == "history":
++                    if not self.state.accept_message(event.message_id):
++                        logger.debug("ignored duplicate history callback %s", event.message_id)
++                        continue
++                    await self._record_inbound_history(event)
                  elif event.kind == "group_member_update":
 +                    previous = self.state.group_member_identity(
 +                        event.conversation_id, event.sender_id
@@ -76,7 +81,7 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..72f85ab91d1dc5a56c83497c9c67983c
                  elif event.kind in {"group_increase", "group_decrease"}:
                      event = await self._resolve_group_member_notice(event)
                      if not event.conversation_id or not event.sender_id:
-@@ -575,6 +618,10 @@ class BridgeApplication:
+@@ -575,6 +623,10 @@ class BridgeApplication:
                  avatar=scalar(
                      member.get("smallHeadImgUrl")
                      or member.get("bigHeadImgUrl")
@@ -87,7 +92,7 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..72f85ab91d1dc5a56c83497c9c67983c
                      or member.get("avatar")
                      or member.get("avatar_url")
                  ).strip(),
-@@ -626,6 +673,7 @@ class BridgeApplication:
+@@ -626,6 +678,7 @@ class BridgeApplication:
              event,
              wechat_name=event.wechat_name or cached.wechat_name,
              group_nickname=event.group_nickname or cached.group_nickname,
@@ -655,7 +660,26 @@ index 9e1015b71244968b14d8bb54494212bdb00419fd..bf91fb0973acd0c82363e7de5f809208
              raw=dict(payload),
          )
      if envelope_type != 2004:
-@@ -537,6 +548,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+@@ -525,12 +536,16 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+         else:
+             # 10000/10002 是微信系统消息（入群、退群、拍其他人等），不应
+             # 作为普通聊天文本转交给 AstrBot。只有结构化确认“拍到机器人”
+             # 时，才转换成可唤醒的 [拍一拍] 消息。
+-            kind = "ignored"
+-    if account_id and sender_id == account_id:
++            kind = (
++                "history"
++                if "<revokemsg" in content.casefold()
++                else "ignored"
++            )
++    if account_id and sender_id == account_id and kind != "history":
+         kind = "ignored"
+     return NormalizedEvent(
+         kind=kind,
+         account_id=account_id,
+         conversation_id=conversation_id,
+         sender_id=sender_id,
+@@ -537,6 +552,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
          sender_name=sender_name,
          wechat_name=wechat_name,
          group_nickname=group_nickname,
@@ -677,8 +701,8 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py b/hook_4
 index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a601cb653 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
-@@ -26,1 +26,74 @@
-+def _xml_tag_text(content: str, tag: str) -> str:
+@@ -26,1 +26,110 @@
++def _xml_tag_fragment(content: str, tag: str) -> str:
 +    folded = content.casefold()
 +    start = folded.find(f"<{tag}")
 +    if start < 0:
@@ -687,7 +711,11 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
 +    end = folded.find(f"</{tag}>", start + 1)
 +    if start < 0 or end < 0:
 +        return ""
-+    value = content[start + 1 : end].strip()
++    return content[start + 1 : end]
++
++
++def _xml_tag_text(content: str, tag: str, *, limit: int = 80) -> str:
++    value = _xml_tag_fragment(content, tag).strip()
 +    if value.startswith("<![CDATA[") and value.endswith("]]>"):
 +        value = value[9:-3]
 +    if "<" in value or ">" in value:
@@ -698,12 +726,44 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
 +        ("&apos;", "'"),
 +    ):
 +        value = value.replace(encoded, decoded)
-+    return " ".join(value.split())[:80]
++    return " ".join(value.split())[:limit]
 +
 +
 +def _message_label(content: str, label: str) -> str:
 +    title = _xml_tag_text(content, "title")
 +    return f"{label} {title}" if title else label
++
++
++def _quoted_content(refermsg: str) -> str:
++    quote_type = _xml_tag_text(refermsg, "type")
++    labels = {
++        "3": "[图片]",
++        "34": "[语音]",
++        "42": "[名片]",
++        "43": "[视频]",
++        "47": "[表情]",
++        "48": "[位置]",
++        "49": "[卡片消息]",
++    }
++    if quote_type in labels:
++        return labels[quote_type]
++    return _xml_tag_text(refermsg, "content", limit=160) or "原消息不可用"
++
++
++def _inbound_metadata(event: NormalizedEvent) -> dict[str, str]:
++    content = str(getattr(event, "content", "") or "")
++    folded = content.casefold()
++    if "<revokemsg" in folded:
++        return {"message_kind": "revoke"}
++    app_type = _xml_tag_text(content, "type")
++    if app_type == "57" or "<refermsg" in folded:
++        refermsg = _xml_tag_fragment(content, "refermsg")
++        return {
++            "message_kind": "quote",
++            "quote_sender": _xml_tag_text(refermsg, "displayname"),
++            "quote_content": _quoted_content(refermsg),
++        }
++    return {}
 +
 +
 +def _inbound_content(event: NormalizedEvent) -> str:
@@ -723,6 +783,11 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
 +    structured = folded.startswith(("<?xml", "<msg", "<appmsg", "<sysmsg"))
 +    if message_type != 49 and not structured:
 +        return content
++    if "<revokemsg" in folded:
++        return _xml_tag_text(content, "replacemsg", limit=160) or "消息已撤回"
++    app_type = _xml_tag_text(content, "type")
++    if app_type == "57" or "<refermsg" in folded:
++        return _xml_tag_text(content, "title", limit=160) or "回复了一条消息"
 +    if "<emoji" in folded:
 +        return "[表情]"
 +    if "<img" in folded:
@@ -733,9 +798,6 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
 +        return "[视频]"
 +    if "<location" in folded:
 +        return "[位置]"
-+    if "<revokemsg" in folded:
-+        return "[撤回消息]"
-+    app_type = _xml_tag_text(content, "type")
 +    if app_type == "6":
 +        return _message_label(content, "[文件]")
 +    if app_type == "5":
@@ -744,8 +806,6 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
 +        return _message_label(content, "[小程序]")
 +    if app_type == "19" or "<recorditem" in folded:
 +        return _message_label(content, "[聊天记录]")
-+    if app_type == "57" or "<refermsg" in folded:
-+        return _message_label(content, "[引用回复]")
 +    if message_type == 49 or "<appmsg" in folded:
 +        return _message_label(content, "[卡片消息]")
 +    return "[特殊消息]"
@@ -781,11 +841,16 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
  
      def record_inbound(self, event: NormalizedEvent) -> bool:
          is_group = event.conversation_id.endswith("@chatroom")
-@@ -96,11 +184,13 @@ class MessageHistoryStore:
+@@ -93,14 +181,18 @@ class MessageHistoryStore:
+         )
++        message_metadata = _inbound_metadata(event)
+         metadata = json.dumps(
+             {
                  "group_name": event.group_name,
                  "group_nickname": event.group_nickname,
                  "wechat_name": event.wechat_name,
 +                "avatar": getattr(event, "member_avatar", ""),
++                **message_metadata,
              },
              ensure_ascii=False,
              separators=(",", ":"),

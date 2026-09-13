@@ -382,6 +382,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .message.assistant .message-meta { justify-content: flex-end; }
 .message-bubble { width: fit-content; max-width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 4px 10px 10px 10px; background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .message.assistant .message-bubble { color: #0b355e; border-color: #c7def8; border-radius: 10px 4px 10px 10px; background: var(--blue-100); }
+.message-bubble-quote { min-width: min(280px, 100%); }
+.message-bubble-quote > p { margin: 0; }
+.message-bubble-quote blockquote { display: grid; gap: 3px; margin: 8px 0 0; padding: 7px 9px; border-left: 3px solid var(--blue-600); border-radius: 6px; color: var(--muted); background: var(--blue-100); }
+.message-bubble-quote blockquote strong { color: var(--blue-700); font-size: 10px; }
+.message-bubble-quote blockquote span { font-size: 12px; }
+.message-bubble-notice { display: grid; gap: 2px; color: var(--muted); background: #f2f5f8; border-style: dashed; }
+.message-bubble-notice strong { color: var(--text); font-size: 11px; }
+.message-bubble-notice span { font-size: 11px; }
 .new-message-button { position: absolute; right: 20px; bottom: 18px; z-index: 2; min-height: 34px; padding: 0 13px; border: 1px solid #b7d5f7; border-radius: 18px; color: var(--blue-700); background: #fff; box-shadow: 0 5px 18px rgba(29, 92, 157, .16); cursor: pointer; font-weight: 700; }
 .new-message-button:hover { background: var(--blue-100); }
 .conversation-inspector { min-height: 0; overflow: auto; padding: 20px; border-left: 1px solid var(--line); background: #fff; }

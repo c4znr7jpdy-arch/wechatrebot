@@ -20,21 +20,23 @@ _IMAGE_XML = re.compile(r"<img\b", re.IGNORECASE)
 _APP_MESSAGE_XML = re.compile(r"<appmsg\b", re.IGNORECASE)
 
 
-def _xml_text(content: str, tag: str) -> str:
+def _xml_fragment(content: str, tag: str) -> str:
     match = re.search(
         rf"<{tag}\b[^>]*>(.*?)</{tag}>",
         content,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    if not match:
-        return ""
-    value = match.group(1).strip()
+    return match.group(1) if match else ""
+
+
+def _xml_text(content: str, tag: str, *, limit: int = 80) -> str:
+    value = _xml_fragment(content, tag).strip()
     if value.startswith("<![CDATA[") and value.endswith("]]>"):
         value = value[9:-3]
     value = unescape(value)
     if "<" in value or ">" in value:
         return ""
-    return " ".join(value.split())[:80]
+    return " ".join(value.split())[:limit]
 
 
 def _message_label(content: str, label: str) -> str:
@@ -42,10 +44,7 @@ def _message_label(content: str, label: str) -> str:
     return f"{label} {title}" if title else label
 
 
-def _display_content(value: object) -> str:
-    content = str(value or "")
-    if not _MESSAGE_XML.search(content):
-        return content
+def _structured_content_summary(content: str) -> str:
     if _EMOJI_XML.search(content):
         return "[表情]"
     if _IMAGE_XML.search(content):
@@ -56,8 +55,6 @@ def _display_content(value: object) -> str:
         return "[视频]"
     if re.search(r"<location\b", content, re.IGNORECASE):
         return "[位置]"
-    if re.search(r"<revokemsg\b", content, re.IGNORECASE):
-        return "[撤回消息]"
     if _APP_MESSAGE_XML.search(content):
         app_type = _xml_text(content, "type")
         if app_type == "6":
@@ -70,12 +67,109 @@ def _display_content(value: object) -> str:
             r"<recorditem\b", content, re.IGNORECASE
         ):
             return _message_label(content, "[聊天记录]")
+        return _message_label(content, "[卡片消息]")
+    return "[特殊消息]"
+
+
+def _quoted_content(refermsg: str) -> str:
+    quote_type = _xml_text(refermsg, "type")
+    label_by_type = {
+        "3": "[图片]",
+        "34": "[语音]",
+        "42": "[名片]",
+        "43": "[视频]",
+        "47": "[表情]",
+        "48": "[位置]",
+        "49": "[卡片消息]",
+    }
+    if quote_type in label_by_type:
+        return label_by_type[quote_type]
+    return _xml_text(refermsg, "content", limit=160) or "原消息不可用"
+
+
+def _message_presentation(
+    value: object,
+    *,
+    message_kind: str = "",
+    quote_sender: str = "",
+    quote_content: str = "",
+) -> dict[str, str]:
+    content = str(value or "")
+    normalized_kind = str(message_kind or "").strip()
+    if normalized_kind == "quote":
+        return {
+            "content": content.strip() or "回复了一条消息",
+            "message_kind": "quote",
+            "quote_sender": str(quote_sender or "").strip(),
+            "quote_content": str(quote_content or "").strip() or "原消息不可用",
+        }
+    if normalized_kind == "revoke":
+        return {
+            "content": content.strip() or "消息已撤回",
+            "message_kind": "revoke",
+            "quote_sender": "",
+            "quote_content": "",
+        }
+    if not _MESSAGE_XML.search(content):
+        return {
+            "content": content,
+            "message_kind": "",
+            "quote_sender": "",
+            "quote_content": "",
+        }
+    if re.search(r"<revokemsg\b", content, re.IGNORECASE):
+        return {
+            "content": _xml_text(content, "replacemsg", limit=160)
+            or "消息已撤回",
+            "message_kind": "revoke",
+            "quote_sender": "",
+            "quote_content": "",
+        }
+    if _APP_MESSAGE_XML.search(content):
+        app_type = _xml_text(content, "type")
         if app_type == "57" or re.search(
             r"<refermsg\b", content, re.IGNORECASE
         ):
-            return _message_label(content, "[引用回复]")
-        return _message_label(content, "[卡片消息]")
-    return "[特殊消息]"
+            refermsg = _xml_fragment(content, "refermsg")
+            return {
+                "content": _xml_text(content, "title", limit=160)
+                or "回复了一条消息",
+                "message_kind": "quote",
+                "quote_sender": _xml_text(refermsg, "displayname"),
+                "quote_content": _quoted_content(refermsg),
+            }
+    return {
+        "content": _structured_content_summary(content),
+        "message_kind": "",
+        "quote_sender": "",
+        "quote_content": "",
+    }
+
+
+def _display_content(
+    value: object,
+    *,
+    message_kind: str = "",
+    quote_sender: str = "",
+    quote_content: str = "",
+) -> str:
+    presentation = _message_presentation(
+        value,
+        message_kind=message_kind,
+        quote_sender=quote_sender,
+        quote_content=quote_content,
+    )
+    if presentation["message_kind"] == "quote":
+        attribution = "引用"
+        if presentation["quote_sender"]:
+            attribution += f" {presentation['quote_sender']}"
+        return (
+            f"{presentation['content']}\n"
+            f"{attribution}：{presentation['quote_content']}"
+        )
+    if presentation["message_kind"] == "revoke":
+        return f"[撤回] {presentation['content']}"
+    return presentation["content"]
 
 
 def _plain_conversation_id(session_id: str, group_id: str) -> tuple[str, str]:
@@ -100,7 +194,7 @@ def _display_name(
     return sender_name.strip() or conversation_id
 
 
-def _identity_metadata(value: object) -> dict[str, str]:
+def _history_metadata(value: object) -> dict[str, str]:
     try:
         payload = json.loads(str(value or "{}"))
     except json.JSONDecodeError:
@@ -109,7 +203,15 @@ def _identity_metadata(value: object) -> dict[str, str]:
         return {}
     return {
         key: str(payload.get(key) or "").strip()
-        for key in ("group_name", "group_nickname", "wechat_name", "avatar")
+        for key in (
+            "group_name",
+            "group_nickname",
+            "wechat_name",
+            "avatar",
+            "message_kind",
+            "quote_sender",
+            "quote_content",
+        )
     }
 
 
@@ -171,6 +273,9 @@ class ChatHistoryService:
                     group_nickname TEXT NOT NULL DEFAULT '',
                     wechat_name TEXT NOT NULL DEFAULT '',
                     avatar TEXT NOT NULL DEFAULT '',
+                    message_kind TEXT NOT NULL DEFAULT '',
+                    quote_sender TEXT NOT NULL DEFAULT '',
+                    quote_content TEXT NOT NULL DEFAULT '',
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
                     UNIQUE(source_key, source_message_id)
@@ -191,6 +296,9 @@ class ChatHistoryService:
                 "group_nickname",
                 "wechat_name",
                 "avatar",
+                "message_kind",
+                "quote_sender",
+                "quote_content",
             ):
                 if column not in columns:
                     connection.execute(
@@ -289,7 +397,7 @@ class ChatHistoryService:
                     source.close()
             highest = last_id
             for item in rows:
-                identity = _identity_metadata(item["metadata"])
+                identity = _history_metadata(item["metadata"])
                 kind, conversation_id = _plain_conversation_id(
                     str(item["session_id"]), str(item["group_id"])
                 )
@@ -299,8 +407,9 @@ class ChatHistoryService:
                         source_key, source_message_id, account_id, session_id,
                         conversation_id, conversation_type, role, sender_id,
                         sender_name, group_id, group_name, group_nickname,
-                        wechat_name, avatar, content, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        wechat_name, avatar, message_kind, quote_sender,
+                        quote_content, content, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_key,
@@ -317,6 +426,9 @@ class ChatHistoryService:
                         identity.get("group_nickname", ""),
                         identity.get("wechat_name", ""),
                         identity.get("avatar", ""),
+                        identity.get("message_kind", ""),
+                        identity.get("quote_sender", ""),
+                        identity.get("quote_content", ""),
                         str(item["content"]),
                         float(item["timestamp"]),
                     ),
@@ -452,7 +564,8 @@ class ChatHistoryService:
                 f"""
                 SELECT id, conversation_type, role, sender_id, sender_name,
                        group_id, group_name, group_nickname, wechat_name,
-                       avatar, content, timestamp
+                       avatar, message_kind, quote_sender, quote_content,
+                       content, timestamp
                 FROM messages
                 WHERE {' AND '.join(clauses)}
                 ORDER BY timestamp DESC
@@ -460,8 +573,15 @@ class ChatHistoryService:
                 """,
                 params,
             ).fetchall()
-        return tuple(
-            {
+        messages: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            presentation = _message_presentation(
+                row["content"],
+                message_kind=row["message_kind"],
+                quote_sender=row["quote_sender"],
+                quote_content=row["quote_content"],
+            )
+            messages.append({
                 "id": row["id"],
                 "type": row["conversation_type"],
                 "role": row["role"],
@@ -476,11 +596,10 @@ class ChatHistoryService:
                 "group_nickname": row["group_nickname"],
                 "wechat_name": row["wechat_name"],
                 "avatar": row["avatar"],
-                "content": _display_content(row["content"]),
+                **presentation,
                 "timestamp": row["timestamp"],
-            }
-            for row in reversed(rows)
-        )
+            })
+        return tuple(messages)
 
     def delete_conversation(self, conversation_id: str, *, account_id: str = "") -> int:
         clauses = ["conversation_id = ?"]
@@ -525,6 +644,7 @@ class ChatHistoryService:
                 f"""
                 SELECT conversation_type, conversation_id, role, sender_id,
                        sender_name, group_name, group_nickname, wechat_name,
+                       message_kind, quote_sender, quote_content,
                        content, timestamp FROM messages
                 {where}
                 ORDER BY timestamp
@@ -535,7 +655,12 @@ class ChatHistoryService:
             exported = []
             for row in rows:
                 item = dict(row)
-                item["content"] = _display_content(item.get("content"))
+                item["content"] = _display_content(
+                    item.get("content"),
+                    message_kind=item.get("message_kind", ""),
+                    quote_sender=item.get("quote_sender", ""),
+                    quote_content=item.get("quote_content", ""),
+                )
                 exported.append(item)
             output.write_text(
                 json.dumps(exported, ensure_ascii=False, indent=2)
@@ -561,7 +686,12 @@ class ChatHistoryService:
                             row["sender_id"],
                             row["wechat_name"] or row["sender_name"],
                             row["group_nickname"],
-                            _display_content(row["content"]),
+                            _display_content(
+                                row["content"],
+                                message_kind=row["message_kind"],
+                                quote_sender=row["quote_sender"],
+                                quote_content=row["quote_content"],
+                            ),
                             datetime.fromtimestamp(
                                 row["timestamp"], tz=timezone.utc
                             ).astimezone().isoformat(timespec="seconds"),

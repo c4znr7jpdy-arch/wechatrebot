@@ -1,7 +1,12 @@
+import json
 import sqlite3
 from pathlib import Path
 
-from wechatrebot_manager.chat_history import ChatHistoryService, _display_content
+from wechatrebot_manager.chat_history import (
+    ChatHistoryService,
+    _display_content,
+    _message_presentation,
+)
 
 
 def _source(root: Path) -> Path:
@@ -164,14 +169,21 @@ def test_structured_wechat_messages_have_readable_summaries() -> None:
             "[聊天记录] 合并聊天记录",
         ),
         (
-            '<msg><appmsg><title>收到，我来处理</title><type>57</type><refermsg /></appmsg></msg>',
-            "[引用回复] 收到，我来处理",
+            '<msg><appmsg><title>收到，我来处理</title><type>57</type>'
+            '<refermsg><type>1</type><displayname>张三</displayname>'
+            '<content><![CDATA[周六算你的]]></content></refermsg></appmsg></msg>',
+            "收到，我来处理\n引用 张三：周六算你的",
         ),
         (
             '<msg><appmsg><title>活动邀请</title><type>2001</type></appmsg></msg>',
             "[卡片消息] 活动邀请",
         ),
-        ('<sysmsg><revokemsg><msgid>1</msgid></revokemsg></sysmsg>', "[撤回消息]"),
+        (
+            '<sysmsg type="revokemsg"><revokemsg><msgid>1</msgid>'
+            '<replacemsg><![CDATA[“张三”撤回了一条消息]]></replacemsg>'
+            '</revokemsg></sysmsg>',
+            "[撤回] “张三”撤回了一条消息",
+        ),
         ('<msg><unknown value="1" /></msg>', "[特殊消息]"),
         ("普通文本", "普通文本"),
     )
@@ -180,17 +192,59 @@ def test_structured_wechat_messages_have_readable_summaries() -> None:
         assert _display_content(content) == expected
 
 
+def test_quote_and_revoke_presentations_expose_structured_fields() -> None:
+    quote = _message_presentation(
+        '<msg><appmsg><title>好的</title><type>57</type><refermsg>'
+        '<type>47</type><displayname>李四</displayname><content>ignored</content>'
+        '</refermsg></appmsg></msg>'
+    )
+    revoke = _message_presentation(
+        '<sysmsg type="revokemsg"><revokemsg>'
+        '<replacemsg>李四撤回了一条消息</replacemsg>'
+        '</revokemsg></sysmsg>'
+    )
+
+    assert quote == {
+        "content": "好的",
+        "message_kind": "quote",
+        "quote_sender": "李四",
+        "quote_content": "[表情]",
+    }
+    assert revoke == {
+        "content": "李四撤回了一条消息",
+        "message_kind": "revoke",
+        "quote_sender": "",
+        "quote_content": "",
+    }
+
+
 def test_history_hides_structured_xml_in_views_and_exports(tmp_path: Path) -> None:
     path = _bridge_source(tmp_path)
     structured_messages = (
-        ('<msg><emoji md5="abc" cdnurl="https://example.invalid/emoji" /></msg>', "[表情]"),
+        ('<msg><emoji md5="abc" cdnurl="https://example.invalid/emoji" /></msg>', "[表情]", "[表情]"),
         (
             '<msg><appmsg><title>季度报价.xlsx</title><type>6</type><appattach /></appmsg></msg>',
+            "[文件] 季度报价.xlsx",
             "[文件] 季度报价.xlsx",
         ),
         (
             '<msg><appmsg><title>本周汇总</title><type>19</type><recorditem /></appmsg></msg>',
             "[聊天记录] 本周汇总",
+            "[聊天记录] 本周汇总",
+        ),
+        (
+            '<msg><appmsg><title>我来确认</title><type>57</type><refermsg>'
+            '<type>1</type><displayname>赵六</displayname>'
+            '<content>请确认交付时间</content></refermsg></appmsg></msg>',
+            "我来确认",
+            "我来确认\n引用 赵六：请确认交付时间",
+        ),
+        (
+            '<sysmsg type="revokemsg"><revokemsg>'
+            '<replacemsg>赵六撤回了一条消息</replacemsg>'
+            '</revokemsg></sysmsg>',
+            "赵六撤回了一条消息",
+            "[撤回] 赵六撤回了一条消息",
         ),
     )
     with sqlite3.connect(path) as connection:
@@ -211,23 +265,32 @@ def test_history_hides_structured_xml_in_views_and_exports(tmp_path: Path) -> No
                     '{"group_name":"测试群","wechat_name":"王五"}',
                     f"in:message-{index}",
                 )
-                for index, (content, _expected) in enumerate(
+                for index, (content, _expected, _exported) in enumerate(
                     structured_messages, start=2
                 )
             ),
         )
     service = ChatHistoryService(tmp_path)
 
-    contents = [item["content"] for item in service.messages("456@chatroom")]
-    for _content, expected in structured_messages:
+    messages = service.messages("456@chatroom")
+    contents = [item["content"] for item in messages]
+    for _content, expected, _exported in structured_messages:
         assert expected in contents
+    quote_message = next(item for item in messages if item["message_kind"] == "quote")
+    assert quote_message["content"] == "我来确认"
+    assert quote_message["quote_sender"] == "赵六"
+    assert quote_message["quote_content"] == "请确认交付时间"
+    assert next(item for item in messages if item["message_kind"] == "revoke")[
+        "content"
+    ] == "赵六撤回了一条消息"
 
     csv_path = service.export(tmp_path / "structured-history.csv")
     json_path = service.export(tmp_path / "structured-history.json", format="json")
     csv_text = csv_path.read_text(encoding="utf-8-sig")
     json_text = json_path.read_text(encoding="utf-8")
-    for _content, expected in structured_messages:
-        assert expected in csv_text
-        assert expected in json_text
+    json_contents = [item["content"] for item in json.loads(json_text)]
+    for _content, _expected, exported in structured_messages:
+        assert exported in csv_text
+        assert exported in json_contents
     assert "<emoji" not in csv_text and "<appmsg" not in csv_text
     assert "<emoji" not in json_text and "<appmsg" not in json_text
