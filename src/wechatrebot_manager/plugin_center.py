@@ -449,6 +449,14 @@ def _public_plugin_id(module_name: str) -> str:
     return f"feature-{digest}"
 
 
+def _scheduled_action(module_name: str) -> str:
+    if module_name == "jiang_short_drama":
+        return "short_drama"
+    if module_name in {"jiang_commands", "jiang_schedule"}:
+        return "weather"
+    return ""
+
+
 def _normalize_plugin_extension_endpoint(endpoint: str) -> str:
     value = str(endpoint or "").strip().strip("/")
     parts = value.split("/") if value else []
@@ -1434,6 +1442,8 @@ class PluginCenterService:
                     "simplified": plugin.simplified,
                     "audience": guide.get("audience", "按需使用"),
                     "readiness": guide.get("readiness", "请按说明准备"),
+                    "scheduled_action": _scheduled_action(plugin.module_name),
+                    "schedule_provider": plugin.module_name in {"jiang_commands", "jiang_short_drama"},
                 }
             )
         return {
@@ -1555,6 +1565,8 @@ class PluginCenterService:
             "rerank_providers": rerank_providers,
             "personas": personas,
             "engine_online": engine_online,
+            "scheduled_action": _scheduled_action(module_name),
+            "schedule_provider": module_name in {"jiang_commands", "jiang_short_drama"},
         }
 
     def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:

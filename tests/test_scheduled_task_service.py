@@ -27,7 +27,7 @@ class Engine:
         if method == "GET":
             return {"version": 1, "runtime_ready": True, "account_id": ACCOUNT,
                     "capabilities": [{"id": action, "ready": True} for action in
-                                     ("weather", "news", "oilprice", "kfc", "text")]}
+                                     ("weather", "news", "oilprice", "kfc", "short_drama", "text")]}
         if path.endswith("save"):
             return {"item": self.service.store.save(payload), "message": "任务已保存并启用。"}
         if path.endswith("test"):

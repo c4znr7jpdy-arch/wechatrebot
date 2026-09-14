@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).parents[1]
@@ -146,6 +147,43 @@ def test_explicit_test_send_uses_temporary_authorized_run_and_leaves_no_task(tmp
     assert runtime.store.list("wxid_robot") == []
 
 
+def test_short_drama_adapter_returns_validated_clickable_card(tmp_path: Path) -> None:
+    module = _copy_runtime_package(tmp_path)
+
+    class Drama:
+        async def build_unified_recommendation(self, media_type, limit):
+            assert (media_type, limit) == ("短剧", 12)
+            return {
+                "type": "link_card",
+                "title": "最新短剧推荐｜12部",
+                "description": "定时推荐 · 点击查看封面并选择播放",
+                "url": "https://player.example/recommendations/token",
+                "image_url": "https://player.example/cover.jpg",
+            }
+
+    (tmp_path / "app/astrbot/data").mkdir(parents=True)
+    (tmp_path / "app/astrbot/data/cmd_config.json").write_text(
+        '{"plugin_set":["jiang_short_drama"]}', encoding="utf-8"
+    )
+    context = SimpleNamespace(get_all_stars=lambda: [SimpleNamespace(
+        root_dir_name="jiang_short_drama", activated=True, star_cls=Drama(),
+    )])
+    service = module.ContentService(context, tmp_path)
+
+    content = asyncio.run(service.generate({
+        "action": "short_drama",
+        "arguments": {"media_type": "短剧", "limit": 12},
+    }))
+
+    assert content.preview()["kind"] == "link_card"
+    assert content.segments() == [{"type": "wechat_link_card", "data": {
+        "title": "最新短剧推荐｜12部",
+        "desc": "定时推荐 · 点击查看封面并选择播放",
+        "url": "https://player.example/recommendations/token",
+        "image_url": "https://player.example/cover.jpg",
+    }}]
+
+
 def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
     if not (PROJECT / "data/plugins/jiang_schedule/main.py").is_file():
         return
@@ -182,3 +220,22 @@ def test_manual_weather_patch_reuses_the_scheduled_card_renderer(tmp_path: Path)
     patched = (checkout / "main.py").read_text(encoding="utf-8")
     compile(patched, str(checkout / "main.py"), "exec")
     assert "generate_weather" in patched
+
+
+def test_short_drama_patch_exposes_unified_content_adapter(tmp_path: Path) -> None:
+    source = PROJECT / "data/plugins/jiang_short_drama/main.py"
+    if not source.is_file():
+        return
+    checkout = tmp_path / "short-drama-plugin"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
+    shutil.copy2(source, checkout / "main.py")
+    for patch in (
+        ROOT / "patches/astrbot-plugin-jiang_short_drama.patch",
+        ROOT / "patches/astrbot-plugin-jiang_short_drama--unified.patch",
+    ):
+        subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
+        subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
+    patched = (checkout / "main.py").read_text(encoding="utf-8")
+    compile(patched, str(checkout / "main.py"), "exec")
+    assert "build_unified_recommendation" in patched

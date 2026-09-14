@@ -11,7 +11,7 @@ from .group_directory import GroupDirectoryService
 from .group_policy import GroupPolicyService
 from .private_policy import PrivateChatPolicyService
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
-from .task_store import ACTION_NAMES, TaskStore, normalize_arguments, normalize_task, validate_account
+from .task_store import ACTION_FEATURES, ACTION_NAMES, TaskStore, normalize_arguments, normalize_task, validate_account
 
 
 _API = "/api/plug/jiang_schedule/page/unified/"
@@ -76,8 +76,9 @@ class ScheduledTaskService:
                 return "有发送对象已暂停全部定时推送。"
             if policy.get("daily_limit", 3) <= 0:
                 return "有发送对象的每日推送上限为零。"
-            if item["action"] != "text" and "jiang_commands" not in policy.get("allowed_features", []):
-                return "有发送对象尚未允许常用指令功能。"
+            feature = ACTION_FEATURES[item["action"]]
+            if feature and feature not in policy.get("allowed_features", []):
+                return "有发送对象尚未允许该内容功能。"
             quiet = policy.get("quiet_hours") or {}
             if quiet.get("enabled") and clock:
                 start, end = quiet.get("start", "22:00"), quiet.get("end", "08:00")
@@ -158,8 +159,9 @@ class ScheduledTaskService:
                 raise ValueError("所选聊天已暂停机器人或定时推送，请在聊天管理中调整。")
             if policy.get("daily_limit", 3) <= 0:
                 raise ValueError("所选聊天的每日发送上限为零，请在聊天管理中调整。")
-            if task["action"] != "text" and "jiang_commands" not in policy.get("allowed_features", []):
-                raise ValueError("所选聊天未允许常用指令功能，请在聊天管理中调整。")
+            feature = ACTION_FEATURES[task["action"]]
+            if feature and feature not in policy.get("allowed_features", []):
+                raise ValueError("所选聊天未允许该内容功能，请在聊天管理中调整。")
             quiet = policy.get("quiet_hours") or {}
             clock = task["schedule"]["time"]
             if quiet.get("enabled") and check_scheduled_time:
@@ -211,7 +213,7 @@ class ScheduledTaskService:
         if not payload.get("account_id") or health.get("account_id") != payload["account_id"]:
             raise ValueError("微信账号已变化，请重新读取任务。")
         result = self.engine.request("POST", _API + "preview", {**payload, "action": action, "arguments": arguments})
-        if not isinstance(result, dict) or result.get("kind") not in {"text", "image"}:
+        if not isinstance(result, dict) or result.get("kind") not in {"text", "image", "link_card"}:
             raise PluginCenterError("内容预览暂时不可用。")
         return result
 

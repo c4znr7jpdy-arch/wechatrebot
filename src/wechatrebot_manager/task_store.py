@@ -16,7 +16,23 @@ import uuid
 
 
 BEIJING = timezone(timedelta(hours=8), "Asia/Shanghai")
-ACTION_NAMES = {"weather": "天气预报", "news": "热点资讯", "oilprice": "油价提醒", "kfc": "星期四文案", "text": "文字提醒"}
+ACTION_NAMES = {
+    "weather": "天气预报",
+    "news": "热点资讯",
+    "oilprice": "油价提醒",
+    "kfc": "星期四文案",
+    "short_drama": "影视推荐",
+    "text": "文字提醒",
+}
+ACTION_FEATURES = {
+    "weather": "jiang_commands",
+    "news": "jiang_commands",
+    "oilprice": "jiang_commands",
+    "kfc": "jiang_commands",
+    "short_drama": "jiang_short_drama",
+    "text": "",
+}
+SHORT_DRAMA_MEDIA_TYPES = ("短剧", "电视剧", "电影", "动漫", "综艺", "体育", "全部")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _TARGET = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
 _CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -126,6 +142,14 @@ def normalize_arguments(action: str, arguments: Any, *, draft: bool = False) -> 
         if (not province and not draft) or len(province) > 40 or any(ord(char) < 32 for char in province):
             raise ValueError("请填写油价查询省份。")
         return {"province": province}
+    if action == "short_drama":
+        media_type = str(arguments.get("media_type") or "短剧").strip()
+        limit = arguments.get("limit", 12)
+        if media_type not in SHORT_DRAMA_MEDIA_TYPES:
+            raise ValueError("请选择支持的影视推荐分类。")
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("影视推荐数量应为 1 到 20。")
+        return {"media_type": media_type, "limit": limit}
     if action == "text":
         text = arguments.get("text")
         text = "" if text is None and draft else text
@@ -196,9 +220,11 @@ def parse_command(command: str) -> dict[str, Any]:
         return {"action": "oilprice", "arguments": {"province": (match[1] or match[2]).strip()}}
     if text.casefold() in {"kfc", "疯狂星期四", "星期四文案"}:
         return {"action": "kfc", "arguments": {}}
+    if text == "短剧推荐":
+        return {"action": "short_drama", "arguments": {"media_type": "短剧", "limit": 12}}
     if match := re.fullmatch(r"(?:提醒|文字提醒)\s+(.+)", text, re.DOTALL):
         return {"action": "text", "arguments": normalize_arguments("text", {"text": match[1]})}
-    raise ValueError("当前支持天气、新闻、油价和星期四文案命令；也可以直接选择内容。")
+    raise ValueError("当前支持天气、新闻、油价、星期四文案和短剧推荐命令；也可以直接选择内容。")
 
 
 class TaskStore:

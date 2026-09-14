@@ -563,6 +563,10 @@ tbody tr:hover { background: #fbfdff; }
 .scheduled-preview { padding: 14px; border: 1px solid var(--line); border-radius: 8px; margin-top: 16px; font-size: 12px; }
 .scheduled-preview img { display: block; max-width: 100%; height: auto; margin-top: 10px; border-radius: 6px; }
 .scheduled-preview p { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow-y: auto; }
+.scheduled-link-card { display: grid; gap: 12px; margin-top: 10px; padding: 14px; border: 1px solid #dce5f2; border-radius: 10px; background: #f7faff; }
+.scheduled-link-card b { color: #173454; font-size: 14px; }
+.scheduled-link-card p { margin-top: 5px; color: #536a84; }
+.scheduled-link-card span { color: #2563eb; font-weight: 600; }
 .schedule-runs-heading { padding: 20px; border-bottom: 1px solid var(--line); }
 .schedule-runs-heading h2 { font-size: 18px; margin: 16px 0 8px; }
 .schedule-runs-heading p { color: #607289; margin: 0; font-size: 12px; }

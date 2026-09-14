@@ -1,0 +1,74 @@
+diff --git a/main.py b/main.py
+index c824744..1a4eb4c 100644
+--- a/main.py
++++ b/main.py
+@@ -492,3 +492,69 @@ class Main(star.Star):
++    async def build_unified_recommendation(
++        self,
++        media_type: str = "短剧",
++        limit: int = 12,
++    ) -> dict[str, object]:
++        """Build deterministic content for the account-scoped task runner.
++
++        The unified runner owns recipient selection and delivery authorization;
++        this adapter only reads the latest catalog and returns one safe message.
++        """
++        if media_type not in {"短剧", "电视剧", "电影", "动漫", "综艺", "体育", "全部"}:
++            raise ValueError("推荐分类不受支持")
++        if type(limit) is not int or not 1 <= limit <= 20:
++            raise ValueError("推荐数量必须在 1 至 20 之间")
++        search_media_type = None if media_type == "全部" else media_type
++        results = await self.searcher.recommend_results(
++            limit,
++            media_type=search_media_type,
++        )
++        if not results:
++            raise RuntimeError(f"当前资源站没有可推荐的{media_type}资源")
++
++        heading = _recommendation_heading(media_type)
++        recommendations_url = self.player_server.create_recommendations_url(
++            results,
++            heading,
++        )
++        if not recommendations_url:
++            recommendations_url = await self._remote_selection_url(
++                results,
++                heading=heading,
++                kind="recommendations",
++            )
++        if not recommendations_url:
++            recommendations_url = build_stateless_recommendations_url(
++                results,
++                self.config.get("stateless_player_url"),
++                heading,
++            )
++        if not recommendations_url:
++            return {
++                "type": "text",
++                "text": "\n".join(item.title for item in results),
++            }
++        parsed_url = urlsplit(recommendations_url)
++        if parsed_url.scheme != "https" or not parsed_url.netloc:
++            return {
++                "type": "text",
++                "text": "\n".join(item.title for item in results),
++            }
++
++        cover_candidates = _recommendation_cover_candidates(results)
++        card_cover = (
++            self.player_server.create_recommendation_cover_url(cover_candidates)
++            or (cover_candidates[0] if cover_candidates else _DEFAULT_COVER)
++        )
++        if urlsplit(card_cover).scheme != "https":
++            card_cover = _DEFAULT_COVER
++        return {
++            "type": "link_card",
++            "title": f"{heading}｜{len(results)}部"[:48],
++            "description": "定时推荐 · 点击查看封面并选择播放",
++            "url": recommendations_url,
++            "image_url": card_cover,
++        }
++
+     async def _execute_schedule_task(self, task_id: str) -> dict[str, object]:
+         task = self.schedule_store.get(task_id)
+         if task is None or not task.get("enabled"):

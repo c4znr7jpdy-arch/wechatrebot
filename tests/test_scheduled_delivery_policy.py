@@ -65,10 +65,15 @@ def bridge(tmp_path_factory):
 
 def _store(root, *, target=GROUP, task_id="task", action="text", sending=True):
     kind = "group" if target.endswith("@chatroom") else "private"
+    arguments = {
+        "text": {"text": "提醒"},
+        "weather": {"city": "青岛", "day": "today", "output": "image"},
+        "short_drama": {"media_type": "短剧", "limit": 12},
+    }.get(action, {})
     store = TaskStore(root / "data/manager/scheduled-tasks.db")
     task = store.save({
         "id": task_id, "account_id": ACCOUNT, "action": action,
-        "arguments": {"text": "提醒"} if action == "text" else {"city": "青岛"},
+        "arguments": arguments,
         "targets": [{"type": kind, "id": target}], "enabled": True,
         "schedule": {"kind": "daily", "time": "08:01"},
     }, now=CREATED)
@@ -103,6 +108,12 @@ def _router(bridge, root, *, on_send=None, on_materialize=None):
 
         async def send_image(self, target, path):
             self.calls.append((target, str(path)))
+            if on_send:
+                on_send()
+            return bridge.models.SendResult(ok=True)
+
+        async def send_link_card(self, target, title, description, thumb_url, url):
+            self.calls.append((target, title, description, thumb_url, url))
             if on_send:
                 on_send()
             return bridge.models.SendResult(ok=True)
@@ -194,6 +205,28 @@ def test_feature_scope_cannot_be_bypassed_by_scheduled_tag(bridge, tmp_path, tar
     assert "未允许" in _send(router, task, run, target=target)["message"]
     _policy(tmp_path, target=target, allowed_features=["jiang_commands"])
     assert _send(router, task, run, target=target)["status"] == "ok"
+
+
+@pytest.mark.parametrize("target", [GROUP, CONTACT])
+def test_scheduled_short_drama_requires_feature_and_sends_link_card(bridge, tmp_path, target):
+    _, task, run = _store(tmp_path, target=target, action="short_drama")
+    router = _router(bridge, tmp_path)
+    card = [{"type": "wechat_link_card", "data": {
+        "title": "最新短剧推荐｜12部",
+        "desc": "定时推荐 · 点击查看封面并选择播放",
+        "url": "https://player.example/recommendations/token",
+        "image_url": "https://player.example/cover.jpg",
+    }}]
+    _policy(tmp_path, target=target, allowed_features=["jiang_commands"])
+    assert "未允许" in _send(router, task, run, target=target, message=card)["message"]
+    _policy(tmp_path, target=target, allowed_features=["jiang_short_drama"])
+    assert _send(router, task, run, target=target, message=card)["status"] == "ok"
+    assert router.hook.calls[-1][1:] == (
+        "最新短剧推荐｜12部",
+        "定时推荐 · 点击查看封面并选择播放",
+        "https://player.example/cover.jpg",
+        "https://player.example/recommendations/token",
+    )
 
 
 @pytest.mark.parametrize("target", [GROUP, CONTACT])

@@ -682,7 +682,7 @@
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
         <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
       </div>
-      ${["feature-commands", "feature-schedule"].includes(detail.id) ? '<div class="feature-schedule-entry"><p>天气、资讯、油价和文字提醒可以安排发送到多个聊天。</p><button class="button secondary" id="featureScheduledTask" type="button">创建定时任务</button></div>' : ""}
+      ${detail.scheduled_action ? `<div class="feature-schedule-entry"><p>${detail.scheduled_action === "short_drama" ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。" : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。"}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>创建定时任务</button></div>` : ""}
       ${guide.recommendation ? `<section class="feature-assessment" aria-label="适用性评估"><div><span class="assessment-chip">${escapeHtml(guide.audience || "按需使用")}</span><span class="assessment-state">${escapeHtml(guide.readiness || "请按说明准备")}</span></div><p>${escapeHtml(guide.recommendation)}</p></section>` : ""}
       <section class="feature-guide" aria-label="快速设置说明">
         <div><span class="eyebrow">从这里开始</span><strong>${detail.configurable ? "先改常用项，其余保持当前设置" : "按指引完成准备"}</strong><p>${escapeHtml(detail.configuration_note || "不会自动覆盖已有设置，也不会替你开通外部服务。")}</p></div>
@@ -697,7 +697,7 @@
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online && detail.enabled ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
+        `<div class="empty-state compact"><p>${detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
     $("#featureEnabled").addEventListener("change", toggleFeature);
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
@@ -1727,7 +1727,8 @@
     } finally { if (generation === state.scheduledLoad) button.disabled = false; }
   }
 
-  const SCHEDULED_ACTIONS = {weather: "天气预报", news: "热点资讯", oilprice: "油价提醒", kfc: "星期四文案", text: "文字提醒"};
+  const SCHEDULED_ACTIONS = {weather: "天气预报", news: "热点资讯", oilprice: "油价提醒", kfc: "星期四文案", short_drama: "影视推荐", text: "文字提醒"};
+  const SCHEDULED_DEFAULTS = {weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, short_drama: {media_type: "短剧", limit: 12}, text: {text: ""}};
   const SCHEDULED_DAYS = ["一", "二", "三", "四", "五", "六", "日"];
   const SCHEDULED_RESULTS = {submitted: "已提交微信", failed: "发送失败", unknown: "结果待确认", skipped: "已跳过", pending: "等待发送", running: "正在执行", completed: "执行完成", partial: "部分失败"};
 
@@ -1753,7 +1754,7 @@
 
   function scheduledName(item) {
     const args = item.arguments || {};
-    return item.action === "weather" ? `${args.city || "城市待填写"}${args.day === "tomorrow" ? "明天" : "当天"}天气` : item.action === "oilprice" ? `${args.province || "省份待填写"}油价` : SCHEDULED_ACTIONS[item.action] || "定时任务";
+    return item.action === "weather" ? `${args.city || "城市待填写"}${args.day === "tomorrow" ? "明天" : "当天"}天气` : item.action === "oilprice" ? `${args.province || "省份待填写"}油价` : item.action === "short_drama" ? `${args.media_type || "短剧"}推荐` : SCHEDULED_ACTIONS[item.action] || "定时任务";
   }
 
   function scheduledStatus(item) {
@@ -1790,7 +1791,7 @@
       <td><span>${escapeHtml(scheduledTargetText(item.targets))}</span><small class="schedule-target-names">${escapeHtml((item.targets || []).map((entry) => entry.name || "待确认对象").join("、"))}</small></td>
       <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(scheduledTime(item.next_run_time))}</small></td>
       <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
-      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5"><div class="empty-state compact"><div class="empty-symbol">时</div><h2>${all.length ? "没有符合条件的任务" : "还没有定时任务"}</h2><p>${all.length ? "调整筛选条件，或为这个聊天新建任务。" : "从天气、资讯或一句文字提醒开始。选择内容、对象和时间后，再由你启用。"}</p><button class="button primary" id="emptyNewScheduledTask">新建任务</button></div></td></tr>`;
+      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5"><div class="empty-state compact"><div class="empty-symbol">时</div><h2>${all.length ? "没有符合条件的任务" : "还没有定时任务"}</h2><p>${all.length ? "调整筛选条件，或为这个聊天新建任务。" : "从天气、资讯、影视推荐或一句文字提醒开始。选择内容、对象和时间后，再由你启用。"}</p><button class="button primary" id="emptyNewScheduledTask">新建任务</button></div></td></tr>`;
     $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id)));
     $("#emptyNewScheduledTask")?.addEventListener("click", () => openScheduledEditor());
   }
@@ -1812,8 +1813,7 @@
   async function openScheduledEditor(item = null, copy = false, action = "weather") {
     if (state.scheduledBusy || guardScheduledDraft(() => openScheduledEditor(item, copy, action))) return;
     if (!state.scheduledContext) await loadSchedules();
-    const defaults = {weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, text: {text: ""}};
-    const editor = item ? structuredClone(item) : {id: crypto.randomUUID(), account_id: state.scheduledContext?.account_id || "", action, arguments: defaults[action], targets: state.scheduledChatFilter ? [structuredClone(state.scheduledChatFilter)] : [], schedule: {kind: "daily", time: "08:00", timezone: "Asia/Shanghai"}, enabled: false, draft: true, name: ""};
+    const editor = item ? structuredClone(item) : {id: crypto.randomUUID(), account_id: state.scheduledContext?.account_id || "", action, arguments: structuredClone(SCHEDULED_DEFAULTS[action] || {}), targets: state.scheduledChatFilter ? [structuredClone(state.scheduledChatFilter)] : [], schedule: {kind: "daily", time: "08:00", timezone: "Asia/Shanghai"}, enabled: false, draft: true, name: ""};
     if (copy) { editor.id = crypto.randomUUID(); delete editor.revision; editor.name = `${item.name || scheduledName(item)}（副本）`; editor.enabled = false; editor.draft = true; editor.status = "draft"; }
     editor.targets ||= [];
     editor.arguments ||= {};
@@ -1831,6 +1831,7 @@
     if (editor.action === "weather") return field("city", "城市", `<input id="scheduledArg-city" data-task-arg="city" value="${escapeHtml(args.city || "")}" placeholder="例如：青岛" maxlength="80">`) + field("day", "天气日期", `<select id="scheduledArg-day" data-task-arg="day"><option value="today" ${args.day !== "tomorrow" ? "selected" : ""}>执行当天</option><option value="tomorrow" ${args.day === "tomorrow" ? "selected" : ""}>执行日的明天</option></select><small>以图片卡片发送，与手动查询的样式一致。</small>`);
     if (editor.action === "news") return field("count", "资讯条数", `<input id="scheduledArg-count" data-task-arg="count" type="number" min="1" max="30" value="${escapeHtml(args.count ?? 10)}"><small>每次执行获取最新资讯。</small>`);
     if (editor.action === "oilprice") return field("province", "省份", `<input id="scheduledArg-province" data-task-arg="province" value="${escapeHtml(args.province || "")}" maxlength="80" placeholder="例如：山东">`);
+    if (editor.action === "short_drama") return field("media_type", "推荐分类", `<select id="scheduledArg-media_type" data-task-arg="media_type">${["短剧", "电视剧", "电影", "动漫", "综艺", "体育", "全部"].map((value) => `<option value="${value}" ${args.media_type === value ? "selected" : ""}>${value === "体育" ? "体育回放" : value === "全部" ? "全部分类" : value}</option>`).join("")}</select>`) + field("limit", "每次推荐", `<input id="scheduledArg-limit" data-task-arg="limit" type="number" min="1" max="20" value="${escapeHtml(args.limit ?? 12)}"><small>每次执行实时获取最新内容，并发送可点击播放的微信卡片。</small>`);
     if (editor.action === "text") return field("text", "提醒文字", `<textarea id="scheduledArg-text" data-task-arg="text" rows="4" maxlength="4000" placeholder="填写希望按时发送的文字">${escapeHtml(args.text || "")}</textarea><small>按原文发送，不会临时改写。</small>`);
     return '<p class="subtle">每次使用最新的星期四文案。可在下方选择每周四发送。</p>';
   }
@@ -1855,7 +1856,7 @@
     $("#scheduledBack").addEventListener("click", () => { if (!guardScheduledDraft(showScheduledList)) { state.scheduledEditor = null; showScheduledList(); } });
     $("#scheduledTaskForm").addEventListener("submit", (event) => event.preventDefault());
     $("#scheduledName").addEventListener("input", (event) => { editor.name = event.target.value; scheduledChanged(false); });
-    $("#scheduledAction").addEventListener("change", (event) => { editor.action = event.target.value; editor.arguments = ({weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, text: {text: ""}})[editor.action]; state.scheduledDirty = true; renderScheduledEditor(); $("#scheduledAction").focus(); });
+    $("#scheduledAction").addEventListener("change", (event) => { editor.action = event.target.value; editor.arguments = structuredClone(SCHEDULED_DEFAULTS[editor.action] || {}); state.scheduledDirty = true; renderScheduledEditor(); $("#scheduledAction").focus(); });
     $$('[data-task-arg]', root).forEach((input) => input.addEventListener("input", () => { editor.arguments[input.dataset.taskArg] = input.type === "number" ? Number(input.value) : input.value; scheduledChanged(false); }));
     $$('[data-scheduled-target-tab]', root).forEach((button) => button.addEventListener("click", () => { state.scheduledTargetTab = button.dataset.scheduledTargetTab; $$('[data-scheduled-target-tab]', root).forEach((tab) => { tab.classList.toggle("active", tab === button); tab.setAttribute("aria-pressed", String(tab === button)); }); renderScheduledTargets(); }));
     const search = $("#scheduledTargetSearch");
@@ -1922,7 +1923,7 @@
     if (!editor || !$("#scheduledSummaryText")) return;
     const ready = scheduledReadiness();
     $("#scheduledSummaryName").textContent = editor.name || scheduledName(editor);
-    $("#scheduledSummaryText").textContent = `${scheduledTimeText(editor.schedule)}，发送${scheduledName(editor)}${editor.action === "weather" ? "图片卡片" : ""}，给${scheduledTargetText(editor.targets)}。`;
+    $("#scheduledSummaryText").textContent = `${scheduledTimeText(editor.schedule)}，发送${scheduledName(editor)}${editor.action === "weather" ? "图片卡片" : editor.action === "short_drama" ? "播放卡片" : ""}，给${scheduledTargetText(editor.targets)}。`;
     $("#scheduledReadiness").textContent = ready.message;
     $("#scheduledReadiness").classList.toggle("warning", !ready.ready);
     $("#scheduledPrepareFeature").hidden = !ready.feature;
@@ -1988,6 +1989,7 @@
       const root = $("#scheduledPreview");
       if (data.kind === "image" && /^data:image\/(png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=\s]+$/.test(data.image_data_url || "")) root.innerHTML = `<strong>内容预览</strong><img src="${escapeHtml(data.image_data_url)}" alt="定时内容预览">`;
       else if (data.kind === "text") root.innerHTML = `<strong>内容预览</strong><p>${escapeHtml(data.text || "没有返回可预览的内容。")}</p>`;
+      else if (data.kind === "link_card") root.innerHTML = `<strong>播放卡片预览</strong><div class="scheduled-link-card"><div><b>${escapeHtml(data.title || "影视推荐")}</b><p>${escapeHtml(data.description || "点击后打开播放页")}</p></div><span>发送到微信后可点击查看</span></div>`;
       else throw new Error("预览内容暂时无法显示，请稍后重试。 ");
       root.hidden = false;
     });
@@ -2034,14 +2036,17 @@
     state.scheduledDirty = false;
     await navigate("features");
     state.scheduledDirty = dirty;
-    await openFeature(state.scheduledContext?.runtime_ready ? "feature-commands" : "feature-schedule");
+    const action = state.scheduledEditor?.action || "weather";
+    const feature = state.features.find((item) => item.schedule_provider && item.scheduled_action === (action === "short_drama" ? "short_drama" : "weather"));
+    if (feature) await openFeature(feature.id);
     toast("当前任务草稿已保留，完成准备后回到定时任务继续。 ");
   }
 
   async function openScheduledFromFeature() {
     if (state.featureDirty) { discardFeatureChanges(openScheduledFromFeature); return; }
+    const action = state.featureDetail?.scheduled_action || "weather";
     await navigate("schedules");
-    if (state.activePage === "schedules") await openScheduledEditor();
+    if (state.activePage === "schedules") await openScheduledEditor(null, false, action);
   }
 
   async function openScheduledForChat(target, accountId) {
@@ -3078,6 +3083,8 @@
       configuration,
       description,
       audience: previewAudience[id] || "按需使用",
+      scheduled_action: options.scheduledAction || "",
+      schedule_provider: options.scheduleProvider === true,
       ...options,
     });
     const features = [
@@ -3092,15 +3099,15 @@
       previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true}),
       previewFeature("feature-self-iterative", "自动改代码（实验）", "schema", "可读写并重新加载功能代码的实验维护能力，不建议普通用户或新安装默认启用。"),
       previewFeature("feature-router", "功能调度", "schema", "识别自然语言意图并把请求交给合适的功能处理。"),
-      previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。"),
+      previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
       previewFeature("feature-group-notice", "群成员变动通知", "schema", "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"),
       previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models", fieldCount: 11}),
       previewFeature("feature-emoji-voice", "表情语音", "schema", "把选中的表情回复转换为匹配情绪的语音。"),
       previewFeature("feature-mystool", "米游社签到", "none", "提供米游社账号绑定、查询和签到能力。"),
       previewFeature("feature-repeater", "复读功能", "none", "在群内出现连续相同消息时进行轻量互动。"),
       previewFeature("feature-rocom", "洛克王国助手", "none", "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"),
-      previewFeature("feature-schedule", "定时任务", "page-and-global-schedule-center", "集中管理新闻、天气、内容推送和多站点签到计划。", {page: "schedule-center"}),
-      previewFeature("feature-drama", "短剧", "page-and-global-schedule-center", "搜索影视与体育内容，并管理面向微信群的短剧推送计划。", {page: "recommendation-schedules"}),
+      previewFeature("feature-schedule", "定时任务", "page-and-global-schedule-center", "集中管理新闻、天气、内容推送和多站点签到计划。", {page: "schedule-center", scheduledAction: "weather"}),
+      previewFeature("feature-drama", "短剧", "page-and-global-schedule-center", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {page: "recommendation-schedules", scheduledAction: "short_drama", scheduleProvider: true}),
       previewFeature("feature-video", "视频理解", "schema", "从微信短视频提取关键帧和音轨，并由 Grok 4.6 生成时间线摘要。", {modelFieldCount: 3}),
       previewFeature("feature-meme", "表情管理", "schema-and-page", "管理多套表情包、会话绑定、资源目录和同步设置。", {page: "meme-management"}),
     ];
@@ -3282,8 +3289,9 @@
       delete_scheduled_task: (_account, id) => { previewTasks.delete(id); return ok({deleted: true}); },
       set_scheduled_task_enabled: (_account, id, enabled) => ok(previewTaskSave({...previewTasks.get(id), enabled, draft: false})),
       preview_scheduled_times: (schedule) => ok({items: previewTaskTimes(schedule), text: "请补齐有效的未来日期、星期和时间。"}),
-      parse_scheduled_command: (command) => { const match = command.replace(/^\//, "").match(/^(.+?)(明天|今日|今天)?天气$/); if (match) return ok({action: "weather", arguments: {city: match[1], day: match[2] === "明天" ? "tomorrow" : "today", output: "image"}}); if (/^(\/?)(新闻|资讯|热点)$/.test(command)) return ok({action: "news", arguments: {count: 10}}); return Promise.resolve({ok: false, error: {message: "这个命令暂不支持，请直接选择发送内容。"}}); },
+      parse_scheduled_command: (command) => { const normalized = command.replace(/^\//, ""); const match = normalized.match(/^(.+?)(明天|今日|今天)?天气$/); if (match) return ok({action: "weather", arguments: {city: match[1], day: match[2] === "明天" ? "tomorrow" : "today", output: "image"}}); if (/^(新闻|资讯|热点)$/.test(normalized)) return ok({action: "news", arguments: {count: 10}}); if (normalized === "短剧推荐") return ok({action: "short_drama", arguments: {media_type: "短剧", limit: 12}}); return Promise.resolve({ok: false, error: {message: "这个命令暂不支持，请直接选择发送内容。"}}); },
       preview_scheduled_task: (payload) => {
+        if (payload.action === "short_drama") return ok({kind: "link_card", title: `最新${payload.arguments.media_type || "短剧"}推荐｜${payload.arguments.limit || 12}部`, description: "定时推荐 · 点击查看封面并选择播放", url: "https://player.example/recommendations/preview", image_url: "https://player.example/cover.jpg"});
         if (payload.action !== "weather") return ok({kind: "text", text: payload.action === "text" ? payload.arguments.text : `预览示意：${SCHEDULED_ACTIONS[payload.action]}，正式执行时获取最新内容。`});
         const canvas = document.createElement("canvas"); canvas.width = 520; canvas.height = 230;
         const ctx = canvas.getContext("2d"); ctx.fillStyle = "#eef4ff"; ctx.fillRect(0, 0, 520, 230); ctx.fillStyle = "#10243d"; ctx.font = "bold 28px Microsoft YaHei UI"; ctx.fillText(`${payload.arguments.city || "城市"} · 天气卡片`, 28, 64); ctx.font = "20px Microsoft YaHei UI"; ctx.fillText(payload.arguments.day === "tomorrow" ? "执行日的明天天气" : "执行当天的天气", 28, 112); ctx.fillStyle = "#536982"; ctx.font = "18px Microsoft YaHei UI"; ctx.fillText("样式预览，不代表实时天气", 28, 181);

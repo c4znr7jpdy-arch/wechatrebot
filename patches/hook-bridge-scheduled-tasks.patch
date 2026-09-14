@@ -24,7 +24,7 @@ index 3c027ae..c763521 100644
          explicit_delivery = str(params.get("_wechatrebot_delivery") or "").casefold()
 +        scheduled = explicit_delivery == "scheduled"
 +        if scheduled:
-+            if any(command.kind not in {"text", "image"} for command in commands):
++            if any(command.kind not in {"text", "image", "link_card"} for command in commands):
 +                return self._failed("定时任务暂不支持此消息类型。", echo, 1403)
 +            decision = await self.scheduled_policy.authorize(
 +                self.state.bot_wxid, target, is_group=is_group, params=params, reserve=False
@@ -46,7 +46,7 @@ index 3c027ae..c763521 100644
              delivery = (
                  explicit_delivery
                  if explicit_delivery in {"reply", "proactive"}
-@@ -622,10 +633,31 @@ class OneBotActionRouter:
+@@ -622,10 +633,36 @@ class OneBotActionRouter:
                      auto_recall_delay,
                  )
              try:
@@ -72,6 +72,11 @@ index 3c027ae..c763521 100644
 +                        )
 +                    if command.kind == "image":
 +                        result = await self.hook.send_image(target, path)
++                    elif command.kind == "link_card":
++                        result = await self.hook.send_link_card(
++                            command.target, command.title, command.description,
++                            command.thumb_url, command.url,
++                        )
 +                    else:
 +                        result = await self.hook.send_text(target, command.text)
 +                else:
@@ -126,7 +131,7 @@ index 0000000..98a3d57
 +from zoneinfo import ZoneInfo
 +
 +from .outbound_policy import OutboundDecision, OutboundGroupPolicy, _atomic_json, _CLOCK
-+from .task_store import TaskStore
++from .task_store import ACTION_FEATURES, TaskStore
 +
 +
 +_CONTACT_ID = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
@@ -270,7 +275,7 @@ index 0000000..98a3d57
 +                    return reject("此聊天的机器人功能已关闭。")
 +                if not policy["scheduled_enabled"]:
 +                    return reject("此聊天已暂停全部定时推送。")
-+                feature = "" if task.get("action") == "text" else "jiang_commands"
++                feature = ACTION_FEATURES.get(task.get("action"), "__unsupported__")
 +                if feature and feature not in policy["allowed_features"]:
 +                    return reject("此聊天未允许该任务所需的功能。")
 +                limit = policy["daily_limit"]

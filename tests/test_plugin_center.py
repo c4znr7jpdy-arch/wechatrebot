@@ -353,11 +353,13 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "model_field_count": 2,
             "pages": ("dashboard",),
             "configuration": "schema-and-page",
-                "description": "",
-                "simplified": False,
-                "audience": "按需使用",
-                "readiness": "请按说明准备",
-            }
+            "description": "",
+            "simplified": False,
+            "audience": "按需使用",
+            "readiness": "请按说明准备",
+            "scheduled_action": "",
+            "schedule_provider": False,
+        }
     ]
     assert public_id.startswith("feature-")
     assert "module_name" not in catalog["plugins"][0]
@@ -671,6 +673,8 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     assert by_name["长期记忆"]["model_field_count"] == 1
     assert by_name["点歌"]["configurable"] is False
     assert by_name["短剧"]["configurable"] is False
+    assert by_name["短剧"]["scheduled_action"] == "short_drama"
+    assert by_name["短剧"]["schedule_provider"] is True
     assert by_name["点歌"]["pages"] == ()
     assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
     assert by_name["长期记忆"]["pages"] == ("chat-config",)
@@ -681,6 +685,7 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     assert list(angel["basic_schema"]) == ["personality"]
     assert music["schema"] == music["config"] == {}
     assert drama["schema"] == drama["config"] == {}
+    assert drama["scheduled_action"] == "short_drama"
     with pytest.raises(PluginCenterError, match="没有可编辑"):
         service.save(by_name["点歌"]["id"], {}, music["revision"])
 

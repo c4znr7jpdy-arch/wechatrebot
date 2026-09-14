@@ -40,6 +40,10 @@ def test_commands_are_parsed_to_typed_arguments() -> None:
     assert parse_command("提醒 下午三点交周报") == {
         "action": "text", "arguments": {"text": "下午三点交周报"}
     }
+    assert parse_command("短剧推荐") == {
+        "action": "short_drama",
+        "arguments": {"media_type": "短剧", "limit": 12},
+    }
 
 
 def test_delete_is_a_persistent_tombstone_and_cannot_be_resurrected(tmp_path: Path) -> None:
