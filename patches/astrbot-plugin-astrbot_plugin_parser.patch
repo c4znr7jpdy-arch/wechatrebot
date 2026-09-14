@@ -59,3 +59,25 @@
          with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
              await to_thread(ydl.download, [url])
          return audio_path
+--- a/main.py
++++ b/main.py
+@@ -239,7 +239,18 @@
+             return
+
+         # 发送
+-        await self.sender.send_parse_result(event, parse_res)
++        # A matched WeChat link invokes this feature just like a command.
++        # Keep the reply marker local to sending so later handlers do not
++        # mistake the link for an additional AI wake-up request.
++        was_wake = event.is_at_or_wake_command
++        if isinstance(event, AiocqhttpMessageEvent) and str(
++            event.get_group_id()
++        ).endswith("@chatroom"):
++            event.is_at_or_wake_command = True
++        try:
++            await self.sender.send_parse_result(event, parse_res)
++        finally:
++            event.is_at_or_wake_command = was_wake
+
+     @filter.permission_type(filter.PermissionType.ADMIN)
+     @filter.command("开启解析")
