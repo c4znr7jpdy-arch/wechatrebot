@@ -83,6 +83,17 @@ def test_common_commands_hide_internal_service_fields_from_basic_settings():
     assert advanced_schema("jiang_commands", schema) == {}
 
 
+def test_short_drama_hides_product_managed_player_settings():
+    schema = {
+        "episode_player_public_base_url": {"type": "string"},
+        "selection_store_api_url": {"type": "string"},
+        "selection_store_api_token": {"type": "string", "secret": True},
+    }
+
+    assert common_schema("jiang_short_drama", schema) == {}
+    assert advanced_schema("jiang_short_drama", schema) == {}
+
+
 def test_link_parser_uses_defaults_and_only_exposes_the_feature_switch():
     schema = {
         "require_at_in_group": {"type": "bool", "default": False},

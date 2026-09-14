@@ -146,6 +146,19 @@ def test_guard_rejects_embedded_cookie_authorization_and_session_literals(
     assert {item["reason"] for item in findings} == {"assigned-secret"}
 
 
+def test_guard_rejects_embedded_api_token_literal(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "jiang_short_drama_config.json").write_text(
+        '{"selection_store_api_token":"private-write-token-123456"}',
+        encoding="utf-8",
+    )
+
+    findings = _load_guard()(tmp_path)
+
+    assert {item["reason"] for item in findings} == {"assigned-secret"}
+
+
 def test_guard_allows_empty_and_documented_credential_placeholders(tmp_path: Path) -> None:
     app = tmp_path / "app"
     app.mkdir()

@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 
 from .task_store import ACTION_FEATURES, ACTION_NAMES
@@ -68,6 +70,71 @@ def _public_http_url(value) -> bool:
     return parsed.scheme == "https" and bool(parsed.netloc) and not parsed.username and not parsed.password
 
 
+def _hosted_player_base(value) -> bool:
+    raw_value = str(value or "").strip()
+    if (
+        not raw_value
+        or len(raw_value) > 2048
+        or any(ord(character) < 32 for character in raw_value)
+        or not _public_http_url(raw_value)
+    ):
+        return False
+    parsed = urlsplit(raw_value)
+    try:
+        parsed.port
+    except ValueError:
+        return False
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+        return False
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        labels = hostname.split(".")
+        if len(labels) < 2 or not re.search(r"[a-z]", labels[-1]) or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in labels
+        ):
+            return False
+    else:
+        if not address.is_global:
+            return False
+    return not parsed.query and not parsed.fragment
+
+
+def _hosted_player_url(value, base_url) -> bool:
+    raw_value = str(value or "").strip()
+    if (
+        not raw_value
+        or len(raw_value) > 2048
+        or any(ord(character) < 32 for character in raw_value)
+        or not _public_http_url(raw_value)
+        or not _hosted_player_base(base_url)
+    ):
+        return False
+    candidate = urlsplit(raw_value)
+    base = urlsplit(base_url)
+    try:
+        same_endpoint = (
+            candidate.hostname == base.hostname
+            and candidate.port == base.port
+            and candidate.path == base.path
+            and bool(candidate.query or candidate.fragment)
+            and not (candidate.query and candidate.fragment)
+        )
+        if not same_endpoint:
+            return False
+        if candidate.query:
+            return bool(re.fullmatch(r"s=[A-Za-z0-9_-]{16,96}", candidate.query))
+        return bool(re.fullmatch(
+            r"(?:r=[A-Za-z0-9_-]{1,1800}|"
+            r"p=[A-Za-z0-9_-]{1,1800}&ep=[1-9]\d{0,4}&force=[01])",
+            candidate.fragment,
+        ))
+    except ValueError:
+        return False
+
+
 def _image_content(path: str) -> Content:
     # Only a trusted renderer returns this path; never accept a path from a task.
     with Path(path).open("rb") as handle:
@@ -100,6 +167,18 @@ class ContentService:
             raise ValueError("内容服务配置格式不正确")
         return config
 
+    def _short_drama_configuration(self) -> dict:
+        path = self.root / "app/astrbot/data/config/jiang_short_drama_config.json"
+        try:
+            config = json.loads(path.read_text("utf-8-sig"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            raise ValueError("影视播放服务配置无法读取，请重新安装或更新") from None
+        if not isinstance(config, dict):
+            raise ValueError("影视播放服务配置格式不正确")
+        return config
+
     def _active_plugin(self, module: str):
         for item in self.context.get_all_stars():
             if (getattr(item, "root_dir_name", None) == module
@@ -125,6 +204,10 @@ class ContentService:
                 return {"ready": False, "message": f"{label}尚未加载，请先在功能中心启用"}
             if action == "short_drama" and not callable(getattr(plugin, "build_unified_recommendation", None)):
                 return {"ready": False, "message": "短剧功能版本过旧，请更新后使用统一任务"}
+            if action == "short_drama" and not _hosted_player_base(
+                self._short_drama_configuration().get("stateless_player_url")
+            ):
+                return {"ready": False, "message": "影视播放服务尚未配置，请更新或重新安装"}
             content_config = self._configuration() if feature == "jiang_commands" else {}
             if action == "news" and not all(str(content_config.get(key) or "").strip()
                                             for key in ("content_api_id", "content_api_key")):
@@ -144,11 +227,12 @@ class ContentService:
         args = task["arguments"]
         if action == "text":
             return Content(text=args["text"])
-        config = self._configuration()
-        for key, env in (("content_api_id", "JIANG_CONTENT_API_ID"),
-                         ("content_api_key", "JIANG_CONTENT_API_KEY"),
-                         ("weather_detail_token", "JIANG_WEATHER_DETAIL_TOKEN")):
-            os.environ[env] = str(config.get(key) or "").strip()
+        if action != "short_drama":
+            config = self._configuration()
+            for key, env in (("content_api_id", "JIANG_CONTENT_API_ID"),
+                             ("content_api_key", "JIANG_CONTENT_API_KEY"),
+                             ("weather_detail_token", "JIANG_WEATHER_DETAIL_TOKEN")):
+                os.environ[env] = str(config.get(key) or "").strip()
         if action == "weather":
             from ai_plugin.scheduled_weather import generate_weather
             day = args.get("day", "today")
@@ -177,6 +261,14 @@ class ContentService:
                 return Content(text=str(result.get("text") or ""))
             if result.get("type") != "link_card":
                 raise ValueError("短剧功能返回了不支持的消息类型")
+            configuration = self._short_drama_configuration()
+            if not _hosted_player_url(
+                result.get("url"), configuration.get("stateless_player_url")
+            ):
+                fallback = str(result.get("fallback_text") or "").strip()
+                if fallback:
+                    return Content(text=fallback)
+                raise ValueError("影视播放地址未通过服务校验")
             return Content(card={
                 "title": result.get("title"),
                 "description": result.get("description"),

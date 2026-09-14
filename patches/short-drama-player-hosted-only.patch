@@ -1,0 +1,285 @@
+diff --git a/index.html b/index.html
+index 369c351..5a4b50f 100644
+--- a/index.html
++++ b/index.html
+@@ -331,7 +331,7 @@
+           <section class="mobile-control-panel" aria-label="播放控制"><div class="mobile-time-row"><span id="mobileCurrentTime">0:00</span><span id="mobileDuration">0:00</span></div><div class="mobile-seek-wrap"><input id="mobileSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度"></div><div class="mobile-action-row"><button id="mobileEpisodeButton" class="mobile-episode-button" type="button" aria-label="选择剧集">选集 · <span id="mobileEpisodeLabel">第01集</span><span class="episode-chevron">›</span></button><button id="mobileMuteButton" class="mobile-tool-button" type="button" aria-label="静音"><svg class="volume-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z"/></svg><svg class="muted-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7 4.7 14.6 14.6-1.4-1.4-3.1-3.1L13 19V5L8 9H4v6h4l1.2.96L7.7 17.5 4.7 14.5 6.1 13.1l1.4 1.4V9.5L4.7 6.1 4.7 4.7Z"/></svg><span class="sr-only">静音</span></button><button id="mobileFullscreenButton" class="mobile-tool-button" type="button" aria-label="全屏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H3v4h2V5h2V3Zm14 4V3h-4v2h2v2h2ZM5 17H3v4h4v-2H5v-2Zm16 0h-2v2h-2v2h4v-4Z"/></svg><span class="sr-only">全屏</span></button><div class="mobile-tool-wrap"><button id="mobileMoreButton" class="mobile-tool-button" type="button" aria-label="更多播放设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></button><div id="mobileMoreMenu" class="mobile-more-menu" hidden><button type="button" data-rate="0.75">0.75 倍速</button><button type="button" data-rate="1" class="active">正常速度</button><button type="button" data-rate="1.25">1.25 倍速</button><button type="button" data-rate="1.5">1.5 倍速</button><button type="button" data-rate="2">2 倍速</button></div></div></div></section>
+         </div>
+       </div>
+-      <div class="below-player"><label class="switch-label"><input id="autoNext" type="checkbox" checked><span class="switch"></span><span>自动连播</span></label><p id="status">正在连接资源站……</p><button id="retry" type="button" hidden>重试</button><a id="direct" target="_blank" rel="noreferrer">线路</a></div>
++      <div class="below-player"><label class="switch-label"><input id="autoNext" type="checkbox" checked><span class="switch"></span><span>自动连播</span></label><p id="status">正在连接资源站……</p><button id="retry" type="button" hidden>重试</button><a id="direct" hidden aria-hidden="true"></a></div>
+       <div id="episodeSheet" class="sheet" hidden><button id="sheetBackdrop" class="sheet-backdrop" type="button" aria-label="关闭选集"></button><section class="sheet-panel"><header class="sheet-header"><span>选择剧集</span><button id="sheetClose" class="sheet-close" type="button">×</button></header><div id="sheetEpisodeGrid" class="episode-grid"></div></section></div>
+     </section>
+     <section id="recommendations" class="recommendations-page" hidden><header><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary"></p></header><section id="recommendationGrid" class="recommendation-grid"></section><p class="recommendation-tip">点击任一作品即可进入播放器；推荐结果会随资源站更新。</p></section>
+@@ -406,6 +406,9 @@
+       };
+ 
+       const decodePlaylist = (token) => {
++        if (!/^[A-Za-z0-9_-]{1,1800}$/.test(String(token || ''))) {
++          throw new Error('播放参数不合法');
++        }
+         if (!window.pako) throw new Error('缺少解压组件');
+         const normalized = token.replace(/-/g, '+').replace(/_/g, '/');
+         const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4));
+@@ -413,6 +416,40 @@
+         return JSON.parse(pako.inflate(bytes, { to: 'string' }));
+       };
+ 
++      const isSafePublicHttpsUrl = (value) => {
++        if (typeof value !== 'string' || !value || value.length > 2048 || /[\u0000-\u001f]/.test(value)) return false;
++        try {
++          const parsed = new URL(value);
++          const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
++          if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
++          if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) return false;
++          if (hostname.startsWith('[') && hostname.endsWith(']')) return false;
++          if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
++            const parts = hostname.split('.').map(Number);
++            if (parts.some((part) => part < 0 || part > 255)) return false;
++            const [a, b, c] = parts;
++            return !(a === 0
++              || a === 10
++              || a === 127
++              || (a === 100 && b >= 64 && b <= 127)
++              || (a === 169 && b === 254)
++              || (a === 172 && b >= 16 && b <= 31)
++              || (a === 192 && b === 0 && (c === 0 || c === 2))
++              || (a === 192 && b === 168)
++              || (a === 198 && (b === 18 || b === 19))
++              || (a === 198 && b === 51 && c === 100)
++              || (a === 203 && b === 0 && c === 113)
++              || a >= 224);
++          }
++          const labels = hostname.split('.');
++          return labels.length >= 2
++            && /[a-z]/.test(labels.at(-1))
++            && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
++        } catch (_error) {
++          return false;
++        }
++      };
++
+       const expandSelectionItem = (rawItem) => {
+         const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+         const pattern = item.episode_name_pattern;
+@@ -456,39 +493,68 @@
+         return item;
+       };
+ 
++      const validateSelectionItem = (rawItem) => {
++        if (!rawItem || typeof rawItem !== 'object') throw new Error('播放项目不合法');
++        const item = expandSelectionItem(rawItem);
++        const title = String(item.title || '短剧播放');
++        if (title.length > 300 || !Array.isArray(item.episodes)
++          || !item.episodes.length || item.episodes.length > 2000) {
++          throw new Error('分集数量不合法');
++        }
++        item.title = title;
++        item.episodes = item.episodes.map((rawEpisode, index) => {
++          if (!rawEpisode || typeof rawEpisode !== 'object') throw new Error('分集不合法');
++          const name = String(rawEpisode.name || `第${index + 1}集`);
++          const url = String(rawEpisode.url || '').trim();
++          if (name.length > 200 || !isSafePublicHttpsUrl(url) || !/\.m3u8(?:$|[?#])/i.test(url)) {
++            throw new Error('播放地址不安全');
++          }
++          return { name, url };
++        });
++        const cover = String(item.cover || '').trim();
++        item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
++        return item;
++      };
++
++      const validateSelectionPayload = (payload) => {
++        if (!payload || payload.v !== 1
++          || !['search', 'recommendations'].includes(String(payload.kind || ''))
++          || !Array.isArray(payload.items)
++          || !payload.items.length
++          || payload.items.length > 24) {
++          throw new Error('选集数据不合法');
++        }
++        return payload.items.map(validateSelectionItem);
++      };
++
+       try {
+         if (params.get('s')) {
+-          const response = await fetch(`/short-drama/api/selections/${encodeURIComponent(params.get('s'))}`, { cache: 'no-store', credentials: 'omit' });
++          const selectionToken = params.get('s');
++          if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
++            || [...params.keys()].some((key) => key !== 's')) {
++            throw new Error('选集令牌不合法');
++          }
++          const response = await fetch(`/short-drama/api/selections/${encodeURIComponent(selectionToken)}`, { cache: 'no-store', credentials: 'omit' });
+           const payload = await response.json();
+           if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
+-          recommendationItems = Array.isArray(payload.items)
+-            ? payload.items.map(expandSelectionItem).filter((item) => item.episodes.length)
+-            : [];
++          recommendationItems = validateSelectionPayload(payload);
+           selectionKind = String(payload.kind || 'recommendations');
+           recommendationsTitle.textContent = String(payload.heading || '选择作品');
+           document.title = recommendationsTitle.textContent;
+           watchStage.hidden = true;
+         } else if (fragment.get('r')) {
+           const payload = decodePlaylist(fragment.get('r'));
+-          recommendationItems = Array.isArray(payload.items)
+-            ? payload.items.map(expandSelectionItem).filter((item) => item.episodes.length)
+-            : [];
++          recommendationItems = validateSelectionPayload(payload);
+           selectionKind = String(payload.kind || 'recommendations');
+           recommendationsTitle.textContent = String(payload.heading || '选择作品');
+           document.title = recommendationsTitle.textContent;
+           watchStage.hidden = true;
+         } else if (fragment.get('p')) {
+-          playlist = decodePlaylist(fragment.get('p'));
++          const payload = decodePlaylist(fragment.get('p'));
++          if (!payload || payload.v !== 1) throw new Error('播放数据不合法');
++          playlist = validateSelectionItem(payload);
+         } else {
+-          playlist = {
+-            v: 1,
+-            title: (params.get('title') || '短剧播放').trim(),
+-            source: '',
+-            episodes: [{
+-              name: (params.get('episode') || '正片').trim(),
+-              url: (params.get('url') || '').trim()
+-            }]
+-          };
++          throw new Error('缺少安全播放参数');
+         }
+       } catch (_error) {
+         fail('分集数据已损坏，请回到微信重新搜索。');
+@@ -717,12 +783,12 @@
+         const item = playlist.episodes[current] || {};
+         const source = String(item.url || '').trim();
+         episodeNode.textContent = String(item.name || `第${current + 1}集`);
+-        fallback.href = `https://m3u8-player.cc/player?url=${encodeURIComponent(source)}`;
++        fallback.removeAttribute('href');
+         statusNode.classList.remove('error');
+         statusNode.textContent = '正在连接资源站……';
+         if (loadTimer) clearTimeout(loadTimer);
+         loadTimer = setTimeout(() => {
+-          fail('资源站响应超时，可能不允许浏览器直连。请点击“线路”使用备用播放器。');
++          fail('资源站响应超时，可能不允许浏览器直连。请稍后重试或回到微信更换资源。');
+         }, 15000);
+         if (hls) { hls.destroy(); hls = null; }
+         qualityMenu.hidden = true;
+@@ -736,9 +802,8 @@
+         syncNativeControls();
+         updateMobileProgress();
+         updatePlaybackOverlay();
+-        if (!/^https?:\/\//i.test(source)) {
++        if (!isSafePublicHttpsUrl(source) || !/\.m3u8(?:$|[?#])/i.test(source)) {
+           fail('播放地址无效，请回到微信重新搜索。');
+-          fallback.removeAttribute('href');
+           return;
+         }
+         if (video.canPlayType('application/vnd.apple.mpegurl')) {
+@@ -761,11 +826,11 @@
+           hls.on(Hls.Events.ERROR, (_event, data) => {
+             if (data && data.fatal) {
+               if (loadTimer) clearTimeout(loadTimer);
+-              fail('资源站拒绝了浏览器直连，请点击“线路”使用备用播放器。');
++              fail('资源站拒绝了浏览器直连，请重试或回到微信更换资源。');
+             }
+           });
+         } else {
+-          fail('当前浏览器不支持 HLS，请使用备用播放器打开。');
++          fail('当前浏览器不支持 HLS 播放。');
+         }
+         fragment.set('ep', String(current + 1));
+         history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
+@@ -836,7 +901,7 @@
+           cover.className = 'cover';
+           cover.textContent = String(item.title || '剧').slice(0, 1);
+           const coverUrl = String(item.cover || '').trim();
+-          if (/^https?:\/\//i.test(coverUrl)) {
++          if (isSafePublicHttpsUrl(coverUrl)) {
+             const image = document.createElement('img');
+             image.src = coverUrl;
+             image.alt = `${item.title || '短剧'}封面`;
+diff --git a/state_server.py b/state_server.py
+index f1f5b69..f43695c 100644
+--- a/state_server.py
++++ b/state_server.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ import argparse
+ import hashlib
+ import hmac
++import ipaddress
+ import json
+ import logging
+ import os
+@@ -103,9 +104,41 @@ class StateStore:
+                 pass
+ 
+ 
+-def _valid_http_url(value: object) -> bool:
+-    parsed = urlsplit(str(value or ""))
+-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
++def _valid_public_https_url(value: object) -> bool:
++    url = str(value or "").strip()
++    if not url or len(url) > 2048 or any(ord(character) < 32 for character in url):
++        return False
++    try:
++        parsed = urlsplit(url)
++        hostname = (parsed.hostname or "").rstrip(".").lower()
++        parsed.port
++        if (
++            parsed.scheme != "https"
++            or not parsed.netloc
++            or parsed.username
++            or parsed.password
++            or hostname == "localhost"
++            or hostname.endswith((".localhost", ".local"))
++        ):
++            return False
++        try:
++            address = ipaddress.ip_address(hostname)
++        except ValueError:
++            labels = hostname.split(".")
++            return (
++                len(labels) >= 2
++                and bool(re.search(r"[a-z]", labels[-1]))
++                and all(
++                    re.fullmatch(
++                        r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
++                        label,
++                    )
++                    for label in labels
++                )
++            )
++        return address.version == 4 and address.is_global
++    except ValueError:
++        return False
+ 
+ 
+ def _validate_payload(payload: object) -> tuple[dict[str, object] | None, str | None]:
+@@ -125,6 +158,9 @@ def _validate_payload(payload: object) -> tuple[dict[str, object] | None, str |
+             return None, "invalid item"
+         if not isinstance(item.get("title"), str) or len(item["title"]) > 300:
+             return None, "invalid item title"
++        cover = item.get("cover")
++        if cover and not _valid_public_https_url(cover):
++            item["cover"] = ""
+         count = item.get("episode_count")
+         episodes = item.get("episodes")
+         if isinstance(episodes, list):
+@@ -135,12 +171,17 @@ def _validate_payload(payload: object) -> tuple[dict[str, object] | None, str |
+                     not isinstance(episode, dict)
+                     or not isinstance(episode.get("name"), str)
+                     or len(episode["name"]) > 200
+-                    or not _valid_http_url(episode.get("url"))
++                    or not _valid_public_https_url(episode.get("url"))
++                    or ".m3u8" not in str(episode.get("url") or "").lower()
+                 ):
+                     return None, "invalid episode"
+         elif "episode_template" in item or "episode_url_template" in item:
+             if not isinstance(count, int) or count < 1 or count > MAX_EPISODES:
+                 return None, "invalid episode template count"
++            template = item.get("episode_template") or item.get("episode_url_template")
++            probe = str(template or "").replace("{name}", "1").replace("{value}", "1")
++            if not _valid_public_https_url(probe) or ".m3u8" not in probe.lower():
++                return None, "invalid episode template"
+         else:
+             return None, "missing episodes"
+     return payload, None

@@ -1,0 +1,475 @@
+diff --git a/main.py b/main.py
+index 429092b..2e1a2eb 100644
+--- a/main.py
++++ b/main.py
+@@ -52,6 +52,45 @@ _SCHEDULE_JOB_PREFIX = "short_drama_recommend_"
+ _ACTIVE_PLUGIN = None
+ 
+ 
++def _safe_card_image_url(value: object) -> str:
++    url = str(value or "").strip()
++    if not url or len(url) > 2048 or any(ord(char) < 32 for char in url):
++        return _DEFAULT_COVER
++    try:
++        parsed = urlsplit(url)
++        hostname = (parsed.hostname or "").rstrip(".").lower()
++        parsed.port
++        try:
++            address = ipaddress.ip_address(hostname)
++        except ValueError:
++            labels = hostname.split(".")
++            public_host = (
++                len(labels) >= 2
++                and bool(re.search(r"[a-z]", labels[-1]))
++                and hostname != "localhost"
++                and not hostname.endswith((".localhost", ".local"))
++                and all(
++                    re.fullmatch(
++                        r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
++                        label,
++                    )
++                    for label in labels
++                )
++            )
++        else:
++            public_host = address.is_global
++        if (
++            parsed.scheme != "https"
++            or not public_host
++            or parsed.username
++            or parsed.password
++        ):
++            return _DEFAULT_COVER
++    except ValueError:
++        return _DEFAULT_COVER
++    return url
++
++
+ def _recommendation_heading(media_type: str) -> str:
+     if media_type == "全部":
+         return "最新全分类推荐"
+@@ -63,8 +101,9 @@ def _first_recommendation_cover(
+ ) -> str:
+     """优先使用推荐列表第一条有封面的作品；都没有时回退默认图。"""
+     for result in recommendations:
+-        cover_url = (result.cover_url or "").strip()
+-        if cover_url:
++        raw_cover = (result.cover_url or "").strip()
++        cover_url = _safe_card_image_url(raw_cover)
++        if cover_url != _DEFAULT_COVER or raw_cover == _DEFAULT_COVER:
+             return cover_url
+     return _DEFAULT_COVER
+ 
+@@ -77,13 +116,10 @@ def _recommendation_cover_candidates(
+     candidates: list[str] = []
+     seen: set[str] = set()
+     for result in recommendations:
+-        cover_url = (result.cover_url or "").strip()
+-        parsed = urlsplit(cover_url)
+-        if (
+-            parsed.scheme not in {"http", "https"}
+-            or not parsed.netloc
+-            or cover_url in seen
+-        ):
++        raw_cover = (result.cover_url or "").strip()
++        cover_url = _safe_card_image_url(raw_cover)
++        if ((cover_url == _DEFAULT_COVER and raw_cover != _DEFAULT_COVER)
++                or cover_url in seen):
+             continue
+         seen.add(cover_url)
+         candidates.append(cover_url)
+@@ -600,10 +636,7 @@ class Main(star.Star):
+             }
+ 
+         cover_candidates = _recommendation_cover_candidates(results)
+-        card_cover = (
+-            self.player_server.create_recommendation_cover_url(cover_candidates)
+-            or (cover_candidates[0] if cover_candidates else _DEFAULT_COVER)
+-        )
++        card_cover = cover_candidates[0] if cover_candidates else _DEFAULT_COVER
+         if urlsplit(card_cover).scheme != "https":
+             card_cover = _DEFAULT_COVER
+         return {
+@@ -636,28 +669,22 @@ class Main(star.Star):
+             raise RuntimeError(f"当前资源站没有可推荐的{media_type}资源")
+ 
+         heading = _recommendation_heading(media_type)
+-        recommendations_url = self.player_server.create_recommendations_url(
++        recommendations_url = await self._remote_selection_url(
+             results,
+-            heading,
++            heading=heading,
++            kind="recommendations",
+         )
+         if not recommendations_url:
+-            recommendations_url = await self._remote_selection_url(
+-                results,
+-                heading=heading,
+-                kind="recommendations",
+-            )
+-        if not recommendations_url:
+-            recommendations_url = build_stateless_recommendations_url(
+-                results,
+-                self.config.get("stateless_player_url"),
+-                heading,
++            recommendations_url = self._hosted_player_url(
++                build_stateless_recommendations_url(
++                    results,
++                    self.config.get("stateless_player_url"),
++                    heading,
++                )
+             )
+         if recommendations_url:
+             cover_candidates = _recommendation_cover_candidates(results)
+-            card_cover = (
+-                self.player_server.create_recommendation_cover_url(cover_candidates)
+-                or (cover_candidates[0] if cover_candidates else _DEFAULT_COVER)
+-            )
++            card_cover = cover_candidates[0] if cover_candidates else _DEFAULT_COVER
+             chain = MessageChain(
+                 [
+                     Share(
+@@ -704,26 +731,21 @@ class Main(star.Star):
+             if not recommendations:
+                 yield event.plain_result("当前资源站暂时没有可推荐的短剧")
+                 return
+-            recommendations_url = self.player_server.create_recommendations_url(
+-                recommendations
++            recommendations_url = await self._remote_selection_url(
++                recommendations,
++                heading="最新短剧推荐",
++                kind="recommendations",
+             )
+             if not recommendations_url:
+-                recommendations_url = await self._remote_selection_url(
+-                    recommendations,
+-                    heading="最新短剧推荐",
+-                    kind="recommendations",
+-                )
+-            if not recommendations_url:
+-                recommendations_url = build_stateless_recommendations_url(
+-                    recommendations,
+-                    self.config.get("stateless_player_url"),
++                recommendations_url = self._hosted_player_url(
++                    build_stateless_recommendations_url(
++                        recommendations,
++                        self.config.get("stateless_player_url"),
++                    )
+                 )
+ 
+             cover_candidates = _recommendation_cover_candidates(recommendations)
+-            card_cover = (
+-                self.player_server.create_recommendation_cover_url(cover_candidates)
+-                or (cover_candidates[0] if cover_candidates else _DEFAULT_COVER)
+-            )
++            card_cover = cover_candidates[0] if cover_candidates else _DEFAULT_COVER
+             if recommendations_url and await self._send_recommendations_card(
+                 event,
+                 recommendations,
+@@ -804,10 +826,20 @@ class Main(star.Star):
+                     "可换个体育关键词或加上年份"
+                 )
+                 return
+-            collection_url = self.player_server.create_collection_url(
+-                sports_query,
+-                first_page,
++            collection_url = await self._remote_selection_url(
++                first_page.items,
++                heading=f"赛事回放｜搜索“{sports_query}”",
++                kind="search",
+             )
++            if not collection_url:
++                collection_url = self._hosted_player_url(
++                    build_stateless_search_url(
++                        first_page.items,
++                        self.config.get("stateless_player_url"),
++                        sports_query,
++                        "赛事回放",
++                    )
++                )
+             if collection_url and await self._send_collection_card(
+                 event,
+                 sports_query,
+@@ -821,7 +853,7 @@ class Main(star.Star):
+                 )
+                 return
+             lines = [item.title for item in first_page.items[:20]]
+-            lines.append("仅展示前20场；配置公网播放器后可分页浏览全部回放")
++            lines.append("仅展示前20场；托管中间页暂不可用")
+             yield event.plain_result("\n".join(lines))
+             return
+ 
+@@ -848,10 +880,20 @@ class Main(star.Star):
+                 )
+                 return
+             if variant_number is None:
+-                variants_url = self.player_server.create_variants_url(
+-                    title_query,
++                variants_url = await self._remote_selection_url(
+                     variants,
++                    heading=f"可选版本｜《{title_query}》",
++                    kind="search",
+                 )
++                if not variants_url:
++                    variants_url = self._hosted_player_url(
++                        build_stateless_search_url(
++                            variants,
++                            self.config.get("stateless_player_url"),
++                            title_query,
++                            "可选版本",
++                        )
++                    )
+                 if variants_url and await self._send_variants_card(
+                     event,
+                     title_query,
+@@ -937,11 +979,20 @@ class Main(star.Star):
+                 media_type=search_media_type,
+             )
+             if people_results:
+-                people_url = self.player_server.create_people_url(
+-                    title_query,
+-                    people_media_label,
++                people_url = await self._remote_selection_url(
+                     people_results,
++                    heading=f"{title_query}相关{people_media_label}",
++                    kind="search",
+                 )
++                if not people_url:
++                    people_url = self._hosted_player_url(
++                        build_stateless_search_url(
++                            people_results,
++                            self.config.get("stateless_player_url"),
++                            title_query,
++                            people_media_label,
++                        )
++                    )
+                 if people_url and await self._send_people_card(
+                     event,
+                     title_query,
+@@ -1006,23 +1057,19 @@ class Main(star.Star):
+                     reverse=True,
+                 )
+             )[:8]
+-            search_url = self.player_server.create_search_url(
+-                title_query,
+-                media_label,
++            search_url = await self._remote_selection_url(
+                 results,
++                heading=f"{media_label or '影视资源'}｜搜索“{title_query or '影视'}”",
++                kind="search",
+             )
+             if not search_url:
+-                search_url = await self._remote_selection_url(
+-                    results,
+-                    heading=f"{media_label or '影视资源'}｜搜索“{title_query or '影视'}”",
+-                    kind="search",
+-                )
+-            if not search_url:
+-                search_url = build_stateless_search_url(
+-                    results,
+-                    self.config.get("stateless_player_url"),
+-                    title_query,
+-                    media_label,
++                search_url = self._hosted_player_url(
++                    build_stateless_search_url(
++                        results,
++                        self.config.get("stateless_player_url"),
++                        title_query,
++                        media_label,
++                    )
+                 )
+             if search_url and await self._send_search_card(
+                 event,
+@@ -1158,20 +1205,22 @@ class Main(star.Star):
+         parts.append(result.source)
+         return f"{index}. " + "｜".join(parts)
+ 
+-    @staticmethod
+     async def _send_collection_card(
++        self,
+         event: AstrMessageEvent,
+         query_title: str,
+         first_page: CollectionPage,
+         collection_url: str,
+     ) -> bool:
+-        cover = next(
++        if not self._hosted_player_url(collection_url):
++            return False
++        cover = _safe_card_image_url(next(
+             (item.cover_url for item in first_page.items if item.cover_url),
+             _DEFAULT_COVER,
+-        )
++        ))
+         description = (
+             f"已找到首批 {len(first_page.items)} 场回放"
+-            " · 点击按页浏览，向下滚动继续加载"
++            " · 点击进入托管页面选择播放"
+         )
+         message = [
+             {
+@@ -1205,13 +1254,15 @@ class Main(star.Star):
+             )
+             return False
+ 
+-    @staticmethod
+     async def _send_recommendations_card(
++        self,
+         event: AstrMessageEvent,
+         recommendations: tuple[SearchResult, ...],
+         recommendations_url: str,
+         cover_url: str,
+     ) -> bool:
++        if not self._hosted_player_url(recommendations_url):
++            return False
+         message = [
+             {
+                 "type": "wechat_link_card",
+@@ -1244,14 +1295,16 @@ class Main(star.Star):
+             )
+             return False
+ 
+-    @staticmethod
+     async def _send_sports_card(
++        self,
+         event: AstrMessageEvent,
+         result: SearchResult,
+         episode: Episode,
+         watch_url: str,
+         player_can_select: bool = False,
+     ) -> bool:
++        if not self._hosted_player_url(watch_url):
++            return False
+         summary = Main._result_summary(result, episode)
+         description = f"{summary} · 点击播放"
+         if player_can_select and len(result.episodes) > 1:
+@@ -1263,7 +1316,7 @@ class Main(star.Star):
+                     "title": f"赛事回放｜{result.title}"[:48],
+                     "desc": description[:80],
+                     "url": watch_url,
+-                    "image_url": result.cover_url or _DEFAULT_COVER,
++                    "image_url": _safe_card_image_url(result.cover_url),
+                 },
+             }
+         ]
+@@ -1288,23 +1341,25 @@ class Main(star.Star):
+             )
+             return False
+ 
+-    @staticmethod
+     async def _send_people_card(
++        self,
+         event: AstrMessageEvent,
+         query_title: str,
+         media_label: str,
+         results: tuple[SearchResult, ...],
+         people_url: str,
+     ) -> bool:
++        if not self._hosted_player_url(people_url):
++            return False
+         title, description = _compact_people_card_text(
+             query_title,
+             media_label,
+             results,
+         )
+-        cover = next(
++        cover = _safe_card_image_url(next(
+             (result.cover_url for result in results if result.cover_url),
+             _DEFAULT_COVER,
+-        )
++        ))
+         message = [
+             {
+                 "type": "wechat_link_card",
+@@ -1345,25 +1400,17 @@ class Main(star.Star):
+         results: tuple[SearchResult, ...],
+         search_url: str,
+     ) -> bool:
++        if not self._hosted_player_url(search_url):
++            return False
+         title, description = _compact_search_card_text(
+             query_title,
+             media_label,
+             results,
+         )
+-        cover = next(
++        cover = _safe_card_image_url(next(
+             (result.cover_url for result in results if result.cover_url),
+             _DEFAULT_COVER,
+-        )
+-        cover_proxy_factory = getattr(
+-            self.player_server,
+-            "create_card_cover_url",
+-            None,
+-        )
+-        card_cover = (
+-            cover_proxy_factory(cover)
+-            if callable(cover_proxy_factory) and cover != _DEFAULT_COVER
+-            else None
+-        ) or cover
++        ))
+         message = [
+             {
+                 "type": "wechat_link_card",
+@@ -1371,7 +1418,7 @@ class Main(star.Star):
+                     "title": title,
+                     "desc": description[:80],
+                     "url": search_url,
+-                    "image_url": card_cover,
++                    "image_url": cover,
+                 },
+             }
+         ]
+@@ -1396,21 +1443,23 @@ class Main(star.Star):
+             )
+             return False
+ 
+-    @staticmethod
+     async def _send_variants_card(
++        self,
+         event: AstrMessageEvent,
+         query_title: str,
+         variants: tuple[SearchResult, ...],
+         variants_url: str,
+     ) -> bool:
++        if not self._hosted_player_url(variants_url):
++            return False
+         title, description = _compact_variants_card_text(
+             query_title,
+             variants,
+         )
+-        cover = next(
++        cover = _safe_card_image_url(next(
+             (result.cover_url for result in variants if result.cover_url),
+             _DEFAULT_COVER,
+-        )
++        ))
+         message = [
+             {
+                 "type": "wechat_link_card",
+@@ -1443,14 +1492,16 @@ class Main(star.Star):
+             )
+             return False
+ 
+-    @staticmethod
+     async def _send_card(
++        self,
+         event: AstrMessageEvent,
+         result: SearchResult,
+         episode: Episode,
+         watch_url: str,
+         player_can_select: bool = False,
+     ) -> bool:
++        if not self._hosted_player_url(watch_url):
++            return False
+         title, description = _compact_play_card_text(result, episode)
+         message = [
+             {
+@@ -1459,7 +1510,7 @@ class Main(star.Star):
+                     "title": title,
+                     "desc": description[:80],
+                     "url": watch_url,
+-                    "image_url": result.cover_url or _DEFAULT_COVER,
++                    "image_url": _safe_card_image_url(result.cover_url),
+                 },
+             }
+         ]

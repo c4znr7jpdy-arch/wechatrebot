@@ -1,0 +1,322 @@
+diff --git a/search.py b/search.py
+index 1d129a8..a89cdc0 100644
+--- a/search.py
++++ b/search.py
+@@ -7,6 +7,7 @@ import ipaddress
+ import json
+ import logging
+ import re
++import socket
+ import time
+ import unicodedata
+ from dataclasses import dataclass, replace
+@@ -16,9 +17,102 @@ from typing import Any, Iterable
+ from urllib.parse import urljoin, urlsplit
+ 
+ import aiohttp
++from aiohttp.abc import AbstractResolver
++from aiohttp.resolver import DefaultResolver
+ 
+ 
+ logger = logging.getLogger("jiang_short_drama")
++_MAX_REMOTE_BODY_BYTES = 5_000_000
++
++
++async def _read_bounded_body(
++    response: aiohttp.ClientResponse, limit: int = _MAX_REMOTE_BODY_BYTES
++) -> bytes:
++    """Read through EOF or one byte beyond the allowed size."""
++    body = bytearray()
++    while len(body) <= limit:
++        chunk = await response.content.read(min(65536, limit + 1 - len(body)))
++        if not chunk:
++            break
++        body.extend(chunk)
++    return bytes(body)
++
++
++def _safe_public_https_url(value: object) -> bool:
++    if not isinstance(value, str) or not value or len(value) > 2048:
++        return False
++    if any(ord(character) < 32 for character in value):
++        return False
++    try:
++        parsed = urlsplit(value)
++        hostname = (parsed.hostname or "").rstrip(".").lower()
++        parsed.port
++        if (
++            parsed.scheme != "https"
++            or not parsed.netloc
++            or parsed.username
++            or parsed.password
++            or hostname == "localhost"
++            or hostname.endswith((".localhost", ".local"))
++        ):
++            return False
++        try:
++            address = ipaddress.ip_address(hostname)
++        except ValueError:
++            labels = hostname.split(".")
++            return (
++                len(labels) >= 2
++                and bool(re.search(r"[a-z]", labels[-1]))
++                and all(
++                    re.fullmatch(
++                        r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
++                        label,
++                    )
++                    for label in labels
++                )
++            )
++        return address.version == 4 and address.is_global and not address.is_multicast
++    except ValueError:
++        return False
++
++
++class _PublicResolver(AbstractResolver):
++    """Resolve only globally routable addresses at connection time."""
++
++    def __init__(self, resolver: AbstractResolver | None = None) -> None:
++        self._resolver = resolver or DefaultResolver()
++
++    async def resolve(
++        self,
++        hostname: str,
++        port: int = 0,
++        family: int = socket.AF_INET,
++    ) -> list[Any]:
++        resolved = await self._resolver.resolve(hostname, port, family)
++        if not resolved:
++            raise OSError("host did not resolve")
++        for item in resolved:
++            raw_host = item.get("host") if isinstance(item, dict) else getattr(
++                item, "host", ""
++            )
++            raw_address = str(raw_host or "").split("%", 1)[0]
++            try:
++                address = ipaddress.ip_address(raw_address)
++            except ValueError as exc:
++                raise OSError("resolver returned an invalid address") from exc
++            if not address.is_global or address.is_multicast:
++                raise OSError("host resolved to a non-public address")
++        return resolved
++
++    async def close(self) -> None:
++        await self._resolver.close()
++
++
++def _public_connector() -> aiohttp.TCPConnector:
++    return aiohttp.TCPConnector(
++        resolver=_PublicResolver(),
++        ttl_dns_cache=60,
++    )
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -548,7 +629,7 @@ def parse_episodes(play_url: Any) -> tuple[Episode, ...]:
+             else:
+                 name, url = f"第{index}集", item
+             url = url.strip()
+-            if not re.match(r"^https?://", url, flags=re.IGNORECASE):
++            if not _safe_public_https_url(url):
+                 continue
+             if ".m3u8" not in url.lower() or url in seen:
+                 continue
+@@ -811,6 +892,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             source_results = await asyncio.gather(
+                 *(
+@@ -897,6 +979,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             source_pages = await asyncio.gather(
+                 *(
+@@ -977,6 +1060,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             source_results = await asyncio.gather(
+                 *(
+@@ -1112,6 +1196,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             for page in range(1, 11):
+                 page_results = await asyncio.gather(
+@@ -1221,6 +1306,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             source_results = await asyncio.gather(
+                 *(
+@@ -1292,6 +1378,7 @@ class ShortDramaSearcher:
+             timeout=timeout,
+             headers=headers,
+             trust_env=False,
++            connector=_public_connector(),
+         ) as session:
+             source_results = await asyncio.gather(
+                 *(
+@@ -1491,8 +1578,7 @@ class ShortDramaSearcher:
+             async with semaphore:
+                 async with session.get(
+                     url,
+-                    allow_redirects=True,
+-                    ssl=False,
++                    allow_redirects=False,
+                 ) as response:
+                     if response.status not in {200, 206}:
+                         return False
+@@ -1545,11 +1631,11 @@ class ShortDramaSearcher:
+             return 0.0
+         try:
+             async with semaphore:
+-                async with session.get(url, allow_redirects=True) as response:
++                async with session.get(url, allow_redirects=False) as response:
+                     if response.status not in {200, 206}:
+                         return 0.0
+-                    raw = await response.read()
+-                    if len(raw) > 5_000_000:
++                    raw = await _read_bounded_body(response)
++                    if len(raw) > _MAX_REMOTE_BODY_BYTES:
+                         return 0.0
+             content = raw.decode("utf-8-sig", errors="replace")
+             seconds = playlist_duration_seconds(content)
+@@ -1569,25 +1655,7 @@ class ShortDramaSearcher:
+ 
+     @staticmethod
+     def _is_public_http_url(url: str) -> bool:
+-        try:
+-            parsed = urlsplit(url)
+-            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+-                return False
+-            if parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
+-                return False
+-            try:
+-                address = ipaddress.ip_address(parsed.hostname)
+-            except ValueError:
+-                return True
+-            return not (
+-                address.is_private
+-                or address.is_loopback
+-                or address.is_link_local
+-                or address.is_reserved
+-                or address.is_multicast
+-            )
+-        except ValueError:
+-            return False
++        return _safe_public_https_url(url)
+ 
+     async def _search_source_variants(
+         self,
+@@ -1599,17 +1667,19 @@ class ShortDramaSearcher:
+         match_query: str | None = None,
+         media_type: str | None = None,
+     ) -> list[SearchResult]:
++        if not _safe_public_https_url(source.url):
++            return []
+         try:
+             async with semaphore:
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "wd": query},
+-                    allow_redirects=True,
++                    allow_redirects=False,
+                 ) as response:
+                     if response.status != 200:
+                         return []
+-                    raw = await response.read()
+-                    if len(raw) > 5_000_000:
++                    raw = await _read_bounded_body(response)
++                    if len(raw) > _MAX_REMOTE_BODY_BYTES:
+                         return []
+             payload = _decode_json(raw)
+             return matching_items(
+@@ -1637,17 +1707,19 @@ class ShortDramaSearcher:
+         media_type: str | None = None,
+         limit: int = 10,
+     ) -> list[SearchResult]:
++        if not _safe_public_https_url(source.url):
++            return []
+         try:
+             async with semaphore:
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "wd": query},
+-                    allow_redirects=True,
++                    allow_redirects=False,
+                 ) as response:
+                     if response.status != 200:
+                         return []
+-                    raw = await response.read()
+-                    if len(raw) > 5_000_000:
++                    raw = await _read_bounded_body(response)
++                    if len(raw) > _MAX_REMOTE_BODY_BYTES:
+                         return []
+             payload = _decode_json(raw)
+             return person_matching_items(
+@@ -1675,6 +1747,8 @@ class ShortDramaSearcher:
+         year: str | None,
+         page: int,
+     ) -> tuple[str, list[SearchResult], int]:
++        if not _safe_public_https_url(source.url):
++            return source.name, [], 0
+         try:
+             async with semaphore:
+                 async with session.get(
+@@ -1684,12 +1758,12 @@ class ShortDramaSearcher:
+                         "wd": f"{league} {year}" if year else league,
+                         "pg": page,
+                     },
+-                    allow_redirects=True,
++                    allow_redirects=False,
+                 ) as response:
+                     if response.status != 200:
+                         return source.name, [], 0
+-                    raw = await response.read()
+-                    if len(raw) > 5_000_000:
++                    raw = await _read_bounded_body(response)
++                    if len(raw) > _MAX_REMOTE_BODY_BYTES:
+                         return source.name, [], 0
+             payload = _decode_json(raw)
+             try:
+@@ -1724,12 +1798,14 @@ class ShortDramaSearcher:
+         page: int,
+         media_type: str | None,
+     ) -> list[Recommendation]:
++        if not _safe_public_https_url(source.url):
++            return []
+         try:
+             async with semaphore:
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "pg": page},
+-                    allow_redirects=True,
++                    allow_redirects=False,
+                 ) as response:
+                     if response.status != 200:
+                         logger.info(
+@@ -1739,8 +1815,8 @@ class ShortDramaSearcher:
+                             response.status,
+                         )
+                         return []
+-                    raw = await response.read()
+-                    if len(raw) > 5_000_000:
++                    raw = await _read_bounded_body(response)
++                    if len(raw) > _MAX_REMOTE_BODY_BYTES:
+                         return []
+             return recommendation_candidates(
+                 _decode_json(raw),

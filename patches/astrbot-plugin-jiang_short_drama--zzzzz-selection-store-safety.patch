@@ -1,0 +1,136 @@
+diff --git a/selection_store.py b/selection_store.py
+index eb10a2d..95ae1f8 100644
+--- a/selection_store.py
++++ b/selection_store.py
+@@ -7,15 +7,20 @@ manifests and segments directly from the source URL in the user's browser.
+ from __future__ import annotations
+ 
++import json
+ import logging
++import re
+ from urllib.parse import quote, urlsplit
+ 
+ import aiohttp
+ 
+-from .search import SearchResult
++from .search import SearchResult, _public_connector, _read_bounded_body, _safe_public_https_url
+ from .watch_url import build_selection_payload
+ 
+ 
+ logger = logging.getLogger("jiang_short_drama")
++_MAX_SELECTION_REQUEST_BYTES = 4 * 1024 * 1024
++_MAX_SELECTION_RESPONSE_BYTES = 16 * 1024
++_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{24,512}$")
+ 
+ 
+ class RemoteSelectionStore:
+@@ -34,18 +39,37 @@ class RemoteSelectionStore:
+         self.player_url = str(player_url or "").strip().rstrip("#")
+         self.timeout_seconds = max(2.0, min(float(timeout_seconds or 8), 20.0))
+ 
++    def _same_hosted_service(self) -> bool:
++        if not (
++            _safe_public_https_url(self.api_url)
++            and _safe_public_https_url(self.player_url)
++        ):
++            return False
++        api = urlsplit(self.api_url)
++        player = urlsplit(self.player_url)
++        try:
++            api_port = api.port or 443
++            player_port = player.port or 443
++        except ValueError:
++            return False
++        if not player.path.endswith("/player"):
++            return False
++        expected_api_path = f"{player.path[:-len('/player')]}/api/selections"
++        return bool(
++            api.hostname == player.hostname
++            and api_port == player_port
++            and api.path == expected_api_path
++            and not api.query
++            and not api.fragment
++            and not player.query
++            and not player.fragment
++        )
++
+     @property
+     def enabled(self) -> bool:
+-        parsed = urlsplit(self.api_url)
+-        player = urlsplit(self.player_url)
+         return bool(
+-            self.api_token
+-            and parsed.scheme == "https"
+-            and parsed.netloc
+-            and player.scheme == "https"
+-            and player.netloc
+-            and not player.query
+-            and not player.fragment
++            _TOKEN_RE.fullmatch(self.api_token)
++            and self._same_hosted_service()
+         )
+ 
+     async def create_url(
+@@ -60,35 +84,56 @@ class RemoteSelectionStore:
+         payload = build_selection_payload(results, heading=heading, kind=kind)
+         if payload is None:
+             return None
++        request_body = json.dumps(
++            {"payload": payload},
++            ensure_ascii=False,
++            separators=(",", ":"),
++        ).encode("utf-8")
++        if len(request_body) > _MAX_SELECTION_REQUEST_BYTES:
++            logger.warning("[SHORT_DRAMA] selection payload is too large")
++            return None
+ 
+         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+         headers = {
+             "Authorization": f"Bearer {self.api_token}",
+             "Content-Type": "application/json",
+             "Accept": "application/json",
+         }
+         try:
+-            async with aiohttp.ClientSession(timeout=timeout) as session:
++            async with aiohttp.ClientSession(
++                timeout=timeout,
++                trust_env=False,
++                connector=_public_connector(),
++            ) as session:
+                 async with session.post(
+                     self.api_url,
+-                    json={"payload": payload},
++                    data=request_body,
+                     headers=headers,
++                    allow_redirects=False,
+                 ) as response:
+-                    body = await response.json(content_type=None)
+-                    if response.status != 200 or not isinstance(body, dict):
++                    raw = await _read_bounded_body(
++                        response, _MAX_SELECTION_RESPONSE_BYTES
++                    )
++                    if (
++                        response.status != 200
++                        or len(raw) > _MAX_SELECTION_RESPONSE_BYTES
++                    ):
+                         logger.warning(
+                             "[SHORT_DRAMA] selection store rejected payload status=%s",
+                             response.status,
+                         )
+                         return None
++                    body = json.loads(raw)
++                    if not isinstance(body, dict):
++                        return None
+                     token = str(body.get("token") or "").strip()
+-                    if not token or len(token) > 96:
++                    if not re.fullmatch(r"[A-Za-z0-9_-]{16,96}", token):
+                         logger.warning("[SHORT_DRAMA] selection store returned invalid token")
+                         return None
+                     return f"{self.player_url}?s={quote(token, safe='')}"
+-        except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
++        except (aiohttp.ClientError, OSError, TimeoutError, ValueError) as exc:
+             logger.warning(
+                 "[SHORT_DRAMA] selection store unavailable: %s",
+                 type(exc).__name__,
+             )
+             return None

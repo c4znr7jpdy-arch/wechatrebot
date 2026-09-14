@@ -1,0 +1,226 @@
+diff --git a/main.py b/main.py
+index 140d2da..429092b 100644
+--- a/main.py
++++ b/main.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import ipaddress
+ import logging
+ import re
+ from pathlib import Path
+@@ -42,7 +43,6 @@ from .watch_url import (
+     build_stateless_playlist_url,
+     build_stateless_recommendations_url,
+     build_stateless_search_url,
+-    build_watch_url,
+ )
+ 
+ 
+@@ -336,7 +336,9 @@ class Main(star.Star):
+             )
+ 
+     async def initialize(self) -> None:
+-        await self.player_server.start()
++        logger.info(
++            "[SHORT_DRAMA] hosted HTTPS player enabled; local player listener disabled"
++        )
+         await self._sync_schedule_jobs()
+ 
+     async def terminate(self) -> None:
+@@ -487,7 +489,76 @@ class Main(star.Star):
+         store = getattr(self, "selection_store", None)
+         if store is None:
+             return None
+-        return await store.create_url(results, heading=heading, kind=kind)
++        return self._hosted_player_url(
++            await store.create_url(results, heading=heading, kind=kind)
++        )
++
++    def _hosted_player_url(self, value: object) -> str | None:
++        """Accept only signed or stateless links on the configured player page."""
++        raw_base = str(
++            self.config.get("stateless_player_url") or ""
++        ).strip().rstrip("#")
++        raw_candidate = str(value or "").strip()
++        if (
++            len(raw_base) > 2048
++            or len(raw_candidate) > 2048
++            or any(ord(character) < 32 for character in raw_base + raw_candidate)
++        ):
++            return None
++        base = urlsplit(raw_base)
++        candidate = urlsplit(raw_candidate)
++        try:
++            hostname = (base.hostname or "").rstrip(".").lower()
++            try:
++                address = ipaddress.ip_address(hostname)
++            except ValueError:
++                labels = hostname.split(".")
++                public_host = (
++                    len(labels) >= 2
++                    and bool(re.search(r"[a-z]", labels[-1]))
++                    and hostname != "localhost"
++                    and not hostname.endswith((".localhost", ".local"))
++                    and all(
++                        re.fullmatch(
++                            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
++                            label,
++                        )
++                        for label in labels
++                    )
++                )
++            else:
++                public_host = address.is_global
++            same_endpoint = (
++                base.scheme == "https"
++                and bool(base.hostname)
++                and public_host
++                and not base.username
++                and not base.password
++                and not base.query
++                and not base.fragment
++                and candidate.scheme == "https"
++                and candidate.hostname == base.hostname
++                and candidate.port == base.port
++                and candidate.path == base.path
++                and not candidate.username
++                and not candidate.password
++            )
++        except ValueError:
++            return None
++        if not same_endpoint:
++            return None
++        if candidate.query:
++            if candidate.fragment or not re.fullmatch(
++                r"s=[A-Za-z0-9_-]{16,96}", candidate.query
++            ):
++                return None
++        elif not re.fullmatch(
++            r"(?:r=[A-Za-z0-9_-]{1,1800}|"
++            r"p=[A-Za-z0-9_-]{1,1800}&ep=[1-9]\d{0,4}&force=[01])",
++            candidate.fragment,
++        ):
++            return None
++        return candidate.geturl()
+ 
+     async def build_unified_recommendation(
+         self,
+@@ -512,21 +574,18 @@ class Main(star.Star):
+             raise RuntimeError(f"当前资源站没有可推荐的{media_type}资源")
+ 
+         heading = _recommendation_heading(media_type)
+-        recommendations_url = self.player_server.create_recommendations_url(
++        recommendations_url = await self._remote_selection_url(
+             results,
+-            heading,
++            heading=heading,
++            kind="recommendations",
+         )
+         if not recommendations_url:
+-            recommendations_url = await self._remote_selection_url(
+-                results,
+-                heading=heading,
+-                kind="recommendations",
+-            )
+-        if not recommendations_url:
+-            recommendations_url = build_stateless_recommendations_url(
+-                results,
+-                self.config.get("stateless_player_url"),
+-                heading,
++            recommendations_url = self._hosted_player_url(
++                build_stateless_recommendations_url(
++                    results,
++                    self.config.get("stateless_player_url"),
++                    heading,
++                )
+             )
+         if not recommendations_url:
+             return {
+@@ -553,6 +612,7 @@ class Main(star.Star):
+             "description": "定时推荐 · 点击查看封面并选择播放",
+             "url": recommendations_url,
+             "image_url": card_cover,
++            "fallback_text": "\n".join(item.title for item in results),
+         }
+ 
+     async def _execute_schedule_task(self, task_id: str) -> dict[str, object]:
+@@ -709,6 +769,11 @@ class Main(star.Star):
+                     yield event.plain_result("这场赛事当前没有可播放线路")
+                     return
+                 watch_url, player_can_select = self._watch_url(result, episode)
++                if not watch_url:
++                    yield event.plain_result(
++                        f"《{result.title}》\n中间播放页暂不可用，请稍后重试"
++                    )
++                    return
+                 if await self._send_sports_card(
+                     event,
+                     result,
+@@ -817,6 +882,11 @@ class Main(star.Star):
+                 yield event.plain_result("这个版本当前没有可播放线路")
+                 return
+             watch_url, player_can_select = self._watch_url(result, episode)
++            if not watch_url:
++                yield event.plain_result(
++                    f"《{result.title}》\n中间播放页暂不可用，请稍后重试"
++                )
++                return
+             sent = await self._send_card(
+                 event,
+                 result,
+@@ -990,6 +1060,11 @@ class Main(star.Star):
+             episode,
+             force_episode=requested_episode is not None,
+         )
++        if not watch_url:
++            yield event.plain_result(
++                f"《{result.title}》\n中间播放页暂不可用，请稍后重试"
++            )
++            return
+         sent = await self._send_card(
+             event,
+             result,
+@@ -1020,33 +1095,17 @@ class Main(star.Star):
+         *,
+         force_episode: bool = False,
+     ) -> tuple[str, bool]:
+-        playlist_url = self.player_server.create_watch_url(
+-            result,
+-            episode,
+-            force_episode=force_episode,
+-        )
+-        if playlist_url:
+-            return playlist_url, True
+-
+-        stateless_url = build_stateless_playlist_url(
+-            result,
+-            self.config.get("stateless_player_url"),
+-            episode,
+-            force_episode=force_episode,
++        stateless_url = self._hosted_player_url(
++            build_stateless_playlist_url(
++                result,
++                self.config.get("stateless_player_url"),
++                episode,
++                force_episode=force_episode,
++            )
+         )
+         if stateless_url:
+             return stateless_url, True
+-
+-        configured = self.config.get("player_url_template")
+-        watch_url = build_watch_url(result, configured, episode)
+-        if configured and str(configured).strip() not in {"direct", "DIRECT"}:
+-            try:
+-                str(configured).format(url="", title="", episode="")
+-            except (KeyError, ValueError):
+-                logger.warning(
+-                    "[SHORT_DRAMA] player_url_template 格式无效，使用默认 HLS 播放页"
+-                )
+-        return watch_url, False
++        return "", False
+ 
+     @staticmethod
+     def _result_summary(result: SearchResult, episode: Episode) -> str:

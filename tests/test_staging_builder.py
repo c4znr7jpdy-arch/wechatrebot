@@ -482,6 +482,18 @@ def test_staging_sanitizes_active_and_documented_project_credentials(
         '"session_id": "private-session-example-123456"\n',
         encoding="utf-8",
     )
+    config_root = tmp_path / "app" / "astrbot" / "data" / "config"
+    config_root.mkdir(parents=True)
+    drama_config = config_root / "jiang_short_drama_config.json"
+    drama_config.write_text(
+        json.dumps({
+            "stateless_player_url": "https://player.example/short-drama/player",
+            "selection_store_api_url": "https://player.example/short-drama/api/selections",
+            "selection_store_api_token": "private-write-token-123456",
+            "episode_player_public_base_url": "https://customer-device.example",
+        }),
+        encoding="utf-8",
+    )
 
     module._sanitize_project_source_credentials(tmp_path)
 
@@ -492,6 +504,15 @@ def test_staging_sanitizes_active_and_documented_project_credentials(
     assert "your-value-here" in sanitized
     namespace: dict[str, object] = {}
     exec(compile(sanitized, str(source), "exec"), namespace)
+    packaged_config = json.loads(drama_config.read_text(encoding="utf-8"))
+    assert packaged_config["selection_store_api_token"] == ""
+    assert packaged_config["episode_player_public_base_url"] == ""
+    assert packaged_config["stateless_player_url"] == (
+        "https://player.example/short-drama/player"
+    )
+    assert packaged_config["selection_store_api_url"] == (
+        "https://player.example/short-drama/api/selections"
+    )
     assert namespace["configured"]() is False
     assert guide.read_text(encoding="utf-8") == (
         'authorization: "your-value-here"\n'

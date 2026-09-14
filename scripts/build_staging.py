@@ -23,7 +23,7 @@ from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 
 
 _SENSITIVE_FIELD = re.compile(
-    r"(?i)(?:.*[_-])?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"(?i)(?:.*[_-])?(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|"
     r"secret|cookie|authorization|session[_-]?token)"
 )
 _DOCUMENTED_PLACEHOLDER = re.compile(
@@ -31,13 +31,13 @@ _DOCUMENTED_PLACEHOLDER = re.compile(
 )
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 _COMMENT_SECRET = re.compile(
-    r"(?i)([\"']?(?:.*[_-])?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"(?i)([\"']?(?:.*[_-])?(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|"
     r"secret|cookie|authorization|session[_-]?token)[\"']?\s*[=:]\s*[\"'])"
     r"((?!<|\$\{|your[-_]|example[-_]|sample[-_]|placeholder|xxx|test[-_])[^\"'\r\n]{16,})"
     r"([\"'])"
 )
 _DOCUMENT_SECRET = re.compile(
-    r"(?i)([\"']?(?:.*[_-])?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"(?i)([\"']?(?:.*[_-])?(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|"
     r"secret|cookie|authorization|session(?:[_-]?(?:id|token))?)[\"']?\s*[=:]\s*[\"'])"
     r"((?!<|\$\{|your[-_]|example[-_]|sample[-_]|placeholder|xxx|test[-_])[^\"'\r\n]{16,})"
     r"([\"'])"
@@ -313,6 +313,45 @@ def _sanitize_project_source_credentials(output: Path) -> None:
                 sanitized = _DOCUMENT_SECRET.sub(r"\1your-value-here\3", source)
                 if sanitized != source:
                     path.write_text(sanitized, encoding="utf-8")
+
+    config_root = output / "app" / "astrbot" / "data" / "config"
+    if config_root.is_dir():
+        for path in sorted(config_root.glob("*_config.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(f"project JSON configuration is invalid: {path}") from exc
+
+            def sanitize(value: object, field: str = "") -> object:
+                if isinstance(value, dict):
+                    return {
+                        str(key): sanitize(child, str(key))
+                        for key, child in value.items()
+                    }
+                if isinstance(value, list):
+                    return [sanitize(child, field) for child in value]
+                if (
+                    isinstance(value, str)
+                    and value
+                    and _SENSITIVE_FIELD.fullmatch(field)
+                    and not _DOCUMENTED_PLACEHOLDER.match(value)
+                    and not _ENVIRONMENT_NAME.fullmatch(value)
+                ):
+                    return ""
+                return value
+
+            sanitized_payload = sanitize(payload)
+            if path.name == "jiang_short_drama_config.json" and isinstance(
+                sanitized_payload, dict
+            ):
+                # Commercial clients use the hosted page and never expose a local
+                # player listener, even if a developer checkout configured one.
+                sanitized_payload["episode_player_public_base_url"] = ""
+            if sanitized_payload != payload:
+                path.write_text(
+                    json.dumps(sanitized_payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
 
 
 def _release_manifest(
