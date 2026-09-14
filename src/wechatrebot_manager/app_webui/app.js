@@ -50,6 +50,15 @@
     messageLoad: 0,
     historyPolling: false,
     schedules: [],
+    scheduledContext: null,
+    scheduledEditor: null,
+    scheduledDirty: false,
+    scheduledBusy: false,
+    scheduledLoad: 0,
+    scheduledTimeLoad: 0,
+    scheduledChatFilter: null,
+    scheduledTargetTab: "group",
+    scheduledReturnDraft: false,
     experience: null,
     maintenance: null,
     responseTraces: [],
@@ -410,9 +419,10 @@
   }
 
   async function navigate(page) {
-    if (!PAGE_TITLES[page] || state.featureSaving) return;
+    if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy) return;
     if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
+    if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
     state.activePage = page;
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
@@ -432,7 +442,7 @@
       await loadConversations();
       if (state.selectedConversation) await selectConversation(state.selectedConversation.conversation_id, {silent: true});
     }
-    if (page === "schedules") await loadSchedules();
+    if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
     if (page === "activity") await loadActivity();
     if (page === "settings") {
       setSettingsSection(state.settingsSection);
@@ -672,6 +682,7 @@
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
         <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
       </div>
+      ${["feature-commands", "feature-schedule"].includes(detail.id) ? '<div class="feature-schedule-entry"><p>天气、资讯、油价和文字提醒可以安排发送到多个聊天。</p><button class="button secondary" id="featureScheduledTask" type="button">创建定时任务</button></div>' : ""}
       ${guide.recommendation ? `<section class="feature-assessment" aria-label="适用性评估"><div><span class="assessment-chip">${escapeHtml(guide.audience || "按需使用")}</span><span class="assessment-state">${escapeHtml(guide.readiness || "请按说明准备")}</span></div><p>${escapeHtml(guide.recommendation)}</p></section>` : ""}
       <section class="feature-guide" aria-label="快速设置说明">
         <div><span class="eyebrow">从这里开始</span><strong>${detail.configurable ? "先改常用项，其余保持当前设置" : "按指引完成准备"}</strong><p>${escapeHtml(detail.configuration_note || "不会自动覆盖已有设置，也不会替你开通外部服务。")}</p></div>
@@ -688,6 +699,7 @@
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online && detail.enabled ? "保存并应用" : "保存设置"}</button></div></div>` :
         `<div class="empty-state compact"><p>${detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureEnabled").addEventListener("change", toggleFeature);
+    $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
       try {
@@ -1087,11 +1099,12 @@
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
-    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div></header>`;
+    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
     const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
     const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
     const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">群主、管理员和头像等微信接口未提供的信息保持“未知”，不会推断。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
     panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
+    $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "group", id: group.group_id, name: group.name}, state.groupAccount));
     $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
       state.groupInspectorView = button.dataset.inspectorView;
       renderGroupInspector();
@@ -1123,10 +1136,11 @@
       <label class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></label>
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>只在被点名时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
-      <label class="toggle-line"><span><strong>允许主动消息</strong><small>${escapeHtml(sourceText)}</small></span><span class="toggle"><input name="proactive_enabled" type="checkbox" ${policy.proactive_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.proactive_enabled ? "已允许" : "已关闭"}</span></span></label>
+      <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
+      <label class="toggle-line"><span><strong>允许 AI 主动聊天</strong><small>${escapeHtml(sourceText)}；与统一定时任务分别控制</small></span><span class="toggle"><input name="proactive_enabled" type="checkbox" ${policy.proactive_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.proactive_enabled ? "已允许" : "已关闭"}</span></span></label>
       <label class="toggle-line"><span><strong>安静时段</strong><small>此时段内不应主动打扰</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
       <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
-      <label><span>每日主动消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示本群不允许主动消息。</small></label>
+      <label><span>每日主动与定时推送上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>两类推送共用上限；填 0 表示全部暂停。</small></label>
       <div class="policy-summary">${escapeHtml(proactive.message || "本群当前策略不允许主动消息。")} 当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
     </form>`;
   }
@@ -1143,6 +1157,7 @@
         bot_enabled: form.elements.bot_enabled.checked,
         reply_mode: form.elements.reply_mode.value,
         proactive_enabled: form.elements.proactive_enabled.checked,
+        scheduled_enabled: form.elements.scheduled_enabled.checked,
         allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
         quiet_hours: {
           enabled: form.elements.quiet_enabled.checked,
@@ -1373,12 +1388,18 @@
   }
 
   function privatePolicyMarkup(data) {
-    if (!data || data.loading) return '<section class="private-feature-policy"><h3>该联系人可用功能</h3><div class="loading-row">正在读取功能范围…</div></section>';
-    if (data.error) return `<section class="private-feature-policy"><h3>该联系人可用功能</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
+    if (!data || data.loading) return '<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="loading-row">正在读取聊天规则…</div></section>';
+    if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
+    const quiet = policy.quiet_hours || {};
     const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong>${feature.globally_enabled_by_default ? "" : "<small>新安装默认关闭，可先预设范围</small>"}</span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
-      <h3>该联系人可用功能</h3>
+      <label class="toggle-line"><span><strong>在此私聊使用机器人</strong><small>关闭后不在这段私聊中回复或发送定时任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></label>
+      <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停该联系人的全部定时推送</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
+      <label class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
+      <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
+      <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
+      <h3>可用功能</h3>
       <p>勾选机器人在这段私聊中可以使用的功能。未单独配置的联系人沿用新安装默认启用范围。</p>
       <div class="option-grid compact-options private-feature-options">${choices || "<span class='subtle'>当前没有可分配的功能</span>"}</div>
     </form>`;
@@ -1415,12 +1436,14 @@
         : facts ? `<dl class="contact-facts">${facts}</dl>` : '<div class="profile-state">当前接口没有返回更多个人资料。</div>';
     const policyData = state.privatePolicies[contact.user_id];
     const saveDisabled = !policyData || policyData.loading || policyData.error;
-    panel.innerHTML = `<header class="inspector-hero"><span class="eyebrow">当前联系人</span><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div></header>
+    panel.innerHTML = `<header class="inspector-hero"><span class="eyebrow">当前联系人</span><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></header>
       <div class="inspector-scroll contact-detail-scroll"><section class="contact-profile"><div class="contact-section-heading"><h3>个人详情</h3><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</section>${privatePolicyMarkup(policyData)}</div>
-      <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存可用功能</button></footer>`;
+      <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存私聊规则</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
+    $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "private", id: contact.user_id, name: displayName}, state.contactAccount));
     bindAvatarFallbacks(panel);
     $("#privatePolicyForm")?.addEventListener("submit", savePrivatePolicy);
+    $$(".toggle input", panel).forEach((input) => input.addEventListener("change", updateToggleCopy));
   }
 
   async function savePrivatePolicy(event) {
@@ -1437,7 +1460,7 @@
       await api("save_private_policy",
         accountId,
         contactId,
-        {allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value)},
+        {allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value), bot_enabled: form.elements.bot_enabled.checked, scheduled_enabled: form.elements.scheduled_enabled.checked, quiet_hours: {enabled: form.elements.quiet_enabled.checked, start: form.elements.quiet_start.value, end: form.elements.quiet_end.value, timezone: "Asia/Shanghai"}, daily_limit: Number(form.elements.daily_limit.value)},
         form.dataset.revision || "",
       );
       if (state.selectedContact === contactId && state.contactAccount === accountId) {
@@ -1448,7 +1471,7 @@
       if (button.isConnected) {
         button.disabled = false;
         button.removeAttribute("aria-busy");
-        button.textContent = "保存可用功能";
+        button.textContent = "保存私聊规则";
       }
     }
   }
@@ -1681,22 +1704,382 @@
   }
 
   async function loadSchedules() {
+    const generation = ++state.scheduledLoad;
+    const button = $("#refreshSchedules");
+    button.disabled = true;
     try {
-      const data = await api("get_schedules");
-      state.schedules = data.items || [];
-      $("#scheduleTotal").textContent = state.schedules.length;
-      $("#scheduleRunning").textContent = data.running || 0;
-      $("#schedulePaused").textContent = data.paused || 0;
-      const groupTasks = state.schedules.filter((item) => item.target_type === "group");
-      const runningGroupTasks = groupTasks.filter((item) => item.enabled).length;
-      $("#proactiveSummary").textContent = groupTasks.length
-        ? `${groupTasks.length} 个群聊任务，其中 ${runningGroupTasks} 个正在运行；最终是否发送还要通过对应群聊的主动消息总控。`
-        : "当前没有群聊主动任务。创建后仍需在对应群聊中明确开启主动消息。";
+      const [context, legacy] = await Promise.allSettled([api("get_scheduled_task_context"), api("get_schedules")]);
+      if (generation !== state.scheduledLoad) return;
+      if (context.status === "rejected") throw context.reason;
+      state.scheduledContext = context.value;
+      state.schedules = legacy.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action) : [];
+      const message = $("#scheduleContextMessage");
+      message.textContent = context.value.message || (!context.value.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
+      if (legacy.status === "rejected") message.textContent += " 已有功能任务暂时无法读取，请刷新重试。";
+      message.hidden = !message.textContent;
       renderSchedules();
-    } catch (error) { reportError(error); }
+      renderScheduledTasks();
+      if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+    } catch (error) {
+      $("#scheduleContextMessage").hidden = false;
+      $("#scheduleContextMessage").textContent = error.message || "任务暂时无法读取，请刷新重试。";
+      reportError(error);
+    } finally { if (generation === state.scheduledLoad) button.disabled = false; }
+  }
+
+  const SCHEDULED_ACTIONS = {weather: "天气预报", news: "热点资讯", oilprice: "油价提醒", kfc: "星期四文案", text: "文字提醒"};
+  const SCHEDULED_DAYS = ["一", "二", "三", "四", "五", "六", "日"];
+  const SCHEDULED_RESULTS = {submitted: "已提交微信", failed: "发送失败", unknown: "结果待确认", skipped: "已跳过", pending: "等待发送", running: "正在执行", completed: "执行完成", partial: "部分失败"};
+
+  function scheduledTime(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "时间待确认";
+    return new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false}).format(date);
+  }
+
+  function scheduledTimeText(schedule = {}) {
+    const time = schedule.time || "待选择时间";
+    if (schedule.kind === "once") return `${schedule.date || "待选择日期"} ${time}，仅一次`;
+    if (schedule.kind === "weekly") return `每周${(schedule.weekdays || []).map((day) => SCHEDULED_DAYS[day]).join("、") || "待选择"} ${time}`;
+    return `每天 ${time}`;
+  }
+
+  function scheduledTargetText(targets = []) {
+    const groups = targets.filter((item) => item.type === "group").length;
+    const contacts = targets.filter((item) => item.type === "private").length;
+    return [groups ? `${groups} 个群` : "", contacts ? `${contacts} 位联系人` : ""].filter(Boolean).join("、") || "尚未选择对象";
+  }
+
+  function scheduledName(item) {
+    const args = item.arguments || {};
+    return item.action === "weather" ? `${args.city || "城市待填写"}${args.day === "tomorrow" ? "明天" : "当天"}天气` : item.action === "oilprice" ? `${args.province || "省份待填写"}油价` : SCHEDULED_ACTIONS[item.action] || "定时任务";
+  }
+
+  function scheduledStatus(item) {
+    if (item.draft || item.status === "draft") return "草稿";
+    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", blocked: "待处理", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
+  }
+
+  function scheduledResultText(value) {
+    if (!value) return "尚无执行记录";
+    if (typeof value === "string") return SCHEDULED_RESULTS[value] || value;
+    return value.message || SCHEDULED_RESULTS[value.status] || "查看执行记录";
+  }
+
+  function renderScheduledTasks() {
+    const all = state.scheduledContext?.items || [];
+    $("#scheduleTotal").textContent = all.length + state.schedules.length;
+    $("#scheduleRunning").textContent = all.filter((item) => item.enabled).length + state.schedules.filter((item) => item.enabled).length;
+    $("#schedulePaused").textContent = all.filter((item) => !item.enabled && item.status !== "completed").length + state.schedules.filter((item) => !item.enabled).length;
+    const action = $("#scheduledActionFilter").value;
+    const target = $("#scheduledTargetFilter").value;
+    const status = $("#scheduledStatusFilter").value;
+    const chat = state.scheduledChatFilter;
+    const clear = $("#clearScheduledChatFilter");
+    clear.hidden = !chat;
+    clear.disabled = !chat;
+    clear.textContent = chat ? `${chat.name} · 清除筛选` : "";
+    clear.setAttribute("aria-label", chat ? `清除聊天筛选：${chat.name}` : "清除聊天筛选");
+    const items = all.filter((item) => (action === "all" || action === item.action)
+      && (target === "all" || (item.targets || []).some((entry) => entry.type === target))
+      && (!chat || (item.targets || []).some((entry) => entry.id === chat.id && entry.type === chat.type))
+      && (status === "all" || (status === "enabled" && item.enabled) || (status === "draft" && item.draft) || (status === "paused" && !item.enabled && !item.draft && item.status !== "completed") || (status === "attention" && ["blocked", "failed", "waiting_account", "waiting_runtime"].includes(item.status))));
+    $("#scheduledTaskRows").innerHTML = items.length ? items.map((item) => `<tr>
+      <td><button class="row-action scheduled-name" data-task-action="edit" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name || scheduledName(item))}</button><small>${escapeHtml(SCHEDULED_ACTIONS[item.action] || "定时任务")}</small></td>
+      <td><span>${escapeHtml(scheduledTargetText(item.targets))}</span><small class="schedule-target-names">${escapeHtml((item.targets || []).map((entry) => entry.name || "待确认对象").join("、"))}</small></td>
+      <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(scheduledTime(item.next_run_time))}</small></td>
+      <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
+      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5"><div class="empty-state compact"><div class="empty-symbol">时</div><h2>${all.length ? "没有符合条件的任务" : "还没有定时任务"}</h2><p>${all.length ? "调整筛选条件，或为这个聊天新建任务。" : "从天气、资讯或一句文字提醒开始。选择内容、对象和时间后，再由你启用。"}</p><button class="button primary" id="emptyNewScheduledTask">新建任务</button></div></td></tr>`;
+    $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id)));
+    $("#emptyNewScheduledTask")?.addEventListener("click", () => openScheduledEditor());
+  }
+
+  function guardScheduledDraft(next) {
+    if (!state.scheduledDirty || !state.scheduledEditor) return false;
+    confirmAction({title: "放弃任务修改？", message: "内容、发送对象或时间还没有保存。留在此页可以保存草稿。", confirmText: "放弃修改并继续", onConfirm: async () => { state.scheduledDirty = false; state.scheduledEditor = null; showScheduledList(); await next(); }});
+    return true;
+  }
+
+  function showScheduledList() {
+    $("#scheduleListView").hidden = false;
+    $("#scheduledTaskEditor").hidden = true;
+    $("#scheduledTaskRuns").hidden = true;
+    $("#newScheduledTask").hidden = false;
+    state.scheduledTimeLoad += 1;
+  }
+
+  async function openScheduledEditor(item = null, copy = false, action = "weather") {
+    if (state.scheduledBusy || guardScheduledDraft(() => openScheduledEditor(item, copy, action))) return;
+    if (!state.scheduledContext) await loadSchedules();
+    const defaults = {weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, text: {text: ""}};
+    const editor = item ? structuredClone(item) : {id: crypto.randomUUID(), account_id: state.scheduledContext?.account_id || "", action, arguments: defaults[action], targets: state.scheduledChatFilter ? [structuredClone(state.scheduledChatFilter)] : [], schedule: {kind: "daily", time: "08:00", timezone: "Asia/Shanghai"}, enabled: false, draft: true, name: ""};
+    if (copy) { editor.id = crypto.randomUUID(); delete editor.revision; editor.name = `${item.name || scheduledName(item)}（副本）`; editor.enabled = false; editor.draft = true; editor.status = "draft"; }
+    editor.targets ||= [];
+    editor.arguments ||= {};
+    editor.schedule ||= {kind: "daily", time: "08:00", timezone: "Asia/Shanghai"};
+    state.scheduledEditor = editor;
+    state.scheduledDirty = Boolean(copy);
+    state.scheduledTargetTab = "group";
+    renderScheduledEditor();
+    $("#scheduledEditorHeading")?.focus();
+  }
+
+  function scheduledArgumentsMarkup(editor) {
+    const args = editor.arguments;
+    const field = (key, label, control) => `<div class="form-field"><label for="scheduledArg-${key}">${label}</label>${control}</div>`;
+    if (editor.action === "weather") return field("city", "城市", `<input id="scheduledArg-city" data-task-arg="city" value="${escapeHtml(args.city || "")}" placeholder="例如：青岛" maxlength="80">`) + field("day", "天气日期", `<select id="scheduledArg-day" data-task-arg="day"><option value="today" ${args.day !== "tomorrow" ? "selected" : ""}>执行当天</option><option value="tomorrow" ${args.day === "tomorrow" ? "selected" : ""}>执行日的明天</option></select><small>以图片卡片发送，与手动查询的样式一致。</small>`);
+    if (editor.action === "news") return field("count", "资讯条数", `<input id="scheduledArg-count" data-task-arg="count" type="number" min="1" max="30" value="${escapeHtml(args.count ?? 10)}"><small>每次执行获取最新资讯。</small>`);
+    if (editor.action === "oilprice") return field("province", "省份", `<input id="scheduledArg-province" data-task-arg="province" value="${escapeHtml(args.province || "")}" maxlength="80" placeholder="例如：山东">`);
+    if (editor.action === "text") return field("text", "提醒文字", `<textarea id="scheduledArg-text" data-task-arg="text" rows="4" maxlength="4000" placeholder="填写希望按时发送的文字">${escapeHtml(args.text || "")}</textarea><small>按原文发送，不会临时改写。</small>`);
+    return '<p class="subtle">每次使用最新的星期四文案。可在下方选择每周四发送。</p>';
+  }
+
+  function renderScheduledEditor() {
+    const editor = state.scheduledEditor;
+    if (!editor) return;
+    $("#scheduleListView").hidden = true;
+    $("#scheduledTaskRuns").hidden = true;
+    $("#newScheduledTask").hidden = true;
+    const root = $("#scheduledTaskEditor");
+    root.hidden = false;
+    root.innerHTML = `<div class="schedule-editor-heading"><button class="button ghost small" id="scheduledBack" type="button">返回任务列表</button><h2 id="scheduledEditorHeading" tabindex="-1">${editor.revision ? "编辑任务" : "新建任务"}</h2></div>
+      <div class="schedule-editor-layout"><form id="scheduledTaskForm" novalidate>
+        <section class="panel scheduled-form-section"><h3><span>1</span>做什么</h3><div class="form-field"><label for="scheduledName">任务名称</label><input id="scheduledName" value="${escapeHtml(editor.name || "")}" placeholder="自动使用内容名称，也可以自己命名" maxlength="80"></div>
+        <div class="form-field"><label for="scheduledAction">发送内容</label><select id="scheduledAction">${Object.entries(SCHEDULED_ACTIONS).map(([value, name]) => `<option value="${value}" ${value === editor.action ? "selected" : ""}>${name}</option>`).join("")}</select></div><div id="scheduledArguments" class="scheduled-arguments">${scheduledArgumentsMarkup(editor)}</div>
+        <div id="scheduledReadiness" class="schedule-notice"></div><button class="row-action" id="scheduledPrepareFeature" type="button" hidden>去准备功能，保留当前草稿</button>
+        <details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>只识别已支持的内容；不会执行命令或发送消息。</small></details></section>
+        <section class="panel scheduled-form-section"><h3><span>2</span>发给谁</h3><p class="subtle">固定选择当前账号的聊天，可同时选择群聊和私聊。</p><div class="scheduled-selected" id="scheduledSelected"></div><div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button><button type="button" data-scheduled-target-tab="private" aria-pressed="false">私聊</button></div><div class="form-field"><label for="scheduledTargetSearch">搜索聊天</label><label class="search-box wide" id="scheduledTargetSearchBox"><svg><use href="#i-search"/></svg><input id="scheduledTargetSearch" type="search" placeholder="搜索群名、昵称或备注" autocomplete="off"><button type="button" class="clear-search" aria-label="清空聊天搜索">×</button></label></div><div id="scheduledTargetChoices" class="scheduled-target-choices"></div></section>
+        <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3><div class="scheduled-time-fields"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind"><option value="daily" ${editor.schedule.kind === "daily" ? "selected" : ""}>每天</option><option value="weekly" ${editor.schedule.kind === "weekly" ? "selected" : ""}>每周</option><option value="once" ${editor.schedule.kind === "once" ? "selected" : ""}>仅一次</option></select></div><div class="form-field"><label for="scheduledTime">北京时间</label><input id="scheduledTime" type="time" value="${escapeHtml(editor.schedule.time || "08:00")}"></div><div class="form-field" id="scheduledDateField" ${editor.schedule.kind !== "once" ? "hidden" : ""}><label for="scheduledDate">执行日期</label><input id="scheduledDate" type="date" value="${escapeHtml(editor.schedule.date || "")}"></div></div><div id="scheduledWeekdays" ${editor.schedule.kind !== "weekly" ? "hidden" : ""}><div class="schedule-weekdays">${SCHEDULED_DAYS.map((name, day) => `<label><input type="checkbox" value="${day}" ${(editor.schedule.weekdays || []).includes(day) ? "checked" : ""}>周${name}</label>`).join("")}</div><button id="scheduledWeekdayShortcut" class="row-action" type="button">选择周一至周五</button></div><p class="subtle">电脑离线错过的时间会跳过，恢复后按下一次计划执行。</p></section>
+      </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">启用只授权本任务向所选聊天定时发送，不会允许 AI 主动聊天。聊天总开关、安静时段及每日上限仍然有效。</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions"><button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button><button class="button primary" id="scheduledSaveEnabled" type="button">${editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>预览只在这里显示；测试发送必须再明确选择一个聊天。</small></aside></div>`;
+    $("#scheduledBack").addEventListener("click", () => { if (!guardScheduledDraft(showScheduledList)) { state.scheduledEditor = null; showScheduledList(); } });
+    $("#scheduledTaskForm").addEventListener("submit", (event) => event.preventDefault());
+    $("#scheduledName").addEventListener("input", (event) => { editor.name = event.target.value; scheduledChanged(false); });
+    $("#scheduledAction").addEventListener("change", (event) => { editor.action = event.target.value; editor.arguments = ({weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, text: {text: ""}})[editor.action]; state.scheduledDirty = true; renderScheduledEditor(); $("#scheduledAction").focus(); });
+    $$('[data-task-arg]', root).forEach((input) => input.addEventListener("input", () => { editor.arguments[input.dataset.taskArg] = input.type === "number" ? Number(input.value) : input.value; scheduledChanged(false); }));
+    $$('[data-scheduled-target-tab]', root).forEach((button) => button.addEventListener("click", () => { state.scheduledTargetTab = button.dataset.scheduledTargetTab; $$('[data-scheduled-target-tab]', root).forEach((tab) => { tab.classList.toggle("active", tab === button); tab.setAttribute("aria-pressed", String(tab === button)); }); renderScheduledTargets(); }));
+    const search = $("#scheduledTargetSearch");
+    const searchTargets = debounce(renderScheduledTargets);
+    search.addEventListener("compositionstart", () => { search.dataset.composing = "true"; });
+    search.addEventListener("compositionend", () => { search.dataset.composing = "false"; searchTargets(); });
+    search.addEventListener("input", () => { $("#scheduledTargetSearchBox").classList.toggle("has-value", Boolean(search.value)); if (search.dataset.composing !== "true") searchTargets(); });
+    $(".clear-search", $("#scheduledTargetSearchBox")).addEventListener("click", () => { search.value = ""; $("#scheduledTargetSearchBox").classList.remove("has-value"); searchTargets(); search.focus(); });
+    $("#scheduledKind").addEventListener("change", (event) => { editor.schedule.kind = event.target.value; $("#scheduledDateField").hidden = editor.schedule.kind !== "once"; $("#scheduledWeekdays").hidden = editor.schedule.kind !== "weekly"; scheduledChanged(); });
+    $("#scheduledTime").addEventListener("input", (event) => { editor.schedule.time = event.target.value; scheduledChanged(); });
+    $("#scheduledDate").addEventListener("input", (event) => { editor.schedule.date = event.target.value; scheduledChanged(); });
+    $$('#scheduledWeekdays input').forEach((input) => input.addEventListener("change", () => { editor.schedule.weekdays = $$('#scheduledWeekdays input:checked').map((entry) => Number(entry.value)); scheduledChanged(); }));
+    $("#scheduledWeekdayShortcut").addEventListener("click", () => { editor.schedule.weekdays = [0, 1, 2, 3, 4]; $$('#scheduledWeekdays input').forEach((input) => { input.checked = Number(input.value) < 5; }); scheduledChanged(); });
+    $("#scheduledParseCommand").addEventListener("click", parseScheduledCommand);
+    $("#scheduledPrepareFeature").addEventListener("click", prepareScheduledFeature);
+    $("#scheduledPreviewButton").addEventListener("click", previewScheduledContent);
+    $("#scheduledTestButton").addEventListener("click", testScheduledContent);
+    $("#scheduledSaveDraft").addEventListener("click", () => saveScheduledTask(true));
+    $("#scheduledSaveEnabled").addEventListener("click", () => saveScheduledTask(false));
+    renderScheduledTargets(); updateScheduledSummary(); void previewScheduledTimes();
+  }
+
+  function scheduledChanged(times = true) {
+    state.scheduledDirty = true;
+    $("#scheduledPreview").hidden = true;
+    $("#scheduledTaskError").hidden = true;
+    updateScheduledSummary();
+    if (times) void previewScheduledTimes();
+  }
+
+  function renderScheduledTargets() {
+    const editor = state.scheduledEditor;
+    if (!editor || !$("#scheduledTargetChoices")) return;
+    const type = state.scheduledTargetTab;
+    const search = $("#scheduledTargetSearch").value.trim().toLocaleLowerCase();
+    const context = state.scheduledContext || {};
+    const sameAccount = editor.account_id === context.account_id;
+    const source = sameAccount ? (type === "group" ? context.groups : context.contacts) || [] : [];
+    const items = source.filter((entry) => `${entry.name || ""} ${entry.id || ""}`.toLocaleLowerCase().includes(search));
+    $("#scheduledTargetChoices").innerHTML = items.length ? items.map((entry) => `<label class="scheduled-target-option"><input type="checkbox" value="${escapeHtml(entry.id)}" ${editor.targets.some((target) => target.type === type && target.id === entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.name || "未命名聊天")}</strong><small>${escapeHtml(entry.id)}</small>${entry.message ? `<small class="scheduled-target-warning">${escapeHtml(entry.message)}</small>` : ""}</span></label>`).join("") : `<p class="member-empty">${!sameAccount ? "请登录此任务绑定的微信账号后选择对象。" : search ? "没有匹配的聊天，试试其他名称。" : "暂时没有可选聊天。请在聊天管理读取当前账号的目录后刷新。"}</p>`;
+    $$('#scheduledTargetChoices input').forEach((input) => input.addEventListener("change", () => { const found = source.find((entry) => entry.id === input.value); editor.targets = editor.targets.filter((entry) => !(entry.type === type && entry.id === input.value)); if (input.checked && found) editor.targets.push({type, id: found.id, name: found.name}); renderScheduledSelected(); scheduledChanged(false); }));
+    renderScheduledSelected();
+  }
+
+  function renderScheduledSelected() {
+    const editor = state.scheduledEditor;
+    const context = state.scheduledContext || {};
+    $("#scheduledSelected").innerHTML = `<strong>${escapeHtml(scheduledTargetText(editor.targets))}</strong><div class="schedule-target-chips">${editor.targets.map((entry, index) => { const known = editor.account_id === context.account_id && ((entry.type === "group" ? context.groups : context.contacts) || []).some((item) => item.id === entry.id); return `<button class="schedule-target-chip" type="button" data-remove-target="${index}" aria-label="移除${escapeHtml(entry.name || "对象")}" disabled>${escapeHtml(entry.name || "未命名聊天")}${known ? "" : "（待确认）"} ×</button>`; }).join("")}</div>`;
+    $$('[data-remove-target]').forEach((button) => { button.disabled = false; button.addEventListener("click", () => { editor.targets.splice(Number(button.dataset.removeTarget), 1); renderScheduledTargets(); scheduledChanged(false); }); });
+  }
+
+  function scheduledReadiness() {
+    const editor = state.scheduledEditor;
+    const context = state.scheduledContext || {};
+    const capability = (context.capabilities || []).find((entry) => entry.id === editor.action);
+    if (!editor.account_id || context.account_id !== editor.account_id) return {ready: false, message: "尚未确认任务绑定的微信账号。请登录对应账号后再保存；当前填写内容会保留。"};
+    if (!capability || !capability.ready) return {ready: false, message: capability?.message || "所需功能尚未就绪，可以先保存草稿。", feature: true};
+    if (!context.runtime_ready) return {ready: false, message: "定时发送能力尚未就绪，可以先保存草稿。"};
+    return {ready: true, message: context.online ? "内容能力已就绪。启用后按所选时间执行。" : "可以保存计划，等待机器人上线后执行；错过的时间不会补发。"};
+  }
+
+  function updateScheduledSummary() {
+    const editor = state.scheduledEditor;
+    if (!editor || !$("#scheduledSummaryText")) return;
+    const ready = scheduledReadiness();
+    $("#scheduledSummaryName").textContent = editor.name || scheduledName(editor);
+    $("#scheduledSummaryText").textContent = `${scheduledTimeText(editor.schedule)}，发送${scheduledName(editor)}${editor.action === "weather" ? "图片卡片" : ""}，给${scheduledTargetText(editor.targets)}。`;
+    $("#scheduledReadiness").textContent = ready.message;
+    $("#scheduledReadiness").classList.toggle("warning", !ready.ready);
+    $("#scheduledPrepareFeature").hidden = !ready.feature;
+    $("#scheduledSaveEnabled").disabled = !ready.ready || state.scheduledBusy;
+    $("#scheduledSaveDraft").disabled = !editor.account_id || state.scheduledBusy;
+    $("#scheduledPreviewButton").disabled = state.scheduledBusy;
+    $("#scheduledTestButton").disabled = !ready.ready || !editor.targets.length || state.scheduledBusy;
+  }
+
+  async function previewScheduledTimes() {
+    const editor = state.scheduledEditor;
+    const generation = ++state.scheduledTimeLoad;
+    if (!editor || !$("#scheduledNextTimes")) return;
+    try {
+      const data = await api("preview_scheduled_times", structuredClone(editor.schedule));
+      if (generation !== state.scheduledTimeLoad || state.scheduledEditor !== editor) return;
+      $("#scheduledNextTimes").innerHTML = data.items?.length ? data.items.map((value) => `<li>${escapeHtml(scheduledTime(value))}</li>`).join("") : `<li>${escapeHtml(data.text || "请补齐日期、星期和时间。")}</li>`;
+    } catch (error) { if (generation === state.scheduledTimeLoad && $("#scheduledNextTimes")) $("#scheduledNextTimes").innerHTML = `<li>${escapeHtml(error.message)}</li>`; }
+  }
+
+  function scheduledError(error) {
+    const box = $("#scheduledTaskError");
+    if (box) { box.textContent = error.product?.message || error.message || "操作未完成，已保留表单。"; box.hidden = false; }
+  }
+
+  function scheduledPayload(draft) {
+    const payload = structuredClone(state.scheduledEditor);
+    payload.name = payload.name.trim() || scheduledName(payload);
+    payload.draft = draft;
+    payload.enabled = !draft;
+    payload.schedule.timezone = "Asia/Shanghai";
+    if (payload.action === "weather") payload.arguments.output = "image";
+    if (!draft && !payload.targets.length) throw new Error("请至少选择一个群聊或联系人。 ");
+    return payload;
+  }
+
+  async function scheduledBusyAction(action) {
+    if (state.scheduledBusy) return;
+    state.scheduledBusy = true;
+    const controls = $$("input, select, textarea, button", $("#scheduledTaskEditor"));
+    const disabled = controls.map((input) => input.disabled);
+    controls.forEach((input) => { input.disabled = true; });
+    $("#scheduledTaskEditor").setAttribute("aria-busy", "true");
+    try { await action(); } catch (error) { scheduledError(error); }
+    finally { state.scheduledBusy = false; controls.forEach((input, index) => { if (input.isConnected) input.disabled = disabled[index]; }); $("#scheduledTaskEditor").removeAttribute("aria-busy"); updateScheduledSummary(); }
+  }
+
+  async function saveScheduledTask(draft) {
+    await scheduledBusyAction(async () => {
+      if (!draft && !scheduledReadiness().ready) throw new Error(scheduledReadiness().message);
+      const payload = scheduledPayload(draft);
+      const data = await api("save_scheduled_task", payload);
+      if (!data.item) throw new Error("未收到任务保存确认，请刷新核对。当前草稿已保留。 ");
+      state.scheduledDirty = false; state.scheduledEditor = null;
+      showScheduledList(); await loadSchedules();
+      toast(data.message || (data.item.draft ? "任务草稿已保存。" : data.item.enabled ? "任务已保存并启用。" : "任务已保存。"));
+    });
+  }
+
+  async function previewScheduledContent() {
+    await scheduledBusyAction(async () => {
+      const data = await api("preview_scheduled_task", scheduledPayload(true));
+      const root = $("#scheduledPreview");
+      if (data.kind === "image" && /^data:image\/(png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=\s]+$/.test(data.image_data_url || "")) root.innerHTML = `<strong>内容预览</strong><img src="${escapeHtml(data.image_data_url)}" alt="定时内容预览">`;
+      else if (data.kind === "text") root.innerHTML = `<strong>内容预览</strong><p>${escapeHtml(data.text || "没有返回可预览的内容。")}</p>`;
+      else throw new Error("预览内容暂时无法显示，请稍后重试。 ");
+      root.hidden = false;
+    });
+  }
+
+  function testScheduledContent() {
+    const editor = state.scheduledEditor;
+    if (!editor?.targets?.length || !scheduledReadiness().ready) return;
+    const options = editor.targets.map((target) => ({
+      value: `${target.type}:${target.id}`,
+      label: `${target.type === "group" ? "群聊" : "私聊"} · ${target.name || target.id}`,
+    }));
+    confirmAction({
+      title: "发送一条测试消息？",
+      message: "测试只发送给下面选择的一个聊天，并计入该聊天的每日推送上限。发送结果不确定时不会自动重试。",
+      confirmText: "发送测试消息",
+      pendingText: "正在测试发送…",
+      intent: "primary",
+      field: {label: "测试发送到", type: "select", value: options[0].value, options},
+      onConfirm: async (value) => {
+        const target = editor.targets.find((item) => `${item.type}:${item.id}` === value);
+        if (!target) throw new Error("测试发送对象已经变化，请重新选择。 ");
+        const result = await api("test_scheduled_task", {...scheduledPayload(false), test_target: {type: target.type, id: target.id}});
+        toast(result.message || "测试发送已结束。", result.status === "failed" ? "error" : "");
+      },
+    });
+  }
+
+  async function parseScheduledCommand() {
+    await scheduledBusyAction(async () => {
+      const command = $("#scheduledCommand").value.trim();
+      if (!command) throw new Error("请先输入需要识别的命令。 ");
+      const parsed = await api("parse_scheduled_command", command);
+      if (!SCHEDULED_ACTIONS[parsed.action]) throw new Error("这个命令暂不支持定时发送。 ");
+      state.scheduledEditor.action = parsed.action; state.scheduledEditor.arguments = parsed.arguments || {}; state.scheduledDirty = true;
+      renderScheduledEditor();
+      toast("已填写内容参数，请确认发送对象和时间。 ");
+    });
+  }
+
+  async function prepareScheduledFeature() {
+    state.scheduledReturnDraft = true;
+    const dirty = state.scheduledDirty;
+    state.scheduledDirty = false;
+    await navigate("features");
+    state.scheduledDirty = dirty;
+    await openFeature(state.scheduledContext?.runtime_ready ? "feature-commands" : "feature-schedule");
+    toast("当前任务草稿已保留，完成准备后回到定时任务继续。 ");
+  }
+
+  async function openScheduledFromFeature() {
+    if (state.featureDirty) { discardFeatureChanges(openScheduledFromFeature); return; }
+    await navigate("schedules");
+    if (state.activePage === "schedules") await openScheduledEditor();
+  }
+
+  async function openScheduledForChat(target, accountId) {
+    await navigate("schedules");
+    if (state.activePage !== "schedules") return;
+    if (accountId !== state.scheduledContext?.account_id) { toast("微信账号已变化，请重新读取聊天目录。", "error"); return; }
+    if (state.scheduledEditor && state.scheduledDirty) return;
+    state.scheduledChatFilter = target; showScheduledList(); renderScheduledTasks();
+  }
+
+  async function scheduledTaskAction(action, id) {
+    if (state.scheduledBusy) return;
+    const item = (state.scheduledContext?.items || []).find((entry) => entry.id === id);
+    if (!item) return;
+    if (action === "edit" || action === "copy") { await openScheduledEditor(item, action === "copy"); return; }
+    if (action === "runs") { await showScheduledRuns(item); return; }
+    confirmAction({title: action === "delete" ? "永久删除定时任务？" : item.enabled ? "暂停定时任务？" : "启用定时任务？", message: action === "delete" ? `“${item.name}”将永久删除，重启或升级后也不会恢复。已提交微信的消息无法撤回。` : `${item.name}：${item.schedule_text || scheduledTimeText(item.schedule)}，发送给${scheduledTargetText(item.targets)}。`, confirmText: action === "delete" ? "永久删除" : item.enabled ? "暂停任务" : "启用任务", intent: action === "delete" ? "danger" : action === "toggle" && !item.enabled ? "primary" : "secondary", onConfirm: async () => {
+      const data = action === "delete" ? await api("delete_scheduled_task", item.account_id, item.id, item.revision) : await api("set_scheduled_task_enabled", item.account_id, item.id, !item.enabled, item.revision);
+      await loadSchedules(); toast(data.message || (action === "delete" ? "任务已删除。" : "任务状态已更新。"));
+    }});
+  }
+
+  async function showScheduledRuns(item) {
+    const root = $("#scheduledTaskRuns");
+    $("#scheduleListView").hidden = true; $("#scheduledTaskEditor").hidden = true; root.hidden = false;
+    root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · 执行记录</h2><p>已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
+    $("#scheduledRunsBack").addEventListener("click", showScheduledList);
+    try {
+      const data = await api("get_scheduled_task_runs", item.account_id, item.id);
+      const body = $("#scheduledRunsBody");
+      if (!body) return;
+      body.className = "schedule-runs-body";
+      body.innerHTML = data.items?.length ? data.items.map((run) => `<article class="schedule-run"><header><strong>${escapeHtml(scheduledTime(run.scheduled_at || run.started_at || run.created_at || run.time))}</strong><span>${escapeHtml(scheduledResultText(run))}</span></header>${run.message ? `<p>${escapeHtml(run.message)}</p>` : ""}<ul>${(run.deliveries || run.targets || run.results || []).map((result) => `<li><strong>${escapeHtml(result.name || result.target?.name || item.targets?.find((target) => target.id === result.id && target.type === result.type)?.name || "发送对象")}</strong><span>${escapeHtml(SCHEDULED_RESULTS[result.status] || result.status || "等待发送")}</span>${result.message || result.error ? `<small>${escapeHtml(result.message || result.error)}</small>` : ""}</li>`).join("")}</ul></article>`).join("") : '<div class="empty-state compact"><h3>尚无执行记录</h3><p>任务到时执行后，可在这里查看每个对象的发送结果。</p></div>';
+    } catch (error) { if ($("#scheduledRunsBody")) $("#scheduledRunsBody").textContent = error.message; }
   }
 
   function renderSchedules() {
+    $("#legacyScheduleSection").hidden = !state.schedules.length;
     $("#scheduleRows").innerHTML = state.schedules.length ? state.schedules.map((item) => `
       <tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.source)}</td><td>${escapeHtml(item.target)}</td><td>${escapeHtml(item.schedule_text)}</td><td>${escapeHtml(shortTime(item.next_run_time))}</td><td><span class="task-status ${item.enabled ? "running" : ""}">${item.status}</span></td><td><div class="row-actions"><button class="row-action" data-action="toggle" data-id="${escapeHtml(item.id)}">${item.enabled ? "暂停" : "开启"}</button><button class="row-action" data-action="edit" data-id="${escapeHtml(item.id)}">改时间</button><button class="row-action delete" data-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : '<tr><td colspan="7" class="table-empty">当前没有业务定时任务</td></tr>';
     $$(".row-action", $("#scheduleRows")).forEach((button) => button.addEventListener("click", () => scheduleAction(button.dataset.action, button.dataset.id)));
@@ -1808,13 +2191,14 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, confirmText = "确认", pendingText = "处理中…", pendingMessage = "", field = null, onConfirm}) {
+  function confirmAction({title, message, confirmText = "确认", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
     $("#modalTitle").textContent = title;
     $("#modalMessage").textContent = message;
     confirm.textContent = confirmText;
+    confirm.className = `button ${["primary", "secondary", "danger"].includes(intent) ? intent : "danger"}`;
     const fieldControl = field?.type === "select"
       ? `<select id="modalInput">${(field.options || []).map((option) => `<option value="${escapeHtml(option.value)}" ${String(option.value) === String(field.value ?? "") ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
       : (field ? `<input id="modalInput" type="${escapeHtml(field.type || "text")}" value="${escapeHtml(field.value || "")}">` : "");
@@ -2568,6 +2952,9 @@
     });
     $("#exportHistory").addEventListener("click", async () => { try { const result = await api("export_history", "csv"); if (!result?.cancelled) toast(`已导出到 ${result.path}`); } catch (error) { reportError(error); } });
     $("#refreshSchedules").addEventListener("click", loadSchedules);
+    $("#newScheduledTask").addEventListener("click", () => openScheduledEditor());
+    ["#scheduledActionFilter", "#scheduledTargetFilter", "#scheduledStatusFilter"].forEach((selector) => $(selector).addEventListener("change", renderScheduledTasks));
+    $("#clearScheduledChatFilter").addEventListener("click", () => { state.scheduledChatFilter = null; renderScheduledTasks(); });
     $("#manageGroupPolicies").addEventListener("click", async () => { await selectChatManagementTab("groups"); await navigate("groups"); });
     $("#refreshActivity").addEventListener("click", loadActivity);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
@@ -2611,7 +2998,7 @@
     $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
@@ -2824,9 +3211,9 @@
       memory: {enabled: true, recall_mode: "smart", explicit_recall_enabled: true, explicit_recall_phrases: ["上次说了什么", "还记得吗", "之前提到", "我说过", "你说过"], casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: [], proactive_enabled: false, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: [], proactive_enabled: false, scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: [], proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
-    let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], revision: "preview-private-1", configured: false};
+    let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
     const previewContacts = [
       {user_id: "wxid_zhangsan", name: "张三", nickname: "山川与海", remark: "张三", alias: "zhangsan_88", avatar: "", gender: "男", gender_code: 1, country: "CN", province: "Zhejiang", city: "Hangzhou", contact_type: "微信好友", signature: "周末去爬山"},
@@ -2835,6 +3222,31 @@
       {user_id: "gh_service", name: "社区服务", nickname: "社区服务", remark: "", alias: "community_service", avatar: "", gender: "", country: "CN", province: "", city: "", contact_type: "公众号"},
       {user_id: "filehelper", name: "文件传输助手", nickname: "文件传输助手", remark: "", alias: "", avatar: "", gender: "", country: "", province: "", city: "", contact_type: "系统联系人"},
     ];
+    const previewTaskGroups = [{id: "51632940287@chatroom", name: "旅行交流群"}, {id: "81263495012@chatroom", name: "短剧分享群"}, {id: "22001983641@chatroom", name: "业主交流群"}, {id: "34902765188@chatroom", name: "周末羽毛球"}];
+    const previewTasks = new Map();
+    let previewTaskRevision = 0;
+    const previewTaskTimes = (schedule) => {
+      const today = new Intl.DateTimeFormat("en-CA", {timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date());
+      const start = new Date(`${schedule.kind === "once" ? schedule.date : today}T${schedule.time}:00+08:00`);
+      const values = [];
+      for (let day = 0; day < (schedule.kind === "once" ? 1 : 22); day += 1) {
+        const candidate = new Date(start.getTime() + day * 86400000);
+        const weekday = (new Date(candidate.getTime() + 8 * 3600000).getUTCDay() + 6) % 7;
+        if (candidate.getTime() > Date.now() && (schedule.kind !== "weekly" || (schedule.weekdays || []).includes(weekday))) values.push(candidate.toISOString());
+        if (values.length === 3) break;
+      }
+      return values;
+    };
+    const previewTaskSave = (payload) => {
+      const item = structuredClone(payload);
+      item.revision = String(++previewTaskRevision);
+      item.enabled = !item.draft && Boolean(item.enabled);
+      item.status = item.draft ? "draft" : item.enabled ? "enabled" : "paused";
+      item.schedule_text = scheduledTimeText(item.schedule);
+      item.next_run_time = item.enabled ? previewTaskTimes(item.schedule)[0] || null : null;
+      previewTasks.set(item.id, item);
+      return {item: structuredClone(item), message: item.draft ? "预览：任务草稿已保存。" : "预览：任务已保存，不会实际发送。"};
+    };
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
@@ -2864,13 +3276,21 @@
       get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000, last_content: "张三｜3栋：帮我找一下今天更新的短剧"}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600, last_content: "明天杭州会下雨吗？"}, {conversation_id: "81263495012@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200, last_content: "李四｜摄影：收到，这样看起来很方便"}, {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0}, {conversation_id: "34902765188@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0}], summary: {messages: 238, conversations: 3, visible_conversations: 5, directory_groups: 6, private_messages: 34, group_messages: 204}}),
       get_messages: () => ok([{id: 1, role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", group_nickname: "张三｜3栋", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {id: 2, role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {id: 3, role: "user", sender_id: "wxid_lisi", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
-      get_schedules: () => ok({running: 4, paused: 1, items: [
-        {id: "daily-report", name: "每日群聊日报", source: "群聊分析", target: "旅行交流群", target_type: "group", schedule_text: "每天 21:30", next_run_time: new Date(new Date().setHours(21, 30, 0, 0)).toISOString(), status: "运行中", enabled: true, cron_expression: "30 21 * * *"},
-        {id: "weather", name: "早间天气提醒", source: "常用指令", target: "业主交流群", target_type: "group", schedule_text: "工作日 07:40", next_run_time: new Date(Date.now() + 86400000).toISOString(), status: "运行中", enabled: true, cron_expression: "40 7 * * 1-5"},
-        {id: "drama", name: "短剧更新推送", source: "短剧", target: "短剧分享群", target_type: "group", schedule_text: "每天 12:00", next_run_time: new Date(new Date().setHours(12, 0, 0, 0)).toISOString(), status: "已暂停", enabled: false, cron_expression: "0 12 * * *"},
-        {id: "sports", name: "周末活动提醒", source: "定时任务", target: "周末羽毛球", target_type: "group", schedule_text: "每周五 18:00", next_run_time: new Date(Date.now() + 172800000).toISOString(), status: "运行中", enabled: true, cron_expression: "0 18 * * 5"},
-        {id: "checkin", name: "米游社签到", source: "米游社签到", target: "个人账号", target_type: "private", schedule_text: "每天 06:30", next_run_time: new Date(Date.now() + 86400000).toISOString(), status: "运行中", enabled: true, cron_expression: "30 6 * * *"},
-      ]}),
+      get_schedules: () => ok({running: 0, paused: 0, items: []}),
+      get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: "预览模式：任务只保存在当前页面，不会发送微信。"}),
+      save_scheduled_task: (payload) => ok(previewTaskSave(payload)),
+      delete_scheduled_task: (_account, id) => { previewTasks.delete(id); return ok({deleted: true}); },
+      set_scheduled_task_enabled: (_account, id, enabled) => ok(previewTaskSave({...previewTasks.get(id), enabled, draft: false})),
+      preview_scheduled_times: (schedule) => ok({items: previewTaskTimes(schedule), text: "请补齐有效的未来日期、星期和时间。"}),
+      parse_scheduled_command: (command) => { const match = command.replace(/^\//, "").match(/^(.+?)(明天|今日|今天)?天气$/); if (match) return ok({action: "weather", arguments: {city: match[1], day: match[2] === "明天" ? "tomorrow" : "today", output: "image"}}); if (/^(\/?)(新闻|资讯|热点)$/.test(command)) return ok({action: "news", arguments: {count: 10}}); return Promise.resolve({ok: false, error: {message: "这个命令暂不支持，请直接选择发送内容。"}}); },
+      preview_scheduled_task: (payload) => {
+        if (payload.action !== "weather") return ok({kind: "text", text: payload.action === "text" ? payload.arguments.text : `预览示意：${SCHEDULED_ACTIONS[payload.action]}，正式执行时获取最新内容。`});
+        const canvas = document.createElement("canvas"); canvas.width = 520; canvas.height = 230;
+        const ctx = canvas.getContext("2d"); ctx.fillStyle = "#eef4ff"; ctx.fillRect(0, 0, 520, 230); ctx.fillStyle = "#10243d"; ctx.font = "bold 28px Microsoft YaHei UI"; ctx.fillText(`${payload.arguments.city || "城市"} · 天气卡片`, 28, 64); ctx.font = "20px Microsoft YaHei UI"; ctx.fillText(payload.arguments.day === "tomorrow" ? "执行日的明天天气" : "执行当天的天气", 28, 112); ctx.fillStyle = "#536982"; ctx.font = "18px Microsoft YaHei UI"; ctx.fillText("样式预览，不代表实时天气", 28, 181);
+        return ok({kind: "image", image_data_url: canvas.toDataURL("image/png")});
+      },
+      test_scheduled_task: (payload) => ok({status: "submitted", message: `预览：测试消息已提交给 ${payload.test_target?.id || "所选聊天"}，不会实际发送。`, target: payload.test_target}),
+      get_scheduled_task_runs: () => ok({items: []}),
       set_schedule_enabled: (_id, enabled) => ok({updated: true, enabled}), update_schedule_time: () => ok({updated: true}), delete_schedule: () => ok({deleted: true}),
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       get_response_traces: () => ok([{time: new Date(Date.now() - 18000).toISOString(), title: "群聊点名", duration_text: "3.4 秒", stages: [{label: "点名快路径", status: "success", detail: "已跳过额外判断", duration_text: "0.4 秒"}, {label: "长期记忆", status: "skipped", detail: "普通寒暄无需回忆", duration_text: "<0.1 秒"}, {label: "精简情感", status: "success", detail: "已加入好感度与心情", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "2.6 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}, {time: new Date(Date.now() - 82000).toISOString(), title: "询问上次内容", duration_text: "5.1 秒", stages: [{label: "点名快路径", status: "success", duration_text: "0.4 秒"}, {label: "长期记忆 3 条", status: "success", detail: "命中明确回忆说法", duration_text: "0.8 秒"}, {label: "精简情感", status: "success", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "3.5 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}]),

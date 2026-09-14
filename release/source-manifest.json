@@ -279,6 +279,31 @@
       "target": "app/astrbot/nonebot-plugin-mystool/src/nonebot_plugin_mystool"
     },
     {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/task_store.py",
+      "target": "app/bridge/src/hook_bridge/task_store.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/task_store.py",
+      "target": "app/astrbot/data/plugins/jiang_schedule/task_store.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/jiang_schedule/unified_runtime.py",
+      "target": "app/astrbot/data/plugins/jiang_schedule/unified_runtime.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/jiang_schedule/content.py",
+      "target": "app/astrbot/data/plugins/jiang_schedule/content.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/jiang_schedule/weather_content.py",
+      "target": "app/astrbot/ai_plugin/ai_plugin/scheduled_weather.py"
+    },
+    {
       "origin": "project",
       "source": "nonebot-plugin-mystool/LICENSE",
       "target": "app/astrbot/nonebot-plugin-mystool/LICENSE"

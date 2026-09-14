@@ -27,6 +27,7 @@ _POLICY_FIELDS = frozenset(
         "reply_mode",
         "allowed_features",
         "proactive_enabled",
+        "scheduled_enabled",
         "quiet_hours",
         "daily_limit",
     }
@@ -60,6 +61,9 @@ class GroupPolicy:
     reply_mode: str = "mention"
     allowed_features: tuple[str, ...] = ()
     proactive_enabled: bool = False
+    # This permits only explicitly saved, enabled tasks whose run is verified
+    # at the bridge; it never seeds a task or enables AI proactive chat.
+    scheduled_enabled: bool = True
     quiet_hours: QuietHours = QuietHours()
     daily_limit: int = 3
     updated_at: str = ""
@@ -72,6 +76,7 @@ class GroupPolicy:
             "effective_reply_mode": self.reply_mode if self.bot_enabled else "off",
             "allowed_features": list(self.allowed_features),
             "proactive_enabled": self.proactive_enabled,
+            "scheduled_enabled": self.scheduled_enabled,
             "quiet_hours": self.quiet_hours.to_dict(),
             "daily_limit": self.daily_limit,
             "updated_at": self.updated_at,
@@ -203,6 +208,11 @@ class GroupPolicyService:
                 if isinstance(raw.get("proactive_enabled"), bool)
                 else False
             ),
+            scheduled_enabled=(
+                raw.get("scheduled_enabled")
+                if isinstance(raw.get("scheduled_enabled"), bool)
+                else True
+            ),
             quiet_hours=QuietHours(
                 enabled=quiet.get("enabled") if isinstance(quiet.get("enabled"), bool) else False,
                 start=quiet.get("start") if isinstance(quiet.get("start"), str) else "22:00",
@@ -284,7 +294,10 @@ class GroupPolicyService:
 
         bot_enabled = values.get("bot_enabled", current.bot_enabled)
         proactive_enabled = values.get("proactive_enabled", current.proactive_enabled)
-        if not isinstance(bot_enabled, bool) or not isinstance(proactive_enabled, bool):
+        scheduled_enabled = values.get("scheduled_enabled", current.scheduled_enabled)
+        if any(not isinstance(value, bool) for value in (
+            bot_enabled, proactive_enabled, scheduled_enabled
+        )):
             raise GroupPolicyError("群聊开关格式不正确。")
         reply_mode = values.get("reply_mode", current.reply_mode)
         if reply_mode not in _REPLY_MODES:
@@ -307,7 +320,7 @@ class GroupPolicyService:
             or not isinstance(daily_limit, int)
             or not 0 <= daily_limit <= 100
         ):
-            raise GroupPolicyError("每日主动消息上限应为 0 到 100。")
+            raise GroupPolicyError("每日主动和定时推送上限应为 0 到 100。")
 
         quiet_value = values.get("quiet_hours", current.quiet_hours.to_dict())
         if not isinstance(quiet_value, dict):
@@ -337,6 +350,7 @@ class GroupPolicyService:
             reply_mode=reply_mode,
             allowed_features=tuple(allowed),
             proactive_enabled=proactive_enabled,
+            scheduled_enabled=scheduled_enabled,
             quiet_hours=QuietHours(
                 enabled=quiet_base["enabled"],
                 start=str(quiet_base["start"]),

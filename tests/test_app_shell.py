@@ -46,6 +46,41 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     return value
 
 
+def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+
+    class Service:
+        def context(self):
+            return {"account_id": "wxid_robot", "items": []}
+
+        def save(self, payload):
+            calls.append(payload)
+            if not payload.get("name"):
+                raise ValueError("请填写任务名称。")
+            return {"item": payload}
+
+    api._scheduled_tasks = Service()
+    required = {
+        "get_scheduled_task_context", "save_scheduled_task",
+        "set_scheduled_task_enabled", "delete_scheduled_task",
+        "preview_scheduled_task", "get_scheduled_task_runs",
+        "test_scheduled_task",
+        "parse_scheduled_command", "preview_scheduled_times",
+    }
+
+    assert required <= set(app_shell.PUBLIC_API_METHODS)
+    assert api.get_scheduled_task_context()["data"]["items"] == []
+    assert api.save_scheduled_task({"name": "提醒"})["ok"] is True
+    failure = api.save_scheduled_task({"name": ""})
+    assert failure == {
+        "ok": False,
+        "error": {"title": "任务尚未完成配置", "message": "请填写任务名称。"},
+    }
+    parsed = api.parse_scheduled_command("青岛天气 明天")
+    assert parsed["data"]["arguments"]["output"] == "image"
+
+
 def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})

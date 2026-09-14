@@ -64,10 +64,11 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
     }
     feature_modules = {item["module"] for item in features}
     source_modules = {
-        Path(item["target"]).name
+        Path(item["target"]).parts[4]
         for item in sources
         if str(item.get("target", "")).startswith("app/astrbot/data/plugins/")
-        and Path(item["target"]).name != "_nonebot_stubs.py"
+        and len(Path(item["target"]).parts) >= 5
+        and Path(item["target"]).parts[4] != "_nonebot_stubs.py"
     }
 
     assert len(delivered) == 24

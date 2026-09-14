@@ -9,14 +9,20 @@ from pathlib import Path
 import re
 import threading
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
+from .group_policy import QuietHours
 
 
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _CONTACT_ID = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
 _MODULE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+_CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_POLICY_FIELDS = frozenset({
+    "allowed_features", "bot_enabled", "scheduled_enabled", "quiet_hours", "daily_limit"
+})
 _STORE_LOCK = threading.RLock()
 
 
@@ -27,12 +33,21 @@ class PrivatePolicyError(ValueError):
 @dataclass(frozen=True, slots=True)
 class PrivateChatPolicy:
     allowed_features: tuple[str, ...] = ()
+    bot_enabled: bool = True
+    # Effective only for saved task/run/recipient authorizations at the bridge.
+    scheduled_enabled: bool = True
+    quiet_hours: QuietHours = QuietHours()
+    daily_limit: int = 3
     updated_at: str = ""
     updated_by: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
             "allowed_features": list(self.allowed_features),
+            "bot_enabled": self.bot_enabled,
+            "scheduled_enabled": self.scheduled_enabled,
+            "quiet_hours": self.quiet_hours.to_dict(),
+            "daily_limit": self.daily_limit,
             "updated_at": self.updated_at,
             "updated_by": self.updated_by,
         }
@@ -108,8 +123,28 @@ class PrivateChatPolicyService:
             for item in values
             if isinstance(item, str) and _MODULE_ID.fullmatch(item)
         )
+        quiet_raw = raw.get("quiet_hours")
+        quiet = quiet_raw if isinstance(quiet_raw, dict) else {}
         return PrivateChatPolicy(
             allowed_features=tuple(dict.fromkeys(features)),
+            bot_enabled=raw.get("bot_enabled") if isinstance(raw.get("bot_enabled"), bool) else True,
+            scheduled_enabled=(
+                raw.get("scheduled_enabled")
+                if isinstance(raw.get("scheduled_enabled"), bool)
+                else True
+            ),
+            quiet_hours=QuietHours(
+                enabled=quiet.get("enabled") if isinstance(quiet.get("enabled"), bool) else False,
+                start=quiet.get("start") if isinstance(quiet.get("start"), str) else "22:00",
+                end=quiet.get("end") if isinstance(quiet.get("end"), str) else "08:00",
+                timezone=quiet.get("timezone") if isinstance(quiet.get("timezone"), str) else "Asia/Shanghai",
+            ),
+            daily_limit=(
+                raw.get("daily_limit")
+                if isinstance(raw.get("daily_limit"), int)
+                and not isinstance(raw.get("daily_limit"), bool)
+                else 3
+            ),
             updated_at=str(raw.get("updated_at") or ""),
             updated_by=str(raw.get("updated_by") or ""),
         )
@@ -169,18 +204,8 @@ class PrivateChatPolicyService:
         actor_id: str = "local-console",
     ) -> dict[str, object]:
         account, contact = self._validate_scope(account_id, contact_id)
-        if not isinstance(values, dict) or set(values) != {"allowed_features"}:
+        if not isinstance(values, dict) or not values or set(values).difference(_POLICY_FIELDS):
             raise PrivatePolicyError("联系人可用功能格式不正确。")
-        allowed = values.get("allowed_features")
-        if not isinstance(allowed, list) or any(
-            not isinstance(item, str) or not _MODULE_ID.fullmatch(item)
-            for item in allowed
-        ):
-            raise PrivatePolicyError("联系人可用功能清单格式不正确。")
-        allowed = list(dict.fromkeys(allowed))
-        available = {feature.module for feature in self._features() if feature.visible}
-        if set(allowed).difference(available):
-            raise PrivatePolicyError("联系人可用功能包含未交付或已移除的功能。")
         actor = str(actor_id or "local-console").strip()
         if len(actor) > 128 or any(ord(char) < 32 for char in actor):
             raise PrivatePolicyError("操作人标识格式不正确。")
@@ -191,8 +216,42 @@ class PrivateChatPolicyService:
             current = self._policy(raw)
             if expected_revision and expected_revision != self._revision(current):
                 raise PrivatePolicyError("联系人功能范围已在其他窗口修改，请刷新后重试。")
+            allowed = values.get("allowed_features", list(current.allowed_features))
+            if not isinstance(allowed, list) or any(
+                not isinstance(item, str) or not _MODULE_ID.fullmatch(item)
+                for item in allowed
+            ):
+                raise PrivatePolicyError("联系人可用功能清单格式不正确。")
+            allowed = list(dict.fromkeys(allowed))
+            available = {feature.module for feature in self._features() if feature.visible}
+            if "allowed_features" in values and set(allowed).difference(available):
+                raise PrivatePolicyError("联系人可用功能包含未交付或已移除的功能。")
+            bot_enabled = values.get("bot_enabled", current.bot_enabled)
+            scheduled_enabled = values.get("scheduled_enabled", current.scheduled_enabled)
+            if not isinstance(bot_enabled, bool) or not isinstance(scheduled_enabled, bool):
+                raise PrivatePolicyError("私聊开关格式不正确。")
+            daily_limit = values.get("daily_limit", current.daily_limit)
+            if isinstance(daily_limit, bool) or not isinstance(daily_limit, int) or not 0 <= daily_limit <= 100:
+                raise PrivatePolicyError("每日定时推送上限应为 0 到 100。")
+            quiet_value = values.get("quiet_hours", current.quiet_hours.to_dict())
+            if not isinstance(quiet_value, dict) or set(quiet_value).difference({"enabled", "start", "end", "timezone"}):
+                raise PrivatePolicyError("安静时段格式不正确。")
+            quiet = current.quiet_hours.to_dict()
+            quiet.update(quiet_value)
+            if not isinstance(quiet["enabled"], bool):
+                raise PrivatePolicyError("安静时段开关格式不正确。")
+            if not _CLOCK.fullmatch(str(quiet["start"])) or not _CLOCK.fullmatch(str(quiet["end"])):
+                raise PrivatePolicyError("安静时段应使用 HH:MM 格式。")
+            try:
+                ZoneInfo(str(quiet["timezone"]))
+            except (ZoneInfoNotFoundError, ValueError):
+                raise PrivatePolicyError("安静时段的时区不可用。") from None
             normalized = PrivateChatPolicy(
                 allowed_features=tuple(allowed),
+                bot_enabled=bot_enabled,
+                scheduled_enabled=scheduled_enabled,
+                quiet_hours=QuietHours(**quiet),
+                daily_limit=daily_limit,
                 updated_at=datetime.now(timezone.utc).isoformat(),
                 updated_by=actor or "local-console",
             )
@@ -212,10 +271,9 @@ class PrivateChatPolicyService:
                     "contact_id": contact,
                     "actor_id": normalized.updated_by,
                     "action": "save_private_chat_policy",
-                    "changed_fields": (
-                        ["allowed_features"]
-                        if current.allowed_features != normalized.allowed_features
-                        else []
+                    "changed_fields": sorted(
+                        field for field in _POLICY_FIELDS
+                        if current.to_dict()[field] != normalized.to_dict()[field]
                     ),
                 }
             )

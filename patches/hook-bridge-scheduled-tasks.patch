@@ -1,0 +1,295 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index 3c027ae..c763521 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -19,6 +19,7 @@ from .media import MediaError, MediaStore
+ from .message_codec import UnsupportedSegmentError, decode_outbound
+ from .models import OutboundCommand, RecallRecord, ReplyTarget, SendResult
+ from .outbound_policy import OutboundGroupPolicy
++from .scheduled_policy import ScheduledDeliveryPolicy
+ from .state import BridgeState
+
+
+@@ -239,6 +240,7 @@ class OneBotActionRouter:
+         self.outbound_policy = OutboundGroupPolicy(
+             policy_path or Path("data/manager/group-policies.json")
+         )
++        self.scheduled_policy = ScheduledDeliveryPolicy(self.outbound_policy)
+         self._scheduled: set[asyncio.Task[None]] = set()
+         self._pending_image_receipts: dict[
+             str, deque[asyncio.Future[RecallRecord]]
+@@ -565,8 +567,17 @@ class OneBotActionRouter:
+             return self._failed("message is empty", echo, 10003)
+
+         explicit_delivery = str(params.get("_wechatrebot_delivery") or "").casefold()
++        scheduled = explicit_delivery == "scheduled"
++        if scheduled:
++            if any(command.kind not in {"text", "image"} for command in commands):
++                return self._failed("定时任务暂不支持此消息类型。", echo, 1403)
++            decision = await self.scheduled_policy.authorize(
++                self.state.bot_wxid, target, is_group=is_group, params=params, reserve=False
++            )
++            if not decision.allowed:
++                return self._failed(decision.message, echo, 1403)
+         reply_target: ReplyTarget | None = None
+-        if is_group and explicit_delivery != "proactive":
++        if is_group and explicit_delivery not in {"proactive", "scheduled"}:
+             explicit_reply_id = _outbound_reply_message_id(message)
+             if explicit_reply_id is not None:
+                 reply_target = self.state.take_reply_target_by_message_id(
+@@ -575,7 +586,7 @@ class OneBotActionRouter:
+             else:
+                 reply_target = self.state.take_reply_target(target)
+
+-        if is_group:
++        if is_group and not scheduled:
+             delivery = (
+                 explicit_delivery
+                 if explicit_delivery in {"reply", "proactive"}
+@@ -622,10 +633,31 @@ class OneBotActionRouter:
+                     auto_recall_delay,
+                 )
+             try:
+-                result = await self._execute_command(
+-                    command,
+-                    reply_target if index == 1 else None,
+-                )
++                if scheduled:
++                    # Media preparation may await downloads; recheck the live
++                    # account and task after it and immediately before HOOK.
++                    path = await self.media.materialize(command.source) if command.kind == "image" else None
++                    decision = await self.scheduled_policy.authorize(
++                        self.state.bot_wxid, target, is_group=is_group, params=params
++                    )
++                    if not decision.allowed or self.state.bot_wxid != params.get("_wechatrebot_account"):
++                        if pending_waiter is not None:
++                            self._cancel_image_receipt_waiter(command.target, pending_waiter)
++                        for pending_target, waiter, _ in pending_auto_recalls:
++                            self._cancel_image_receipt_waiter(pending_target, waiter)
++                        return self._failed(
++                            decision.message if not decision.allowed else "机器人账号已变化，定时推送已取消。",
++                            echo, 1403,
++                        )
++                    if command.kind == "image":
++                        result = await self.hook.send_image(target, path)
++                    else:
++                        result = await self.hook.send_text(target, command.text)
++                else:
++                    result = await self._execute_command(
++                        command,
++                        reply_target if index == 1 else None,
++                    )
+             except (HookApiError, MediaError, OSError, asyncio.TimeoutError) as exc:
+                 if pending_waiter is not None:
+                     self._cancel_image_receipt_waiter(command.target, pending_waiter)
+@@ -769,6 +801,9 @@ class OneBotActionRouter:
+                         "message": node_message,
+                         "_wechatrebot_delivery": params.get("_wechatrebot_delivery"),
+                         "_wechatrebot_wake": params.get("_wechatrebot_wake"),
++                        "_wechatrebot_account": params.get("_wechatrebot_account"),
++                        "_wechatrebot_task_id": params.get("_wechatrebot_task_id"),
++                        "_wechatrebot_run_id": params.get("_wechatrebot_run_id"),
+                     },
+                     echo,
+                 )
+@@ -789,6 +824,8 @@ class OneBotActionRouter:
+         }:
+             return await self._send_message(action, params, echo)
+         if action == "send_voice":
++            if str(params.get("_wechatrebot_delivery") or "").casefold() == "scheduled":
++                return self._failed("定时任务暂不支持语音消息。", echo, 1403)
+             target, _ = self._target(action, params)
+             source = str(
+                 params.get("file")
+@@ -807,6 +844,8 @@ class OneBotActionRouter:
+                 echo,
+             )
+         if action == "send_raw_xml":
++            if str(params.get("_wechatrebot_delivery") or "").casefold() == "scheduled":
++                return self._failed("定时任务暂不支持原始卡片消息。", echo, 1403)
+             target, is_group = self._target(action, params)
+             if not target or not params.get("content"):
+                 return self._failed("to_wxid and content are required", echo, 10003)
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/scheduled_policy.py b/hook_41827_astrbot_bridge/src/hook_bridge/scheduled_policy.py
+new file mode 100644
+index 0000000..98a3d57
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/scheduled_policy.py
+@@ -0,0 +1,177 @@
++"""Explicit, account-scoped task authorization at the final delivery boundary."""
++from __future__ import annotations
++
++import json
++from pathlib import Path
++import re
++from typing import Any
++from zoneinfo import ZoneInfo
++
++from .outbound_policy import OutboundDecision, OutboundGroupPolicy, _atomic_json, _CLOCK
++from .task_store import TaskStore
++
++
++_CONTACT_ID = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
++
++
++class ScheduledDeliveryPolicy:
++    """A delivery tag alone grants nothing: the saved run must authorize it."""
++
++    def __init__(self, group_policy: OutboundGroupPolicy) -> None:
++        self.group_policy = group_policy
++        self.manager_root = group_policy.policy_path.parent
++        self.private_path = self.manager_root / "private-chat-policies.json"
++        self.private_usage_path = self.manager_root / "private-policy-usage.json"
++
++    @staticmethod
++    def _raw(path: Path, account_id: str, target_id: str, scope: str) -> dict[str, Any]:
++        try:
++            payload = json.loads(path.read_text(encoding="utf-8-sig"))
++        except FileNotFoundError:
++            return {}
++        if (not isinstance(payload, dict) or payload.get("schema_version") != 1
++                or not isinstance(payload.get("accounts"), dict)):
++            raise ValueError("聊天策略格式不正确")
++        account = payload["accounts"].get(account_id, {})
++        if not isinstance(account, dict) or not isinstance(account.get(scope, {}), dict):
++            raise ValueError("当前账号的聊天策略格式不正确")
++        raw = account.get(scope, {}).get(target_id, {})
++        if not isinstance(raw, dict):
++            raise ValueError("聊天策略格式不正确")
++        return raw
++
++    def _private_default_features(self) -> list[str]:
++        path = self.manager_root.parent.parent / "legal/feature-set.json"
++        try:
++            payload = json.loads(path.read_text(encoding="utf-8-sig"))
++        except FileNotFoundError:
++            return []
++        features = payload.get("features", [])
++        if not isinstance(features, list):
++            raise ValueError("无法确认私聊的默认功能范围")
++        return [item["module"] for item in features
++                if isinstance(item, dict) and isinstance(item.get("module"), str)
++                and item.get("default_enabled", True) is True
++                and item.get("visible", True) is not False]
++
++    def _policy(self, account_id: str, target_id: str, is_group: bool) -> dict[str, Any]:
++        raw = self._raw(
++            self.group_policy.policy_path if is_group else self.private_path,
++            account_id, target_id, "groups" if is_group else "contacts",
++        )
++        policy = self.group_policy._default()
++        for key in ("bot_enabled", "scheduled_enabled"):
++            value = raw.get(key, True)
++            if not isinstance(value, bool):
++                raise ValueError("聊天开关格式不正确")
++            policy[key] = value
++        allowed = raw.get("allowed_features")
++        if allowed is None:
++            allowed = [] if is_group else self._private_default_features()
++        if not isinstance(allowed, list) or any(not isinstance(item, str) for item in allowed):
++            raise ValueError("聊天功能范围格式不正确")
++        policy["allowed_features"] = allowed
++        limit = raw.get("daily_limit", 3)
++        if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 100:
++            raise ValueError("每日推送上限格式不正确")
++        policy["daily_limit"] = limit
++        quiet = raw.get("quiet_hours", {})
++        if not isinstance(quiet, dict):
++            raise ValueError("安静时段格式不正确")
++        policy["quiet_hours"].update(quiet)
++        quiet = policy["quiet_hours"]
++        if (not isinstance(quiet.get("enabled"), bool)
++                or not isinstance(quiet.get("start"), str) or not _CLOCK.fullmatch(quiet["start"])
++                or not isinstance(quiet.get("end"), str) or not _CLOCK.fullmatch(quiet["end"])
++                or not isinstance(quiet.get("timezone"), str)):
++            raise ValueError("安静时段格式不正确")
++        return policy
++
++    @staticmethod
++    def _reserve(path: Path, account_id: str, target_id: str, day: str,
++                 limit: int, reservation_id: str) -> bool:
++        try:
++            payload = json.loads(path.read_text(encoding="utf-8-sig"))
++        except FileNotFoundError:
++            payload = {"schema_version": 1, "counts": {}, "scheduled_runs": {}}
++        if (not isinstance(payload, dict) or payload.get("schema_version") != 1
++                or not isinstance(payload.get("counts"), dict)
++                or not isinstance(payload.get("scheduled_runs", {}), dict)):
++            return False
++        counts = payload["counts"].setdefault(account_id, {}).setdefault(target_id, {})
++        runs = payload.setdefault("scheduled_runs", {}).setdefault(account_id, {}).setdefault(target_id, {})
++        if not isinstance(counts, dict) or not isinstance(runs, dict):
++            return False
++        day_runs = runs.setdefault(day, [])
++        count = counts.get(day, 0)
++        if (not isinstance(day_runs, list) or isinstance(count, bool)
++                or not isinstance(count, int) or count < 0):
++            return False
++        # A weather result may contain several message segments. Charge the
++        # task occurrence once per recipient, also across bridge restarts.
++        if reservation_id in day_runs:
++            return True
++        if count >= limit:
++            return False
++        counts[day] = count + 1
++        day_runs.append(reservation_id)
++        for history in (counts, runs):
++            for old_day in sorted(history)[:-60]:
++                history.pop(old_day, None)
++        _atomic_json(path, payload)
++        return True
++
++    async def authorize(self, account_id: str, target_id: str, *, is_group: bool,
++                        params: Any, reserve: bool = True) -> OutboundDecision:
++        def reject(message: str) -> OutboundDecision:
++            return OutboundDecision(False, "scheduled", message)
++
++        # Always use the current bridge identity for DB and policy lookups.
++        if not account_id or params.get("_wechatrebot_account") != account_id:
++            return reject("机器人账号已变化或无法确认，定时推送已取消。")
++        if (not _CONTACT_ID.fullmatch(target_id)
++                or target_id.endswith("@chatroom") != is_group):
++            return reject("定时推送对象无法确认。")
++        task_id = params.get("_wechatrebot_task_id")
++        run_id = params.get("_wechatrebot_run_id")
++        if not isinstance(task_id, str) or not task_id or not isinstance(run_id, str) or not run_id:
++            return reject("缺少有效的定时任务执行授权。")
++        # Group proactive and scheduled sends share a lock and daily counter.
++        async with self.group_policy._lock:
++            try:
++                database = self.manager_root / "scheduled-tasks.db"
++                if not database.is_file():
++                    return reject("无法确认定时任务执行授权。")
++                store = TaskStore(database)
++                target_type = "group" if is_group else "private"
++                if not store.authorize_delivery(account_id, task_id, run_id, target_type, target_id):
++                    return reject("定时任务已暂停、删除、修改或未授权此发送对象。")
++                task = store.get(account_id, task_id)
++                policy = self._policy(account_id, target_id, is_group)
++                if not policy["bot_enabled"]:
++                    return reject("此聊天的机器人功能已关闭。")
++                if not policy["scheduled_enabled"]:
++                    return reject("此聊天已暂停全部定时推送。")
++                feature = "" if task.get("action") == "text" else "jiang_commands"
++                if feature and feature not in policy["allowed_features"]:
++                    return reject("此聊天未允许该任务所需的功能。")
++                limit = policy["daily_limit"]
++                if limit <= 0:
++                    return reject("此聊天的每日推送上限为零。")
++                current = self.group_policy._now(ZoneInfo(policy["quiet_hours"]["timezone"]))
++                if self.group_policy._in_quiet_hours(policy, current):
++                    return reject("当前处于此聊天的安静时段。")
++                if reserve and not self._reserve(
++                    self.group_policy.usage_path if is_group else self.private_usage_path,
++                    account_id, target_id, current.date().isoformat(), limit,
++                    f"{task_id}:{run_id}",
++                ):
++                    return reject("此聊天今日推送已达上限或用量无法确认。")
++            except Exception:
++                # Corrupt policies, incomplete upgrades and stale DB schemas
++                # cannot turn a scheduled tag into a delivery bypass.
++                return reject("定时任务授权或聊天策略无法确认，消息已取消。")
++        return OutboundDecision(True, "scheduled", "scheduled delivery authorized")
++
++
++__all__ = ["ScheduledDeliveryPolicy"]

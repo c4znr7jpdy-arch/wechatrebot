@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="app.css?v=0.9.2-uninstall-fix">
+  <link rel="stylesheet" href="app.css?v=0.9.2-unified-schedules">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -212,13 +212,20 @@
         </section>
 
         <section class="page" id="page-schedules" aria-labelledby="scheduleHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">自动运行</span><h1 id="scheduleHeading">定时任务</h1><p>汇总各项功能创建的业务任务，内部维护任务不会出现在这里。</p></div><button class="button ghost" id="refreshSchedules" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
-          <section class="proactive-control panel" id="proactiveControl"><div><span class="eyebrow">主动消息总控</span><h2>默认不主动打扰群聊</h2><p id="proactiveSummary">选择群聊后，可单独允许主动消息、设置安静时段和每日上限。</p></div><button class="button secondary" id="manageGroupPolicies" data-action-bound disabled>去管理群聊规则</button></section>
-          <div class="metric-row"><article><span>全部任务</span><strong id="scheduleTotal">0</strong></article><article><span>运行中</span><strong id="scheduleRunning">0</strong></article><article><span>已暂停</span><strong id="schedulePaused">0</strong></article></div>
-          <section class="table-panel panel">
-            <div class="table-panel-heading"><div><h2>任务列表</h2><p>暂停、改时间和删除都会先确认，不会误触。</p></div><span class="status-badge checking">Asia/Shanghai</span></div>
-            <table><thead><tr><th>任务名称</th><th>来源</th><th>发送到</th><th>执行时间</th><th>下次运行</th><th>状态</th><th class="actions-column">操作</th></tr></thead><tbody id="scheduleRows"><tr><td colspan="7" class="table-empty">正在读取定时任务…</td></tr></tbody></table>
-          </section>
+          <div class="page-heading compact"><div><span class="eyebrow">按你的安排发送</span><h1 id="scheduleHeading">定时任务</h1><p>选择做什么、发给谁、什么时候。只有你创建并启用的任务才会发送。</p></div><div class="schedule-heading-actions"><button class="button ghost" id="refreshSchedules" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button><button class="button primary" id="newScheduledTask" data-action-bound disabled>新建任务</button></div></div>
+          <div id="scheduleContextMessage" class="schedule-notice" role="status" hidden></div>
+          <div id="scheduleListView">
+            <div class="metric-row"><article><span>全部任务</span><strong id="scheduleTotal">0</strong></article><article><span>已启用</span><strong id="scheduleRunning">0</strong></article><article><span>草稿 / 已暂停</span><strong id="schedulePaused">0</strong></article></div>
+            <section class="table-panel panel">
+              <div class="table-panel-heading"><div><h2>我的任务</h2><p>相同内容可以发送给多个群聊和联系人。</p></div><span class="status-badge checking">北京时间</span></div>
+              <div class="schedule-filters"><label>内容<select id="scheduledActionFilter"><option value="all">全部内容</option><option value="weather">天气预报</option><option value="news">热点资讯</option><option value="oilprice">油价提醒</option><option value="kfc">星期四文案</option><option value="text">文字提醒</option></select></label><label>发送对象<select id="scheduledTargetFilter"><option value="all">全部对象</option><option value="group">包含群聊</option><option value="private">包含私聊</option></select></label><label>状态<select id="scheduledStatusFilter"><option value="all">全部状态</option><option value="enabled">已启用</option><option value="paused">已暂停</option><option value="draft">草稿</option><option value="attention">待处理</option></select></label><button class="button ghost small" id="clearScheduledChatFilter" type="button" aria-label="清除聊天筛选" hidden disabled></button></div>
+              <div class="schedule-table-scroll"><table><thead><tr><th>任务 / 内容</th><th>发送到</th><th>执行时间 / 下次运行</th><th>状态 / 最近执行</th><th class="actions-column">操作</th></tr></thead><tbody id="scheduledTaskRows"><tr><td colspan="5" class="table-empty">正在读取定时任务…</td></tr></tbody></table></div>
+            </section>
+            <details id="legacyScheduleSection" class="panel schedule-legacy" hidden><summary>已有功能任务</summary><p>这些任务仍沿用原功能的设置，可以暂停、修改时间或删除。</p><div class="schedule-table-scroll"><table><thead><tr><th>任务名称</th><th>来源</th><th>发送到</th><th>执行时间</th><th>下次运行</th><th>状态</th><th>操作</th></tr></thead><tbody id="scheduleRows"></tbody></table></div></details>
+            <section class="schedule-policy-note"><p id="proactiveSummary">定时推送与 AI 主动聊天分别控制；创建任务不会允许 AI 自行找话题。</p><button class="row-action" id="manageGroupPolicies" data-action-bound disabled>管理聊天规则</button></section>
+          </div>
+          <section id="scheduledTaskEditor" hidden aria-label="任务编辑器"></section>
+          <section id="scheduledTaskRuns" class="panel" hidden aria-label="任务执行记录"></section>
         </section>
 
         <section class="page" id="page-activity" aria-labelledby="activityHeading">
@@ -359,6 +366,6 @@
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
     </section>
   </div>
-  <script src="app.js?v=0.9.2-uninstall-fix"></script>
+  <script src="app.js?v=0.9.2-unified-schedules"></script>
 </body>
 </html>

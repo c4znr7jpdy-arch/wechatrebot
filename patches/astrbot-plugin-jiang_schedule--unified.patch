@@ -1,0 +1,96 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -404,7 +404,7 @@
+         return
+     try:
+-        data = await fetch_weather(city)
+-        msg = format_weather(data)
+-        sent = await ctx.send_message(session, MessageChain([Plain(msg)]))
++        from ai_plugin.scheduled_weather import generate_weather
++        image_path = await generate_weather(city, 0)
++        sent = await ctx.send_message(session, MessageChain([Comp.Image.fromFileSystem(image_path)]))
+         if not sent:
+             raise RuntimeError("未找到可发送的平台会话")
+@@ -715,5 +715,13 @@
+         # 保证新注册的定时回调仍能取得发送上下文。
+         _CTX = context
+-        self._register_page_apis()
++        self._register_page_apis()
++        from .unified_runtime import UnifiedRuntime
++        self._unified = UnifiedRuntime(context)
++        self._unified.register_apis()
++        # Plugin hot reload does not always call initialize again.
++        try:
++            self._unified.start()
++        except RuntimeError:
++            pass  # initialize will start it once the event loop is available.
+
+     def _register_page_apis(self) -> None:
+@@ -786,5 +794,6 @@
+         global _CTX
+         _CTX = self.context
+-        logger.info("[SCHEDULE] initialize 开始")
++        logger.info("[SCHEDULE] initialize 开始")
++        self._unified.start()
+         try:
+             _apply_checkin_task_config()
+@@ -798,5 +807,8 @@
+             logger.exception(f"[SCHEDULE] 初始化失败: {e}")
+
+-    @filter.regex(_COMMAND_ENTRY_PATTERN)
++    async def terminate(self) -> None:
++        await self._unified.stop()
++
++    @filter.regex(_COMMAND_ENTRY_PATTERN)
+     async def schedule(self, event: AstrMessageEvent):
+         """定时任务管理"""
+@@ -813,8 +825,12 @@
+             tasks = _load_tasks()
+             mine = [t for t in tasks if t.get("session") == session]
+-            if not mine:
+-                yield event.plain_result("当前聊天暂无定时任务")
++            unified = await self._unified.command_tasks(event)
++            if not mine and not unified:
++                yield event.plain_result("当前聊天暂无定时任务")
+                 return
+-            lines = ["定时任务列表:"]
++            lines = ["定时任务列表:"]
++            for item in unified:
++                state = "已启用" if item["enabled"] else "草稿" if item["draft"] else "已暂停"
++                lines.append(f"  • {item['name']}  {item['schedule_text']}  {state}")
+             for t in mine:
+                 label = _type_label(t["type"])
+@@ -857,8 +873,8 @@
+                 return
+             tasks = _load_tasks()
+-            new_tasks = []
+-            removed = False
+-            for task in tasks:
+-                if task.get("session") == session and task["type"] == t:
++            new_tasks = []
++            removed = await self._unified.command_delete(event, t)
++            for task in tasks:
++                if task.get("session") == session and task["type"] == t:
+                     removed = True
+                 else:
+@@ -915,6 +931,17 @@
+                 day_of_week = _DOW_MAP.get(dow_raw, "")
+
+-            tasks = _load_tasks()
+-            # 检查重复
++            if t in {"weather", "news", "oilprice", "kfc"}:
++                try:
++                    result = await self._unified.command_add(event, t, city, hour, minute, day_of_week)
++                    yield event.plain_result(result)
++                except ValueError as exc:
++                    yield event.plain_result(str(exc))
++                except Exception:
++                    logger.exception("创建统一定时任务失败")
++                    yield event.plain_result("本次未能创建任务，请在管理器检查连接与功能配置。")
++                return
++
++            tasks = _load_tasks()
++            # 检查重复
+             for task in tasks:
+                 if task.get("session") == session and task["type"] == t:

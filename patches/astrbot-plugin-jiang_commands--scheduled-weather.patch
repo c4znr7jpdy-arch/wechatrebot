@@ -1,0 +1,79 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -528,5 +528,6 @@
+ import ai_plugin.news as _news_mod
+ import ai_plugin.weather as _weather_mod
+-import ai_plugin.weather_image as _weather_image_mod
++import ai_plugin.weather_image as _weather_image_mod
++from ai_plugin.scheduled_weather import generate_weather
+ import ai_plugin.epic as _epic_mod
+ import ai_plugin.kfc as _kfc_mod
+@@ -706,57 +707,12 @@
+                 yield event.plain_result(date_error)
+                 return
+-        try:
+-            if target_offset is not None and target_offset > 6:
+-                daily_result = await fetch_weather(place)
+-                target_data = await fetch_weather_target_date(
+-                    daily_result,
+-                    target_offset,
+-                )
+-                if not target_data:
+-                    raise ValueError("指定日期天气数据暂不可用")
+-                target_data["city"] = (
+-                    daily_result.get("shi")
+-                    or daily_result.get("name")
+-                    or place
+-                )
+-                img_path = await render_weather_target_image(target_data, place)
+-                _record_event_action(
+-                    event,
+-                    "info.weather",
+-                    "指定日期天气",
+-                    {"city": place, "date_offset": target_offset},
+-                )
+-                yield event.image_result(img_path)
+-                return
+-
+-            alapi_task = asyncio.create_task(fetch_weather_alapi(place))
+-            try:
+-                daily_result = await fetch_weather(place)
+-            except Exception:
+-                alapi_task.cancel()
+-                await asyncio.gather(alapi_task, return_exceptions=True)
+-                raise
+-            open_meteo_result, alapi_result = await asyncio.gather(
+-                fetch_weather_open_meteo(daily_result),
+-                alapi_task,
+-                return_exceptions=True,
+-            )
+-            supplemental_data = merge_weather_supplements(
+-                open_meteo_result if isinstance(open_meteo_result, dict) else None,
+-                alapi_result if isinstance(alapi_result, dict) else None,
+-            )
+-            card_data = build_weather_card_data(
+-                daily_result,
+-                place,
+-                supplemental_data,
+-            )
+-            card_data["selected_offset"] = target_offset
+-            img_path = await render_weather_image(card_data, daily_result)
+-            _record_event_action(
+-                event,
+-                "info.weather",
+-                "天气预报",
+-                {"city": place, "date_offset": target_offset},
+-            )
+-            yield event.image_result(img_path)
++        try:
++            img_path = await generate_weather(place, target_offset)
++            _record_event_action(
++                event,
++                "info.weather",
++                "指定日期天气" if target_offset is not None and target_offset > 6 else "天气预报",
++                {"city": place, "date_offset": target_offset},
++            )
++            yield event.image_result(img_path)
+         except Exception as e:
+            logger.exception(f"/{place}天气 失败: {e}")
