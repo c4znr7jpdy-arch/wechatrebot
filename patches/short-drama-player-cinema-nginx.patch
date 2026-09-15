@@ -1,0 +1,30 @@
+diff --git a/short_drama_player.conf b/short_drama_player.conf
+--- a/short_drama_player.conf
++++ b/short_drama_player.conf
+@@ -37,6 +37,17 @@
+         return 200 '{"ok":true,"plugin":"jiang_short_drama","player":"selection-store"}';
+     }
+ 
++    # Public, validated recommendation metadata; video bytes remain direct to source.
++    location = /short-drama/api/recommendations {
++        limit_except GET { deny all; }
++        proxy_pass http://127.0.0.1:6198/recommendations;
++        proxy_http_version 1.1;
++        proxy_set_header Host $host;
++        proxy_set_header X-Real-IP $remote_addr;
++        proxy_read_timeout 25s;
++        add_header Cache-Control "no-store" always;
++    }
++
+     location = /short-drama/api/selections {
+         proxy_pass http://127.0.0.1:6198/selections;
+         proxy_http_version 1.1;
+@@ -64,7 +75,7 @@
+         root /var/www/short-drama-player;
+         try_files /index.html =404;
+         add_header Cache-Control "no-store" always;
+-        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; media-src https: http: blob:; connect-src https: http:; img-src 'self' data: https: http:; base-uri 'none'; frame-ancestors 'self'" always;
++        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; media-src https: http: blob:; connect-src https: http:; img-src 'self' data: https: http:; base-uri 'none'; frame-ancestors 'self'" always;
+     }
+ 
+     location = /short-drama/player/ {

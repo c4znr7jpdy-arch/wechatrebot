@@ -117,6 +117,20 @@ UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作�
 
 ## Verification matrix
 
+### Hosted video workflow
+
+来源：`docs/requirements/requirements-unified-scheduled-tasks.md` 的“短剧播放入口与服务边界”，2026-09-15 手机参考图与用户明确的播放控件要求。独立托管页采用 `DESIGN.md` 的 Hosted cinema surface 变体。
+
+| 能力 | 规范所有者 | 行为与验证 |
+|---|---|---|
+| 播放控件 | 托管页单个 video 与自定义 controller | 关闭原生 controls；显式播放按钮独占切换，点击画面只唤出控件；进度支持拖动与键盘；倍速循环并自动隐藏提示 |
+| 选集 | episodeButton / renderEpisodePage / followEpisode | 下方整条横向滚动并跟随当前集；弹层每 30 集，焦点限制、Escape、inert 与恢复焦点；全屏仍可用 |
+| 搜索与返回 | 片单本地筛选与原始入口状态 | 中文合成不提前过滤；清除即时恢复；返回保留原片单令牌、筛选和已选卡片焦点 |
+| 推荐刷新 | RecommendationCatalog 与 refreshRelated | 固定公开来源，媒体字段校验；缓存与并发刷新合并；随机三个、排除当前、尽量避免上一批；失败可重试、不清空已有推荐；新作品使用服务端短令牌恢复播放 |
+| 提示与滚动 | 页面 :root 与统一状态区域 | 倍速提示 1.4 秒；正常播放状态不占布局，错误内联显示；所有溢出区有全局可操作滚动条 |
+
+专项回归：`tests/test_short_drama_player_controls.py`、`tests/test_short_drama_player_hardening.py`；不运行与本次改动无关的全量测试。
+
 - Static: `node --check app.js`、`python -m compileall src`、JSON 解析。
 - Unit: 使用 `PYTHONPATH=src python -m pytest -q`。
 - Browser: Edge/Chromium，1380×860 与 900×700；七个页面、搜索、聊天管理标签、群列表/成员、联系人列表/详情/功能范围、定时任务空态/创建/筛选/预览/测试确认/删除确认/执行记录、模态、错误态、控制台零 error/warning。

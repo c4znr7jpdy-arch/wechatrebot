@@ -22,7 +22,7 @@ def _patched_player(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     shutil.copy2(source / "index.html", checkout / "index.html")
     shutil.copy2(source / "state_server.py", checkout / "state_server.py")
-    for name in ("short-drama-player-hosted-only.patch", "short-drama-player-controls.patch"):
+    for name in ("short-drama-player-hosted-only.patch", "short-drama-player-controls.patch", "short-drama-player-cinema.patch"):
         patch = ROOT / "patches" / name
         subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
         subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
@@ -138,3 +138,90 @@ def test_state_service_rejects_unsafe_media_payloads(tmp_path: Path) -> None:
     validated, error = module._validate_payload(payload)
     assert validated is None
     assert error == "invalid episode"
+
+
+def test_recommendations_are_public_validated_cached_and_reopenable(tmp_path, monkeypatch):
+    checkout = _patched_player(tmp_path)
+    module = _load_state_server(checkout, f"catalog_{tmp_path.name}")
+    store = module.StateStore(tmp_path / "state", 600, 100)
+    # Private user selections must never become a public recommendation pool.
+    store.put({"v": 1, "kind": "search", "heading": "private", "items": [{"title": "private title"}]})
+    calls = []
+
+    def catalog_json(base, **params):
+        calls.append(params)
+        if params["ac"] == "list":
+            return {"class": [{"type_id": 3, "type_name": "短剧"}]}
+        return {"list": [
+            {"vod_name": f"公开短剧{index}", "type_name": "短剧", "vod_pic": "https://cdn.example/poster.jpg",
+             "vod_play_url": "第1集$https://cdn.example/one.m3u8#第2集$https://cdn.example/two.m3u8"}
+            for index in range(9)
+        ] + [
+            {"vod_name": "unsafe", "type_name": "短剧", "vod_play_url": "第1集$https://127.0.0.1/private.m3u8"},
+            {"vod_name": "movie", "type_name": "电影", "vod_play_url": "完整版$https://cdn.example/movie.m3u8"},
+        ]}
+
+    monkeypatch.setattr(module, "_catalog_json", catalog_json)
+    catalog = module.RecommendationCatalog(store)
+    items = catalog.get()
+    assert len(items) == 9
+    assert len(calls) == 2
+    assert catalog.get() == items and len(calls) == 2
+    for item in items:
+        assert item["title"] not in {"private title", "unsafe", "movie"}
+        saved = store.get(item["selection_token"])
+        assert saved["items"][0]["episodes"] == item["episodes"]
+    catalog.refresh_at = 0
+    monkeypatch.setattr(catalog, "_load", lambda: [])
+    assert catalog.get() == items
+    catalog.refresh_at = catalog.expires_at = 0
+    assert catalog.get() == []
+
+
+def test_recommendation_http_endpoint_and_busy_cache(tmp_path, monkeypatch):
+    import threading
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+    checkout = _patched_player(tmp_path)
+    module = _load_state_server(checkout, f"http_catalog_{tmp_path.name}")
+    store = module.StateStore(tmp_path / "state", 600, 100)
+    catalog = module.RecommendationCatalog(store)
+    catalog.lock.acquire()
+    try:
+        assert catalog.get() == []
+    finally:
+        catalog.lock.release()
+    monkeypatch.setattr(catalog, "_load", lambda: [])
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    server.recommendation_catalog = catalog
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with pytest.raises(HTTPError) as error:
+            urlopen(f"http://127.0.0.1:{server.server_port}/recommendations", timeout=2)
+        assert error.value.code == 503
+        monkeypatch.setattr(catalog, "get", lambda: [{"title": "公开短剧"}])
+        with urlopen(f"http://127.0.0.1:{server.server_port}/recommendations", timeout=2) as response:
+            assert response.headers["Cache-Control"] == "no-store"
+            assert json.load(response)["items"][0]["title"] == "公开短剧"
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)
+
+
+def test_recommendation_proxy_patch_applies_to_hosted_nginx(tmp_path):
+    source = PROJECT / "deploy/nginx/short_drama_player.conf"
+    if not source.is_file():
+        pytest.skip("hosted nginx source unavailable")
+    # Preserve the Linux host's LF configuration contract on Windows as well.
+    (tmp_path / source.name).write_text(source.read_text("utf-8"), encoding="utf-8", newline="\n")
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    patch = ROOT / "patches/short-drama-player-cinema-nginx.patch"
+    subprocess.run(["git", "apply", "--check", str(patch)], cwd=tmp_path, check=True)
+    subprocess.run(["git", "apply", str(patch)], cwd=tmp_path, check=True)
+    config = (tmp_path / source.name).read_text("utf-8")
+    assert "location = /short-drama/api/recommendations" in config
+    assert "proxy_pass http://127.0.0.1:6198/recommendations;" in config
+    assert "limit_except GET { deny all; }" in config
+    assert "worker-src 'self' blob:;" in config

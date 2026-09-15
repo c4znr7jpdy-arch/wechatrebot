@@ -1,4 +1,4 @@
-"""Native-control regression checks using a locally generated video, no network."""
+"""Custom player interaction regression checks using a locally generated video, no network."""
 from pathlib import Path
 import re
 import shutil
@@ -77,6 +77,12 @@ def player_page(browser, player_assets):
             route.fulfill(body=html, content_type="text/html; charset=utf-8")
         elif "/api/selections/" in path:
             route.fulfill(json=payload)
+        elif path.endswith("/api/recommendations"):
+            route.fulfill(json={"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": [
+                {"title": f"推荐短剧{index}", "category": "短剧", "cover": "", "selection_token": f"abcdefghijklmnop{index}",
+                 "episodes": [{"name": "第1集", "url": f"https://media.example/related{index}.m3u8"}]}
+                for index in range(1, 10)
+            ]})
         elif path.endswith(".mp4"):
             headers = {"Access-Control-Allow-Origin": "*", "Accept-Ranges": "bytes"}
             requested_range = re.fullmatch(r"bytes=(\d+)-(\d*)", route.request.headers.get("range", ""))
@@ -105,18 +111,17 @@ def player_page(browser, player_assets):
     assert not errors, errors
 
 
-def native_play_click(page):
-    box = page.locator("#video").bounding_box()
-    page.mouse.move(box["x"] + 24, box["y"] + box["height"] - 48)
-    page.mouse.click(box["x"] + 24, box["y"] + box["height"] - 48)
+def play_click(page):
+    page.locator("#togglePlayback").click()
 
 
-def test_native_control_clicks_toggle_once_and_seeking_keeps_pause(player_page):
+def test_custom_controls_toggle_once_and_seeking_keeps_pause(player_page):
     page = player_page
-    assert page.evaluate("window.customVideoClicks") == 0
-    native_play_click(page)
+    assert page.evaluate("window.customVideoClicks") == 1
+    assert not page.locator("#video").evaluate("video => video.controls")
+    play_click(page)
     page.wait_for_function("!document.getElementById('video').paused && document.getElementById('video').currentTime > .1")
-    native_play_click(page)
+    play_click(page)
     page.wait_for_function("document.getElementById('video').paused")
     page.locator("#video").evaluate("video => { video.currentTime = 3; }")
     page.wait_for_function("document.getElementById('video').currentTime > 2")
@@ -125,9 +130,10 @@ def test_native_control_clicks_toggle_once_and_seeking_keeps_pause(player_page):
 
 def test_episode_switch_and_auto_next_preserve_playback_speed(player_page):
     page = player_page
-    page.get_by_label("播放速度").select_option("1.5")
-    native_play_click(page)
+    page.locator("#speedButton").click()
+    play_click(page)
     page.wait_for_function("!document.getElementById('video').paused")
+    page.get_by_label("更多播放设置").click()
     page.get_by_role("button", name="下一集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集' && !document.getElementById('video').paused && document.getElementById('video').currentTime > .1")
     assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
@@ -138,9 +144,11 @@ def test_episode_switch_and_auto_next_preserve_playback_speed(player_page):
 
 def test_disabled_auto_next_stays_on_current_episode(player_page):
     page = player_page
+    page.get_by_label("更多播放设置").click()
     page.locator(".switch-label").click()
+    page.get_by_label("更多播放设置").click()
     assert not page.get_by_label("自动连播").is_checked()
-    native_play_click(page)
+    play_click(page)
     page.wait_for_function("!document.getElementById('video').paused")
     page.locator("#video").evaluate("video => { video.currentTime = video.duration - .2; }")
     page.wait_for_function("document.getElementById('video').ended")
@@ -148,13 +156,14 @@ def test_disabled_auto_next_stays_on_current_episode(player_page):
 
 
 @pytest.mark.parametrize("width", [320, 390, 1280])
-def test_toolbar_and_episode_sheet_do_not_overlap_native_controls(player_page, width):
+def test_overlay_controls_and_episode_sheet_fit_player(player_page, width):
     page = player_page
     page.set_viewport_size({"width": width, "height": 844})
     video = page.locator("#video").bounding_box()
-    toolbar = page.get_by_role("group", name="剧集和播放设置").bounding_box()
-    assert toolbar["y"] >= video["y"] + video["height"]
-    assert page.locator("#videoShell button").count() == 0
+    controls = page.get_by_role("group", name="播放控制").bounding_box()
+    assert controls["y"] >= video["y"]
+    assert controls["y"] + controls["height"] <= video["y"] + video["height"]
+    assert page.locator("#videoShell button").count() > 0
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     page.get_by_role("button", name="选择剧集", exact=True).click()
     assert page.locator("#episodeSheet").is_visible()
@@ -162,3 +171,183 @@ def test_toolbar_and_episode_sheet_do_not_overlap_native_controls(player_page, w
     assert page.locator("#episodeSheet").is_hidden()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
     assert page.locator("#video").evaluate("video => video.paused")
+
+
+@pytest.fixture
+def cinema_catalog(player_page):
+    page = player_page
+    titles = ["山海之间", "长风入夜", "山海之间：归途", "雨落长安", "下一站春天", "深海来信", "人间烟火", "逐光"]
+    payload = {"v": 1, "kind": "search", "heading": "发现好故事", "items": [
+        {"title": title, "year": "2026", "category": "电视剧", "source": "测试片单",
+         "cover": "https://media.example/missing-cover.jpg", "episodes": [
+             {"name": f"第{index}集", "url": f"https://media.example/{index}.m3u8"}
+             for index in range(1, 66)
+         ]}
+        for title in titles
+    ]}
+    page.route("**/api/selections/**", lambda route: route.fulfill(json=payload))
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").first.wait_for()
+    return page
+
+
+def test_catalog_filter_clear_ime_and_return_keep_context(cinema_catalog):
+    page = cinema_catalog
+    search = page.get_by_label("在当前片单中查找")
+    search.dispatch_event("compositionstart")
+    search.fill("山海")
+    assert page.locator(".recommend-card:visible").count() == 8
+    search.dispatch_event("compositionend")
+    assert page.locator(".recommend-card:visible").count() == 2
+    page.locator(".recommend-card:visible").first.click()
+    page.get_by_label("返回", exact=True).click()
+    assert search.input_value() == "山海"
+    assert page.locator(".recommend-card:visible").count() == 2
+    assert page.evaluate("document.activeElement.classList.contains('recommend-card')")
+    assert page.locator("#video").get_attribute("src") is None
+    search.fill("不存在的片名")
+    assert page.locator("#catalogEmpty").is_visible()
+    page.get_by_label("清除片名筛选").click()
+    assert page.locator(".recommend-card:visible").count() == 8
+    assert search.evaluate("node => node === document.activeElement")
+    assert "q=" not in page.url
+
+
+def test_episode_groups_modal_focus_and_current_state(cinema_catalog):
+    page = cinema_catalog
+    page.locator(".recommend-card").first.click()
+    assert page.locator("#episodeGrid button").count() == 65
+    page.locator("#episodeGrid").get_by_label("第32集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第32集'")
+    assert page.locator('#episodeGrid [aria-current="true"]').inner_text() == "32"
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    assert page.get_by_role("dialog", name="选择剧集").is_visible()
+    assert page.locator("#sheetClose").evaluate("node => node === document.activeElement")
+    assert not page.locator("#episodeSheet").evaluate("node => node.inert")
+    page.keyboard.press("Shift+Tab")
+    assert page.locator("#sheetEpisodeGrid button").last.evaluate("node => node === document.activeElement")
+    page.keyboard.press("Tab")
+    assert page.locator("#sheetClose").evaluate("node => node === document.activeElement")
+    page.locator("#sheetEpisodeRanges").get_by_role("button", name="61–65").click()
+    assert page.locator("#sheetEpisodeGrid button").count() == 5
+    page.keyboard.press("Escape")
+    assert page.locator("#episodeSheet").is_hidden()
+    assert page.locator("#episodeOpen").evaluate("node => node === document.activeElement")
+    assert page.locator("[inert]").count() == 0
+
+
+@pytest.mark.parametrize("width", [320, 390, 768, 1440])
+def test_cinema_catalog_and_player_responsive(cinema_catalog, width):
+    page = cinema_catalog
+    page.set_viewport_size({"width": width, "height": 900})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    # Failed posters fall back to title initials without broken-image chrome.
+    page.wait_for_function("document.querySelectorAll('.cover img').length === 0")
+    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
+    screenshots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(screenshots / f"catalog-{width}.png"), full_page=True)
+    page.locator(".recommend-card").first.click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.screenshot(path=str(screenshots / f"player-{width}.png"), full_page=True)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    if width == 390:
+        assert page.locator("#episodes").bounding_box()["y"] > page.locator("#video").bounding_box()["y"]
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    page.screenshot(path=str(screenshots / f"episodes-{width}.png"))
+    panel = page.locator(".sheet-panel").bounding_box()
+    assert panel["x"] >= 0 and panel["x"] + panel["width"] <= width
+    assert panel["y"] >= 0 and panel["y"] + panel["height"] <= 900
+
+
+def test_speed_cycles_temporary_hint_and_seek_does_not_autoplay(player_page):
+    page = player_page
+    for rate in [1.5, 2, 3, 1]:
+        page.locator("#speedButton").click()
+        assert page.locator("#video").evaluate("video => video.playbackRate") == rate
+        assert page.locator("#videoHint").inner_text() == f"{rate:.1f} 倍速"
+    page.locator("#videoHint").wait_for(state="hidden", timeout=2500)
+    assert page.locator("#video").evaluate("video => video.paused")
+    page.locator("#seek").focus()
+    page.keyboard.press("ArrowRight")
+    assert page.locator("#video").evaluate("video => video.currentTime > 0 && video.paused")
+    # Clicking the video reveals controls without introducing a second play toggle.
+    page.locator("#video").click(position={"x": 60, "y": 100})
+    assert page.locator("#video").evaluate("video => video.paused")
+
+
+def test_strip_follows_episode_and_can_scroll_independently(cinema_catalog):
+    page = cinema_catalog
+    page.emulate_media(reduced_motion="reduce")
+    page.locator(".recommend-card").first.click()
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    page.locator("#sheetEpisodeRanges").get_by_role("button", name="31–60").click()
+    page.locator("#sheetEpisodeGrid").get_by_label("第32集", exact=True).click()
+    page.wait_for_function("document.getElementById('episodeGrid').scrollLeft > 500")
+    strip = page.locator("#episodeGrid").bounding_box()
+    active = page.locator('#episodeGrid [aria-current="true"]').bounding_box()
+    assert abs(active["x"] - strip["x"]) < 3
+    page.locator("#episodeGrid").evaluate("node => node.scrollLeft += 100")
+    assert page.locator('#episodeGrid [aria-current="true"]').inner_text() == "32"
+
+
+def test_random_three_refresh_navigation_failure_and_return(cinema_catalog):
+    page = cinema_catalog
+    page.locator(".recommend-card").first.click()
+    page.wait_for_function("document.querySelectorAll('.related-card').length === 3")
+    previous_titles = set(page.locator(".related-card strong").all_text_contents())
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    next_titles = set(page.locator(".related-card strong").all_text_contents())
+    assert len(next_titles) == 3 and previous_titles.isdisjoint(next_titles)
+    selected = page.locator(".related-card strong").first.inner_text()
+    page.locator(".related-card").first.click()
+    assert page.locator("#title").inner_text() == selected
+    assert page.locator("#videoTitle").inner_text() == selected
+    assert "i=0" in page.url
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    assert selected not in page.locator(".related-card strong").all_text_contents()
+    page.route("**/api/recommendations", lambda route: route.fulfill(status=503, json={"error": "offline"}))
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('relatedStatus').textContent.includes('更新失败')")
+    assert page.locator(".related-card").count() == 3
+    page.get_by_label("返回", exact=True).click()
+    assert page.locator(".recommend-card:visible").count() == 8
+    assert page.url.endswith("?s=abcdefghijklmnop#") or page.url.endswith("?s=abcdefghijklmnop")
+    assert page.locator("#related").is_hidden()
+
+
+def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
+    page = cinema_catalog
+    page.set_viewport_size({"width": 960, "height": 600})
+    page.locator(".recommend-card").first.click()
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell') || document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    assert page.get_by_role("dialog", name="选择剧集").is_visible()
+    panel = page.locator(".sheet-panel").bounding_box()
+    assert panel["x"] > 450 and panel["height"] <= 568
+    page.locator("#sheetEpisodeRanges").get_by_role("button", name="31–60").click()
+    page.locator("#sheetEpisodeGrid").get_by_label("第32集", exact=True).click()
+    assert page.locator("#meta").inner_text() == "第32集"
+    page.get_by_label("退出全屏", exact=True).click()
+    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+
+
+@pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
+def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
+    page = player_page
+    width, height, mode = aspect
+    clip = tmp_path / "aspect.mp4"
+    subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                    f"testsrc2=size={width}x{height}:rate=12", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(clip)], check=True, timeout=15)
+    page.route("**/aspect.mp4", lambda route: route.fulfill(body=clip.read_bytes(), content_type="video/mp4", headers={"Access-Control-Allow-Origin": "*"}))
+    page.locator("#video").evaluate("video => { video.src = 'https://media.example/aspect.mp4'; video.load(); }")
+    page.wait_for_function(f"document.getElementById('videoShell').classList.contains('player--{mode}') && document.getElementById('video').readyState >= 2")
+    for viewport in [{"width": 390, "height": 844}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
+        page.set_viewport_size(viewport)
+        video = page.locator("#video").bounding_box()
+        assert video["width"] <= viewport["width"]
+        assert video["height"] <= viewport["height"] * .72
+        assert page.locator("#video").evaluate("node => getComputedStyle(node).objectFit") == "contain"
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
