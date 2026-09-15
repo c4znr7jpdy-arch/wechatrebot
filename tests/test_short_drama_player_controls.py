@@ -333,6 +333,48 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
     page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
 
 
+@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
+def test_mobile_landscape_video_rotates_fullscreen_and_restores(player_page):
+    page = player_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    # Exercise the WebKit/WeChat fallback where an element cannot enter native fullscreen.
+    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    shell = page.locator("#videoShell")
+    style = shell.evaluate("node => ({ width: getComputedStyle(node).width, height: getComputedStyle(node).height, transform: getComputedStyle(node).transform })")
+    assert abs(float(style["width"].removesuffix("px")) - 844) < 1
+    assert abs(float(style["height"].removesuffix("px")) - 390) < 1
+    assert style["transform"] != "none"
+    bounds = shell.bounding_box()
+    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
+    screenshots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(screenshots / "mobile-landscape-fullscreen-390.png"))
+
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    panel = page.locator(".sheet-panel").bounding_box()
+    assert panel["x"] >= 0 and panel["y"] >= 0
+    assert panel["x"] + panel["width"] <= 390 and panel["y"] + panel["height"] <= 844
+    page.locator("#sheetClose").click()
+
+    page.set_viewport_size({"width": 844, "height": 390})
+    page.wait_for_function("!document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    page.get_by_label("退出全屏", exact=True).click()
+    page.wait_for_function("!document.getElementById('videoShell').classList.contains('pseudo-fullscreen') && !document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
+
+    shell.evaluate("node => { node.classList.remove('player--landscape', 'player--cinema'); node.classList.add('player--portrait'); }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+    assert not shell.evaluate("node => node.classList.contains('fullscreen-rotated')")
+    page.get_by_label("退出全屏", exact=True).click()
+
+
 @pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
 def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page = player_page

@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,237 @@
+@@ -5,369 +5,240 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -481,8 +481,11 @@ diff --git a/index.html b/index.html
 +    .episode-ranges { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
 +
 +    .video-shell:fullscreen, .video-shell.pseudo-fullscreen { width: 100vw; height: 100dvh; max-height: none; position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
++    .video-shell:fullscreen.fullscreen-rotated, .video-shell.pseudo-fullscreen.fullscreen-rotated { width: 100dvh; height: 100dvw; inset: 50% auto auto 50%; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center; }
 +    .video-shell:fullscreen .sheet, .video-shell.pseudo-fullscreen .sheet { position: absolute; align-items: center; justify-content: flex-end; padding: 16px; }
 +    .video-shell:fullscreen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: min(46vw, 420px); max-height: calc(100dvh - 32px); border-radius: 16px; }
++    .video-shell.fullscreen-rotated .sheet { align-items: center; padding: 16px; }
++    .video-shell.fullscreen-rotated .sheet-panel { width: min(46%, 420px); max-height: calc(100% - 32px); border-radius: 16px; }
 +    .related { padding: 18px 20px 20px; }
 +    .related-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 +    #refreshRelated { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 90px; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
@@ -496,7 +499,7 @@ diff --git a/index.html b/index.html
 +    @media (min-width: 761px) { main.watch-mode { margin-top: 24px; } .related-card { aspect-ratio: 16 / 9; } }
 +    @media (max-width: 760px) { .video-shell.player--landscape, .video-shell.player--cinema { aspect-ratio: 4 / 3; } .video-header { gap: 4px; padding-inline: 4px; } .video-controls { padding-inline: 6px; } .watch-description, .inline-episodes, .related { padding-left: 14px; padding-right: 14px; } .below-player { padding-inline: 14px; } }
 +    @media (max-width: 380px) { .episode-grid { gap: 7px; grid-template-columns: repeat(5, minmax(0, 1fr)); } .controls-row { gap: 2px; } .video-heading { font-size: 13px; } .playback-time { font-size: 12px; } }
-+    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell.pseudo-fullscreen .sheet { align-items: flex-end; padding: 0; } }
++    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell.pseudo-fullscreen .sheet { align-items: flex-end; padding: 0; } .video-shell.fullscreen-rotated .sheet { align-items: center; padding: 16px; } .video-shell.fullscreen-rotated .sheet-panel { width: min(46%, 420px); max-height: calc(100% - 32px); border-radius: 16px; } }
 +
 +    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 +    @media (forced-colors: active) { :root { scrollbar-color: auto; } button, .search-field { border: 1px solid ButtonText; } .episode-item.active { outline: 2px solid Highlight; } }
@@ -589,7 +592,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,228 @@
+@@ -406,8 +277,248 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -719,22 +722,42 @@ diff --git a/index.html b/index.html
 +          morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false');
 +        }
 +      });
++      let orientationLockRequested = false;
++      const hasHorizontalVideo = () => videoShell.classList.contains('player--landscape') || videoShell.classList.contains('player--cinema');
 +      const syncFullscreen = () => {
 +        const active = document.fullscreenElement === videoShell || videoShell.classList.contains('pseudo-fullscreen');
++        const rotateInPortrait = active && hasHorizontalVideo() && window.innerHeight > window.innerWidth;
 +        document.body.classList.toggle('player-fullscreen', active);
++        videoShell.classList.toggle('fullscreen-rotated', rotateInPortrait);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
++        if (!active && orientationLockRequested) {
++          try { screen.orientation?.unlock?.(); } catch (_error) {}
++          orientationLockRequested = false;
++        }
 +        showControls();
 +      };
++      const requestLandscapeOrientation = async () => {
++        if (!hasHorizontalVideo() || !screen.orientation?.lock) return;
++        try {
++          await screen.orientation.lock('landscape');
++          orientationLockRequested = true;
++        } catch (_error) {}
++        syncFullscreen();
++      };
 +      fullButton.addEventListener('click', async () => {
++        let entering = false;
 +        try {
 +          if (document.fullscreenElement) await document.exitFullscreen();
 +          else if (videoShell.classList.contains('pseudo-fullscreen')) videoShell.classList.remove('pseudo-fullscreen');
-+          else if (videoShell.requestFullscreen) await videoShell.requestFullscreen();
-+          else videoShell.classList.add('pseudo-fullscreen');
++          else if (videoShell.requestFullscreen) { entering = true; await videoShell.requestFullscreen(); }
++          else { entering = true; videoShell.classList.add('pseudo-fullscreen'); }
 +        } catch (_error) { videoShell.classList.toggle('pseudo-fullscreen'); }
 +        syncFullscreen();
++        if (entering) await requestLandscapeOrientation();
 +      });
 +      document.addEventListener('fullscreenchange', syncFullscreen);
++      window.addEventListener('resize', syncFullscreen);
++      screen.orientation?.addEventListener?.('change', syncFullscreen);
 +      document.addEventListener('keydown', (event) => {
 +        if (event.isComposing) return;
 +        if (event.key === 'Escape' && episodeSheet.hidden) {
@@ -818,7 +841,7 @@ diff --git a/index.html b/index.html
  
        const fail = (message) => {
          statusNode.textContent = message;
-@@ -415,15 +503,27 @@
+@@ -415,15 +526,27 @@
          retry.hidden = false;
        };
  
@@ -849,7 +872,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +621,7 @@
+@@ -521,7 +644,7 @@
            }
            return { name, url };
          });
@@ -858,7 +881,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +635,71 @@
+@@ -535,6 +658,71 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -930,7 +953,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +717,29 @@
+@@ -552,22 +740,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -963,7 +986,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +758,15 @@
+@@ -586,14 +781,15 @@
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
@@ -985,7 +1008,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +787,13 @@
+@@ -614,27 +810,14 @@
        };
  
        const applyVideoAspect = () => {
@@ -1011,6 +1034,7 @@ diff --git a/index.html b/index.html
 -        video.controls = true;
 -      };
 +        videoShell.classList.add(`player--${videoAspectMode(video.videoWidth, video.videoHeight)}`);
++        syncFullscreen();
 +        requestAnimationFrame(followEpisode);
 +      };
 +
@@ -1018,7 +1042,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,17 +855,69 @@
+@@ -696,17 +879,69 @@
          updateQualityActive();
        };
  
@@ -1091,7 +1115,7 @@ diff --git a/index.html b/index.html
        };
  
  
-@@ -717,6 +928,10 @@
+@@ -717,6 +952,10 @@
          const loadId = ++episodeLoadId;
          removeEpisodeReadyListener();
          current = index;
@@ -1102,7 +1126,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -749,7 +964,6 @@
+@@ -749,7 +988,6 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1110,7 +1134,7 @@ diff --git a/index.html b/index.html
          video.pause();
          video.removeAttribute('src');
          video.load();
-@@ -784,44 +998,75 @@
+@@ -784,44 +1022,75 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1216,7 +1240,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1075,16 @@
+@@ -830,11 +1099,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1233,7 +1257,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1106,11 @@
+@@ -856,10 +1130,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1246,7 +1270,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1133,7 @@
+@@ -882,7 +1157,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1255,7 +1279,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1142,66 @@
+@@ -891,21 +1166,66 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1331,7 +1355,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1214,7 @@
+@@ -918,6 +1238,7 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1339,7 +1363,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1238,15 @@
+@@ -941,6 +1262,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1355,7 +1379,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1264,21 @@
+@@ -958,12 +1288,21 @@
          }
        });
        syncNativeControls();
