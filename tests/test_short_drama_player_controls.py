@@ -40,9 +40,9 @@ def browser():
 
 
 @pytest.fixture
-def player_page(browser, player_assets):
+def player_page(browser, player_assets, request):
     html, media = player_assets
-    page = browser.new_page(viewport={"width": 390, "height": 844})
+    page = browser.new_page(viewport={"width": 390, "height": 844}, **(getattr(request, "param", None) or {}))
     page.set_default_timeout(5000)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -351,3 +351,93 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
         assert video["height"] <= viewport["height"] * .72
         assert page.locator("#video").evaluate("node => getComputedStyle(node).objectFit") == "contain"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+@pytest.mark.parametrize("player_page", [None, {"has_touch": True, "is_mobile": True}], indirect=True)
+def test_compact_link_recovers_cover_full_strip_and_next_episode(player_page):
+    import base64
+    import json
+    import zlib
+    page = player_page
+    compact = {"v": 1, "kind": "recommendations", "heading": "旧片单", "items": [{
+        "title": "独剑九天", "source": "量子资源", "episode_count": 16,
+        "episodes": [{"name": "第01集", "url": "https://media.example/1.m3u8"}],
+    }]}
+    full = {"v": 1, "kind": "search", "heading": "独剑九天", "items": [{
+        "title": "独剑九天", "source": "量子资源", "cover": "https://media.example/poster.png",
+        "episodes": [{"name": f"第{index:02}集", "url": f"https://media.example/{index}.m3u8"} for index in range(1, 17)],
+    }]}
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf1sAAAAASUVORK5CYII=")
+    page.route("**/poster.png", lambda route: route.fulfill(body=png, content_type="image/png"))
+    requests = []
+    def resolve(route):
+        requests.append(route.request.url)
+        route.fulfill(json=full)
+    page.route("**/api/resolve?*", resolve)
+    token = base64.urlsafe_b64encode(zlib.compress(json.dumps(compact).encode())).decode().rstrip("=")
+    page.goto(f"https://player.example/short-drama/player#r={token}")
+    page.wait_for_function("document.querySelector('.cover img')?.naturalWidth > 0")
+    page.locator(".recommend-card").click()
+    page.wait_for_function("document.querySelectorAll('#episodeGrid button').length === 16")
+    assert page.locator("#episodes").is_visible()
+    assert len(requests) == 1
+    assert "https%3A" not in requests[0]  # Resolver accepts a fingerprint, never a fetch URL.
+    page.get_by_label("更多播放设置").click()
+    assert page.get_by_role("button", name="上一集", exact=True).is_disabled()
+    assert page.get_by_role("button", name="下一集", exact=True).is_enabled()
+    page.get_by_role("button", name="下一集", exact=True).click()
+    assert page.locator("#meta").inner_text() == "第02集"
+
+
+@pytest.mark.parametrize("player_page", [None, {"has_touch": True, "is_mobile": True}], indirect=True)
+def test_picture_taps_toggle_chrome_without_toggling_playback(player_page, request):
+    page = player_page
+    for hidden in [True, False, True, False]:
+        if (request.node.callspec.params["player_page"] or {}).get("has_touch"):
+            box = page.locator("#video").bounding_box()
+            page.touchscreen.tap(box["x"] + 180, box["y"] + 100)
+        else:
+            page.locator("#video").click(position={"x": 180, "y": 100})
+        assert page.locator("#videoShell").evaluate("node => node.classList.contains('controls-hidden')") == hidden
+        assert page.locator("#video").evaluate("video => video.paused")
+
+
+@pytest.mark.parametrize("player_page", [None, {"has_touch": True, "is_mobile": True}], indirect=True)
+def test_speed_is_inline_and_touch_navigation_has_no_gold_focus(player_page):
+    page = player_page
+    for width in [320, 390]:
+        page.set_viewport_size({"width": width, "height": 844})
+        speed = page.locator("#speedButton").bounding_box()
+        fullscreen = page.locator("#fullscreenButton").bounding_box()
+        assert speed["x"] + speed["width"] <= fullscreen["x"] + 1
+        assert abs(speed["y"] - fullscreen["y"]) < 1
+        assert page.locator("#speedButton").evaluate("node => getComputedStyle(node).color") == page.locator("#fullscreenButton").evaluate("node => getComputedStyle(node).color")
+        assert page.locator("#pageBackButton").evaluate("node => getComputedStyle(node).outlineStyle") == "none"
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.locator(".related-card").first.click()
+    assert page.locator("#togglePlayback").evaluate("node => node !== document.activeElement")
+
+
+def test_compact_metadata_failure_can_retry_without_losing_playback(player_page):
+    page = player_page
+    compact = {"v": 1, "kind": "search", "heading": "旧片单", "items": [{
+        "title": "旧作品", "source": "量子资源", "episode_count": 3,
+        "episodes": [{"name": "第1集", "url": "https://media.example/1.m3u8"}],
+    }]}
+    full = {"v": 1, "kind": "search", "heading": "旧作品", "items": [{
+        "title": "旧作品", "source": "量子资源", "cover": "",
+        "episodes": [{"name": f"第{index}集", "url": f"https://media.example/{index}.m3u8"} for index in range(1, 4)],
+    }]}
+    page.route("**/api/selections/**", lambda route: route.fulfill(json=compact))
+    page.route("**/api/resolve?*", lambda route: route.fulfill(status=503, json={"error": "unavailable"}))
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
+    page.locator("#metadataRetry").wait_for(state="visible")
+    assert page.locator("#title").inner_text() == "旧作品"
+    assert page.locator("#video").evaluate("video => video.paused")
+    page.route("**/api/resolve?*", lambda route: route.fulfill(json=full))
+    page.locator("#metadataRetry").click()
+    page.wait_for_function("document.querySelectorAll('#episodeGrid button').length === 3")
+    assert page.locator("#metadataRetry").is_hidden()
+    assert page.locator("#metadataStatus").inner_text() == ""
+    assert page.locator("#video").evaluate("video => video.paused")

@@ -1,10 +1,17 @@
 diff --git a/short_drama_player.conf b/short_drama_player.conf
 --- a/short_drama_player.conf
 +++ b/short_drama_player.conf
-@@ -37,6 +37,17 @@
+@@ -37,6 +37,24 @@
          return 200 '{"ok":true,"plugin":"jiang_short_drama","player":"selection-store"}';
      }
  
++    location = /short-drama/api/resolve {
++        limit_except GET { deny all; }
++        proxy_pass http://127.0.0.1:6198/resolve;
++        proxy_read_timeout 15s;
++        add_header Cache-Control "no-store" always;
++    }
++
 +    # Public, validated recommendation metadata; video bytes remain direct to source.
 +    location = /short-drama/api/recommendations {
 +        limit_except GET { deny all; }
@@ -19,7 +26,7 @@ diff --git a/short_drama_player.conf b/short_drama_player.conf
      location = /short-drama/api/selections {
          proxy_pass http://127.0.0.1:6198/selections;
          proxy_http_version 1.1;
-@@ -64,7 +75,7 @@
+@@ -64,7 +82,7 @@
          root /var/www/short-drama-player;
          try_files /index.html =404;
          add_header Cache-Control "no-store" always;

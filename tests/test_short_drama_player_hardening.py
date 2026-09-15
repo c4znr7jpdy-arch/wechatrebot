@@ -194,6 +194,7 @@ def test_recommendation_http_endpoint_and_busy_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog, "_load", lambda: [])
     server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
     server.recommendation_catalog = catalog
+    server.selection_resolver = module.SelectionResolver()
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
@@ -204,6 +205,14 @@ def test_recommendation_http_endpoint_and_busy_cache(tmp_path, monkeypatch):
         with urlopen(f"http://127.0.0.1:{server.server_port}/recommendations", timeout=2) as response:
             assert response.headers["Cache-Control"] == "no-store"
             assert json.load(response)["items"][0]["title"] == "公开短剧"
+        from urllib.parse import urlencode
+        query = urlencode({"title": "原剧", "source": "量子资源", "episode": "0" * 64})
+        monkeypatch.setattr(server.selection_resolver, "get", lambda *_args: {"title": "原剧", "episodes": []})
+        with urlopen(f"http://127.0.0.1:{server.server_port}/resolve?{query}", timeout=2) as response:
+            assert json.load(response)["items"][0]["title"] == "原剧"
+        with pytest.raises(HTTPError) as error:
+            urlopen(f"http://127.0.0.1:{server.server_port}/resolve?title=missing", timeout=2)
+        assert error.value.code == 400
     finally:
         server.shutdown()
         server.server_close()
@@ -225,3 +234,33 @@ def test_recommendation_proxy_patch_applies_to_hosted_nginx(tmp_path):
     assert "proxy_pass http://127.0.0.1:6198/recommendations;" in config
     assert "limit_except GET { deny all; }" in config
     assert "worker-src 'self' blob:;" in config
+    assert "location = /short-drama/api/resolve" in config
+    assert "proxy_pass http://127.0.0.1:6198/resolve;" in config
+
+
+def test_compact_metadata_resolver_uses_original_fixed_source_and_fingerprint(tmp_path, monkeypatch):
+    import hashlib
+    checkout = _patched_player(tmp_path)
+    module = _load_state_server(checkout, f"resolve_{tmp_path.name}")
+    calls = []
+    first = "https://cdn.example/one.m3u8"
+    fingerprint = hashlib.sha256(first.encode()).hexdigest()
+    def catalog_json(base, **params):
+        calls.append((base, params))
+        return {"list": [
+            {"vod_name": "原剧", "type_name": "电视剧", "vod_play_url": "第1集$https://other.example/wrong.m3u8"},
+            {"vod_name": "原剧", "type_name": "电视剧", "vod_pic": "http://cdn.example/cover.jpg",
+             "vod_play_url": f"第1集${first}$$$第1集${first}#第2集$https://cdn.example/two.m3u8"},
+        ]}
+    monkeypatch.setattr(module, "_catalog_json", catalog_json)
+    resolver = module.SelectionResolver()
+    item = resolver.get("原剧", "量子资源", fingerprint)
+    assert len(item["episodes"]) == 2
+    assert item["cover"] == "https://cdn.example/cover.jpg"
+    assert calls == [("https://cj.lziapi.com/api.php/provide/vod/", {"ac": "detail", "wd": "原剧", "pg": 1})]
+    assert resolver.get("原剧", "量子资源", fingerprint) == item and len(calls) == 1
+    with pytest.raises(ValueError):
+        resolver.get("原剧", "https://127.0.0.1/private", fingerprint)
+    with pytest.raises(ValueError):
+        resolver.get("原剧", "量子资源", first)
+    assert resolver.get("原剧", "量子资源", "0" * 64) is None
