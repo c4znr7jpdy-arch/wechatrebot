@@ -37,3 +37,17 @@
 - 本机没有 Nginx，验证了补丁应用和路径声明，未在本机执行 Nginx 配置加载。服务器仍需同步页面、状态服务和 Nginx 配置后才会改变线上效果。
 
 final result: passed
+
+## 线上部署记录
+
+2026-09-15 15:19（北京时间），按用户“发上去吧”指令完成托管服务部署，对应代码 `74f6da7`。站点为 `player.xiuxianjyj.xin`，通过已记录主机密钥的 SSH 连接 `47.242.208.64`。部署前线上三份文件与 `E:/Project` 基线哈希一致。
+
+- 更新 `/var/www/short-drama-player/index.html`、`/opt/short-drama-state/state_server.py`、`/etc/nginx/sites-enabled/short-drama-player`；保留状态目录、原有写入鉴权和 systemd 配置。
+- 原文件备份：`/root/nginx-backups/short-drama-cinema-20260915-74f6da7-retry2`。部署使用候选文件哈希校验、原子替换和失败回滚；服务启动和 Nginx 重载后轮询就绪再继续。
+- 前两次因立即检查尚未就绪的服务/新路由而自动回滚，回滚后三份哈希及健康检查均确认恢复；加入就绪重试后部署成功。
+- 服务器 Python 3.10 编译通过，`short-drama-state` 为 active，`nginx -t` 通过，配置已重载。
+- 本机直连公网验证页面 HTTP 200，SHA-256 为 `99b5fe4fe669a36258f69a5409ec70eefef284c9f1ddf23e0af5cbb2742477d0`，与已验证页面一致；响应 CSP 包含 HLS worker 声明。公网推荐接口返回 12 部候选，推荐短令牌 GET 可重新读取有剧集的片单。
+- 服务文件 SHA-256：`72aefc97fd8be64586f4add056388188297ce61825727e9f8712539dbdfcb62a`；Nginx 站点 SHA-256：`a90ffd0115cdc3d45d7ca19d8eeb67f54f06700013ad097af785430b60ff9990`。
+- 部署后尝试打开 Codex 内置浏览器，工具超时，未取得新的线上视觉截图；本次线上验证依据公网内容哈希、接口回环和服务检查，部署前浏览器交互证据见上文。
+
+此次只部署托管页面与服务，没有制作或发布客户端安装包。现有有效播放链接重新打开即读取新版页面。
