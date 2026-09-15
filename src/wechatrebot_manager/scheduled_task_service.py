@@ -156,12 +156,12 @@ class ScheduledTaskService:
             policy = (GroupPolicyService(self.root).get(account, target["id"]) if target["type"] == "group"
                       else PrivateChatPolicyService(self.root).overview(account, target["id"])["policy"])
             if not policy.get("bot_enabled", True) or not policy.get("scheduled_enabled", True):
-                raise ValueError("所选聊天已暂停机器人或定时推送，请在聊天管理中调整。")
+                raise ValueError("所选聊天已暂停机器人或定时推送，请在消息管理中调整。")
             if policy.get("daily_limit", 3) <= 0:
-                raise ValueError("所选聊天的每日发送上限为零，请在聊天管理中调整。")
+                raise ValueError("所选聊天的每日发送上限为零，请在消息管理中调整。")
             feature = ACTION_FEATURES[task["action"]]
             if feature and feature not in policy.get("allowed_features", []):
-                raise ValueError("所选聊天未允许该内容功能，请在聊天管理中调整。")
+                raise ValueError("所选聊天未允许该内容功能，请在消息管理中调整。")
             quiet = policy.get("quiet_hours") or {}
             clock = task["schedule"]["time"]
             if quiet.get("enabled") and check_scheduled_time:

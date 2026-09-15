@@ -1442,6 +1442,7 @@ class PluginCenterService:
                     "simplified": plugin.simplified,
                     "audience": guide.get("audience", "按需使用"),
                     "readiness": guide.get("readiness", "请按说明准备"),
+                    "guide": guide,
                     "scheduled_action": _scheduled_action(plugin.module_name),
                     "schedule_provider": plugin.module_name in {"jiang_commands", "jiang_short_drama"},
                 }

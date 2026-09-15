@@ -248,6 +248,28 @@ def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path
     assert updated_astrbot["plugin_set"] == ["astrbot_plugin_angel_heart"]
 
 
+def test_existing_global_features_migrate_once_to_group_scoping(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    legal = install / "legal"
+    legal.mkdir(parents=True)
+    (legal / "feature-set.json").write_text(json.dumps({"features": [
+        {"module": "jiang_commands", "display_name": "指令", "configuration": "none", "default_enabled": True},
+        {"module": "jiang_schedule", "display_name": "定时任务", "configuration": "none", "default_enabled": True},
+        {"module": "astrbot_plugin_self_iterative_core", "display_name": "实验", "configuration": "none", "default_enabled": False},
+    ]}), encoding="utf-8")
+    path = install / "app" / "astrbot" / "data" / "cmd_config.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"plugin_set": ["jiang_commands"]}), encoding="utf-8")
+    write_runtime_configs(install)
+    updated = json.loads(path.read_text(encoding="utf-8"))
+    assert updated["plugin_set"] == ["jiang_commands", "jiang_schedule"]
+    assert updated["wechatrebot_feature_scope_version"] == 1
+    updated["plugin_set"] = ["jiang_commands"]
+    path.write_text(json.dumps(updated), encoding="utf-8")
+    write_runtime_configs(install)
+    assert json.loads(path.read_text(encoding="utf-8"))["plugin_set"] == ["jiang_commands"]
+
+
 def test_delivery_seeds_fast_single_memory_and_private_emotion_defaults(
     tmp_path: Path,
 ) -> None:

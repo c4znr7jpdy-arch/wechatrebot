@@ -56,7 +56,7 @@ def _source(root: Path) -> Path:
                     "source:GroupMessage:123@chatroom",
                     "source",
                     102.0,
-                    '{"group_name":"客户交流群","group_nickname":"客服小李","wechat_name":"李四"}',
+                    '{"group_name":"客户交流群","group_nickname":"客服小李","wechat_name":"李四","wechat_id":"lisi_work"}',
                 ),
             ),
         )
@@ -113,6 +113,7 @@ def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:
     assert group_message["group_name"] == "客户交流群"
     assert group_message["group_nickname"] == "客服小李"
     assert group_message["wechat_name"] == "李四"
+    assert group_message["wechat_id"] == "lisi_work"
     assert service.messages("wxid_a")[0]["avatar"] == (
         "https://example.test/zhangsan.jpg"
     )
@@ -186,10 +187,40 @@ def test_structured_wechat_messages_have_readable_summaries() -> None:
         ),
         ('<msg><unknown value="1" /></msg>', "[特殊消息]"),
         ("普通文本", "普通文本"),
+        (
+            "[链接卡片]最新短剧推荐 · 点击查看封面 · https://example.test/player?token=secret",
+            "[链接卡片]最新短剧推荐 · 点击查看封面",
+        ),
     )
 
     for content, expected in samples:
         assert _display_content(content) == expected
+
+
+def test_group_message_search_filters_members_not_only_conversation(tmp_path: Path) -> None:
+    source = _source(tmp_path)
+    with sqlite3.connect(source) as connection:
+        connection.execute(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                4,
+                "source:GroupMessage:123@chatroom",
+                "user",
+                "另一位群友的消息",
+                "wxid_other",
+                "王五",
+                "source:GroupMessage:123@chatroom",
+                "source",
+                103.0,
+                '{"group_name":"客户交流群","group_nickname":"王五"}',
+            ),
+        )
+    service = ChatHistoryService(tmp_path)
+
+    messages = service.messages("123@chatroom", search="wxid_b")
+
+    assert [message["sender_id"] for message in messages] == ["wxid_b"]
+    assert service.conversations(search="wxid_b")["summary"]["messages"] == 1
 
 
 def test_quote_and_revoke_presentations_expose_structured_fields() -> None:

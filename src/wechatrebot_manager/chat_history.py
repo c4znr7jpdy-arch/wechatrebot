@@ -18,6 +18,8 @@ _MESSAGE_XML = re.compile(
 _EMOJI_XML = re.compile(r"<emoji\b", re.IGNORECASE)
 _IMAGE_XML = re.compile(r"<img\b", re.IGNORECASE)
 _APP_MESSAGE_XML = re.compile(r"<appmsg\b", re.IGNORECASE)
+_LEGACY_LINK_CARD = re.compile(r"^\s*\[链接卡片\]", re.IGNORECASE)
+_HTTP_URL = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 def _xml_fragment(content: str, tag: str) -> str:
@@ -111,6 +113,16 @@ def _message_presentation(
             "quote_content": "",
         }
     if not _MESSAGE_XML.search(content):
+        if _LEGACY_LINK_CARD.search(content):
+            readable = _HTTP_URL.sub("", content)
+            readable = re.sub(r"\s*[·|]\s*$", "", readable)
+            readable = " ".join(readable.split()).strip() or "[链接卡片]"
+            return {
+                "content": readable,
+                "message_kind": "link_card",
+                "quote_sender": "",
+                "quote_content": "",
+            }
         return {
             "content": content,
             "message_kind": "",
@@ -207,6 +219,7 @@ def _history_metadata(value: object) -> dict[str, str]:
             "group_name",
             "group_nickname",
             "wechat_name",
+            "wechat_id",
             "avatar",
             "message_kind",
             "quote_sender",
@@ -272,6 +285,7 @@ class ChatHistoryService:
                     group_name TEXT NOT NULL DEFAULT '',
                     group_nickname TEXT NOT NULL DEFAULT '',
                     wechat_name TEXT NOT NULL DEFAULT '',
+                    wechat_id TEXT NOT NULL DEFAULT '',
                     avatar TEXT NOT NULL DEFAULT '',
                     message_kind TEXT NOT NULL DEFAULT '',
                     quote_sender TEXT NOT NULL DEFAULT '',
@@ -295,6 +309,7 @@ class ChatHistoryService:
                 "group_name",
                 "group_nickname",
                 "wechat_name",
+                "wechat_id",
                 "avatar",
                 "message_kind",
                 "quote_sender",
@@ -407,9 +422,9 @@ class ChatHistoryService:
                         source_key, source_message_id, account_id, session_id,
                         conversation_id, conversation_type, role, sender_id,
                         sender_name, group_id, group_name, group_nickname,
-                        wechat_name, avatar, message_kind, quote_sender,
+                        wechat_name, wechat_id, avatar, message_kind, quote_sender,
                         quote_content, content, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_key,
@@ -425,6 +440,7 @@ class ChatHistoryService:
                         identity.get("group_name", ""),
                         identity.get("group_nickname", ""),
                         identity.get("wechat_name", ""),
+                        identity.get("wechat_id", ""),
                         identity.get("avatar", ""),
                         identity.get("message_kind", ""),
                         identity.get("quote_sender", ""),
@@ -474,11 +490,16 @@ class ChatHistoryService:
             clauses.append("conversation_type = ?")
             params.append(kind)
         if search.strip():
-            pattern = f"%{search.strip()}%"
-            clauses.append(
-                "(content LIKE ? OR sender_name LIKE ? OR sender_id LIKE ? OR conversation_id LIKE ? OR group_name LIKE ? OR group_nickname LIKE ? OR wechat_name LIKE ?)"
-            )
-            params.extend((pattern,) * 7)
+            term = search.strip()
+            if term.casefold().startswith("wxid_"):
+                clauses.append("(sender_id = ? OR wechat_id = ?)")
+                params.extend((term, term))
+            else:
+                pattern = f"%{term}%"
+                clauses.append(
+                    "(content LIKE ? OR sender_name LIKE ? OR sender_id LIKE ? OR conversation_id LIKE ? OR group_name LIKE ? OR group_nickname LIKE ? OR wechat_name LIKE ? OR wechat_id LIKE ?)"
+                )
+                params.extend((pattern,) * 8)
         if start_time is not None:
             clauses.append("timestamp >= ?")
             params.append(float(start_time))
@@ -499,11 +520,10 @@ class ChatHistoryService:
             ORDER BY last_timestamp DESC
             LIMIT ?
         """
+        total_params = tuple(params)
         params.append(max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
-            total_where = "WHERE account_id = ?" if normalized_account else ""
-            total_params = (normalized_account,) if normalized_account else ()
             totals = connection.execute(
                 f"""
                 SELECT COUNT(*) AS messages,
@@ -511,7 +531,7 @@ class ChatHistoryService:
                        SUM(CASE WHEN conversation_type = 'private' THEN 1 ELSE 0 END) AS private_messages,
                        SUM(CASE WHEN conversation_type = 'group' THEN 1 ELSE 0 END) AS group_messages
                 FROM messages
-                {total_where}
+                {where}
                 """,
                 total_params,
             ).fetchone()
@@ -545,6 +565,9 @@ class ChatHistoryService:
         conversation_id: str,
         *,
         before: float | None = None,
+        search: str = "",
+        start_time: float | None = None,
+        end_time: float | None = None,
         account_id: str = "",
         limit: int = 200,
     ) -> tuple[dict[str, Any], ...]:
@@ -558,12 +581,31 @@ class ChatHistoryService:
         if before is not None:
             clauses.append("timestamp < ?")
             params.append(float(before))
+        if search.strip():
+            term = search.strip()
+            if term.casefold().startswith("wxid_"):
+                clauses.append("(sender_id = ? OR wechat_id = ?)")
+                params.extend((term, term))
+            else:
+                pattern = f"%{term}%"
+                clauses.append(
+                    "(content LIKE ? OR sender_name LIKE ? OR sender_id LIKE ? OR "
+                    "group_name LIKE ? OR group_nickname LIKE ? OR wechat_name LIKE ? OR "
+                    "wechat_id LIKE ? OR conversation_id LIKE ?)"
+                )
+                params.extend((pattern,) * 8)
+        if start_time is not None:
+            clauses.append("timestamp >= ?")
+            params.append(float(start_time))
+        if end_time is not None:
+            clauses.append("timestamp <= ?")
+            params.append(float(end_time))
         params.append(max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
                 SELECT id, conversation_type, role, sender_id, sender_name,
-                       group_id, group_name, group_nickname, wechat_name,
+                       group_id, group_name, group_nickname, wechat_name, wechat_id,
                        avatar, message_kind, quote_sender, quote_content,
                        content, timestamp
                 FROM messages
@@ -595,6 +637,7 @@ class ChatHistoryService:
                 "group_name": row["group_name"],
                 "group_nickname": row["group_nickname"],
                 "wechat_name": row["wechat_name"],
+                "wechat_id": row["wechat_id"],
                 "avatar": row["avatar"],
                 **presentation,
                 "timestamp": row["timestamp"],
@@ -643,7 +686,7 @@ class ChatHistoryService:
             rows = connection.execute(
                 f"""
                 SELECT conversation_type, conversation_id, role, sender_id,
-                       sender_name, group_name, group_nickname, wechat_name,
+                       sender_name, group_name, group_nickname, wechat_name, wechat_id,
                        message_kind, quote_sender, quote_content,
                        content, timestamp FROM messages
                 {where}
@@ -683,7 +726,7 @@ class ChatHistoryService:
                             row["conversation_id"],
                             row["group_name"],
                             "机器人" if row["role"] == "assistant" else "用户",
-                            row["sender_id"],
+                            row["wechat_id"] or row["sender_id"],
                             row["wechat_name"] or row["sender_name"],
                             row["group_nickname"],
                             _display_content(

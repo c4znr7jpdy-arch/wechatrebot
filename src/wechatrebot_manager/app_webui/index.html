@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="app.css?v=0.9.2-unified-schedules">
+  <link rel="icon" type="image/png" href="assets/app-icon.png">
+  <link rel="stylesheet" href="app.css?v=0.9.3-message-management">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -18,6 +18,7 @@
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 8a7 7 0 0 1 11.6-1L20 12M4 12l2.3 5a7 7 0 0 0 11.6-1"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 6 9 6-9 6z"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></symbol>
@@ -29,20 +30,20 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-block">
-        <div class="brand-mark" id="brandMark">姜</div>
+        <div class="brand-mark" id="brandMark"><img src="assets/app-icon.png" alt=""></div>
         <div class="brand-copy"><strong id="brandName">姜小妹机器人</strong><span>微信机器人管理</span></div>
       </div>
       <div class="nav-label">机器人管理</div>
       <nav class="main-nav" aria-label="主导航">
             <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
             <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
-            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="聊天管理" title="聊天管理"><svg><use href="#i-users"/></svg><span>聊天管理</span></button>
+            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="消息管理" title="消息管理"><svg><use href="#i-users"/></svg><span>消息管理</span></button>
             <button class="nav-item" data-page="history" data-action-bound disabled aria-label="聊天记录" title="聊天记录"><svg><use href="#i-chat"/></svg><span>聊天记录</span></button>
             <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
             <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
+            <button class="nav-item" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg><span>帮助</span></button>
       </nav>
-      <div class="sidebar-help"><strong>第一次使用？</strong><span>跟着运行中心的步骤操作，不需要理解技术名词。</span></div>
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
         <span id="versionText">v0.0.0</span>
@@ -128,13 +129,13 @@
 
         <section class="page" id="page-groups" aria-labelledby="groupHeading">
           <div class="page-heading compact">
-            <div><span class="eyebrow">会话范围</span><h1 id="groupHeading">聊天管理</h1><p id="chatManagementDescription">管理机器人所在群聊的回复规则、可用功能和成员信息。</p></div>
+            <div><span class="eyebrow">会话范围</span><h1 id="groupHeading">消息管理</h1><p id="chatManagementDescription">管理机器人所在群聊的回复规则、可用功能和成员信息。</p></div>
             <div class="directory-actions">
               <button class="button secondary" id="refreshGroups" data-action-bound disabled><svg><use href="#i-refresh"/></svg><span>刷新群列表</span></button>
               <button class="button secondary" id="refreshContacts" data-action-bound disabled hidden><svg><use href="#i-refresh"/></svg><span>刷新联系人</span></button>
             </div>
           </div>
-          <div class="management-tabs" role="tablist" aria-label="聊天管理分类">
+          <div class="management-tabs" role="tablist" aria-label="消息管理分类">
             <button type="button" id="groupManagementTab" role="tab" aria-controls="groupManagementPanel" aria-selected="true" tabindex="0" data-chat-management-tab="groups" class="active" data-action-bound disabled>群聊管理</button>
             <button type="button" id="privateManagementTab" role="tab" aria-controls="privateManagementPanel" aria-selected="false" tabindex="-1" data-chat-management-tab="private" data-action-bound disabled>私聊管理</button>
           </div>
@@ -234,12 +235,26 @@
           <section class="activity-panel panel"><div class="activity-list" id="activityList"><div class="loading-row">正在读取运行记录…</div></div></section>
         </section>
 
+        <section class="page" id="page-help" aria-labelledby="helpHeading">
+          <div class="page-heading compact">
+            <div><span class="eyebrow">使用指南</span><h1 id="helpHeading">帮助</h1><p>从常见任务开始，需要时再查看每项功能的完整说明。</p></div>
+            <label class="search-box help-search" id="helpSearchBox"><svg><use href="#i-search"/></svg><input id="helpSearch" type="search" placeholder="搜索功能或用法" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空帮助搜索">×</button></label>
+          </div>
+          <section class="help-start panel" aria-labelledby="helpStartTitle">
+            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>连接微信并选择模型后，到消息管理为每个群设置回复方式和可用功能。功能中心只保留开关与参数，具体用法都在本页查看。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与人格</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
+            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="消息管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在消息管理中按群设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心调整开关和必要参数，详细用法回到帮助查看。</figcaption></figure></div>
+          </section>
+          <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
+          <div class="help-feature-grid" id="helpFeatureGrid"><div class="loading-row panel">正在整理功能说明…</div></div>
+        </section>
+
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
           <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>先完成推荐项，只有需要时再展开高级设置。</p></div></div>
           <div class="settings-tabs" id="settingsTabs" aria-label="设置分类">
             <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>模型服务</button>
-            <button type="button" data-settings-tab="persona" data-action-bound disabled>人格、身份与维护</button>
+            <button type="button" data-settings-tab="persona" data-action-bound disabled>人格身份与维护</button>
             <button type="button" data-settings-tab="memory" data-action-bound disabled>记忆与情感</button>
+            <button type="button" data-settings-tab="system" data-action-bound disabled>系统信息</button>
             <span>修改后会明确提示“已应用”或“启动时使用”</span>
           </div>
           <div class="settings-grid">
@@ -282,13 +297,12 @@
             </section>
 
             <form class="settings-card assistant-settings-card panel" id="personaForm" data-settings-section="persona" novalidate>
-              <div class="panel-heading"><div><span class="eyebrow">人格与回复</span><h2>她是谁、什么时候说话</h2></div><span class="status-badge" id="personaStatus">等待读取</span></div>
-              <p class="settings-copy">被点名时走快速回应，不再额外调用一次判断模型；群聊里默认只处理最相关的一件事。</p>
+              <div class="panel-heading"><div><span class="eyebrow">人格与回复</span><h2>她是谁、怎样表达</h2></div><span class="status-badge" id="personaStatus">等待读取</span></div>
+              <p class="settings-copy">这里仅配置身份和表达风格。群聊在何时参与、允许使用哪些功能，统一到“消息管理”按群设置。</p>
               <label><span>软件名称</span><input name="display_name" maxlength="32" required><small>用于窗口标题和管理界面；机器人在聊天中的称呼以下方昵称为准。</small></label>
               <div class="field-pair"><label><span>说话风格</span><select name="tone"><option value="natural">自然熟人</option><option value="warm">温柔陪伴</option><option value="professional">专业助理</option><option value="lively">活泼群友</option></select></label><label><span>日常回复长度</span><select name="reply_length"><option value="brief">简短，适合群聊</option><option value="balanced">均衡</option><option value="detailed">详细</option></select></label></div>
               <label><span>机器人昵称</span><input name="alias" maxlength="200" placeholder="姜小妹|小妹" required><small>多个昵称用 | 分隔；第一个昵称同时作为界面简称和人物称呼，不再重复配置。</small></label>
               <label><span>身份定位</span><textarea class="resize-none" name="identity_prompt" rows="4" maxlength="3000" required></textarea><small>只说明机器人是谁、擅长什么；接话时机和安全边界由软件使用推荐默认值。</small></label>
-              <div class="option-grid compact-options"><label class="option-check"><input name="mention_only" type="checkbox"><span>离场时只在被点名后加入聊天</span></label><label class="option-check"><input name="fast_reply" type="checkbox"><span>点名或引用时直接交给回复模型</span></label></div>
               <label><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..."><small>留空表示暂不设置管理员。</small></label>
               <div class="form-actions"><span class="form-note" id="personaNote" role="status"></span><button class="button primary" type="submit">保存人格与身份</button></div>
             </form>
@@ -296,10 +310,10 @@
             <aside class="settings-card settings-preview-card panel" data-settings-section="persona">
               <div class="panel-heading"><div><span class="eyebrow">回复预览</span><h2>设置会怎样影响回复</h2></div><span class="status-badge checking">示例，不会发送</span></div>
               <div class="persona-preview">
-                <div class="preview-summary" id="personaPreviewSummary">当前组合：自然熟人 · 简短回复 · 仅点名参与</div>
+                <div class="preview-summary" id="personaPreviewSummary">当前组合：自然熟人 · 简短回复</div>
                 <div class="preview-message"><span class="preview-avatar blue">张</span><div><small>张三</small><p>小妹，明天杭州会下雨吗？</p></div></div>
                 <div class="preview-message mine"><div><small>姜小妹</small><p>明天杭州有阵雨，出门带把伞更稳妥。</p></div><span class="preview-avatar">姜</span></div>
-                <div class="preview-note">没有点名时默认不插话；被点名后优先快速回应。</div>
+                <div class="preview-note">群聊接话方式已移到消息管理，可为不同群分别选择“仅点名或引用”或“自然参与”。</div>
               </div>
             </aside>
 
@@ -323,7 +337,7 @@
               <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
             </form>
 
-            <div class="settings-system-stack persona-maintenance" data-settings-section="persona">
+            <div class="settings-system-stack system-maintenance" data-settings-section="system">
             <section class="settings-card panel">
               <div class="panel-heading"><div><span class="eyebrow">微信环境</span><h2>客户端位置</h2></div></div>
               <div class="path-box"><span>当前路径</span><code id="wechatPath">尚未选择</code></div>
@@ -337,7 +351,7 @@
               <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
-              <div class="maintenance-row"><div><strong>新手引导</strong><span>重新查看连接微信、选择模型和管理群聊的三步说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>重新查看</button></div>
+              <div class="maintenance-row"><div><strong>使用帮助</strong><span>查看快速开始、消息管理和全部功能说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
               <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、聊天记录、日志、备份及全部本机残留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
@@ -366,6 +380,6 @@
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
     </section>
   </div>
-  <script src="app.js?v=0.9.2-unified-schedules"></script>
+  <script src="app.js?v=0.9.3-message-management"></script>
 </body>
 </html>

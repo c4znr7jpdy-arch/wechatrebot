@@ -9,6 +9,7 @@
     featuresEngineOnline: false,
     features: [],
     featureAudience: "all",
+    helpAudience: "all",
     selectedFeature: null,
     featureDetail: null,
     featureTab: "basic",
@@ -326,11 +327,11 @@
   }
 
   const PAGE_TITLES = {
-    home: "运行中心", features: "功能中心", groups: "聊天管理", history: "聊天记录",
-    schedules: "定时任务", activity: "运行记录", settings: "设置",
+    home: "运行中心", features: "功能中心", groups: "消息管理", history: "聊天记录",
+    schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory"]);
+  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory", "system"]);
 
   function providerFormSnapshot() {
     const form = $("#providerForm");
@@ -444,6 +445,10 @@
     }
     if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
     if (page === "activity") await loadActivity();
+    if (page === "help") {
+      if (!state.featuresLoaded) await loadFeatures();
+      renderHelp();
+    }
     if (page === "settings") {
       setSettingsSection(state.settingsSection);
       if (!state.maintenance) await loadMaintenance();
@@ -460,6 +465,7 @@
       state.featuresLoaded = true;
       $("#featureSummary").textContent = `${state.features.length} 项功能 · ${data.engine_online ? "设置可立即应用" : "设置将在下次启动时应用"}`;
       renderFeatureList();
+      renderHelp();
       if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
       void prefetchFeatureDetails(++state.featurePrefetch);
     } catch (error) {
@@ -675,7 +681,6 @@
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
-    const steps = detail.setup_steps?.length ? detail.setup_steps : (guide.setup_steps || []);
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : !detail.enabled ? "功能未启用：保存后启用时使用。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
@@ -683,12 +688,7 @@
         <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
       </div>
       ${detail.scheduled_action ? `<div class="feature-schedule-entry"><p>${detail.scheduled_action === "short_drama" ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。" : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。"}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>创建定时任务</button></div>` : ""}
-      ${guide.recommendation ? `<section class="feature-assessment" aria-label="适用性评估"><div><span class="assessment-chip">${escapeHtml(guide.audience || "按需使用")}</span><span class="assessment-state">${escapeHtml(guide.readiness || "请按说明准备")}</span></div><p>${escapeHtml(guide.recommendation)}</p></section>` : ""}
-      <section class="feature-guide" aria-label="快速设置说明">
-        <div><span class="eyebrow">从这里开始</span><strong>${detail.configurable ? "先改常用项，其余保持当前设置" : "按指引完成准备"}</strong><p>${escapeHtml(detail.configuration_note || "不会自动覆盖已有设置，也不会替你开通外部服务。")}</p></div>
-        ${steps.length ? `<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : "<p>修改需要的设置，保存后查看生效状态。</p>"}
-      </section>
-      ${(guide.prerequisites || []).map((item) => `<p class="feature-prerequisite"><strong>使用前确认</strong> ${escapeHtml(item)}</p>`).join("")}
+      <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
       ${detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
@@ -731,7 +731,45 @@
     $("#saveFeature")?.addEventListener("click", saveFeature);
     $("#refreshFeature")?.addEventListener("click", () => openFeature(state.selectedFeature, false, true));
     $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
+    $("#openFeatureHelp")?.addEventListener("click", () => openHelpForFeature(detail.display_name));
     $$("[data-action-bound]", $("#featureDetail")).forEach((button) => { button.disabled = false; });
+  }
+
+  function helpAudienceMatch(item) {
+    const label = String(item.audience || "");
+    if (state.helpAudience === "all") return true;
+    if (state.helpAudience === "common") return label.includes("常用") || label.includes("基础");
+    return !label.includes("常用") && !label.includes("基础");
+  }
+
+  function renderHelp() {
+    const root = $("#helpFeatureGrid");
+    if (!root) return;
+    const keyword = String($("#helpSearch")?.value || "").trim().toLocaleLowerCase("zh-CN");
+    const items = state.features.filter((item) => {
+      const guide = item.guide || {};
+      const haystack = [item.display_name, item.description, guide.summary, guide.recommendation, ...(guide.setup_steps || []), ...(guide.prerequisites || [])].join(" ").toLocaleLowerCase("zh-CN");
+      return helpAudienceMatch(item) && (!keyword || haystack.includes(keyword));
+    });
+    $("#helpSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
+    root.innerHTML = items.length ? items.map((item) => {
+      const guide = item.guide || {};
+      const steps = guide.setup_steps?.length ? guide.setup_steps : ["在功能中心确认开关，根据页面提示完成必要配置。", "在测试聊天中验证一次实际效果。"];
+      const prerequisite = (guide.prerequisites || []).join(" ");
+      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="feature-state ${item.enabled ? "enabled" : ""}" title="${item.enabled ? "已启用" : "已停用"}"></span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
+    }).join("") : '<div class="empty-state compact panel"><h2>没有找到相关帮助</h2><p>换一个功能名或用法关键词试试。</p></div>';
+    $$(".help-configure-feature", root).forEach((button) => button.addEventListener("click", async () => {
+      await navigate("features");
+      await openFeature(button.dataset.featureId);
+    }));
+  }
+
+  async function openHelpForFeature(displayName) {
+    const input = $("#helpSearch");
+    if (input) input.value = String(displayName || "");
+    await navigate("help");
+    renderHelp();
+    $("#helpFeatureGrid .help-feature-card")?.scrollIntoView({block: "start", behavior: "smooth"});
   }
 
   function growTextarea(input) {
@@ -1097,7 +1135,7 @@
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
-      : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
+      : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.wechat_id || item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
     const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
     const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
@@ -1134,7 +1172,7 @@
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <h3>本群机器人规则</h3>
       <label class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></label>
-      <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>只在被点名时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select></label>
+      <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>仅在点名或引用时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select><small>点名或引用会自动快速回应；此设置只影响当前群。</small></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
       <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
       <label class="toggle-line"><span><strong>允许 AI 主动聊天</strong><small>${escapeHtml(sourceText)}；与统一定时任务分别控制</small></span><span class="toggle"><input name="proactive_enabled" type="checkbox" ${policy.proactive_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.proactive_enabled ? "已允许" : "已关闭"}</span></span></label>
@@ -1497,12 +1535,26 @@
       $("#historySummary").textContent = `${visible} 个聊天 · ${summary.messages || 0} 条消息 · 个人消息 ${summary.private_messages || 0} · 群聊消息 ${summary.group_messages || 0} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
       if (state.selectedConversation) {
-        renderConversationHeader(state.selectedConversation);
-        renderConversationInspector(state.selectedConversation);
+        await selectConversation(state.selectedConversation.conversation_id, {silent});
       } else if (state.conversations.length) {
         await selectConversation(state.conversations[0].conversation_id, {silent: true});
+      } else {
+        ++state.messageLoad;
+        state.selectedMessages = [];
+        $("#conversationHeader").textContent = "没有匹配的聊天";
+        $("#messageList").innerHTML = '<div class="empty-state compact"><h2>没有找到匹配消息</h2><p>调整昵称、微信号或日期后再试。</p></div>';
+        $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><p class="subtle">当前筛选没有匹配的聊天。</p>';
+        $("#newMessageButton").hidden = true;
       }
     } catch (error) { if (!silent) reportError(error); }
+  }
+
+  function historyFilters() {
+    return {
+      search: $("#historySearch").value,
+      start: $("#historyStart").value,
+      end: $("#historyEnd").value,
+    };
   }
 
   function renderConversations() {
@@ -1526,7 +1578,7 @@
   function messagesSignature(messages) {
     return JSON.stringify(messages.map((message) => [
       message.id, message.timestamp, message.role, message.sender_id,
-      message.sender_name, message.group_nickname, message.wechat_name,
+      message.sender_name, message.group_nickname, message.wechat_name, message.wechat_id,
       message.avatar, message.content, message.message_kind,
       message.quote_sender, message.quote_content,
     ]));
@@ -1558,7 +1610,13 @@
     const content = String(value ?? "");
     const structuredXml = /^\s*(?:<\?xml[^>]*>\s*)?<(?:msg|appmsg|sysmsg)\b/i;
     const plain = {content, messageKind: "", quoteSender: "", quoteContent: "", preview: content};
-    if (!structuredXml.test(content)) return plain;
+    if (!structuredXml.test(content)) {
+      if (/^\s*\[链接卡片\]/.test(content)) {
+        const readable = content.replace(/https?:\/\/\S+/gi, "").replace(/\s*[·|]\s*$/g, "").replace(/\s+/g, " ").trim();
+        return {...plain, content: readable || "[链接卡片]", preview: readable || "[链接卡片]"};
+      }
+      return plain;
+    }
     const folded = content.toLowerCase();
     const summary = (text) => ({...plain, content: text, preview: text});
     if (/<revokemsg\b/i.test(content)) {
@@ -1633,7 +1691,7 @@
     list.innerHTML = messages.length ? messages.map((message) => {
       const assistant = message.role === "assistant";
       const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
-      const identity = !assistant && message.sender_id ? message.sender_id : "";
+      const identity = !assistant ? (message.wechat_id || message.sender_id || "") : "";
       return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
     }).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
     bindAvatarFallbacks(list);
@@ -1665,7 +1723,7 @@
     if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     const load = ++state.messageLoad;
     try {
-      const messages = await api("get_messages", conversationId);
+      const messages = await api("get_messages", conversationId, historyFilters());
       if (load !== state.messageLoad || state.selectedConversation?.conversation_id !== conversationId) return;
       if (changed || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
         renderMessages(messages, {forceBottom: changed, nearBottom});
@@ -1687,9 +1745,12 @@
   function renderConversationInspector(item) {
     const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
     const senderName = latestSender ? (latestSender.group_nickname || latestSender.wechat_name || latestSender.sender_name || "未知发送者") : "尚无发送者";
-    const senderId = latestSender?.sender_id || "标识未提供";
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, latestSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制</button></div></section><dl class="inspector-list"><div><dt>分类</dt><dd>${item.type === "group" ? "群聊" : "个人聊天"}</dd></div><div><dt>群成员身份</dt><dd>头像 + 群昵称 + wxid</dd></div><div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
-    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, "发送者标识"));
+    const senderId = latestSender?.wechat_id || latestSender?.sender_id || "标识未提供";
+    const identityFacts = item.type === "group"
+      ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
+      : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, latestSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${latestSender?.wechat_id && latestSender.wechat_id !== latestSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, "微信号"));
     bindAvatarFallbacks($("#conversationInspector"));
     $("#deleteConversation")?.addEventListener("click", () => confirmAction({
       title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
@@ -1896,7 +1957,7 @@
     const sameAccount = editor.account_id === context.account_id;
     const source = sameAccount ? (type === "group" ? context.groups : context.contacts) || [] : [];
     const items = source.filter((entry) => `${entry.name || ""} ${entry.id || ""}`.toLocaleLowerCase().includes(search));
-    $("#scheduledTargetChoices").innerHTML = items.length ? items.map((entry) => `<label class="scheduled-target-option"><input type="checkbox" value="${escapeHtml(entry.id)}" ${editor.targets.some((target) => target.type === type && target.id === entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.name || "未命名聊天")}</strong><small>${escapeHtml(entry.id)}</small>${entry.message ? `<small class="scheduled-target-warning">${escapeHtml(entry.message)}</small>` : ""}</span></label>`).join("") : `<p class="member-empty">${!sameAccount ? "请登录此任务绑定的微信账号后选择对象。" : search ? "没有匹配的聊天，试试其他名称。" : "暂时没有可选聊天。请在聊天管理读取当前账号的目录后刷新。"}</p>`;
+    $("#scheduledTargetChoices").innerHTML = items.length ? items.map((entry) => `<label class="scheduled-target-option"><input type="checkbox" value="${escapeHtml(entry.id)}" ${editor.targets.some((target) => target.type === type && target.id === entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.name || "未命名聊天")}</strong><small>${escapeHtml(entry.id)}</small>${entry.message ? `<small class="scheduled-target-warning">${escapeHtml(entry.message)}</small>` : ""}</span></label>`).join("") : `<p class="member-empty">${!sameAccount ? "请登录此任务绑定的微信账号后选择对象。" : search ? "没有匹配的聊天，试试其他名称。" : "暂时没有可选聊天。请在消息管理读取当前账号的目录后刷新。"}</p>`;
     $$('#scheduledTargetChoices input').forEach((input) => input.addEventListener("change", () => { const found = source.find((entry) => entry.id === input.value); editor.targets = editor.targets.filter((entry) => !(entry.type === type && entry.id === input.value)); if (input.checked && found) editor.targets.push({type, id: found.id, name: found.name}); renderScheduledSelected(); scheduledChanged(false); }));
     renderScheduledSelected();
   }
@@ -2574,7 +2635,8 @@
 
   function applyBrand(brand) {
     $("#brandName").textContent = brand.display_name;
-    $("#brandMark").textContent = (brand.short_name || brand.display_name || "机").slice(0, 1);
+    const mark = $("#brandMark");
+    if (mark && !mark.querySelector("img")) mark.innerHTML = '<img src="assets/app-icon.png" alt="">';
     document.title = `${brand.display_name} · 机器人管理`;
     const form = $("#personaForm");
     for (const key of ["display_name", "admin_id"]) if (form?.elements[key]) form.elements[key].value = brand[key] || "";
@@ -2587,7 +2649,7 @@
     if (!form || !summary) return;
     const tone = {natural: "自然熟人", warm: "温柔陪伴", professional: "专业助理", lively: "活泼群友"}[form.elements.tone.value] || "自然熟人";
     const length = {brief: "简短回复", balanced: "均衡回复", detailed: "详细回复"}[form.elements.reply_length.value] || "简短回复";
-    summary.textContent = `当前组合：${tone} · ${length} · ${form.elements.mention_only.checked ? "仅点名参与" : "自然参与"}`;
+    summary.textContent = `当前组合：${tone} · ${length}`;
     const robotName = String(form.elements.alias.value || "").split("|").map((item) => item.trim()).find(Boolean)
       || state.bootstrap?.brand?.short_name || "机器人";
     const names = $$(".preview-message.mine small, .preview-message.mine .preview-avatar");
@@ -2610,8 +2672,6 @@
     for (const key of ["tone", "reply_length", "alias", "identity_prompt"]) {
       if (personaForm.elements[key]) personaForm.elements[key].value = persona[key] ?? "";
     }
-    personaForm.elements.mention_only.checked = Boolean(persona.mention_only);
-    personaForm.elements.fast_reply.checked = Boolean(persona.fast_reply);
     $("#personaStatus").textContent = capabilities.persona ? "保存后热更新" : "需要完整更新";
     personaForm.querySelector("button[type='submit']").disabled = !capabilities.persona;
 
@@ -2688,8 +2748,6 @@
       const personaValues = {
         tone: values.tone,
         reply_length: values.reply_length,
-        mention_only: values.mention_only,
-        fast_reply: values.fast_reply,
         alias: values.alias,
         identity_prompt: values.identity_prompt,
       };
@@ -2900,6 +2958,7 @@
   function bindSearch(boxSelector, inputSelector, callback) {
     const input = $(inputSelector);
     const box = $(boxSelector);
+    if (!input.hasAttribute("aria-label")) input.setAttribute("aria-label", input.placeholder || "搜索");
     const update = () => box.classList.toggle("has-value", Boolean(input.value));
     input.addEventListener("compositionstart", () => { state.composing = true; });
     input.addEventListener("compositionend", () => { state.composing = false; update(); callback(); });
@@ -2926,6 +2985,19 @@
     bindSearch("#groupSearchBox", "#groupSearch", renderGroups);
     bindSearch("#contactSearchBox", "#contactSearch", () => { state.contactPage = 1; renderContacts(); });
     bindSearch("#historySearchBox", "#historySearch", loadConversations);
+    bindSearch("#helpSearchBox", "#helpSearch", renderHelp);
+    $$("#helpAudience button").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.helpAudience = button.dataset.helpAudience;
+        $$("#helpAudience button").forEach((item) => item.classList.toggle("active", item === button));
+        renderHelp();
+      });
+      button.disabled = false;
+    });
+    $$("[data-help-target]").forEach((button) => {
+      button.addEventListener("click", () => navigate(button.dataset.helpTarget));
+      button.disabled = false;
+    });
     $("#refreshGroups").addEventListener("click", () => loadGroups(true));
     $("#refreshContacts").addEventListener("click", () => loadContacts(true));
     $$('[data-chat-management-tab]').forEach((button, index, tabs) => {
@@ -2999,7 +3071,7 @@
     $("#createBackup").addEventListener("click", createBackup);
     $("#restoreBackup").addEventListener("click", chooseRestoreBackup);
     $("#exportDiagnostics").addEventListener("click", exportDiagnostics);
-    $("#openOnboarding").addEventListener("click", () => showOnboarding(true));
+    $("#openOnboarding").addEventListener("click", () => navigate("help"));
     $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
@@ -3040,7 +3112,6 @@
         state.bootstrap.experience.onboarding_complete = true;
         await navigate("settings");
       }
-      showOnboarding();
       window.setInterval(refreshStatus, 1500);
       window.setInterval(pollHistory, 1500);
       if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
@@ -3068,14 +3139,10 @@
       "feature-rocom": "兴趣选配", "feature-schedule": "群管理常用",
       "feature-drama": "场景选配", "feature-video": "群聊常用", "feature-meme": "群聊常用",
     };
-    const previewDefaultEnabled = new Set([
-      "feature-memory", "feature-long-memory", "feature-music", "feature-parser", "feature-wxid",
-      "feature-router", "feature-commands", "feature-video", "feature-meme",
-    ]);
     const previewFeature = (id, displayName, configuration, description, options = {}) => ({
       id,
       display_name: displayName,
-      enabled: previewDefaultEnabled.has(id),
+      enabled: true,
       configurable: configuration.includes("schema"),
       field_count: configuration.includes("schema") ? (options.fieldCount || 4) : 0,
       model_field_count: options.modelFieldCount || 0,
@@ -3092,13 +3159,11 @@
       previewFeature("feature-long-memory", "长期记忆", "schema-and-page", "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。", {page: "dashboard", readiness: "智能召回已就绪"}),
       previewFeature("feature-bittorrent", "资源检索", "schema", "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"),
       previewFeature("feature-voice-clone", "语音克隆", "schema-and-page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
-      previewFeature("feature-memory-manager", "记忆管理", "schema", "提供向量记忆存储与召回；Windows 需配置 Milvus 服务和 Embedding 模型，未配置时保持待配置状态。基础长期记忆可独立使用。"),
+      previewFeature("feature-memory-manager", "外部向量记忆（进阶替代）", "schema", "需要 Milvus 和 Embedding 模型；与基础长期记忆只能选择其中一种作为主记忆。", {enabled: false, readiness: "需先停用基础长期记忆并配置外部服务"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
       previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true}),
-      previewFeature("feature-self-iterative", "自动改代码（实验）", "schema", "可读写并重新加载功能代码的实验维护能力，不建议普通用户或新安装默认启用。"),
-      previewFeature("feature-router", "功能调度", "schema", "识别自然语言意图并把请求交给合适的功能处理。"),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
       previewFeature("feature-group-notice", "群成员变动通知", "schema", "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"),
       previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models", fieldCount: 11}),
@@ -3209,17 +3274,17 @@
       {id: "custom", name: "其他兼容服务", api_base: "", model: "", description: "填写兼容接口地址、模型名称和密钥。"},
     ];
     const previewExperience = {
-      onboarding_complete: false,
+      onboarding_complete: true,
       capabilities: {persona: true, memory: true, emotion: true},
       memory_backend: "长期记忆",
       memory_explanation: "聊天摘要和相关往事由长期记忆保存与召回；明确问起上次内容时优先回忆，普通寒暄不查询。",
       readiness: {memory: true},
-      persona: {tone: "natural", reply_length: "brief", mention_only: true, fast_reply: true, alias: "姜小妹|小妹", identity_prompt: "你是姜小妹，是群聊里的熟人型助手。说话随意、直接、简短，不使用机械的客服措辞。", reply_guide: "被点名或引用时回应；一次只处理当前最相关的话题，不抢话，不连续刷屏。"},
+      persona: {tone: "natural", reply_length: "brief", mention_only: false, fast_reply: true, alias: "姜小妹|小妹", identity_prompt: "你是姜小妹，是群聊里的熟人型助手。说话随意、直接、简短，不使用机械的客服措辞。", reply_guide: "一次只处理当前最相关的话题，不抢话，不连续刷屏。"},
       memory: {enabled: true, recall_mode: "smart", explicit_recall_enabled: true, explicit_recall_phrases: ["上次说了什么", "还记得吗", "之前提到", "我说过", "你说过"], casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: [], proactive_enabled: false, scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
-    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: [], proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
+    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], proactive_enabled: false, scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
     const previewContacts = [
@@ -3229,6 +3294,38 @@
       {user_id: "gh_service", name: "社区服务", nickname: "社区服务", remark: "", alias: "community_service", avatar: "", gender: "", country: "CN", province: "", city: "", contact_type: "公众号"},
       {user_id: "filehelper", name: "文件传输助手", nickname: "文件传输助手", remark: "", alias: "", avatar: "", gender: "", country: "", province: "", city: "", contact_type: "系统联系人"},
     ];
+    const previewHistoryItems = [
+      {conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 3, last_timestamp: Date.now() / 1000, last_content: "张三｜3栋：帮我找一下今天更新的短剧"},
+      {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 1, last_timestamp: Date.now() / 1000 - 3600, last_content: "明天杭州会下雨吗？"},
+      {conversation_id: "81263495012@chatroom", type: "group", display_name: "短剧分享群", message_count: 1, last_timestamp: Date.now() / 1000 - 7200, last_content: "李四｜摄影：收到，这样看起来很方便"},
+      {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0},
+      {conversation_id: "34902765188@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0},
+    ];
+    const previewHistoryMessages = [
+      {id: 1, conversation_id: "51632940287@chatroom", role: "user", sender_id: "wxid_zhangsan", wechat_id: "zhangsan_88", sender_name: "张三", group_nickname: "张三｜3栋", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180},
+      {id: 2, conversation_id: "51632940287@chatroom", role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160},
+      {id: 3, conversation_id: "51632940287@chatroom", role: "user", sender_id: "wxid_lisi", wechat_id: "lisi_photo", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120},
+      {id: 4, conversation_id: "wxid_zhangsan", role: "user", sender_id: "wxid_zhangsan", wechat_id: "zhangsan_88", sender_name: "张三", content: "明天杭州会下雨吗？", timestamp: Date.now() / 1000 - 3600},
+      {id: 5, conversation_id: "81263495012@chatroom", role: "user", sender_id: "wxid_lisi", wechat_id: "lisi_photo", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 7200},
+    ];
+    const previewHistoryMatches = (message, keyword) => [message.sender_id, message.wechat_id].includes(keyword);
+    const previewConversations = (filters = {}) => {
+      const search = String(filters.search || "").trim().toLocaleLowerCase("zh-CN");
+      const items = previewHistoryItems.filter((item) => {
+        if (filters.kind && filters.kind !== "all" && item.type !== filters.kind) return false;
+        if (!search) return true;
+        if (search.startsWith("wxid_")) return item.conversation_id === search || previewHistoryMessages.some((message) => message.conversation_id === item.conversation_id && previewHistoryMatches(message, search));
+        return [item.conversation_id, item.display_name, item.last_content].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(search)) || previewHistoryMessages.some((message) => message.conversation_id === item.conversation_id && [message.sender_name, message.wechat_id, message.group_nickname, message.content].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(search)));
+      });
+      const messages = search.startsWith("wxid_") ? previewHistoryMessages.filter((message) => previewHistoryMatches(message, search)) : previewHistoryMessages;
+      const viewItems = items.map((item) => {
+        if (!search.startsWith("wxid_")) return item;
+        const own = messages.filter((message) => message.conversation_id === item.conversation_id);
+        const latest = own.at(-1);
+        return {...item, message_count: own.length, last_content: latest?.content || "", last_timestamp: latest?.timestamp || 0};
+      });
+      return {items: structuredClone(viewItems), summary: {messages: messages.filter((message) => items.some((item) => item.conversation_id === message.conversation_id)).length, conversations: items.length, visible_conversations: items.length, directory_groups: 6, private_messages: messages.filter((message) => items.some((item) => item.type === "private" && item.conversation_id === message.conversation_id)).length, group_messages: messages.filter((message) => items.some((item) => item.type === "group" && item.conversation_id === message.conversation_id)).length}};
+    };
     const previewTaskGroups = [{id: "51632940287@chatroom", name: "旅行交流群"}, {id: "81263495012@chatroom", name: "短剧分享群"}, {id: "22001983641@chatroom", name: "业主交流群"}, {id: "34902765188@chatroom", name: "周末羽毛球"}];
     const previewTasks = new Map();
     let previewTaskRevision = 0;
@@ -3269,8 +3366,8 @@
         {group_id: "45871023498@chatroom", name: "社区团购通知", member_count: 210},
       ], message: "预览数据：正式版本从当前登录微信读取，刷新不会发送群消息。"}),
       get_group_members: (groupId) => ok({account_id: "wxid_demo_account", group_id: groupId, source: "wechat_cache", total: 3, truncated: false, items: [
-        {user_id: "wxid_demo_01", name: "张三", group_nickname: "张三｜3栋"},
-        {user_id: "wxid_demo_02", name: "李四", group_nickname: "李四"},
+        {user_id: "wxid_demo_01", wechat_id: "zhangsan_88", name: "张三", group_nickname: "张三｜3栋"},
+        {user_id: "wxid_demo_02", wechat_id: "lisi_photo", name: "李四", group_nickname: "李四"},
         {user_id: "wxid_demo_03", name: "王五", group_nickname: ""},
       ]}),
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
@@ -3280,8 +3377,18 @@
       get_private_policy: (_accountId, contactId) => ok(previewPrivatePolicyOverview(contactId)),
       save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok(previewPrivatePolicyOverview(contactId).policy, "联系人可用功能已保存。"); },
       set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: (id, config) => { previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
-      get_conversations: () => ok({items: [{conversation_id: "51632940287@chatroom", type: "group", display_name: "旅行交流群", message_count: 128, last_timestamp: Date.now() / 1000, last_content: "张三｜3栋：帮我找一下今天更新的短剧"}, {conversation_id: "wxid_zhangsan", type: "private", display_name: "张三", message_count: 34, last_timestamp: Date.now() / 1000 - 3600, last_content: "明天杭州会下雨吗？"}, {conversation_id: "81263495012@chatroom", type: "group", display_name: "短剧分享群", message_count: 76, last_timestamp: Date.now() / 1000 - 7200, last_content: "李四｜摄影：收到，这样看起来很方便"}, {conversation_id: "22001983641@chatroom", type: "group", display_name: "业主交流群", message_count: 0, last_timestamp: 0}, {conversation_id: "34902765188@chatroom", type: "group", display_name: "周末羽毛球", message_count: 0, last_timestamp: 0}], summary: {messages: 238, conversations: 3, visible_conversations: 5, directory_groups: 6, private_messages: 34, group_messages: 204}}),
-      get_messages: () => ok([{id: 1, role: "user", sender_id: "wxid_zhangsan", sender_name: "张三", group_nickname: "张三｜3栋", content: "帮我找一下今天更新的短剧", timestamp: Date.now() / 1000 - 180}, {id: 2, role: "assistant", sender_id: "bot", sender_name: "机器人", content: "找到了 8 部今天更新的内容，我已经整理成播放页发到群里。", timestamp: Date.now() / 1000 - 160}, {id: 3, role: "user", sender_id: "wxid_lisi", sender_name: "李四", group_nickname: "李四｜摄影", content: "收到，这样看起来很方便", timestamp: Date.now() / 1000 - 120}]),
+      get_conversations: (filters) => ok(previewConversations(filters)),
+      get_messages: (conversationId, filters = {}) => {
+        const search = String(filters.search || "").trim().toLocaleLowerCase("zh-CN");
+        const matching = previewHistoryMessages.filter((message) => {
+          if (message.conversation_id !== conversationId) return false;
+          if (!search) return true;
+          if (search.startsWith("wxid_")) return previewHistoryMatches(message, search);
+          return [message.sender_name, message.wechat_id, message.group_nickname, message.content]
+            .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(search));
+        });
+        return ok(structuredClone(matching));
+      },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),
       get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: "预览模式：任务只保存在当前页面，不会发送微信。"}),

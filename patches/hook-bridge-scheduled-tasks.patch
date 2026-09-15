@@ -120,7 +120,7 @@ new file mode 100644
 index 0000000..98a3d57
 --- /dev/null
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/scheduled_policy.py
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,188 @@
 +"""Explicit, account-scoped task authorization at the final delivery boundary."""
 +from __future__ import annotations
 +
@@ -189,8 +189,19 @@ index 0000000..98a3d57
 +                raise ValueError("聊天开关格式不正确")
 +            policy[key] = value
 +        allowed = raw.get("allowed_features")
-+        if allowed is None:
-+            allowed = [] if is_group else self._private_default_features()
++        if "allowed_features" not in raw:
++            allowed = (
++                [
++                    "astrbot_plugin_angel_heart",
++                    "astrbot_plugin_music",
++                    "astrbot_plugin_parser",
++                    "astrbot_plugin_qq_group_daily_analysis",
++                    "jiang_commands",
++                    "jiang_group_notice",
++                    "jiang_image",
++                ]
++                if is_group else self._private_default_features()
++            )
 +        if not isinstance(allowed, list) or any(not isinstance(item, str) for item in allowed):
 +            raise ValueError("聊天功能范围格式不正确")
 +        policy["allowed_features"] = allowed

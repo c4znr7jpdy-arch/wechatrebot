@@ -31,7 +31,7 @@ _DEFAULT_STATE: dict[str, Any] = {
     "persona": {
         "tone": "natural",
         "reply_length": "brief",
-        "mention_only": True,
+        "mention_only": False,
         "fast_reply": True,
         "alias": "AI|助手",
         "identity_prompt": "你是群聊里的熟人型助手，说话自然、直接，不使用机械的客服措辞。",
@@ -213,8 +213,11 @@ class ExperienceService:
         persona = {
             "tone": tone,
             "reply_length": reply_length,
-            "mention_only": bool(values.get("mention_only", True)),
-            "fast_reply": bool(values.get("fast_reply", True)),
+            # Per-group participation is owned by Message Management. Keep the
+            # underlying coordinator receptive, then let the outbound group
+            # policy enforce mention-only, natural, or off for each group.
+            "mention_only": False,
+            "fast_reply": True,
             "alias": alias,
             "identity_prompt": identity,
             "reply_guide": guide,

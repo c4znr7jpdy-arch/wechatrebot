@@ -1,0 +1,159 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index 00537ef..fd2edfe 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -630,6 +630,13 @@ class BridgeApplication:
+                     or member.get("avatar")
+                     or member.get("avatar_url")
+                 ).strip(),
++                wechat_id=scalar(
++                    member.get("wechat_id")
++                    or member.get("alias")
++                    or member.get("aliasName")
++                    or member.get("userAlias")
++                    or member.get("account")
++                ).strip(),
+             )
+         return identities
+ 
+@@ -676,6 +683,7 @@ class BridgeApplication:
+             return event
+         return replace(
+             event,
++            wechat_id=event.wechat_id or cached.wechat_id,
+             wechat_name=event.wechat_name or cached.wechat_name,
+             group_nickname=event.group_nickname or cached.group_nickname,
+             member_avatar=event.member_avatar or cached.avatar,
+@@ -736,6 +744,7 @@ class BridgeApplication:
+             event,
+             sender_id=member_id,
+             sender_name=event.sender_name or identity.wechat_name,
++            wechat_id=event.wechat_id or identity.wechat_id,
+             wechat_name=event.wechat_name or identity.wechat_name,
+             group_nickname=event.group_nickname or identity.group_nickname,
+             member_avatar=event.member_avatar or identity.avatar,
+@@ -808,6 +817,7 @@ class BridgeApplication:
+         return replace(
+             event,
+             sender_name=event.sender_name or identity.wechat_name,
++            wechat_id=event.wechat_id or identity.wechat_id,
+             wechat_name=(
+                 event.wechat_name
+                 or identity.wechat_name
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+index f32ed25..8852489 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+@@ -142,6 +142,17 @@ def _normalize_member(value: Any) -> dict[str, str] | None:
+     group_nickname = _manager_text(
+         _record_value(value, record, "group_nickname", "display_name", "displayName")
+     )
++    wechat_id = _manager_text(
++        _record_value(
++            value,
++            record,
++            "wechat_id",
++            "alias",
++            "aliasName",
++            "userAlias",
++            "account",
++        )
++    )
+     avatar = _manager_text(
+         _record_value(
+             value,
+@@ -160,6 +171,7 @@ def _normalize_member(value: Any) -> dict[str, str] | None:
+         "user_id": user_id,
+         "name": name,
+         "group_nickname": group_nickname,
++        "wechat_id": wechat_id,
+         "avatar": avatar,
+     }
+ 
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+index 5c7a338..ab118d4 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+@@ -409,6 +409,7 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+             conversation_id=room_id,
+             sender_id=member_id,
+             sender_name=_member_scalar(member, "nickName", "nickname", "nick_name", "name"),
++            wechat_id=_member_scalar(member, "wechat_id", "alias", "aliasName", "userAlias", "account"),
+             wechat_name=_member_scalar(
+                 member, "nickName", "nickname", "nick_name", "name"
+             ),
+@@ -469,6 +470,7 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+             kind="group_member_update",
+             conversation_id=scalar(data.get("roomid") or data.get("roomId")),
+             sender_id=scalar(member.get("userName") or member.get("wxid")),
++            wechat_id=_member_scalar(member, "wechat_id", "alias", "aliasName", "userAlias", "account"),
+             wechat_name=scalar(member.get("nickName")).strip(),
+             group_nickname=scalar(member.get("displayName")).strip(),
+             member_avatar=_member_scalar(
+@@ -500,11 +502,17 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+     profile = data.get("sender_profile")
+     profile_mapping = profile if isinstance(profile, Mapping) else {}
+     if is_group:
++        wechat_id = _member_scalar(
++            member_mapping, "wechat_id", "alias", "aliasName", "userAlias", "account"
++        )
+         wechat_name = scalar(
+             member_mapping.get("nickName") or data.get("sender_nick")
+         ).strip()
+         group_nickname = scalar(member_mapping.get("displayName")).strip()
+     else:
++        wechat_id = _member_scalar(
++            profile_mapping, "wechat_id", "alias", "aliasName", "userAlias", "account"
++        )
+         wechat_name = scalar(
+             profile_mapping.get("nickName") or data.get("sender_nick")
+         ).strip()
+@@ -550,6 +558,7 @@ def normalize_event(payload: Mapping[str, Any]) -> NormalizedEvent:
+         conversation_id=conversation_id,
+         sender_id=sender_id,
+         sender_name=sender_name,
++        wechat_id=wechat_id,
+         wechat_name=wechat_name,
+         group_nickname=group_nickname,
+         member_avatar=_member_scalar(
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+index c267040..aa2142b 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+@@ -147,7 +147,7 @@ def _command_content(commands: Sequence[OutboundCommand]) -> str:
+             parts.append(command.text)
+         elif command.kind == "link_card":
+             details = " · ".join(
+-                item for item in (command.title, command.description, command.url) if item
++                item for item in (command.title, command.description) if item
+             )
+             parts.append(f"[链接卡片]{details}")
+         else:
+@@ -221,6 +221,7 @@ class MessageHistoryStore:
+                 "group_name": event.group_name,
+                 "group_nickname": event.group_nickname,
+                 "wechat_name": event.wechat_name,
++                "wechat_id": getattr(event, "wechat_id", ""),
+                 "avatar": getattr(event, "member_avatar", ""),
+                 **message_metadata,
+             },
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/models.py b/hook_41827_astrbot_bridge/src/hook_bridge/models.py
+index 9fe8df5..12b1942 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/models.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/models.py
+@@ -30,6 +30,7 @@ class GroupMemberIdentity:
+     wechat_name: str = ""
+     group_nickname: str = ""
+     avatar: str = ""
++    wechat_id: str = ""
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -50,6 +51,7 @@ class NormalizedEvent:
+     conversation_id: str = ""
+     sender_id: str = ""
+     sender_name: str = ""
++    wechat_id: str = ""
+     wechat_name: str = ""
+     group_nickname: str = ""
+     message_type: int = 0

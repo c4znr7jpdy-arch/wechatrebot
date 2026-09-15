@@ -31,6 +31,13 @@ if (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET) {
     $shortcut.Description = '彻底卸载微信机器人及本机数据'
     $shortcut.Save()
 }
+$folderIni = Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR 'desktop.ini'
+if (-not (Test-Path -LiteralPath $folderIni)) {
+    $folderConfig = "[.ShellClassInfo]`r`nIconFile=manager\WeChatReBot.exe`r`nIconIndex=0`r`nConfirmFileOp=0`r`n"
+    [System.IO.File]::WriteAllText($folderIni, $folderConfig, [System.Text.Encoding]::Unicode)
+    & attrib.exe +h +s $folderIni
+    & attrib.exe +s $env:WECHATREBOT_SHORTCUT_WORKDIR
+}
 """.strip()
 
 

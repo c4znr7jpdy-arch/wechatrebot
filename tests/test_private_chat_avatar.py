@@ -212,3 +212,71 @@ def test_private_conversation_and_old_messages_use_current_contact_avatar() -> N
     )
     assert messages["data"][0]["avatar"] == "https://example.test/friend.jpg"
     assert messages["data"][0]["wechat_name"] == "微信好友"
+
+
+def test_group_messages_use_member_wechat_id_and_profile_fallback() -> None:
+    api = ApplicationApi.__new__(ApplicationApi)
+    api._lifecycle = SimpleNamespace(view=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity="wxid_bot")))
+    received: dict[str, object] = {}
+
+    def messages(_conversation_id, **filters):
+        received.update(filters)
+        return ({
+            "id": 1,
+            "role": "user",
+            "sender_id": "wxid_member",
+            "sender_name": "成员",
+            "wechat_name": "",
+            "wechat_id": "",
+            "group_nickname": "",
+            "avatar": "",
+            "content": "你好",
+            "timestamp": 100,
+        },)
+
+    api._history = SimpleNamespace(messages=messages)
+    api._groups = SimpleNamespace(
+        members=lambda _group_id: {
+            "account_id": "wxid_bot",
+            "items": [{
+                "user_id": "wxid_member",
+                "wechat_id": "member_account",
+                "name": "微信昵称",
+                "group_nickname": "群昵称",
+                "avatar": "https://example.test/member.jpg",
+            }]
+        }
+    )
+
+    result = api.get_messages(
+        "room@chatroom",
+        {"search": "wxid_member", "start": "2026-09-14", "end": "2026-09-15"},
+    )
+
+    message = result["data"][0]
+    assert message["wechat_id"] == "member_account"
+    assert message["group_nickname"] == "群昵称"
+    assert message["avatar"] == "https://example.test/member.jpg"
+    assert received["search"] == "wxid_member"
+    assert float(received["start_time"]) < float(received["end_time"])
+
+
+def test_group_member_cache_never_crosses_accounts() -> None:
+    api = ApplicationApi.__new__(ApplicationApi)
+    account = ["wxid_first"]
+    api._lifecycle = SimpleNamespace(view=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity=account[0])))
+    api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
+    api._groups = SimpleNamespace(members=lambda _group_id: {"account_id": account[0], "items": [{"user_id": "wxid_member", "wechat_id": account[0] + "_alias"}]})
+    assert api.get_messages("room@chatroom")["data"][0]["wechat_id"] == "wxid_first_alias"
+    account[0] = "wxid_second"
+    assert api.get_messages("room@chatroom")["data"][0]["wechat_id"] == "wxid_second_alias"
+    assert list(api._history_group_members) == [("wxid_second", "room@chatroom")]
+
+
+def test_group_member_directory_for_different_account_is_not_used() -> None:
+    api = ApplicationApi.__new__(ApplicationApi)
+    api._lifecycle = SimpleNamespace(view=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity="wxid_current")))
+    api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
+    api._groups = SimpleNamespace(members=lambda _group_id: {"account_id": "wxid_other", "items": [{"user_id": "wxid_member", "wechat_id": "other_alias"}]})
+    assert api.get_messages("room@chatroom")["data"][0]["wechat_id"] == "wxid_member"
+    assert not api._history_group_members

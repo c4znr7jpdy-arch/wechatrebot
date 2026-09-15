@@ -15,7 +15,7 @@
 | 页面与交互 | `src/wechatrebot_manager/app_webui/` | Playwright + 人工截图 |
 | 生命周期 | `lifecycle.py`、`runtime_status.py` | 单元测试 + 真实机器验收 |
 | 环境检测 | `environment.py` | 单元测试 + 各微信安装路径验收 |
-| 功能配置 | `PluginCenterService` + `legal/feature-set.json` 交付/默认启用策略 + 可选 Schema/专属页 | 单元测试 |
+| 功能配置 | `PluginCenterService` + `release/feature-set.json` 交付/默认启用策略 + 可选 Schema/专属页 | 单元测试 |
 | 群聊目录 | `GroupDirectoryService` + 当前账号绑定的连接层只读接口 | 单元测试 + 隔离浏览器预览 |
 | 私聊目录与功能范围 | `ContactDirectoryService` + `PrivateChatPolicyService` + 当前账号绑定的连接层只读接口 | 单元测试 + 隔离浏览器预览 |
 | 聊天记录 | `chat_history.py` 的产品数据库 | 单元测试 + 大数据量验收 |
@@ -30,13 +30,18 @@
 |---|---|---|
 | 运行中心 | 环境、状态、启动、停止、错误恢复 | `LifecycleController` |
 | 功能中心 | 搜索、选择、启停、按交付策略显示动态配置或专属页 | `PluginCenterService` |
-| 聊天管理 | 群聊/私聊标签；群聊搜索、复制、刷新和成员；联系人搜索、分页、详情与可用功能 | `GroupDirectoryService` + `ContactDirectoryService` + `PrivateChatPolicyService` |
+| 消息管理 | 群聊/私聊标签；群聊搜索、复制、刷新和成员；联系人搜索、分页、详情与可用功能 | `GroupDirectoryService` + `GroupPolicyService` + `ContactDirectoryService` + `PrivateChatPolicyService` |
 | 聊天记录 | 分类、搜索、筛选、消息、导出、清理 | `ChatHistoryService` |
 | 定时任务 | 新建、编辑、混合多选群聊/私聊、预览、单对象测试、草稿、启停、复制、永久删除、逐对象记录；旧任务折叠兼容 | `ScheduledTaskService` + `TaskStore`；旧任务由 `ScheduleService` 只读兼容 |
 | 运行记录 | 脱敏的结构化生命周期事件与最近回复阶段 | `EventStore` + `ResponseTraceService` |
 | 设置 | 品牌、人格、长期记忆、情感、统一模型服务、微信路径、备份恢复与维护 | `ApplicationApi` |
+| 帮助 | 快速开始、管理界面实况图和各功能的操作步骤 | 功能中心的只读用途与准备条件 |
 
 UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作，WebView 不得递归暴露窗口、生命周期、数据服务或其他内部对象；页面不得直接终止进程、改数据库或读取底层日志。
+
+2026-09-15 用户的消息管理与设置调整覆盖旧页面文案：一级导航为运行中心、功能中心、消息管理、聊天记录、定时任务、运行记录、设置、帮助；消息管理保留“群聊管理 / 私聊管理”；设置一级标签为“模型服务 / 人格身份与维护 / 记忆与情感 / 系统信息”。新群允许功能默认是群聊上下文、点歌、链接解析、群聊分析、常用指令、群成员变动通知、图片生成。定时接收独立于允许功能；天气任务仍须允许“常用指令”，保存后运行端在最终发送边界重新核验。功能中心默认启用可并行功能，但外部向量记忆只可替代基础长期记忆，隐藏的自动改代码保持关闭。来源：本次用户 15 项请求与 `DESIGN.md` 的主记忆互斥、安全默认约束。
+
+消息管理长表单、设置人格表单使用工作区外层滚动条；聊天记录三栏原有独立消息滚动不改变。帮助集中上手说明，首次进入不自动弹出新手提示；帮助实况图只取隔离预览，不使用客户聊天记录。聊天记录输入精确 wxid 时消息列表按发送者筛选，微信号可用时优先展示微信号；群昵称和群头像来自当前账号只读群目录及消息成员资料，资料缺失时仍保持 wxid/文字占位，不猜测。
 
 全部交付功能提供用途、准备条件和操作指引；复杂功能由管理器提供“常用设置”投影，完整参数在“专业设置（全部）”中保留。保存时必须用完整原始 Schema 合并，保留未展示字段、未知兼容值和已保存密钥；不得因为界面精简而重置专业参数。切换分类保留内存草稿，离开当前功能通过应用确认层询问是否丢弃，不将密钥草稿写入浏览器存储。
 

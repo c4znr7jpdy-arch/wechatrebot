@@ -19,10 +19,12 @@ import pytest
 
 PROJECT_ROOT = Path(r"E:\Project")
 BRIDGE_ROOT = PROJECT_ROOT / "hook_41827_astrbot_bridge"
-PATCH_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "patches"
-    / "hook-bridge-group-directory.patch"
+PATCH_PATHS = tuple(
+    Path(__file__).resolve().parents[1] / "patches" / name
+    for name in (
+        "hook-bridge-group-directory.patch",
+        "hook-bridge-message-history-identity.patch",
+    )
 )
 
 
@@ -34,15 +36,16 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     shutil.copytree(BRIDGE_ROOT / "src" / "hook_bridge", package_dir)
 
     subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
-    applied = subprocess.run(
-        ["git", "apply", "--whitespace=error-all", str(PATCH_PATH)],
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    assert applied.returncode == 0, applied.stderr
+    for patch in PATCH_PATHS:
+        applied = subprocess.run(
+            ["git", "apply", "--whitespace=error-all", str(patch)],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert applied.returncode == 0, applied.stderr
 
     package_name = "_isolated_group_bridge"
     package_spec = importlib.util.spec_from_file_location(
@@ -632,7 +635,8 @@ def test_member_directory_validates_group_and_caps_real_fields_at_500(
                 {
                     "userName": {"String": f"wxid_{index}"},
                     "nickName": {"String": f"成员{index}"},
-                    "displayName": {"String": f"群昵称{index}"},
+                        "displayName": {"String": f"群昵称{index}"},
+                        "alias": {"String": f"wechat_{index}"},
                     "owner": True,
                     "small_head_url": "https://sensitive.invalid/avatar",
                 }
@@ -672,12 +676,14 @@ def test_member_directory_validates_group_and_caps_real_fields_at_500(
             "user_id": "wxid_0",
             "name": "成员0",
             "group_nickname": "群昵称0",
+            "wechat_id": "wechat_0",
             "avatar": "https://sensitive.invalid/avatar",
         }
         assert set(body["data"]["items"][0]) == {
             "user_id",
             "name",
             "group_nickname",
+            "wechat_id",
             "avatar",
         }
         assert body["data"]["source"] == "wechat_cache"

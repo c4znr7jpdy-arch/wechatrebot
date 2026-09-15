@@ -402,6 +402,40 @@ def test_conversation_search_matches_group_without_local_messages(tmp_path: Path
     ]
 
 
+def test_dated_group_history_still_uses_directory_avatar_without_adding_empty_groups(
+    tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+    api._history = SimpleNamespace(
+        conversations=lambda **_filters: {
+            "items": [{
+                "conversation_id": "active@chatroom",
+                "type": "group",
+                "display_name": "旧群名",
+                "message_count": 1,
+                "last_timestamp": 100,
+                "avatar": "",
+            }],
+            "summary": {"messages": 1},
+        }
+    )
+    api._groups = SimpleNamespace(
+        list=lambda _refresh: {
+            "account_id": "wxid_bot",
+            "items": [
+                {"group_id": "active@chatroom", "name": "当前群名", "avatar": "https://example.test/group.jpg"},
+                {"group_id": "empty@chatroom", "name": "空群", "avatar": "https://example.test/empty.jpg"},
+            ],
+        }
+    )
+    result = api.get_conversations({"kind": "group", "start": "2026-09-14", "end": "2026-09-15"})
+
+    assert result["ok"] is True, result
+    assert [item["conversation_id"] for item in result["data"]["items"]] == ["active@chatroom"]
+    assert result["data"]["items"][0]["display_name"] == "当前群名"
+    assert result["data"]["items"][0]["avatar"] == "https://example.test/group.jpg"
+
+
 def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path) -> None:
     release = UpdateRelease(
         version="0.9.0",
@@ -655,8 +689,8 @@ def test_chat_management_adds_private_directory_profile_and_feature_scope() -> N
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
-    assert '>聊天管理</span>' in markup
-    assert 'role="tablist" aria-label="聊天管理分类"' in markup
+    assert '>消息管理</span>' in markup
+    assert 'role="tablist" aria-label="消息管理分类"' in markup
     assert 'data-chat-management-tab="private"' in markup
     assert 'id="privateManagementPanel" role="tabpanel"' in markup
     assert 'id="contactSearch"' in markup

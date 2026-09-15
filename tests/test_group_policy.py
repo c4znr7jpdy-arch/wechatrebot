@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from wechatrebot_manager.group_policy import GroupPolicyError, GroupPolicyService
+from wechatrebot_manager.group_policy import (
+    DEFAULT_GROUP_FEATURES,
+    GroupPolicyError,
+    GroupPolicyService,
+)
 from wechatrebot_manager.schedules import ScheduleService
 
 
@@ -93,7 +97,7 @@ def test_new_group_has_conservative_account_scoped_defaults(tmp_path: Path) -> N
     assert result["bot_enabled"] is True
     assert result["reply_mode"] == "mention"
     assert result["proactive_enabled"] is False
-    assert result["allowed_features"] == []
+    assert result["allowed_features"] == list(DEFAULT_GROUP_FEATURES)
     assert result["permissions"]["group_role"] == "unknown"
     assert result["permissions"]["can_perform_group_admin_actions"] is False
 

@@ -355,8 +355,9 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
             "configuration": "schema-and-page",
             "description": "",
             "simplified": False,
-            "audience": "按需使用",
-            "readiness": "请按说明准备",
+                "audience": "按需使用",
+                "readiness": "请按说明准备",
+                "guide": {},
             "scheduled_action": "",
             "schedule_provider": False,
         }

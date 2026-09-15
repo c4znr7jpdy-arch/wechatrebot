@@ -177,6 +177,7 @@ class ApplicationApi:
         self._catalog = load_error_catalog(self._install_root)
         self._window: Any | None = None
         self._tray: WindowsTrayController | None = None
+        self._history_group_members: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
         self._action_lock = threading.Lock()
         self._update_lock = threading.Lock()
         self._update_status_lock = threading.Lock()
@@ -483,7 +484,7 @@ class ApplicationApi:
             start_time = self._date_timestamp(values.get("start"))
             end_time = self._date_timestamp(values.get("end"), end=True)
             directory = {"items": []}
-            if kind in {"all", "group"} and start_time is None and end_time is None:
+            if kind in {"all", "group"}:
                 directory = self._groups.list(False)
             account_id = str(
                 directory.get("account_id") or self._history_account_id()
@@ -512,7 +513,7 @@ class ApplicationApi:
                 item["avatar"] = str(
                     contact.get("avatar") or item.get("avatar") or ""
                 )
-            if kind in {"all", "group"} and start_time is None and end_time is None:
+            if kind in {"all", "group"}:
                 known = {
                     str(item.get("conversation_id") or ""): item
                     for item in items
@@ -536,6 +537,8 @@ class ApplicationApi:
                         # only use the portrait returned for that group.
                         known[group_id]["avatar"] = str(group.get("avatar") or "")
                         known[group_id]["member_count"] = group.get("member_count")
+                        continue
+                    if start_time is not None or end_time is not None:
                         continue
                     item = {
                         "conversation_id": group_id,
@@ -562,6 +565,8 @@ class ApplicationApi:
             return self._failed(exc)
 
     def get_groups(self, refresh: bool = False) -> dict[str, object]:
+        if refresh:
+            getattr(self, "_history_group_members", {}).clear()
         return self._ok(self._groups.list(bool(refresh)))
 
     def get_group_members(self, group_id: str) -> dict[str, object]:
@@ -635,16 +640,74 @@ class ApplicationApi:
         except (OSError, ValueError, PrivatePolicyError) as exc:
             return self._failed(exc, "15002")
 
-    def get_messages(self, conversation_id: str) -> dict[str, object]:
+    def get_messages(
+        self,
+        conversation_id: str,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
         try:
+            values = filters or {}
+            account_id = self._history_account_id()
             messages = list(
                 self._history.messages(
                     conversation_id,
-                    account_id=self._history_account_id(),
+                    account_id=account_id,
+                    search=str(values.get("search") or "").strip(),
+                    start_time=self._date_timestamp(values.get("start")),
+                    end_time=self._date_timestamp(values.get("end"), end=True),
                 )
             )
-            if not conversation_id.endswith("@chatroom") and any(
-                message.get("role") != "assistant" and not message.get("avatar")
+            if conversation_id.endswith("@chatroom"):
+                member_cache = getattr(self, "_history_group_members", None)
+                if not isinstance(member_cache, dict):
+                    member_cache = {}
+                    self._history_group_members = member_cache
+                cache_key = (account_id, conversation_id)
+                # Never reuse member details from a previously logged-in account.
+                for old_key in tuple(member_cache):
+                    if old_key[0] != account_id:
+                        member_cache.pop(old_key, None)
+                members = member_cache.get(cache_key)
+                if members is None:
+                    members = {}
+                    try:
+                        directory = self._groups.members(conversation_id)
+                        trusted = bool(account_id) and directory.get("account_id") == account_id and not directory.get("stale")
+                        for item in (directory.get("items") or []) if trusted else []:
+                            if not isinstance(item, dict):
+                                continue
+                            user_id = str(item.get("user_id") or "").strip()
+                            if user_id:
+                                members[user_id] = {
+                                    "wechat_id": str(item.get("wechat_id") or item.get("alias") or "").strip(),
+                                    "wechat_name": str(item.get("name") or "").strip(),
+                                    "group_nickname": str(item.get("group_nickname") or "").strip(),
+                                    "avatar": str(item.get("avatar") or "").strip(),
+                                }
+                        if trusted:
+                            member_cache[cache_key] = members
+                    except (OSError, ValueError, GroupDirectoryError):
+                        pass
+                for message in messages:
+                    if message.get("role") == "assistant":
+                        continue
+                    profile = members.get(str(message.get("sender_id") or ""), {})
+                    for key in ("wechat_name", "group_nickname", "avatar"):
+                        if not message.get(key) and profile.get(key):
+                            message[key] = profile[key]
+                    message["wechat_id"] = str(
+                        message.get("wechat_id")
+                        or profile.get("wechat_id")
+                        or message.get("sender_id")
+                        or ""
+                    )
+            elif any(
+                message.get("role") != "assistant"
+                and (
+                    not message.get("avatar")
+                    or not message.get("wechat_name")
+                    or not message.get("wechat_id")
+                )
                 for message in messages
             ):
                 contact = self._history_contacts([conversation_id]).get(
@@ -659,6 +722,10 @@ class ApplicationApi:
                         message["avatar"] = avatar
                     if not message.get("wechat_name"):
                         message["wechat_name"] = wechat_name
+                    if not message.get("wechat_id"):
+                        message["wechat_id"] = str(
+                            contact.get("alias") or message.get("sender_id") or ""
+                        )
             return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)

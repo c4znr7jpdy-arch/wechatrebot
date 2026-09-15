@@ -21,6 +21,15 @@ _GROUP_ID = re.compile(r"^[A-Za-z0-9_.-]+@chatroom$")
 _MODULE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _REPLY_MODES = frozenset({"mention", "natural", "off"})
+DEFAULT_GROUP_FEATURES = (
+    "astrbot_plugin_angel_heart",
+    "astrbot_plugin_music",
+    "astrbot_plugin_parser",
+    "astrbot_plugin_qq_group_daily_analysis",
+    "jiang_commands",
+    "jiang_group_notice",
+    "jiang_image",
+)
 _POLICY_FIELDS = frozenset(
     {
         "bot_enabled",
@@ -59,7 +68,7 @@ class QuietHours:
 class GroupPolicy:
     bot_enabled: bool = True
     reply_mode: str = "mention"
-    allowed_features: tuple[str, ...] = ()
+    allowed_features: tuple[str, ...] = DEFAULT_GROUP_FEATURES
     proactive_enabled: bool = False
     # This permits only explicitly saved, enabled tasks whose run is verified
     # at the bridge; it never seeds a task or enables AI proactive chat.
@@ -195,6 +204,8 @@ class GroupPolicyService:
         quiet_raw = raw.get("quiet_hours")
         quiet = quiet_raw if isinstance(quiet_raw, dict) else {}
         allowed = raw.get("allowed_features")
+        if "allowed_features" not in raw:
+            allowed = list(DEFAULT_GROUP_FEATURES)
         features = tuple(
             item for item in (allowed if isinstance(allowed, list) else [])
             if isinstance(item, str) and _MODULE_ID.fullmatch(item)
@@ -309,10 +320,11 @@ class GroupPolicyService:
         ):
             raise GroupPolicyError("允许功能清单格式不正确。")
         allowed = list(dict.fromkeys(allowed))
-        available = {feature.module for feature in self._features()}
-        unavailable = sorted(set(allowed).difference(available))
-        if unavailable:
-            raise GroupPolicyError("允许功能清单包含未交付或已移除的功能。")
+        if "allowed_features" in values:
+            available = {feature.module for feature in self._features()}
+            unavailable = sorted(set(allowed).difference(available))
+            if unavailable:
+                raise GroupPolicyError("允许功能清单包含未交付或已移除的功能。")
 
         daily_limit = values.get("daily_limit", current.daily_limit)
         if (
@@ -543,6 +555,7 @@ class GroupPolicyService:
 
 
 __all__ = [
+    "DEFAULT_GROUP_FEATURES",
     "GroupPolicy",
     "GroupPolicyError",
     "GroupPolicyService",

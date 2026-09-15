@@ -3,9 +3,22 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 import os
+from pathlib import Path
+import sys
 import threading
 from typing import Any
 import uuid
+
+
+def _tray_icon_path() -> Path | None:
+    candidates = [Path(__file__).with_name("app_webui") / "assets" / "app-icon.ico"]
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.insert(
+            0,
+            Path(bundle_root) / "wechatrebot_manager" / "app_webui" / "assets" / "app-icon.ico",
+        )
+    return next((path for path in candidates if path.is_file()), None)
 
 
 class WindowsTrayController:
@@ -131,6 +144,7 @@ class WindowsTrayController:
         tpm_rightbutton = 0x0002
         image_icon = 1
         lr_defaultsize = 0x0040
+        lr_loadfromfile = 0x0010
         lr_shared = 0x8000
 
         lresult = ctypes.c_ssize_t
@@ -316,9 +330,20 @@ class WindowsTrayController:
 
         class_name = f"WeChatReBotTray_{uuid.uuid4().hex}"
         instance = kernel32.GetModuleHandleW(None)
+        resource = ctypes.cast(32512, wintypes.LPCWSTR)
+        icon_path = _tray_icon_path()
+        icon = user32.LoadImageW(
+            None,
+            str(icon_path) if icon_path else resource,
+            image_icon,
+            0,
+            0,
+            (lr_defaultsize | lr_loadfromfile) if icon_path else (lr_defaultsize | lr_shared),
+        )
         window_class = WindowClass()
         window_class.lpfnWndProc = window_proc
         window_class.hInstance = instance
+        window_class.hIcon = icon
         window_class.lpszClassName = class_name
         atom = user32.RegisterClassW(ctypes.byref(window_class))
         if not atom:
@@ -344,15 +369,6 @@ class WindowsTrayController:
             self._ready.set()
             return
 
-        resource = ctypes.cast(32512, wintypes.LPCWSTR)
-        icon = user32.LoadImageW(
-            None,
-            resource,
-            image_icon,
-            0,
-            0,
-            lr_defaultsize | lr_shared,
-        )
         data = NotifyIconData()
         data.cbSize = ctypes.sizeof(NotifyIconData)
         data.hWnd = hwnd

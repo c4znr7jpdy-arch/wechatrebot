@@ -80,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             "--windowed",
             "--name",
             "WeChatReBot",
+            "--icon",
+            str(commercial_root / "src" / "wechatrebot_manager" / "app_webui" / "assets" / "app-icon.ico"),
             "--distpath",
             str(dist),
             "--workpath",

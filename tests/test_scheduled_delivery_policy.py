@@ -153,6 +153,24 @@ def test_explicit_schedule_allowed_while_ai_proactive_stays_off(bridge, tmp_path
     assert len(router.hook.calls) == 1
 
 
+def test_new_group_default_allows_weather_schedule_without_ai_proactive(bridge, tmp_path):
+    _, task, run = _store(tmp_path, action="weather")
+    router = _router(bridge, tmp_path)
+    assert not (tmp_path / "data/manager/group-policies.json").exists()
+    assert _send(router, task, run)["status"] == "ok"
+    assert len(router.hook.calls) == 1
+    decision = asyncio.run(router.outbound_policy.authorize(ACCOUNT, GROUP, delivery="proactive"))
+    assert not decision.allowed
+
+
+def test_null_group_feature_list_is_not_treated_as_new_group_defaults(bridge, tmp_path):
+    _, task, run = _store(tmp_path, action="weather")
+    _policy(tmp_path, allowed_features=None)
+    router = _router(bridge, tmp_path)
+    assert _send(router, task, run)["status"] == "failed"
+    assert router.hook.calls == []
+
+
 @pytest.mark.parametrize("target", [GROUP, CONTACT])
 @pytest.mark.parametrize("mutation", ["no_run", "pending", "wrong_account", "wrong_target", "deleted", "paused", "revised", "finished"])
 def test_scheduled_tag_needs_live_task_run_target_and_account_authorization(bridge, tmp_path, target, mutation):

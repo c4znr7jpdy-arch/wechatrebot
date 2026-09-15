@@ -98,7 +98,10 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
         item["module"] for item in features if item.get("default_enabled", True)
     }
     assert set(template["plugin_set"]) == safe_defaults
-    assert safe_defaults < delivered
+    assert delivered - safe_defaults == {
+        "astrbot_plugin_mnemosyne",  # alternative primary memory cannot run alongside livingmemory
+        "astrbot_plugin_self_iterative_core",  # hidden code-writing experiment
+    }
 
 
 def test_every_delivered_plugin_has_auditable_legal_metadata() -> None:
@@ -166,10 +169,10 @@ def test_group_analysis_keeps_customer_facing_policy() -> None:
 
     assert feature["display_name"] == "群聊分析"
     assert feature["configuration"] == "schema"
-    assert feature["default_enabled"] is False
+    assert feature["default_enabled"] is True
 
 
-def test_new_install_enables_only_low_setup_group_basics() -> None:
+def test_new_install_enables_all_safe_features_without_conflicting_memory_or_code_writes() -> None:
     commercial_root = Path(__file__).parents[1]
     features = json.loads(
         (commercial_root / "release" / "feature-set.json").read_text(
@@ -180,16 +183,9 @@ def test_new_install_enables_only_low_setup_group_basics() -> None:
         item["module"] for item in features if item.get("default_enabled", True)
     }
 
-    assert enabled == {
-        "astrbot_plugin_angel_heart",
-        "astrbot_plugin_bittorrent",
-        "astrbot_plugin_livingmemory",
-        "astrbot_plugin_music",
-        "astrbot_plugin_parser",
-        "astrbot_plugin_patch_at_wxid",
-        "astrbot_plugin_self_learning",
-        "jiang_capability_router",
-        "jiang_commands",
-        "jiang_video_understanding",
-        "meme_manager",
+    assert {item["module"] for item in features} - enabled == {
+        "astrbot_plugin_mnemosyne",
+        "astrbot_plugin_self_iterative_core",
     }
+    assert all(item.get("default_enabled", True) for item in features
+               if item.get("visible", True) and item["module"] != "astrbot_plugin_mnemosyne")

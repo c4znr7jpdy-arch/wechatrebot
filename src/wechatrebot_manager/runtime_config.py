@@ -316,28 +316,39 @@ def _sync_delivery_plugins(
             if isinstance(configured, list)
             else {"*"}
         )
-        astrbot_payload["plugin_set"] = (
-            [feature.module for feature in features if feature.default_enabled]
-            if "*" in configured_names
-            else [module for module in allowed if module in configured_names]
-        )
+        defaults = {feature.module for feature in features if feature.default_enabled}
+        # One-time transition from old global defaults to per-group grants.
+        # Later manual global disables must not be undone on every startup.
+        if astrbot_payload.get("wechatrebot_feature_scope_version") != 1:
+            if "astrbot_plugin_mnemosyne" in configured_names and "*" not in configured_names:
+                defaults.discard("astrbot_plugin_livingmemory")
+            configured_names = defaults if "*" in configured_names else configured_names | defaults
+            astrbot_payload["wechatrebot_feature_scope_version"] = 1
+        elif "*" in configured_names:
+            configured_names = defaults
+        astrbot_payload["plugin_set"] = [module for module in allowed if module in configured_names]
 
 
 def _sync_angel_heart_model(
     astrbot_data_root: Path,
     provider_profile: OpenAIProviderProfile | None,
 ) -> None:
-    if provider_profile is None:
-        return
     plugin_dir = astrbot_data_root / "plugins" / "astrbot_plugin_angel_heart"
     if not plugin_dir.is_dir():
         return
     path = astrbot_data_root / "config" / "astrbot_plugin_angel_heart_config.json"
     payload = _load_object(path)
-    model_id = provider_profile.normalized().model_id
-    for field in ("analyzer_model", "image_caption_provider_id"):
-        if not str(payload.get(field) or "").strip():
-            payload[field] = model_id
+    wake = payload.get("wake_interaction")
+    if not isinstance(wake, dict):
+        wake = {}
+        payload["wake_interaction"] = wake
+    wake["enter_on_mention_only"] = False
+    wake["direct_wake_fast_path"] = True
+    if provider_profile is not None:
+        model_id = provider_profile.normalized().model_id
+        for field in ("analyzer_model", "image_caption_provider_id"):
+            if not str(payload.get(field) or "").strip():
+                payload[field] = model_id
     if payload:
         write_json_atomic(path, payload)
 
