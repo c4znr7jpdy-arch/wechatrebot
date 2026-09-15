@@ -84,3 +84,5 @@ final result: passed
 
 - 新增 390×844 手机触屏全屏测试，强制模拟 WebKit/微信缺少容器全屏 API 的路径，验证旋转尺寸、系统横屏后的二次旋转规避、选集弹窗边界和退出清理；截图为 `output/playwright/cinema/mobile-landscape-fullscreen-390.png`。
 - 本轮播放器、托管安全和网络安全专项验证：`37 passed in 29.38s`。测试使用 Chromium 手机触屏模拟，真实 iPhone/微信兼容性由页面全屏兜底覆盖，仍需用户设备实测确认具体宿主限制。
+
+`c1c6578` 已于 2026-09-15 同步线上静态页。公网页面 SHA-256 为 `82a41fcfe58e5b9c20cec3dfa6c95359e1f450ea5b5887eb6a075e7a03b8a8a0`，与通过本轮测试的页面一致；页面包含系统横屏请求、页面旋转兜底和方向变化同步逻辑。服务器备份位于 `/root/nginx-backups/short-drama-landscape-fullscreen-20260915-c1c6578`。部署后状态服务保持 active，`nginx -t` 通过，推荐接口仍返回 12 部候选；状态服务及 Nginx 配置哈希未改变。本次仅替换托管静态页，没有制作或发布客户端安装包。
