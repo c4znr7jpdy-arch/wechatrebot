@@ -1,0 +1,465 @@
+diff --git a/index.html b/index.html
+index 5a4b50f..9328caf 100644
+--- a/index.html
++++ b/index.html
+@@ -301,10 +301,28 @@
+       .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { top: 50%; width: 44px; height: 44px; }
+       .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay svg { width: 20px; height: 20px; }
+     }
+-    /* Mobile uses the browser/OS video controls. Keep only episode and quality overlays. */
+-    @media (max-width: 560px) {
+-      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .mobile-control-panel,
+-      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { display: none !important; }
++    /* Native media controls own the video surface; extra actions stay outside it. */
++    .player-toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
++    .player-toolbar button, .player-toolbar select { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; color: #f3f5f7; background: var(--surface-2); font: inherit; font-size: 14px; cursor: pointer; }
++    .player-toolbar button { padding: 0 12px; }
++    .player-toolbar button:disabled { opacity: .4; cursor: default; }
++    .player-toolbar #episodeOpen { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .player-toolbar .episode-navigation { display: flex; gap: 6px; margin-right: auto; }
++    .player-toolbar .playback-rate { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
++    .player-toolbar select { padding: 0 8px; max-width: 105px; }
++    .player-toolbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++    .player-toolbar .quality-control { position: relative; }
++    .player-toolbar .quality-menu { position: absolute; inset: auto 0 auto auto; top: calc(100% + 6px); z-index: 10; min-width: 120px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: #191d23; box-shadow: 0 8px 24px #0008; }
++    .player-toolbar .quality-menu[hidden], #direct[hidden] { display: none !important; }
++    .player-toolbar .quality-menu button { display: block; width: 100%; text-align: left; }
++    .player-toolbar .quality-menu button.active { color: var(--accent); border-color: var(--accent); }
++    .below-player #status { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
++    @media (max-width: 380px) {
++      .player-toolbar { gap: 6px; }
++      .player-toolbar button { padding: 0 9px; }
++      .player-toolbar .playback-rate { margin-left: auto; }
++      .below-player { flex-wrap: wrap; }
++      .below-player #status { flex-basis: 100%; text-align: left; }
+     }
+   </style>
+ </head>
+@@ -316,19 +334,27 @@
+           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.7 5.3-1.4-1.4L5.2 12l8.1 8.1 1.4-1.4L8 12l6.7-6.7Z"/></svg>
+         </button>
+         <div class="heading-copy"><h1 id="title">短剧播放</h1><span class="heading-subtitle">短剧播放器</span></div>
+-        <button id="pageMoreButton" class="page-nav-button" type="button" aria-label="更多选项">
+-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
+-        </button>
++        <span aria-hidden="true"></span>
+       </header>
+       <div class="episode-meta"><span class="episode-meta-label">当前：</span><span id="meta">正在载入剧集…</span></div>
+       <div id="videoShell" class="video-shell">
+         <video id="video" aria-label="视频播放区域" controls playsinline webkit-playsinline preload="metadata" crossorigin="anonymous"></video>
+-        <div class="video-actions">
+-          <button id="playbackOverlay" type="button" aria-label="播放或暂停"><svg class="play-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg><svg class="pause-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z"/></svg></button>
+-          <div class="topbar"><div class="top-left"><button id="episodeOpen" class="pill-button desktop-video-control" type="button" aria-label="选择剧集">选集</button><span id="currentEpisode" class="pill-button desktop-video-control">第01集</span><button id="mobileEpisodeButtonTop" class="mobile-episode-button" type="button" aria-label="选择剧集"><svg class="episode-list-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h2v2H4V5Zm4 0h12v2H8V5ZM4 11h2v2H4v-2Zm4 0h12v2H8v-2ZM4 17h2v2H4v-2Zm4 0h12v2H8v-2Z"/></svg>选集 · <span id="mobileEpisodeLabelTop">第01集</span><span class="episode-chevron">›</span></button></div><div class="top-right"><button id="qualityButton" class="pill-button" type="button" aria-label="选择清晰度" disabled><span id="qualityLabel">原画</span></button><button id="fullscreenButton" class="pill-button desktop-video-control" type="button" aria-label="全屏播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H3v4h2V5h2V3Zm14 4V3h-4v2h2v2h2ZM5 17H3v4h4v-2H5v-2Zm16 0h-2v2h-2v2h2v-4Z"/></svg></button></div></div>
+-          <div id="qualityMenu" class="quality-menu" role="menu" hidden></div>
+-          <div class="center-nav"><button id="previous" class="icon-button" type="button" aria-label="上一集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 7.4 10.8 12l4.6 4.6L14 18l-6-6 6-6 1.4 1.4Z"/></svg></button><button id="next" class="icon-button" type="button" aria-label="下一集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.6 16.6 4.6-4.6-4.6-4.6L10 6l6 6-6 6-1.4-1.4Z"/></svg></button></div>
+-          <section class="mobile-control-panel" aria-label="播放控制"><div class="mobile-time-row"><span id="mobileCurrentTime">0:00</span><span id="mobileDuration">0:00</span></div><div class="mobile-seek-wrap"><input id="mobileSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度"></div><div class="mobile-action-row"><button id="mobileEpisodeButton" class="mobile-episode-button" type="button" aria-label="选择剧集">选集 · <span id="mobileEpisodeLabel">第01集</span><span class="episode-chevron">›</span></button><button id="mobileMuteButton" class="mobile-tool-button" type="button" aria-label="静音"><svg class="volume-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z"/></svg><svg class="muted-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7 4.7 14.6 14.6-1.4-1.4-3.1-3.1L13 19V5L8 9H4v6h4l1.2.96L7.7 17.5 4.7 14.5 6.1 13.1l1.4 1.4V9.5L4.7 6.1 4.7 4.7Z"/></svg><span class="sr-only">静音</span></button><button id="mobileFullscreenButton" class="mobile-tool-button" type="button" aria-label="全屏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H3v4h2V5h2V3Zm14 4V3h-4v2h2v2h2ZM5 17H3v4h4v-2H5v-2Zm16 0h-2v2h-2v2h4v-4Z"/></svg><span class="sr-only">全屏</span></button><div class="mobile-tool-wrap"><button id="mobileMoreButton" class="mobile-tool-button" type="button" aria-label="更多播放设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></button><div id="mobileMoreMenu" class="mobile-more-menu" hidden><button type="button" data-rate="0.75">0.75 倍速</button><button type="button" data-rate="1" class="active">正常速度</button><button type="button" data-rate="1.25">1.25 倍速</button><button type="button" data-rate="1.5">1.5 倍速</button><button type="button" data-rate="2">2 倍速</button></div></div></div></section>
++      </div>
++      <div class="player-toolbar" role="group" aria-label="剧集和播放设置">
++        <button id="episodeOpen" type="button" aria-label="选择剧集">选集</button>
++        <div class="episode-navigation">
++          <button id="previous" type="button" aria-label="上一集">上一集</button>
++          <button id="next" type="button" aria-label="下一集">下一集</button>
++        </div>
++        <label class="playback-rate"><span>倍速</span>
++          <select id="playbackRate" aria-label="播放速度">
++            <option value="0.75">0.75 倍</option><option value="1" selected>1 倍</option>
++            <option value="1.25">1.25 倍</option><option value="1.5">1.5 倍</option><option value="2">2 倍</option>
++          </select>
++        </label>
++        <div class="quality-control">
++          <button id="qualityButton" type="button" aria-label="选择清晰度" aria-haspopup="true" aria-expanded="false" disabled><span id="qualityLabel">原画</span></button>
++          <div id="qualityMenu" class="quality-menu" hidden></div>
+         </div>
+       </div>
+       <div class="below-player"><label class="switch-label"><input id="autoNext" type="checkbox" checked><span class="switch"></span><span>自动连播</span></label><p id="status">正在连接资源站……</p><button id="retry" type="button" hidden>重试</button><a id="direct" hidden aria-hidden="true"></a></div>
+@@ -358,23 +384,7 @@
+       const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
+       const sheetBackdrop = document.getElementById('sheetBackdrop');
+       const sheetClose = document.getElementById('sheetClose');
+-      const fullscreenButton = document.getElementById('fullscreenButton');
+-      const mobileFullscreenButton = document.getElementById('mobileFullscreenButton');
+-      const mobileMuteButton = document.getElementById('mobileMuteButton');
+-      const mobileMoreButton = document.getElementById('mobileMoreButton');
+-      const mobileMoreMenu = document.getElementById('mobileMoreMenu');
+-      const mobileEpisodeButton = document.getElementById('mobileEpisodeButton');
+-      const mobileEpisodeLabel = document.getElementById('mobileEpisodeLabel');
+-      const mobileEpisodeButtonTop = document.getElementById('mobileEpisodeButtonTop');
+-      const mobileEpisodeLabelTop = document.getElementById('mobileEpisodeLabelTop');
+-      const mobileSeek = document.getElementById('mobileSeek');
+-      const mobileCurrentTime = document.getElementById('mobileCurrentTime');
+-      const mobileDuration = document.getElementById('mobileDuration');
+       const autoNext = document.getElementById('autoNext');
+-      const currentEpisode = document.getElementById('currentEpisode');
+-      const playbackOverlay = document.getElementById('playbackOverlay');
+-      const videoActions = document.querySelector('.video-actions');
+-      const mobileControls = document.querySelector('.mobile-control-panel');
+       const qualityButton = document.getElementById('qualityButton');
+       const qualityLabel = document.getElementById('qualityLabel');
+       const qualityMenu = document.getElementById('qualityMenu');
+@@ -385,7 +395,6 @@
+       const recommendationsSummary = document.getElementById('recommendationsSummary');
+       const recommendationGrid = document.getElementById('recommendationGrid');
+       const pageBackButton = document.getElementById('pageBackButton');
+-      const pageMoreButton = document.getElementById('pageMoreButton');
+       const episodeExpand = document.getElementById('episodeExpand');
+       let hls = null;
+       let current = 0;
+@@ -393,16 +402,17 @@
+       let recommendationItems = [];
+       let selectionKind = 'recommendations';
+       let loadTimer = null;
+-      let playbackOverlayTimer = null;
+-      let controlsHideTimer = null;
+-      let controlsPointerActive = false;
++      let episodeLoadId = 0;
++      let removeEpisodeReadyListener = () => {};
++      const playbackRate = document.getElementById('playbackRate');
++      const episodeCount = document.getElementById('episodeCount');
+       let episodesExpanded = false;
+-      const mobileLayoutQuery = window.matchMedia('(max-width: 560px)');
+       const VIDEO_ASPECT_CLASSES = ['player--cinema', 'player--landscape', 'player--square', 'player--portrait'];
+ 
+       const fail = (message) => {
+         statusNode.textContent = message;
+         statusNode.classList.add('error');
++        retry.hidden = false;
+       };
+ 
+       const decodePlaylist = (token) => {
+@@ -576,9 +586,9 @@
+         previous.disabled = current <= 0;
+         next.disabled = current >= playlist.episodes.length - 1;
+         const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
+-        currentEpisode.textContent = label;
+-        mobileEpisodeLabel.textContent = label;
+-        mobileEpisodeLabelTop.textContent = label;
++        episodeOpen.textContent = `选集 · ${label}`;
++        episodeOpen.disabled = playlist.episodes.length < 2;
++        episodeCount.textContent = `共 ${playlist.episodes.length} 集`;
+         episodeGrid.querySelectorAll('button').forEach((button, index) => {
+           button.classList.toggle('active', index === current);
+         });
+@@ -622,28 +632,8 @@
+       };
+ 
+       const syncNativeControls = () => {
++        // Browser controls are the sole owner of play/pause, seeking and fullscreen.
+         video.controls = true;
+-        clearControlsHideTimer();
+-        videoActions.classList.remove('controls-hidden');
+-      };
+-
+-      const formatTime = (seconds) => {
+-        if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+-        const value = Math.floor(seconds);
+-        const hours = Math.floor(value / 3600);
+-        const minutes = Math.floor((value % 3600) / 60);
+-        const rest = String(value % 60).padStart(2, '0');
+-        return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+-      };
+-
+-      const updateMobileProgress = () => {
+-        const duration = Number.isFinite(video.duration) ? video.duration : 0;
+-        const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+-        mobileCurrentTime.textContent = formatTime(currentTime);
+-        mobileDuration.textContent = formatTime(duration);
+-        const ratio = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
+-        mobileSeek.value = String(Math.round(ratio * 1000));
+-        mobileSeek.style.setProperty('--seek-progress', `${ratio * 100}%`);
+       };
+ 
+       const levelName = (level) => {
+@@ -678,8 +668,8 @@
+         else if (hls.levels[Number(value)]) hls.currentLevel = Number(value);
+         else return;
+         qualityMenu.hidden = true;
++        qualityButton.setAttribute('aria-expanded', 'false');
+         updateQualityActive(value === 'auto' ? null : Number(value));
+-        showControls();
+       };
+ 
+       const setupQualityMenu = () => {
+@@ -706,55 +696,10 @@
+         updateQualityActive();
+       };
+ 
+-      const isInlineMobile = () => mobileLayoutQuery.matches
+-        && !document.fullscreenElement
+-        && !videoShell.classList.contains('pseudo-fullscreen');
+-
+-      const clearControlsHideTimer = () => {
+-        if (controlsHideTimer) {
+-          clearTimeout(controlsHideTimer);
+-          controlsHideTimer = null;
+-        }
+-      };
+-
+-      const scheduleControlsHide = () => {
+-        clearControlsHideTimer();
+-        if (!isInlineMobile() || video.paused || controlsPointerActive || !mobileMoreMenu.hidden || !qualityMenu.hidden) return;
+-        controlsHideTimer = setTimeout(() => {
+-          if (!video.paused && !controlsPointerActive && mobileMoreMenu.hidden && qualityMenu.hidden) {
+-            videoActions.classList.add('controls-hidden');
+-          }
+-          controlsHideTimer = null;
+-        }, 2800);
+-      };
+-
+-      const showControls = () => {
+-        videoActions.classList.remove('controls-hidden');
+-        scheduleControlsHide();
+-      };
+-
+-      const hideControls = () => {
+-        clearControlsHideTimer();
+-        if (isInlineMobile() && !video.paused && !controlsPointerActive && mobileMoreMenu.hidden && qualityMenu.hidden) {
+-          videoActions.classList.add('controls-hidden');
+-        }
+-      };
+-
+-      const updatePlaybackOverlay = () => {
+-        if (playbackOverlayTimer) {
+-          clearTimeout(playbackOverlayTimer);
+-          playbackOverlayTimer = null;
+-        }
+-        playbackOverlay.hidden = false;
+-        playbackOverlay.classList.toggle('is-playing', !video.paused);
+-        if (video.paused) showControls();
+-        else scheduleControlsHide();
+-      };
+-
+       const openEpisodeSheet = () => {
+         if (!playlist || playlist.episodes.length < 2) return;
+         qualityMenu.hidden = true;
+-        mobileMoreMenu.hidden = true;
++        qualityButton.setAttribute('aria-expanded', 'false');
+         episodeSheet.hidden = false;
+         document.body.classList.add('sheet-open');
+       };
+@@ -764,21 +709,13 @@
+         document.body.classList.remove('sheet-open');
+       };
+ 
+-      const toggleFullscreen = async () => {
+-        const shell = videoShell;
+-        try {
+-          if (document.fullscreenElement) await document.exitFullscreen();
+-          else if (shell.classList.contains('pseudo-fullscreen')) shell.classList.remove('pseudo-fullscreen');
+-          else if (shell.requestFullscreen) await shell.requestFullscreen();
+-          else shell.classList.add('pseudo-fullscreen');
+-        } catch (_error) { /* 微信内置浏览器可能不允许原生全屏 */ }
+-        applyVideoAspect();
+-        syncNativeControls();
+-      };
+ 
+-      const loadEpisode = (index) => {
++      const loadEpisode = (index, { autoplay = false } = {}) => {
+         if (!playlist) return;
+         if (index < 0 || index >= playlist.episodes.length) return;
++        const resumePlayback = autoplay || (!video.paused && !video.ended);
++        const loadId = ++episodeLoadId;
++        removeEpisodeReadyListener();
+         current = index;
+         const item = playlist.episodes[current] || {};
+         const source = String(item.url || '').trim();
+@@ -786,12 +723,29 @@
+         fallback.removeAttribute('href');
+         statusNode.classList.remove('error');
+         statusNode.textContent = '正在连接资源站……';
++        retry.hidden = true;
+         if (loadTimer) clearTimeout(loadTimer);
+         loadTimer = setTimeout(() => {
+           fail('资源站响应超时，可能不允许浏览器直连。请稍后重试或回到微信更换资源。');
+         }, 15000);
++        const onEpisodeReady = () => {
++          if (loadId !== episodeLoadId) return;
++          if (loadTimer) clearTimeout(loadTimer);
++          applyVideoAspect();
++          video.playbackRate = Number(playbackRate.value) || 1;
++          if (resumePlayback && video.paused) {
++            video.play().catch((error) => {
++              if (loadId === episodeLoadId && error.name !== 'AbortError') {
++                statusNode.textContent = '已就绪，点击播放。';
++              }
++            });
++          } else if (video.paused) {
++            statusNode.textContent = '已连接，点击播放。';
++          }
++        };
+         if (hls) { hls.destroy(); hls = null; }
+         qualityMenu.hidden = true;
++        qualityButton.setAttribute('aria-expanded', 'false');
+         qualityMenu.replaceChildren();
+         qualityButton.disabled = true;
+         qualityLabel.textContent = '原画';
+@@ -800,31 +754,26 @@
+         video.removeAttribute('src');
+         video.load();
+         syncNativeControls();
+-        updateMobileProgress();
+-        updatePlaybackOverlay();
+         if (!isSafePublicHttpsUrl(source) || !/\.m3u8(?:$|[?#])/i.test(source)) {
+           fail('播放地址无效，请回到微信重新搜索。');
+           return;
+         }
+         if (video.canPlayType('application/vnd.apple.mpegurl')) {
+           video.src = source;
+-          video.addEventListener('loadedmetadata', () => {
+-            if (loadTimer) clearTimeout(loadTimer);
+-            statusNode.textContent = '已连接，点击播放。';
+-            applyVideoAspect();
+-          }, { once: true });
++          video.addEventListener('loadedmetadata', onEpisodeReady, { once: true });
++          removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
+         } else if (window.Hls && Hls.isSupported()) {
+           hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
+           hls.loadSource(source);
+           hls.attachMedia(video);
+           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+-            if (loadTimer) clearTimeout(loadTimer);
+-            statusNode.textContent = '已连接，点击播放。';
++            if (loadId !== episodeLoadId) return;
+             setupQualityMenu();
++            onEpisodeReady();
+           });
+           hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
+           hls.on(Hls.Events.ERROR, (_event, data) => {
+-            if (data && data.fatal) {
++            if (loadId === episodeLoadId && data && data.fatal) {
+               if (loadTimer) clearTimeout(loadTimer);
+               fail('资源站拒绝了浏览器直连，请重试或回到微信更换资源。');
+             }
+@@ -947,12 +896,9 @@
+       next.addEventListener('click', () => loadEpisode(current + 1));
+       retry.addEventListener('click', () => loadEpisode(current));
+       episodeOpen.addEventListener('click', openEpisodeSheet);
+-      mobileEpisodeButton.addEventListener('click', openEpisodeSheet);
+-      mobileEpisodeButtonTop.addEventListener('click', openEpisodeSheet);
+       pageBackButton.addEventListener('click', () => {
+         if (history.length > 1) history.back();
+       });
+-      pageMoreButton.addEventListener('click', () => mobileMoreButton.click());
+       episodeExpand.addEventListener('click', () => {
+         episodesExpanded = !episodesExpanded;
+         episodesNode.classList.toggle('is-collapsed', !episodesExpanded);
+@@ -965,89 +911,53 @@
+       qualityButton.addEventListener('click', (event) => {
+         event.stopPropagation();
+         if (qualityButton.disabled) return;
+-        mobileMoreMenu.hidden = true;
+         qualityMenu.hidden = !qualityMenu.hidden;
+-        showControls();
+-        if (!qualityMenu.hidden) clearControlsHideTimer();
++        qualityButton.setAttribute('aria-expanded', String(!qualityMenu.hidden));
+       });
+-      fullscreenButton.addEventListener('click', toggleFullscreen);
+-      mobileFullscreenButton.addEventListener('click', toggleFullscreen);
+-      mobileMuteButton.addEventListener('click', () => { video.muted = !video.muted; mobileMuteButton.classList.toggle('is-muted', video.muted); mobileMuteButton.setAttribute('aria-label', video.muted ? '取消静音' : '静音'); showControls(); });
+-      mobileMoreButton.addEventListener('click', (event) => {
+-        event.stopPropagation();
+-        qualityMenu.hidden = true;
+-        mobileMoreMenu.hidden = !mobileMoreMenu.hidden;
+-        showControls();
+-        if (!mobileMoreMenu.hidden) clearControlsHideTimer();
++      playbackRate.addEventListener('change', () => {
++        const rate = Number(playbackRate.value) || 1;
++        video.defaultPlaybackRate = rate;
++        video.playbackRate = rate;
+       });
+-      mobileMoreMenu.querySelectorAll('[data-rate]').forEach((button) => {
+-        button.addEventListener('click', () => {
+-          video.playbackRate = Number(button.dataset.rate) || 1;
+-          mobileMoreMenu.querySelectorAll('[data-rate]').forEach((item) => item.classList.toggle('active', item === button));
+-          mobileMoreMenu.hidden = true;
+-          showControls();
+-        });
++      video.addEventListener('playing', () => {
++        if (loadTimer) clearTimeout(loadTimer);
++        retry.hidden = true;
++        statusNode.classList.remove('error');
++        statusNode.textContent = '正在播放';
++      });
++      video.addEventListener('pause', () => {
++        if (!video.ended && video.readyState >= 2) statusNode.textContent = '已暂停';
++      });
++      video.addEventListener('waiting', () => {
++        if (!video.paused) statusNode.textContent = '正在缓冲…';
++      });
++      video.addEventListener('error', () => {
++        if (video.error) fail('视频加载失败，请重试或更换资源。');
+       });
+-      mobileSeek.addEventListener('input', () => { if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = (Number(mobileSeek.value) / 1000) * video.duration; });
+-      video.addEventListener('timeupdate', updateMobileProgress);
+-      video.addEventListener('durationchange', updateMobileProgress);
+-      video.addEventListener('play', updatePlaybackOverlay);
+-      video.addEventListener('pause', updatePlaybackOverlay);
+-      const beginControlsInteraction = () => {
+-        controlsPointerActive = true;
+-        clearControlsHideTimer();
+-        showControls();
+-      };
+-      const endControlsInteraction = () => {
+-        controlsPointerActive = false;
+-        scheduleControlsHide();
+-      };
+-      mobileMoreMenu.addEventListener('pointerdown', beginControlsInteraction);
+-      mobileControls.addEventListener('pointerdown', beginControlsInteraction);
+-      window.addEventListener('pointerup', endControlsInteraction);
+-      window.addEventListener('pointercancel', endControlsInteraction);
+-      videoActions.addEventListener('pointerdown', (event) => {
+-        if (event.target.closest('button, input, .mobile-more-menu, .quality-menu')) beginControlsInteraction();
+-      }, true);
+       document.addEventListener('click', (event) => {
+-        if (!qualityMenu.contains(event.target) && event.target !== qualityButton) {
+-          const wasOpen = !qualityMenu.hidden;
++        if (!qualityMenu.contains(event.target) && !qualityButton.contains(event.target)) {
+           qualityMenu.hidden = true;
+-          if (wasOpen) scheduleControlsHide();
+-        }
+-        if (!mobileMoreMenu.contains(event.target) && event.target !== mobileMoreButton) {
+-          const wasOpen = !mobileMoreMenu.hidden;
+-          mobileMoreMenu.hidden = true;
+-          if (wasOpen) scheduleControlsHide();
++          qualityButton.setAttribute('aria-expanded', 'false');
+         }
+       });
+-      video.addEventListener('click', (event) => {
+-        const fullscreen = document.fullscreenElement === videoShell || videoShell.classList.contains('pseudo-fullscreen');
+-        if (!mobileLayoutQuery.matches || fullscreen) return;
+-        event.preventDefault();
+-        event.stopImmediatePropagation();
+-        if (videoActions.classList.contains('controls-hidden')) {
+-          showControls();
+-          return;
++      document.addEventListener('keydown', (event) => {
++        if (event.key === 'Escape' && !qualityMenu.hidden) {
++          qualityMenu.hidden = true;
++          qualityButton.setAttribute('aria-expanded', 'false');
++          qualityButton.focus();
+         }
+-        if (video.paused) video.play().catch(() => {});
+-        else video.pause();
+-      }, true);
+-      playbackOverlay.addEventListener('click', (event) => {
+-        event.preventDefault();
+-        event.stopPropagation();
+-        if (video.paused) video.play().catch(() => {});
+-        else video.pause();
+-        showControls();
+       });
+       document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
+       window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
+       video.addEventListener('loadedmetadata', applyVideoAspect);
+       video.addEventListener('ended', () => {
+-        if (autoNext.checked && playlist && current < playlist.episodes.length - 1) loadEpisode(current + 1);
++        if (autoNext.checked && playlist && current < playlist.episodes.length - 1) {
++          loadEpisode(current + 1, { autoplay: true });
++        } else {
++          statusNode.textContent = '播放结束';
++        }
+       });
+       syncNativeControls();
+-      updatePlaybackOverlay();
+       if (playlist) {
+         const initial = Math.max(0, Math.min(
+           playlist.episodes.length - 1,

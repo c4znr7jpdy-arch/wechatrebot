@@ -22,9 +22,10 @@ def _patched_player(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     shutil.copy2(source / "index.html", checkout / "index.html")
     shutil.copy2(source / "state_server.py", checkout / "state_server.py")
-    patch = ROOT / "patches/short-drama-player-hosted-only.patch"
-    subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
-    subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
+    for name in ("short-drama-player-hosted-only.patch", "short-drama-player-controls.patch"):
+        patch = ROOT / "patches" / name
+        subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
+        subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
     return checkout
 
 
