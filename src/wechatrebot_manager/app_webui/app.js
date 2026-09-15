@@ -243,10 +243,13 @@
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting ? "waiting" : status.busy || active ? "starting" : "stopped";
     const primary = $("#primaryAction");
     const stopMode = status.can_stop || online;
-    primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止") : "启动"}</span>`;
+    const primaryLabel = starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止运行") : "启动";
+    primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
     primary.disabled = current === "STOP_WAIT_WECHAT" || Boolean(status.busy) || (!status.can_start && !status.can_stop);
     primary.setAttribute("aria-busy", String(Boolean(status.busy)));
+    primary.setAttribute("aria-label", primaryLabel);
+    primary.title = online ? "安全停止机器人" : primaryLabel;
 
     const alert = $("#environmentAlert");
     alert.hidden = Boolean(environment.ready);
@@ -2331,17 +2334,19 @@
     $("#providerNote").textContent = "正在更新统一模型配置…";
     try {
       const data = await api("save_provider", Object.fromEntries(new FormData(form)));
-      state.bootstrap.provider = data;
       state.bootstrap.providers = await api("get_providers");
+      state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
       state.featureDetails = {};
       $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
       form.elements.api_key.value = "";
       renderProviderServices();
       markProviderClean();
       showProviderOverview(true);
-      toast(data.apply_state === "applied"
-        ? "模型服务已保存，并已设为当前回复模型。"
-        : "模型服务已保存，机器人启动时会使用它。");
+      toast(data.is_default
+        ? (data.apply_state === "applied"
+          ? "模型服务已保存，并已设为当前回复模型。"
+          : "模型服务已保存，机器人启动时会使用它。")
+        : "模型服务已保存，当前回复模型保持不变。");
     } catch (error) { reportError(error); $("#providerNote").textContent = error.message; }
     finally { button.disabled = false; button.textContent = originalText; }
   }
@@ -2364,6 +2369,14 @@
     $("#providerPresetHint").textContent = preset.description || "填写模型服务信息";
   }
 
+  function renderProviderSaveIntent(makeDefault) {
+    $("#providerSaveIntentTitle").textContent = makeDefault ? "保存后直接设为回复模型" : "保存为备用模型服务";
+    $("#providerSaveIntentDetail").textContent = makeDefault
+      ? "首个模型服务会自动用于机器人回复。"
+      : "不会更改当前回复模型；保存后可在服务列表中手动切换。";
+    $("#saveProvider").textContent = makeDefault ? "保存并设为回复模型" : "保存模型服务";
+  }
+
   function beginNewProvider(presetId = "free_grok") {
     const form = $("#providerForm");
     form.reset();
@@ -2377,6 +2390,7 @@
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
     $("#providerNote").textContent = "";
+    renderProviderSaveIntent(!(state.bootstrap?.providers || []).length);
     markProviderClean("尚未保存");
     showProviderEditor();
   }
@@ -2400,6 +2414,7 @@
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
     $("#providerNote").textContent = "";
+    renderProviderSaveIntent(Boolean(service.is_default));
     markProviderClean("已保存");
     showProviderEditor();
   }
@@ -3416,7 +3431,17 @@
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },
       save_brand: (values) => ok(values, "机器人名称和回复身份已统一更新。"),
       get_providers: () => ok(structuredClone(previewProviders)),
-      save_provider: (values) => { const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`; previewProviders = previewProviders.map((item) => ({...item, is_default: false})).filter((item) => item.id !== values.provider_id && item.id !== id); const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: true, is_recommended: values.preset === "free_grok", apply_state: "applied"}; previewProviders.unshift(saved); return ok(saved, "回复模型已热更新并立即生效。"); },
+      save_provider: (values) => {
+        const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`;
+        const original = previewProviders.find((item) => item.id === values.provider_id);
+        const makeDefault = !previewProviders.length || Boolean(original?.is_default);
+        previewProviders = previewProviders
+          .filter((item) => item.id !== values.provider_id && item.id !== id)
+          .map((item) => makeDefault ? {...item, is_default: false} : item);
+        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", apply_state: "applied"};
+        previewProviders.unshift(saved);
+        return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
+      },
       set_default_provider: (id) => { previewProviders = previewProviders.map((item) => ({...item, is_default: item.id === id})); return ok({id, apply_state: "applied"}, "默认回复模型已切换并立即生效。"); },
       test_provider: () => ok({ok: true}, "模型服务连接正常。"),
       discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}, "已读取 6 个可用模型。"),

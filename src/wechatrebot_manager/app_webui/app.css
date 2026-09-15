@@ -148,13 +148,17 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .status-orbit[data-state="error"] .orbit-progress { stroke: var(--red-700); stroke-dashoffset: 360; }
 @keyframes orbit-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
-.power-button { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; width: 128px; height: 128px; border: 1px solid #c9d5e3; border-radius: 50%; color: var(--blue-700); background: #fff; box-shadow: 0 10px 28px rgba(7,95,199,.12); cursor: pointer; font-weight: 800; }
+.power-button { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; width: 128px; height: 128px; border: 1px solid #c9d5e3; border-radius: 50%; color: var(--blue-700); background: #fff; box-shadow: 0 10px 28px rgba(7,95,199,.12); cursor: pointer; font-weight: 800; transition: color .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease; }
 .power-button:hover:not(:disabled) { border-color: #83b7ef; background: #f8fbff; }
 .power-button svg { width: 30px; height: 30px; }
 .status-orbit[data-state="starting"] .power-button { cursor: progress; opacity: 1; }
 .status-orbit[data-state="starting"] .power-button svg { animation: control-spin .9s linear infinite; }
 @keyframes control-spin { to { transform: rotate(360deg); } }
-.status-orbit[data-state="online"] .power-button { color: var(--red-700); }
+.status-orbit[data-state="online"] .power-button { color: #566579; border-color: #d5dee9; background: #f8fafc; box-shadow: 0 7px 20px rgba(24,48,76,.09); }
+.status-orbit[data-state="online"] .power-button svg { width: 23px; height: 23px; color: #788697; }
+.status-orbit[data-state="online"] .power-button:hover:not(:disabled) { color: var(--red-700); border-color: #e2a7b0; background: #fff7f8; box-shadow: 0 8px 22px rgba(180,38,58,.12); }
+.status-orbit[data-state="online"] .power-button:hover:not(:disabled) svg { color: var(--red-700); }
+.status-orbit[data-state="online"] .power-button:active:not(:disabled) { background: #fdecef; box-shadow: 0 4px 12px rgba(180,38,58,.12); }
 .control-copy h2 { margin: 8px 0; font-size: 25px; letter-spacing: -.02em; }
 .control-copy p { margin: 0; color: var(--muted); max-width: 320px; }
 .state-kicker { color: var(--subtle); font-size: 12px; font-weight: 700; }
@@ -1189,6 +1193,8 @@ tbody tr:hover { background: #fbfdff; }
 #page-settings .provider-workspace,
 #page-settings .provider-overview-card,
 #page-settings .provider-editor-guide { height: auto; min-height: 0; overflow: visible; }
+#page-settings .provider-editor-page { min-height: 0; }
+#page-settings .provider-editor-layout { flex: none; min-height: auto; align-items: start; }
 #page-settings .assistant-settings-card,
 #page-settings .settings-preview-card { grid-column: 1 / -1; }
 #page-settings .settings-system-stack { grid-column: 1 / -1; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: none; }

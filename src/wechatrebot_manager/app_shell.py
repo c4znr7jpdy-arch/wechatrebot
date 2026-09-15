@@ -70,6 +70,7 @@ from .updates import (
     load_update_channel,
     prepare_update,
 )
+from .shortcuts import refresh_windows_shortcuts
 from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
@@ -977,6 +978,9 @@ class ApplicationApi:
                 (item for item in services if item.provider_id == original_id),
                 None,
             )
+            make_default = not services or bool(
+                selected is not None and selected.is_default
+            )
             current = load_provider_profile(self._install_root)
             api_key = str(values.get("api_key") or "").strip()
             if not api_key and selected is not None:
@@ -1011,11 +1015,15 @@ class ApplicationApi:
                         if selected is not None and selected.model == model
                         else None
                     ),
-                    make_default=True,
+                    make_default=make_default,
                 )
                 saved = profile.normalized()
             else:
-                saved = save_provider_profile(self._install_root, profile)
+                saved = save_provider_profile(
+                    self._install_root,
+                    profile,
+                    make_default=make_default,
+                )
             return self._ok(
                 {
                     "id": saved.model_id,
@@ -1031,7 +1039,7 @@ class ApplicationApi:
                     "api_base": saved.api_base,
                     "model": saved.model,
                     "api_key_configured": bool(saved.api_key),
-                    "is_default": True,
+                    "is_default": make_default,
                     "is_recommended": (
                         saved.source_id == DEFAULT_PROVIDER_SOURCE_ID
                         and saved.model == DEFAULT_PROVIDER_MODEL
@@ -1039,9 +1047,13 @@ class ApplicationApi:
                     "apply_state": "applied" if hot_applied else "saved_for_start",
                 },
                 message=(
-                    "回复模型已热更新并立即生效。"
-                    if hot_applied
-                    else "回复模型已保存，机器人启动时会直接使用。"
+                    (
+                        "回复模型已热更新并立即生效。"
+                        if hot_applied
+                        else "回复模型已保存，机器人启动时会直接使用。"
+                    )
+                    if make_default
+                    else "模型服务已保存，当前回复模型保持不变。"
                 ),
             )
         except (OSError, ValueError, PluginCenterError) as exc:
@@ -1492,6 +1504,10 @@ def run_application(install_root: str | Path) -> int:
             provision_uninstaller(
                 install_root,
                 display_name=brand.display_name,
+            )
+            refresh_windows_shortcuts(
+                install_root,
+                description=f"启动{brand.display_name}",
             )
         except (OSError, RuntimeError, ValueError):
             pass

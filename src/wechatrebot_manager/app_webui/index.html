@@ -279,8 +279,8 @@
                     <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
                     <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 grok-4.6" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
                     <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="粘贴服务密钥；已保存的密钥不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">密钥只保存在本机</small></label>
-                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong>保存后直接设为回复模型</strong><small>如果机器人正在运行，会先确认热更新成功；失败时保留当前表单。</small></p></div>
-                    <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" type="submit">保存并设为回复模型</button></div></div>
+                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong><small id="providerSaveIntentDetail">首个模型服务会自动用于机器人回复。</small></p></div>
+                    <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
                   </form>
 
                   <aside class="provider-editor-guide panel" aria-label="填写说明">
@@ -288,7 +288,7 @@
                     <ol>
                       <li><span>1</span><div><strong>选择服务</strong><small>第一次使用建议选择免费 Grok 4.6。</small></div></li>
                       <li><span>2</span><div><strong>确认连接信息</strong><small>推荐服务会自动带出接口地址和模型名称。</small></div></li>
-                      <li><span>3</span><div><strong>保存并使用</strong><small>成功后返回服务列表，并标记当前回复模型。</small></div></li>
+                      <li><span>3</span><div><strong>保存服务</strong><small>首个服务自动用于回复；后续服务可在列表中手动切换。</small></div></li>
                     </ol>
                     <div class="provider-local-note"><strong>密钥仅存本机</strong><span>界面、诊断和导出内容都不会回显完整密钥。</span></div>
                   </aside>

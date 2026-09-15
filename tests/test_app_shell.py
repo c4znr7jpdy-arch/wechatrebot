@@ -114,8 +114,9 @@ def test_first_provider_save_uses_jyjapi_grok_source(
     captured = {}
     monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
 
-    def fake_save(_root, profile):
+    def fake_save(_root, profile, *, make_default=True):
         captured["profile"] = profile.normalized()
+        captured["make_default"] = make_default
         return captured["profile"]
 
     monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
@@ -131,6 +132,49 @@ def test_first_provider_save_uses_jyjapi_grok_source(
     assert result["ok"] is True
     assert captured["profile"].source_id == "jyjapi"
     assert captured["profile"].model_id == "jyjapi/grok-4.6"
+    assert captured["make_default"] is True
+
+
+def test_new_provider_keeps_the_existing_reply_model(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    existing = SimpleNamespace(
+        provider_id="jyjapi/grok-4.6",
+        is_default=True,
+    )
+    monkeypatch.setattr(
+        app_shell, "load_provider_services", lambda _root: (existing,)
+    )
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+
+    class AvailableClient:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def save_provider(profile, **kwargs):
+            captured["profile"] = profile.normalized()
+            captured.update(kwargs)
+
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: AvailableClient())
+
+    result = api.save_provider(
+        {
+            "api_key": "second-secret",
+            "api_base": "https://api.deepseek.com/v1",
+            "model": "deepseek-v4-flash",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["is_default"] is False
+    assert result["data"]["apply_state"] == "applied"
+    assert captured["make_default"] is False
+    assert captured["original_provider_id"] is None
+    assert "当前回复模型保持不变" in result["message"]
 
 
 def test_switching_an_existing_service_preset_uses_the_new_source(
@@ -144,6 +188,7 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
         api_base="https://api.deepseek.com/v1",
         model="deepseek-v4-flash",
         api_key="developer-key",
+        is_default=False,
     )
     monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: (selected,))
     monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
@@ -153,8 +198,9 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
 
-    def fake_save(_root, profile):
+    def fake_save(_root, profile, *, make_default=True):
         captured["profile"] = profile.normalized()
+        captured["make_default"] = make_default
         return captured["profile"]
 
     monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
@@ -170,6 +216,7 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
 
     assert result["ok"] is True
     assert captured["profile"].source_id == "jyjapi"
+    assert captured["make_default"] is False
 
 
 def test_model_discovery_reuses_saved_key_without_exposing_it(
@@ -855,6 +902,30 @@ def test_model_combobox_opens_the_complete_discovered_list_before_filtering() ->
     assert 'combobox.classList.toggle("open-above"' in script
     assert ".model-combobox.open-above .model-options" in styles
     assert 'discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}' in script
+
+
+def test_model_editor_keeps_natural_height_and_explains_default_selection() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+
+    assert "#page-settings .provider-editor-layout { flex: none; min-height: auto; align-items: start; }" in styles
+    assert 'id="providerSaveIntentTitle"' in markup
+    assert 'id="saveProvider"' in markup
+    assert 'renderProviderSaveIntent(!(state.bootstrap?.providers || []).length);' in script
+    assert 'renderProviderSaveIntent(Boolean(service.is_default));' in script
+    assert '"模型服务已保存，当前回复模型保持不变。"' in script
+
+
+def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert '"停止运行"' in script
+    assert 'primary.title = online ? "安全停止机器人" : primaryLabel;' in script
+    assert '.status-orbit[data-state="online"] .power-button:hover:not(:disabled)' in styles
 
 
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
