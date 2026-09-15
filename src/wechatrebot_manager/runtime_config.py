@@ -342,8 +342,8 @@ def _sync_angel_heart_model(
     if not isinstance(wake, dict):
         wake = {}
         payload["wake_interaction"] = wake
-    wake["enter_on_mention_only"] = False
-    wake["direct_wake_fast_path"] = True
+    wake.setdefault("enter_on_mention_only", False)
+    wake.setdefault("direct_wake_fast_path", True)
     if provider_profile is not None:
         model_id = provider_profile.normalized().model_id
         for field in ("analyzer_model", "image_caption_provider_id"):
@@ -506,6 +506,7 @@ def write_runtime_configs(
     wechat_version: str | None = None,
     ports: RuntimePorts = RuntimePorts(),
     brand_profile: BrandProfile | None = None,
+    apply_brand_persona: bool = True,
     provider_profile: OpenAIProviderProfile | None = None,
     provider_make_default: bool = True,
     admin_id: str | None = None,
@@ -562,7 +563,7 @@ def write_runtime_configs(
             "disable_metrics",
         ):
             astrbot_payload[key] = generated_astrbot[key]
-        if brand_profile is not None:
+        if brand_profile is not None and apply_brand_persona:
             _apply_brand_to_astrbot(astrbot_payload, brand_profile)
         if provider_profile is not None:
             _apply_provider_to_astrbot(

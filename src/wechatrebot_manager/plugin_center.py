@@ -449,6 +449,9 @@ def _public_plugin_id(module_name: str) -> str:
     return f"feature-{digest}"
 
 
+ROBOT_CORE_FEATURE_ID = _public_plugin_id(_ANGEL_HEART_MODULE)
+
+
 def _scheduled_action(module_name: str) -> str:
     if module_name == "jiang_short_drama":
         return "short_drama"
@@ -625,6 +628,10 @@ def _white_label_schema(value: Any) -> Any:
     if isinstance(value, list):
         return [_white_label_schema(item) for item in value]
     if isinstance(value, str):
+        value = re.sub(r"天使(?:之)?心", "机器人核心", value)
+        value = value.replace("angel_describe_image", "历史图片描述")
+        value = re.sub(r"(?i)angel[-_ ]?heart", "核心助手", value)
+        value = re.sub(r"(?i)kawayiyokami", "核心维护者", value)
         result = re.sub(r"(?i)astrbot", "回复引擎", value)
         result = re.sub(r"(?i)new[-_ ]?hook", "微信连接", result)
         result = re.sub(r"(?i)hook", "微信连接", result)
@@ -635,6 +642,37 @@ def _white_label_schema(value: Any) -> Any:
         result = re.sub(r"(?i)qq", "微信", result)
         return re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", result).strip()
     return value
+
+
+def _white_label_core_page_content(
+    path: str,
+    content_type: str,
+    raw: bytes,
+) -> bytes:
+    """Rebrand the bundled core page without changing its internal API contract."""
+    decoded_path = unquote(path)
+    media_type = content_type.partition(";")[0].strip().casefold()
+    if (
+        _ANGEL_HEART_MODULE not in decoded_path
+        or "/content/" not in decoded_path
+        or media_type
+        not in {
+            "text/html",
+            "text/css",
+            "text/javascript",
+            "application/javascript",
+        }
+    ):
+        return raw
+    for original, replacement in (
+        ("天使之心", "机器人核心"),
+        ("天使心", "机器人核心"),
+        ("AngelHeart", "核心助手"),
+        ("kawayiYokami", "核心维护者"),
+        ("插件设置", "核心设置"),
+    ):
+        raw = raw.replace(original.encode("utf-8"), replacement.encode("utf-8"))
+    return raw
 
 
 def _is_secret_field(key: str, field: dict[str, Any]) -> bool:
@@ -1427,6 +1465,8 @@ class PluginCenterService:
         engine_online, live_states = self._runtime_plugin_states()
         entries = []
         for plugin in self._catalog_items(live_states if engine_online else None):
+            if plugin.module_name == _ANGEL_HEART_MODULE:
+                continue
             guide = get_plugin_guide(plugin.module_name)
             entries.append(
                 {
@@ -1788,6 +1828,11 @@ def _handler(service: PluginCenterService):
                 accept_language=self.headers.get("Accept-Language", "zh-CN"),
             )
             normalized_headers = {key.casefold(): value for key, value in headers.items()}
+            raw = _white_label_core_page_content(
+                split.path,
+                normalized_headers.get("content-type", ""),
+                raw,
+            )
             self.send_response(status)
             self._security_headers()
             for key in ("Content-Type", "Content-Security-Policy", "Permissions-Policy"):
@@ -2011,6 +2056,7 @@ __all__ = [
     "PluginCatalogItem",
     "PluginCenterError",
     "PluginCenterService",
+    "ROBOT_CORE_FEATURE_ID",
     "launch_plugin_center",
     "plugin_center_command",
     "run_plugin_center",

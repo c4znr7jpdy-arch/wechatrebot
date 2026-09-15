@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="app.css?v=0.9.3-message-management">
+  <link rel="stylesheet" href="app.css?v=0.9.3-robot-core">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -241,7 +241,7 @@
             <label class="search-box help-search" id="helpSearchBox"><svg><use href="#i-search"/></svg><input id="helpSearch" type="search" placeholder="搜索功能或用法" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空帮助搜索">×</button></label>
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
-            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>连接微信并选择模型后，到消息管理为每个群设置回复方式和可用功能。功能中心只保留开关与参数，具体用法都在本页查看。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与人格</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
+            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到消息管理为每个群设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
             <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="消息管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在消息管理中按群设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心调整开关和必要参数，详细用法回到帮助查看。</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
@@ -252,7 +252,7 @@
           <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>先完成推荐项，只有需要时再展开高级设置。</p></div></div>
           <div class="settings-tabs" id="settingsTabs" aria-label="设置分类">
             <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>模型服务</button>
-            <button type="button" data-settings-tab="persona" data-action-bound disabled>人格身份与维护</button>
+            <button type="button" data-settings-tab="core" data-action-bound disabled>机器人核心</button>
             <button type="button" data-settings-tab="memory" data-action-bound disabled>记忆与情感</button>
             <button type="button" data-settings-tab="system" data-action-bound disabled>系统信息</button>
             <span>修改后会明确提示“已应用”或“启动时使用”</span>
@@ -296,26 +296,10 @@
               </section>
             </section>
 
-            <form class="settings-card assistant-settings-card panel" id="personaForm" data-settings-section="persona" novalidate>
-              <div class="panel-heading"><div><span class="eyebrow">人格与回复</span><h2>她是谁、怎样表达</h2></div><span class="status-badge" id="personaStatus">等待读取</span></div>
-              <p class="settings-copy">这里仅配置身份和表达风格。群聊在何时参与、允许使用哪些功能，统一到“消息管理”按群设置。</p>
-              <label><span>软件名称</span><input name="display_name" maxlength="32" required><small>用于窗口标题和管理界面；机器人在聊天中的称呼以下方昵称为准。</small></label>
-              <div class="field-pair"><label><span>说话风格</span><select name="tone"><option value="natural">自然熟人</option><option value="warm">温柔陪伴</option><option value="professional">专业助理</option><option value="lively">活泼群友</option></select></label><label><span>日常回复长度</span><select name="reply_length"><option value="brief">简短，适合群聊</option><option value="balanced">均衡</option><option value="detailed">详细</option></select></label></div>
-              <label><span>机器人昵称</span><input name="alias" maxlength="200" placeholder="姜小妹|小妹" required><small>多个昵称用 | 分隔；第一个昵称同时作为界面简称和人物称呼，不再重复配置。</small></label>
-              <label><span>身份定位</span><textarea class="resize-none" name="identity_prompt" rows="4" maxlength="3000" required></textarea><small>只说明机器人是谁、擅长什么；接话时机和安全边界由软件使用推荐默认值。</small></label>
-              <label><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..."><small>留空表示暂不设置管理员。</small></label>
-              <div class="form-actions"><span class="form-note" id="personaNote" role="status"></span><button class="button primary" type="submit">保存人格与身份</button></div>
-            </form>
-
-            <aside class="settings-card settings-preview-card panel" data-settings-section="persona">
-              <div class="panel-heading"><div><span class="eyebrow">回复预览</span><h2>设置会怎样影响回复</h2></div><span class="status-badge checking">示例，不会发送</span></div>
-              <div class="persona-preview">
-                <div class="preview-summary" id="personaPreviewSummary">当前组合：自然熟人 · 简短回复</div>
-                <div class="preview-message"><span class="preview-avatar blue">张</span><div><small>张三</small><p>小妹，明天杭州会下雨吗？</p></div></div>
-                <div class="preview-message mine"><div><small>姜小妹</small><p>明天杭州有阵雨，出门带把伞更稳妥。</p></div><span class="preview-avatar">姜</span></div>
-                <div class="preview-note">群聊接话方式已移到消息管理，可为不同群分别选择“仅点名或引用”或“自然参与”。</div>
-              </div>
-            </aside>
+            <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="机器人核心配置">
+              <div class="core-heading panel"><div><span class="eyebrow">对话与群聊协调</span><h2>机器人核心</h2><p>统一管理身份、唤醒、回复节奏与完整上下文参数；支持按聊天绑定配置模板。</p><small>消息管理中的聊天总开关、回复模式与功能范围仍是最终边界。</small></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button">重新读取</button></div></div>
+              <div class="core-layout"><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-core-view="global">全局配置<span>未绑定聊天的默认配置</span></button><button class="core-nav" type="button" data-core-view="monitor">联系人监控与绑定<span>在场状态、能量与最近决策</span></button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button">新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div><p class="core-sidebar-note">模板未覆盖的参数跟随全局配置；删除模板后，绑定聊天自动回到全局配置。</p></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取机器人核心…</div></section></div>
+            </section>
 
             <form class="settings-card panel" id="memoryForm" data-settings-section="memory" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">长期记忆</span><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
@@ -338,6 +322,12 @@
             </form>
 
             <div class="settings-system-stack system-maintenance" data-settings-section="system">
+            <form class="settings-card panel" id="brandForm" novalidate>
+              <div class="panel-heading"><div><span class="eyebrow">管理界面</span><h2>名称与管理员</h2></div></div>
+              <label><span>软件名称</span><input name="display_name" maxlength="32" required><small>只修改窗口与管理界面名称；聊天身份与昵称统一在“机器人核心”中配置。</small></label>
+              <label><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..."><small>留空表示暂不设置管理员。</small></label>
+              <div class="form-actions"><span class="form-note" id="brandNote" role="status"></span><button class="button primary" type="submit">保存界面设置</button></div>
+            </form>
             <section class="settings-card panel">
               <div class="panel-heading"><div><span class="eyebrow">微信环境</span><h2>客户端位置</h2></div></div>
               <div class="path-box"><span>当前路径</span><code id="wechatPath">尚未选择</code></div>
@@ -380,6 +370,7 @@
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
     </section>
   </div>
-  <script src="app.js?v=0.9.3-message-management"></script>
+  <script src="core-settings.js?v=0.9.3-robot-core"></script>
+  <script src="app.js?v=0.9.3-robot-core"></script>
 </body>
 </html>

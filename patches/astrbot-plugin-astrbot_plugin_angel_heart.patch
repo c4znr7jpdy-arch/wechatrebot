@@ -40,3 +40,68 @@ diff --git a/web_api/__init__.py b/web_api/__init__.py
 +                return _err("新设置未生效，恢复原设置失败。请查看运行记录后重试。")
 +            return _err("新设置未生效，已恢复原设置。请检查输入和磁盘权限后重试。")
          return _ok(message="已保存并即时生效")
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -32,6 +32,7 @@
+ 
+ from .core.config_manager import ConfigManager
+ from .core.config_migration import run_migration
++from .core.reply_identity import apply_reply_identity
+ from .roles.front_desk import FrontDesk
+ from .roles.secretary import Secretary
+ from .core.utils import strip_markdown, strip_period_before_newline
+@@ -230,6 +231,10 @@
+             if plain_chat_id not in self._whitelist_cache:
+                 return
+ 
++        # Use the same live global/template identity for final replies, even
++        # when history rewriting is disabled or this is the first message.
++        apply_reply_identity(req, self.config_manager.for_chat(chat_id))
++
+         if self._is_private_chat(chat_id):
+             if not self.config_manager.takeover_private_chat_context:
+                 logger.debug(
+diff --git a/core/reply_identity.py b/core/reply_identity.py
+new file mode 100644
+--- /dev/null
++++ b/core/reply_identity.py
+@@ -0,0 +1,38 @@
++"""Apply the conversation core's per-chat identity without losing system context."""
++from __future__ import annotations
++
++import re
++from typing import Any
++
++
++_START = "[robot_core_profile]"
++_END = "[/robot_core_profile]"
++_PROFILE = re.compile(re.escape(_START) + r".*?" + re.escape(_END), re.DOTALL)
++
++
++def apply_reply_identity(request: Any, config: Any) -> None:
++    identity = str(config.ai_self_identity or "").strip()
++    guide = str(config.reply_strategy_guide or "").strip()
++    aliases = str(config.alias or "").strip()
++    original = str(getattr(request, "system_prompt", "") or "")
++    # Retry/rewrite hooks may see the same request again. Replace only our own
++    # section, retaining unrelated safety rules, memory and tool instructions.
++    original = _PROFILE.sub("", original).rstrip()
++    fields = []
++    if aliases:
++        name = next((part.strip() for part in aliases.split("|") if part.strip()), "")
++        fields.append(f"聊天称呼：{name}。可识别昵称：{aliases}。")
++    if identity:
++        fields.append(f"身份与表达：\n{identity}")
++    if guide:
++        fields.append(f"接话与表达规则：\n{guide}")
++    if not fields:
++        request.system_prompt = original
++        return
++    profile = "\n".join([
++        _START,
++        "以下是本次聊天的当前机器人核心配置。身份、称呼与表达以此为准，不以管理界面名称或此前的旧角色称呼为准。其他安全、工具和能力边界仍按原有要求执行。",
++        *fields,
++        _END,
++    ])
++    request.system_prompt = f"{original}\n\n{profile}" if original else profile

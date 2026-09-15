@@ -198,7 +198,9 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
     return RobotSettings(profile=profile, admin_id=admin_id)
 
 
-def save_robot_settings(root: str | Path, settings: RobotSettings) -> RobotSettings:
+def save_robot_settings(
+    root: str | Path, settings: RobotSettings, *, apply_reply_identity: bool = True,
+) -> RobotSettings:
     install, manager_path, _ = _paths(root)
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
@@ -211,6 +213,7 @@ def save_robot_settings(root: str | Path, settings: RobotSettings) -> RobotSetti
         wechat_path or None,
         wechat_version=str(manager.get("wechat_version") or "") or None,
         brand_profile=profile,
+        apply_brand_persona=apply_reply_identity,
         admin_id=normalized_admin,
     )
     return RobotSettings(profile=profile, admin_id=normalized_admin)

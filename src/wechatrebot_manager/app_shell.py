@@ -33,6 +33,7 @@ from .customer_maintenance import (
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog
 from .experience import ExperienceError, ExperienceService
+from .core_settings import RobotCoreSettingsService
 from .group_policy import GroupPolicyError, GroupPolicyService
 from .lifecycle import LifecycleController
 from .payload import PayloadError
@@ -85,6 +86,8 @@ PUBLIC_API_METHODS = (
     "select_wechat",
     "open_wechat_download",
     "get_features",
+    "get_robot_core",
+    "request_robot_core",
     "get_feature",
     "set_feature_enabled",
     "save_feature",
@@ -118,7 +121,6 @@ PUBLIC_API_METHODS = (
     "preview_scheduled_times",
     "get_activity",
     "get_response_traces",
-    "save_persona_settings",
     "save_memory_settings",
     "save_emotion_settings",
     "complete_onboarding",
@@ -403,6 +405,20 @@ class ApplicationApi:
             return self._ok(self._features.catalog())
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
+
+    def get_robot_core(self) -> dict[str, object]:
+        try:
+            return self._ok(RobotCoreSettingsService(self._features).detail())
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "13003")
+
+    def request_robot_core(
+        self, method: str, endpoint: str, payload: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
+        try:
+            return self._ok(RobotCoreSettingsService(self._features).request(method, endpoint, payload))
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
 
     def get_feature(self, feature_id: str) -> dict[str, object]:
         try:
@@ -962,10 +978,11 @@ class ApplicationApi:
                     profile=profile,
                     admin_id=str(values.get("admin_id") or ""),
                 ),
+                apply_reply_identity=False,
             )
             return self._ok(
                 {**saved.profile.to_dict(), "admin_id": saved.admin_id},
-                message="机器人名称和回复身份已统一更新。",
+                message="管理界面名称与管理员已保存，聊天身份未改变。",
             )
         except (OSError, ValueError) as exc:
             return self._failed(exc, "15001")

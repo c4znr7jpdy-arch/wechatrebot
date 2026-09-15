@@ -185,7 +185,7 @@ class PrivateChatPolicyService:
                 "globally_enabled_by_default": feature.default_enabled,
             }
             for feature in self._features()
-            if feature.visible
+            if feature.visible and feature.module != "astrbot_plugin_angel_heart"
         ]
         return {
             "policy": self._public(
@@ -226,6 +226,8 @@ class PrivateChatPolicyService:
             available = {feature.module for feature in self._features() if feature.visible}
             if "allowed_features" in values and set(allowed).difference(available):
                 raise PrivatePolicyError("联系人可用功能包含未交付或已移除的功能。")
+            if "astrbot_plugin_angel_heart" in available and "astrbot_plugin_angel_heart" not in allowed:
+                allowed.insert(0, "astrbot_plugin_angel_heart")
             bot_enabled = values.get("bot_enabled", current.bot_enabled)
             scheduled_enabled = values.get("scheduled_enabled", current.scheduled_enabled)
             if not isinstance(bot_enabled, bool) or not isinstance(scheduled_enabled, bool):

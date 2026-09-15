@@ -26,6 +26,8 @@ _SECRET_VALUE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 def white_label_terms(value: Any) -> Any:
     """Remove implementation brand names from customer-facing diagnostics."""
     def clean(text: str) -> str:
+        text = re.sub(r"天使(?:之)?心|(?i:angel[-_ ]?heart)", "robot-core", text)
+        text = re.sub(r"(?i)kawayiyokami", "core-maintainer", text)
         text = re.sub(r"(?i)astrbot", "engine", text)
         text = re.sub(r"(?i)new[-_ ]?hook", "wechat-connection", text)
         text = re.sub(r"(?i)hook", "wechat-connection", text)

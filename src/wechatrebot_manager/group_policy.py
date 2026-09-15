@@ -325,6 +325,11 @@ class GroupPolicyService:
             unavailable = sorted(set(allowed).difference(available))
             if unavailable:
                 raise GroupPolicyError("允许功能清单包含未交付或已移除的功能。")
+        # The conversation core is no longer an optional per-chat feature.
+        # Keep the persisted grant compatible with older installed runtimes.
+        if any(feature.module == "astrbot_plugin_angel_heart" for feature in self._features()):
+            if "astrbot_plugin_angel_heart" not in allowed:
+                allowed.insert(0, "astrbot_plugin_angel_heart")
 
         daily_limit = values.get("daily_limit", current.daily_limit)
         if (
@@ -544,7 +549,7 @@ class GroupPolicyService:
                 "globally_enabled_by_default": item.default_enabled,
             }
             for item in self._features()
-            if item.visible
+            if item.visible and item.module != "astrbot_plugin_angel_heart"
         ]
         return {
             "policy": policy,

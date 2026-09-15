@@ -86,6 +86,14 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 
+  const coreSettings = window.createRobotCoreSettings({
+    read: () => api("get_robot_core"),
+    request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
+    save: (id, config, revision) => api("save_feature", id, config, revision),
+    toggle: (id, enabled) => api("set_feature_enabled", id, enabled),
+    schemaMarkup, configFromForm, escapeHtml, confirmAction, toast, reportError, growTextarea,
+  });
+
   function safeImageUrl(value) {
     try {
       const parsed = new URL(String(value || "").trim());
@@ -334,7 +342,7 @@
     schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "persona", "memory", "system"]);
+  const SETTINGS_SECTIONS = new Set(["model", "core", "memory", "system"]);
 
   function providerFormSnapshot() {
     const form = $("#providerForm");
@@ -400,6 +408,7 @@
   }
 
   function selectSettingsSection(section) {
+    if (section !== state.settingsSection && coreSettings.guard(() => selectSettingsSection(section))) return;
     if (section !== "model" && guardProviderDraft(() => setSettingsSection(section, true))) return;
     setSettingsSection(section, true);
   }
@@ -420,10 +429,12 @@
       $("#providerOverview").hidden = state.providerScreen !== "overview";
       $("#providerEditorPage").hidden = state.providerScreen !== "editor";
     }
+    if (section === "core") void coreSettings.load();
   }
 
   async function navigate(page) {
-    if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy) return;
+    if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
+    if (page !== state.activePage && coreSettings.guard(() => navigate(page))) return;
     if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
@@ -483,6 +494,7 @@
     state.selectedFeature = null;
     state.featureDetail = null;
     state.featureDetails = {};
+    coreSettings.invalidate();
     await loadFeatures();
     toast("功能准备情况已重新检查。 ");
   }
@@ -601,14 +613,14 @@
     });
   }
 
-  function fieldMarkup(key, field, value, path) {
+  function fieldMarkup(key, field, value, path, namespace = "") {
     const type = field.type || "string";
     const uiControl = field._ui_control || "";
     const label = field.description || field.title || key.replaceAll("_", " ");
     const hint = field.hint || field.help || "";
     const encodedPath = escapeHtml(JSON.stringify(path));
     const encodedLabel = escapeHtml(label);
-    const fieldId = "config-" + path.map((part) => encodeURIComponent(part)).join("--");
+    const fieldId = namespace + "config-" + path.map((part) => encodeURIComponent(part)).join("--");
     const helpId = fieldId + "-help";
     let control = "";
     if (type === "bool") {
@@ -629,8 +641,8 @@
       control = `<select class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(type)}">${unlisted ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current || "未设置")}（当前值）</option>` : ""}${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${current === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
     } else if (["list", "template_list"].includes(type)) {
       control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="json" rows="5">${escapeHtml(JSON.stringify(value ?? [], null, 2))}</textarea>`;
-    } else if (type === "text") {
-      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="string" rows="4">${escapeHtml(value ?? "")}</textarea>`;
+    } else if (type === "text" || field.editor_mode || field.editor_language === "json") {
+      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${field.editor_language === "json" ? "json-string" : "string"}" rows="4">${escapeHtml(value ?? "")}</textarea>`;
     } else {
       const inputType = ["int", "float"].includes(type) ? "number" : (field.secret ? "password" : "text");
       const step = type === "float" ? "any" : "1";
@@ -642,10 +654,10 @@
     control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
-    return `<div class="form-field ${["text", "list", "template_list"].includes(type) ? "full" : ""}"><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
+    return `<div class="form-field ${["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
   }
 
-  function schemaMarkup(schema, config, prefix = []) {
+  function schemaMarkup(schema, config, prefix = [], namespace = "") {
     const markup = [];
     let groupTitle = "";
     let groupFields = [];
@@ -660,10 +672,10 @@
       const path = [...prefix, key];
       if (field.type === "object" && field.items && typeof field.items === "object") {
         flushGroup();
-        markup.push(`<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path)}</div></section>`);
+        markup.push(`<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path, namespace)}</div></section>`);
         return;
       }
-      const fieldHtml = fieldMarkup(key, field, getAtPath(config, path), path);
+      const fieldHtml = fieldMarkup(key, field, getAtPath(config, path), path, namespace);
       const nextGroup = String(field._ui_group || "").trim();
       if (!nextGroup) {
         flushGroup();
@@ -813,18 +825,18 @@
     finally { input.disabled = false; }
   }
 
-  function configFromForm() {
-    $$(".config-input[aria-invalid]", $("#featureForm")).forEach((input) => input.removeAttribute("aria-invalid"));
-    $$(".field-error", $("#featureForm")).forEach((error) => { error.hidden = true; });
-    const config = structuredClone(state.featureDetail.config || {});
+  function configFromForm(form = $("#featureForm"), source = state.featureDetail?.config || {}) {
+    $$(".config-input[aria-invalid]", form).forEach((input) => input.removeAttribute("aria-invalid"));
+    $$(".field-error", form).forEach((error) => { error.hidden = true; });
+    const config = structuredClone(source);
     const listValues = new Map();
-    $$(".config-list-option", $("#featureForm")).forEach((input) => {
+    $$(".config-list-option:not(:disabled)", form).forEach((input) => {
       const key = input.dataset.path;
       if (!listValues.has(key)) listValues.set(key, []);
       if (input.checked) listValues.get(key).push(input.value);
     });
     listValues.forEach((value, key) => setAtPath(config, JSON.parse(key), value));
-    $$(".config-input", $("#featureForm")).forEach((input) => {
+    $$(".config-input:not(:disabled)", form).forEach((input) => {
       const path = JSON.parse(input.dataset.path);
       let value;
       try {
@@ -842,6 +854,11 @@
         catch (_error) { throw new Error(`${input.dataset.label || "列表配置"}的格式不正确，请检查括号和引号。`); }
         if (!Array.isArray(value)) throw new Error(`${input.dataset.label || "列表配置"}必须填写为列表。`);
       }
+      else if (input.dataset.type === "json-string") {
+        try { JSON.parse(input.value || "{}"); }
+        catch (_error) { throw new Error(`${input.dataset.label || "映射配置"}必须填写有效的 JSON。`); }
+        value = input.value;
+      }
       else value = input.value;
       if (["int", "float"].includes(input.dataset.type) && value !== null && !Number.isFinite(value)) throw new Error(`${input.dataset.label || "数字配置"}必须填写有效数字。`);
       setAtPath(config, path, value);
@@ -852,7 +869,7 @@
       }
       } catch (error) { error.input = input; throw error; }
     });
-    $$(".config-secret-clear:checked", $("#featureForm")).forEach((input) => setAtPath(config, JSON.parse(input.dataset.path), null));
+    $$(".config-secret-clear:checked", form).forEach((input) => setAtPath(config, JSON.parse(input.dataset.path), null));
     return config;
   }
 
@@ -2337,6 +2354,7 @@
       state.bootstrap.providers = await api("get_providers");
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
       state.featureDetails = {};
+      coreSettings.invalidate();
       $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
       form.elements.api_key.value = "";
       renderProviderServices();
@@ -2454,6 +2472,7 @@
       const result = await api("set_default_provider", providerId);
       state.bootstrap.providers = await api("get_providers");
       state.featureDetails = {};
+      coreSettings.invalidate();
       renderProviderServices();
       toast(result.apply_state === "applied" ? "回复模型已切换并立即生效。" : "回复模型已切换，将在启动时生效。");
     } catch (error) { reportError(error); }
@@ -2640,6 +2659,7 @@
         await api("delete_provider", providerId, replacementId || "");
         state.bootstrap.providers = await api("get_providers");
         state.featureDetails = {};
+        coreSettings.invalidate();
         renderProviderServices();
         markProviderClean();
         showProviderOverview(true);
@@ -2653,23 +2673,8 @@
     const mark = $("#brandMark");
     if (mark && !mark.querySelector("img")) mark.innerHTML = '<img src="assets/app-icon.png" alt="">';
     document.title = `${brand.display_name} · 机器人管理`;
-    const form = $("#personaForm");
+    const form = $("#brandForm");
     for (const key of ["display_name", "admin_id"]) if (form?.elements[key]) form.elements[key].value = brand[key] || "";
-    updatePersonaPreview();
-  }
-
-  function updatePersonaPreview() {
-    const form = $("#personaForm");
-    const summary = $("#personaPreviewSummary");
-    if (!form || !summary) return;
-    const tone = {natural: "自然熟人", warm: "温柔陪伴", professional: "专业助理", lively: "活泼群友"}[form.elements.tone.value] || "自然熟人";
-    const length = {brief: "简短回复", balanced: "均衡回复", detailed: "详细回复"}[form.elements.reply_length.value] || "简短回复";
-    summary.textContent = `当前组合：${tone} · ${length}`;
-    const robotName = String(form.elements.alias.value || "").split("|").map((item) => item.trim()).find(Boolean)
-      || state.bootstrap?.brand?.short_name || "机器人";
-    const names = $$(".preview-message.mine small, .preview-message.mine .preview-avatar");
-    if (names[0]) names[0].textContent = robotName;
-    if (names[1]) names[1].textContent = robotName.slice(0, 1);
   }
 
   function updateToggleCopy(event) {
@@ -2682,14 +2687,6 @@
   function fillExperience(experience) {
     state.experience = experience || {};
     const capabilities = state.experience.capabilities || {};
-    const persona = state.experience.persona || {};
-    const personaForm = $("#personaForm");
-    for (const key of ["tone", "reply_length", "alias", "identity_prompt"]) {
-      if (personaForm.elements[key]) personaForm.elements[key].value = persona[key] ?? "";
-    }
-    $("#personaStatus").textContent = capabilities.persona ? "保存后热更新" : "需要完整更新";
-    personaForm.querySelector("button[type='submit']").disabled = !capabilities.persona;
-
     const memory = state.experience.memory || {};
     const readiness = state.experience.readiness || {};
     const memoryForm = $("#memoryForm");
@@ -2711,11 +2708,10 @@
     for (const key of ["enabled", "daily_mood", "include_affection", "include_mood"]) emotionForm.elements[key].checked = Boolean(emotion[key]);
     $("#emotionStatus").textContent = capabilities.emotion ? "精简上下文" : "需要完整更新";
     emotionForm.querySelector("button[type='submit']").disabled = !capabilities.emotion;
-    $$(".toggle input", $("#personaForm").parentElement).forEach((input) => {
+    $$(".toggle input", $("#page-settings")).forEach((input) => {
       input.removeEventListener("change", updateToggleCopy);
       input.addEventListener("change", updateToggleCopy);
     });
-    updatePersonaPreview();
   }
 
   async function saveExperience(event, save, section, noteSelector) {
@@ -2738,55 +2734,37 @@
       reportError(error);
     } finally {
       button.disabled = false;
-      button.textContent = section === "persona" ? "保存人格设置" : section === "memory" ? "保存记忆设置" : "保存情感设置";
+      button.textContent = section === "memory" ? "保存记忆设置" : "保存情感设置";
     }
   }
 
-  async function savePersonaAndIdentity(event) {
+  async function saveInterfaceSettings(event) {
     event.preventDefault();
     const form = event.currentTarget;
     if (!requiredValues(form)) return;
     const button = $("button[type='submit']", form);
-    const note = $("#personaNote");
+    const note = $("#brandNote");
     const values = Object.fromEntries(new FormData(form));
-    $$('input[type="checkbox"]', form).forEach((input) => { values[input.name] = input.checked; });
-    const primaryAlias = String(values.alias || "").split("|").map((item) => item.trim()).find(Boolean) || "";
-    if (!primaryAlias || primaryAlias.length > 32) {
-      form.elements.alias.focus();
-      toast("第一个机器人昵称不能为空且不能超过 32 个字符。", "error");
-      return;
-    }
     button.disabled = true;
     button.textContent = "正在保存…";
-    note.textContent = "正在统一更新人格与身份…";
+    note.textContent = "正在保存界面设置…";
     try {
-      const personaValues = {
-        tone: values.tone,
-        reply_length: values.reply_length,
-        alias: values.alias,
-        identity_prompt: values.identity_prompt,
-      };
-      const savedPersona = await api("save_persona_settings", personaValues);
       const displayName = String(values.display_name || "").trim();
       const savedBrand = await api("save_brand", {
+        ...state.bootstrap.brand,
         display_name: displayName,
-        short_name: primaryAlias,
-        persona_name: primaryAlias,
         welcome_text: `你好，我是${displayName}。`,
         admin_id: values.admin_id || "",
       });
-      state.experience.persona = savedPersona;
       state.bootstrap.brand = savedBrand;
       applyBrand(savedBrand);
-      note.textContent = savedPersona.apply_state === "applied"
-        ? "人格与身份已统一更新，下一条消息生效。"
-        : "人格与身份已保存，机器人下次启动时生效。";
+      note.textContent = "界面设置已保存；聊天身份与核心配置未改变。";
     } catch (error) {
       note.textContent = error.message || "保存失败";
       reportError(error);
     } finally {
       button.disabled = false;
-      button.textContent = "保存人格与身份";
+      button.textContent = "保存界面设置";
     }
   }
 
@@ -3050,9 +3028,8 @@
     $("#manageGroupPolicies").addEventListener("click", async () => { await selectChatManagementTab("groups"); await navigate("groups"); });
     $("#refreshActivity").addEventListener("click", loadActivity);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
-    $("#personaForm").addEventListener("input", updatePersonaPreview);
-    $("#personaForm").addEventListener("change", updatePersonaPreview);
-    $("#personaForm").addEventListener("submit", savePersonaAndIdentity);
+    coreSettings.init();
+    $("#brandForm").addEventListener("submit", saveInterfaceSettings);
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
@@ -3090,7 +3067,7 @@
     $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
@@ -3170,7 +3147,6 @@
       ...options,
     });
     const features = [
-      previewFeature("feature-memory", "群聊上下文", "page", "调节群聊回复节奏、多发言人上下文和接话方式；它不是长期记忆库。", {page: "chat-config"}),
       previewFeature("feature-long-memory", "长期记忆", "schema-and-page", "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。", {page: "dashboard", readiness: "智能召回已就绪"}),
       previewFeature("feature-bittorrent", "资源检索", "schema", "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"),
       previewFeature("feature-voice-clone", "语音克隆", "schema-and-page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
@@ -3247,6 +3223,36 @@
       "洛克王国助手": {summary: "使用洛克王国游戏助手", setup_steps: ["通过二维码或已有凭据绑定游戏账号。"], prerequisites: ["账号凭据不要发到群里。"], audience: "兴趣选配", readiness: "需要游戏账号绑定", recommendation: "仅洛克王国用户群有必要，不是运势功能。"},
     };
     const previewSavedConfigs = new Map();
+    const corePreviewSchema = {
+      analyzer_model: {type: "string", description: "群聊分析模型", options: ["", "jyjapi/grok-4.6"], labels: ["请选择模型（完整使用所必需）", "免费 Grok 4.6"], default: "jyjapi/grok-4.6"},
+      personality: {type: "object", description: "身份与接话原则", items: {ai_self_identity: {type: "text", description: "群聊身份", default: "你是群聊里的熟人型助手，说话自然、直接。"}, reply_strategy_guide: {type: "text", description: "接话原则", default: "围绕当前话题提供帮助，不连续插话。"}}},
+      wake_interaction: {type: "object", description: "点名与唤醒", items: {alias: {type: "string", description: "可识别的昵称", default: "姜小妹|小妹"}, enter_on_mention_only: {type: "bool", description: "仅在被点名后参与", default: true}, direct_wake_fast_path: {type: "bool", description: "点名时快速回应", default: true}}},
+      timing: {type: "object", description: "回复节奏", items: {assistant_debounce_time: {type: "float", description: "点名后等待补充（秒）", default: 1, min: 0}, waiting_time: {type: "float", description: "回复后休息（秒）", default: 30, min: 0}}},
+      energy: {type: "object", description: "能量设置", items: {initial_energy: {type: "float", description: "初始能量", default: 100}}},
+      leave_reply: {type: "object", description: "离场应答", items: {leave_echo_reply: {type: "bool", description: "复读时离场应答", default: false}}},
+      reply_length: {type: "object", description: "回复长度", items: {normal_reply_max_chars: {type: "int", description: "普通回复参考字数", default: 20}, focus_reply_max_chars: {type: "int", description: "分析类回复参考字数", default: 200}}},
+    };
+    const corePreviewTemplateSchema = Object.fromEntries(Object.entries(corePreviewSchema).filter(([, field]) => field.type === "object").map(([key, field]) => [key, structuredClone(field)]));
+    delete corePreviewTemplateSchema.wake_interaction.items.direct_wake_fast_path;
+    const corePreviewDefaults = (schema) => Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, field.type === "object" ? corePreviewDefaults(field.items) : structuredClone(field.default)]));
+    let corePreviewConfig = corePreviewDefaults(corePreviewSchema);
+    let corePreviewEnabled = true;
+    const corePreviewTemplates = [];
+    const corePreviewBindings = {};
+    let corePreviewRevision = 1;
+    let corePreviewTemplateRevision = 1;
+    const corePreviewDetail = () => ({id: "feature-95a906d4b9173155", display_name: "机器人核心", enabled: corePreviewEnabled, engine_online: true, revision: String(corePreviewRevision), basic_schema: Object.fromEntries(Object.entries(corePreviewSchema).filter(([key]) => !["analyzer_model", "energy", "leave_reply"].includes(key))), model_schema: {analyzer_model: corePreviewSchema.analyzer_model}, advanced_schema: structuredClone(corePreviewSchema), advanced_config: structuredClone(corePreviewConfig), template_schema: structuredClone(corePreviewTemplateSchema)});
+    const corePreviewChats = [{chat_id: "wechat:GroupMessage:51632940287@chatroom", display_name: "旅行交流群", kind: "group"}, {chat_id: "wechat:FriendMessage:wxid_zhangsan", display_name: "张三", kind: "private"}];
+    const corePreviewRequest = (method, endpoint, payload = {}) => {
+      if (method === "GET" && endpoint === "profiles") return {templates: structuredClone(corePreviewTemplates), bindings: {...corePreviewBindings}};
+      if (method === "GET" && endpoint === "chats") return structuredClone(corePreviewChats);
+      if (method === "GET" && endpoint === "chat_status") return corePreviewChats.map((chat, index) => ({...chat, template_id: corePreviewBindings[chat.chat_id] || "", status: {current_status: index ? "NOT_PRESENT" : "OBSERVATION"}, energy: 86, patrol: {waiting: "", remaining: 0, total: 0}, last_decision: {should_reply: true, summary: "回应当前群友的问题"}}));
+      if (endpoint === "profiles/create") { const item = {id: `tpl_preview_${++corePreviewTemplateRevision}`, name: payload.name, description: payload.description || "", updated_at: corePreviewTemplateRevision, config: payload.from_global ? Object.fromEntries(Object.entries(corePreviewConfig).filter(([key]) => key in corePreviewTemplateSchema).map(([key, value]) => [key, Object.fromEntries(Object.entries(value).filter(([field]) => field in corePreviewTemplateSchema[key].items))])) : {}}; corePreviewTemplates.push(item); return structuredClone(item); }
+      if (endpoint === "profiles/update") { const item = corePreviewTemplates.find((tpl) => tpl.id === payload.id); if (!item || item.updated_at !== payload.updated_at) throw new Error("模板已被其他窗口修改，请重新读取后保存。"); const patch = structuredClone(payload); delete patch.updated_at; Object.assign(item, patch, {updated_at: ++corePreviewTemplateRevision}); return structuredClone(item); }
+      if (endpoint === "profiles/delete") { corePreviewTemplates.splice(corePreviewTemplates.findIndex((tpl) => tpl.id === payload.id), 1); Object.keys(corePreviewBindings).forEach((id) => { if (corePreviewBindings[id] === payload.id) delete corePreviewBindings[id]; }); return {}; }
+      if (endpoint === "bindings/set") { if (payload.template_id) corePreviewBindings[payload.chat_id] = payload.template_id; else delete corePreviewBindings[payload.chat_id]; return {}; }
+      throw new Error("预览请求无效。");
+    };
     function previewFeatureDetail(id) {
       const found = features.find((value) => value.id === id);
       const item = {...found, guide: previewGuideOverrides[found?.display_name] || previewGuides[found?.display_name] || {}};
@@ -3371,6 +3377,8 @@
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
+      get_robot_core: () => ok(corePreviewDetail()),
+      request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
       get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 6, items: [
         {group_id: "51632940287@chatroom", name: "旅行交流群", member_count: 128},
@@ -3391,7 +3399,7 @@
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_private_policy: (_accountId, contactId) => ok(previewPrivatePolicyOverview(contactId)),
       save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok(previewPrivatePolicyOverview(contactId).policy, "联系人可用功能已保存。"); },
-      set_feature_enabled: (_id, enabled) => ok({enabled, message: "功能状态已立即更新。"}), save_feature: (id, config) => { previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
+      set_feature_enabled: (id, enabled) => { if (id === "feature-95a906d4b9173155") corePreviewEnabled = enabled; return ok({enabled, message: "功能状态已立即更新。"}); }, save_feature: (id, config) => { if (id === "feature-95a906d4b9173155") { corePreviewConfig = structuredClone(config); corePreviewRevision += 1; } else previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: (filters) => ok(previewConversations(filters)),
       get_messages: (conversationId, filters = {}) => {
         const search = String(filters.search || "").trim().toLocaleLowerCase("zh-CN");
@@ -3425,11 +3433,10 @@
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       get_response_traces: () => ok([{time: new Date(Date.now() - 18000).toISOString(), title: "群聊点名", duration_text: "3.4 秒", stages: [{label: "点名快路径", status: "success", detail: "已跳过额外判断", duration_text: "0.4 秒"}, {label: "长期记忆", status: "skipped", detail: "普通寒暄无需回忆", duration_text: "<0.1 秒"}, {label: "精简情感", status: "success", detail: "已加入好感度与心情", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "2.6 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}, {time: new Date(Date.now() - 82000).toISOString(), title: "询问上次内容", duration_text: "5.1 秒", stages: [{label: "点名快路径", status: "success", duration_text: "0.4 秒"}, {label: "长期记忆 3 条", status: "success", detail: "命中明确回忆说法", duration_text: "0.8 秒"}, {label: "精简情感", status: "success", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "3.5 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}]),
       get_experience: () => ok(structuredClone(previewExperience)),
-      save_persona_settings: (values) => ok({...values, apply_state: "applied"}, "人格设置已热更新，下一条消息立即使用。"),
       save_memory_settings: (values) => ok({...values, apply_state: "applied"}, "长期记忆设置已热更新，下一条消息立即使用。"),
       save_emotion_settings: (values) => ok({...values, apply_state: "applied"}, "情感设置已热更新，下一条消息立即使用。"),
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },
-      save_brand: (values) => ok(values, "机器人名称和回复身份已统一更新。"),
+      save_brand: (values) => ok(values, "管理界面名称与管理员已保存，聊天身份未改变。"),
       get_providers: () => ok(structuredClone(previewProviders)),
       save_provider: (values) => {
         const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`;

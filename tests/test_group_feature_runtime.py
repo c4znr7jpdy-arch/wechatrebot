@@ -41,6 +41,17 @@ def test_group_permissions_never_reenable_globally_disabled_functions(tmp_path):
     permitted = group_plugins(path, "wxid_bot", "room@chatroom", ["jiang_commands"], STARS)
     assert "jiang_schedule" not in permitted
     assert "jiang_commands" in permitted
+    assert "astrbot_plugin_angel_heart" not in permitted
+
+
+def test_conversation_core_survives_optional_grants_but_respects_chat_boundaries(tmp_path):
+    path = tmp_path / "policy.json"
+    _save(path, allowed_features=[])
+    assert "astrbot_plugin_angel_heart" in group_plugins(path, "wxid_bot", "room@chatroom", None, STARS)
+    _save(path, allowed_features=[], bot_enabled=False)
+    assert group_plugins(path, "wxid_bot", "room@chatroom", None, STARS) is None
+    _save(path, allowed_features=[], reply_mode="off")
+    assert group_plugins(path, "wxid_bot", "room@chatroom", None, STARS) is None
 
 
 def test_group_feature_policy_fails_closed_and_is_account_scoped(tmp_path):

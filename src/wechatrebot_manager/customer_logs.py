@@ -24,6 +24,8 @@ def log_sources(root: str | Path) -> tuple[LogSource, ...]:
 
 def sanitize_log_text(text: str) -> str:
     replacements = (
+        (r"天使(?:之)?心|(?i:angel[-_ ]?heart)", "机器人核心"),
+        (r"(?i)kawayiyokami", "核心维护者"),
         (r"(?i)astrbot", "回复引擎"),
         (r"(?i)new[-_ ]?hook", "微信连接"),
         (r"(?i)hook[_ -]?bridge", "微信连接"),

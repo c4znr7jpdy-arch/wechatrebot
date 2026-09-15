@@ -668,18 +668,18 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
 
     catalog = service.catalog()["plugins"]
 
-    assert [item["display_name"] for item in catalog] == ["长期记忆", "点歌", "短剧"]
+    assert [item["display_name"] for item in catalog] == ["点歌", "短剧"]
     by_name = {item["display_name"]: item for item in catalog}
-    assert by_name["长期记忆"]["configurable"] is True
-    assert by_name["长期记忆"]["model_field_count"] == 1
     assert by_name["点歌"]["configurable"] is False
     assert by_name["短剧"]["configurable"] is False
     assert by_name["短剧"]["scheduled_action"] == "short_drama"
     assert by_name["短剧"]["schedule_provider"] is True
     assert by_name["点歌"]["pages"] == ()
     assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
-    assert by_name["长期记忆"]["pages"] == ("chat-config",)
-    angel = service.detail(by_name["长期记忆"]["id"])
+    angel = service.detail(plugin_center.ROBOT_CORE_FEATURE_ID)
+    assert angel["configurable"] is True
+    assert angel["model_field_count"] == 1
+    assert angel["pages"] == ("chat-config",)
     music = service.detail(by_name["点歌"]["id"])
     drama = service.detail(by_name["短剧"]["id"])
     assert list(angel["model_schema"]) == ["analyzer_model"]
