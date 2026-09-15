@@ -435,9 +435,58 @@ def test_compact_metadata_failure_can_retry_without_losing_playback(player_page)
     page.locator("#metadataRetry").wait_for(state="visible")
     assert page.locator("#title").inner_text() == "旧作品"
     assert page.locator("#video").evaluate("video => video.paused")
+
     page.route("**/api/resolve?*", lambda route: route.fulfill(json=full))
     page.locator("#metadataRetry").click()
     page.wait_for_function("document.querySelectorAll('#episodeGrid button').length === 3")
     assert page.locator("#metadataRetry").is_hidden()
     assert page.locator("#metadataStatus").inner_text() == ""
     assert page.locator("#video").evaluate("video => video.paused")
+
+
+@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
+def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page):
+    page = player_page
+    page.set_viewport_size({"width": 375, "height": 480})
+    payload = {"v": 1, "kind": "search", "heading": "手机片单", "items": [{
+        "title": "手机滚动测试" + "长片名" * 25,
+        "actor": "演员名单" * 40,
+        "episodes": [{"name": f"第{index}集", "url": f"https://media.example/{index}.m3u8"} for index in range(1, 181)],
+    }]}
+    page.route("**/api/selections/**", lambda route: route.fulfill(json=payload))
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
+    page.evaluate("window.scrollTo(0, 60)")
+    previous_scroll = page.evaluate("window.scrollY")
+    previous_top = page.locator("#videoShell").bounding_box()["y"]
+    assert previous_scroll == 60
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    assert page.locator("body").evaluate("node => getComputedStyle(node).position") == "fixed"
+    assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
+    assert page.evaluate("document.elementFromPoint(60, innerHeight - 80).closest('#episodeSheet') !== null")
+    assert page.locator(".sheet-panel").evaluate("node => node.scrollHeight > node.clientHeight")
+    cdp = page.context.new_cdp_session(page)
+    def swipe(x, y, end_x, end_y):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        for step in range(1, 11):
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + (end_x - x) * step / 10, "y": y + (end_y - y) * step / 10}]})
+            page.wait_for_timeout(20)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    panel = page.locator(".sheet-panel").bounding_box()
+    swipe(180, panel["y"] + 260, 180, panel["y"] + 140)
+    page.wait_for_function("document.querySelector('.sheet-panel').scrollTop > 20")
+    assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
+    page.locator(".sheet-panel").evaluate("node => node.scrollTop = 0")
+    ranges = page.locator("#sheetEpisodeRanges").bounding_box()
+    swipe(280, ranges["y"] + 20, 80, ranges["y"] + 20)
+    page.wait_for_function("document.getElementById('sheetEpisodeRanges').scrollLeft > 30")
+    assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
+    swipe(190, 30, 190, 65)  # Backdrop cannot move the background.
+    assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
+    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
+    page.screenshot(path=str(screenshots / "mobile-sheet-scroll-375.png"))
+    page.locator("#sheetClose").click()
+    assert page.evaluate("window.scrollY") == previous_scroll
+    assert page.locator("body").evaluate("node => getComputedStyle(node).position") != "fixed"
+    page.evaluate("window.scrollTo(0, 120)")
+    assert page.evaluate("window.scrollY") == 120

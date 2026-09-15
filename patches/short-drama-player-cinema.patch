@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,230 @@
+@@ -5,369 +5,237 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -472,7 +472,14 @@ diff --git a/index.html b/index.html
 +    .sheet-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-weight: 700; font-size: 18px; }
 +    .sheet-close { width: 44px; padding: 0; border: 0; background: transparent; font-size: 26px; }
 +    .episode-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
-+    body.sheet-open, body.player-fullscreen { overflow: hidden; }
++    body.player-fullscreen { overflow: hidden; }
++    html.sheet-open { overflow: hidden; overscroll-behavior: none; }
++    body.sheet-open { position: fixed; inset: var(--locked-page-top, 0px) 0 auto; width: 100%; overflow: hidden; overscroll-behavior: none; }
++    body.sheet-open .video-shell { z-index: 60; }
++    .sheet-panel { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
++    .sheet-backdrop { touch-action: none; }
++    .episode-ranges { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
++
 +    .video-shell:fullscreen, .video-shell.pseudo-fullscreen { width: 100vw; height: 100dvh; max-height: none; position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
 +    .video-shell:fullscreen .sheet, .video-shell.pseudo-fullscreen .sheet { position: absolute; align-items: center; justify-content: flex-end; padding: 16px; }
 +    .video-shell:fullscreen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: min(46vw, 420px); max-height: calc(100dvh - 32px); border-radius: 16px; }
@@ -582,7 +589,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +267,228 @@
+@@ -406,8 +274,228 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -811,7 +818,7 @@ diff --git a/index.html b/index.html
  
        const fail = (message) => {
          statusNode.textContent = message;
-@@ -415,15 +496,27 @@
+@@ -415,15 +503,27 @@
          retry.hidden = false;
        };
  
@@ -842,7 +849,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +614,7 @@
+@@ -521,7 +621,7 @@
            }
            return { name, url };
          });
@@ -851,7 +858,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +628,71 @@
+@@ -535,6 +635,71 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -923,7 +930,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +710,29 @@
+@@ -552,22 +717,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -956,7 +963,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +751,15 @@
+@@ -586,14 +758,15 @@
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
@@ -978,7 +985,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +780,13 @@
+@@ -614,27 +787,13 @@
        };
  
        const applyVideoAspect = () => {
@@ -1011,8 +1018,47 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -700,12 +852,30 @@
-         if (!playlist || playlist.episodes.length < 2) return;
+@@ -696,17 +855,69 @@
+         updateQualityActive();
+       };
+ 
++      let lockedPage = null;
++      const lockPageScroll = () => {
++        if (lockedPage) return;
++        lockedPage = {x: window.scrollX, y: window.scrollY, offset: document.body.style.getPropertyValue('--locked-page-top')};
++        document.body.style.setProperty('--locked-page-top', `${-lockedPage.y}px`);
++        document.documentElement.classList.add('sheet-open');
++        document.body.classList.add('sheet-open');
++      };
++      const unlockPageScroll = () => {
++        if (!lockedPage) return;
++        const saved = lockedPage; lockedPage = null;
++        document.documentElement.classList.remove('sheet-open');
++        document.body.classList.remove('sheet-open');
++        if (saved.offset) document.body.style.setProperty('--locked-page-top', saved.offset);
++        else document.body.style.removeProperty('--locked-page-top');
++        window.scrollTo(saved.x, saved.y);
++      };
++      // Stop touch scroll chaining at panel/range boundaries on mobile WebKit.
++      let sheetTouch = null;
++      episodeSheet.addEventListener('touchstart', (event) => {
++        if (event.touches.length === 1) sheetTouch = {x: event.touches[0].clientX, y: event.touches[0].clientY};
++      }, {passive: true});
++      episodeSheet.addEventListener('touchmove', (event) => {
++        if (!sheetTouch || event.touches.length !== 1) return;
++        const point = event.touches[0], dx = point.clientX - sheetTouch.x, dy = point.clientY - sheetTouch.y;
++        sheetTouch = {x: point.clientX, y: point.clientY};
++        const panel = episodeSheet.querySelector('.sheet-panel');
++        if (!panel.contains(event.target)) { event.preventDefault(); return; }
++        const ranges = event.target.closest('#sheetEpisodeRanges');
++        if (ranges && Math.abs(dx) > Math.abs(dy)) {
++          if (ranges.scrollWidth <= ranges.clientWidth || (dx > 0 && ranges.scrollLeft <= 0) || (dx < 0 && ranges.scrollLeft + ranges.clientWidth >= ranges.scrollWidth - 1)) event.preventDefault();
++        } else if (panel.scrollHeight <= panel.clientHeight || (dy > 0 && panel.scrollTop <= 0) || (dy < 0 && panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1)) event.preventDefault();
++      }, {passive: false});
++
+       const openEpisodeSheet = () => {
+-        if (!playlist || playlist.episodes.length < 2) return;
++        if (!playlist || playlist.episodes.length < 2 || !episodeSheet.hidden) return;
          qualityMenu.hidden = true;
          qualityButton.setAttribute('aria-expanded', 'false');
 +        sheetReturnFocus = document.activeElement;
@@ -1021,6 +1067,7 @@ diff --git a/index.html b/index.html
 +        morePanel.hidden = true;
 +        moreButton.setAttribute('aria-expanded', 'false');
          episodeSheet.hidden = false;
+-        document.body.classList.add('sheet-open');
 +        episodeOpen.setAttribute('aria-expanded', 'true');
 +        episodeExpand.setAttribute('aria-expanded', 'true');
 +        [...document.querySelector('main').children].forEach((node) => {
@@ -1028,21 +1075,23 @@ diff --git a/index.html b/index.html
 +        });
 +        [...watchStage.children].forEach((node) => { if (node !== videoShell) node.inert = true; });
 +        [...videoShell.children].forEach((node) => { if (node !== episodeSheet) node.inert = true; });
-+        sheetClose.focus();
-         document.body.classList.add('sheet-open');
++        lockPageScroll();
++        sheetClose.focus({preventScroll: true});
        };
  
        const closeEpisodeSheet = () => {
 +        const wasOpen = !episodeSheet.hidden;
          episodeSheet.hidden = true;
+-        document.body.classList.remove('sheet-open');
 +        episodeOpen.setAttribute('aria-expanded', 'false');
 +        episodeExpand.setAttribute('aria-expanded', 'false');
 +        [...document.querySelector('main').children, ...watchStage.children, ...videoShell.children].forEach((node) => { node.inert = false; });
-+        if (wasOpen && sheetReturnFocus?.isConnected) sheetReturnFocus.focus();
-         document.body.classList.remove('sheet-open');
++        if (wasOpen) unlockPageScroll();
++        if (wasOpen && sheetReturnFocus?.isConnected) sheetReturnFocus.focus({preventScroll: true});
        };
  
-@@ -717,6 +887,10 @@
+ 
+@@ -717,6 +928,10 @@
          const loadId = ++episodeLoadId;
          removeEpisodeReadyListener();
          current = index;
@@ -1053,7 +1102,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -749,7 +923,6 @@
+@@ -749,7 +964,6 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1061,7 +1110,7 @@ diff --git a/index.html b/index.html
          video.pause();
          video.removeAttribute('src');
          video.load();
-@@ -784,44 +957,75 @@
+@@ -784,44 +998,75 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1167,7 +1216,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1034,16 @@
+@@ -830,11 +1075,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1184,7 +1233,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1065,11 @@
+@@ -856,10 +1106,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1197,7 +1246,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1092,7 @@
+@@ -882,7 +1133,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1206,7 +1255,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1101,66 @@
+@@ -891,21 +1142,66 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1282,7 +1331,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1173,7 @@
+@@ -918,6 +1214,7 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1290,7 +1339,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1197,15 @@
+@@ -941,6 +1238,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1306,7 +1355,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1223,21 @@
+@@ -958,12 +1264,21 @@
          }
        });
        syncNativeControls();
