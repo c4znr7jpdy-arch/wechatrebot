@@ -1,0 +1,33 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -39,7 +39,7 @@
+     r"[0-9]{1,2}\s*日?))?\s*$"
+ )
+ _WEATHER_MAX_OFFSET = 30
+-_OILPRICE_PATTERN = re.compile(r"^\s*油价\s*(.+?)\s*$")
++_OILPRICE_PATTERN = re.compile(r"^\s*(?:油价\s*(.*?)|(.+?)\s*油价)\s*$")
+ _RANDOM_IMAGE_URLS = (
+     "https://boudoir.ortlinde.com/random",
+     "https://acg.yaohud.cn/dm/adaptive.php",
+@@ -592,7 +592,7 @@
+     "常用命令": [
+         ("\\新闻", "今日热点新闻"),
+         ("\\城市天气", "如: \\绵阳天气、\\青岛天气902"),
+-        ("\\油价省份", "如: \\油价四川"),
++        ("\\省份油价", "如: \\山东油价、\\油价山东"),
+         ("\\epic", "Epic喜加一"),
+         ("\\kfc", "疯狂星期四文案"),
+         ("\\理想", "发送20秒《理想进行曲》语音条"),
+@@ -829,9 +829,9 @@
+         m = _OILPRICE_PATTERN.match(text)
+         if not m:
+             return
+-        province = m.group(1).strip()
++        province = (m.group(1) or m.group(2) or "").strip()
+         if not province:
+-            yield event.plain_result("请指定省份，如: \\油价四川 或 \\油价 北京")
++            yield event.plain_result("请指定省份，如: /山东油价 或 /油价山东")
+             return
+         try:
+             data = await fetch_oilprice(province)
