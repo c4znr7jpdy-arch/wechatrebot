@@ -17,8 +17,6 @@ DEFAULT_PROVIDER_MODEL = "grok-4.6"
 DEFAULT_PROVIDER_MODEL_ID = (
     f"{DEFAULT_PROVIDER_SOURCE_ID}/{DEFAULT_PROVIDER_MODEL}"
 )
-MIMO_THINKING_MODELS = frozenset({"mimo-v2.5", "mimo-v2.5-pro"})
-
 DEEPSEEK_PROVIDER_SOURCE_ID = "deepseek"
 DEEPSEEK_PROVIDER_API_BASE = "https://api.deepseek.com/v1"
 DEEPSEEK_PROVIDER_MODEL = "deepseek-v4-flash"
@@ -29,19 +27,139 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = 35
 PROVIDER_REQUEST_MAX_ATTEMPTS = 1
 
 
-def supports_thinking_toggle(api_base: str, model: str) -> bool:
-    """Only expose the switch where the provider's request format is known."""
+def thinking_mode_adapter(api_base: str, model: str) -> str | None:
+    """Return the safe request mapping for a known OpenAI-compatible service."""
     host = (urlsplit(api_base.strip()).hostname or "").casefold()
-    return (host == "xiaomimimo.com" or host.endswith(".xiaomimimo.com")) and (
-        model.strip().casefold() in MIMO_THINKING_MODELS
-    )
+    normalized_model = model.strip().casefold()
+    if (
+        host == "xiaomimimo.com" or host.endswith(".xiaomimimo.com")
+    ) and normalized_model in {"mimo-v2.5", "mimo-v2.5-pro"}:
+        return "thinking"
+    if (
+        host == "deepseek.com" or host.endswith(".deepseek.com")
+    ) and normalized_model.startswith(
+        ("deepseek-chat", "deepseek-flash", "deepseek-v3", "deepseek-v4")
+    ):
+        return "thinking"
+    if (
+        host == "dashscope.aliyuncs.com"
+        or host.endswith(".dashscope.aliyuncs.com")
+    ) and "thinking" not in normalized_model and normalized_model.startswith(
+        ("qwen-plus", "qwen3", "deepseek-v3", "deepseek-v4", "kimi-k2", "glm-")
+    ):
+        return "enable_thinking"
+    if (
+        host == "x.ai"
+        or host.endswith(".x.ai")
+        or host == "xiuxianjyj.xin"
+        or host.endswith(".xiuxianjyj.xin")
+    ) and normalized_model.startswith(("grok-4.5", "grok-4.6")):
+        # Current Grok reasoning models cannot fully disable reasoning. Treat
+        # the off position as the lowest supported effort instead.
+        return "reasoning_effort_low"
+    if (
+        host == "googleapis.com" or host.endswith(".googleapis.com")
+    ) and normalized_model.startswith(
+        ("gemini-2.5-flash", "gemini-2.5-flash-lite")
+    ):
+        return "reasoning_effort_none"
+    openai_match = re.match(r"^gpt-5\.(\d+)", normalized_model)
+    if (
+        host == "openai.com" or host.endswith(".openai.com")
+    ) and openai_match is not None and int(openai_match.group(1)) >= 1 and (
+        "pro" not in normalized_model
+    ):
+        return "reasoning_effort_none"
+    return None
 
 
-def with_thinking_mode(extra_body: object, enabled: bool) -> dict[str, object]:
-    """Preserve unrelated model request parameters when changing thinking."""
+def supports_thinking_toggle(api_base: str, model: str) -> bool:
+    """Whether the manager knows how to apply the preference to requests."""
+    return thinking_mode_adapter(api_base, model) is not None
+
+
+def without_thinking_mode(
+    extra_body: object,
+    *,
+    api_base: str,
+    model: str,
+) -> dict[str, object]:
+    """Remove only the request field managed for the previous adapter."""
     merged = dict(extra_body) if isinstance(extra_body, dict) else {}
-    merged["thinking"] = {"type": "enabled" if enabled else "disabled"}
+    adapter = thinking_mode_adapter(api_base, model)
+    if adapter == "thinking":
+        merged.pop("thinking", None)
+    elif adapter == "enable_thinking":
+        merged.pop("enable_thinking", None)
+    elif adapter in {"reasoning_effort_low", "reasoning_effort_none"}:
+        merged.pop("reasoning_effort", None)
     return merged
+
+
+def with_thinking_mode(
+    extra_body: object,
+    enabled: bool,
+    *,
+    api_base: str,
+    model: str,
+) -> dict[str, object]:
+    """Apply a known thinking protocol and preserve unrelated parameters."""
+    merged = dict(extra_body) if isinstance(extra_body, dict) else {}
+    adapter = thinking_mode_adapter(api_base, model)
+    if adapter == "thinking":
+        merged["thinking"] = {"type": "enabled" if enabled else "disabled"}
+    elif adapter == "enable_thinking":
+        merged["enable_thinking"] = enabled
+    elif adapter == "reasoning_effort_low":
+        merged["reasoning_effort"] = "high" if enabled else "low"
+    elif adapter == "reasoning_effort_none":
+        merged["reasoning_effort"] = "high" if enabled else "none"
+    return merged
+
+
+def thinking_mode_matches(
+    extra_body: object,
+    enabled: bool,
+    *,
+    api_base: str,
+    model: str,
+) -> bool:
+    """Confirm a known adapter was persisted; unknown adapters are no-ops."""
+    adapter = thinking_mode_adapter(api_base, model)
+    if adapter is None:
+        return True
+    body = extra_body if isinstance(extra_body, dict) else {}
+    if adapter == "thinking":
+        return body.get("thinking") == {
+            "type": "enabled" if enabled else "disabled"
+        }
+    if adapter == "enable_thinking":
+        return body.get("enable_thinking") is enabled
+    if adapter == "reasoning_effort_low":
+        return body.get("reasoning_effort") == ("high" if enabled else "low")
+    return body.get("reasoning_effort") == ("high" if enabled else "none")
+
+
+def infer_thinking_mode(
+    extra_body: object,
+    *,
+    api_base: str,
+    model: str,
+) -> bool:
+    """Infer an existing setting when no manager preference was saved yet."""
+    adapter = thinking_mode_adapter(api_base, model)
+    body = extra_body if isinstance(extra_body, dict) else {}
+    if adapter == "thinking":
+        value = body.get("thinking")
+        return not (isinstance(value, dict) and value.get("type") == "disabled")
+    if adapter == "enable_thinking" and isinstance(body.get("enable_thinking"), bool):
+        return bool(body["enable_thinking"])
+    effort = str(body.get("reasoning_effort") or "").casefold()
+    if adapter == "reasoning_effort_low":
+        return effort not in {"low", "none"}
+    if adapter == "reasoning_effort_none":
+        return effort != "none"
+    return True
 
 
 def provider_source_id(api_base: str, model: str) -> str:
@@ -110,8 +228,6 @@ class OpenAIProviderProfile:
         if profile.thinking_enabled is not None:
             if not isinstance(profile.thinking_enabled, bool):
                 errors.append("思考模式只能选择开启或关闭。")
-            elif not supports_thinking_toggle(profile.api_base, profile.model):
-                errors.append("当前模型不支持在这里切换思考模式。")
 
         parsed = urlsplit(profile.api_base)
         loopback = (parsed.hostname or "").casefold() in {
@@ -168,7 +284,10 @@ class OpenAIProviderProfile:
             "model": profile.model,
             "modalities": modalities,
             "custom_extra_body": (
-                with_thinking_mode({}, profile.thinking_enabled)
+                with_thinking_mode(
+                    {}, profile.thinking_enabled,
+                    api_base=profile.api_base, model=profile.model,
+                )
                 if profile.thinking_enabled is not None else {}
             ),
             "max_context_tokens": 131072,
@@ -247,6 +366,10 @@ __all__ = [
     "discover_openai_models",
     "provider_display_name",
     "provider_source_id",
+    "infer_thinking_mode",
     "supports_thinking_toggle",
+    "thinking_mode_adapter",
+    "thinking_mode_matches",
+    "without_thinking_mode",
     "with_thinking_mode",
 ]

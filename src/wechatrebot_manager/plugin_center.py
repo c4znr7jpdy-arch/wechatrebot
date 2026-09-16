@@ -29,6 +29,8 @@ from .provider import (
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     provider_display_name,
     supports_thinking_toggle,
+    thinking_mode_matches,
+    without_thinking_mode,
     with_thinking_mode,
 )
 from .single_instance import SingleInstanceLock
@@ -1297,6 +1299,13 @@ class EngineApiClient:
             current_model = dict(
                 next(item for item in providers if item.get("id") == target)
             )
+            previous_source = next(
+                (
+                    item for item in sources
+                    if item.get("id") == current_model.get("provider_source_id")
+                ),
+                None,
+            )
             for inherited_field in (
                 "key",
                 "api_base",
@@ -1318,8 +1327,16 @@ class EngineApiClient:
                 }
             )
             if normalized.thinking_enabled is not None:
+                extra_body = current_model.get("custom_extra_body")
+                if isinstance(previous_source, dict):
+                    extra_body = without_thinking_mode(
+                        extra_body,
+                        api_base=str(previous_source.get("api_base") or ""),
+                        model=str(current_model.get("model") or ""),
+                    )
                 model_payload["custom_extra_body"] = with_thinking_mode(
-                    current_model.get("custom_extra_body"), normalized.thinking_enabled
+                    extra_body, normalized.thinking_enabled,
+                    api_base=normalized.api_base, model=normalized.model,
                 )
             self.request(
                 "PUT",
@@ -1347,16 +1364,15 @@ class EngineApiClient:
             or str(provider.get("model") or "") != normalized.model
             or (
                 normalized.thinking_enabled is not None
-                and (
-                    (provider.get("custom_extra_body") or {}).get("thinking")
-                    if isinstance(provider.get("custom_extra_body"), dict)
-                    else None
-                ) != {"type": "enabled" if normalized.thinking_enabled else "disabled"}
+                and not thinking_mode_matches(
+                    provider.get("custom_extra_body"), normalized.thinking_enabled,
+                    api_base=normalized.api_base, model=normalized.model,
+                )
             )
         ):
             raise PluginCenterError("模型服务已提交，但没有收到生效确认，请刷新后重试。")
 
-    def set_provider_thinking(self, provider_id: str, enabled: bool) -> None:
+    def set_provider_thinking(self, provider_id: str, enabled: bool) -> bool:
         if not isinstance(enabled, bool):
             raise ValueError("思考模式只能选择开启或关闭。")
         sources, providers = self._provider_records()
@@ -1372,9 +1388,14 @@ class EngineApiClient:
         if not supports_thinking_toggle(
             str(source.get("api_base") or ""), str(model.get("model") or "")
         ):
-            raise ValueError("当前模型不支持在这里切换思考模式。")
+            return False
+        api_base = str(source.get("api_base") or "")
+        model_name = str(model.get("model") or "")
         updated = dict(model)
-        updated["custom_extra_body"] = with_thinking_mode(model.get("custom_extra_body"), enabled)
+        updated["custom_extra_body"] = with_thinking_mode(
+            model.get("custom_extra_body"), enabled,
+            api_base=api_base, model=model_name,
+        )
         self.request(
             "PUT", "/api/v1/providers/by-id",
             {"provider_id": provider_id, "config": updated},
@@ -1382,9 +1403,11 @@ class EngineApiClient:
         _sources, verified = self._provider_records()
         actual = next((item for item in verified if item.get("id") == provider_id), None)
         body = actual.get("custom_extra_body") if isinstance(actual, dict) else None
-        thinking = body.get("thinking") if isinstance(body, dict) else None
-        if thinking != {"type": "enabled" if enabled else "disabled"}:
+        if not thinking_mode_matches(
+            body, enabled, api_base=api_base, model=model_name
+        ):
             raise PluginCenterError("思考模式已提交，但没有收到生效确认，请刷新后重试。")
+        return True
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         result = self.request(

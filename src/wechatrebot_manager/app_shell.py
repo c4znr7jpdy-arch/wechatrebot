@@ -15,6 +15,7 @@ from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     delete_provider_profile,
+    delete_provider_thinking_preference,
     load_provider_profile,
     load_provider_services,
     load_robot_settings,
@@ -22,6 +23,7 @@ from .customer_config import (
     replace_provider_references,
     replace_provider_value,
     save_provider_profile,
+    save_provider_thinking_preference,
     set_default_provider,
     set_provider_thinking,
 )
@@ -1058,6 +1060,10 @@ class ApplicationApi:
                     make_default=make_default,
                 )
                 saved = profile.normalized()
+                if saved.thinking_enabled is not None:
+                    save_provider_thinking_preference(
+                        self._install_root, saved.model_id, saved.thinking_enabled
+                    )
             else:
                 saved = save_provider_profile(
                     self._install_root,
@@ -1155,9 +1161,14 @@ class ApplicationApi:
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
             if hot_applied:
-                client.set_provider_thinking(provider_id, requested)
+                protocol_applied = client.set_provider_thinking(provider_id, requested)
+                save_provider_thinking_preference(
+                    self._install_root, provider_id, requested
+                )
             else:
-                set_provider_thinking(self._install_root, provider_id, requested)
+                protocol_applied = set_provider_thinking(
+                    self._install_root, provider_id, requested
+                )
             saved = next(
                 (
                     item
@@ -1172,11 +1183,19 @@ class ApplicationApi:
                 {
                     "id": provider_id,
                     "thinking_enabled": requested,
-                    "apply_state": "applied" if hot_applied else "saved_for_start",
+                    "thinking_supported": protocol_applied,
+                    "apply_state": (
+                        "applied" if hot_applied and protocol_applied
+                        else "saved_for_start" if protocol_applied
+                        else "saved_preference"
+                    ),
                 },
                 message=(
                     "思考模式已热更新，下一条消息立即生效。"
-                    if hot_applied else "思考模式已保存，机器人下次启动时生效。"
+                    if hot_applied and protocol_applied
+                    else "思考模式已保存，机器人下次启动时生效。"
+                    if protocol_applied
+                    else "思考模式偏好已保存；当前模型不支持时会自动忽略。"
                 ),
             )
         except (OSError, ValueError, PluginCenterError) as exc:
@@ -1285,6 +1304,9 @@ class ApplicationApi:
                 if selected.is_default:
                     client.set_default_provider(replacement_provider_id)
                 client.delete_provider(provider_id, selected.source_id)
+                delete_provider_thinking_preference(
+                    self._install_root, provider_id
+                )
                 hot_applied = True
             else:
                 if reference_modules:

@@ -301,6 +301,8 @@ def _apply_provider_to_astrbot(
         model_payload["custom_extra_body"] = with_thinking_mode(
             existing_model.get("custom_extra_body") if isinstance(existing_model, dict) else None,
             normalized.thinking_enabled,
+            api_base=normalized.api_base,
+            model=normalized.model,
         )
         updated_model_fields += ("custom_extra_body",)
     payload["provider"] = _upsert_by_id(

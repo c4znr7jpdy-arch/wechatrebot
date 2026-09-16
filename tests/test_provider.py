@@ -12,6 +12,7 @@ from wechatrebot_manager.provider import (
     provider_display_name,
     provider_source_id,
     supports_thinking_toggle,
+    with_thinking_mode,
 )
 
 
@@ -49,19 +50,30 @@ def test_provider_profile_allows_loopback_http() -> None:
     assert profile.validate() == ()
 
 
-def test_mimo_thinking_switch_uses_only_supported_request_format() -> None:
+def test_thinking_switch_is_available_for_every_model_and_maps_known_protocols() -> None:
     base = "https://token-plan-cn.xiaomimimo.com/v1"
     assert supports_thinking_toggle(base, "mimo-v2.5")
-    assert supports_thinking_toggle("https://api.xiaomimimo.com/v1", "mimo-v2.5-pro")
+    assert supports_thinking_toggle("https://api.deepseek.com/v1", "deepseek-v4-flash")
+    assert supports_thinking_toggle("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3-max")
+    assert supports_thinking_toggle("https://api.x.ai/v1", "grok-4.6")
+    assert supports_thinking_toggle("https://api.openai.com/v1", "gpt-5.6")
     assert not supports_thinking_toggle("https://example.com/v1", "mimo-v2.5")
-    assert not supports_thinking_toggle(base, "other-model")
     disabled = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled=False)
     assert disabled.validate() == ()
     assert disabled.astrbot_model()["custom_extra_body"] == {"thinking": {"type": "disabled"}}
-    enabled = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled=True)
-    assert enabled.astrbot_model()["custom_extra_body"] == {"thinking": {"type": "enabled"}}
     unsupported = OpenAIProviderProfile("secret", "https://example.com/v1", "mimo-v2.5", thinking_enabled=False)
-    assert "不支持" in " ".join(unsupported.validate())
+    assert unsupported.validate() == ()
+    assert unsupported.astrbot_model()["custom_extra_body"] == {}
+    assert with_thinking_mode(
+        {"safe_extra": "keep"}, False,
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1", model="qwen3-max",
+    ) == {"safe_extra": "keep", "enable_thinking": False}
+    assert with_thinking_mode(
+        {}, False, api_base="https://api.x.ai/v1", model="grok-4.6",
+    ) == {"reasoning_effort": "low"}
+    assert with_thinking_mode(
+        {}, False, api_base="https://api.openai.com/v1", model="gpt-5.6",
+    ) == {"reasoning_effort": "none"}
     invalid = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled="false")
     assert "只能选择" in " ".join(invalid.validate())
 

@@ -343,6 +343,50 @@ def test_mimo_thinking_hot_switch_preserves_model_and_reads_back(tmp_path: Path)
     assert client.providers[0]["custom_extra_body"]["thinking"] == {"type": "enabled"}
 
 
+def test_thinking_hot_switch_maps_grok_and_ignores_unknown_protocols(tmp_path: Path) -> None:
+    grok = _ProviderHotApplyClient(tmp_path)
+    grok.sources[0]["api_base"] = "https://api.x.ai/v1"
+    assert grok.set_provider_thinking("jyjapi/grok-4.6", False) is True
+    assert grok.providers[0]["custom_extra_body"] == {
+        "thinking": True,
+        "reasoning_effort": "low",
+    }
+
+    unknown = _ProviderHotApplyClient(tmp_path)
+    unknown.sources[0]["api_base"] = "https://example.com/v1"
+    before = json.loads(json.dumps(unknown.providers))
+    assert unknown.set_provider_thinking("jyjapi/grok-4.6", False) is False
+    assert unknown.providers == before
+
+
+def test_editing_to_unknown_protocol_removes_only_managed_thinking_field(
+    tmp_path: Path,
+) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+    client.sources[0]["api_base"] = "https://api.xiaomimimo.com/v1"
+    client.providers[0].update({
+        "id": "jyjapi/mimo-v2.5",
+        "model": "mimo-v2.5",
+        "custom_extra_body": {
+            "thinking": {"type": "enabled"},
+            "safe_extra": "keep",
+        },
+    })
+
+    client.save_provider(
+        OpenAIProviderProfile(
+            api_key="new-key",
+            api_base="https://example.com/v1",
+            model="mimo-v2.5",
+            source_id="jyjapi",
+            thinking_enabled=False,
+        ),
+        original_provider_id="jyjapi/mimo-v2.5",
+    )
+
+    assert client.providers[0]["custom_extra_body"] == {"safe_extra": "keep"}
+
+
 def test_mimo_thinking_hot_switch_rejects_missing_readback(tmp_path: Path) -> None:
     class NoWriteClient(_ProviderHotApplyClient):
         def request(self, method, path, payload=None):

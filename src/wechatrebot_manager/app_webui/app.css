@@ -1016,7 +1016,6 @@ tbody tr:hover { background: #fbfdff; }
 .provider-thinking-switch[aria-checked="true"] > span { transform: translateX(17px); }
 .provider-thinking-switch:focus-visible { outline: 3px solid var(--blue-600); outline-offset: 3px; }
 .provider-thinking-switch:disabled { cursor: wait; opacity: .55; }
-.provider-thinking-unavailable { flex: 0 0 auto; color: var(--subtle); font-size: 10px; }
 .provider-service-actions { justify-content: flex-end; min-height: 35px; gap: 5px; padding-top: 11px; border-top: 1px solid #e8edf3; }
 .provider-card-action { min-height: 30px; padding: 0 8px; border: 0; border-radius: 6px; color: #52657a; background: transparent; cursor: pointer; font-size: 10px; font-weight: 800; transition: color .16s ease, background .16s ease; }
 .provider-card-action:hover { color: var(--blue-700); background: var(--blue-100); }
@@ -1040,7 +1039,6 @@ tbody tr:hover { background: #fbfdff; }
 .provider-settings-card .panel-heading h2 { font-size: 20px; }
 .provider-settings-card .panel-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .provider-thinking-row { margin: 2px 0 0; }
-.provider-thinking-row.unsupported { opacity: .68; }
 .provider-form-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid #c9ddfb; border-radius: 8px; color: var(--blue-700); background: #f4f7ff; }
 .provider-form-note > span { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; color: #fff; background: var(--blue-600); font-size: 11px; font-weight: 900; }
 .provider-form-note p { margin: 0; }

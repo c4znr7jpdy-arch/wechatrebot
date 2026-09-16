@@ -150,7 +150,7 @@ def test_first_provider_save_uses_jyjapi_grok_source(
     assert captured["make_default"] is True
 
 
-def test_new_mimo_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_path: Path) -> None:
+def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     captured = {}
     monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
@@ -170,10 +170,12 @@ def test_new_mimo_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_p
     })
     assert result["ok"] is True
     assert captured["profile"].thinking_enabled is False
-    assert api.save_provider({
+    generic = api.save_provider({
         "api_key": "secret", "api_base": "https://example.com/v1",
         "model": "other", "thinking_enabled": False,
-    })["ok"] is False
+    })
+    assert generic["ok"] is True
+    assert captured["profile"].thinking_enabled is False
 
 
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
@@ -191,6 +193,7 @@ def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch
         def set_provider_thinking(target, enabled):
             calls.append((target, enabled))
             state["enabled"] = enabled
+            return True
 
     monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: FakeClient())
     monkeypatch.setattr(

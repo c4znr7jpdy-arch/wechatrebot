@@ -2586,9 +2586,7 @@
     $("#providerNote").textContent = "正在更新统一模型配置…";
     try {
       const values = Object.fromEntries(new FormData(form));
-      if (providerThinkingSupported(values.api_base, values.model)) {
-        values.thinking_enabled = form.elements.thinking_enabled.checked;
-      }
+      values.thinking_enabled = form.elements.thinking_enabled.checked;
       const data = await api("save_provider", values);
       state.bootstrap.providers = await api("get_providers");
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
@@ -2625,26 +2623,23 @@
   function providerThinkingSupported(apiBase, model) {
     try {
       const host = new URL(String(apiBase || "")).hostname.toLowerCase();
-      return (host === "xiaomimimo.com" || host.endsWith(".xiaomimimo.com"))
-        && ["mimo-v2.5", "mimo-v2.5-pro"].includes(String(model || "").trim().toLowerCase());
+      const name = String(model || "").trim().toLowerCase();
+      return (host.endsWith("xiaomimimo.com") && ["mimo-v2.5", "mimo-v2.5-pro"].includes(name))
+        || (host.endsWith("deepseek.com") && /^(deepseek-chat|deepseek-flash|deepseek-v3|deepseek-v4)/.test(name))
+        || (host.endsWith("dashscope.aliyuncs.com") && !name.includes("thinking") && /^(qwen-plus|qwen3|deepseek-v3|deepseek-v4|kimi-k2|glm-)/.test(name))
+        || ((host.endsWith("x.ai") || host.endsWith("xiuxianjyj.xin")) && /^(grok-4\.5|grok-4\.6)/.test(name))
+        || (host.endsWith("googleapis.com") && /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(name))
+        || (host.endsWith("openai.com") && /^gpt-5\.(?:[1-9]|\d{2,})/.test(name) && !name.includes("pro"));
     } catch (_) { return false; }
   }
 
   function syncProviderThinkingControl(initialValue = null) {
     const form = $("#providerForm");
     const input = form.elements.thinking_enabled;
-    const supported = providerThinkingSupported(form.elements.api_base.value, form.elements.model.value);
-    const signature = `${form.elements.api_base.value.trim()}|${form.elements.model.value.trim()}`;
-    if (input.dataset.signature !== signature || initialValue !== null) {
-      input.checked = initialValue === null ? true : Boolean(initialValue);
-      input.dataset.signature = signature;
-    }
-    input.disabled = !supported;
-    $("#providerThinkingRow").classList.toggle("unsupported", !supported);
-    $("#providerThinkingHint").textContent = supported
-      ? "关闭后普通聊天通常更快；复杂问题可能需要开启。保存后对该模型生效。"
-      : "目前支持小米 MiMo V2.5；其他模型暂不能在这里切换。";
-    $("#providerThinkingValue").textContent = supported ? (input.checked ? "已开启" : "已关闭") : "暂不支持";
+    if (initialValue !== null) input.checked = Boolean(initialValue);
+    input.disabled = false;
+    $("#providerThinkingHint").textContent = "关闭后普通聊天通常更快；模型不支持切换时会自动忽略，不影响正常调用。";
+    $("#providerThinkingValue").textContent = input.checked ? "已开启" : "已关闭";
   }
 
   function applyProviderPreset(presetId) {
@@ -2670,7 +2665,6 @@
   function beginNewProvider(presetId = "free_grok") {
     const form = $("#providerForm");
     form.reset();
-    form.elements.thinking_enabled.dataset.signature = "";
     form.elements.provider_id.value = "";
     form.elements.preset.value = presetId;
     applyProviderPreset(presetId);
@@ -2695,7 +2689,6 @@
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
-    form.elements.thinking_enabled.dataset.signature = "";
     syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
@@ -2751,8 +2744,8 @@
             </div>
             <p>${escapeHtml(description)}</p>
             <div class="provider-thinking-control">
-              <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_supported ? (item.thinking_enabled ? "已开启 · 适合复杂问题" : "已关闭 · 优先快速回复") : "当前模型暂不支持切换"}</small></span>
-              ${item.thinking_supported ? `<button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>` : '<span class="provider-thinking-unavailable">不可切换</span>'}
+              <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_enabled ? "已开启 · 模型支持时生效" : "已关闭 · 模型支持时生效"}</small></span>
+              <button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>
             </div>
           </div>
           <footer class="provider-service-actions">
@@ -2983,7 +2976,7 @@
 
   async function setProviderThinking(providerId, button) {
     const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
-    if (!service || !service.thinking_supported || button.disabled) return;
+    if (!service || button.disabled) return;
     button.disabled = true;
     const status = button.closest(".provider-thinking-control")?.querySelector("[data-provider-thinking-status]");
     if (status) status.textContent = "正在应用…";
@@ -3790,7 +3783,7 @@
         previewProviders = previewProviders
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
-        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: providerThinkingSupported(values.api_base, values.model) ? values.thinking_enabled !== false : null, apply_state: "applied"};
+        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },

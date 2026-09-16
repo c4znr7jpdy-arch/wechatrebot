@@ -84,7 +84,13 @@ def test_multiple_model_services_share_one_catalog_and_default(tmp_path: Path) -
     assert all("api_key" not in item.to_public_dict() for item in services)
 
     set_default_provider(install, deepseek.model_id)
-    assert load_provider_profile(install) == deepseek.normalized()
+    loaded = load_provider_profile(install)
+    assert loaded is not None
+    assert loaded.api_key == deepseek.api_key
+    assert loaded.api_base == deepseek.api_base
+    assert loaded.model == deepseek.model
+    assert loaded.source_id == deepseek.source_id
+    assert loaded.thinking_enabled is True
     engine = json.loads(
         (install / "app/astrbot/data/cmd_config.json").read_text(encoding="utf-8")
     )
@@ -130,6 +136,41 @@ def test_mimo_thinking_offline_save_and_card_switch_preserve_extra_fields(tmp_pa
     ))
     refreshed = json.loads(config_path.read_text(encoding="utf-8"))
     assert refreshed["provider"][0]["custom_extra_body"] == {"thinking": {"type": "disabled"}, "safe_extra": "keep"}
+
+
+def test_unknown_model_keeps_universal_thinking_preference_without_request_fields(
+    tmp_path: Path,
+) -> None:
+    install, _ = _install(tmp_path)
+    profile = OpenAIProviderProfile(
+        api_key="custom-secret",
+        api_base="https://example.com/v1",
+        model="custom-chat",
+        source_id="custom_model",
+        thinking_enabled=False,
+    )
+    save_provider_profile(install, profile)
+
+    service = next(
+        item for item in load_provider_services(install)
+        if item.provider_id == profile.model_id
+    )
+    assert service.thinking_enabled is False
+    assert service.to_public_dict()["thinking_supported"] is False
+    engine = json.loads(
+        (install / "app/astrbot/data/cmd_config.json").read_text(encoding="utf-8")
+    )
+    model = next(item for item in engine["provider"] if item["id"] == profile.model_id)
+    assert model["custom_extra_body"] == {}
+
+    assert set_provider_thinking(install, profile.model_id, True) is False
+    refreshed = next(
+        item for item in load_provider_services(install)
+        if item.provider_id == profile.model_id
+    )
+    assert refreshed.thinking_enabled is True
+    manager = json.loads((install / "config/manager.json").read_text(encoding="utf-8"))
+    assert manager["provider_thinking_modes"][profile.model_id] is True
 
 
 def test_provider_references_are_named_and_migrated_before_deletion(
