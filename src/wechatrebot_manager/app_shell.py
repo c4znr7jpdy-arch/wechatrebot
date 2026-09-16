@@ -670,15 +670,38 @@ class ApplicationApi:
         try:
             values = filters or {}
             account_id = self._history_account_id()
+            paged = values.get("paged") is True
+            page_size = 20
+            before_timestamp: float | None = None
+            before_id: int | None = None
+            if paged:
+                page_size = max(1, min(int(values.get("page_size") or 20), 20))
+                before = values.get("before")
+                if isinstance(before, dict) and before.get("timestamp") is not None:
+                    before_timestamp = float(before["timestamp"])
+                    if before.get("id") is not None:
+                        before_id = int(before["id"])
+            query = {
+                "account_id": account_id,
+                "search": str(values.get("search") or "").strip(),
+                "start_time": self._date_timestamp(values.get("start")),
+                "end_time": self._date_timestamp(values.get("end"), end=True),
+            }
+            if paged:
+                query.update(
+                    before=before_timestamp,
+                    before_id=before_id,
+                    limit=page_size + 1,
+                )
             messages = list(
                 self._history.messages(
                     conversation_id,
-                    account_id=account_id,
-                    search=str(values.get("search") or "").strip(),
-                    start_time=self._date_timestamp(values.get("start")),
-                    end_time=self._date_timestamp(values.get("end"), end=True),
+                    **query,
                 )
             )
+            has_more = paged and len(messages) > page_size
+            if has_more:
+                messages = messages[-page_size:]
             if conversation_id.endswith("@chatroom"):
                 member_cache = getattr(self, "_history_group_members", None)
                 if not isinstance(member_cache, dict):
@@ -748,6 +771,8 @@ class ApplicationApi:
                         message["wechat_id"] = str(
                             contact.get("alias") or message.get("sender_id") or ""
                         )
+            if paged:
+                return self._ok({"items": messages, "has_more": has_more})
             return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)

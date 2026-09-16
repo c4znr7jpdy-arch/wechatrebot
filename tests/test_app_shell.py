@@ -826,6 +826,55 @@ def test_history_default_date_rolls_forward_across_midnight() -> None:
     assert "rollHistoryDatesForward();\n    const load = ++state.historyLoad;" in script
 
 
+def test_history_messages_load_in_invisible_twenty_item_pages(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_robot"
+    received: dict[str, object] = {}
+
+    def messages(_conversation_id: str, **filters: object):
+        received.update(filters)
+        return tuple(
+            {
+                "id": message_id,
+                "role": "assistant",
+                "sender_id": "robot",
+                "sender_name": "机器人",
+                "content": f"消息 {message_id}",
+                "timestamp": float(message_id),
+            }
+            for message_id in range(1, 22)
+        )
+
+    api._history = SimpleNamespace(messages=messages)
+
+    result = api.get_messages(
+        "wxid_friend",
+        {
+            "paged": True,
+            "page_size": 100,
+            "before": {"timestamp": 50.0, "id": 50},
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["has_more"] is True
+    assert len(result["data"]["items"]) == 20
+    assert result["data"]["items"][0]["id"] == 2
+    assert received["limit"] == 21
+    assert received["before"] == 50.0
+    assert received["before_id"] == 50
+
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+    assert "const HISTORY_PAGE_SIZE = 20;" in script
+    assert "async function loadOlderMessages()" in script
+    assert 'list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);' in script
+    assert 'id="olderMessagesStatus" role="status" aria-live="polite" hidden' in markup
+    assert ".older-messages-status" in styles
+
+
 def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     calls: list[tuple[str, object]] = []

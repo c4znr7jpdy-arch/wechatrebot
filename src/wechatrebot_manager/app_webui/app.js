@@ -51,6 +51,10 @@
     messageLoad: 0,
     historyPolling: false,
     historyAutoDate: "",
+    historyHasMore: false,
+    historyLoadingOlder: false,
+    historyOlderLoad: 0,
+    historyMessageQuery: "",
     schedules: [],
     scheduledContext: null,
     scheduledEditor: null,
@@ -83,6 +87,8 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const CONTACT_PAGE_SIZE = 100;
+  const HISTORY_PAGE_SIZE = 20;
+  const HISTORY_PRELOAD_THRESHOLD = 120;
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -1596,9 +1602,15 @@
         await selectConversation(state.conversations[0].conversation_id, {silent: true});
       } else {
         ++state.messageLoad;
+        state.historyOlderLoad += 1;
+        state.historyHasMore = false;
+        state.historyLoadingOlder = false;
+        state.historyMessageQuery = "";
         state.selectedMessages = [];
         $("#conversationHeader").textContent = "没有匹配的聊天";
+        $("#messageList").removeAttribute("aria-busy");
         $("#messageList").innerHTML = '<div class="empty-state compact"><h2>没有找到匹配消息</h2><p>调整昵称、微信号或日期后再试。</p></div>';
+        $("#olderMessagesStatus").hidden = true;
         $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><p class="subtle">当前筛选没有匹配的聊天。</p>';
         $("#newMessageButton").hidden = true;
       }
@@ -1611,6 +1623,34 @@
       start: $("#historyStart").value,
       end: $("#historyEnd").value,
     };
+  }
+
+  function pagedHistoryFilters(before = null) {
+    return {
+      ...historyFilters(),
+      paged: true,
+      page_size: HISTORY_PAGE_SIZE,
+      ...(before ? {before: {id: before.id, timestamp: before.timestamp}} : {}),
+    };
+  }
+
+  function normalizeMessagePage(value) {
+    if (Array.isArray(value)) {
+      return {items: value.slice(-HISTORY_PAGE_SIZE), has_more: value.length > HISTORY_PAGE_SIZE};
+    }
+    return {
+      items: Array.isArray(value?.items) ? value.items : [],
+      has_more: Boolean(value?.has_more),
+    };
+  }
+
+  function mergeMessages(...pages) {
+    const messages = new Map();
+    pages.flat().forEach((message) => messages.set(String(message.id), message));
+    return [...messages.values()].sort((left, right) => (
+      Number(left.timestamp || 0) - Number(right.timestamp || 0)
+      || Number(left.id || 0) - Number(right.id || 0)
+    ));
   }
 
   function renderConversations() {
@@ -1739,17 +1779,19 @@
     return `<div class="message-bubble">${escapeHtml(presentation.content)}</div>`;
   }
 
+  function messageMarkup(message) {
+    const assistant = message.role === "assistant";
+    const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
+    const identity = !assistant ? (message.wechat_id || message.sender_id || "") : "";
+    return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
+  }
+
   function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
     const list = $("#messageList");
     const previousIds = new Set(state.selectedMessages.map((message) => message.id));
     const added = messages.filter((message) => !previousIds.has(message.id)).length;
     const previousScroll = list.scrollTop;
-    list.innerHTML = messages.length ? messages.map((message) => {
-      const assistant = message.role === "assistant";
-      const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
-      const identity = !assistant ? (message.wechat_id || message.sender_id || "") : "";
-      return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
-    }).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
+    list.innerHTML = messages.length ? messages.map(messageMarkup).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
     bindAvatarFallbacks(list);
     state.selectedMessages = messages;
     const newButton = $("#newMessageButton");
@@ -1765,22 +1807,46 @@
     }
   }
 
+  function prependOlderMessages(messages) {
+    const existing = new Set(state.selectedMessages.map((message) => String(message.id)));
+    const older = messages.filter((message) => !existing.has(String(message.id)));
+    if (!older.length) return;
+    const list = $("#messageList");
+    const previousHeight = list.scrollHeight;
+    const previousScroll = list.scrollTop;
+    list.insertAdjacentHTML("afterbegin", older.map(messageMarkup).join(""));
+    bindAvatarFallbacks(list);
+    state.selectedMessages = mergeMessages(older, state.selectedMessages);
+    list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
+  }
+
   async function selectConversation(conversationId, options = {}) {
     const item = state.conversations.find((value) => value.conversation_id === conversationId);
     if (!item) return;
     const silent = options?.silent === true;
-    const changed = state.selectedConversation?.conversation_id !== conversationId;
+    const query = JSON.stringify(historyFilters());
+    const changed = state.selectedConversation?.conversation_id !== conversationId || state.historyMessageQuery !== query;
     const list = $("#messageList");
     const nearBottom = changed || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     state.selectedConversation = item;
-    if (changed) state.selectedMessages = [];
+    if (changed) {
+      state.selectedMessages = [];
+      state.historyHasMore = false;
+      state.historyLoadingOlder = false;
+      state.historyMessageQuery = query;
+      state.historyOlderLoad += 1;
+      list.removeAttribute("aria-busy");
+      $("#olderMessagesStatus").hidden = true;
+    }
     renderConversations();
     renderConversationHeader(item);
     if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     const load = ++state.messageLoad;
     try {
-      const messages = await api("get_messages", conversationId, historyFilters());
+      const page = normalizeMessagePage(await api("get_messages", conversationId, pagedHistoryFilters()));
       if (load !== state.messageLoad || state.selectedConversation?.conversation_id !== conversationId) return;
+      const messages = changed ? page.items : mergeMessages(state.selectedMessages, page.items);
+      if (changed) state.historyHasMore = page.has_more;
       if (changed || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
         renderMessages(messages, {forceBottom: changed, nearBottom});
       }
@@ -1788,13 +1854,41 @@
     } catch (error) { if (!silent) reportError(error); }
   }
 
+  async function loadOlderMessages() {
+    const list = $("#messageList");
+    const selected = state.selectedConversation;
+    const oldest = state.selectedMessages[0];
+    if (!selected || !oldest || !state.historyHasMore || state.historyLoadingOlder || list.scrollTop > HISTORY_PRELOAD_THRESHOLD) return;
+    state.historyLoadingOlder = true;
+    const request = ++state.historyOlderLoad;
+    const messageGeneration = state.messageLoad;
+    const status = $("#olderMessagesStatus");
+    list.setAttribute("aria-busy", "true");
+    const feedbackTimer = window.setTimeout(() => {
+      if (request === state.historyOlderLoad) status.hidden = false;
+    }, 300);
+    try {
+      const page = normalizeMessagePage(await api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest)));
+      if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
+      state.historyHasMore = page.has_more;
+      prependOlderMessages(page.items);
+    } catch (error) {
+      if (request === state.historyOlderLoad) reportError(error);
+    } finally {
+      window.clearTimeout(feedbackTimer);
+      if (request === state.historyOlderLoad) {
+        state.historyLoadingOlder = false;
+        status.hidden = true;
+        list.removeAttribute("aria-busy");
+      }
+    }
+  }
+
   async function pollHistory() {
-    if (state.activePage !== "history" || state.historyPolling) return;
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
     state.historyPolling = true;
     try {
-      const selectedId = state.selectedConversation?.conversation_id || "";
       await loadConversations({silent: true});
-      if (selectedId) await selectConversation(selectedId, {silent: true});
     } finally { state.historyPolling = false; }
   }
 
@@ -3054,6 +3148,7 @@
     });
     $("#messageList").addEventListener("scroll", () => {
       const list = $("#messageList");
+      if (list.scrollTop <= HISTORY_PRELOAD_THRESHOLD) void loadOlderMessages();
       if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
     $("#exportHistory").addEventListener("click", async () => { try { const result = await api("export_history", "csv"); if (!result?.cancelled) toast(`已导出到 ${result.path}`); } catch (error) { reportError(error); } });
@@ -3459,7 +3554,14 @@
           return [message.sender_name, message.wechat_id, message.group_nickname, message.content]
             .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(search));
         });
-        return ok(structuredClone(matching));
+        if (filters.paged !== true) return ok(structuredClone(matching));
+        const before = filters.before;
+        const older = before ? matching.filter((message) => (
+          Number(message.timestamp) < Number(before.timestamp)
+          || (Number(message.timestamp) === Number(before.timestamp) && Number(message.id) < Number(before.id))
+        )) : matching;
+        const pageSize = Math.max(1, Math.min(Number(filters.page_size) || HISTORY_PAGE_SIZE, HISTORY_PAGE_SIZE));
+        return ok({items: structuredClone(older.slice(-pageSize)), has_more: older.length > pageSize});
       },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),

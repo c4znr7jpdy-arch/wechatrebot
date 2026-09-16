@@ -146,6 +146,55 @@ def test_history_prefers_bridge_journal_without_memory_plugin(tmp_path: Path) ->
     assert service.messages("456@chatroom")[0]["content"] == "点歌 发如雪"
 
 
+def test_history_messages_use_stable_twenty_item_cursor_pages(tmp_path: Path) -> None:
+    source = _source(tmp_path)
+    with sqlite3.connect(source) as connection:
+        connection.execute("DELETE FROM messages")
+        connection.executemany(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (
+                    message_id,
+                    "source:FriendMessage:wxid_page",
+                    "user",
+                    f"消息 {message_id}",
+                    "wxid_page",
+                    "分页好友",
+                    "",
+                    "source",
+                    100.0,
+                    "{}",
+                )
+                for message_id in range(1, 46)
+            ),
+        )
+    service = ChatHistoryService(tmp_path)
+
+    latest = service.messages("wxid_page", limit=20)
+    middle = service.messages(
+        "wxid_page",
+        before=latest[0]["timestamp"],
+        before_id=latest[0]["id"],
+        limit=20,
+    )
+    oldest = service.messages(
+        "wxid_page",
+        before=middle[0]["timestamp"],
+        before_id=middle[0]["id"],
+        limit=20,
+    )
+
+    assert [item["content"] for item in latest] == [
+        f"消息 {message_id}" for message_id in range(26, 46)
+    ]
+    assert [item["content"] for item in middle] == [
+        f"消息 {message_id}" for message_id in range(6, 26)
+    ]
+    assert [item["content"] for item in oldest] == [
+        f"消息 {message_id}" for message_id in range(1, 6)
+    ]
+
+
 def test_structured_wechat_messages_have_readable_summaries() -> None:
     samples = (
         ('<msg><emoji md5="abc" /></msg>', "[表情]"),

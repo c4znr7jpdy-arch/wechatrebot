@@ -565,6 +565,7 @@ class ChatHistoryService:
         conversation_id: str,
         *,
         before: float | None = None,
+        before_id: int | None = None,
         search: str = "",
         start_time: float | None = None,
         end_time: float | None = None,
@@ -579,8 +580,12 @@ class ChatHistoryService:
             clauses.append("account_id = ?")
             params.append(normalized_account)
         if before is not None:
-            clauses.append("timestamp < ?")
-            params.append(float(before))
+            if before_id is None:
+                clauses.append("timestamp < ?")
+                params.append(float(before))
+            else:
+                clauses.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
+                params.extend((float(before), float(before), int(before_id)))
         if search.strip():
             term = search.strip()
             if term.casefold().startswith("wxid_"):
@@ -610,7 +615,7 @@ class ChatHistoryService:
                        content, timestamp
                 FROM messages
                 WHERE {' AND '.join(clauses)}
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, id DESC
                 LIMIT ?
                 """,
                 params,
