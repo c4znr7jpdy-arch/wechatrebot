@@ -41,3 +41,40 @@
 - 全量测试：401 passed，26 failed；失败由当前 Python 3.11 32 位环境缺少 `os.path.isreserved`，以及正式发布测试要求 Python 3.13 x64 导致，与本次 Web UI 改动无关。
 
 结论：设计还原与关键交互验收通过。
+
+---
+
+# 定时任务页面重设计 QA（2026-09-16）
+
+- source visual truth path: `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-1ccff770-7b0f-4112-a747-7f5ed63c7c61.png`
+- implementation screenshot path: `E:\wechatrebot\output\design-qa\schedule-main-1266x713.png`
+- responsive evidence: `E:\wechatrebot\output\design-qa\schedule-desktop.png`、`E:\wechatrebot\output\design-qa\schedule-mobile.png`
+- viewport: 主内容对照 1266×713；桌面 1440×960；窄屏 430×932；device scale factor 1
+- normalization: 参考图与主内容截图均为 1266×713；实现截图从 1502×713 视口裁去 236px 产品侧栏后对照。
+- state: 已登录账号、零任务、默认筛选、浅色主题。
+
+## Findings
+
+- 无剩余 P0/P1/P2。产品侧栏、底部聊天规则属于现有应用结构，参考图仅定义内容区，因此作为预期差异保留；时钟图标符合“日历/时钟”要求。
+
+## Fidelity surfaces
+
+- 字体：沿用产品既有数黑标题与微软雅黑正文，标题、统计数字和辅助文案层级清楚，无截断。
+- 间距：48px 单排统计条、列表内筛选顶栏、空态中心线和 CTA 间距与参考意图一致。
+- 色彩：沿用 `#2F6BFF`、浅蓝底板、白色表面与灰蓝边框，状态色语义未改变。
+- 图像与图标：页面无位图资产；复用产品时钟图标库，36px 图标置于 64px 浅蓝底板。
+- 文案：使用“暂无定时任务”及天气、资讯、提醒场景引导；筛选无结果使用独立文案。
+- 无障碍：筛选均有关联标签，计数使用 live region，按钮焦点规则沿用全局样式。
+
+## Comparison history
+
+1. 首轮发现顶部“控制台”、预览提示和空表头增加噪音；已隐藏重复上下文、清除正常空态提示并在零任务时隐藏表头。复查证据：`schedule-desktop.png`。
+2. 430px 首轮发现空态继承 810px 表格宽度而横向偏移；已为零任务表格切换 `is-empty` 并恢复 100% 宽度。复查证据：`schedule-mobile.png`，document/content 均无横向溢出。
+3. 最终同尺寸主内容对照通过；关键文字、控件和图标在完整截图中可读，无需额外局部放大。
+
+## Interaction and console
+
+- 已验证空态 CTA 进入新建任务编辑器并可返回；刷新与内容筛选生效。
+- 1440×960 与 430×932 均无横向溢出；浏览器控制台 0 warning/error。
+
+final result: passed

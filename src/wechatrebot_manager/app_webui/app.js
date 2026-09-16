@@ -464,6 +464,9 @@
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
     $("#pageTitle").textContent = PAGE_TITLES[page];
+    $("#pageContextLabel").hidden = page === "schedules";
+    $("#defaultTopActions").hidden = page === "schedules";
+    $("#scheduleTopActions").hidden = page !== "schedules";
     document.title = `${PAGE_TITLES[page]} · ${state.bootstrap?.brand?.display_name || "机器人管理"}`;
     const content = $(".content-scroll");
     if (content) {
@@ -2027,7 +2030,9 @@
 
   function renderScheduledTasks() {
     const all = state.scheduledContext?.items || [];
-    $("#scheduleTotal").textContent = all.length + state.schedules.length;
+    const total = all.length + state.schedules.length;
+    $("#scheduleTotal").textContent = total;
+    $("#scheduleTableTotal").textContent = total;
     $("#scheduleRunning").textContent = all.filter((item) => item.enabled).length + state.schedules.filter((item) => item.enabled).length;
     $("#schedulePaused").textContent = all.filter((item) => !item.enabled && item.status !== "completed").length + state.schedules.filter((item) => !item.enabled).length;
     const action = $("#scheduledActionFilter").value;
@@ -2043,12 +2048,14 @@
       && (target === "all" || (item.targets || []).some((entry) => entry.type === target))
       && (!chat || (item.targets || []).some((entry) => entry.id === chat.id && entry.type === chat.type))
       && (status === "all" || (status === "enabled" && item.enabled) || (status === "draft" && item.draft) || (status === "paused" && !item.enabled && !item.draft && item.status !== "completed") || (status === "attention" && ["blocked", "failed", "waiting_account", "waiting_runtime"].includes(item.status))));
+    $("#scheduledTaskHead").hidden = items.length === 0;
+    $("#scheduledTaskTable").classList.toggle("is-empty", items.length === 0);
     $("#scheduledTaskRows").innerHTML = items.length ? items.map((item) => `<tr>
       <td><button class="row-action scheduled-name" data-task-action="edit" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name || scheduledName(item))}</button><small>${escapeHtml(SCHEDULED_ACTIONS[item.action] || "定时任务")}</small></td>
       <td><span>${escapeHtml(scheduledTargetText(item.targets))}</span><small class="schedule-target-names">${escapeHtml((item.targets || []).map((entry) => entry.name || "待确认对象").join("、"))}</small></td>
       <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(scheduledTime(item.next_run_time))}</small></td>
       <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
-      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5"><div class="empty-state compact"><div class="empty-symbol">时</div><h2>${all.length ? "没有符合条件的任务" : "还没有定时任务"}</h2><p>${all.length ? "调整筛选条件，或为这个聊天新建任务。" : "从天气、资讯、影视推荐或一句文字提醒开始。选择内容、对象和时间后，再由你启用。"}</p><button class="button primary" id="emptyNewScheduledTask">新建任务</button></div></td></tr>`;
+      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="schedule-empty-cell"><div class="schedule-empty-state"><div class="schedule-empty-icon" aria-hidden="true">${icon("i-clock")}</div><h2>${all.length ? "没有符合条件的任务" : "暂无定时任务"}</h2><p>${all.length ? "调整内容、发送对象或状态筛选，查看其他任务。" : "可创建每日天气预报、定时资讯或一句提醒，选择发送对象后自动触发。"}</p><button class="button secondary schedule-empty-cta" id="emptyNewScheduledTask">${all.length ? "+ 新建任务" : "+ 创建第一个定时任务"}</button></div></td></tr>`;
     $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id)));
     $("#emptyNewScheduledTask")?.addEventListener("click", () => openScheduledEditor());
   }
@@ -3625,7 +3632,7 @@
       },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),
-      get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: "预览模式：任务只保存在当前页面，不会发送微信。"}),
+      get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: ""}),
       save_scheduled_task: (payload) => ok(previewTaskSave(payload)),
       delete_scheduled_task: (_account, id) => { previewTasks.delete(id); return ok({deleted: true}); },
       set_scheduled_task_enabled: (_account, id, enabled) => ok(previewTaskSave({...previewTasks.get(id), enabled, draft: false})),
