@@ -1011,6 +1011,23 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
     assert '"模型服务已保存，当前回复模型保持不变。"' in script
 
 
+def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="provider-card-header"' in script
+    assert 'class="provider-add-card"' in script
+    assert 'data-provider-delete="${escapeHtml(item.id)}"' in script
+    assert 'function providerCardIdentity(service)' in script
+    assert ".provider-service-cards { display: grid; grid-template-columns: repeat(3,minmax(0,1fr));" in styles
+    assert "@media (max-width: 1220px)" in styles
+    assert ".provider-service-cards { grid-template-columns: 1fr; padding: 16px; }" in styles
+    assert 'id="i-more"' in markup
+    assert 'id="i-plus"' in markup
+
+
 def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     app_script = (webui / "app.js").read_text(encoding="utf-8")

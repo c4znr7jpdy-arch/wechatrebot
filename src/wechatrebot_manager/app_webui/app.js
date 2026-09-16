@@ -2579,6 +2579,13 @@
     return "custom";
   }
 
+  function providerCardIdentity(service) {
+    const preset = providerPresetFor(service);
+    if (preset === "free_grok") return {mark: "X", label: "xAI · Grok", className: "grok"};
+    if (preset === "deepseek") return {mark: "D", label: "DeepSeek", className: "deepseek"};
+    return {mark: "AI", label: "兼容服务", className: "custom"};
+  }
+
   function applyProviderPreset(presetId) {
     const form = $("#providerForm");
     const preset = (state.bootstrap?.provider_presets || []).find((item) => item.id === presetId);
@@ -2642,20 +2649,56 @@
 
   function renderProviderServices() {
     const items = state.bootstrap?.providers || [];
+    const displayItems = [...items].sort((left, right) => Number(right.is_default) - Number(left.is_default));
     const status = $("#providerStatus");
     const defaultProvider = items.find((item) => item.is_default);
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
     status.textContent = defaultProvider ? `${items.length} 项服务` : "0 项服务";
     $("#providerServiceList").innerHTML = items.length ? `
-      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>服务配置只保存在当前设备。</span></div><button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button></div>
-      <div class="provider-service-cards">${items.map((item) => `
+      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，服务密钥仅保存在当前设备。</span></div></div>
+      <div class="provider-service-cards">${displayItems.map((item) => {
+        const identity = providerCardIdentity(item);
+        const statusText = item.is_default ? "使用中" : item.configured ? "备用" : "待完善";
+        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充服务密钥后即可使用";
+        return `
         <article class="provider-service ${item.is_default ? "active" : ""}">
-          <div class="provider-service-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.is_default ? "当前回复模型 · 配置已统一共享" : item.configured ? "已配置 · 可供相关功能选择" : "缺少服务密钥")}</span></div>
-          <div class="provider-service-actions">
-            ${item.is_default ? '<span class="status-badge online">使用中</span>' : `<button class="button ghost small" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
-            <button class="button secondary small" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
+          <header class="provider-card-header">
+            <div class="provider-card-title">
+              <span class="provider-logo ${identity.className}" aria-hidden="true">${identity.mark}</span>
+              <div class="provider-service-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(identity.label)}</span></div>
+            </div>
+            <div class="provider-card-status-row">
+              <span class="provider-card-status ${item.is_default ? "active" : item.configured ? "ready" : "incomplete"}">${statusText}</span>
+              <details class="provider-card-menu">
+                <summary aria-label="打开 ${escapeHtml(item.name)} 操作菜单" title="更多操作">${icon("i-more")}</summary>
+                <div class="provider-card-menu-popover" role="menu">
+                  <button type="button" role="menuitem" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑服务</button>
+                  ${item.is_default ? "" : `<button type="button" role="menuitem" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
+                  <button class="danger" type="button" role="menuitem" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除服务</button>
+                </div>
+              </details>
+            </div>
+          </header>
+          <div class="provider-service-body">
+            <div class="provider-card-tags">
+              ${item.is_recommended ? '<span>免费</span>' : '<span>自定义</span>'}
+              <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
+            </div>
+            <p>${escapeHtml(description)}</p>
           </div>
-        </article>`).join("")}</div>` : `
+          <footer class="provider-service-actions">
+            <button class="provider-card-action" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
+            ${item.is_default ? '<span class="provider-card-current">正在用于回复</span>' : `<button class="provider-card-action primary" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">切换使用</button>`}
+            <button class="provider-card-action danger" type="button" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除</button>
+          </footer>
+        </article>`;
+      }).join("")}
+        <button class="provider-add-card" type="button" data-action-bound disabled data-provider-create>
+          <span class="provider-add-icon" aria-hidden="true">${icon("i-plus")}</span>
+          <strong>添加模型服务</strong>
+          <small>连接其他兼容模型</small>
+        </button>
+      </div>` : `
       <div class="provider-empty-state">
         <div class="provider-empty-visual" aria-hidden="true"><span></span><i></i><span></span></div>
         <span class="eyebrow">从这里开始</span>
@@ -2831,9 +2874,7 @@
     });
   }
 
-  function deleteSelectedProvider() {
-    const form = $("#providerForm");
-    const providerId = form.elements.provider_id.value;
+  function deleteProvider(providerId) {
     const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
     if (!service) return;
     const alternatives = (state.bootstrap?.providers || []).filter((item) => item.id !== providerId && item.configured);
@@ -2869,6 +2910,10 @@
         toast("模型服务已删除。");
       },
     });
+  }
+
+  function deleteSelectedProvider() {
+    deleteProvider($("#providerForm").elements.provider_id.value);
   }
 
   function applyBrand(brand) {
@@ -3260,7 +3305,14 @@
       const edit = event.target.closest("[data-provider-edit]");
       if (edit) { editProvider(edit.dataset.providerEdit); return; }
       const makeDefault = event.target.closest("[data-provider-default]");
-      if (makeDefault) setProviderDefault(makeDefault.dataset.providerDefault, makeDefault);
+      if (makeDefault) { setProviderDefault(makeDefault.dataset.providerDefault, makeDefault); return; }
+      const remove = event.target.closest("[data-provider-delete]");
+      if (remove) deleteProvider(remove.dataset.providerDelete);
+    });
+    document.addEventListener("click", (event) => {
+      $$(".provider-card-menu[open]").forEach((menu) => {
+        if (!menu.contains(event.target)) menu.removeAttribute("open");
+      });
     });
     $("#openInstall").addEventListener("click", async () => { try { await api("open_install_folder"); } catch (error) { reportError(error); } });
     $("#openUninstaller").addEventListener("click", async () => { try { await api("open_uninstaller"); } catch (error) { reportError(error); } });
