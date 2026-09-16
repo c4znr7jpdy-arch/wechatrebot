@@ -6,6 +6,7 @@ Only explicitly saved tasks exist; reading an empty store never seeds jobs.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
@@ -61,8 +62,8 @@ def validate_account(value: Any) -> str:
 
 
 def normalize_schedule(raw: Any, *, draft: bool = False) -> dict[str, Any]:
-    if not isinstance(raw, dict) or raw.get("kind") not in {"once", "daily", "weekly"}:
-        raise ValueError("请选择仅一次、每天或每周执行。")
+    if not isinstance(raw, dict) or raw.get("kind") not in {"once", "daily", "weekly", "monthly"}:
+        raise ValueError("请选择仅一次、每天、每周或每月执行。")
     clock = raw.get("time")
     if not isinstance(clock, str) or (not _CLOCK.fullmatch(clock) and not (draft and not clock)):
         raise ValueError("请输入有效的执行时间，格式为 HH:MM。")
@@ -86,6 +87,15 @@ def normalize_schedule(raw: Any, *, draft: bool = False) -> dict[str, Any]:
         if not isinstance(days, list) or (not days and not draft) or any(type(day) is not int or not 0 <= day <= 6 for day in days):
             raise ValueError("请至少选择每周的一天。")
         result["weekdays"] = sorted(set(days))
+    if raw["kind"] == "monthly":
+        days = raw.get("monthdays", [])
+        last_day = raw.get("last_day", False)
+        if (not isinstance(days, list) or type(last_day) is not bool
+                or any(type(day) is not int or not 1 <= day <= 31 for day in days)
+                or (not days and not last_day and not draft)):
+            raise ValueError("请至少选择每月的一个日期或月末最后一天。")
+        result["monthdays"] = sorted(set(days))
+        result["last_day"] = last_day
     return result
 
 
@@ -97,9 +107,18 @@ def next_occurrences(schedule: dict[str, Any], now: datetime | None = None, coun
     if schedule["kind"] == "once":
         occurrence = datetime.combine(date.fromisoformat(schedule["date"]), clock, BEIJING)
         return [occurrence.isoformat()] if occurrence > current else []
-    for offset in range(max(1, min(count, 20)) * 7 + 1):
+    count = max(1, min(count, 20))
+    # A task on the 31st can skip a short month. 62 days per occurrence
+    # covers that gap while retaining the existing bounded preview size.
+    horizon = 62 if schedule["kind"] == "monthly" else 7
+    for offset in range(count * horizon + 1):
         day = current.date() + timedelta(days=offset)
         if schedule["kind"] == "weekly" and day.weekday() not in schedule["weekdays"]:
+            continue
+        if schedule["kind"] == "monthly" and not (
+            day.day in schedule["monthdays"]
+            or (schedule["last_day"] and day.day == monthrange(day.year, day.month)[1])
+        ):
             continue
         occurrence = datetime.combine(day, clock, BEIJING)
         if occurrence > current:
@@ -115,8 +134,13 @@ def schedule_text(schedule: dict[str, Any]) -> str:
         prefix = schedule["date"]
     elif schedule["kind"] == "daily":
         prefix = "每天"
+    elif schedule["kind"] == "monthly":
+        dates = [f"{day}日" for day in schedule["monthdays"]]
+        if schedule["last_day"]:
+            dates.append("最后一天")
+        prefix = "每月" + "、".join(dates)
     else:
-        prefix = "、".join(("周一", "周二", "周三", "周四", "周五", "周六", "周日")[day] for day in schedule["weekdays"])
+        prefix = "每周" + "、".join(("一", "二", "三", "四", "五", "六", "日")[day] for day in schedule["weekdays"])
     return f"{prefix} {schedule['time']}"
 
 

@@ -116,3 +116,34 @@ def test_perform_install_does_not_require_wechat(
     )
     assert manager["wechat_exe_path"] == ""
     assert bridge["wechat_exe_path"] == ""
+
+
+def test_install_creates_both_root_executables(tmp_path: Path, monkeypatch) -> None:
+    from wechatrebot_manager.installed_entries import START_EXECUTABLE_NAME
+    from wechatrebot_manager.uninstaller import UNINSTALL_EXECUTABLE_NAME
+
+    payload = tmp_path / "payload"
+    _payload(payload)
+    executable = payload / "manager" / "WeChatReBot.exe"
+    executable.parent.mkdir()
+    executable.write_bytes(b"test-manager")
+    manifest_path = payload / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].append({
+        "path": "manager/WeChatReBot.exe",
+        "sha256": hashlib.sha256(executable.read_bytes()).hexdigest().upper(),
+    })
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        "wechatrebot_manager.installer.validate_install_path",
+        lambda path, **_kwargs: InstallPathValidation(Path(path), (), (), 10 * 1024**3),
+    )
+    # Integration checks must not change this developer machine's Apps entry.
+    monkeypatch.setattr("wechatrebot_manager.uninstaller.register_windows_uninstaller", lambda *a, **k: True)
+    root = tmp_path / "install"
+    perform_install(
+        InstallRequest(root, payload, BrandProfile("群聊管家", "管家", "小管家")),
+        save_locator=False, create_shortcuts=False,
+    )
+    assert (root / START_EXECUTABLE_NAME).read_bytes() == b"test-manager"
+    assert (root / UNINSTALL_EXECUTABLE_NAME).read_bytes() == b"test-manager"

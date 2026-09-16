@@ -9,6 +9,7 @@ from .bootstrap import run_bootstrap
 from .diagnostics import collect_diagnostics
 from .desktop import run_desktop
 from .install_paths import INSTALL_MARKER, prepare_install_layout, validate_install_path
+from .installed_entries import is_start_entrypoint, launch_installed_manager
 from .json_io import write_json_atomic
 from .launcher import ServiceLaunchError, run_services_foreground
 from .payload import (
@@ -86,12 +87,21 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if not values and is_uninstall_entrypoint():
-        from .desktop import install_root_from_executable
+        # Uninstall also supports failed/unfinished installs. Its own validator
+        # reports invalid markers in a visible dialog instead of a hidden crash.
+        return run_uninstaller(Path(sys.executable).resolve().parent)
+    if not values and is_start_entrypoint():
+        try:
+            from .desktop import install_root_from_executable
 
-        root = install_root_from_executable()
-        if root is None:
-            raise FileNotFoundError("未找到可卸载的机器人安装目录。")
-        return run_uninstaller(root)
+            root = install_root_from_executable()
+            if root is None:
+                raise FileNotFoundError("未找到机器人安装目录，请重新安装软件。")
+            launch_installed_manager(root)
+            return 0
+        except Exception as exc:
+            report_startup_error(exc)
+            return 1
     args = _parser().parse_args(values)
     if args.command is None:
         try:

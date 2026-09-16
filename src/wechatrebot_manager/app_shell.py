@@ -73,6 +73,7 @@ from .updates import (
 )
 from .shortcuts import refresh_windows_shortcuts
 from .uninstaller import launch_installed_uninstaller, provision_uninstaller
+from .installed_entries import ensure_launcher_executable
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
 
@@ -1340,6 +1341,7 @@ class ApplicationApi:
 
     def open_install_folder(self) -> dict[str, object]:
         try:
+            ensure_launcher_executable(self._install_root)
             if os.name == "nt":
                 os.startfile(self._install_root)  # type: ignore[attr-defined]
             return self._ok({"opened": True})
@@ -1548,6 +1550,7 @@ def run_application(install_root: str | Path) -> int:
 
         brand = load_robot_settings(install_root).profile
         try:
+            ensure_launcher_executable(install_root)
             provision_uninstaller(
                 install_root,
                 display_name=brand.display_name,

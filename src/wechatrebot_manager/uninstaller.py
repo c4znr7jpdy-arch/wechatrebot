@@ -14,6 +14,7 @@ from typing import Callable
 
 from . import __version__
 from .install_paths import INSTALL_MARKER
+from .installed_entries import copy_manager_executable
 from .json_io import write_json_atomic
 from .location import locator_path
 from .shortcuts import remove_windows_shortcuts
@@ -117,26 +118,7 @@ def ensure_uninstall_executable(
     source = Path(
         source_executable or root / "manager" / "WeChatReBot.exe"
     ).expanduser().resolve()
-    if not source.is_file():
-        return False
-    target = root / UNINSTALL_EXECUTABLE_NAME
-    try:
-        source_stat = source.stat()
-        target_stat = target.stat()
-        if (
-            source_stat.st_size == target_stat.st_size
-            and source_stat.st_mtime_ns == target_stat.st_mtime_ns
-        ):
-            return True
-    except FileNotFoundError:
-        pass
-    temporary = root / f".{UNINSTALL_EXECUTABLE_NAME}.{uuid.uuid4().hex}.tmp"
-    try:
-        shutil.copy2(source, temporary)
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return True
+    return copy_manager_executable(root, UNINSTALL_EXECUTABLE_NAME, source)
 
 
 def register_windows_uninstaller(
@@ -264,6 +246,8 @@ def launch_uninstall_helper(plan: UninstallPlan) -> None:
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "DETACHED_PROCESS", 0
     )
+    environment = os.environ.copy()
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     subprocess.Popen(
         [
             str(plan.helper_executable),
@@ -272,6 +256,7 @@ def launch_uninstall_helper(plan: UninstallPlan) -> None:
             str(plan.plan_path),
         ],
         cwd=plan.plan_path.parent,
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -509,16 +494,22 @@ def remove_installation(
     process_stopper: Callable[[str | Path], int] = stop_installation_processes,
     shortcut_remover: Callable[[], bool] = remove_windows_shortcuts,
     registry_remover: Callable[[], bool] = remove_windows_uninstaller_registration,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> None:
     root = validate_uninstall_root(install_root)
     residual_root = locator_path(local_app_data).parent.resolve()
     if residual_root.parent == residual_root or residual_root.name != "WeChatReBot":
         raise UninstallError("本机残留目录无效，已停止操作。")
+    progress = progress_callback or (lambda _message: None)
+    progress("正在关闭机器人和与机器人连接的微信…")
     process_stopper(root)
+    progress("正在清理快捷方式和卸载记录…")
     if os.name == "nt" and not shortcut_remover():
         raise UninstallError("无法清理桌面或开始菜单快捷方式。")
     registry_remover()
+    progress("正在删除程序和本机数据，文件较多时需要稍候…")
     _remove_tree(root)
+    progress("正在清理本机残留文件…")
     if not _same_path(residual_root, root):
         _remove_tree(residual_root)
 
@@ -569,7 +560,9 @@ def _message_box(message: str, title: str, flags: int) -> int:
     if os.name == "nt":
         import ctypes
 
-        return int(ctypes.windll.user32.MessageBoxW(None, message, title, flags))
+        return int(ctypes.windll.user32.MessageBoxW(
+            None, message, title, flags | 0x00010000 | 0x00040000
+        ))
     print(f"{title}: {message}")
     return 0
 
@@ -591,10 +584,16 @@ def run_uninstaller(install_root: str | Path) -> int:
     if answer != 6:
         return 0
     try:
-        plan = create_uninstall_plan(root)
-        launch_uninstall_helper(plan)
+        from .uninstall_ui import run_uninstall_progress
+
+        def prepare(progress: Callable[[str], None]) -> None:
+            progress("正在准备卸载程序…")
+            plan = create_uninstall_plan(root)
+            launch_uninstall_helper(plan)
+
+        run_uninstall_progress(prepare, close_on_success=True)
         return 0
-    except (OSError, UninstallError) as exc:
+    except Exception as exc:
         _message_box(
             f"卸载程序未能启动：{exc}",
             "微信机器人 · 无法卸载",
@@ -615,22 +614,26 @@ def apply_uninstall_plan(
 ) -> int:
     working = Path(plan_path).expanduser().resolve().parent
     try:
-        payload, root = _validated_plan(plan_path)
-        for pid in _plan_wait_pids(payload):
-            _wait_for_process_exit(pid)
-        remove_installation(
-            root,
-            local_app_data=local_app_data,
-            process_stopper=process_stopper,
-            shortcut_remover=shortcut_remover,
-            registry_remover=registry_remover,
-        )
-        if show_result:
-            _message_box(
-                "微信机器人及其本机数据和残留文件已全部清理。",
-                "微信机器人 · 卸载完成",
-                0x40,
+        def remove(progress: Callable[[str], None]) -> None:
+            payload, root = _validated_plan(plan_path)
+            progress("正在等待卸载准备完成…")
+            for pid in _plan_wait_pids(payload):
+                _wait_for_process_exit(pid)
+            remove_installation(
+                root,
+                local_app_data=local_app_data,
+                process_stopper=process_stopper,
+                shortcut_remover=shortcut_remover,
+                registry_remover=registry_remover,
+                progress_callback=progress,
             )
+
+        if show_result:
+            from .uninstall_ui import run_uninstall_progress
+
+            run_uninstall_progress(remove)
+        else:
+            remove(lambda _message: None)
         return 0
     except Exception as exc:
         if show_result:

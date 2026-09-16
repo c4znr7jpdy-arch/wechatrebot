@@ -97,3 +97,80 @@ def test_apply_uninstall_plan_removes_everything_without_ui(
 def test_chinese_uninstaller_filename_is_double_click_entry() -> None:
     assert uninstaller.is_uninstall_entrypoint(r"D:\Robot\卸载机器人.exe")
     assert not uninstaller.is_uninstall_entrypoint(r"D:\Robot\WeChatReBot.exe")
+
+
+@pytest.mark.parametrize("state", ["failed", "installing", "payload-installed", "ready"])
+def test_double_click_uninstaller_accepts_incomplete_install(monkeypatch, tmp_path: Path, state: str) -> None:
+    from wechatrebot_manager import cli
+
+    root = _installation(tmp_path / "install")
+    (root / INSTALL_MARKER).write_text(
+        json.dumps({"schema_version": 1, "state": state}), encoding="utf-8"
+    )
+    monkeypatch.setattr(cli.sys, "executable", str(root / uninstaller.UNINSTALL_EXECUTABLE_NAME))
+    prompts = []
+    monkeypatch.setattr(uninstaller, "_message_box", lambda *args: prompts.append(args) or 7)
+    assert cli.main([]) == 0
+    assert "确认彻底卸载" in prompts[0][1]
+    assert root.exists()
+
+
+def test_double_click_uninstaller_missing_marker_displays_error(monkeypatch, tmp_path: Path) -> None:
+    from wechatrebot_manager import cli
+
+    monkeypatch.setattr(cli.sys, "executable", str(tmp_path / uninstaller.UNINSTALL_EXECUTABLE_NAME))
+    prompts = []
+    monkeypatch.setattr(uninstaller, "_message_box", lambda *args: prompts.append(args) or 0)
+    assert cli.main([]) == 1
+    assert "无法卸载" in prompts[0][1]
+
+
+def test_visible_uninstall_reports_real_stages_before_deletion(monkeypatch, tmp_path: Path) -> None:
+    from wechatrebot_manager import uninstall_ui
+
+    root = _installation(tmp_path / "install")
+    plan = uninstaller.create_uninstall_plan(
+        root, executable=root / "manager" / "WeChatReBot.exe",
+        parent_pid=0, temp_root=tmp_path / "temporary",
+    )
+    stages = []
+    def show_progress(operation):
+        assert root.exists()
+        operation(lambda message: stages.append((message, root.exists())))
+    monkeypatch.setattr(uninstall_ui, "run_uninstall_progress", show_progress)
+    assert uninstaller.apply_uninstall_plan(
+        plan.plan_path, schedule_cleanup=False,
+        process_stopper=lambda _root: 0,
+        shortcut_remover=lambda: True, registry_remover=lambda: True,
+        local_app_data=tmp_path / "local",
+    ) == 0
+    assert len(stages) == 5
+    assert "等待" in stages[0][0]
+    assert "删除程序" in stages[3][0] and stages[3][1]
+    assert "残留" in stages[4][0] and not stages[4][1]
+
+
+def test_ui_failure_does_not_silently_remove_files(monkeypatch, tmp_path: Path) -> None:
+    from wechatrebot_manager import uninstall_ui
+
+    root = _installation(tmp_path / "install")
+    plan = uninstaller.create_uninstall_plan(
+        root, executable=root / "manager" / "WeChatReBot.exe",
+        parent_pid=0, temp_root=tmp_path / "temporary",
+    )
+    def unavailable(_operation):
+        raise RuntimeError("测试窗口创建失败")
+    prompts = []
+    monkeypatch.setattr(uninstall_ui, "run_uninstall_progress", unavailable)
+    monkeypatch.setattr(uninstaller, "_message_box", lambda *args: prompts.append(args) or 0)
+    assert uninstaller.apply_uninstall_plan(plan.plan_path, schedule_cleanup=False) == 1
+    assert root.exists()
+    assert "卸载失败" in prompts[0][1]
+
+
+def test_uninstall_helper_uses_independent_frozen_environment(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    monkeypatch.setattr(uninstaller.subprocess, "Popen", lambda argv, **kw: calls.append((argv, kw)))
+    plan = uninstaller.UninstallPlan(tmp_path / "plan.json", tmp_path / "helper.exe")
+    uninstaller.launch_uninstall_helper(plan)
+    assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"

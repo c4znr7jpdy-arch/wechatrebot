@@ -1941,6 +1941,7 @@
   const SCHEDULED_ACTIONS = {weather: "天气预报", news: "热点资讯", oilprice: "油价提醒", kfc: "星期四文案", short_drama: "影视推荐", text: "文字提醒"};
   const SCHEDULED_DEFAULTS = {weather: {city: "", day: "today", output: "image"}, news: {count: 10}, oilprice: {province: ""}, kfc: {}, short_drama: {media_type: "短剧", limit: 12}, text: {text: ""}};
   const SCHEDULED_DAYS = ["一", "二", "三", "四", "五", "六", "日"];
+  const SCHEDULED_WEEK_PRESETS = {thursday: [3], weekdays: [0, 1, 2, 3, 4], weekends: [5, 6]};
   const SCHEDULED_RESULTS = {submitted: "已提交微信", failed: "发送失败", unknown: "结果待确认", skipped: "已跳过", pending: "等待发送", running: "正在执行", completed: "执行完成", partial: "部分失败"};
 
   function scheduledTime(value) {
@@ -1954,7 +1955,26 @@
     const time = schedule.time || "待选择时间";
     if (schedule.kind === "once") return `${schedule.date || "待选择日期"} ${time}，仅一次`;
     if (schedule.kind === "weekly") return `每周${(schedule.weekdays || []).map((day) => SCHEDULED_DAYS[day]).join("、") || "待选择"} ${time}`;
+    if (schedule.kind === "monthly") return `每月${[...(schedule.monthdays || []).map((day) => `${day}日`), ...(schedule.last_day ? ["最后一天"] : [])].join("、") || "待选择日期"} ${time}`;
     return `每天 ${time}`;
+  }
+
+  function scheduledKindValue(schedule) {
+    if (schedule.kind !== "weekly") return schedule.kind;
+    return Object.keys(SCHEDULED_WEEK_PRESETS).find((key) => {
+      const days = schedule.weekdays || [];
+      return days.length === SCHEDULED_WEEK_PRESETS[key].length && SCHEDULED_WEEK_PRESETS[key].every((day) => days.includes(day));
+    }) || "weekly";
+  }
+
+  function scheduledTimingMarkup(schedule) {
+    const kinds = {daily: "每天", thursday: "每周四", weekdays: "每周一至周五", weekends: "每周末（周六、周日）", weekly: "每周（自选星期，可多选）", monthly: "每月（自选日期，可多选）", once: "仅一次"};
+    return `<div class="scheduled-time-fields"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind">${Object.entries(kinds).map(([value, label]) => `<option value="${value}" ${scheduledKindValue(schedule) === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
+      <div class="form-field"><label for="scheduledTime">北京时间</label><input id="scheduledTime" type="time" value="${escapeHtml(schedule.time || "08:00")}"></div>
+      <div class="form-field" id="scheduledDateField" ${schedule.kind !== "once" ? "hidden" : ""}><label for="scheduledDate">执行日期</label><input id="scheduledDate" type="date" value="${escapeHtml(schedule.date || "")}"></div></div>
+      <div id="scheduledWeekdays" ${schedule.kind !== "weekly" ? "hidden" : ""}><p class="subtle">选择星期（可多选）；只选周四即为每周四发送。</p><div class="schedule-weekdays" role="group" aria-label="每周执行星期">${SCHEDULED_DAYS.map((name, day) => `<label><input type="checkbox" value="${day}" ${(schedule.weekdays || []).includes(day) ? "checked" : ""}>周${name}</label>`).join("")}</div><button id="scheduledThursdayShortcut" class="row-action" type="button">只选周四</button><button id="scheduledWeekdayShortcut" class="row-action" type="button">选择周一至周五</button></div>
+      <div id="scheduledMonthdays" ${schedule.kind !== "monthly" ? "hidden" : ""}><p class="subtle">选择每月日期（可多选）</p><div class="schedule-weekdays schedule-monthdays" role="group" aria-label="每月执行日期">${Array.from({length: 31}, (_, index) => index + 1).map((day) => `<label><input type="checkbox" value="${day}" ${(schedule.monthdays || []).includes(day) ? "checked" : ""}>${day}日</label>`).join("")}<label class="schedule-month-end"><input id="scheduledLastDay" type="checkbox" ${schedule.last_day ? "checked" : ""}>月末最后一天</label></div><p class="subtle">当月没有所选日期时跳过；选择“月末最后一天”会自动按当月实际天数执行。同一天只发送一次。</p></div>
+      <p class="subtle">电脑离线错过的时间会跳过，恢复后按下一次计划执行。</p>`;
   }
 
   function scheduledTargetText(targets = []) {
@@ -2062,7 +2082,7 @@
         <div id="scheduledReadiness" class="schedule-notice"></div><button class="row-action" id="scheduledPrepareFeature" type="button" hidden>去准备功能，保留当前草稿</button>
         <details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>只识别已支持的内容；不会执行命令或发送消息。</small></details></section>
         <section class="panel scheduled-form-section"><h3><span>2</span>发给谁</h3><p class="subtle">固定选择当前账号的聊天，可同时选择群聊和私聊。</p><div class="scheduled-selected" id="scheduledSelected"></div><div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button><button type="button" data-scheduled-target-tab="private" aria-pressed="false">私聊</button></div><div class="form-field"><label for="scheduledTargetSearch">搜索聊天</label><label class="search-box wide" id="scheduledTargetSearchBox"><svg><use href="#i-search"/></svg><input id="scheduledTargetSearch" type="search" placeholder="搜索群名、昵称或备注" autocomplete="off"><button type="button" class="clear-search" aria-label="清空聊天搜索">×</button></label></div><div id="scheduledTargetChoices" class="scheduled-target-choices"></div></section>
-        <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3><div class="scheduled-time-fields"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind"><option value="daily" ${editor.schedule.kind === "daily" ? "selected" : ""}>每天</option><option value="weekly" ${editor.schedule.kind === "weekly" ? "selected" : ""}>每周</option><option value="once" ${editor.schedule.kind === "once" ? "selected" : ""}>仅一次</option></select></div><div class="form-field"><label for="scheduledTime">北京时间</label><input id="scheduledTime" type="time" value="${escapeHtml(editor.schedule.time || "08:00")}"></div><div class="form-field" id="scheduledDateField" ${editor.schedule.kind !== "once" ? "hidden" : ""}><label for="scheduledDate">执行日期</label><input id="scheduledDate" type="date" value="${escapeHtml(editor.schedule.date || "")}"></div></div><div id="scheduledWeekdays" ${editor.schedule.kind !== "weekly" ? "hidden" : ""}><div class="schedule-weekdays">${SCHEDULED_DAYS.map((name, day) => `<label><input type="checkbox" value="${day}" ${(editor.schedule.weekdays || []).includes(day) ? "checked" : ""}>周${name}</label>`).join("")}</div><button id="scheduledWeekdayShortcut" class="row-action" type="button">选择周一至周五</button></div><p class="subtle">电脑离线错过的时间会跳过，恢复后按下一次计划执行。</p></section>
+        <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3>${scheduledTimingMarkup(editor.schedule)}</section>
       </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">启用只授权本任务向所选聊天定时发送，不会允许 AI 主动聊天。聊天总开关、安静时段及每日上限仍然有效。</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions"><button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button><button class="button primary" id="scheduledSaveEnabled" type="button">${editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>预览只在这里显示；测试发送必须再明确选择一个聊天。</small></aside></div>`;
     $("#scheduledBack").addEventListener("click", () => { if (!guardScheduledDraft(showScheduledList)) { state.scheduledEditor = null; showScheduledList(); } });
     $("#scheduledTaskForm").addEventListener("submit", (event) => event.preventDefault());
@@ -2076,11 +2096,31 @@
     search.addEventListener("compositionend", () => { search.dataset.composing = "false"; searchTargets(); });
     search.addEventListener("input", () => { $("#scheduledTargetSearchBox").classList.toggle("has-value", Boolean(search.value)); if (search.dataset.composing !== "true") searchTargets(); });
     $(".clear-search", $("#scheduledTargetSearchBox")).addEventListener("click", () => { search.value = ""; $("#scheduledTargetSearchBox").classList.remove("has-value"); searchTargets(); search.focus(); });
-    $("#scheduledKind").addEventListener("change", (event) => { editor.schedule.kind = event.target.value; $("#scheduledDateField").hidden = editor.schedule.kind !== "once"; $("#scheduledWeekdays").hidden = editor.schedule.kind !== "weekly"; scheduledChanged(); });
+    const syncScheduleFields = () => {
+      $("#scheduledDateField").hidden = editor.schedule.kind !== "once";
+      $("#scheduledWeekdays").hidden = editor.schedule.kind !== "weekly";
+      $("#scheduledMonthdays").hidden = editor.schedule.kind !== "monthly";
+      $$('#scheduledWeekdays input').forEach((input) => { input.checked = (editor.schedule.weekdays || []).includes(Number(input.value)); });
+    };
+    $("#scheduledKind").addEventListener("change", (event) => {
+      const preset = SCHEDULED_WEEK_PRESETS[event.target.value];
+      editor.schedule.kind = preset ? "weekly" : event.target.value;
+      if (preset) editor.schedule.weekdays = [...preset];
+      if (editor.schedule.kind === "weekly") editor.schedule.weekdays ||= [];
+      if (editor.schedule.kind === "monthly") editor.schedule.monthdays ||= [];
+      syncScheduleFields(); scheduledChanged();
+    });
     $("#scheduledTime").addEventListener("input", (event) => { editor.schedule.time = event.target.value; scheduledChanged(); });
     $("#scheduledDate").addEventListener("input", (event) => { editor.schedule.date = event.target.value; scheduledChanged(); });
-    $$('#scheduledWeekdays input').forEach((input) => input.addEventListener("change", () => { editor.schedule.weekdays = $$('#scheduledWeekdays input:checked').map((entry) => Number(entry.value)); scheduledChanged(); }));
-    $("#scheduledWeekdayShortcut").addEventListener("click", () => { editor.schedule.weekdays = [0, 1, 2, 3, 4]; $$('#scheduledWeekdays input').forEach((input) => { input.checked = Number(input.value) < 5; }); scheduledChanged(); });
+    $$('#scheduledWeekdays input').forEach((input) => input.addEventListener("change", () => { editor.schedule.weekdays = $$('#scheduledWeekdays input:checked').map((entry) => Number(entry.value)); $("#scheduledKind").value = scheduledKindValue(editor.schedule); scheduledChanged(); }));
+    const selectWeekdays = (days) => { editor.schedule.weekdays = [...days]; $("#scheduledKind").value = scheduledKindValue(editor.schedule); syncScheduleFields(); scheduledChanged(); };
+    $("#scheduledThursdayShortcut").addEventListener("click", () => selectWeekdays([3]));
+    $("#scheduledWeekdayShortcut").addEventListener("click", () => selectWeekdays([0, 1, 2, 3, 4]));
+    $$('#scheduledMonthdays input').forEach((input) => input.addEventListener("change", () => {
+      editor.schedule.monthdays = $$('#scheduledMonthdays input[value]:checked').map((entry) => Number(entry.value));
+      editor.schedule.last_day = $("#scheduledLastDay").checked;
+      scheduledChanged();
+    }));
     $("#scheduledParseCommand").addEventListener("click", parseScheduledCommand);
     $("#scheduledPrepareFeature").addEventListener("click", prepareScheduledFeature);
     $("#scheduledPreviewButton").addEventListener("click", previewScheduledContent);

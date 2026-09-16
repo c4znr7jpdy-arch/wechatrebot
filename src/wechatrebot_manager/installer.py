@@ -12,6 +12,7 @@ from .install_paths import (
     validate_install_path,
 )
 from .json_io import write_json_atomic
+from .installed_entries import ensure_launcher_executable
 from .location import save_install_location
 from .payload import (
     PayloadError,
@@ -115,6 +116,7 @@ def perform_install(
                 "state": "ready" if verified is not None else "configured",
             },
         )
+        ensure_launcher_executable(root)
         provision_uninstaller(
             root,
             display_name=normalized_brand.display_name,
