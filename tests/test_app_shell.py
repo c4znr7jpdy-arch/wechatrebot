@@ -751,8 +751,12 @@ def test_chat_management_adds_private_directory_profile_and_feature_scope() -> N
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
-    assert '>消息管理</span>' in markup
-    assert 'role="tablist" aria-label="消息管理分类"' in markup
+    assert '>群聊&amp;私聊管理</span>' in markup
+    assert '>消息中心</span>' in markup
+    assert '<h1 id="groupHeading">群聊&amp;私聊管理</h1>' in markup
+    assert '<h1 id="historyHeading">消息中心</h1>' in markup
+    assert 'role="tablist" aria-label="群聊与私聊管理分类"' in markup
+    assert 'groups: "群聊&私聊管理", history: "消息中心"' in script
     assert 'data-chat-management-tab="private"' in markup
     assert 'id="privateManagementPanel" role="tabpanel"' in markup
     assert 'id="contactSearch"' in markup

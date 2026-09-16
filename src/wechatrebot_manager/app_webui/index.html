@@ -39,8 +39,8 @@
       <nav class="main-nav" aria-label="主导航">
             <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
             <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
-            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="消息管理" title="消息管理"><svg><use href="#i-users"/></svg><span>消息管理</span></button>
-            <button class="nav-item" data-page="history" data-action-bound disabled aria-label="聊天记录" title="聊天记录"><svg><use href="#i-chat"/></svg><span>聊天记录</span></button>
+            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="群聊与私聊管理" title="群聊&私聊管理"><svg><use href="#i-users"/></svg><span>群聊&amp;私聊管理</span></button>
+            <button class="nav-item" data-page="history" data-action-bound disabled aria-label="消息中心" title="消息中心"><svg><use href="#i-chat"/></svg><span>消息中心</span></button>
             <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
             <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
@@ -136,13 +136,13 @@
 
         <section class="page" id="page-groups" aria-labelledby="groupHeading">
           <div class="page-heading compact">
-            <div><span class="eyebrow">会话范围</span><h1 id="groupHeading">消息管理</h1><p id="chatManagementDescription">管理机器人所在群聊的回复规则、可用功能和成员信息。</p></div>
+            <div><span class="eyebrow">会话范围</span><h1 id="groupHeading">群聊&amp;私聊管理</h1><p id="chatManagementDescription">管理机器人所在群聊的回复规则、可用功能和成员信息。</p></div>
             <div class="directory-actions">
               <button class="button secondary" id="refreshGroups" data-action-bound disabled><svg><use href="#i-refresh"/></svg><span>刷新群列表</span></button>
               <button class="button secondary" id="refreshContacts" data-action-bound disabled hidden><svg><use href="#i-refresh"/></svg><span>刷新联系人</span></button>
             </div>
           </div>
-          <div class="management-tabs" role="tablist" aria-label="消息管理分类">
+          <div class="management-tabs" role="tablist" aria-label="群聊与私聊管理分类">
             <button type="button" id="groupManagementTab" role="tab" aria-controls="groupManagementPanel" aria-selected="true" tabindex="0" data-chat-management-tab="groups" class="active" data-action-bound disabled>群聊管理</button>
             <button type="button" id="privateManagementTab" role="tab" aria-controls="privateManagementPanel" aria-selected="false" tabindex="-1" data-chat-management-tab="private" data-action-bound disabled>私聊管理</button>
           </div>
@@ -199,7 +199,7 @@
         </section>
 
         <section class="page" id="page-history" aria-labelledby="historyHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">本机数据</span><h1 id="historyHeading">聊天记录</h1><p>这里是便于查看的本机聊天副本；删除记录不会让机器人忘记长期记忆。</p></div><button class="button secondary" id="exportHistory" data-action-bound disabled><svg><use href="#i-download"/></svg>导出记录</button></div>
+          <div class="page-heading compact"><div><span class="eyebrow">本机数据</span><h1 id="historyHeading">消息中心</h1><p>这里是便于查看的本机聊天副本；删除记录不会让机器人忘记长期记忆。</p></div><button class="button secondary" id="exportHistory" data-action-bound disabled><svg><use href="#i-download"/></svg>导出记录</button></div>
           <div class="history-toolbar panel">
               <div class="segmented" id="historyKinds"><button class="active" data-kind="all" data-action-bound disabled>全部</button><button data-kind="private" data-action-bound disabled>个人聊天</button><button data-kind="group" data-action-bound disabled>群聊</button></div>
               <label class="search-box wide" id="historySearchBox"><svg><use href="#i-search"/></svg><input id="historySearch" type="search" placeholder="搜索昵称、微信号或内容" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
@@ -250,8 +250,8 @@
             <label class="search-box help-search" id="helpSearchBox"><svg><use href="#i-search"/></svg><input id="helpSearch" type="search" placeholder="搜索功能或用法" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空帮助搜索">×</button></label>
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
-            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到消息管理为每个群设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
-            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="消息管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在消息管理中按群设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心调整开关和必要参数，详细用法回到帮助查看。</figcaption></figure></div>
+            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
+            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在群聊&amp;私聊管理中按聊天设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心调整开关和必要参数，详细用法回到帮助查看。</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
           <div class="help-feature-grid" id="helpFeatureGrid"><div class="loading-row panel">正在整理功能说明…</div></div>
@@ -306,7 +306,7 @@
             </section>
 
             <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="机器人核心配置">
-              <div class="core-heading panel"><div><span class="eyebrow">对话与群聊协调</span><h2>机器人核心</h2><p>统一管理身份、唤醒、回复节奏与完整上下文参数；支持按聊天绑定配置模板。</p><small>消息管理中的聊天总开关、回复模式与功能范围仍是最终边界。</small></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button">重新读取</button></div></div>
+              <div class="core-heading panel"><div><span class="eyebrow">对话与群聊协调</span><h2>机器人核心</h2><p>统一管理身份、唤醒、回复节奏与完整上下文参数；支持按聊天绑定配置模板。</p><small>群聊&amp;私聊管理中的聊天总开关、回复模式与功能范围仍是最终边界。</small></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button">重新读取</button></div></div>
               <div class="core-layout"><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-core-view="global">全局配置<span>未绑定聊天的默认配置</span></button><button class="core-nav" type="button" data-core-view="monitor">联系人监控与绑定<span>在场状态、能量与最近决策</span></button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button">新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div><p class="core-sidebar-note">模板未覆盖的参数跟随全局配置；删除模板后，绑定聊天自动回到全局配置。</p></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取机器人核心…</div></section></div>
             </section>
 
@@ -350,7 +350,7 @@
               <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
-              <div class="maintenance-row"><div><strong>使用帮助</strong><span>查看快速开始、消息管理和全部功能说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
+              <div class="maintenance-row"><div><strong>使用帮助</strong><span>查看快速开始、群聊&amp;私聊管理和全部功能说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
               <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、聊天记录、日志、备份及全部本机残留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>

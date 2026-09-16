@@ -7,7 +7,7 @@ from typing import Any
 
 # Paths use the delivered upstream schema. Omitted settings remain in Advanced.
 _GUIDES = {
-    "astrbot_plugin_angel_heart": ("协调群聊接话和多人上下文", "先到消息管理选择群聊和回复方式；需要调整上下文长度时再打开专属配置页。", "它不会建立独立长期记忆库；会话上下文仍受回复引擎的上下文范围限制。", ()),
+    "astrbot_plugin_angel_heart": ("协调群聊接话和多人上下文", "先到群聊&私聊管理选择群聊和回复方式；需要调整上下文长度时再打开专属配置页。", "它不会建立独立长期记忆库；会话上下文仍受回复引擎的上下文范围限制。", ()),
     "astrbot_plugin_bittorrent": ("按关键词查找资源索引", "先填写可用的资源索引站地址，再调整返回数量。", "只检索有权访问和使用的内容；索引站需要可访问。", ("magnet_search.base_url", "magnet_search.max_results", "magnet_search.enable_preview")),
     "astrbot_plugin_livingmemory": ("记住重要对话并在需要时回忆", "先在模型设置中选择 Embedding 文本向量模型和聊天模型，再保持智能召回。", "需要单独配置 Embedding 模型；Grok 等聊天模型不能替代。明确回忆会检索，普通问候默认跳过。", ("provider_settings.embedding_provider_id", "provider_settings.llm_provider_id", "recall_engine.auto_recall_mode", "recall_engine.explicit_recall_phrases", "recall_engine.top_k", "reflection_engine.summary_trigger_rounds")),
     "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "打开专属配置页填写语音服务密钥，管理授权音色、使用范围和语音参数；保存后查看页面反馈并在测试聊天中验证。", "需要 MiMo 语音服务和已授权的参考音频；自动语音会产生服务用量。", ()),
@@ -20,14 +20,14 @@ _GUIDES = {
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
-    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；安排青岛天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在消息管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
+    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；安排青岛天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先填写一个主生图模型即可；确有需要时点击“添加备用模型”再填写第二个。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
     "jiang_rocom": ("使用洛克王国游戏助手", "按插件提示通过二维码或已有凭据绑定游戏账号，再使用角色、阵容、交换或家园能力。", "这是特定游戏工具，不是运势功能；账号凭据不要发到群里。", ()),
-    "jiang_schedule": ("安排内容推送和签到", "在定时任务选择内容、聊天和时间；天气等内容还需在消息管理允许对应功能，再打开该聊天的定时接收开关。旧版计划留在兼容区。", "功能中心启用不等于向全部群发送；没有用户创建并启用的任务时不会推送。旧式群聊写操作仍要求可靠管理员身份。", ()),
+    "jiang_schedule": ("安排内容推送和签到", "在定时任务选择内容、聊天和时间；天气等内容还需在群聊&私聊管理允许对应功能，再打开该聊天的定时接收开关。旧版计划留在兼容区。", "功能中心启用不等于向全部群发送；没有用户创建并启用的任务时不会推送。旧式群聊写操作仍要求可靠管理员身份。", ()),
     "jiang_short_drama": ("搜索内容并安排推送", "在定时任务中选择影视推荐、分类、数量和发送聊天；播放卡片统一打开托管中间页，无需在本机启动服务。旧版计划只在兼容页管理。", "仅访问有权使用的内容；播放依赖内容源与托管播放页可用。", ()),
     "jiang_video_understanding": ("总结微信短视频", "发送视频后使用 /总结视频；先保留当前抽帧数量。", "需要能理解图片的模型；音频不可用时会退回画面分析。", ("max_duration_seconds", "max_file_size_mb", "frame_count", "vision_provider_id", "audio_provider_id", "semantic_fallback_provider_id")),
     "meme_manager": ("管理聊天使用的表情包", "打开专属配置页导入表情包，并绑定到需要使用的会话。", "只导入有权使用的表情；云端同步需要相应图床或存储账号。", ("storage.provider", "sync.status_cache_ttl_seconds")),

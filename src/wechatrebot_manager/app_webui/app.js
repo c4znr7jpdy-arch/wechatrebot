@@ -360,7 +360,7 @@
   }
 
   const PAGE_TITLES = {
-    home: "运行中心", features: "功能中心", groups: "消息管理", history: "聊天记录",
+    home: "运行中心", features: "功能中心", groups: "群聊&私聊管理", history: "消息中心",
     schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助",
   };
 
@@ -2180,7 +2180,7 @@
     const sameAccount = editor.account_id === context.account_id;
     const source = sameAccount ? (type === "group" ? context.groups : context.contacts) || [] : [];
     const items = source.filter((entry) => `${entry.name || ""} ${entry.id || ""}`.toLocaleLowerCase().includes(search));
-    $("#scheduledTargetChoices").innerHTML = items.length ? items.map((entry) => `<label class="scheduled-target-option"><input type="checkbox" value="${escapeHtml(entry.id)}" ${editor.targets.some((target) => target.type === type && target.id === entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.name || "未命名聊天")}</strong><small>${escapeHtml(entry.id)}</small>${entry.message ? `<small class="scheduled-target-warning">${escapeHtml(entry.message)}</small>` : ""}</span></label>`).join("") : `<p class="member-empty">${!sameAccount ? "请登录此任务绑定的微信账号后选择对象。" : search ? "没有匹配的聊天，试试其他名称。" : "暂时没有可选聊天。请在消息管理读取当前账号的目录后刷新。"}</p>`;
+    $("#scheduledTargetChoices").innerHTML = items.length ? items.map((entry) => `<label class="scheduled-target-option"><input type="checkbox" value="${escapeHtml(entry.id)}" ${editor.targets.some((target) => target.type === type && target.id === entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.name || "未命名聊天")}</strong><small>${escapeHtml(entry.id)}</small>${entry.message ? `<small class="scheduled-target-warning">${escapeHtml(entry.message)}</small>` : ""}</span></label>`).join("") : `<p class="member-empty">${!sameAccount ? "请登录此任务绑定的微信账号后选择对象。" : search ? "没有匹配的聊天，试试其他名称。" : "暂时没有可选聊天。请在群聊&私聊管理读取当前账号的目录后刷新。"}</p>`;
     $$('#scheduledTargetChoices input').forEach((input) => input.addEventListener("change", () => { const found = source.find((entry) => entry.id === input.value); editor.targets = editor.targets.filter((entry) => !(entry.type === type && entry.id === input.value)); if (input.checked && found) editor.targets.push({type, id: found.id, name: found.name}); renderScheduledSelected(); scheduledChanged(false); }));
     renderScheduledSelected();
   }
