@@ -51,13 +51,12 @@ def test_curated_paths_match_local_delivered_schemas():
             for key in parts[:-1]:
                 cursor = cursor[key]["items"]
             if parts[-1] not in cursor:
-                patch = (
-                    Path(__file__).parents[1]
-                    / "patches"
-                    / f"astrbot-plugin-{module}.patch"
+                patches = (Path(__file__).parents[1] / "patches").glob(
+                    f"astrbot-plugin-{module}*.patch"
                 )
-                assert patch.is_file() and f'"{parts[-1]}"' in patch.read_text(
-                    encoding="utf-8"
+                assert any(
+                    f'"{parts[-1]}"' in patch.read_text(encoding="utf-8")
+                    for patch in patches
                 ), (module, path)
 
 
@@ -109,7 +108,7 @@ def test_image_generation_moves_all_service_fields_to_common_settings():
         "primary_api_key", "primary_base_url", "primary_model",
         "secondary_enabled", "secondary_api_key", "secondary_base_url",
         "secondary_model", "tertiary_enabled", "tertiary_api_key",
-        "tertiary_base_url", "tertiary_model",
+        "tertiary_base_url", "tertiary_model", "use_system_proxy",
     )
     schema = {key: {"type": "string", "default": ""} for key in fields}
 

@@ -3211,11 +3211,13 @@
       tertiary_api_key: {description: "第三顺位生图 API Key", type: "string", secret: true, hint: "不使用第三顺位服务时可以留空。"},
       tertiary_base_url: {description: "第三顺位生图 API Base URL", type: "string"},
       tertiary_model: {description: "第三顺位生图模型", type: "string"},
+      use_system_proxy: {description: "使用系统代理", type: "bool", hint: "生图服务无法连接时，使用本机已有的代理设置。"},
     };
     const imageConfig = {
       primary_api_key: "", primary_base_url: "https://api.hostcentral.cc/", primary_model: "gpt-image-2",
       secondary_enabled: true, secondary_api_key: "", secondary_base_url: "https://api.gemai.cc/v1", secondary_model: "gpt-image-2-2K",
       tertiary_enabled: true, tertiary_api_key: "", tertiary_base_url: "https://api.minimaxi.com/v1", tertiary_model: "image-01",
+      use_system_proxy: true,
     };
     const previewGuides = {};
     const previewGuideOverrides = {
@@ -3224,7 +3226,7 @@
       "定时任务": {summary: "安排内容推送和签到", setup_steps: ["打开专属配置页创建计划，再到定时任务中心调整。"], prerequisites: ["写操作仅允许可靠管理员身份；共享账号签到仅允许机器人管理员。"], audience: "群管理常用", readiness: "权限已加固", recommendation: "建议保留；任务按当前会话隔离，微信无法确认群角色时默认拒绝修改。"},
       "自动改代码（实验）": {summary: "实验性的功能代码维护", setup_steps: ["仅由了解代码与回滚的维护人员使用。"], prerequisites: ["可读写并重新加载功能代码。"], audience: "不建议默认启用", readiness: "实验性高风险", recommendation: "不属于群主管理刚需，应从小白默认界面和新安装默认项移除。"},
       "群成员变动通知": {summary: "提示入群、退群和群昵称变化", setup_steps: ["设置提示文案后在测试群验证。"], prerequisites: ["不能发布或编辑微信群公告。"], audience: "群管理常用", readiness: "收到成员事件即可用", recommendation: "建议保留，并始终使用准确名称。"},
-      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["填写首选生图服务的 API Key、地址和模型。", "需要回退服务时再启用并填写次选或第三顺位。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
+      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["填写首选生图服务的 API Key、地址和模型。", "生图服务无法连接时，检查“使用系统代理”设置。", "需要回退服务时再启用并填写次选或第三顺位。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
       "洛克王国助手": {summary: "使用洛克王国游戏助手", setup_steps: ["通过二维码或已有凭据绑定游戏账号。"], prerequisites: ["账号凭据不要发到群里。"], audience: "兴趣选配", readiness: "需要游戏账号绑定", recommendation: "仅洛克王国用户群有必要，不是运势功能。"},
     };
     const previewSavedConfigs = new Map();

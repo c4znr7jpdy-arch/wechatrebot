@@ -1,0 +1,116 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+index 16decad..960322a 100644
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -62,5 +62,11 @@
+     "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u6a21\u578b",
+     "type": "string",
+     "default": "image-01"
++  },
++  "use_system_proxy": {
++    "description": "\u4f7f\u7528\u7cfb\u7edf\u4ee3\u7406",
++    "hint": "\u751f\u56fe\u8bf7\u6c42\u4f7f\u7528\u672c\u673a\u5df2\u6709\u7684\u4ee3\u7406\u8bbe\u7f6e\uff1b\u8fde\u63a5\u670d\u52a1\u5931\u8d25\u65f6\u8bf7\u4fdd\u6301\u5f00\u542f\u3002",
++    "type": "bool",
++    "default": true
+   }
+ }
+diff --git a/main.py b/main.py
+index 4728c7a..949d9d2 100644
+--- a/main.py
++++ b/main.py
+@@ -170,6 +170,7 @@ class Main(star.Star):
+             ("secondary_base_url", "secondary_model", "secondary_enabled", "secondary_api_key"),
+             ("tertiary_base_url", "tertiary_model", "tertiary_enabled", "tertiary_api_key"),
+         )
++        use_system_proxy = bool(self.config.get("use_system_proxy", True))
+         public = self.model_manager.public_config()
+         active_id = str(public.get("active_model") or "")
+         active = next(
+@@ -207,9 +208,16 @@ class Main(star.Star):
+                 and enabled == profile.get("enabled", True)
+                 and int(profile.get("fallback_priority", 0)) == index
+                 and not api_key
++                and use_system_proxy == bool(profile.get("trust_env", False))
+             ):
+                 continue
+             payload = dict(profile)
++            if (
++                index == 0
++                and profile.get("name") == "HostCentral GPT Image 2"
++                and "hostcentral.cc" not in (base_url or str(profile.get("base_url") or "")).lower()
++            ):
++                payload["name"] = "首选生图模型"
+             if base_url:
+                 payload["base_url"] = base_url
+             if model:
+@@ -217,6 +225,7 @@ class Main(star.Star):
+             if api_key:
+                 payload["api_key_source"] = {"type": "stored"}
+                 payload["api_key"] = api_key
++            payload["trust_env"] = use_system_proxy
+             payload["enabled"] = enabled
+             payload["fallback_priority"] = index
+             self.model_manager.upsert_profile(payload)
+@@ -308,7 +317,8 @@ class Main(star.Star):
+             return error_response(str(exc), status_code=400)
+         except Exception as exc:
+             logger.warning("[IMAGE] WebUI 模型连接检查失败: %s", exc)
+-            return error_response(str(exc), status_code=502)
++            profile = self.model_manager.get_profile(model_id) or {}
++            return error_response(self.model_manager.format_error(profile, exc), status_code=502)
+ 
+     async def page_reload(self):
+         try:
+@@ -461,8 +471,9 @@ class Main(star.Star):
+                 )
+                 break
+             except Exception as exc:
+-                logger.warning("[IMAGE] 模型 %s 生图失败: %s", profile["id"], exc)
+-                errors.append(f"{profile['name']}: {exc}")
++                error = self.model_manager.format_error(profile, exc)
++                logger.warning("[IMAGE] 生图失败: %s", error)
++                errors.append(error)
+         if not paths:
+             yield event.plain_result(f"画图失败: {' | '.join(errors)}")
+             return
+@@ -505,8 +516,9 @@ class Main(star.Star):
+                 logger.info("[IMAGE] 图生图成功, model=%s", profile["id"])
+                 break
+             except Exception as exc:
+-                logger.warning("[IMAGE] 模型 %s 图生图失败: %s", profile["id"], exc)
+-                errors.append(f"{profile['name']}: {exc}")
++                error = self.model_manager.format_error(profile, exc)
++                logger.warning("[IMAGE] 图生图失败: %s", error)
++                errors.append(error)
+         if not paths:
+             yield event.plain_result(f"图片编辑失败: {' | '.join(errors)}")
+             return
+diff --git a/model_manager.py b/model_manager.py
+index a803740..3a4d8ba 100644
+--- a/model_manager.py
++++ b/model_manager.py
+@@ -461,6 +461,24 @@ class ImageModelManager:
+             headers[str(profile.get("api_key_header") or "X-API-Key")] = api_key
+         return headers
+ 
++    def format_error(self, profile: dict[str, Any], exc: Exception) -> str:
++        model = str(profile.get("model") or profile.get("name") or "生图模型")
++        host = urlparse(str(profile.get("base_url") or "")).hostname or ""
++        label = f"{model}（{host}）" if host else model
++        error_type = type(exc).__name__
++        if isinstance(exc, httpx.TimeoutException):
++            detail = "生图服务响应超时，请稍后重试"
++        elif isinstance(exc, httpx.RequestError):
++            detail = "连接生图服务失败，请检查网络或系统代理"
++            if not profile.get("trust_env", False):
++                detail += "；可在画图常用设置中启用系统代理"
++        else:
++            detail = str(exc).strip() or "生图请求失败"
++        secret = self._resolve_api_key(profile)
++        if secret:
++            detail = detail.replace(secret, "[已隐藏密钥]")
++        return f"{label}: {detail}（{error_type}）"
++
+     def _require_api_key(self, profile: dict[str, Any]) -> str:
+         if profile.get("auth_type") == "none":
+             return ""
