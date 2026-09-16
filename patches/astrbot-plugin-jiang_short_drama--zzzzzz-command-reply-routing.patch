@@ -1,0 +1,118 @@
+diff --git a/main.py b/main.py
+index de5d5ae..5c33e48 100644
+--- a/main.py
++++ b/main.py
+@@ -153,6 +153,26 @@ def _strip_system_identity_prefix(text: str) -> str:
+     return value
+ 
+ 
++def _is_wechat_group(event: AstrMessageEvent) -> bool:
++    return event.get_platform_name() == "aiocqhttp" and str(
++        event.get_group_id() or ""
++    ).endswith("@chatroom")
++
++
++def _interactive_card_payload(event: AstrMessageEvent, message: list[dict]) -> dict:
++    payload = {"message": message}
++    if _is_wechat_group(event):
++        # The card answers a command received in this group, not a scheduled send.
++        payload["_wechatrebot_delivery"] = "reply"
++        payload["_wechatrebot_wake"] = True
++    return payload
++
++
++def _mark_interactive_command(event: AstrMessageEvent) -> None:
++    if _is_wechat_group(event):
++        event.is_at_or_wake_command = True
++
++
+ def _safe_int(value, default: int, minimum: int, maximum: int) -> int:
+     try:
+         return max(minimum, min(int(value), maximum))
+@@ -732,6 +752,7 @@ class Main(star.Star):
+         text = _strip_system_identity_prefix(event.get_message_str())
+         if is_recommendation_command(text):
+             event.stop_event()
++            _mark_interactive_command(event)
+             logger.info(
+                 "[SHORT_DRAMA] recommendation request sender=%s group=%s",
+                 event.get_sender_id(),
+@@ -774,6 +795,7 @@ class Main(star.Star):
+ 
+         if is_media_help_command(text):
+             event.stop_event()
++            _mark_interactive_command(event)
+             yield event.plain_result(_media_help_text())
+             return
+ 
+@@ -783,6 +805,7 @@ class Main(star.Star):
+             return
+ 
+         event.stop_event()
++        _mark_interactive_command(event)
+         if sports_query is not None:
+             if len(sports_query) > 120:
+                 yield event.plain_result("赛事名称太长了，精简到 120 个字以内再搜")
+@@ -1243,7 +1266,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1284,7 +1307,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1330,7 +1353,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1381,7 +1404,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1432,7 +1455,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1481,7 +1504,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+@@ -1524,7 +1547,7 @@ class Main(star.Star):
+                 },
+             }
+         ]
+-        payload = {"message": message}
++        payload = _interactive_card_payload(event, message)
+         try:
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
