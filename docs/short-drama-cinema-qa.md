@@ -94,3 +94,5 @@ final result: passed
 浏览器不支持容器全屏或设备方向锁定时，页面采用不旋转画面的全屏容器；竖持手机会提示用户横过手机。iOS、微信等宿主能否自动改变设备方向取决于浏览器提供的 Screen Orientation API，需在真实设备上确认。旧版页面旋转 90 度的效果已移除。
 
 本轮专项验证：播放页交互 `29 passed`，托管页补丁与安全检查 `6 passed`；覆盖真实生成的竖屏片源、手机触屏模拟、横屏方向请求、选集、倍速、播放后控件隐藏及回退路径。未在真实手机上执行。
+
+`f13f87a` 已于 2026-09-16 更新线上托管静态页 `/var/www/short-drama-player/index.html`。替换前页面 SHA-256 为 `82a41fcfe58e5b9c20cec3dfa6c95359e1f450ea5b5887eb6a075e7a03b8a8a0`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260916-f13f87a`。替换后服务器文件、公网 HTTPS 页面与本地候选页的 SHA-256 均为 `6dd7ba0ceae6eae875404a333ece0d3b8fded30aee0c672aec1f454225102fd5`；`nginx -t` 通过，短剧状态服务 active，推荐接口返回 12 部候选。状态服务文件和 Nginx 配置哈希未变化。本次没有制作或发布客户端安装包。
