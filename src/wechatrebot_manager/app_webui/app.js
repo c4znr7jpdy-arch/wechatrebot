@@ -50,6 +50,7 @@
     historyLoad: 0,
     messageLoad: 0,
     historyPolling: false,
+    historyAutoDate: "",
     schedules: [],
     scheduledContext: null,
     scheduledEditor: null,
@@ -185,6 +186,20 @@
     const today = localDateInputValue();
     if (!$("#historyStart").value) $("#historyStart").value = today;
     if (!$("#historyEnd").value) $("#historyEnd").value = today;
+    state.historyAutoDate = today;
+  }
+
+  function rollHistoryDatesForward() {
+    const today = localDateInputValue();
+    const previous = state.historyAutoDate;
+    if (!previous || previous === today) return false;
+    state.historyAutoDate = today;
+    const start = $("#historyStart");
+    const end = $("#historyEnd");
+    if (start.value !== previous || end.value !== previous) return false;
+    start.value = today;
+    end.value = today;
+    return true;
   }
 
   function setStage(element, mode, label) {
@@ -1556,6 +1571,7 @@
 
   async function loadConversations(options = {}) {
     const silent = options?.silent === true;
+    rollHistoryDatesForward();
     const load = ++state.historyLoad;
     try {
       const data = await api("get_conversations", {

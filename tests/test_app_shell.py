@@ -814,6 +814,18 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     assert "max-width: min(68%, 560px)" in styles
 
 
+def test_history_default_date_rolls_forward_across_midnight() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'historyAutoDate: ""' in script
+    assert "function rollHistoryDatesForward()" in script
+    assert "if (!previous || previous === today) return false;" in script
+    assert "if (start.value !== previous || end.value !== previous) return false;" in script
+    assert "rollHistoryDatesForward();\n    const load = ++state.historyLoad;" in script
+
+
 def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     calls: list[tuple[str, object]] = []
