@@ -32,6 +32,51 @@ def test_directory_manual_refresh_requeries_without_messages(tmp_path, monkeypat
     assert calls == ["/api/manager/groups"] * 2
 
 
+def test_directory_automatically_refreshes_stale_snapshot(tmp_path, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(directory.time, "monotonic", lambda: now[0])
+    obj, _, calls = service(tmp_path, monkeypatch)
+    groups = [[{"group_id": "old@chatroom", "avatar": "old.jpg"}]]
+
+    def request(_port, _token, identity, path, **_options):
+        calls.append(path)
+        return {"account_id": identity, "items": groups[0], "total": len(groups[0])}
+
+    monkeypatch.setattr(obj, "_request", request)
+    assert [item["group_id"] for item in obj.list()["items"]] == ["old@chatroom"]
+    groups[0] = [
+        {"group_id": "old@chatroom", "avatar": "old.jpg"},
+        {"group_id": "new@chatroom", "avatar": "new.jpg"},
+    ]
+    now[0] += 59
+    assert len(obj.list()["items"]) == 1
+    now[0] += 1
+    assert obj.list()["items"][1]["avatar"] == "new.jpg"
+    assert calls == ["/api/manager/groups"] * 2
+
+
+def test_failed_automatic_refresh_retries_later_and_manual_refresh_bypasses_delay(tmp_path, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(directory.time, "monotonic", lambda: now[0])
+    obj, _, calls = service(tmp_path, monkeypatch)
+    assert obj.list()["stale"] is False
+
+    def failure(*_args, **_kwargs):
+        calls.append("failed")
+        raise directory.GroupDirectoryError("读取失败")
+
+    monkeypatch.setattr(obj, "_request", failure)
+    now[0] += 60
+    assert obj.list()["stale"] is True
+    assert obj.list()["stale"] is True
+    assert calls.count("failed") == 1
+    assert obj.list(True)["stale"] is True
+    assert calls.count("failed") == 2
+    now[0] += 15
+    assert obj.list()["stale"] is True
+    assert calls.count("failed") == 3
+
+
 def test_failed_refresh_preserves_same_account_snapshot(tmp_path, monkeypatch):
     obj, _, _ = service(tmp_path, monkeypatch)
     original = obj.list()

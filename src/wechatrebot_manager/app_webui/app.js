@@ -479,11 +479,11 @@
     }
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
     if (page === "groups") {
-      if (state.chatManagementTab === "groups" && !state.groupsLoaded) await loadGroups(false);
+      if (state.chatManagementTab === "groups") await loadGroups(true, {background: state.groupsLoaded});
       if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
     }
     if (page === "history") {
-      await loadConversations();
+      await loadConversations({refreshGroups: true});
       if (state.selectedConversation) await selectConversation(state.selectedConversation.conversation_id, {silent: true});
     }
     if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
@@ -1075,7 +1075,7 @@
     $("#chatManagementDescription").textContent = tab === "groups"
       ? "管理机器人所在群聊的回复规则、可用功能和成员信息。"
       : "读取当前微信通讯录，查看个人资料并配置每位联系人的可用功能。";
-    if (tab === "groups" && !state.groupsLoaded) await loadGroups(false);
+    if (tab === "groups") await loadGroups(true, {background: state.groupsLoaded});
     if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
   }
 
@@ -1090,24 +1090,34 @@
     panel.innerHTML = `<div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
   }
 
-  async function loadGroups(refresh = false) {
+  async function loadGroups(refresh = false, options = {}) {
     if (state.groupsBusy) return;
+    const background = options.background === true;
     state.groupsBusy = true;
     const button = $("#refreshGroups");
-    button.disabled = true;
-    button.setAttribute("aria-busy", "true");
-    button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
+    if (!background) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
+    }
     if (!state.groups.length) $("#groupRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信的群聊…</td></tr>';
     try {
       const data = await api("get_groups", refresh);
       const previousAccount = state.groupAccount;
-      state.groups = Array.isArray(data.items) ? data.items : [];
+      const previousGroups = JSON.stringify(state.groups);
+      const previousStale = state.groupStale;
+      const nextGroups = Array.isArray(data.items) ? data.items : [];
+      state.groups = nextGroups;
       state.groupAccount = data.account_id || "";
       if (previousAccount && previousAccount !== state.groupAccount) {
         state.selectedGroup = null;
         state.groupMembers = {};
         state.groupPolicies = {};
       }
+      if (background) state.groups.forEach((item) => {
+        const cachedCount = state.groupMembers[item.group_id]?.total;
+        if (!Number.isInteger(item.member_count) && Number.isInteger(cachedCount)) item.member_count = cachedCount;
+      });
       state.groupUpdatedAt = data.updated_at || "";
       state.groupStale = Boolean(data.stale);
       state.groupsLoaded = true;
@@ -1118,8 +1128,12 @@
       if (state.selectedGroup && !state.groups.some((item) => item.group_id === state.selectedGroup)) {
         state.selectedGroup = null;
       }
-      const memberLoad = ++state.groupMemberLoad;
-      const groupsNeedingCounts = state.groups.filter((item) => !Number.isInteger(item.member_count));
+      const memberLoad = background && previousGroups === JSON.stringify(state.groups)
+        && previousAccount === state.groupAccount
+        ? state.groupMemberLoad : ++state.groupMemberLoad;
+      const groupsNeedingCounts = state.groups.filter((item) =>
+        !Number.isInteger(item.member_count)
+        && (!background || !state.groupMembers[item.group_id] || state.groupMembers[item.group_id].loading));
       groupsNeedingCounts.forEach((item) => {
         const previous = state.groupMembers[item.group_id] || {};
         state.groupMembers[item.group_id] = {
@@ -1130,22 +1144,30 @@
         };
       });
       groupDirectoryStatus(data);
-      renderGroups();
+      if (!background || previousGroups !== JSON.stringify(state.groups)
+          || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
+        renderGroups({preserveInspector: background});
+      } else {
+        $("#groupUpdated").textContent = state.groupUpdatedAt
+          ? `${state.groupStale ? "上次成功" : "更新于"} ${fullTime(state.groupUpdatedAt)}` : "尚无可用结果";
+      }
       void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad);
     } catch (error) {
       state.groupStale = true;
       groupDirectoryStatus({message: error?.message}, true);
-      renderGroups();
-      reportError(error);
+      renderGroups({preserveInspector: background});
+      if (!background) reportError(error);
     } finally {
       state.groupsBusy = false;
-      button.disabled = false;
-      button.removeAttribute("aria-busy");
-      button.innerHTML = `${icon("i-refresh")}<span>刷新群列表</span>`;
+      if (!background) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.innerHTML = `${icon("i-refresh")}<span>刷新群列表</span>`;
+      }
     }
   }
 
-  function renderGroups() {
+  function renderGroups(options = {}) {
     const scroll = $(".group-table-scroll");
     const previousScroll = scroll?.scrollTop || 0;
     const keyword = $("#groupSearch").value.trim().toLocaleLowerCase("zh-CN");
@@ -1187,7 +1209,7 @@
     $$(".inspect-group").forEach((button) => button.addEventListener("click", () => selectGroup(button.dataset.groupId)));
     $$(".copy-group").forEach((button) => button.addEventListener("click", () => copyText(button.dataset.groupId)));
     bindAvatarFallbacks($("#groupRows"));
-    renderGroupInspector();
+    if (!options.preserveInspector || !state.selectedGroup) renderGroupInspector();
     if (scroll) scroll.scrollTop = previousScroll;
   }
 
@@ -1347,7 +1369,7 @@
       state.groupMembers[groupId] = {loading: false, items: [], error: error?.message || "成员暂时无法读取，请稍后重试。"};
       if (!background) reportError(error);
     }
-    renderGroups();
+    renderGroups({preserveInspector: background});
   }
 
   function contactDisplayName(contact) {
@@ -1618,6 +1640,7 @@
         search: $("#historySearch").value,
         start: $("#historyStart").value,
         end: $("#historyEnd").value,
+        refresh_groups: options?.refreshGroups === true,
       });
       if (load !== state.historyLoad) return;
       state.conversations = data.items || [];
@@ -1923,6 +1946,11 @@
     try {
       await loadConversations({silent: true});
     } finally { state.historyPolling = false; }
+  }
+
+  async function pollGroups() {
+    if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || !state.groupsLoaded) return;
+    await loadGroups(false, {background: true});
   }
 
   function renderConversationInspector(item) {
@@ -3333,6 +3361,7 @@
       }
       window.setInterval(refreshStatus, 1500);
       window.setInterval(pollHistory, 1500);
+      window.setInterval(pollGroups, 15000);
       if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
     } catch (error) {
       reportError(error);

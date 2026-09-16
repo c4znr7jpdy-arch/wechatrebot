@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
@@ -24,11 +25,16 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class GroupDirectoryService:
+    _REFRESH_INTERVAL_SECONDS = 60.0
+    _RETRY_INTERVAL_SECONDS = 15.0
+
     def __init__(self, install_root: str | Path):
         self.root = Path(install_root)
         self._lock = threading.Lock()
         self._account = ""
         self._snapshot = None
+        self._next_refresh_at = 0.0
+        self._last_error = ""
 
     def _connection(self):
         try:
@@ -50,15 +56,21 @@ class GroupDirectoryService:
         if not account:
             # Unknown identity must not expose a previous account's directory.
             self._account, self._snapshot = "", None
+            self._next_refresh_at = 0.0
+            self._last_error = ""
             raise GroupDirectoryError("尚未确认微信登录账号，请先连接微信，再刷新群列表。")
         if account != self._account:
             self._account, self._snapshot = account, None
+            self._next_refresh_at = 0.0
+            self._last_error = ""
         return port, token, account
 
     def _clear_current_account(self, account: str, *, state_locked: bool) -> None:
         def clear() -> None:
             if self._account == account:
                 self._account, self._snapshot = "", None
+                self._next_refresh_at = 0.0
+                self._last_error = ""
 
         if state_locked:
             clear()
@@ -101,17 +113,25 @@ class GroupDirectoryService:
         with self._lock:
             try:
                 port, token, account = self._connection()
-                if refresh or self._snapshot is None:
-                    data = self._request(
-                        port,
-                        token,
-                        account,
-                        "/api/manager/groups",
-                        state_locked=True,
-                    )
+                if refresh or time.monotonic() >= self._next_refresh_at:
+                    try:
+                        data = self._request(
+                            port,
+                            token,
+                            account,
+                            "/api/manager/groups",
+                            state_locked=True,
+                        )
+                    except GroupDirectoryError as exc:
+                        self._next_refresh_at = time.monotonic() + self._RETRY_INTERVAL_SECONDS
+                        self._last_error = str(exc)
+                        raise
                     self._snapshot = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
-                return {**copy.deepcopy(self._snapshot), "stale": False,
-                        "message": "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
+                    self._next_refresh_at = time.monotonic() + self._REFRESH_INTERVAL_SECONDS
+                    self._last_error = ""
+                return {**copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": account, "updated_at": None}),
+                        "stale": bool(self._last_error),
+                        "message": self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
             except GroupDirectoryError as exc:
                 return {**copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None}),
                         "stale": True, "message": str(exc)}

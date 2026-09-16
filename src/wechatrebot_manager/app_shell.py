@@ -520,7 +520,7 @@ class ApplicationApi:
             end_time = self._date_timestamp(values.get("end"), end=True)
             directory = {"items": []}
             if kind in {"all", "group"}:
-                directory = self._groups.list(False)
+                directory = self._groups.list(values.get("refresh_groups") is True)
             account_id = str(
                 directory.get("account_id") or self._history_account_id()
             ).strip()

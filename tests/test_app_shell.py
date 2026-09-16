@@ -498,6 +498,36 @@ def test_dated_group_history_still_uses_directory_avatar_without_adding_empty_gr
     assert result["data"]["items"][0]["avatar"] == "https://example.test/group.jpg"
 
 
+def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._history = SimpleNamespace(
+        conversations=lambda **_filters: {
+            "items": [{
+                "conversation_id": "new@chatroom",
+                "type": "group",
+                "display_name": "微信 群",
+                "message_count": 2,
+                "last_timestamp": 100,
+                "avatar": "",
+            }],
+            "summary": {"messages": 2},
+        }
+    )
+    reads = []
+
+    def groups(refresh: bool):
+        reads.append(refresh)
+        return {"account_id": "wxid_bot", "items": [
+            {"group_id": "new@chatroom", "name": "新加入的群", "avatar": "https://example.test/new.jpg"}
+        ]}
+
+    api._groups = SimpleNamespace(list=groups)
+    result = api.get_conversations({"kind": "group", "refresh_groups": True})
+
+    assert reads == [True]
+    assert result["data"]["items"][0]["avatar"] == "https://example.test/new.jpg"
+
+
 def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path) -> None:
     release = UpdateRelease(
         version="0.9.0",
