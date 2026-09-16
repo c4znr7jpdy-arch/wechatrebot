@@ -238,6 +238,11 @@ class ApplicationApi:
 
     def _failed(self, exc: BaseException, code: str = "19000") -> dict[str, object]:
         definition = self._catalog.get(code)
+        error = definition.to_dict()
+        # Policy validation errors are written for users. Never expose raw
+        # filesystem/transport errors, which can contain paths or credentials.
+        if isinstance(exc, (GroupPolicyError, PrivatePolicyError)):
+            error["detail"] = str(exc)
         self._lifecycle.events.emit(
             "APP_ERROR",
             "failed",
@@ -246,7 +251,7 @@ class ApplicationApi:
         )
         return {
             "ok": False,
-            "error": definition.to_dict(),
+            "error": error,
         }
 
     def bootstrap(self) -> dict[str, object]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+import zoneinfo
 
 import pytest
 
@@ -12,6 +13,7 @@ from wechatrebot_manager.group_policy import (
     GroupPolicyService,
 )
 from wechatrebot_manager.schedules import ScheduleService
+from wechatrebot_manager import group_policy
 
 
 ACCOUNT_A = "wxid_robot_a"
@@ -155,6 +157,44 @@ def test_revision_conflict_and_invalid_values_leave_original_unchanged(tmp_path:
     with pytest.raises(GroupPolicyError, match="0 到 100"):
         service.save(ACCOUNT_A, GROUP, {"daily_limit": 101})
     assert service.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("quiet_enabled", [False, True])
+def test_feature_save_uses_packaged_timezone_without_system_database(
+    monkeypatch, tmp_path: Path, quiet_enabled: bool,
+) -> None:
+    _feature_set(tmp_path)
+    feature_path = tmp_path / "legal" / "feature-set.json"
+    features = json.loads(feature_path.read_text(encoding="utf-8"))
+    features["features"].append({
+        "module": "jiang_short_drama",
+        "display_name": "短剧",
+        "configuration": "schema",
+        "default_enabled": True,
+    })
+    feature_path.write_text(json.dumps(features), encoding="utf-8")
+    # Force the Windows/frozen fallback and bypass any prior cached zone.
+    original_path = zoneinfo.TZPATH
+    zoneinfo.reset_tzpath([])
+    monkeypatch.setattr(group_policy, "ZoneInfo", zoneinfo.ZoneInfo.no_cache)
+    try:
+        service = GroupPolicyService(tmp_path)
+        service.save(ACCOUNT_A, GROUP, {
+            "allowed_features": ["jiang_short_drama"],
+            "quiet_hours": {"enabled": quiet_enabled},
+        })
+        saved = service.get(ACCOUNT_A, GROUP)
+        assert "jiang_short_drama" in saved["allowed_features"]
+        assert saved["quiet_hours"]["enabled"] is quiet_enabled
+        assert saved["quiet_hours"]["timezone"] == "Asia/Shanghai"
+        before = service.path.read_bytes()
+        with pytest.raises(GroupPolicyError, match="时区不可用"):
+            service.save(ACCOUNT_A, GROUP, {
+                "quiet_hours": {"timezone": "Invalid/Timezone"},
+            })
+        assert service.path.read_bytes() == before
+    finally:
+        zoneinfo.reset_tzpath(original_path)
 
 
 @pytest.mark.parametrize(

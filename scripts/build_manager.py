@@ -100,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             f"{commercial_root / 'src' / 'wechatrebot_manager' / 'error-codes.zh-CN.json'}{os.pathsep}wechatrebot_manager",
             "--collect-all",
             "webview",
+            "--collect-all",
+            "tzdata",
             "--hidden-import",
             "webview.platforms.edgechromium",
             "--version-file",
@@ -118,7 +120,10 @@ def main(argv: list[str] | None = None) -> int:
         timeout=60,
     )
     result = json.loads(self_test.read_text(encoding="utf-8"))
-    if not result.get("ok") or not result.get("frozen") or result.get("architecture") != 64:
+    if (
+        not result.get("ok") or not result.get("frozen")
+        or result.get("architecture") != 64 or not result.get("timezone_data")
+    ):
         raise RuntimeError(f"frozen manager self-test failed: {result}")
     manifest = {
         "schema_version": 1,

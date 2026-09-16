@@ -137,8 +137,9 @@
 
   function reportError(error) {
     const product = error?.product;
+    const detail = typeof product?.detail === "string" ? product.detail.trim() : "";
     const message = product
-      ? `${product.title || "操作未完成"}${product.code ? `（${product.code}）` : ""}`
+      ? `${product.title || "操作未完成"}${detail ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
       : (error?.message || "操作未完成，请稍后重试。 ");
     toast(message, "error");
   }

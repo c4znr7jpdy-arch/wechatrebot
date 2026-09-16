@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from wechatrebot_manager import self_test
 from wechatrebot_manager.self_test import manager_self_test
 
 
@@ -16,4 +19,25 @@ def test_manager_self_test_includes_unified_ui_assets(monkeypatch, tmp_path) -> 
     assert result["app_assets"] is True
     assert result["webview2_backend"] is True
     assert result["error_codes"] is True
+    assert result["timezone_data"] is True
     assert json.loads(target.read_text(encoding="utf-8")) == result
+
+
+@pytest.mark.parametrize('failure', ['package', 'resource', 'lookup'])
+def test_manager_self_test_rejects_missing_timezone_data(monkeypatch, tmp_path, failure):
+    monkeypatch.setattr(self_test.importlib.util, 'find_spec', lambda _name: object())
+    if failure == 'package':
+        def missing(_package):
+            raise ModuleNotFoundError('tzdata')
+        monkeypatch.setattr(self_test.importlib.resources, 'files', missing)
+    elif failure == 'resource':
+        monkeypatch.setattr(self_test.importlib.resources, 'files', lambda _package: tmp_path)
+    else:
+        class MissingZone:
+            @staticmethod
+            def no_cache(_name):
+                raise self_test.ZoneInfoNotFoundError('Asia/Shanghai')
+        monkeypatch.setattr(self_test, 'ZoneInfo', MissingZone)
+    result = manager_self_test(tmp_path / 'self-test.json')
+    assert result['ok'] is False and result['timezone_data'] is False
+    assert result['app_assets'] is True and result['error_codes'] is True

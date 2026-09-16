@@ -81,6 +81,20 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
     assert parsed["data"]["arguments"]["output"] == "image"
 
 
+def test_policy_errors_expose_user_validation_but_not_raw_io_failures(tmp_path):
+    api = _api(tmp_path)
+    for error, code in [
+        (app_shell.GroupPolicyError('安静时段的时区不可用。'), '15001'),
+        (app_shell.PrivatePolicyError('联系人规则已在其他窗口修改，请刷新后重试。'), '15002'),
+    ]:
+        result = api._failed(error, code)
+        assert result['error']['code'] == code
+        assert result['error']['detail'] == str(error)
+    result = api._failed(PermissionError('secret filesystem path and credential'), '15001')
+    assert 'detail' not in result['error']
+    assert 'secret' not in str(result['error'])
+
+
 def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
