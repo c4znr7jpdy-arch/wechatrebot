@@ -682,7 +682,7 @@ def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
     assert 'data-audience="optional"' not in audience
     assert 'data-audience="advanced"' not in audience
     assert 'previewFeature("feature-parser", "链接解析", "none"' in script
-    assert 'primary_api_key: {description: "首选生图 API Key"' in script
+    assert 'primary_api_key: {description: "主生图 API Key"' in script
     assert 'advanced_schema: {}' in script
     assert '.filter(([key]) => Object.keys(schemas[key]).length)' in script
 
@@ -1009,6 +1009,22 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
     assert 'renderProviderSaveIntent(!(state.bootstrap?.providers || []).length);' in script
     assert 'renderProviderSaveIntent(Boolean(service.is_default));' in script
     assert '"模型服务已保存，当前回复模型保持不变。"' in script
+
+
+def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    app_script = (webui / "app.js").read_text(encoding="utf-8")
+    app_styles = (webui / "app.css").read_text(encoding="utf-8")
+    plugin_webui = Path(app_shell.__file__).with_name("plugin_webui")
+    plugin_script = (plugin_webui / "app.js").read_text(encoding="utf-8")
+    plugin_styles = (plugin_webui / "app.css").read_text(encoding="utf-8")
+
+    assert '_ui_disclosure: "添加备用模型"' in app_script
+    assert 'button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";' in app_script
+    assert ".form-field.disclosure-controller { display: none; }" in app_styles
+    assert 'controller.dispatchEvent(new Event("change", { bubbles: true }));' in plugin_script
+    assert ".optional-group-heading" in plugin_styles
+    assert "tertiary_enabled" not in app_script
 
 
 def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:

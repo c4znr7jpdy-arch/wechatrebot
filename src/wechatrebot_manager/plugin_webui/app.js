@@ -279,6 +279,7 @@ function blankChoiceLabel(role, schema = {}) {
 function fieldShell(key, schema, path, parentPath) {
   const row = document.createElement("div");
   row.className = "field";
+  if (schema._ui_disclosure) row.classList.add("disclosure-controller");
   row.dataset.fieldPath = JSON.stringify(path);
   if (schema.condition) {
     row.dataset.condition = JSON.stringify(schema.condition);
@@ -610,9 +611,66 @@ function renderPrimitive(key, schema, path, parentPath) {
 }
 
 function renderSchema(schema, container, parentPath = []) {
+  let activeGroup = "";
+  let activeFields = null;
+  const groupTarget = (title, disclosure, path) => {
+    if (activeFields && activeGroup === title) return activeFields;
+    activeGroup = title;
+    const section = document.createElement("section");
+    section.className = `config-section${disclosure ? " optional-model-group" : ""}`;
+    const heading = document.createElement(disclosure ? "div" : "h3");
+    if (disclosure) {
+      heading.className = "optional-group-heading";
+      const copy = document.createElement("div");
+      const titleNode = document.createElement("h3");
+      titleNode.textContent = customerText(title);
+      const note = document.createElement("p");
+      note.textContent = "主模型不可用时才会尝试这一项。";
+      copy.append(titleNode, note);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button secondary compact-button";
+      const fields = document.createElement("div");
+      fields.className = "section-fields";
+      const update = () => {
+        const enabled = Boolean(getAtPath(path));
+        button.textContent = enabled ? "不使用备用模型" : customerText(disclosure);
+        button.setAttribute("aria-expanded", String(enabled));
+        fields.hidden = !enabled;
+      };
+      button.addEventListener("click", () => {
+        const controller = fields.querySelector(".disclosure-controller input[type='checkbox']");
+        if (!controller) return;
+        controller.checked = !controller.checked;
+        controller.dispatchEvent(new Event("change", { bubbles: true }));
+        update();
+      });
+      heading.append(copy, button);
+      section.appendChild(heading);
+      activeFields = fields;
+      section.appendChild(fields);
+      container.appendChild(section);
+      update();
+      return activeFields;
+    }
+    heading.textContent = customerText(title);
+    section.appendChild(heading);
+    activeFields = document.createElement("div");
+    activeFields.className = "section-fields";
+    section.appendChild(activeFields);
+    container.appendChild(section);
+    return activeFields;
+  };
+
   Object.entries(schema || {}).forEach(([key, field]) => {
     if (!field || typeof field !== "object" || field.invisible === true || field._invisible === true) return;
     const path = [...parentPath, key];
+    const group = customerText(field._ui_group || "");
+    const target = group ? groupTarget(group, field._ui_disclosure, path) : container;
+    if (!group) {
+      activeGroup = "";
+      activeFields = null;
+    }
     if (field.type === "object" && field.items && typeof field.items === "object") {
       const section = document.createElement("section");
       section.className = "config-section";
@@ -633,9 +691,9 @@ function renderSchema(schema, container, parentPath = []) {
       fields.className = "section-fields";
       section.appendChild(fields);
       renderSchema(field.items, fields, path);
-      container.appendChild(section);
+      target.appendChild(section);
     } else {
-      container.appendChild(renderPrimitive(key, field, path, parentPath));
+      target.appendChild(renderPrimitive(key, field, path, parentPath));
     }
   });
 }

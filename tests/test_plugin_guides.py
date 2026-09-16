@@ -107,16 +107,15 @@ def test_image_generation_moves_all_service_fields_to_common_settings():
     fields = (
         "primary_base_url", "primary_model", "primary_api_key",
         "secondary_enabled", "secondary_base_url", "secondary_model",
-        "secondary_api_key", "tertiary_enabled", "tertiary_base_url",
-        "tertiary_model", "tertiary_api_key", "use_system_proxy", "local_proxy_port",
+        "secondary_api_key", "use_system_proxy", "local_proxy_port",
     )
     schema = {key: {"type": "string", "default": ""} for key in fields}
 
     projected = common_schema("jiang_image", schema)
     assert tuple(projected) == fields
-    assert projected["primary_model"]["_ui_group"] == "首选生图服务"
+    assert projected["primary_model"]["_ui_group"] == "主生图模型"
+    assert projected["secondary_enabled"]["_ui_disclosure"] == "添加备用模型"
     assert projected["secondary_model"]["_ui_depends_on"] == "secondary_enabled"
-    assert projected["tertiary_api_key"]["_ui_depends_on"] == "tertiary_enabled"
     assert projected["local_proxy_port"]["_ui_depends_on"] == "use_system_proxy"
     assert advanced_schema("jiang_image", schema) == {}
     clean_schema = _customer_schema(schema, {"primary_api_key": "stored-secret"})

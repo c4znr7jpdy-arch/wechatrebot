@@ -249,6 +249,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .config-section-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 18px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-field[hidden] { display: none; }
+.form-field.disclosure-controller { display: none; }
 .form-field.full { grid-column: 1 / -1; }
 .form-field.tinted-list { padding: 12px; border: 1px solid #c5ddf8; border-radius: 8px; background: var(--blue-100); }
 .form-field.tinted-list textarea { background: #fafdff; }
@@ -262,6 +263,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .form-field input:focus-visible, .form-field select:focus-visible, .form-field textarea:focus-visible, .settings-card input:focus-visible, .settings-card select:focus-visible, .settings-card textarea:focus-visible { outline: 3px solid var(--blue-600); outline-offset: 2px; }
 .form-field .field-error { color: var(--red-700); }
 .form-field [aria-invalid="true"] { border-color: var(--red-700); }
+.optional-group-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.optional-group-heading h3 { margin: 0; }
+.optional-group-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.optional-model-group > .config-section-grid[hidden] { display: none; }
 .secret-reveal { align-self: flex-start; min-height: 32px; font-size: 12px; }
 .group-field-button { align-self: flex-start; }
 .feature-prerequisite { padding: 10px 0; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }

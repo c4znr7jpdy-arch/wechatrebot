@@ -1,0 +1,591 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+index 5088ae3..8c35e57 100644
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -1,68 +1,45 @@
+ {
+   "primary_base_url": {
+-    "description": "\u9996\u9009\u751f\u56fe API Base URL",
++    "description": "主生图 API Base URL",
+     "hint": "\u4f8b\u5982 https://api.hostcentral.cc/\uff1b\u63d2\u4ef6\u4f1a\u81ea\u52a8\u8865\u9f50 OpenAI \u517c\u5bb9\u63a5\u53e3\u7684 /v1 \u8def\u5f84\u3002",
+     "type": "string",
+     "default": "https://api.hostcentral.cc/"
+   },
+   "primary_api_key": {
+-    "description": "首选生图 API Key",
++    "description": "主生图 API Key",
+     "hint": "密钥仅保存在本机；已保存时留空不会覆盖。",
+     "type": "string",
+     "default": ""
+   },
+   "primary_model": {
+-    "description": "\u9996\u9009\u751f\u56fe\u6a21\u578b",
++    "description": "主生图模型",
+     "hint": "\u4f8b\u5982 gpt-image-2\u3002",
+     "type": "string",
+     "default": "gpt-image-2"
+   },
+   "secondary_enabled": {
+-    "description": "\u542f\u7528\u6b21\u9009\u751f\u56fe\u5730\u5740",
+-    "hint": "\u9996\u9009\u5730\u5740\u8fde\u63a5\u5931\u8d25\u3001\u8fd4\u56de\u9519\u8bef\u6216\u6ca1\u6709\u56fe\u7247\u65f6\uff0c\u81ea\u52a8\u5c1d\u8bd5\u6b21\u9009\u5730\u5740\u3002",
++    "description": "使用备用生图模型",
++    "hint": "主模型连接失败、返回错误或没有图片时，自动尝试这一个备用模型。",
+     "type": "bool",
+-    "default": true
++    "default": false
+   },
+   "secondary_base_url": {
+-    "description": "\u6b21\u9009\u751f\u56fe API Base URL",
+-    "hint": "\u4f8b\u5982 https://api.gemai.cc/v1\u3002\u7559\u7a7a\u5219\u4fdd\u7559\u73b0\u6709\u6b21\u9009\u6a21\u578b\u5730\u5740\u3002",
++    "description": "备用生图 API Base URL",
++    "hint": "例如 https://api.gemai.cc/v1。",
+     "type": "string",
+     "default": "https://api.gemai.cc/v1"
+   },
+   "secondary_api_key": {
+-    "description": "次选生图 API Key",
+-    "hint": "不使用次选服务时可以留空。",
++    "description": "备用生图 API Key",
++    "hint": "密钥仅保存在本机；已保存时留空不会覆盖。",
+     "type": "string",
+     "default": ""
+   },
+   "secondary_model": {
+-    "description": "\u6b21\u9009\u751f\u56fe\u6a21\u578b",
++    "description": "备用生图模型",
+     "type": "string",
+     "default": "gpt-image-2-2K"
+   },
+-  "tertiary_enabled": {
+-    "description": "\u542f\u7528\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u5730\u5740",
+-    "hint": "\u6b21\u9009\u4e5f\u5931\u8d25\u65f6\u7ee7\u7eed\u5c1d\u8bd5\u7b2c\u4e09\u987a\u4f4d\u5730\u5740\u3002",
+-    "type": "bool",
+-    "default": true
+-  },
+-  "tertiary_base_url": {
+-    "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe API Base URL",
+-    "hint": "\u4f8b\u5982 https://api.minimaxi.com/v1\u3002\u7559\u7a7a\u5219\u4fdd\u7559\u73b0\u6709\u7b2c\u4e09\u987a\u4f4d\u6a21\u578b\u5730\u5740\u3002",
+-    "type": "string",
+-    "default": "https://api.minimaxi.com/v1"
+-  },
+-  "tertiary_api_key": {
+-    "description": "第三顺位生图 API Key",
+-    "hint": "不使用第三顺位服务时可以留空。",
+-    "type": "string",
+-    "default": ""
+-  },
+-  "tertiary_model": {
+-    "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u6a21\u578b",
+-    "type": "string",
+-    "default": "image-01"
+-  },
+   "use_system_proxy": {
+     "description": "\u4f7f\u7528\u672c\u5730\u4ee3\u7406",
+     "hint": "\u5173\u95ed\u65f6\u76f4\u8fde\uff1b\u5f00\u542f\u540e\u53ef\u586b\u5199\u672c\u673a\u4ee3\u7406\u7aef\u53e3\u3002\u7aef\u53e3\u7559\u7a7a\u65f6\u4f7f\u7528\u7cfb\u7edf\u5df2\u6709\u4ee3\u7406\u8bbe\u7f6e\u3002",
+diff --git a/main.py b/main.py
+index f772783..ce8d4c4 100644
+--- a/main.py
++++ b/main.py
+@@ -162,13 +162,12 @@ class Main(star.Star):
+         )
+ 
+     def _apply_plugin_config(self) -> None:
+-        """把 AstrBot 齿轮配置映射到模型管理器的有序回退链。"""
++        """把常用设置映射为一个主模型和一个可选备用模型。"""
+         if not self.config:
+             return
+         slots = (
+-            ("primary_base_url", "primary_model", None, "primary_api_key"),
+-            ("secondary_base_url", "secondary_model", "secondary_enabled", "secondary_api_key"),
+-            ("tertiary_base_url", "tertiary_model", "tertiary_enabled", "tertiary_api_key"),
++            ("primary", "primary_base_url", "primary_model", None, "primary_api_key"),
++            ("fallback", "secondary_base_url", "secondary_model", "secondary_enabled", "secondary_api_key"),
+         )
+         use_system_proxy = bool(self.config.get("use_system_proxy", True))
+         proxy_port = str(self.config.get("local_proxy_port") or "").strip()
+@@ -196,19 +195,46 @@ class Main(star.Star):
+                 profile["name"],
+             ),
+         )
+-        chain = ([active] if active else []) + fallbacks
+-        for index, (base_key, model_key, enabled_key, api_key_key) in enumerate(slots):
+-            if index >= len(chain):
+-                break
+-            profile = chain[index]
++        chain = ([active] if active else []) + fallbacks[:1]
++        for index, (slot_name, base_key, model_key, enabled_key, api_key_key) in enumerate(slots):
++            profile = chain[index] if index < len(chain) else None
+             base_url = str(self.config.get(base_key) or "").strip()
+             model = str(self.config.get(model_key) or "").strip()
+             api_key = str(self.config.get(api_key_key) or "").strip()
+-            enabled = (
+-                profile.get("enabled", True)
+-                if enabled_key is None
+-                else bool(self.config.get(enabled_key, profile.get("enabled", True)))
+-            )
++            if enabled_key is None:
++                enabled = bool(profile.get("enabled", True)) if profile else True
++            else:
++                enabled = bool(self.config.get(enabled_key, False))
++            if index == 1 and not enabled:
++                if profile:
++                    self.model_manager.delete_profile(profile["id"])
++                continue
++            if not base_url or not model:
++                continue
++            if profile is None:
++                profile = {
++                    "id": "primary-image-model" if slot_name == "primary" else "fallback-image-model",
++                    "name": "主生图模型" if slot_name == "primary" else "备用生图模型",
++                    "enabled": True,
++                    "protocol": "openai_images",
++                    "base_url": base_url,
++                    "model": model,
++                    "generation_path": "images/generations",
++                    "edit_path": "images/edits",
++                    "models_path": "models",
++                    "supports_edit": True,
++                    "size_mode": "pixels",
++                    "response_format": "url",
++                    "timeout_seconds": 300,
++                    "trust_env": use_system_proxy,
++                    "auth_type": "bearer",
++                    "api_key_header": "X-API-Key",
++                    "api_key_source": {"type": "stored"},
++                    "api_key": api_key,
++                    "extra_headers": {},
++                    "extra_body": {},
++                    "fallback_priority": index,
++                }
+             if (
+                 (not base_url or base_url.rstrip("/") == str(profile.get("base_url") or "").rstrip("/"))
+                 and (not model or model == profile.get("model"))
+@@ -237,6 +263,41 @@ class Main(star.Star):
+             payload["fallback_priority"] = index
+             self.model_manager.upsert_profile(payload)
+ 
++    def _sync_plugin_config_from_models(self) -> None:
++        """Keep the simple form aligned with mutations from the model page."""
++        if not self.config:
++            return
++        public = self.model_manager.public_config()
++        active_id = str(public.get("active_model") or "")
++        active = self.model_manager.get_profile(active_id) if active_id else None
++        fallback = next(
++            (
++                self.model_manager.get_profile(item["id"])
++                for item in public.get("models", [])
++                if item["id"] != active_id and item.get("enabled", True)
++            ),
++            None,
++        )
++
++        def stored_key(profile):
++            if not profile or (profile.get("api_key_source") or {}).get("type") != "stored":
++                return ""
++            return str(profile.get("api_key") or "")
++
++        self.config["primary_base_url"] = str((active or {}).get("base_url") or "")
++        self.config["primary_model"] = str((active or {}).get("model") or "")
++        self.config["primary_api_key"] = stored_key(active)
++        self.config["secondary_enabled"] = bool(fallback)
++        self.config["secondary_base_url"] = str((fallback or {}).get("base_url") or "")
++        self.config["secondary_model"] = str((fallback or {}).get("model") or "")
++        self.config["secondary_api_key"] = stored_key(fallback)
++        # Remove the former third slot from runtime behavior while retaining
++        # compatibility with installations whose config file still has keys.
++        self.config["tertiary_enabled"] = False
++        save = getattr(self.config, "save_config", None)
++        if callable(save):
++            save()
++
+     def _register_page_apis(self) -> None:
+         """注册 AstrBot Plugin Page 使用的管理 API。"""
+         if not hasattr(self.context, "register_web_api"):
+@@ -277,7 +338,10 @@ class Main(star.Star):
+                 raise ImageModelConfigError("请求体必须是 JSON 对象")
+             async with self._config_lock:
+                 self._ensure_models_initialized()
+-                config = self.model_manager.upsert_profile(payload.get("model", payload))
++                self.model_manager.upsert_profile(payload.get("model", payload))
++                self.model_manager.reload()
++                self._sync_plugin_config_from_models()
++                config = self.model_manager.public_config()
+             return json_response({"status": "ok", "data": config})
+         except ImageModelConfigError as exc:
+             return error_response(str(exc), status_code=400)
+@@ -291,7 +355,10 @@ class Main(star.Star):
+             model_id = str((payload or {}).get("id") or "").strip()
+             async with self._config_lock:
+                 self._ensure_models_initialized()
+-                config = self.model_manager.delete_profile(model_id)
++                self.model_manager.delete_profile(model_id)
++                self.model_manager.reload()
++                self._sync_plugin_config_from_models()
++                config = self.model_manager.public_config()
+             return json_response({"status": "ok", "data": config})
+         except ImageModelConfigError as exc:
+             return error_response(str(exc), status_code=400)
+@@ -305,7 +372,10 @@ class Main(star.Star):
+             model_id = str((payload or {}).get("id") or "").strip()
+             async with self._config_lock:
+                 self._ensure_models_initialized()
+-                config = self.model_manager.set_active(model_id)
++                self.model_manager.set_active(model_id)
++                self.model_manager.reload()
++                self._sync_plugin_config_from_models()
++                config = self.model_manager.public_config()
+             return json_response({"status": "ok", "data": config})
+         except ImageModelConfigError as exc:
+             return error_response(str(exc), status_code=400)
+diff --git a/model_manager.py b/model_manager.py
+index f4458ea..012bb35 100644
+--- a/model_manager.py
++++ b/model_manager.py
+@@ -107,12 +107,19 @@ class ImageModelManager:
+             ),
+             key=lambda item: (int(item.get("fallback_priority", 0)), item["name"]),
+         )
+-        return active + fallbacks
++        # The simple customer flow supports one primary model and one optional
++        # fallback.  Older profiles remain editable, but a third paid service
++        # must never be attempted silently.
++        return active + fallbacks[:1]
+ 
+     def upsert_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+         if not isinstance(payload, dict):
+             raise ImageModelConfigError("模型配置必须是 JSON 对象")
+         existing = self.get_profile(str(payload.get("id", "")).strip())
++        if existing is None and len(self._config.get("models", [])) >= 2:
++            raise ImageModelConfigError(
++                "最多保留一个主模型和一个备用模型；请先删除不再使用的模型"
++            )
+         normalized = self._validate_profile(payload, existing=existing)
+         models = [
+             item
+@@ -134,13 +141,14 @@ class ImageModelManager:
+         ]
+         if len(models) == len(self._config.get("models", [])):
+             raise ImageModelConfigError(f"模型不存在: {profile_id}")
+-        if not models:
+-            raise ImageModelConfigError("至少保留一个模型")
+         updated = deepcopy(self._config)
+         updated["models"] = models
+         if updated.get("active_model") == profile_id:
+             enabled = [item for item in models if item.get("enabled", True)]
+-            updated["active_model"] = (enabled or models)[0]["id"]
++            updated["active_model"] = (enabled or models)[0]["id"] if models else ""
++            for item in models:
++                if item["id"] == updated["active_model"]:
++                    item["fallback_priority"] = 0
+         self._commit(updated)
+         return self.public_config()
+ 
+@@ -152,6 +160,11 @@ class ImageModelManager:
+             raise ImageModelConfigError("不能将已停用模型设为默认")
+         updated = deepcopy(self._config)
+         updated["active_model"] = profile["id"]
++        for item in updated.get("models", []):
++            if item["id"] == profile["id"]:
++                item["fallback_priority"] = 0
++            elif int(item.get("fallback_priority", 0)) == 0:
++                item["fallback_priority"] = 1
+         self._commit(updated)
+         return self.public_config()
+ 
+@@ -543,7 +556,6 @@ class ImageModelManager:
+         return values
+ 
+     def _default_config(self) -> dict[str, Any]:
+-        env = self._load_env_file()
+         models: list[dict[str, Any]] = [
+             {
+                 "id": "hostcentral-gpt-image-2",
+@@ -570,96 +582,8 @@ class ImageModelManager:
+                 "extra_headers": {},
+                 "extra_body": {},
+                 "fallback_priority": 0,
+-            },
+-            {
+-                "id": "gemai-gpt-image-2k",
+-                "name": "GemAI GPT Image 2K",
+-                "enabled": True,
+-                "protocol": "openai_images",
+-                "base_url": "https://api.gemai.cc/v1",
+-                "model": "gpt-image-2-2K",
+-                "generation_path": "images/generations",
+-                "edit_path": "images/edits",
+-                "models_path": "models",
+-                "supports_edit": True,
+-                "size_mode": "ratio_size",
+-                "response_format": "",
+-                "timeout_seconds": 300,
+-                "trust_env": False,
+-                "auth_type": "bearer",
+-                "api_key_header": "X-API-Key",
+-                "api_key_source": {
+-                    "type": "astrbot_provider",
+-                    "provider_id": "openai_embedding",
+-                },
+-                "api_key": "",
+-                "extra_headers": {},
+-                "extra_body": {},
+-                "fallback_priority": 1,
+             }
+         ]
+-        old_base = env.get("GPT_IMAGE_BASE_URL", "").rstrip("/")
+-        old_key = env.get("GPT_IMAGE_API_KEY", "")
+-        if old_key and old_base and "gemai.cc" not in old_base.lower():
+-            models.append(
+-                {
+-                    "id": "legacy-gpt-image",
+-                    "name": "旧 GPT Image 后端",
+-                    "enabled": True,
+-                    "protocol": "openai_images",
+-                    "base_url": old_base,
+-                    "model": env.get("GPT_IMAGE_MODEL", "gpt-image-2"),
+-                    "generation_path": "images/generations",
+-                    "edit_path": "images/edits",
+-                    "models_path": "models",
+-                    "supports_edit": True,
+-                    "size_mode": "pixels",
+-                    "response_format": "url",
+-                    "timeout_seconds": 300,
+-                    "trust_env": False,
+-                    "auth_type": "bearer",
+-                    "api_key_header": "X-API-Key",
+-                    "api_key_source": {
+-                        "type": "environment",
+-                        "env_name": "GPT_IMAGE_API_KEY",
+-                    },
+-                    "api_key": "",
+-                    "extra_headers": {},
+-                    "extra_body": {},
+-                    "fallback_priority": 2,
+-                }
+-            )
+-        if env.get("MINIMAX_API_KEY"):
+-            models.append(
+-                {
+-                    "id": "minimax-image-01",
+-                    "name": "MiniMax image-01",
+-                    "enabled": True,
+-                    "protocol": "minimax",
+-                    "base_url": env.get(
+-                        "MINIMAX_API_BASE_URL", "https://api.minimaxi.com/v1"
+-                    ),
+-                    "model": env.get("MINIMAX_IMAGE_MODEL", "image-01"),
+-                    "generation_path": "image_generation",
+-                    "edit_path": "image_generation",
+-                    "models_path": "models",
+-                    "supports_edit": True,
+-                    "size_mode": "aspect_ratio",
+-                    "response_format": "url",
+-                    "timeout_seconds": 180,
+-                    "trust_env": True,
+-                    "auth_type": "bearer",
+-                    "api_key_header": "X-API-Key",
+-                    "api_key_source": {
+-                        "type": "environment",
+-                        "env_name": "MINIMAX_API_KEY",
+-                    },
+-                    "api_key": "",
+-                    "extra_headers": {},
+-                    "extra_body": {},
+-                    "fallback_priority": 3,
+-                }
+-            )
+         return {
+             "version": CONFIG_VERSION,
+             "active_model": "hostcentral-gpt-image-2",
+@@ -671,8 +595,8 @@ class ImageModelManager:
+         if not isinstance(raw, dict):
+             raise ImageModelConfigError("模型配置根节点必须是 JSON 对象")
+         models_raw = raw.get("models")
+-        if not isinstance(models_raw, list) or not models_raw:
+-            raise ImageModelConfigError("models 必须是非空数组")
++        if not isinstance(models_raw, list):
++            raise ImageModelConfigError("models 必须是数组")
+         models: list[dict[str, Any]] = []
+         ids: set[str] = set()
+         for item in models_raw:
+@@ -683,7 +607,9 @@ class ImageModelManager:
+             models.append(normalized)
+         active = str(raw.get("active_model") or "").strip()
+         active_profile = next((item for item in models if item["id"] == active), None)
+-        if active_profile is None or not active_profile.get("enabled", True):
++        if not models:
++            active = ""
++        elif active_profile is None or not active_profile.get("enabled", True):
+             active = next(
+                 (item["id"] for item in models if item.get("enabled", True)),
+                 models[0]["id"],
+diff --git a/pages/model-manager/app.js b/pages/model-manager/app.js
+index 050b042..1893f13 100644
+--- a/pages/model-manager/app.js
++++ b/pages/model-manager/app.js
+@@ -62,11 +62,15 @@ function sourceLabel(profile) {
+ function render() {
+   const config = state.config || { models: [], active_model: "" };
+   const active = config.models.find((item) => item.id === config.active_model);
++  const addButton = document.getElementById("add-button");
++  addButton.hidden = config.models.length >= 2;
++  addButton.disabled = config.models.length >= 2;
++  addButton.textContent = config.models.length ? "添加备用模型" : "添加主模型";
+   document.getElementById("active-summary").textContent = active ? `${active.name} · ${active.model}` : "未配置";
+   document.getElementById("count-summary").textContent = `${config.models.filter((item) => item.enabled).length} / ${config.models.length}`;
+ 
+   if (!config.models.length) {
+-    grid.innerHTML = '<div class="empty-state">还没有生成模型，点击右上角添加。</div>';
++    grid.innerHTML = '<div class="empty-state">还没有生图模型。先添加一个主模型即可开始使用。</div>';
+     return;
+   }
+ 
+@@ -94,7 +98,7 @@ function render() {
+           <dt>地址</dt><dd>${escapeHtml(profile.base_url)}</dd>
+           <dt>密钥来源</dt><dd>${escapeHtml(sourceLabel(profile))}</dd>
+           <dt>图生图</dt><dd>${profile.supports_edit ? "支持" : "关闭"}</dd>
+-          <dt>自动回退</dt><dd>${profile.fallback_priority > 0 ? `优先级 ${profile.fallback_priority}` : "不参与"}</dd>
++          <dt>使用顺序</dt><dd>${isActive ? "主模型" : "主模型失败后使用"}</dd>
+         </dl>
+         <div class="model-actions">
+           ${!isActive && profile.enabled ? `<button class="button small primary" data-action="active" data-id="${escapeHtml(profile.id)}">设为默认</button>` : ""}
+@@ -107,7 +111,7 @@ function render() {
+   }).join("");
+ }
+ 
+-function defaults() {
++function defaults(fallback = false) {
+   return {
+     id: "",
+     name: "",
+@@ -126,7 +130,7 @@ function defaults() {
+     auth_type: "bearer",
+     api_key_header: "X-API-Key",
+     api_key_source: { type: "stored" },
+-    fallback_priority: 0,
++    fallback_priority: fallback ? 1 : 0,
+     extra_body: {},
+     extra_headers: {},
+   };
+@@ -140,9 +144,12 @@ function setField(name, value) {
+ }
+ 
+ function openModal(profile = null) {
+-  const item = profile || defaults();
++  const fallback = !profile && Boolean(state.config?.models?.length);
++  const item = profile || defaults(fallback);
+   state.editingId = profile?.id || null;
+-  document.getElementById("modal-title").textContent = profile ? "编辑生成模型" : "添加生成模型";
++  document.getElementById("modal-title").textContent = profile
++    ? "编辑生成模型"
++    : fallback ? "添加备用模型" : "添加主模型";
+   [
+     "id", "name", "protocol", "base_url", "model", "generation_path", "edit_path",
+     "models_path", "size_mode", "response_format", "timeout_seconds",
+@@ -158,6 +165,7 @@ function openModal(profile = null) {
+   form.elements.namedItem("id").readOnly = Boolean(profile);
+   updateSourceFields();
+   modal.classList.remove("hidden");
++  form.elements.namedItem("id").focus();
+ }
+ 
+ function closeModal() {
+@@ -229,7 +237,8 @@ grid.addEventListener("click", async (event) => {
+     }
+     button.disabled = true;
+     if (action === "active") {
+-      state.config = await apiPost("models/active", { id });
++      await apiPost("models/active", { id });
++      await loadConfig();
+       showToast(`默认模型已切换为 ${profile.name}`);
+     } else if (action === "test") {
+       const result = await apiPost("models/test", { id });
+@@ -247,7 +256,8 @@ grid.addEventListener("click", async (event) => {
+         }, 5000);
+         return;
+       }
+-      state.config = await apiPost("models/delete", { id });
++      await apiPost("models/delete", { id });
++      await loadConfig();
+       state.deleteArmed = null;
+       showToast(`已删除 ${profile.name}`);
+     }
+@@ -261,12 +271,13 @@ grid.addEventListener("click", async (event) => {
+ form.addEventListener("submit", async (event) => {
+   event.preventDefault();
+   const saveButton = document.getElementById("save-button");
++  const editing = Boolean(state.editingId);
+   try {
+     saveButton.disabled = true;
+-    state.config = await apiPost("models/save", { model: collectForm() });
++    await apiPost("models/save", { model: collectForm() });
++    await loadConfig();
+     closeModal();
+-    render();
+-    showToast("模型已保存并热更新");
++    showToast(editing ? "模型已保存并热更新" : "模型已添加并显示在列表中");
+   } catch (error) {
+     showToast(error.message || String(error), true);
+   } finally {
+@@ -274,7 +285,9 @@ form.addEventListener("submit", async (event) => {
+   }
+ });
+ 
+-document.getElementById("add-button").addEventListener("click", () => openModal());
++document.getElementById("add-button").addEventListener("click", () => {
++  if ((state.config?.models || []).length < 2) openModal();
++});
+ document.getElementById("close-modal").addEventListener("click", closeModal);
+ document.getElementById("cancel-button").addEventListener("click", closeModal);
+ sourceType.addEventListener("change", updateSourceFields);
+@@ -296,6 +309,10 @@ modal.addEventListener("click", (event) => {
+   if (event.target === modal) closeModal();
+ });
+ 
++document.addEventListener("keydown", (event) => {
++  if (event.key === "Escape" && !modal.classList.contains("hidden")) closeModal();
++});
++
+ try {
+   await bridge.ready();
+   await loadConfig();
+diff --git a/pages/model-manager/index.html b/pages/model-manager/index.html
+index 9d24300..e8f0c00 100644
+--- a/pages/model-manager/index.html
++++ b/pages/model-manager/index.html
+@@ -12,11 +12,11 @@
+         <div>
+           <p class="eyebrow">JIANG IMAGE · RUNTIME CONTROL</p>
+           <h1>生图模型管理</h1>
+-          <p class="subtitle">新增、切换和热更新生成模型。保存后下一次生图立即使用，无需重启 AstrBot。</p>
++          <p class="subtitle">只需配置一个主模型；确有需要时再添加一个备用模型。保存后立即生效。</p>
+         </div>
+         <div class="hero-actions">
+           <button class="button secondary" id="reload-button">从磁盘热重载</button>
+-          <button class="button primary" id="add-button">添加生成模型</button>
++          <button class="button primary" id="add-button">添加主模型</button>
+         </div>
+       </header>
+ 
+@@ -39,7 +39,7 @@
+         <div class="section-heading">
+           <div>
+             <h2>生成应用</h2>
+-            <p>回退优先级为 0 表示不参与自动回退；数字越小越先尝试。</p>
++            <p>平时只使用主模型；主模型失败时，才会尝试你主动添加的一个备用模型。</p>
+           </div>
+         </div>
+         <div class="model-grid" id="model-grid">
+@@ -169,10 +169,7 @@
+                   <span>超时（秒）</span>
+                   <input name="timeout_seconds" type="number" min="5" max="900" value="300" />
+                 </label>
+-                <label>
+-                  <span>回退优先级</span>
+-                  <input name="fallback_priority" type="number" min="0" max="99" value="0" />
+-                </label>
++                <input name="fallback_priority" type="hidden" value="0" />
+                 <label class="toggle-line">
+                   <input name="trust_env" type="checkbox" />
+                   <span>使用系统代理环境变量</span>

@@ -24,11 +24,13 @@ def patched_image(tmp_path):
         pytest.skip("Local image plugin source is unavailable")
     for name in ("main.py", "model_manager.py", "_conf_schema.json"):
         shutil.copy2(SOURCE / name, tmp_path / name)
+    shutil.copytree(SOURCE / "pages", tmp_path / "pages")
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     for name in (
         "astrbot-plugin-jiang_image.patch",
         "astrbot-plugin-jiang_image--network-errors.patch",
         "astrbot-plugin-jiang_image--z-local-proxy.patch",
+        "astrbot-plugin-jiang_image--zz-model-experience.patch",
     ):
         result = subprocess.run(
             ["git", "apply", "--check", "--ignore-space-change", str(ROOT / "patches" / name)],
@@ -41,11 +43,66 @@ def patched_image(tmp_path):
     assert schema["use_system_proxy"]["type"] == "bool"
     assert schema["use_system_proxy"]["default"] is True
     assert schema["local_proxy_port"]["default"] == ""
+    assert schema["secondary_enabled"]["default"] is False
+    assert "tertiary_enabled" not in schema
     spec = importlib.util.spec_from_file_location("patched_image_model_manager", tmp_path / "model_manager.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return (tmp_path / "main.py").read_text("utf-8"), module
+
+
+def test_image_models_allow_empty_then_show_new_primary_after_disk_reload(
+    patched_image, tmp_path,
+):
+    _source, module = patched_image
+    manager = module.ImageModelManager(tmp_path / "plugin", tmp_path / "data", Mock())
+    manager.initialize()
+    initial = manager.public_config()
+    assert len(initial["models"]) == 1
+
+    profile = initial["models"][0]
+    manager.delete_profile(profile["id"])
+    assert manager.reload()["models"] == []
+    assert manager.public_config()["active_model"] == ""
+
+    profile.update({"id": "new-primary", "name": "新主模型", "fallback_priority": 0})
+    manager.upsert_profile(profile)
+    reread = manager.reload()
+    assert reread["active_model"] == "new-primary"
+    assert [item["id"] for item in reread["models"]] == ["new-primary"]
+
+
+def test_image_models_limit_runtime_to_primary_and_one_fallback(patched_image, tmp_path):
+    _source, module = patched_image
+    manager = module.ImageModelManager(tmp_path / "plugin", tmp_path / "data", Mock())
+    manager.initialize()
+    primary = manager.public_config()["models"][0]
+    fallback = {
+        **primary,
+        "id": "fallback",
+        "name": "备用模型",
+        "fallback_priority": 1,
+    }
+    manager.upsert_profile(fallback)
+    assert [item["id"] for item in manager.generation_chain()] == [primary["id"], "fallback"]
+    with pytest.raises(module.ImageModelConfigError, match="一个主模型和一个备用模型"):
+        manager.upsert_profile({**fallback, "id": "third", "name": "第三个模型"})
+
+
+def test_image_model_page_uses_progressive_fallback_and_refreshes_saved_list(patched_image):
+    script = (
+        Path(patched_image[1].__file__).parent / "pages" / "model-manager" / "app.js"
+    ).read_text("utf-8")
+    markup = (
+        Path(patched_image[1].__file__).parent / "pages" / "model-manager" / "index.html"
+    ).read_text("utf-8")
+
+    assert 'addButton.textContent = config.models.length ? "添加备用模型" : "添加主模型";' in script
+    assert 'await apiPost("models/save", { model: collectForm() });\n    await loadConfig();' in script
+    assert 'await apiPost("models/delete", { id });\n      await loadConfig();' in script
+    assert "回退优先级" not in markup
+    assert 'name="fallback_priority" type="hidden"' in markup
 
 
 def _method(source, name, namespace):

@@ -16,24 +16,34 @@ REPOSITORY = Path(__file__).parents[1]
 PROJECT_PLUGINS = Path("E:/Project/data/plugins")
 
 
-def _patched(tmp_path: Path, module: str, relative: str) -> str:
+def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = False) -> str:
     source = PROJECT_PLUGINS / module / relative
     if not source.is_file():
         pytest.skip("Local plugin source checkout is unavailable")
-    patch = REPOSITORY / "patches" / f"astrbot-plugin-{module}.patch"
+    base_patch = REPOSITORY / "patches" / f"astrbot-plugin-{module}.patch"
+    patches = [base_patch]
+    if all_patches:
+        patches = sorted(
+            REPOSITORY.glob(f"patches/astrbot-plugin-{module}*.patch"),
+            key=lambda path: (0 if "--" not in path.stem else 1, path.name.casefold()),
+        )
     # Each portability patch may also adapt lifecycle code in other files.
     # Use an isolated repository so git does not silently skip paths outside
     # a parent checkout when pytest's temporary directory happens to be in it.
-    for path in re.findall(r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE):
-        original = PROJECT_PLUGINS / module / path
-        destination = tmp_path / path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(original, destination)
+    for patch in patches:
+        for path in re.findall(r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE):
+            original = PROJECT_PLUGINS / module / path
+            destination = tmp_path / path
+            if destination.exists():
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(original, destination)
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "apply", "--ignore-space-change", str(patch)],
-        cwd=tmp_path, check=True, capture_output=True,
-    )
+    for patch in patches:
+        subprocess.run(
+            ["git", "apply", "--ignore-space-change", str(patch)],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
     return (tmp_path / relative).read_text(encoding="utf-8")
 
 
@@ -141,18 +151,22 @@ def test_group_member_notice_has_independent_hot_read_switches(tmp_path: Path) -
 
 
 def test_image_generation_common_config_applies_stored_api_keys(tmp_path: Path) -> None:
-    source = _patched(tmp_path, "jiang_image", "main.py")
+    source = _patched(tmp_path, "jiang_image", "main.py", all_patches=True)
     schema = json.loads((tmp_path / "_conf_schema.json").read_text(encoding="utf-8"))
     assert {
         "primary_api_key",
         "secondary_api_key",
-        "tertiary_api_key",
     } <= set(schema)
     assert all(schema[key]["default"] == "" for key in (
-        "primary_api_key", "secondary_api_key", "tertiary_api_key"
+        "primary_api_key", "secondary_api_key"
     ))
+    assert "tertiary_api_key" not in schema
 
-    apply_config = _function(source, "_apply_plugin_config", {})
+    apply_config = _function(
+        source,
+        "_apply_plugin_config",
+        {"re": re, "ImageModelConfigError": ValueError},
+    )
     updates = []
     manager = SimpleNamespace(
         public_config=lambda: {
