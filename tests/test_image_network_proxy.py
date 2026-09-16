@@ -31,6 +31,7 @@ def patched_image(tmp_path):
         "astrbot-plugin-jiang_image--network-errors.patch",
         "astrbot-plugin-jiang_image--z-local-proxy.patch",
         "astrbot-plugin-jiang_image--zz-model-experience.patch",
+        "astrbot-plugin-jiang_image--zzz-stop-propagation.patch",
     ):
         result = subprocess.run(
             ["git", "apply", "--check", "--ignore-space-change", str(ROOT / "patches" / name)],
@@ -112,6 +113,61 @@ def _method(source, name, namespace):
     scope = dict(namespace)
     exec(compile(ast.Module(body=[node], type_ignores=[]), "image-plugin-method", "exec"), scope)
     return scope[name]
+
+
+def test_image_command_stops_propagation_before_generation(patched_image, monkeypatch):
+    source, _module = patched_image
+    import sys
+    from types import ModuleType
+
+    astrbot = ModuleType("astrbot")
+    astrbot_api = ModuleType("astrbot.api")
+    message_components = ModuleType("astrbot.api.message_components")
+    message_components.At = type("At", (), {})
+    monkeypatch.setitem(sys.modules, "astrbot", astrbot)
+    monkeypatch.setitem(sys.modules, "astrbot.api", astrbot_api)
+    monkeypatch.setitem(sys.modules, "astrbot.api.message_components", message_components)
+
+    async def quoted_image(_event):
+        return None
+
+    handle_image = _method(
+        source,
+        "handle_image",
+        {
+            "AstrMessageEvent": object,
+            "_get_plain_text": lambda _event: "生成一张小猫图",
+            "_get_quoted_image_path": quoted_image,
+            "detect_image_edit_intent": lambda _text: None,
+            "detect_image_intent": lambda _text: "小猫图",
+            "_parse_aspect": lambda prompt: (prompt, "1:1"),
+        },
+    )
+    timeline = []
+
+    class Event:
+        message_obj = None
+
+        def get_sender_id(self):
+            return "user"
+
+        def get_self_id(self):
+            return "bot"
+
+        def stop_event(self):
+            timeline.append("stopped")
+
+    async def generate(_event, prompt, aspect):
+        timeline.append(("generate", prompt, aspect))
+        yield "image"
+
+    instance = SimpleNamespace(_do_image_gen=generate)
+
+    async def run():
+        return [item async for item in handle_image(instance, Event())]
+
+    assert asyncio.run(run()) == ["image"]
+    assert timeline == ["stopped", ("generate", "小猫图", "1:1")]
 
 
 @pytest.mark.parametrize("proxy, port", [(True, "7890"), (True, ""), (False, "7890")])

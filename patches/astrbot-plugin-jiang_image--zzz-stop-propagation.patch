@@ -1,0 +1,26 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -359,6 +359,7 @@ class Main(star.Star):
+         # ── 图生图：有引用图片 + 编辑意图 ──
+         edit_prompt = detect_image_edit_intent(text)
+         if edit_prompt and quoted_image_path:
++            event.stop_event()
+             async for r in self._do_image_edit(event, edit_prompt, quoted_image_path):
+                 yield r
+             return
+@@ -367,6 +368,7 @@ class Main(star.Star):
+         # ── 图生图：有引用图片 + 画图意图（自动转编辑）──
+         image_prompt = detect_image_intent(text)
+         if image_prompt and quoted_image_path:
++            event.stop_event()
+             async for r in self._do_image_edit(event, image_prompt, quoted_image_path):
+                 yield r
+             return
+@@ -373,5 +375,6 @@ class Main(star.Star):
+         # ── 文生图 ──
+         if image_prompt:
++            event.stop_event()
+             prompt, aspect = _parse_aspect(image_prompt)
+             if not prompt:
+                 prompt = image_prompt
