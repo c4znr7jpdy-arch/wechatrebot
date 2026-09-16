@@ -590,6 +590,52 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert saved["future_setting"] == {"keep": True}
 
 
+def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    module = "astrbot_plugin_qq_group_daily_analysis"
+    plugin = install / "app/astrbot/data/plugins" / module
+    plugin.mkdir(parents=True)
+    group_list = {"type": "list", "items": {"type": "string"}, "default": [], "hint": "onebot:GroupMessage:123456"}
+    schema = {
+        "basic": {"type": "object", "items": {
+            "admin_ids": group_list,
+            "bot_self_ids": group_list,
+            "group_list": group_list,
+            "group_list_mode": {"type": "string", "options": ["whitelist", "blacklist", "none"], "default": "none"},
+        }},
+        "auto_analysis": {"type": "object", "items": {"scheduled_group_list": group_list}},
+        "incremental": {"type": "object", "items": {"incremental_group_list": group_list}},
+    }
+    (plugin / "_conf_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False
+    public_id = service.catalog()["plugins"][0]["id"]
+    detail = service.detail(public_id)
+    for form in (detail["basic_schema"], detail["advanced_schema"]):
+        items = form["basic"]["items"]
+        for key in ("admin_ids", "bot_self_ids", "group_list"):
+            assert items[key]["_ui_control"] == "line-list"
+            assert "onebot" not in items[key]["hint"]
+        assert items["admin_ids"]["_ui_tint"] is True
+        assert items["bot_self_ids"]["_ui_tint"] is True
+        assert items["group_list"]["_group_selector"] is True
+    for section, key in (("auto_analysis", "scheduled_group_list"), ("incremental", "incremental_group_list")):
+        assert detail["advanced_schema"][section]["items"][key]["_group_selector"] is True
+    detail["advanced_config"]["basic"].update({
+        "admin_ids": ["wxid_analysis_admin"], "bot_self_ids": ["wxid_excluded"],
+        "group_list_mode": "whitelist", "group_list": ["123456@chatroom"],
+    })
+    service.save(public_id, detail["advanced_config"], detail["revision"])
+    saved = service.detail(public_id)["config"]["basic"]
+    assert saved["admin_ids"] == ["wxid_analysis_admin"]
+    assert saved["bot_self_ids"] == ["wxid_excluded"]
+    assert saved["group_list"] == ["123456@chatroom"]
+    assert saved["group_list_mode"] == "whitelist"
+
+
 def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path) -> None:
     install = tmp_path / "install"
     plugin_root = install / "app" / "astrbot" / "data" / "plugins"

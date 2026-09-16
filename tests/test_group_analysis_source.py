@@ -23,6 +23,81 @@ SOURCE_PATCH = (
     ROOT
     / "patches/astrbot-plugin-astrbot_plugin_qq_group_daily_analysis--source.patch"
 )
+PERMISSIONS_PATCH = (
+    ROOT
+    / "patches/astrbot-plugin-astrbot_plugin_qq_group_daily_analysis--z-permissions.patch"
+)
+PLUGIN_PATCHES = (BASE_PATCH, SOURCE_PATCH, PERMISSIONS_PATCH)
+
+
+@pytest.fixture
+def analysis_permissions(tmp_path: Path):
+    source = (_patched_plugin(tmp_path) / "main.py").read_text(encoding="utf-8")
+    scope = {"AstrMessageEvent": Any}
+    is_admin = _method(source, "_commercial_is_analysis_admin", scope)
+    denied = _method(source, "_commercial_admin_denied", scope)
+    plugin = SimpleNamespace(config={"basic": {"admin_ids": [" wxid_analysis_admin "]}})
+    plugin._commercial_is_analysis_admin = lambda event: is_admin(plugin, event)
+    plugin._commercial_admin_denied = lambda event: denied(plugin, event)
+    return source, scope, plugin
+
+
+def _permission_event(sender: str, admin: bool = False):
+    return SimpleNamespace(
+        get_sender_id=lambda: sender,
+        is_admin=lambda: admin,
+        should_call_llm=lambda enabled: None,
+        plain_result=lambda text: text,
+    )
+
+
+@pytest.mark.parametrize("name", [
+    "analyze_group_daily", "set_output_format", "set_report_template",
+    "view_templates", "analysis_settings", "incremental_status",
+])
+def test_analysis_commands_reject_non_admin_before_side_effects(analysis_permissions, name):
+    source, scope, plugin = analysis_permissions
+    method = _method(source, name, scope)
+    event = _permission_event("wxid_outsider")
+
+    async def run():
+        return [text async for text in method(plugin, event)]
+
+    replies = asyncio.run(run())
+    assert len(replies) == 1
+    assert "群聊分析管理员" in replies[0]
+    assert "wxid_outsider" in replies[0]
+    # Without an early denial the minimal plugin stub would fail on any service access.
+    node = next(node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.AsyncFunctionDef) and node.name == name)
+    assert all("permission_type" not in ast.unparse(decorator) for decorator in node.decorator_list)
+
+
+@pytest.mark.parametrize("sender,global_admin", [
+    ("wxid_analysis_admin", False), ("wxid_global_admin", True),
+])
+def test_analysis_admin_can_change_plugin_setting(analysis_permissions, sender, global_admin):
+    source, scope, plugin = analysis_permissions
+    saved = []
+    plugin.config_manager = SimpleNamespace(set_output_format=saved.append)
+    method = _method(source, "set_output_format", scope)
+
+    async def run():
+        return [text async for text in method(plugin, _permission_event(sender, global_admin), "text")]
+
+    assert "已设置" in asyncio.run(run())[0]
+    assert saved == ["text"]
+    plugin.config["basic"]["admin_ids"] = []
+    assert plugin._commercial_is_analysis_admin(_permission_event(sender, global_admin)) is global_admin
+
+
+@pytest.mark.parametrize("admins,sender", [
+    ("wxid_analysis_admin", "wxid_analysis"), (["wxid_analysis_admin"], "wxid_analysis"),
+    ([None, 123, ""], ""), (None, "wxid_analysis_admin"),
+])
+def test_analysis_admin_requires_exact_nonempty_user_id(analysis_permissions, admins, sender):
+    _, _, plugin = analysis_permissions
+    plugin.config["basic"]["admin_ids"] = admins
+    assert plugin._commercial_is_analysis_admin(_permission_event(sender)) is False
 
 
 def _patched_plugin(tmp_path: Path) -> Path:
@@ -30,7 +105,7 @@ def _patched_plugin(tmp_path: Path) -> Path:
         pytest.skip("Local group analysis plugin source checkout is unavailable")
 
     files: set[str] = set()
-    for patch in (BASE_PATCH, SOURCE_PATCH):
+    for patch in PLUGIN_PATCHES:
         files.update(
             re.findall(
                 r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE
@@ -46,7 +121,7 @@ def _patched_plugin(tmp_path: Path) -> Path:
     )
     # The extension patch is intentionally based on the already-commercialized
     # source. This test also locks down the required build order.
-    for patch in (BASE_PATCH, SOURCE_PATCH):
+    for patch in PLUGIN_PATCHES:
         subprocess.run(
             ["git", "apply", "--check", "--whitespace=error-all", str(patch)],
             cwd=tmp_path,

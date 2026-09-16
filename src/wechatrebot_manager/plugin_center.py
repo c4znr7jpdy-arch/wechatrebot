@@ -88,8 +88,12 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
     sections=(
         (
             "basic",
-            "报告设置",
+            "基础设置",
             (
+                ("admin_ids", {}),
+                ("group_list_mode", {}),
+                ("group_list", {}),
+                ("bot_self_ids", {}),
                 (
                     "report_template",
                     {
@@ -387,11 +391,67 @@ _CUSTOMER_SCHEMA_PROFILES = {
 _MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
 
 
+def _group_analysis_ui_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(schema)
+    group_hint = (
+        "点击“从群聊列表添加”下拉选择群；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID，"
+        "或填写群标识（例如 123456@chatroom）。手动填写时建议直接复制完整会话 ID。"
+    )
+    overrides = {
+        "basic": {
+            "admin_ids": {
+                "description": "群聊分析管理员",
+                "_ui_control": "line-list",
+                "placeholder": "例如：wxid_admin",
+                "hint": "每行填写一个用户 ID，使用权限提示中显示的 ID；请勿填写群标识或昵称。仅授予本插件的分析和设置指令权限；机器人管理员仍可使用。留空时仅机器人管理员可用。",
+                "_ui_tint": True,
+            },
+            "group_list_mode": {
+                "labels": ["白名单：仅允许列表中的群", "黑名单：屏蔽列表中的群", "不限制群聊"],
+                "hint": "决定哪些群可以使用群聊分析。白名单为空时没有群可用；黑名单为空时不屏蔽群；不限制群聊时忽略下面的名单。此项不会授予管理员权限。",
+            },
+            "group_list": {
+                "_ui_control": "line-list", "_group_selector": True,
+                "placeholder": "从群聊列表选择，或粘贴完整会话 ID", "hint": group_hint,
+            },
+            "bot_self_ids": {
+                "_ui_control": "line-list", "_ui_tint": True,
+                "placeholder": "例如：wxid_robot\nwxid_member",
+                "hint": "每行填写一个不希望参与报告统计的用户 ID，例如机器人或其他群成员；请勿填写群标识或昵称。留空表示不额外屏蔽用户；这里不会授予管理员权限。",
+            },
+        },
+        "auto_analysis": {
+            "scheduled_group_list_mode": {"hint": "白名单只对列表中的群生成定时日报，空列表不生成；黑名单屏蔽列表中的群。目标群还须通过基础群聊权限。"},
+            "scheduled_group_list": {
+                "_ui_control": "line-list", "_group_selector": True,
+                "placeholder": "从群聊列表选择，或粘贴完整会话 ID",
+                "hint": group_hint + "定时白名单留空时不生成日报。",
+            },
+        },
+        "incremental": {
+            "incremental_group_list_mode": {"hint": "白名单只让列表中的群使用增量分析，空列表不启用；黑名单让列表外的群使用增量分析。目标群还须通过基础群聊权限和定时名单。"},
+            "incremental_group_list": {
+                "_ui_control": "line-list", "_group_selector": True,
+                "placeholder": "从群聊列表选择，或粘贴完整会话 ID", "hint": group_hint,
+            },
+        },
+    }
+    for section_key, fields in overrides.items():
+        section = result.get(section_key, {})
+        items = section.get("items", {}) if isinstance(section, dict) else {}
+        for key, changes in fields.items():
+            if isinstance(items.get(key), dict):
+                items[key].update(changes)
+    return result
+
+
 def _project_customer_schema(
     module_name: str,
     schema: dict[str, Any],
 ) -> tuple[dict[str, Any], CustomerSchemaProfile | None]:
     """Project complex engine schemas into a small customer-facing form."""
+    if module_name == _GROUP_ANALYSIS_MODULE:
+        schema = _group_analysis_ui_schema(schema)
     profile = _CUSTOMER_SCHEMA_PROFILES.get(module_name)
     if profile is None:
         projected = common_schema(module_name, schema)
@@ -1571,6 +1631,8 @@ class PluginCenterService:
             rerank_providers=rerank_providers,
             personas=personas,
         )
+        if module_name == _GROUP_ANALYSIS_MODULE:
+            runtime_schema = _group_analysis_ui_schema(runtime_schema)
         customer_schema, profile = _project_customer_schema(module_name, runtime_schema)
         clean_schema = _customer_schema(customer_schema, config)
         customer_config = _customer_config(customer_schema, config)

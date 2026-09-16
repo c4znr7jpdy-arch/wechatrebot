@@ -247,6 +247,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .config-section-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 18px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-field.full { grid-column: 1 / -1; }
+.form-field.tinted-list { padding: 12px; border: 1px solid #c5ddf8; border-radius: 8px; background: var(--blue-100); }
+.form-field.tinted-list textarea { background: #fafdff; }
+.form-field.tinted-list small { line-height: 1.7; }
 .form-field > span, .form-field > label:first-child { font-size: 12px; font-weight: 800; }
 .form-field small { color: var(--muted); }
 .form-field input:not([type="checkbox"]), .form-field select, .form-field textarea, .settings-card input, .settings-card select, .settings-card textarea, .modal input, .modal select {
@@ -1099,7 +1102,10 @@ tbody tr:hover { background: #fbfdff; }
   #page-activity.active,
   #page-settings.active { min-height: 0; }
   .runtime-grid { min-height: 0; }
+  #page-features .feature-layout { flex: 0 0 auto; }
   .feature-catalog { max-height: 330px; }
+  .feature-catalog, .feature-detail { height: auto; }
+  .feature-detail { overflow: visible; }
   .group-table-panel,
   .group-inspector,
   .contact-table-panel,

@@ -655,7 +655,7 @@
     control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
-    return `<div class="form-field ${["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
+    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
   }
 
   function schemaMarkup(schema, config, prefix = [], namespace = "") {
@@ -3169,7 +3169,11 @@
       previewFeature("feature-meme", "表情管理", "schema-and-page", "管理多套表情包、会话绑定、资源目录和同步设置。", {page: "meme-management"}),
     ];
     const groupAnalysisBasicSchema = {
-      basic: {description: "报告设置", type: "object", items: {
+      basic: {description: "基础设置", type: "object", items: {
+        admin_ids: {description: "群聊分析管理员", type: "list", _ui_control: "line-list", _ui_tint: true, placeholder: "例如：wxid_admin", hint: "每行填写一个用户 ID，使用权限提示中显示的 ID；仅授予本插件的指令权限，机器人管理员仍可使用。留空时仅机器人管理员可用。"},
+        group_list_mode: {description: "群聊权限模式", type: "string", options: ["whitelist", "blacklist", "none"], labels: ["白名单：仅允许列表中的群", "黑名单：屏蔽列表中的群", "不限制群聊"], hint: "白名单为空时没有群可用；黑名单为空时不屏蔽群；不限制群聊时忽略名单。此项不会授予管理员权限。"},
+        group_list: {description: "群组白/黑名单列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "点击“从群聊列表添加”下拉选择群；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID，或填写群标识（例如 123456@chatroom）。"},
+        bot_self_ids: {description: "群分析时屏蔽的用户ID列表", type: "list", _ui_control: "line-list", _ui_tint: true, placeholder: "例如：wxid_robot\nwxid_member", hint: "每行填写一个不希望参与报告统计的用户 ID，例如机器人或其他群成员；请勿填写群标识或昵称。留空表示不额外屏蔽用户；这里不会授予管理员权限。"},
         report_template: {description: "报告样式", type: "string", options: ["姜小妹", "BlueArchive", "scrapbook", "retro_futurism", "HatsuneMiku", "hack", "spring_festival", "simple", "format"], labels: ["姜小妹主题", "蔚蓝档案", "手账风（示例样式）", "复古未来", "初音未来", "极客终端", "新春风", "简洁风", "通用排版"], hint: "“手账风”就是示例截图中的长图样式。"},
         analysis_days: {description: "统计最近几天", type: "int", min: 1, max: 30, hint: "一般保持 1 天；需要周报时可改为 7 天。"},
         min_messages_threshold: {description: "最少消息数", type: "int", min: 1, max: 10000, hint: "低于这个数量时跳过报告，建议保持 200。"},
@@ -3189,7 +3193,7 @@
       llm_provider_id: {description: "用于分析的模型", type: "string", options: ["", "jyjapi/grok-4.6"], labels: ["使用系统默认", "免费 Grok 4.6"], hint: "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。"},
     }}};
     const groupAnalysisConfig = {
-      basic: {report_template: "scrapbook", analysis_days: 1, min_messages_threshold: 200},
+      basic: {admin_ids: [], group_list_mode: "none", group_list: [], bot_self_ids: [], report_template: "scrapbook", analysis_days: 1, min_messages_threshold: 200},
       auto_analysis: {scheduled_group_list: ["18310516375@chatroom"], auto_analysis_time: ["23:00"]},
       analysis_features: {topic_analysis_enabled: true, user_title_analysis_enabled: true, golden_quote_analysis_enabled: true, chat_quality_analysis_enabled: true},
       llm: {llm_provider_id: "jyjapi/grok-4.6"},
@@ -3280,7 +3284,9 @@
         schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema},
         config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
-        advanced_schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema, performance: {type: "object", description: "并发设置", items: {max_concurrent: {type: "int", description: "同时生成报告数量", min: 1, max: 5, default: 1}}}},
+        advanced_schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema, incremental: {type: "object", description: "增量分析设置", items: {
+          incremental_group_list: {description: "增量分析群列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "从群聊列表下拉选择；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID。目标群还须通过基础群聊权限和定时名单。"},
+        }}, performance: {type: "object", description: "并发设置", items: {max_concurrent: {type: "int", description: "同时生成报告数量", min: 1, max: 5, default: 1}}}},
         configuration_note: "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数继续使用推荐值，保存时不会被重置。",
         setup_steps: ["在“自动日报群”旁点击“从群聊列表添加”，无需在群里发送命令", "选择需要生成日报的群；多个群可以继续添加", "确认生成时间和分析模型后保存"],
         revision: "preview",
