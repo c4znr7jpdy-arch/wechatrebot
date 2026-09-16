@@ -40,6 +40,7 @@ _PROXY_PREFIXES = (
     "/api/plug/",
 )
 _MAX_BODY_BYTES = 4 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 _CONFIG_WRITE_LOCK = threading.RLock()
 _SECRET_FIELD = re.compile(
     r"(?:^|[^a-z0-9])(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)(?:$|[^a-z0-9])",
@@ -1924,14 +1925,16 @@ def _handler(service: PluginCenterService):
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError as exc:
                 raise PluginCenterError("请求长度无效。") from exc
-            if length > _MAX_BODY_BYTES:
+            content_type = self.headers.get("Content-Type", "application/json")
+            limit = _MAX_UPLOAD_BYTES if content_type.casefold().startswith("multipart/form-data;") else _MAX_BODY_BYTES
+            if length > limit:
                 raise PluginCenterError("请求内容过大。")
             body = self.rfile.read(length) if length else None
             status, headers, raw = service.engine.raw_request(
                 self.command,
                 upstream_path,
                 body=body,
-                content_type=self.headers.get("Content-Type", "application/json"),
+                content_type=content_type,
                 accept_language=self.headers.get("Accept-Language", "zh-CN"),
             )
             normalized_headers = {key.casefold(): value for key, value in headers.items()}

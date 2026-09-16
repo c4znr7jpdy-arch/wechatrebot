@@ -119,6 +119,21 @@ async function handlePluginPageRequest(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(message.body ?? {}),
     });
+  } else if (message.action === "files:upload") {
+    const buffer = message.fileBuffer;
+    if (Object.prototype.toString.call(buffer) !== "[object ArrayBuffer]" && !ArrayBuffer.isView(buffer)) {
+      throw new Error("请选择要上传的文件。");
+    }
+    if (buffer.byteLength > 12 * 1024 * 1024) {
+      throw new Error("上传文件过大，请选择较小的文件。");
+    }
+    const fileName = String(message.fileName || "upload.bin");
+    if (!fileName || fileName.length > 255 || /[\\/]/.test(fileName)) {
+      throw new Error("上传文件名无效。");
+    }
+    const form = new FormData();
+    form.append("file", new Blob([buffer], { type: message.fileType || "application/octet-stream" }), fileName);
+    response = await fetch(base, { method: "POST", body: form });
   } else {
     throw new Error("当前高级配置页使用了尚未支持的操作。");
   }
@@ -716,6 +731,7 @@ function renderConfigPanels() {
   const hasBasic = state.detail.configurable && Object.keys(basicSchema).length > 0;
   const configurationNote = customerText(state.detail.configuration_note || "");
   el("basic-config-intro").hidden = !hasBasic || !configurationNote;
+  el("basic-tab").hidden = !hasBasic;
   el("basic-config-note").textContent = configurationNote;
   fields.hidden = !hasBasic;
   configSearch.closest(".config-toolbar").hidden = !hasBasic;
@@ -756,6 +772,7 @@ function renderDetail() {
 function renderPages() {
   const pages = state.detail.pages || [];
   el("pages-tab").hidden = pages.length === 0;
+  el("pages-tab").textContent = state.detail.configurable ? "完整配置" : "专属配置";
   const picker = el("page-picker");
   picker.replaceChildren();
   const frame = el("plugin-frame");
@@ -955,7 +972,17 @@ async function loadCatalog() {
   detailView.hidden = true;
   try {
     const data = await api("/control/catalog");
-    state.catalog = data.plugins || [];
+    const plugins = data.plugins || [];
+    const requested = requestedFeatureId ? plugins.find((item) => item.id === requestedFeatureId) : null;
+    if (requestedFeatureId && !requested) {
+      throw new Error("当前功能不在交付列表中，请返回功能中心重新打开专属配置页。");
+    }
+    state.catalog = requested ? [requested] : plugins;
+    if (requested) {
+      el("plugin-search").closest(".search-box").hidden = true;
+      el("plugin-count").previousElementSibling.textContent = "当前功能";
+      document.querySelector(".topbar p").textContent = "只管理当前功能的专属配置";
+    }
     if (data.product_name) {
       el("product-title").textContent = `${customerText(data.product_name)} · 功能配置`;
       document.title = `${customerText(data.product_name)} · 功能配置`;
@@ -964,8 +991,7 @@ async function loadCatalog() {
     renderCatalog();
     loadingView.hidden = true;
     if (state.catalog.length) {
-      const requested = state.catalog.find((item) => item.id === requestedFeatureId);
-      await selectPlugin((requested || state.catalog[0]).id, Boolean(requested));
+      await selectPlugin(state.catalog[0].id, Boolean(requested));
     }
     else emptyView.hidden = false;
   } catch (error) {

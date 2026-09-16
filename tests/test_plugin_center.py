@@ -782,6 +782,42 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
         service.save(by_name["点歌"]["id"], {}, music["revision"])
 
 
+def test_voice_clone_uses_only_its_page_even_with_old_schema_delivery(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    module = "astrbot_plugin_mimo_tts_clone"
+    plugin = install / "app" / "astrbot" / "data" / "plugins" / module
+    page = plugin / "pages" / "settings"
+    page.mkdir(parents=True)
+    (page / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps({
+            "api_key": {"type": "string", "default": ""},
+            "ai_style_director_provider_id": {"type": "string", "default": ""},
+        }),
+        encoding="utf-8",
+    )
+    legal = install / "legal"
+    legal.mkdir(parents=True, exist_ok=True)
+    (legal / "feature-set.json").write_text(
+        json.dumps({"features": [{
+            "module": module, "display_name": "语音克隆",
+            "configuration": "schema-and-page",
+        }]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    entry = service.catalog()["plugins"][0]
+    detail = service.detail(entry["id"])
+
+    assert entry["configurable"] is False
+    assert entry["field_count"] == entry["model_field_count"] == 0
+    assert detail["basic_schema"] == detail["model_schema"] == detail["advanced_schema"] == {}
+    assert detail["pages"] == ("settings",)
+    with pytest.raises(PluginCenterError, match="没有可编辑"):
+        service.save(entry["id"], {}, detail["revision"])
+
+
 def test_plugin_center_command_can_open_selected_feature(tmp_path: Path) -> None:
     command = plugin_center_command(tmp_path, "feature-0123456789abcdef")
 
@@ -1228,6 +1264,7 @@ def test_plugin_web_assets_are_packaged_and_customer_facing() -> None:
     assert "astrbot-plugin-page" in javascript
     assert 'message.action === "api:get"' in javascript
     assert 'message.action === "api:post"' in javascript
+    assert 'message.action === "files:upload"' in javascript
     assert "async function refreshCurrentPluginState()" in javascript
     assert 'window.addEventListener("focus", () => { refreshCurrentPluginState(); });' in javascript
 
@@ -1331,6 +1368,48 @@ def test_local_web_handler_hosts_plugin_page_bridge_and_preserves_content_type()
             ("GET", "/api/plug/example/page/schedules?kind=short", None),
             ("POST", "/api/plug/example/page/schedules", b'{"enabled":true}'),
         ]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_plugin_page_upload_forwards_large_audio_to_the_selected_feature() -> None:
+    calls: list[tuple[str, str, int, str]] = []
+
+    class FakeEngine:
+        def raw_request(self, method, path, *, body=None, content_type="", **_kwargs):
+            calls.append((method, path, len(body or b""), content_type))
+            return 200, {"content-type": "application/json"}, b'{"status":"ok","data":{"success":true}}'
+
+    class FakeService:
+        engine = FakeEngine()
+
+        def extension_path(self, public_id: str, endpoint: str) -> str:
+            assert public_id == "feature-0000000000000000"
+            assert endpoint == "upload_voice_sample"
+            return "/api/plug/astrbot_plugin_mimo_tts_clone/upload_voice_sample"
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(FakeService()))  # type: ignore[arg-type]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        body = b"--audio\r\nContent-Disposition: form-data; name=\"file\"; filename=\"sample.wav\"\r\n\r\n"
+        body += b"a" * (5 * 1024 * 1024)
+        body += b"\r\n--audio--\r\n"
+        request = Request(
+            f"{base}/control/plugins/feature-0000000000000000/extension/upload_voice_sample",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "multipart/form-data; boundary=audio", "Origin": base},
+        )
+        with urlopen(request, timeout=5) as response:
+            assert json.loads(response.read())["data"]["success"] is True
+        assert calls == [(
+            "POST", "/api/plug/astrbot_plugin_mimo_tts_clone/upload_voice_sample",
+            len(body), "multipart/form-data; boundary=audio",
+        )]
     finally:
         server.shutdown()
         server.server_close()

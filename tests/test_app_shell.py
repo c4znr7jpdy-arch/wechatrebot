@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 import sys
 import threading
 
@@ -902,6 +903,23 @@ def test_model_service_starts_empty_and_opens_a_dedicated_editor() -> None:
     assert "放弃模型配置？" in script
     assert "showProviderOverview(true);" in script
     assert 'previewParams.get("demo") === "model-services"' in script
+
+
+def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() -> None:
+    root = Path(app_shell.__file__).parents[2]
+    script = (Path(app_shell.__file__).with_name("app_webui") / "app.js").read_text(
+        encoding="utf-8"
+    )
+    features = json.loads(
+        (root / "release" / "feature-set.json").read_text(encoding="utf-8")
+    )["features"]
+    voice = next(
+        item for item in features if item["module"] == "astrbot_plugin_mimo_tts_clone"
+    )
+
+    assert voice["configuration"] == "page"
+    assert 'previewFeature("feature-voice-clone", "语音克隆", "page"' in script
+    assert "请打开专属配置页填写服务密钥" in script
 
 
 def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:

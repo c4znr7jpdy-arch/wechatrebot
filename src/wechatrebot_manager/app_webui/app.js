@@ -724,7 +724,7 @@
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online && detail.enabled ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
+        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
     $("#featureEnabled").addEventListener("change", toggleFeature);
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
@@ -3169,7 +3169,7 @@
     const features = [
       previewFeature("feature-long-memory", "长期记忆", "schema-and-page", "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。", {page: "dashboard", readiness: "智能召回已就绪"}),
       previewFeature("feature-bittorrent", "资源检索", "schema", "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"),
-      previewFeature("feature-voice-clone", "语音克隆", "schema-and-page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
+      previewFeature("feature-voice-clone", "语音克隆", "page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
       previewFeature("feature-memory-manager", "外部向量记忆（进阶替代）", "schema", "需要 Milvus 和 Embedding 模型；与基础长期记忆只能选择其中一种作为主记忆。", {enabled: false, readiness: "需先停用基础长期记忆并配置外部服务"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
