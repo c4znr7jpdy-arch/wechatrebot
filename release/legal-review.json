@@ -3,7 +3,7 @@
   "status": "review-required",
   "runtime_component_count": 223,
   "shared_runtime_component_count": 2,
-  "manager_build_component_count": 17,
+  "manager_build_component_count": 18,
   "delivered_plugin_count": 24,
   "unresolved_license_components": [
     "apilmoji 0.3.1",
@@ -36,15 +36,15 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "E059CDCB4D233123E5E242EE0D8C1F6E110CF423575B2563916847A7F6DE3B1B"
+      "sha256": "D968EAFF5BC7237C4E862E8CBA3032E915BA8B2AA3BF31F1B7487282091B4C1C"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
-      "sha256": "815429C9E22124DE9BDBF87E8C61194F756202ED6BCCDF454701B59914085652"
+      "sha256": "4567F213A5A71CF4489C7420746311AF5643D9800FB4A84041FC4194DC64F7B2"
     },
     "license_texts": {
       "path": "legal/THIRD-PARTY-LICENSES.txt",
-      "sha256": "82D1CB527B932A3C8C9CD73B8FE6BC1E72E3B57EF24084E7B899C5192F6D31D9"
+      "sha256": "56444EED14A7B41BCCEEA0387F5D457FD48DFE2D862FFE33273533FC95EF7267"
     },
     "corresponding_source": {
       "path": "legal/CORRESPONDING-SOURCE.md",

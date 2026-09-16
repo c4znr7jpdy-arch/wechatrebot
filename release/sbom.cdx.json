@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:073e88d4-5c58-55c3-9e88-f19107f7733c",
+  "serialNumber": "urn:uuid:7ac8b533-d200-5ba9-8dbf-787cf5d1e10a",
   "version": 1,
   "metadata": {
     "component": {
@@ -6008,6 +6008,32 @@
         {
           "type": "website",
           "url": "https://github.com/python/typing_extensions"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "manager-build",
+      "name": "tzdata",
+      "version": "2026.4",
+      "purl": "pkg:pypi/tzdata@2026.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "manager-build"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python/tzdata"
         }
       ]
     },

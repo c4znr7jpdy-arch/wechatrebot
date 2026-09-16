@@ -49,6 +49,7 @@
 | manager-build | pywin32-ctypes | 0.2.3 | BSD-3-Clause |
 | manager-build | setuptools | 84.0.0 | MIT |
 | manager-build | typing_extensions | 4.16.0 | PSF-2.0 |
+| manager-build | tzdata | 2026.4 | Apache-2.0 |
 | runtime | aiocqhttp | 1.4.4 | MIT |
 | runtime | aiodocker | 0.26.0 | Apache-2.0 |
 | runtime | aiofiles | 25.1.0 | Apache-2.0 |
