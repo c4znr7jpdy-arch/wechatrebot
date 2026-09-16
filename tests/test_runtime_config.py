@@ -231,6 +231,8 @@ def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path
         "commercial_openai/chat-model"
     )
     assert angel["analyzer_model"] == "commercial_openai/chat-model"
+    assert angel["wake_interaction"]["alias"] == "小妹"
+    assert angel["personality"]["ai_self_identity"].startswith("你是小妹")
 
     angel_path.write_text(json.dumps({"analyzer_model": "custom/model"}), encoding="utf-8")
     astrbot["plugin_set"] = ["astrbot_plugin_angel_heart", "legacy-plugin"]

@@ -173,7 +173,7 @@ def _write_download_metadata(
 ) -> Path:
     payload = {
         "schema_version": 1,
-        "product": "姜小妹机器人",
+        "product": "小妹",
         "platform": "Windows 10/11 x64",
         "version": package.version,
         "published_at": published_at,

@@ -332,11 +332,13 @@ def _sync_delivery_plugins(
 def _sync_angel_heart_model(
     astrbot_data_root: Path,
     provider_profile: OpenAIProviderProfile | None,
+    robot_name: str = "小妹",
 ) -> None:
     plugin_dir = astrbot_data_root / "plugins" / "astrbot_plugin_angel_heart"
     if not plugin_dir.is_dir():
         return
     path = astrbot_data_root / "config" / "astrbot_plugin_angel_heart_config.json"
+    new_config = not path.is_file()
     payload = _load_object(path)
     wake = payload.get("wake_interaction")
     if not isinstance(wake, dict):
@@ -344,6 +346,14 @@ def _sync_angel_heart_model(
         payload["wake_interaction"] = wake
     wake.setdefault("enter_on_mention_only", False)
     wake.setdefault("direct_wake_fast_path", True)
+    if new_config:
+        wake["alias"] = robot_name
+        payload["personality"] = {
+            "ai_self_identity": (
+                f"你是{robot_name}，是群聊里的熟人型机器人。"
+                "说话自然、直接、简短，不使用机械的客服措辞。"
+            )
+        }
     if provider_profile is not None:
         model_id = provider_profile.normalized().model_id
         for field in ("analyzer_model", "image_caption_provider_id"):
@@ -590,7 +600,14 @@ def write_runtime_configs(
         astrbot_path,
         astrbot_payload,
     )
-    _sync_angel_heart_model(astrbot_data_root, provider_profile)
+    saved_brand = _load_object(root / "config" / "brand.json")
+    robot_name = str(
+        (brand_profile.display_name if brand_profile is not None else saved_brand.get("display_name"))
+        or "小妹"
+    ).strip()
+    if robot_name == "\u59dc\u5c0f\u59b9\u673a\u5668\u4eba":
+        robot_name = "小妹"
+    _sync_angel_heart_model(astrbot_data_root, provider_profile, robot_name)
     _sync_living_memory_config(astrbot_data_root, provider_profile)
     _sync_emotion_config(astrbot_data_root)
     manager_path = root / "config" / "manager.json"

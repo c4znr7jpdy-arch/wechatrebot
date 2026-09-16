@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "display_name": "姜小妹机器人",
-  "short_name": "姜小妹",
-  "persona_name": "姜小妹",
+  "display_name": "小妹",
+  "short_name": "小妹",
+  "persona_name": "小妹",
   "avatar_path": "",
-  "welcome_text": "你好，我是姜小妹机器人。",
-  "help_title": "姜小妹机器人帮助"
+  "welcome_text": "你好，我是小妹。",
+  "help_title": "小妹帮助"
 }

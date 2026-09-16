@@ -102,7 +102,7 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
                         "hint": "“手账风”就是示例截图中的长图样式。",
                         "_option_labels": {
                             "scrapbook": "手账风（示例样式）",
-                            "姜小妹": "姜小妹主题",
+                            "\u59dc\u5c0f\u59b9": "小妹主题",
                             "simple": "简洁风",
                             "spring_festival": "新春风",
                             "BlueArchive": "蔚蓝档案",
@@ -250,6 +250,7 @@ _ANGEL_HEART_PROFILE = CustomerSchemaProfile(
                     {
                         "description": "群聊身份",
                         "hint": "说明机器人是谁、擅长什么，供群聊接话判断使用。",
+                        "default": "你是小妹，是群聊里的熟人型机器人。说话自然、直接、简短，不使用机械的客服措辞。",
                     },
                 ),
                 (
@@ -269,7 +270,8 @@ _ANGEL_HEART_PROFILE = CustomerSchemaProfile(
                     "alias",
                     {
                         "description": "可识别的昵称",
-                        "hint": "多个昵称用 | 分隔，例如：姜小妹|小妹。",
+                        "hint": "机器人名称会自动放在最前；其他昵称用 | 分隔，例如：小妹|妹宝。",
+                        "default": "小妹",
                     },
                 ),
                 (
@@ -691,7 +693,7 @@ def _white_label_schema(value: Any) -> Any:
     if isinstance(value, str):
         value = re.sub(r"天使(?:之)?心", "机器人核心", value)
         value = value.replace("angel_describe_image", "历史图片描述")
-        value = re.sub(r"(?i)angel[-_ ]?heart", "核心助手", value)
+        value = re.sub(r"(?i)angel[-_ ]?heart", "机器人核心", value)
         value = re.sub(r"(?i)kawayiyokami", "核心维护者", value)
         result = re.sub(r"(?i)astrbot", "回复引擎", value)
         result = re.sub(r"(?i)new[-_ ]?hook", "微信连接", result)
@@ -728,9 +730,11 @@ def _white_label_core_page_content(
     for original, replacement in (
         ("天使之心", "机器人核心"),
         ("天使心", "机器人核心"),
-        ("AngelHeart", "核心助手"),
+        ("AngelHeart", "机器人核心"),
         ("kawayiYokami", "核心维护者"),
         ("插件设置", "核心设置"),
+        ("助理", "机器人"),
+        ("助手", "机器人"),
     ):
         raw = raw.replace(original.encode("utf-8"), replacement.encode("utf-8"))
     return raw

@@ -14,7 +14,6 @@ from .chat_history import ChatHistoryService
 from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
-    RobotSettings,
     delete_provider_profile,
     load_provider_profile,
     load_provider_services,
@@ -23,7 +22,6 @@ from .customer_config import (
     replace_provider_references,
     replace_provider_value,
     save_provider_profile,
-    save_robot_settings,
     set_default_provider,
 )
 from .customer_maintenance import (
@@ -88,6 +86,7 @@ PUBLIC_API_METHODS = (
     "open_wechat_download",
     "get_features",
     "get_robot_core",
+    "save_robot_core",
     "request_robot_core",
     "get_feature",
     "set_feature_enabled",
@@ -125,7 +124,6 @@ PUBLIC_API_METHODS = (
     "save_memory_settings",
     "save_emotion_settings",
     "complete_onboarding",
-    "save_brand",
     "get_providers",
     "save_provider",
     "set_default_provider",
@@ -417,6 +415,20 @@ class ApplicationApi:
             return self._ok(RobotCoreSettingsService(self._features).detail())
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
+
+    def save_robot_core(
+        self,
+        config: dict[str, Any],
+        revision: str = "",
+        identity: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
+        try:
+            saved = RobotCoreSettingsService(self._features).save_global(
+                config, revision, identity
+            )
+            return self._ok(saved)
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
 
     def request_robot_core(
         self, method: str, endpoint: str, payload: dict[str, Any] | None = None,
@@ -989,33 +1001,6 @@ class ApplicationApi:
         try:
             return self._ok(self._experience_service().finish_onboarding(), message="基础设置已完成。")
         except (OSError, ExperienceError) as exc:
-            return self._failed(exc, "15001")
-
-    def save_brand(self, values: dict[str, Any]) -> dict[str, object]:
-        try:
-            current = load_robot_settings(self._install_root)
-            from .brand import BrandProfile
-
-            profile = BrandProfile(
-                display_name=str(values.get("display_name") or ""),
-                short_name=str(values.get("short_name") or ""),
-                persona_name=str(values.get("persona_name") or ""),
-                avatar_path=current.profile.avatar_path,
-                welcome_text=str(values.get("welcome_text") or ""),
-            )
-            saved = save_robot_settings(
-                self._install_root,
-                RobotSettings(
-                    profile=profile,
-                    admin_id=str(values.get("admin_id") or ""),
-                ),
-                apply_reply_identity=False,
-            )
-            return self._ok(
-                {**saved.profile.to_dict(), "admin_id": saved.admin_id},
-                message="管理界面名称与管理员已保存，聊天身份未改变。",
-            )
-        except (OSError, ValueError) as exc:
             return self._failed(exc, "15001")
 
     def save_provider(self, values: dict[str, Any]) -> dict[str, object]:

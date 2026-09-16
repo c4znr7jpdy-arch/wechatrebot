@@ -134,7 +134,7 @@ def test_patch_forces_explicit_recall_and_skips_repeated_greetings(
         True,
         "explicit_memory_request",
     )
-    assert recall._should_auto_recall("[At:wxid_masked] @姜小妹 你好你好") == (
+    assert recall._should_auto_recall("[At:wxid_masked] @小妹 你好你好") == (
         False,
         "short_casual",
     )

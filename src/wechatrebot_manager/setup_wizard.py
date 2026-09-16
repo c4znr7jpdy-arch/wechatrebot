@@ -17,9 +17,9 @@ PROVIDER_CUSTOM = "自定义 OpenAI 兼容"
 PROVIDER_LATER = "稍后在管理后台配置"
 
 DEFAULT_BRAND = BrandProfile(
-    display_name="姜小妹机器人",
-    short_name="姜小妹",
-    persona_name="姜小妹",
+    display_name="小妹",
+    short_name="小妹",
+    persona_name="小妹",
 )
 
 
@@ -27,7 +27,7 @@ def default_install_root() -> Path:
     """Return a writable per-user default that can still be changed in the wizard."""
     local_app_data = os.environ.get("LOCALAPPDATA")
     base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
-    return (base / "JiangXiaomeiRobot").expanduser().resolve()
+    return (base / "XiaomeiRobot").expanduser().resolve()
 
 
 def provider_profile_for_choice(
@@ -71,7 +71,7 @@ class SetupWizard:
         self.installing = False
         self.events: queue.Queue[tuple[object, ...]] = queue.Queue()
 
-        root.title("姜小妹机器人安装向导")
+        root.title("小妹安装向导")
         root.geometry("760x520")
         root.minsize(700, 500)
         root.configure(background="#f4f6fa")
@@ -89,7 +89,7 @@ class SetupWizard:
 
         header = ttk.Frame(root, padding=(32, 24, 32, 12))
         header.pack(fill="x")
-        ttk.Label(header, text="姜小妹机器人 · 商业版", style="Title.TLabel").pack(
+        ttk.Label(header, text="小妹 · 商业版", style="Title.TLabel").pack(
             anchor="w"
         )
         self.step_label = ttk.Label(header, style="Step.TLabel")

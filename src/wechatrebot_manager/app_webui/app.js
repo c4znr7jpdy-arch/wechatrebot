@@ -96,8 +96,12 @@
   const coreSettings = window.createRobotCoreSettings({
     read: () => api("get_robot_core"),
     request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
-    save: (id, config, revision) => api("save_feature", id, config, revision),
+    save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
     toggle: (id, enabled) => api("set_feature_enabled", id, enabled),
+    applyBrand: (brand) => {
+      state.bootstrap.brand = brand;
+      applyBrand(brand);
+    },
     schemaMarkup, configFromForm, escapeHtml, confirmAction, toast, reportError, growTextarea,
   });
 
@@ -2921,8 +2925,6 @@
     const mark = $("#brandMark");
     if (mark && !mark.querySelector("img")) mark.innerHTML = '<img src="assets/app-icon.png" alt="">';
     document.title = `${brand.display_name} · 机器人管理`;
-    const form = $("#brandForm");
-    for (const key of ["display_name", "admin_id"]) if (form?.elements[key]) form.elements[key].value = brand[key] || "";
   }
 
   function updateToggleCopy(event) {
@@ -2983,36 +2985,6 @@
     } finally {
       button.disabled = false;
       button.textContent = section === "memory" ? "保存记忆设置" : "保存情感设置";
-    }
-  }
-
-  async function saveInterfaceSettings(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    if (!requiredValues(form)) return;
-    const button = $("button[type='submit']", form);
-    const note = $("#brandNote");
-    const values = Object.fromEntries(new FormData(form));
-    button.disabled = true;
-    button.textContent = "正在保存…";
-    note.textContent = "正在保存界面设置…";
-    try {
-      const displayName = String(values.display_name || "").trim();
-      const savedBrand = await api("save_brand", {
-        ...state.bootstrap.brand,
-        display_name: displayName,
-        welcome_text: `你好，我是${displayName}。`,
-        admin_id: values.admin_id || "",
-      });
-      state.bootstrap.brand = savedBrand;
-      applyBrand(savedBrand);
-      note.textContent = "界面设置已保存；聊天身份与核心配置未改变。";
-    } catch (error) {
-      note.textContent = error.message || "保存失败";
-      reportError(error);
-    } finally {
-      button.disabled = false;
-      button.textContent = "保存界面设置";
     }
   }
 
@@ -3278,7 +3250,6 @@
     $("#refreshActivity").addEventListener("click", loadActivity);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     coreSettings.init();
-    $("#brandForm").addEventListener("submit", saveInterfaceSettings);
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
@@ -3429,7 +3400,7 @@
         group_list_mode: {description: "群聊权限模式", type: "string", options: ["whitelist", "blacklist", "none"], labels: ["白名单：仅允许列表中的群", "黑名单：屏蔽列表中的群", "不限制群聊"], hint: "白名单为空时没有群可用；黑名单为空时不屏蔽群；不限制群聊时忽略名单。此项不会授予管理员权限。"},
         group_list: {description: "群组白/黑名单列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "点击“从群聊列表添加”下拉选择群；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID，或填写群标识（例如 123456@chatroom）。"},
         bot_self_ids: {description: "群分析时屏蔽的用户ID列表", type: "list", _ui_control: "line-list", _ui_tint: true, placeholder: "例如：wxid_robot\nwxid_member", hint: "每行填写一个不希望参与报告统计的用户 ID，例如机器人或其他群成员；请勿填写群标识或昵称。留空表示不额外屏蔽用户；这里不会授予管理员权限。"},
-        report_template: {description: "报告样式", type: "string", options: ["姜小妹", "BlueArchive", "scrapbook", "retro_futurism", "HatsuneMiku", "hack", "spring_festival", "simple", "format"], labels: ["姜小妹主题", "蔚蓝档案", "手账风（示例样式）", "复古未来", "初音未来", "极客终端", "新春风", "简洁风", "通用排版"], hint: "“手账风”就是示例截图中的长图样式。"},
+        report_template: {description: "报告样式", type: "string", options: ["小妹", "BlueArchive", "scrapbook", "retro_futurism", "HatsuneMiku", "hack", "spring_festival", "simple", "format"], labels: ["小妹主题", "蔚蓝档案", "手账风（示例样式）", "复古未来", "初音未来", "极客终端", "新春风", "简洁风", "通用排版"], hint: "“手账风”就是示例截图中的长图样式。"},
         analysis_days: {description: "统计最近几天", type: "int", min: 1, max: 30, hint: "一般保持 1 天；需要周报时可改为 7 天。"},
         min_messages_threshold: {description: "最少消息数", type: "int", min: 1, max: 10000, hint: "低于这个数量时跳过报告，建议保持 200。"},
       }},
@@ -3486,8 +3457,8 @@
     const previewSavedConfigs = new Map();
     const corePreviewSchema = {
       analyzer_model: {type: "string", description: "群聊分析模型", options: ["", "jyjapi/grok-4.6"], labels: ["请选择模型（完整使用所必需）", "免费 Grok 4.6"], default: "jyjapi/grok-4.6"},
-      personality: {type: "object", description: "身份与接话原则", items: {ai_self_identity: {type: "text", description: "群聊身份", default: "你是群聊里的熟人型助手，说话自然、直接。"}, reply_strategy_guide: {type: "text", description: "接话原则", default: "围绕当前话题提供帮助，不连续插话。"}}},
-      wake_interaction: {type: "object", description: "点名与唤醒", items: {alias: {type: "string", description: "可识别的昵称", default: "姜小妹|小妹"}, enter_on_mention_only: {type: "bool", description: "仅在被点名后参与", default: true}, direct_wake_fast_path: {type: "bool", description: "点名时快速回应", default: true}}},
+      personality: {type: "object", description: "身份与接话原则", items: {ai_self_identity: {type: "text", description: "群聊身份", default: "你是小妹，是群聊里的熟人型机器人。说话自然、直接。"}, reply_strategy_guide: {type: "text", description: "接话原则", default: "围绕当前话题提供帮助，不连续插话。"}}},
+      wake_interaction: {type: "object", description: "点名与唤醒", items: {alias: {type: "string", description: "可识别的昵称", default: "小妹"}, enter_on_mention_only: {type: "bool", description: "仅在被点名后参与", default: true}, direct_wake_fast_path: {type: "bool", description: "点名时快速回应", default: true}}},
       timing: {type: "object", description: "回复节奏", items: {assistant_debounce_time: {type: "float", description: "点名后等待补充（秒）", default: 1, min: 0}, waiting_time: {type: "float", description: "回复后休息（秒）", default: 30, min: 0}}},
       energy: {type: "object", description: "能量设置", items: {initial_energy: {type: "float", description: "初始能量", default: 100}}},
       leave_reply: {type: "object", description: "离场应答", items: {leave_echo_reply: {type: "bool", description: "复读时离场应答", default: false}}},
@@ -3497,12 +3468,13 @@
     delete corePreviewTemplateSchema.wake_interaction.items.direct_wake_fast_path;
     const corePreviewDefaults = (schema) => Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, field.type === "object" ? corePreviewDefaults(field.items) : structuredClone(field.default)]));
     let corePreviewConfig = corePreviewDefaults(corePreviewSchema);
+    let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin"};
     let corePreviewEnabled = true;
     const corePreviewTemplates = [];
     const corePreviewBindings = {};
     let corePreviewRevision = 1;
     let corePreviewTemplateRevision = 1;
-    const corePreviewDetail = () => ({id: "feature-95a906d4b9173155", display_name: "机器人核心", enabled: corePreviewEnabled, engine_online: true, revision: String(corePreviewRevision), basic_schema: Object.fromEntries(Object.entries(corePreviewSchema).filter(([key]) => !["analyzer_model", "energy", "leave_reply"].includes(key))), model_schema: {analyzer_model: corePreviewSchema.analyzer_model}, advanced_schema: structuredClone(corePreviewSchema), advanced_config: structuredClone(corePreviewConfig), template_schema: structuredClone(corePreviewTemplateSchema)});
+    const corePreviewDetail = () => ({id: "feature-95a906d4b9173155", display_name: "机器人核心", enabled: corePreviewEnabled, engine_online: true, revision: String(corePreviewRevision), identity: structuredClone(corePreviewIdentity), basic_schema: Object.fromEntries(Object.entries(corePreviewSchema).filter(([key]) => !["analyzer_model", "energy", "leave_reply"].includes(key))), model_schema: {analyzer_model: corePreviewSchema.analyzer_model}, advanced_schema: structuredClone(corePreviewSchema), advanced_config: structuredClone(corePreviewConfig), template_schema: structuredClone(corePreviewTemplateSchema)});
     const corePreviewChats = [{chat_id: "wechat:GroupMessage:51632940287@chatroom", display_name: "旅行交流群", kind: "group"}, {chat_id: "wechat:FriendMessage:wxid_zhangsan", display_name: "张三", kind: "private"}];
     const corePreviewRequest = (method, endpoint, payload = {}) => {
       if (method === "GET" && endpoint === "profiles") return {templates: structuredClone(corePreviewTemplates), bindings: {...corePreviewBindings}};
@@ -3563,7 +3535,7 @@
       memory_backend: "长期记忆",
       memory_explanation: "聊天摘要和相关往事由长期记忆保存与召回；明确问起上次内容时优先回忆，普通寒暄不查询。",
       readiness: {memory: true},
-      persona: {tone: "natural", reply_length: "brief", mention_only: false, fast_reply: true, alias: "姜小妹|小妹", identity_prompt: "你是姜小妹，是群聊里的熟人型助手。说话随意、直接、简短，不使用机械的客服措辞。", reply_guide: "一次只处理当前最相关的话题，不抢话，不连续刷屏。"},
+      persona: {tone: "natural", reply_length: "brief", mention_only: false, fast_reply: true, alias: "小妹", identity_prompt: "你是小妹，是群聊里的熟人型机器人。说话随意、直接、简短，不使用机械的客服措辞。", reply_guide: "一次只处理当前最相关的话题，不抢话，不连续刷屏。"},
       memory: {enabled: true, recall_mode: "smart", explicit_recall_enabled: true, explicit_recall_phrases: ["上次说了什么", "还记得吗", "之前提到", "我说过", "你说过"], casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
@@ -3637,10 +3609,21 @@
     };
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
-      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\姜小妹机器人", status, brand: {display_name: "姜小妹机器人", short_name: "姜小妹", persona_name: "姜小妹", welcome_text: "你好，我是姜小妹机器人。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
+      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
+      save_robot_core: (config, _revision, identity) => {
+        const oldName = corePreviewIdentity.robot_name || "小妹";
+        const name = String(identity?.robot_name || "小妹").trim();
+        corePreviewConfig = structuredClone(config);
+        const aliases = String(corePreviewConfig.wake_interaction?.alias || "").split("|").map((item) => item.trim()).filter((item) => item && ![oldName, name, "AI", "助手", "助理"].includes(item));
+        corePreviewConfig.wake_interaction.alias = [name, ...aliases].join("|");
+        corePreviewConfig.personality.ai_self_identity = String(corePreviewConfig.personality?.ai_self_identity || "").replaceAll(oldName, name).replaceAll("群聊里的熟人型助手", "群聊里的熟人型机器人").replaceAll("群聊助手", "群聊机器人");
+        corePreviewIdentity = {robot_name: name, admin_id: String(identity?.admin_id || "").trim()};
+        corePreviewRevision += 1;
+        return ok({revision: String(corePreviewRevision), apply_state: "applied", brand: {display_name: name, short_name: name, persona_name: name, welcome_text: `你好，我是${name}。`, admin_id: corePreviewIdentity.admin_id}, message: "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"});
+      },
       request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
       get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 6, items: [
@@ -3706,7 +3689,6 @@
       save_memory_settings: (values) => ok({...values, apply_state: "applied"}, "长期记忆设置已热更新，下一条消息立即使用。"),
       save_emotion_settings: (values) => ok({...values, apply_state: "applied"}, "情感设置已热更新，下一条消息立即使用。"),
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },
-      save_brand: (values) => ok(values, "管理界面名称与管理员已保存，聊天身份未改变。"),
       get_providers: () => ok(structuredClone(previewProviders)),
       save_provider: (values) => {
         const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`;

@@ -40,8 +40,8 @@ def test_save_persona_preserves_advanced_plugin_fields_when_offline(tmp_path: Pa
             "reply_length": "balanced",
             "mention_only": True,
             "fast_reply": True,
-            "alias": "姜小妹|小妹",
-            "identity_prompt": "你是姜小妹。",
+            "alias": "小妹",
+            "identity_prompt": "你是小妹。",
             "reply_guide": "被点名时回应。",
         }
     )

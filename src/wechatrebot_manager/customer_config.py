@@ -185,13 +185,37 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
     install, _, engine_path = _paths(root)
     brand_payload = _object(install / "config" / "brand.json")
     profile = BrandProfile(
-        display_name=str(brand_payload.get("display_name", "姜小妹机器人")),
-        short_name=str(brand_payload.get("short_name", "姜小妹")),
-        persona_name=str(brand_payload.get("persona_name", "姜小妹")),
+        display_name=str(brand_payload.get("display_name", "小妹")),
+        short_name=str(brand_payload.get("short_name", "小妹")),
+        persona_name=str(brand_payload.get("persona_name", "小妹")),
         avatar_path=str(brand_payload.get("avatar_path", "")),
         welcome_text=str(brand_payload.get("welcome_text", "")),
         help_title=str(brand_payload.get("help_title", "")),
     ).normalized()
+    # Migrate the product's former factory identity in memory. Custom brands are
+    # never rewritten; the new value is persisted when the unified identity
+    # form is next saved.
+    if (
+        profile.display_name == "\u59dc\u5c0f\u59b9\u673a\u5668\u4eba"
+        and profile.short_name == "\u59dc\u5c0f\u59b9"
+        and profile.persona_name == "\u59dc\u5c0f\u59b9"
+    ):
+        profile = BrandProfile(
+            display_name="小妹",
+            short_name="小妹",
+            persona_name="小妹",
+            avatar_path=profile.avatar_path,
+            welcome_text=(
+                profile.welcome_text
+                .replace("\u59dc\u5c0f\u59b9\u673a\u5668\u4eba", "小妹")
+                .replace("\u59dc\u5c0f\u59b9", "小妹")
+            ),
+            help_title=(
+                profile.help_title
+                .replace("\u59dc\u5c0f\u59b9\u673a\u5668\u4eba", "小妹")
+                .replace("\u59dc\u5c0f\u59b9", "小妹")
+            ),
+        )
     engine = _object(engine_path)
     admins = engine.get("admins_id")
     admin_id = str(admins[0]) if isinstance(admins, list) and admins else ""
