@@ -23,6 +23,7 @@ _CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _REPLY_MODES = frozenset({"mention", "natural", "off"})
 DEFAULT_GROUP_FEATURES = (
     "astrbot_plugin_angel_heart",
+    "astrbot_plugin_bittorrent",
     "astrbot_plugin_music",
     "astrbot_plugin_parser",
     "astrbot_plugin_qq_group_daily_analysis",

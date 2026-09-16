@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 DEFAULT_GROUP_FEATURES = (
     "astrbot_plugin_angel_heart",
+    "astrbot_plugin_bittorrent",
     "astrbot_plugin_music",
     "astrbot_plugin_parser",
     "astrbot_plugin_qq_group_daily_analysis",
