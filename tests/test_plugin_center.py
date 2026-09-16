@@ -1303,6 +1303,12 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
             assert response.status == 200
             assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
             assert "功能配置中心" in response.read().decode("utf-8")
+        for weight in ("Regular", "Bold"):
+            font_url = f"{base}/assets/AlibabaPuHuiTi2-{weight}.woff2"
+            with urlopen(font_url, timeout=2) as response:
+                assert response.status == 200
+                assert response.headers["Content-Type"] == "font/woff2"
+                assert response.read(4) == b"wOF2"
         with urlopen(f"{base}/control/catalog", timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
             assert payload["data"]["product_name"] == "测试机器人"

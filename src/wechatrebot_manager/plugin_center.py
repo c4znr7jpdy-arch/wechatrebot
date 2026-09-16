@@ -1963,6 +1963,12 @@ def _handler(service: PluginCenterService):
                 if split.path == "/assets/app.js":
                     self._serve_asset("app.js", "text/javascript; charset=utf-8")
                     return
+                if split.path in {
+                    "/assets/AlibabaPuHuiTi2-Regular.woff2",
+                    "/assets/AlibabaPuHuiTi2-Bold.woff2",
+                }:
+                    self._serve_asset(split.path.lstrip("/"), "font/woff2")
+                    return
                 if any(split.path.startswith(prefix) for prefix in _PROXY_PREFIXES):
                     self._proxy()
                     return

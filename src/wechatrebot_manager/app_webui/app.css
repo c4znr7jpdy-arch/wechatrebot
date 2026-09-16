@@ -6,6 +6,22 @@
   font-weight: 700;
 }
 
+@font-face {
+  font-family: "Alibaba PuHuiTi 2";
+  src: url("assets/AlibabaPuHuiTi2-Regular.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "Alibaba PuHuiTi 2";
+  src: url("assets/AlibabaPuHuiTi2-Bold.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 700;
+}
+
 :root {
   color-scheme: light;
   --navy-950: #071a2f;
@@ -31,7 +47,7 @@
   --shadow: 0 10px 28px rgba(19, 45, 77, .08);
   --radius: 14px;
   --font-display: "Alimama ShuHei", "Microsoft YaHei UI", sans-serif;
-  --font-body: "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-body: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.5;
