@@ -1,3 +1,5 @@
+import pytest
+
 from wechatrebot_manager import provider
 from wechatrebot_manager.provider import (
     DEEPSEEK_PROVIDER_API_BASE,
@@ -12,6 +14,8 @@ from wechatrebot_manager.provider import (
     provider_display_name,
     provider_source_id,
     supports_thinking_toggle,
+    thinking_mode_adapter,
+    without_thinking_mode,
     with_thinking_mode,
 )
 
@@ -76,6 +80,118 @@ def test_thinking_switch_is_available_for_every_model_and_maps_known_protocols()
     ) == {"reasoning_effort": "none"}
     invalid = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled="false")
     assert "只能选择" in " ".join(invalid.validate())
+
+
+@pytest.mark.parametrize(
+    ("api_base", "model", "adapter", "disabled_body"),
+    [
+        (
+            "https://ark.cn-beijing.volces.com/api/v3",
+            "doubao-seed-2-0-lite-260215",
+            "thinking",
+            {"thinking": {"type": "disabled"}},
+        ),
+        (
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-5.2",
+            "thinking",
+            {"thinking": {"type": "disabled"}},
+        ),
+        (
+            "https://api.siliconflow.cn/v1",
+            "deepseek-ai/DeepSeek-V4-Flash",
+            "enable_thinking",
+            {"enable_thinking": False},
+        ),
+        (
+            "https://api.moonshot.cn/v1",
+            "kimi-k2.6",
+            "thinking",
+            {"thinking": {"type": "disabled"}},
+        ),
+        (
+            "https://openrouter.ai/api/v1",
+            "anthropic/claude-sonnet-4.7",
+            "reasoning_effort_object",
+            {"reasoning": {"effort": "none"}},
+        ),
+        (
+            "https://api.together.xyz/v1",
+            "Qwen/Qwen3.5-9B",
+            "reasoning_enabled",
+            {"reasoning": {"enabled": False}},
+        ),
+        (
+            "https://api.fireworks.ai/inference/v1",
+            "accounts/fireworks/models/deepseek-v4",
+            "reasoning_effort_none",
+            {"reasoning_effort": "none"},
+        ),
+        (
+            "https://api.groq.com/openai/v1",
+            "qwen/qwen3.8-27b",
+            "reasoning_effort_default",
+            {"reasoning_effort": "none"},
+        ),
+        (
+            "https://api.cerebras.ai/v1",
+            "zai-glm-4.7",
+            "reasoning_effort_none",
+            {"reasoning_effort": "none"},
+        ),
+        (
+            "http://127.0.0.1:11434/v1",
+            "qwen3:8b",
+            "reasoning_effort_none",
+            {"reasoning_effort": "none"},
+        ),
+        (
+            "https://demo.openai.azure.com/openai/v1",
+            "gpt-5.2",
+            "reasoning_effort_none",
+            {"reasoning_effort": "none"},
+        ),
+    ],
+)
+def test_thinking_adapter_covers_common_compatible_services(
+    api_base: str,
+    model: str,
+    adapter: str,
+    disabled_body: dict[str, object],
+) -> None:
+    assert thinking_mode_adapter(api_base, model) == adapter
+    assert with_thinking_mode({}, False, api_base=api_base, model=model) == disabled_body
+
+
+@pytest.mark.parametrize(
+    ("api_base", "model"),
+    [
+        ("https://api.moonshot.cn/v1", "kimi-k2.7-code"),
+        ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
+        ("https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/minimax-m2"),
+        ("http://127.0.0.1:11434/v1", "gpt-oss:20b"),
+        ("https://openrouter.ai/api/v1", "google/gemini-3.5-flash"),
+    ],
+)
+def test_thinking_adapter_ignores_models_that_cannot_safely_disable_reasoning(
+    api_base: str,
+    model: str,
+) -> None:
+    assert thinking_mode_adapter(api_base, model) is None
+    assert with_thinking_mode({}, False, api_base=api_base, model=model) == {}
+
+
+def test_nested_reasoning_adapter_preserves_unrelated_options() -> None:
+    api_base = "https://openrouter.ai/api/v1"
+    model = "anthropic/claude-sonnet-4.7"
+    original = {"reasoning": {"max_tokens": 4096}, "safe_extra": "keep"}
+
+    enabled = with_thinking_mode(original, True, api_base=api_base, model=model)
+    assert enabled == {
+        "reasoning": {"max_tokens": 4096, "effort": "high"},
+        "safe_extra": "keep",
+    }
+    assert without_thinking_mode(enabled, api_base=api_base, model=model) == original
 
 
 def test_grok_46_defaults_expose_multimodal_capabilities() -> None:

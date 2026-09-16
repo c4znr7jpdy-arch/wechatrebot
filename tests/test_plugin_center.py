@@ -359,6 +359,29 @@ def test_thinking_hot_switch_maps_grok_and_ignores_unknown_protocols(tmp_path: P
     assert unknown.providers == before
 
 
+def test_openrouter_thinking_hot_switch_preserves_nested_reasoning_options(
+    tmp_path: Path,
+) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+    client.sources[0]["api_base"] = "https://openrouter.ai/api/v1"
+    client.providers[0].update({
+        "id": "jyjapi/anthropic/claude-sonnet-4.7",
+        "model": "anthropic/claude-sonnet-4.7",
+        "custom_extra_body": {
+            "reasoning": {"max_tokens": 4096},
+            "safe_extra": "keep",
+        },
+    })
+
+    assert client.set_provider_thinking(
+        "jyjapi/anthropic/claude-sonnet-4.7", False
+    ) is True
+    assert client.providers[0]["custom_extra_body"] == {
+        "reasoning": {"max_tokens": 4096, "effort": "none"},
+        "safe_extra": "keep",
+    }
+
+
 def test_editing_to_unknown_protocol_removes_only_managed_thinking_field(
     tmp_path: Path,
 ) -> None:

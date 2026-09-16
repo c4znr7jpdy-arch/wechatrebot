@@ -2622,14 +2622,34 @@
 
   function providerThinkingSupported(apiBase, model) {
     try {
-      const host = new URL(String(apiBase || "")).hostname.toLowerCase();
+      const endpoint = new URL(String(apiBase || ""));
+      const host = endpoint.hostname.toLowerCase();
       const name = String(model || "").trim().toLowerCase();
-      return (host.endsWith("xiaomimimo.com") && ["mimo-v2.5", "mimo-v2.5-pro"].includes(name))
-        || (host.endsWith("deepseek.com") && /^(deepseek-chat|deepseek-flash|deepseek-v3|deepseek-v4)/.test(name))
-        || (host.endsWith("dashscope.aliyuncs.com") && !name.includes("thinking") && /^(qwen-plus|qwen3|deepseek-v3|deepseek-v4|kimi-k2|glm-)/.test(name))
-        || ((host.endsWith("x.ai") || host.endsWith("xiuxianjyj.xin")) && /^(grok-4\.5|grok-4\.6)/.test(name))
-        || (host.endsWith("googleapis.com") && /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(name))
-        || (host.endsWith("openai.com") && /^gpt-5\.(?:[1-9]|\d{2,})/.test(name) && !name.includes("pro"));
+      const leaf = name.split("/").pop();
+      const on = (...domains) => domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+      const deepseek = !/(reasoner|speciale|-r1|r1-)/.test(leaf) && /^(deepseek-chat|deepseek-flash|deepseek-v3|deepseek-v4)/.test(leaf);
+      const qwen = /^(qwen3|qwen-3)/.test(leaf) && !/(thinking|qwq)/.test(leaf);
+      const glm = /^glm-(?:4\.(?:5|6|7)|5(?:[.\-]|$))/.test(leaf);
+      const kimi = /^(kimi-k2\.5|kimi-k2\.6)/.test(leaf);
+      const openai = /^gpt-5\.(?:[1-9]|\d{2,})/.test(leaf) && !leaf.includes("pro");
+      const claude = /^claude-(?:3\.7|(?:opus|sonnet|haiku)-4(?:[.\-]|$))/.test(leaf);
+      const ollama = endpoint.port === "11434" || ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host);
+      return (on("xiaomimimo.com") && ["mimo-v2.5", "mimo-v2.5-pro"].includes(leaf))
+        || (on("deepseek.com") && deepseek)
+        || (on("dashscope.aliyuncs.com") && !leaf.includes("thinking") && (/^qwen-plus/.test(leaf) || qwen || deepseek || kimi || glm))
+        || (on("volces.com") && /^(doubao-seed-1-6|doubao-seed-2)/.test(leaf))
+        || (on("bigmodel.cn", "z.ai") && glm)
+        || (on("siliconflow.cn", "siliconflow.com") && (qwen || deepseek || glm || /^hunyuan-a13b/.test(leaf)))
+        || (on("moonshot.cn", "moonshot.ai") && kimi)
+        || (on("openrouter.ai") && (qwen || deepseek || glm || kimi || openai || /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(leaf) || claude))
+        || (on("together.xyz", "together.ai") && /^(qwen3\.5|qwen-3\.5|deepseek-v4)/.test(leaf))
+        || (on("fireworks.ai") && (qwen || deepseek || glm))
+        || (on("groq.com") && /^(qwen3\.6-27b|qwen3\.8-27b)/.test(leaf))
+        || (on("cerebras.ai") && leaf === "zai-glm-4.7")
+        || (ollama && !leaf.includes("gpt-oss") && /^(qwen3|qwen-3|deepseek-v3\.1|deepseek-r1|glm-4\.7)/.test(leaf))
+        || (on("x.ai", "xiuxianjyj.xin") && /^(grok-4\.5|grok-4\.6)/.test(leaf))
+        || (on("googleapis.com") && /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(leaf))
+        || (on("openai.com", "openai.azure.com", "services.ai.azure.com", "models.inference.ai.azure.com") && openai);
     } catch (_) { return false; }
   }
 

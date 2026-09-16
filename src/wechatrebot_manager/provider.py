@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 import json
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -27,49 +28,225 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = 35
 PROVIDER_REQUEST_MAX_ATTEMPTS = 1
 
 
+@dataclass(frozen=True)
+class _ThinkingModeRule:
+    adapter: str
+    endpoint_matches: Callable[[SplitResult], bool]
+    model_matches: Callable[[str], bool]
+
+
+def _host_matches(host: str, *domains: str) -> bool:
+    return any(host == domain or host.endswith(f".{domain}") for domain in domains)
+
+
+def _domain_endpoint(*domains: str) -> Callable[[SplitResult], bool]:
+    return lambda endpoint: _host_matches(
+        (endpoint.hostname or "").casefold(), *domains
+    )
+
+
+def _model_leaf(model: str) -> str:
+    return model.rsplit("/", 1)[-1]
+
+
+def _starts_with(model: str, *prefixes: str) -> bool:
+    return _model_leaf(model).startswith(prefixes)
+
+
+def _xiaomi_hybrid_model(model: str) -> bool:
+    return _model_leaf(model) in {"mimo-v2.5", "mimo-v2.5-pro"}
+
+
+def _deepseek_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return not any(
+        marker in name for marker in ("reasoner", "speciale", "-r1", "r1-")
+    ) and name.startswith(
+        ("deepseek-chat", "deepseek-flash", "deepseek-v3", "deepseek-v4")
+    )
+
+
+def _qwen_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return (
+        name.startswith(("qwen3", "qwen-3"))
+        and "thinking" not in name
+        and "qwq" not in name
+    )
+
+
+def _glm_hybrid_model(model: str) -> bool:
+    return re.match(r"^glm-(?:4\.(?:5|6|7)|5(?:[.\-]|$))", _model_leaf(model)) is not None
+
+
+def _kimi_hybrid_model(model: str) -> bool:
+    return _starts_with(model, "kimi-k2.5", "kimi-k2.6")
+
+
+def _doubao_hybrid_model(model: str) -> bool:
+    return _starts_with(model, "doubao-seed-1-6", "doubao-seed-2")
+
+
+def _dashscope_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return "thinking" not in name and (
+        name.startswith("qwen-plus")
+        or _qwen_hybrid_model(name)
+        or _deepseek_hybrid_model(name)
+        or _kimi_hybrid_model(name)
+        or _glm_hybrid_model(name)
+    )
+
+
+def _siliconflow_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return (
+        _qwen_hybrid_model(name)
+        or _deepseek_hybrid_model(name)
+        or _glm_hybrid_model(name)
+        or name.startswith("hunyuan-a13b")
+    )
+
+
+def _fireworks_hybrid_model(model: str) -> bool:
+    return (
+        _qwen_hybrid_model(model)
+        or _deepseek_hybrid_model(model)
+        or _glm_hybrid_model(model)
+    )
+
+
+def _together_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return name.startswith(("qwen3.5", "qwen-3.5", "deepseek-v4"))
+
+
+def _openai_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    match = re.match(r"^gpt-5\.(\d+)", name)
+    return match is not None and int(match.group(1)) >= 1 and "pro" not in name
+
+
+def _openrouter_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    claude_optional = re.match(
+        r"^claude-(?:3\.7|(?:opus|sonnet|haiku)-4(?:[.\-]|$))", name
+    ) is not None
+    return (
+        _qwen_hybrid_model(model)
+        or _deepseek_hybrid_model(model)
+        or _glm_hybrid_model(model)
+        or _kimi_hybrid_model(model)
+        or _openai_hybrid_model(model)
+        or name.startswith(("gemini-2.5-flash", "gemini-2.5-flash-lite"))
+        or claude_optional
+    )
+
+
+def _ollama_endpoint(endpoint: SplitResult) -> bool:
+    host = (endpoint.hostname or "").casefold()
+    try:
+        port = endpoint.port
+    except ValueError:
+        return False
+    return port == 11434 or host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _ollama_hybrid_model(model: str) -> bool:
+    name = _model_leaf(model)
+    return "gpt-oss" not in name and name.startswith(
+        ("qwen3", "qwen-3", "deepseek-v3.1", "deepseek-r1", "glm-4.7")
+    )
+
+
+_THINKING_MODE_RULES = (
+    _ThinkingModeRule(
+        "thinking", _domain_endpoint("xiaomimimo.com"), _xiaomi_hybrid_model
+    ),
+    _ThinkingModeRule(
+        "thinking", _domain_endpoint("deepseek.com"), _deepseek_hybrid_model
+    ),
+    _ThinkingModeRule(
+        "enable_thinking",
+        _domain_endpoint("dashscope.aliyuncs.com"),
+        _dashscope_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "thinking", _domain_endpoint("volces.com"), _doubao_hybrid_model
+    ),
+    _ThinkingModeRule(
+        "thinking", _domain_endpoint("bigmodel.cn", "z.ai"), _glm_hybrid_model
+    ),
+    _ThinkingModeRule(
+        "enable_thinking",
+        _domain_endpoint("siliconflow.cn", "siliconflow.com"),
+        _siliconflow_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "thinking",
+        _domain_endpoint("moonshot.cn", "moonshot.ai"),
+        _kimi_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_object",
+        _domain_endpoint("openrouter.ai"),
+        _openrouter_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "reasoning_enabled",
+        _domain_endpoint("together.xyz", "together.ai"),
+        _together_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_none",
+        _domain_endpoint("fireworks.ai"),
+        _fireworks_hybrid_model,
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_default",
+        _domain_endpoint("groq.com"),
+        lambda model: _starts_with(model, "qwen3.6-27b", "qwen3.8-27b"),
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_none",
+        _domain_endpoint("cerebras.ai"),
+        lambda model: _model_leaf(model) == "zai-glm-4.7",
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_none", _ollama_endpoint, _ollama_hybrid_model
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_low",
+        _domain_endpoint("x.ai", "xiuxianjyj.xin"),
+        lambda model: _starts_with(model, "grok-4.5", "grok-4.6"),
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_none",
+        _domain_endpoint("googleapis.com"),
+        lambda model: _starts_with(
+            model, "gemini-2.5-flash", "gemini-2.5-flash-lite"
+        ),
+    ),
+    _ThinkingModeRule(
+        "reasoning_effort_none",
+        _domain_endpoint(
+            "openai.com",
+            "openai.azure.com",
+            "services.ai.azure.com",
+            "models.inference.ai.azure.com",
+        ),
+        _openai_hybrid_model,
+    ),
+)
+
+
 def thinking_mode_adapter(api_base: str, model: str) -> str | None:
     """Return the safe request mapping for a known OpenAI-compatible service."""
-    host = (urlsplit(api_base.strip()).hostname or "").casefold()
+    endpoint = urlsplit(api_base.strip())
     normalized_model = model.strip().casefold()
-    if (
-        host == "xiaomimimo.com" or host.endswith(".xiaomimimo.com")
-    ) and normalized_model in {"mimo-v2.5", "mimo-v2.5-pro"}:
-        return "thinking"
-    if (
-        host == "deepseek.com" or host.endswith(".deepseek.com")
-    ) and normalized_model.startswith(
-        ("deepseek-chat", "deepseek-flash", "deepseek-v3", "deepseek-v4")
-    ):
-        return "thinking"
-    if (
-        host == "dashscope.aliyuncs.com"
-        or host.endswith(".dashscope.aliyuncs.com")
-    ) and "thinking" not in normalized_model and normalized_model.startswith(
-        ("qwen-plus", "qwen3", "deepseek-v3", "deepseek-v4", "kimi-k2", "glm-")
-    ):
-        return "enable_thinking"
-    if (
-        host == "x.ai"
-        or host.endswith(".x.ai")
-        or host == "xiuxianjyj.xin"
-        or host.endswith(".xiuxianjyj.xin")
-    ) and normalized_model.startswith(("grok-4.5", "grok-4.6")):
-        # Current Grok reasoning models cannot fully disable reasoning. Treat
-        # the off position as the lowest supported effort instead.
-        return "reasoning_effort_low"
-    if (
-        host == "googleapis.com" or host.endswith(".googleapis.com")
-    ) and normalized_model.startswith(
-        ("gemini-2.5-flash", "gemini-2.5-flash-lite")
-    ):
-        return "reasoning_effort_none"
-    openai_match = re.match(r"^gpt-5\.(\d+)", normalized_model)
-    if (
-        host == "openai.com" or host.endswith(".openai.com")
-    ) and openai_match is not None and int(openai_match.group(1)) >= 1 and (
-        "pro" not in normalized_model
-    ):
-        return "reasoning_effort_none"
+    for rule in _THINKING_MODE_RULES:
+        if rule.endpoint_matches(endpoint) and rule.model_matches(normalized_model):
+            return rule.adapter
     return None
 
 
@@ -91,8 +268,24 @@ def without_thinking_mode(
         merged.pop("thinking", None)
     elif adapter == "enable_thinking":
         merged.pop("enable_thinking", None)
-    elif adapter in {"reasoning_effort_low", "reasoning_effort_none"}:
+    elif adapter in {
+        "reasoning_effort_low",
+        "reasoning_effort_none",
+        "reasoning_effort_default",
+    }:
         merged.pop("reasoning_effort", None)
+    elif adapter in {"reasoning_effort_object", "reasoning_enabled"}:
+        reasoning = merged.get("reasoning")
+        if isinstance(reasoning, dict):
+            cleaned = dict(reasoning)
+            cleaned.pop(
+                "effort" if adapter == "reasoning_effort_object" else "enabled",
+                None,
+            )
+            if cleaned:
+                merged["reasoning"] = cleaned
+            else:
+                merged.pop("reasoning", None)
     return merged
 
 
@@ -114,6 +307,16 @@ def with_thinking_mode(
         merged["reasoning_effort"] = "high" if enabled else "low"
     elif adapter == "reasoning_effort_none":
         merged["reasoning_effort"] = "high" if enabled else "none"
+    elif adapter == "reasoning_effort_default":
+        merged["reasoning_effort"] = "default" if enabled else "none"
+    elif adapter in {"reasoning_effort_object", "reasoning_enabled"}:
+        reasoning = merged.get("reasoning")
+        nested = dict(reasoning) if isinstance(reasoning, dict) else {}
+        if adapter == "reasoning_effort_object":
+            nested["effort"] = "high" if enabled else "none"
+        else:
+            nested["enabled"] = enabled
+        merged["reasoning"] = nested
     return merged
 
 
@@ -137,7 +340,15 @@ def thinking_mode_matches(
         return body.get("enable_thinking") is enabled
     if adapter == "reasoning_effort_low":
         return body.get("reasoning_effort") == ("high" if enabled else "low")
-    return body.get("reasoning_effort") == ("high" if enabled else "none")
+    if adapter == "reasoning_effort_none":
+        return body.get("reasoning_effort") == ("high" if enabled else "none")
+    if adapter == "reasoning_effort_default":
+        return body.get("reasoning_effort") == ("default" if enabled else "none")
+    reasoning = body.get("reasoning")
+    nested = reasoning if isinstance(reasoning, dict) else {}
+    if adapter == "reasoning_effort_object":
+        return nested.get("effort") == ("high" if enabled else "none")
+    return nested.get("enabled") is enabled
 
 
 def infer_thinking_mode(
@@ -159,6 +370,14 @@ def infer_thinking_mode(
         return effort not in {"low", "none"}
     if adapter == "reasoning_effort_none":
         return effort != "none"
+    if adapter == "reasoning_effort_default":
+        return effort != "none"
+    reasoning = body.get("reasoning")
+    nested = reasoning if isinstance(reasoning, dict) else {}
+    if adapter == "reasoning_effort_object":
+        return str(nested.get("effort") or "").casefold() != "none"
+    if adapter == "reasoning_enabled" and isinstance(nested.get("enabled"), bool):
+        return bool(nested["enabled"])
     return True
 
 
