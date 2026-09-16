@@ -966,6 +966,13 @@ def _with_runtime_choices(
     return result
 
 
+def _validate_image_proxy_port(config: dict[str, Any]) -> None:
+    port = str(config.get("local_proxy_port") or "").strip()
+    if port and (not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535):
+        raise PluginCenterError("本地代理端口请填写 1–65535 的整数，或留空使用已有代理设置。")
+    config["local_proxy_port"] = port
+
+
 def _validate_config(schema: dict[str, Any], config: dict[str, Any], path: str = "") -> None:
     expected_types: dict[str, tuple[type, ...]] = {
         "string": (str,),
@@ -1691,6 +1698,8 @@ class PluginCenterService:
         merged = _merge_customer_config(schema, config, stored)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)
+        if module_name == "jiang_image" and "local_proxy_port" in schema:
+            _validate_image_proxy_port(normalized)
         online = self.engine.is_available()
         reloaded = False
         apply_state = "pending_start" if not online else "pending_enable"

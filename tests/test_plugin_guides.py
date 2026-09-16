@@ -105,14 +105,19 @@ def test_link_parser_uses_defaults_and_only_exposes_the_feature_switch():
 
 def test_image_generation_moves_all_service_fields_to_common_settings():
     fields = (
-        "primary_api_key", "primary_base_url", "primary_model",
-        "secondary_enabled", "secondary_api_key", "secondary_base_url",
-        "secondary_model", "tertiary_enabled", "tertiary_api_key",
-        "tertiary_base_url", "tertiary_model", "use_system_proxy",
+        "primary_base_url", "primary_model", "primary_api_key",
+        "secondary_enabled", "secondary_base_url", "secondary_model",
+        "secondary_api_key", "tertiary_enabled", "tertiary_base_url",
+        "tertiary_model", "tertiary_api_key", "use_system_proxy", "local_proxy_port",
     )
     schema = {key: {"type": "string", "default": ""} for key in fields}
 
-    assert tuple(common_schema("jiang_image", schema)) == fields
+    projected = common_schema("jiang_image", schema)
+    assert tuple(projected) == fields
+    assert projected["primary_model"]["_ui_group"] == "首选生图服务"
+    assert projected["secondary_model"]["_ui_depends_on"] == "secondary_enabled"
+    assert projected["tertiary_api_key"]["_ui_depends_on"] == "tertiary_enabled"
+    assert projected["local_proxy_port"]["_ui_depends_on"] == "use_system_proxy"
     assert advanced_schema("jiang_image", schema) == {}
     clean_schema = _customer_schema(schema, {"primary_api_key": "stored-secret"})
     clean_config = _customer_config(schema, {"primary_api_key": "stored-secret"})

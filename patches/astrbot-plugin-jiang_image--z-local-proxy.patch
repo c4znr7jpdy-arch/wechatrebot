@@ -1,0 +1,77 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+index 960322a..5088ae3 100644
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -64,9 +64,15 @@
+     "default": "image-01"
+   },
+   "use_system_proxy": {
+-    "description": "\u4f7f\u7528\u7cfb\u7edf\u4ee3\u7406",
+-    "hint": "\u751f\u56fe\u8bf7\u6c42\u4f7f\u7528\u672c\u673a\u5df2\u6709\u7684\u4ee3\u7406\u8bbe\u7f6e\uff1b\u8fde\u63a5\u670d\u52a1\u5931\u8d25\u65f6\u8bf7\u4fdd\u6301\u5f00\u542f\u3002",
++    "description": "\u4f7f\u7528\u672c\u5730\u4ee3\u7406",
++    "hint": "\u5173\u95ed\u65f6\u76f4\u8fde\uff1b\u5f00\u542f\u540e\u53ef\u586b\u5199\u672c\u673a\u4ee3\u7406\u7aef\u53e3\u3002\u7aef\u53e3\u7559\u7a7a\u65f6\u4f7f\u7528\u7cfb\u7edf\u5df2\u6709\u4ee3\u7406\u8bbe\u7f6e\u3002",
+     "type": "bool",
+     "default": true
++  },
++  "local_proxy_port": {
++    "description": "\u672c\u5730\u4ee3\u7406\u7aef\u53e3\uff08\u53ef\u7559\u7a7a\uff09",
++    "hint": "\u4f8b\u5982 7890\uff1b\u4ec5\u8fde\u63a5\u672c\u673a 127.0.0.1\u3002\u7559\u7a7a\u65f6\u4f7f\u7528\u7cfb\u7edf\u5df2\u6709\u4ee3\u7406\u8bbe\u7f6e\u3002",
++    "type": "string",
++    "default": ""
+   }
+ }
+diff --git a/main.py b/main.py
+index 949d9d2..f772783 100644
+--- a/main.py
++++ b/main.py
+@@ -171,6 +171,13 @@ class Main(star.Star):
+             ("tertiary_base_url", "tertiary_model", "tertiary_enabled", "tertiary_api_key"),
+         )
+         use_system_proxy = bool(self.config.get("use_system_proxy", True))
++        proxy_port = str(self.config.get("local_proxy_port") or "").strip()
++        if use_system_proxy and proxy_port and (
++            not re.fullmatch(r"[0-9]{1,5}", proxy_port)
++            or not 1 <= int(proxy_port) <= 65535
++        ):
++            raise ImageModelConfigError("本地代理端口请填写 1–65535 的整数，或留空使用已有代理设置")
++        self.model_manager.local_proxy_port = proxy_port if use_system_proxy else ""
+         public = self.model_manager.public_config()
+         active_id = str(public.get("active_model") or "")
+         active = next(
+diff --git a/model_manager.py b/model_manager.py
+index 3a4d8ba..f4458ea 100644
+--- a/model_manager.py
++++ b/model_manager.py
+@@ -443,10 +443,16 @@ class ImageModelManager:
+         timeout = int(profile.get("timeout_seconds", 300))
+         if timeout_cap is not None:
+             timeout = min(timeout, timeout_cap)
++        local_port = str(getattr(self, "local_proxy_port", "") or "").strip()
++        proxy = (
++            f"http://127.0.0.1:{local_port}"
++            if local_port and profile.get("trust_env", False) else None
++        )
+         return httpx.AsyncClient(
+             timeout=httpx.Timeout(float(timeout), connect=min(float(timeout), 15.0)),
+             follow_redirects=True,
+-            trust_env=bool(profile.get("trust_env", False)),
++            trust_env=bool(profile.get("trust_env", False)) and proxy is None,
++            proxy=proxy,
+         )
+ 
+     def _headers(self, profile: dict[str, Any], api_key: str) -> dict[str, str]:
+@@ -469,9 +475,12 @@ class ImageModelManager:
+         if isinstance(exc, httpx.TimeoutException):
+             detail = "生图服务响应超时，请稍后重试"
+         elif isinstance(exc, httpx.RequestError):
+-            detail = "连接生图服务失败，请检查网络或系统代理"
++            if profile.get("trust_env", False) and getattr(self, "local_proxy_port", ""):
++                detail = "连接生图服务失败，请检查本机代理服务和端口"
++            else:
++                detail = "连接生图服务失败，请检查网络或已有代理设置"
+             if not profile.get("trust_env", False):
+-                detail += "；可在画图常用设置中启用系统代理"
++                detail += "；可在画图常用设置中启用本地代理"
+         else:
+             detail = str(exc).strip() or "生图请求失败"
+         secret = self._resolve_api_key(profile)

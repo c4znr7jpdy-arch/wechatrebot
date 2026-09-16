@@ -25,7 +25,11 @@ def patched_image(tmp_path):
     for name in ("main.py", "model_manager.py", "_conf_schema.json"):
         shutil.copy2(SOURCE / name, tmp_path / name)
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
-    for name in ("astrbot-plugin-jiang_image.patch", "astrbot-plugin-jiang_image--network-errors.patch"):
+    for name in (
+        "astrbot-plugin-jiang_image.patch",
+        "astrbot-plugin-jiang_image--network-errors.patch",
+        "astrbot-plugin-jiang_image--z-local-proxy.patch",
+    ):
         result = subprocess.run(
             ["git", "apply", "--check", "--ignore-space-change", str(ROOT / "patches" / name)],
             cwd=tmp_path, capture_output=True, text=True,
@@ -36,6 +40,7 @@ def patched_image(tmp_path):
     schema = json.loads((tmp_path / "_conf_schema.json").read_text("utf-8"))
     assert schema["use_system_proxy"]["type"] == "bool"
     assert schema["use_system_proxy"]["default"] is True
+    assert schema["local_proxy_port"]["default"] == ""
     spec = importlib.util.spec_from_file_location("patched_image_model_manager", tmp_path / "model_manager.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -52,10 +57,10 @@ def _method(source, name, namespace):
     return scope[name]
 
 
-@pytest.mark.parametrize("proxy", [True, False])
-def test_saved_image_config_updates_proxy_and_stale_provider_name(patched_image, proxy):
+@pytest.mark.parametrize("proxy, port", [(True, "7890"), (True, ""), (False, "7890")])
+def test_saved_image_config_updates_proxy_and_stale_provider_name(patched_image, proxy, port):
     source, _module = patched_image
-    apply_config = _method(source, "_apply_plugin_config", {})
+    apply_config = _method(source, "_apply_plugin_config", {"re": __import__("re"), "ImageModelConfigError": ValueError})
     changes = []
     profile = {
         "id": "hostcentral-gpt-image-2", "name": "HostCentral GPT Image 2",
@@ -64,7 +69,8 @@ def test_saved_image_config_updates_proxy_and_stale_provider_name(patched_image,
     }
     instance = SimpleNamespace(
         config={"primary_base_url": profile["base_url"], "primary_model": profile["model"],
-                "primary_api_key": "stored-secret", "use_system_proxy": proxy},
+                "primary_api_key": "stored-secret", "use_system_proxy": proxy,
+                "local_proxy_port": port},
         model_manager=SimpleNamespace(
             public_config=lambda: {"active_model": profile["id"], "models": [profile]},
             upsert_profile=lambda item: changes.append(item),
@@ -75,6 +81,7 @@ def test_saved_image_config_updates_proxy_and_stale_provider_name(patched_image,
     assert changes[0]["name"] == "首选生图模型"
     assert changes[0]["api_key_source"] == {"type": "stored"}
     assert changes[0]["api_key"] == "stored-secret"
+    assert instance.model_manager.local_proxy_port == (port if proxy else "")
 
 
 def test_blank_connection_error_names_actual_model_and_repair(patched_image):
@@ -88,7 +95,7 @@ def test_blank_connection_error_names_actual_model_and_repair(patched_image):
     message = manager.format_error(profile, httpx.ConnectError(""))
     assert "gpt-image-2.5-flare（api.gemai.cc）" in message
     assert "连接生图服务失败" in message
-    assert "启用系统代理" in message
+    assert "启用本地代理" in message
     assert "ConnectError" in message
     assert "HostCentral" not in message
     assert "stored-secret" not in message
@@ -97,13 +104,32 @@ def test_blank_connection_error_names_actual_model_and_repair(patched_image):
     assert "[已隐藏密钥]" in secret_error
 
 
-def test_image_request_uses_proxy_when_enabled(patched_image, monkeypatch):
+@pytest.mark.parametrize("enabled, port, expected_proxy, expected_trust_env", [
+    (False, "", None, False),
+    (True, "", None, True),
+    (True, "7890", "http://127.0.0.1:7890", False),
+    (False, "7890", None, False),
+])
+def test_image_request_uses_selected_proxy_route(
+    patched_image, monkeypatch, enabled, port, expected_proxy, expected_trust_env,
+):
     _source, module = patched_image
     calls = []
     monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: calls.append(kwargs) or object())
     manager = module.ImageModelManager.__new__(module.ImageModelManager)
-    manager._client({"trust_env": True})
-    assert calls[0]["trust_env"] is True
+    manager.local_proxy_port = port
+    manager._client({"trust_env": enabled})
+    assert calls[0]["trust_env"] is expected_trust_env
+    assert calls[0]["proxy"] == expected_proxy
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "-1", "7890abc"])
+def test_invalid_local_proxy_port_is_rejected_before_plugin_load(patched_image, port):
+    source, _module = patched_image
+    apply_config = _method(source, "_apply_plugin_config", {"re": __import__("re"), "ImageModelConfigError": ValueError})
+    instance = SimpleNamespace(config={"use_system_proxy": True, "local_proxy_port": port}, model_manager=Mock())
+    with pytest.raises(ValueError, match="本地代理端口"):
+        apply_config(instance)
 
 
 def test_chat_failure_contains_actionable_reason_instead_of_empty_hostcentral_label(patched_image):

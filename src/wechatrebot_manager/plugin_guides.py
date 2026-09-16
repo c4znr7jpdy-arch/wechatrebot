@@ -22,7 +22,7 @@ _GUIDES = {
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
     "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；安排青岛天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在消息管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
-    "jiang_image": ("用文字或参考图生成图片", "在常用设置填写生图服务密钥、地址和模型；连接失败时可启用系统代理。备用服务可直接在同一页配置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "tertiary_enabled", "tertiary_api_key", "tertiary_base_url", "tertiary_model", "use_system_proxy")),
+    "jiang_image": ("用文字或参考图生成图片", "先在同一组填写首选服务的地址、模型和密钥；需要回退时再开启备用服务。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "tertiary_enabled", "tertiary_api_key", "tertiary_base_url", "tertiary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
@@ -110,7 +110,40 @@ def common_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
                 if children:
                     result[key] = {**copy.deepcopy(field), "items": children}
         return result
-    return select(schema) or schema
+    projected = select(schema) or schema
+    if module_name == "jiang_image":
+        groups = (
+            ("首选生图服务", ("primary_base_url", "primary_model", "primary_api_key")),
+            ("次选生图服务", ("secondary_enabled", "secondary_base_url", "secondary_model", "secondary_api_key")),
+            ("第三顺位生图服务", ("tertiary_enabled", "tertiary_base_url", "tertiary_model", "tertiary_api_key")),
+            ("本地代理", ("use_system_proxy", "local_proxy_port")),
+        )
+        ordered = {}
+        for title, keys in groups:
+            for key in keys:
+                if key not in projected:
+                    continue
+                field = projected[key]
+                field["_ui_group"] = title
+                if key.endswith("_enabled") or key == "use_system_proxy":
+                    field["_ui_full"] = True
+                if key.startswith("secondary_") and key != "secondary_enabled":
+                    field["_ui_depends_on"] = "secondary_enabled"
+                if key.startswith("tertiary_") and key != "tertiary_enabled":
+                    field["_ui_depends_on"] = "tertiary_enabled"
+                if key == "use_system_proxy":
+                    field["description"] = "使用本地代理"
+                    field["hint"] = "关闭时直连；开启后可填写本机代理端口。端口留空时使用系统已有代理设置，未配置代理时仍直连。"
+                if key == "local_proxy_port":
+                    field["description"] = "本地代理端口（可留空）"
+                    field["hint"] = "例如 7890。仅连接本机 127.0.0.1；留空时使用系统已有代理设置。"
+                    field["_ui_control"] = "proxy-port"
+                    field["_ui_depends_on"] = "use_system_proxy"
+                    field["min"] = 1
+                    field["max"] = 65535
+                ordered[key] = field
+        return ordered
+    return projected
 
 
 def advanced_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:

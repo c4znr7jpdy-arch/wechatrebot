@@ -244,8 +244,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .feature-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 18px; padding: 8px 0 80px; }
 .config-section { grid-column: 1 / -1; padding: 14px; background: #f8fafc; border: 1px solid var(--line); border-radius: 9px; }
 .config-section > h3 { margin: 0 0 12px; font-size: 14px; }
+.config-section.grouped { padding: 18px 20px; background: var(--surface); border-left: 3px solid var(--blue-600); }
+.config-section.grouped > h3 { margin-bottom: 16px; color: var(--navy-900); }
 .config-section-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 18px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.form-field[hidden] { display: none; }
 .form-field.full { grid-column: 1 / -1; }
 .form-field.tinted-list { padding: 12px; border: 1px solid #c5ddf8; border-radius: 8px; background: var(--blue-100); }
 .form-field.tinted-list textarea { background: #fafdff; }
@@ -272,7 +275,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .option-check, .secret-clear { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .option-check input, .secret-clear input { width: 16px; height: 16px; accent-color: var(--blue-600); }
 .secret-clear { margin-top: 2px; color: #9f3a38; }
-.feature-savebar { position: sticky; left: 0; right: 0; bottom: -22px; display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 9px; margin: 0 -22px -22px; padding: 12px 22px 14px; background: rgba(255,255,255,.97); border-top: 1px solid var(--line); }
+.feature-savebar { position: sticky; left: 0; right: 0; bottom: -22px; display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 9px; margin: 0 -22px -22px; padding: 12px 22px 14px; background: var(--surface); border-top: 1px solid var(--line); }
 .feature-savebar #featureNote { display: block; min-height: 18px; overflow-wrap: anywhere; }
 .feature-save-actions { display: flex; align-items: center; justify-self: start; gap: 8px; }
 

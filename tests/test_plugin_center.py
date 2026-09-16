@@ -590,6 +590,51 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert saved["future_setting"] == {"keep": True}
 
 
+def test_image_service_round_trip_keeps_visible_model_and_validates_proxy_port(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    plugin = install / "app/astrbot/data/plugins/jiang_image"
+    plugin.mkdir(parents=True)
+    schema = {
+        "primary_base_url": {"type": "string", "default": "https://images.example/v1"},
+        "primary_model": {"type": "string", "default": "image-default"},
+        "primary_api_key": {"type": "string", "default": ""},
+        "use_system_proxy": {"type": "bool", "default": True},
+        "local_proxy_port": {"type": "string", "default": ""},
+    }
+    (plugin / "_conf_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    config_path = install / "app/astrbot/data/config/jiang_image_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({
+        "primary_base_url": "https://saved.example/v1", "primary_model": "image-saved",
+        "primary_api_key": "stored-secret", "use_system_proxy": True,
+    }), encoding="utf-8")
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False
+    public_id = service.catalog()["plugins"][0]["id"]
+    detail = service.detail(public_id)
+    assert detail["config"]["primary_base_url"] == "https://saved.example/v1"
+    assert detail["config"]["primary_model"] == "image-saved"
+    assert detail["config"]["primary_api_key"] == ""
+    assert detail["advanced_config"] == {}
+
+    edited = {**detail["config"], "primary_base_url": "https://new.example/v1",
+              "primary_model": "image-new", "local_proxy_port": "70000"}
+    with pytest.raises(PluginCenterError, match="本地代理端口"):
+        service.save(public_id, edited, detail["revision"])
+    assert json.loads(config_path.read_text("utf-8"))["primary_model"] == "image-saved"
+
+    edited["local_proxy_port"] = "7890"
+    service.save(public_id, edited, detail["revision"])
+    reread = service.detail(public_id)
+    assert reread["config"]["primary_base_url"] == "https://new.example/v1"
+    assert reread["config"]["primary_model"] == "image-new"
+    assert reread["config"]["local_proxy_port"] == "7890"
+    assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == "stored-secret"
+
+
 def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Path) -> None:
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"

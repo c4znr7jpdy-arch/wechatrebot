@@ -550,7 +550,7 @@
 
   function useFeatureDetail(source, afterSave = false, preserveTab = false) {
     const detail = structuredClone(source);
-    detail.config = structuredClone(detail.advanced_config || detail.config || {});
+    detail.config = structuredClone(Object.keys(detail.advanced_config || {}).length ? detail.advanced_config : (detail.config || {}));
     state.featureDetail = detail;
     state.featureBaseline = structuredClone(detail.config);
     state.featureDirty = false;
@@ -645,17 +645,18 @@
     } else if (type === "text" || field.editor_mode || field.editor_language === "json") {
       control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${field.editor_language === "json" ? "json-string" : "string"}" rows="4">${escapeHtml(value ?? "")}</textarea>`;
     } else {
-      const inputType = ["int", "float"].includes(type) ? "number" : (field.secret ? "password" : "text");
+      const inputType = ["int", "float"].includes(type) || uiControl === "proxy-port" ? "number" : (field.secret ? "password" : "text");
       const step = type === "float" ? "any" : "1";
       const slider = field.slider && typeof field.slider === "object" ? field.slider : {};
       const numericRules = inputType === "number" ? `step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
       const secretRules = field.secret ? `autocomplete="new-password" placeholder="${field._secret_configured ? "已安全保存；留空保持不变" : "请输入后保存"}"` : "";
-      control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
+      control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(uiControl === "proxy-port" ? uiControl : type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
     }
     control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
-    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
+    const dependsOn = field._ui_depends_on ? ` data-depends-on="${escapeHtml(JSON.stringify([...path.slice(0, -1), field._ui_depends_on]))}"` : "";
+    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${field._ui_full || ["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"${dependsOn}><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
   }
 
   function schemaMarkup(schema, config, prefix = [], namespace = "") {
@@ -664,7 +665,7 @@
     let groupFields = [];
     const flushGroup = () => {
       if (!groupFields.length) return;
-      markup.push(`<section class="config-section"><h3>${escapeHtml(groupTitle)}</h3><div class="config-section-grid">${groupFields.join("")}</div></section>`);
+      markup.push(`<section class="config-section grouped"><h3>${escapeHtml(groupTitle)}</h3><div class="config-section-grid">${groupFields.join("")}</div></section>`);
       groupTitle = "";
       groupFields = [];
     };
@@ -689,6 +690,16 @@
     });
     flushGroup();
     return markup.join("");
+  }
+
+  function syncFeatureDependencies(form) {
+    $$(".form-field[data-depends-on]", form).forEach((field) => {
+      const sourcePath = field.dataset.dependsOn;
+      const source = $$(".config-input[data-type='bool']", form).find((input) => input.dataset.path === sourcePath);
+      const enabled = source ? source.checked : true;
+      field.hidden = !enabled;
+      $$("input, select, textarea", field).forEach((input) => { input.disabled = !enabled; });
+    });
   }
 
   function renderFeatureDetail() {
@@ -730,10 +741,12 @@
       $("#featureNote").textContent = "有修改尚未保存。";
       $$("textarea", $("#featureForm")).forEach(growTextarea);
     });
+    if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
     $("#featureForm")?.addEventListener("submit", (event) => { event.preventDefault(); saveFeature(); });
     $$(".config-input[data-type='bool']").forEach((input) => input.addEventListener("change", () => {
       const label = input.closest(".toggle")?.querySelector("span:last-child");
       if (label) label.textContent = input.checked ? "已启用" : "已停用";
+      if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
     }));
     $$(".secret-reveal").forEach((button) => button.addEventListener("click", () => {
       const input = document.getElementById(button.getAttribute("aria-controls"));
@@ -859,6 +872,12 @@
         try { JSON.parse(input.value || "{}"); }
         catch (_error) { throw new Error(`${input.dataset.label || "映射配置"}必须填写有效的 JSON。`); }
         value = input.value;
+      }
+      else if (input.dataset.type === "proxy-port") {
+        value = input.value.trim();
+        if (input.validity.badInput || (value && (!/^[0-9]{1,5}$/.test(value) || Number(value) < 1 || Number(value) > 65535))) {
+          throw new Error("本地代理端口请填写 1–65535 的整数，或留空使用已有代理设置。");
+        }
       }
       else value = input.value;
       if (["int", "float"].includes(input.dataset.type) && value !== null && !Number.isFinite(value)) throw new Error(`${input.dataset.label || "数字配置"}必须填写有效数字。`);
@@ -3200,24 +3219,29 @@
       performance: {max_concurrent: 1},
     };
     const imageBasicSchema = {
-      primary_api_key: {description: "首选生图 API Key", type: "string", secret: true, hint: "密钥仅保存在本机；已保存时留空不会覆盖。"},
-      primary_base_url: {description: "首选生图 API Base URL", type: "string", hint: "例如 https://api.hostcentral.cc/。"},
-      primary_model: {description: "首选生图模型", type: "string", hint: "例如 gpt-image-2。"},
-      secondary_enabled: {description: "启用次选生图地址", type: "bool"},
-      secondary_api_key: {description: "次选生图 API Key", type: "string", secret: true, hint: "不使用次选服务时可以留空。"},
-      secondary_base_url: {description: "次选生图 API Base URL", type: "string"},
-      secondary_model: {description: "次选生图模型", type: "string"},
-      tertiary_enabled: {description: "启用第三顺位生图地址", type: "bool"},
-      tertiary_api_key: {description: "第三顺位生图 API Key", type: "string", secret: true, hint: "不使用第三顺位服务时可以留空。"},
-      tertiary_base_url: {description: "第三顺位生图 API Base URL", type: "string"},
-      tertiary_model: {description: "第三顺位生图模型", type: "string"},
-      use_system_proxy: {description: "使用系统代理", type: "bool", hint: "生图服务无法连接时，使用本机已有的代理设置。"},
+      primary_base_url: {description: "首选生图 API Base URL", type: "string", hint: "例如 https://api.hostcentral.cc/。", _ui_group: "首选生图服务"},
+      primary_model: {description: "首选生图模型", type: "string", hint: "例如 gpt-image-2。", _ui_group: "首选生图服务"},
+      primary_api_key: {description: "首选生图 API Key", type: "string", secret: true, hint: "密钥仅保存在本机；已保存时留空不会覆盖。", _ui_group: "首选生图服务"},
+      secondary_enabled: {description: "启用次选生图地址", type: "bool", _ui_group: "次选生图服务", _ui_full: true},
+      secondary_base_url: {description: "次选生图 API Base URL", type: "string", _ui_group: "次选生图服务"},
+      secondary_model: {description: "次选生图模型", type: "string", _ui_group: "次选生图服务"},
+      secondary_api_key: {description: "次选生图 API Key", type: "string", secret: true, hint: "不使用次选服务时可以留空。", _ui_group: "次选生图服务"},
+      tertiary_enabled: {description: "启用第三顺位生图地址", type: "bool", _ui_group: "第三顺位生图服务", _ui_full: true},
+      tertiary_base_url: {description: "第三顺位生图 API Base URL", type: "string", _ui_group: "第三顺位生图服务"},
+      tertiary_model: {description: "第三顺位生图模型", type: "string", _ui_group: "第三顺位生图服务"},
+      tertiary_api_key: {description: "第三顺位生图 API Key", type: "string", secret: true, hint: "不使用第三顺位服务时可以留空。", _ui_group: "第三顺位生图服务"},
+      use_system_proxy: {description: "使用本地代理", type: "bool", hint: "关闭时直连；端口留空时使用系统已有代理设置。", _ui_group: "本地代理", _ui_full: true},
+      local_proxy_port: {description: "本地代理端口（可留空）", type: "string", hint: "例如 7890。仅连接本机 127.0.0.1；留空时使用系统已有代理设置。", _ui_group: "本地代理", _ui_control: "proxy-port", _ui_depends_on: "use_system_proxy", min: 1, max: 65535},
     };
+    for (const [key, field] of Object.entries(imageBasicSchema)) {
+      if (key.startsWith("secondary_") && key !== "secondary_enabled") field._ui_depends_on = "secondary_enabled";
+      if (key.startsWith("tertiary_") && key !== "tertiary_enabled") field._ui_depends_on = "tertiary_enabled";
+    }
     const imageConfig = {
       primary_api_key: "", primary_base_url: "https://api.hostcentral.cc/", primary_model: "gpt-image-2",
       secondary_enabled: true, secondary_api_key: "", secondary_base_url: "https://api.gemai.cc/v1", secondary_model: "gpt-image-2-2K",
       tertiary_enabled: true, tertiary_api_key: "", tertiary_base_url: "https://api.minimaxi.com/v1", tertiary_model: "image-01",
-      use_system_proxy: true,
+      use_system_proxy: true, local_proxy_port: "",
     };
     const previewGuides = {};
     const previewGuideOverrides = {
@@ -3226,7 +3250,7 @@
       "定时任务": {summary: "安排内容推送和签到", setup_steps: ["打开专属配置页创建计划，再到定时任务中心调整。"], prerequisites: ["写操作仅允许可靠管理员身份；共享账号签到仅允许机器人管理员。"], audience: "群管理常用", readiness: "权限已加固", recommendation: "建议保留；任务按当前会话隔离，微信无法确认群角色时默认拒绝修改。"},
       "自动改代码（实验）": {summary: "实验性的功能代码维护", setup_steps: ["仅由了解代码与回滚的维护人员使用。"], prerequisites: ["可读写并重新加载功能代码。"], audience: "不建议默认启用", readiness: "实验性高风险", recommendation: "不属于群主管理刚需，应从小白默认界面和新安装默认项移除。"},
       "群成员变动通知": {summary: "提示入群、退群和群昵称变化", setup_steps: ["设置提示文案后在测试群验证。"], prerequisites: ["不能发布或编辑微信群公告。"], audience: "群管理常用", readiness: "收到成员事件即可用", recommendation: "建议保留，并始终使用准确名称。"},
-      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["填写首选生图服务的 API Key、地址和模型。", "生图服务无法连接时，检查“使用系统代理”设置。", "需要回退服务时再启用并填写次选或第三顺位。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
+      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["在首选服务中填写地址、模型和密钥。", "需要回退时开启并填写次选或第三顺位服务。", "连接失败时可开启本地代理；填写本机端口或留空使用已有代理设置。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
       "洛克王国助手": {summary: "使用洛克王国游戏助手", setup_steps: ["通过二维码或已有凭据绑定游戏账号。"], prerequisites: ["账号凭据不要发到群里。"], audience: "兴趣选配", readiness: "需要游戏账号绑定", recommendation: "仅洛克王国用户群有必要，不是运势功能。"},
     };
     const previewSavedConfigs = new Map();
@@ -3270,7 +3294,7 @@
         schema: imageBasicSchema,
         advanced_schema: {},
         config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
-        advanced_config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
+        advanced_config: {},
         configuration_note: "生图服务配置已合并到常用设置，密钥保存后不会回显。",
         setup_steps: item.guide.setup_steps,
         revision: "preview",
