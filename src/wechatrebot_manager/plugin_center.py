@@ -28,6 +28,8 @@ from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     provider_display_name,
+    supports_thinking_toggle,
+    with_thinking_mode,
 )
 from .single_instance import SingleInstanceLock
 
@@ -1315,6 +1317,10 @@ class EngineApiClient:
                     "enable": True,
                 }
             )
+            if normalized.thinking_enabled is not None:
+                model_payload["custom_extra_body"] = with_thinking_mode(
+                    current_model.get("custom_extra_body"), normalized.thinking_enabled
+                )
             self.request(
                 "PUT",
                 "/api/v1/providers/by-id",
@@ -1339,8 +1345,46 @@ class EngineApiClient:
             or str(source.get("api_base") or "").rstrip("/") != normalized.api_base
             or not isinstance(provider, dict)
             or str(provider.get("model") or "") != normalized.model
+            or (
+                normalized.thinking_enabled is not None
+                and (
+                    (provider.get("custom_extra_body") or {}).get("thinking")
+                    if isinstance(provider.get("custom_extra_body"), dict)
+                    else None
+                ) != {"type": "enabled" if normalized.thinking_enabled else "disabled"}
+            )
         ):
             raise PluginCenterError("模型服务已提交，但没有收到生效确认，请刷新后重试。")
+
+    def set_provider_thinking(self, provider_id: str, enabled: bool) -> None:
+        if not isinstance(enabled, bool):
+            raise ValueError("思考模式只能选择开启或关闭。")
+        sources, providers = self._provider_records()
+        model = next(
+            (item for item in providers if item.get("id") == provider_id), None
+        )
+        source = next(
+            (item for item in sources if isinstance(model, dict) and item.get("id") == model.get("provider_source_id")),
+            None,
+        )
+        if not isinstance(model, dict) or not isinstance(source, dict):
+            raise ValueError("所选模型服务不存在，请刷新后重试。")
+        if not supports_thinking_toggle(
+            str(source.get("api_base") or ""), str(model.get("model") or "")
+        ):
+            raise ValueError("当前模型不支持在这里切换思考模式。")
+        updated = dict(model)
+        updated["custom_extra_body"] = with_thinking_mode(model.get("custom_extra_body"), enabled)
+        self.request(
+            "PUT", "/api/v1/providers/by-id",
+            {"provider_id": provider_id, "config": updated},
+        )
+        _sources, verified = self._provider_records()
+        actual = next((item for item in verified if item.get("id") == provider_id), None)
+        body = actual.get("custom_extra_body") if isinstance(actual, dict) else None
+        thinking = body.get("thinking") if isinstance(body, dict) else None
+        if thinking != {"type": "enabled" if enabled else "disabled"}:
+            raise PluginCenterError("思考模式已提交，但没有收到生效确认，请刷新后重试。")
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
         result = self.request(

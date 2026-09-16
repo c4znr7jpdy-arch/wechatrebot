@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="app.css?v=0.9.3-puhuiti-body">
+  <link rel="stylesheet" href="app.css?v=0.9.3-thinking-mode">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -287,6 +287,7 @@
                     <input name="provider_id" type="hidden">
                     <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
                     <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 grok-4.6" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
+                    <label class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">选择小米 MiMo V2.5 后可设置；其他模型由服务自行决定。</small></span><span class="toggle"><input name="thinking_enabled" type="checkbox" checked disabled><span class="toggle-track"></span><span id="providerThinkingValue">暂不支持</span></span></label>
                     <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="粘贴服务密钥；已保存的密钥不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">密钥只保存在本机</small></label>
                     <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong><small id="providerSaveIntentDetail">首个模型服务会自动用于机器人回复。</small></p></div>
                     <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
@@ -374,6 +375,6 @@
     </section>
   </div>
   <script src="core-settings.js?v=0.9.3-robot-core"></script>
-  <script src="app.js?v=0.9.3-robot-core"></script>
+  <script src="app.js?v=0.9.3-thinking-mode"></script>
 </body>
 </html>

@@ -17,6 +17,7 @@ DEFAULT_PROVIDER_MODEL = "grok-4.6"
 DEFAULT_PROVIDER_MODEL_ID = (
     f"{DEFAULT_PROVIDER_SOURCE_ID}/{DEFAULT_PROVIDER_MODEL}"
 )
+MIMO_THINKING_MODELS = frozenset({"mimo-v2.5", "mimo-v2.5-pro"})
 
 DEEPSEEK_PROVIDER_SOURCE_ID = "deepseek"
 DEEPSEEK_PROVIDER_API_BASE = "https://api.deepseek.com/v1"
@@ -26,6 +27,21 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = 35
 # Keep one product-level attempt so a failed endpoint cannot hold a group reply
 # for several minutes. The SDK retry is disabled by the bundled runtime patch.
 PROVIDER_REQUEST_MAX_ATTEMPTS = 1
+
+
+def supports_thinking_toggle(api_base: str, model: str) -> bool:
+    """Only expose the switch where the provider's request format is known."""
+    host = (urlsplit(api_base.strip()).hostname or "").casefold()
+    return (host == "xiaomimimo.com" or host.endswith(".xiaomimimo.com")) and (
+        model.strip().casefold() in MIMO_THINKING_MODELS
+    )
+
+
+def with_thinking_mode(extra_body: object, enabled: bool) -> dict[str, object]:
+    """Preserve unrelated model request parameters when changing thinking."""
+    merged = dict(extra_body) if isinstance(extra_body, dict) else {}
+    merged["thinking"] = {"type": "enabled" if enabled else "disabled"}
+    return merged
 
 
 def provider_source_id(api_base: str, model: str) -> str:
@@ -67,6 +83,7 @@ class OpenAIProviderProfile:
     api_base: str
     model: str
     source_id: str = "commercial_openai"
+    thinking_enabled: bool | None = None
 
     def normalized(self) -> "OpenAIProviderProfile":
         return OpenAIProviderProfile(
@@ -74,6 +91,7 @@ class OpenAIProviderProfile:
             api_base=self.api_base.strip().rstrip("/"),
             model=self.model.strip(),
             source_id=self.source_id.strip().casefold(),
+            thinking_enabled=self.thinking_enabled,
         )
 
     def validate(self) -> tuple[str, ...]:
@@ -89,6 +107,11 @@ class OpenAIProviderProfile:
             errors.append("模型名称不能为空且不能超过 128 个字符。")
         if not _SAFE_ID.fullmatch(profile.source_id):
             errors.append("模型来源 ID 格式无效。")
+        if profile.thinking_enabled is not None:
+            if not isinstance(profile.thinking_enabled, bool):
+                errors.append("思考模式只能选择开启或关闭。")
+            elif not supports_thinking_toggle(profile.api_base, profile.model):
+                errors.append("当前模型不支持在这里切换思考模式。")
 
         parsed = urlsplit(profile.api_base)
         loopback = (parsed.hostname or "").casefold() in {
@@ -144,7 +167,10 @@ class OpenAIProviderProfile:
             "provider_source_id": profile.source_id,
             "model": profile.model,
             "modalities": modalities,
-            "custom_extra_body": {},
+            "custom_extra_body": (
+                with_thinking_mode({}, profile.thinking_enabled)
+                if profile.thinking_enabled is not None else {}
+            ),
             "max_context_tokens": 131072,
         }
 
@@ -221,4 +247,6 @@ __all__ = [
     "discover_openai_models",
     "provider_display_name",
     "provider_source_id",
+    "supports_thinking_toggle",
+    "with_thinking_mode",
 ]

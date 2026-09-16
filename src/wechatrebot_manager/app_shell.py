@@ -23,6 +23,7 @@ from .customer_config import (
     replace_provider_value,
     save_provider_profile,
     set_default_provider,
+    set_provider_thinking,
 )
 from .customer_maintenance import (
     CustomerMaintenanceService,
@@ -52,6 +53,7 @@ from .provider import (
     OpenAIProviderProfile,
     discover_openai_models,
     provider_source_id,
+    supports_thinking_toggle,
 )
 from .response_trace import ResponseTraceService
 from .schedules import ScheduleService
@@ -127,6 +129,7 @@ PUBLIC_API_METHODS = (
     "get_providers",
     "save_provider",
     "set_default_provider",
+    "set_provider_thinking",
     "test_provider",
     "discover_provider_models",
     "delete_provider",
@@ -1034,6 +1037,10 @@ class ApplicationApi:
                     )
                     else provider_source_id(api_base, model)
                 ),
+                thinking_enabled=(
+                    self._requested_thinking(values["thinking_enabled"])
+                    if "thinking_enabled" in values else None
+                ),
             )
             errors = profile.validate()
             if errors:
@@ -1077,6 +1084,8 @@ class ApplicationApi:
                         saved.source_id == DEFAULT_PROVIDER_SOURCE_ID
                         and saved.model == DEFAULT_PROVIDER_MODEL
                     ),
+                    "thinking_supported": supports_thinking_toggle(saved.api_base, saved.model),
+                    "thinking_enabled": profile.thinking_enabled,
                     "apply_state": "applied" if hot_applied else "saved_for_start",
                 },
                 message=(
@@ -1091,6 +1100,14 @@ class ApplicationApi:
             )
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
+
+    @staticmethod
+    def _requested_thinking(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.casefold() in {"true", "false"}:
+            return value.casefold() == "true"
+        raise ValueError("思考模式只能选择开启或关闭。")
 
     def get_providers(self) -> dict[str, object]:
         try:
@@ -1127,6 +1144,39 @@ class ApplicationApi:
                     "默认回复模型已切换并立即生效。"
                     if hot_applied
                     else "默认回复模型已保存，机器人启动时会直接使用。"
+                ),
+            )
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def set_provider_thinking(self, provider_id: str, enabled: bool) -> dict[str, object]:
+        try:
+            requested = self._requested_thinking(enabled)
+            client = EngineApiClient(self._install_root)
+            hot_applied = client.is_available()
+            if hot_applied:
+                client.set_provider_thinking(provider_id, requested)
+            else:
+                set_provider_thinking(self._install_root, provider_id, requested)
+            saved = next(
+                (
+                    item
+                    for item in load_provider_services(self._install_root)
+                    if item.provider_id == provider_id
+                ),
+                None,
+            )
+            if saved is None or saved.thinking_enabled is not requested:
+                raise PluginCenterError("思考模式未能确认保存，请刷新后重试。")
+            return self._ok(
+                {
+                    "id": provider_id,
+                    "thinking_enabled": requested,
+                    "apply_state": "applied" if hot_applied else "saved_for_start",
+                },
+                message=(
+                    "思考模式已热更新，下一条消息立即生效。"
+                    if hot_applied else "思考模式已保存，机器人下次启动时生效。"
                 ),
             )
         except (OSError, ValueError, PluginCenterError) as exc:

@@ -325,6 +325,43 @@ def test_provider_hot_apply_preserves_extended_fields_and_verifies_default(
     assert client.config["unrelated"] == {"keep": True}
 
 
+def test_mimo_thinking_hot_switch_preserves_model_and_reads_back(tmp_path: Path) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+    client.sources[0].update({
+        "id": "custom_mimo", "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
+    })
+    client.providers[0].update({
+        "id": "custom_mimo/mimo-v2.5", "provider_source_id": "custom_mimo",
+        "model": "mimo-v2.5", "custom_extra_body": {"safe_extra": "keep"},
+    })
+    client.set_provider_thinking("custom_mimo/mimo-v2.5", False)
+    assert client.providers[0]["custom_extra_body"] == {
+        "safe_extra": "keep", "thinking": {"type": "disabled"},
+    }
+    assert client.providers[0]["model"] == "mimo-v2.5"
+    client.set_provider_thinking("custom_mimo/mimo-v2.5", True)
+    assert client.providers[0]["custom_extra_body"]["thinking"] == {"type": "enabled"}
+
+
+def test_mimo_thinking_hot_switch_rejects_missing_readback(tmp_path: Path) -> None:
+    class NoWriteClient(_ProviderHotApplyClient):
+        def request(self, method, path, payload=None):
+            if method == "PUT" and path == "/api/v1/providers/by-id":
+                return {}
+            return super().request(method, path, payload)
+
+    client = NoWriteClient(tmp_path)
+    client.sources[0].update({
+        "id": "custom_mimo", "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
+    })
+    client.providers[0].update({
+        "id": "custom_mimo/mimo-v2.5", "provider_source_id": "custom_mimo",
+        "model": "mimo-v2.5", "custom_extra_body": {},
+    })
+    with pytest.raises(PluginCenterError, match="生效确认"):
+        client.set_provider_thinking("custom_mimo/mimo-v2.5", False)
+
+
 def test_provider_hot_delete_is_read_back_and_cleans_unused_source(
     tmp_path: Path,
 ) -> None:

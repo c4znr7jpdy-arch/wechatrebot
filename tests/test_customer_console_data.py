@@ -15,6 +15,7 @@ from wechatrebot_manager.customer_config import (
     save_robot_settings,
     set_plugin_enabled,
     set_default_provider,
+    set_provider_thinking,
 )
 from wechatrebot_manager.customer_logs import sanitize_log_text, tail_log
 from wechatrebot_manager.diagnostics import white_label_terms
@@ -93,6 +94,42 @@ def test_multiple_model_services_share_one_catalog_and_default(tmp_path: Path) -
     assert [item.provider_id for item in load_provider_services(install)] == [
         deepseek.model_id
     ]
+
+
+def test_mimo_thinking_offline_save_and_card_switch_preserve_extra_fields(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    profile = OpenAIProviderProfile(
+        api_key="mimo-secret",
+        api_base="https://token-plan-cn.xiaomimimo.com/v1",
+        model="mimo-v2.5",
+        source_id="custom_mimo",
+        thinking_enabled=False,
+    )
+    save_provider_profile(install, profile)
+    config_path = install / "app/astrbot/data/cmd_config.json"
+    engine = json.loads(config_path.read_text(encoding="utf-8"))
+    model = next(item for item in engine["provider"] if item["id"] == profile.model_id)
+    assert model["custom_extra_body"] == {"thinking": {"type": "disabled"}}
+    model["custom_extra_body"]["safe_extra"] = "keep"
+    config_path.write_text(json.dumps(engine), encoding="utf-8")
+
+    set_provider_thinking(install, profile.model_id, True)
+    service = next(item for item in load_provider_services(install) if item.provider_id == profile.model_id)
+    assert service.to_public_dict()["thinking_enabled"] is True
+    assert service.to_public_dict()["thinking_supported"] is True
+    assert load_provider_profile(install).thinking_enabled is True
+    updated = json.loads(config_path.read_text(encoding="utf-8"))
+    current = next(item for item in updated["provider"] if item["id"] == profile.model_id)
+    assert current["custom_extra_body"] == {"thinking": {"type": "enabled"}, "safe_extra": "keep"}
+    assert updated["provider_sources"][0]["key"] == ["mimo-secret"]
+    assert updated["provider_settings"]["default_provider_id"] == profile.model_id
+
+    save_provider_profile(install, OpenAIProviderProfile(
+        api_key="mimo-secret", api_base=profile.api_base, model=profile.model,
+        source_id=profile.source_id, thinking_enabled=False,
+    ))
+    refreshed = json.loads(config_path.read_text(encoding="utf-8"))
+    assert refreshed["provider"][0]["custom_extra_body"] == {"thinking": {"type": "disabled"}, "safe_extra": "keep"}
 
 
 def test_provider_references_are_named_and_migrated_before_deletion(

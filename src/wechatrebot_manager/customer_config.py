@@ -14,6 +14,8 @@ from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     provider_display_name,
+    supports_thinking_toggle,
+    with_thinking_mode,
 )
 from .runtime_config import normalize_admin_id, write_runtime_configs
 
@@ -58,6 +60,11 @@ class ProviderService:
     is_default: bool
     is_recommended: bool
     reference_modules: tuple[str, ...] = ()
+    thinking_enabled: bool | None = None
+
+    @property
+    def thinking_supported(self) -> bool:
+        return supports_thinking_toggle(self.api_base, self.model)
 
     @property
     def configured(self) -> bool:
@@ -78,6 +85,8 @@ class ProviderService:
             "api_key_configured": bool(self.api_key),
             "is_default": self.is_default,
             "is_recommended": self.is_recommended,
+            "thinking_supported": self.thinking_supported,
+            "thinking_enabled": self.thinking_enabled if self.thinking_supported else None,
             "references": [
                 _plugin_display_name(module_name)
                 for module_name in self.reference_modules
@@ -280,6 +289,11 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
             continue
         keys = source.get("key")
         api_key = str(keys[0]) if isinstance(keys, list) and keys else ""
+        thinking_supported = supports_thinking_toggle(
+            str(source.get("api_base") or ""), model
+        )
+        extra_body = provider.get("custom_extra_body")
+        thinking = extra_body.get("thinking") if isinstance(extra_body, dict) else None
         services.append(
             ProviderService(
                 provider_id=provider_id,
@@ -292,6 +306,10 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
                 is_recommended=(
                     source_id == DEFAULT_PROVIDER_SOURCE_ID
                     and model.casefold() == DEFAULT_PROVIDER_MODEL.casefold()
+                ),
+                thinking_enabled=(
+                    not (isinstance(thinking, dict) and thinking.get("type") == "disabled")
+                    if thinking_supported else None
                 ),
             )
         )
@@ -308,6 +326,7 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
             reference_modules=provider_reference_modules(
                 install, item.provider_id
             ),
+            thinking_enabled=item.thinking_enabled,
         )
         for item in services
     ]
@@ -335,6 +354,7 @@ def load_provider_profile(root: str | Path) -> OpenAIProviderProfile | None:
         api_base=service.api_base,
         model=service.model,
         source_id=service.source_id,
+        thinking_enabled=service.thinking_enabled,
     ).normalized()
 
 
@@ -382,6 +402,46 @@ def set_default_provider(root: str | Path, provider_id: str) -> None:
     settings["context_limit_reached_strategy"] = "llm_compress"
     settings["llm_compress_provider_id"] = provider_id
     write_json_atomic(engine_path, engine)
+
+
+def set_provider_thinking(root: str | Path, provider_id: str, enabled: bool) -> None:
+    if not isinstance(enabled, bool):
+        raise ValueError("思考模式只能选择开启或关闭。")
+    _, _, engine_path = _paths(root)
+    engine = _object(engine_path)
+    providers = engine.get("provider")
+    sources = engine.get("provider_sources")
+    model = next(
+        (item for item in providers if isinstance(item, dict) and item.get("id") == provider_id),
+        None,
+    ) if isinstance(providers, list) else None
+    source = next(
+        (
+            item
+            for item in sources
+            if isinstance(item, dict)
+            and item.get("id") == model.get("provider_source_id")
+        ),
+        None,
+    ) if isinstance(model, dict) and isinstance(sources, list) else None
+    if not isinstance(model, dict) or not isinstance(source, dict):
+        raise ValueError("所选模型服务不存在，请刷新后重试。")
+    if not supports_thinking_toggle(
+        str(source.get("api_base") or ""), str(model.get("model") or "")
+    ):
+        raise ValueError("当前模型不支持在这里切换思考模式。")
+    model["custom_extra_body"] = with_thinking_mode(model.get("custom_extra_body"), enabled)
+    write_json_atomic(engine_path, engine)
+    updated = next(
+        (
+            item
+            for item in load_provider_services(root)
+            if item.provider_id == provider_id
+        ),
+        None,
+    )
+    if updated is None or updated.thinking_enabled is not enabled:
+        raise ValueError("思考模式已提交，但未能确认保存，请刷新后重试。")
 
 
 def delete_provider_profile(root: str | Path, provider_id: str) -> None:

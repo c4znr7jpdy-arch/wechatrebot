@@ -2585,7 +2585,11 @@
     button.textContent = "正在保存并应用…";
     $("#providerNote").textContent = "正在更新统一模型配置…";
     try {
-      const data = await api("save_provider", Object.fromEntries(new FormData(form)));
+      const values = Object.fromEntries(new FormData(form));
+      if (providerThinkingSupported(values.api_base, values.model)) {
+        values.thinking_enabled = form.elements.thinking_enabled.checked;
+      }
+      const data = await api("save_provider", values);
       state.bootstrap.providers = await api("get_providers");
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
       state.featureDetails = {};
@@ -2618,6 +2622,31 @@
     return {mark: "AI", label: "兼容服务", className: "custom"};
   }
 
+  function providerThinkingSupported(apiBase, model) {
+    try {
+      const host = new URL(String(apiBase || "")).hostname.toLowerCase();
+      return (host === "xiaomimimo.com" || host.endsWith(".xiaomimimo.com"))
+        && ["mimo-v2.5", "mimo-v2.5-pro"].includes(String(model || "").trim().toLowerCase());
+    } catch (_) { return false; }
+  }
+
+  function syncProviderThinkingControl(initialValue = null) {
+    const form = $("#providerForm");
+    const input = form.elements.thinking_enabled;
+    const supported = providerThinkingSupported(form.elements.api_base.value, form.elements.model.value);
+    const signature = `${form.elements.api_base.value.trim()}|${form.elements.model.value.trim()}`;
+    if (input.dataset.signature !== signature || initialValue !== null) {
+      input.checked = initialValue === null ? true : Boolean(initialValue);
+      input.dataset.signature = signature;
+    }
+    input.disabled = !supported;
+    $("#providerThinkingRow").classList.toggle("unsupported", !supported);
+    $("#providerThinkingHint").textContent = supported
+      ? "关闭后普通聊天通常更快；复杂问题可能需要开启。保存后对该模型生效。"
+      : "目前支持小米 MiMo V2.5；其他模型暂不能在这里切换。";
+    $("#providerThinkingValue").textContent = supported ? (input.checked ? "已开启" : "已关闭") : "暂不支持";
+  }
+
   function applyProviderPreset(presetId) {
     const form = $("#providerForm");
     const preset = (state.bootstrap?.provider_presets || []).find((item) => item.id === presetId);
@@ -2627,6 +2656,7 @@
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
     $("#providerPresetHint").textContent = preset.description || "填写模型服务信息";
+    syncProviderThinkingControl();
   }
 
   function renderProviderSaveIntent(makeDefault) {
@@ -2640,6 +2670,7 @@
   function beginNewProvider(presetId = "free_grok") {
     const form = $("#providerForm");
     form.reset();
+    form.elements.thinking_enabled.dataset.signature = "";
     form.elements.provider_id.value = "";
     form.elements.preset.value = presetId;
     applyProviderPreset(presetId);
@@ -2664,6 +2695,8 @@
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
+    form.elements.thinking_enabled.dataset.signature = "";
+    syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
     $("#providerEditorEyebrow").textContent = "编辑服务";
@@ -2717,6 +2750,10 @@
               <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
+            <div class="provider-thinking-control">
+              <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_supported ? (item.thinking_enabled ? "已开启 · 适合复杂问题" : "已关闭 · 优先快速回复") : "当前模型暂不支持切换"}</small></span>
+              ${item.thinking_supported ? `<button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>` : '<span class="provider-thinking-unavailable">不可切换</span>'}
+            </div>
           </div>
           <footer class="provider-service-actions">
             <button class="provider-card-action" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
@@ -2942,6 +2979,22 @@
         toast("模型服务已删除。");
       },
     });
+  }
+
+  async function setProviderThinking(providerId, button) {
+    const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
+    if (!service || !service.thinking_supported || button.disabled) return;
+    button.disabled = true;
+    const status = button.closest(".provider-thinking-control")?.querySelector("[data-provider-thinking-status]");
+    if (status) status.textContent = "正在应用…";
+    try {
+      await api("set_provider_thinking", providerId, !service.thinking_enabled);
+      state.bootstrap.providers = await api("get_providers");
+      renderProviderServices();
+    } catch (error) {
+      reportError(error);
+      renderProviderServices();
+    }
   }
 
   function deleteSelectedProvider() {
@@ -3284,6 +3337,12 @@
     $("#providerForm").addEventListener("submit", saveProvider);
     $("#providerForm").addEventListener("input", updateProviderDirty);
     $("#providerForm").addEventListener("change", updateProviderDirty);
+    $("#providerForm").addEventListener("input", (event) => {
+      if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
+    });
+    $("#providerForm").addEventListener("change", (event) => {
+      if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
+    });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
     $("#closeProviderEditor").addEventListener("click", requestProviderOverview);
     $("#cancelProviderEdit").addEventListener("click", requestProviderOverview);
@@ -3305,6 +3364,8 @@
       if (edit) { editProvider(edit.dataset.providerEdit); return; }
       const makeDefault = event.target.closest("[data-provider-default]");
       if (makeDefault) { setProviderDefault(makeDefault.dataset.providerDefault, makeDefault); return; }
+      const thinking = event.target.closest("[data-provider-thinking]");
+      if (thinking) { setProviderThinking(thinking.dataset.providerThinking, thinking); return; }
       const remove = event.target.closest("[data-provider-delete]");
       if (remove) deleteProvider(remove.dataset.providerDelete);
     });
@@ -3355,7 +3416,7 @@
       fillSettings(state.bootstrap);
       renderStatus(state.bootstrap.status);
       const previewParams = new URLSearchParams(window.location.search);
-      if (previewParams.has("preview") && previewParams.get("demo") === "model-services") {
+      if (previewParams.has("preview") && (previewParams.get("demo") === "model-services" || previewParams.get("demo") === "thinking-mode")) {
         state.bootstrap.experience.onboarding_complete = true;
         await navigate("settings");
       }
@@ -3553,6 +3614,9 @@
       };
     }
     let previewProviders = [];
+    if (new URLSearchParams(window.location.search).get("demo") === "thinking-mode") {
+      previewProviders = [{id: "custom_mimo/mimo-v2.5", name: "mimo-v2.5", api_base: "https://token-plan-cn.xiaomimimo.com/v1", model: "mimo-v2.5", configured: true, api_key_configured: true, is_default: true, is_recommended: false, thinking_supported: true, thinking_enabled: true}];
+    }
     const previewPresets = [
       {id: "free_grok", name: "免费 Grok 4.6（推荐）", api_base: "https://api.xiuxianjyj.xin/v1", model: "grok-4.6", description: "面向普通用户的默认回复服务。"},
       {id: "deepseek", name: "DeepSeek（自用）", api_base: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", description: "适合在你自己的设备上使用。"},
@@ -3726,11 +3790,12 @@
         previewProviders = previewProviders
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
-        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", apply_state: "applied"};
+        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: providerThinkingSupported(values.api_base, values.model) ? values.thinking_enabled !== false : null, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },
       set_default_provider: (id) => { previewProviders = previewProviders.map((item) => ({...item, is_default: item.id === id})); return ok({id, apply_state: "applied"}, "默认回复模型已切换并立即生效。"); },
+      set_provider_thinking: (id, enabled) => { previewProviders = previewProviders.map((item) => item.id === id ? {...item, thinking_enabled: Boolean(enabled)} : item); return ok({id, thinking_enabled: Boolean(enabled), apply_state: "applied"}, "思考模式已热更新，下一条消息立即生效。"); },
       test_provider: () => ok({ok: true}, "模型服务连接正常。"),
       discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}, "已读取 6 个可用模型。"),
       delete_provider: (id) => { previewProviders = previewProviders.filter((item) => item.id !== id); return ok({id}, "模型服务已删除并立即生效。"); },

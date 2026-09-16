@@ -10,7 +10,11 @@ import secrets
 from .brand import BrandProfile
 from .feature_policy import load_delivery_features
 from .json_io import write_json_atomic
-from .provider import OpenAIProviderProfile, PROVIDER_REQUEST_MAX_ATTEMPTS
+from .provider import (
+    OpenAIProviderProfile,
+    PROVIDER_REQUEST_MAX_ATTEMPTS,
+    with_thinking_mode,
+)
 
 
 _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
@@ -283,10 +287,26 @@ def _apply_provider_to_astrbot(
         # minutes. The product timeout is part of the unified provider policy.
         updated_fields=("id", "key", "api_base", "enable", "timeout"),
     )
+    model_payload = normalized.astrbot_model()
+    updated_model_fields = ("id", "provider_source_id", "model", "enable")
+    if normalized.thinking_enabled is not None:
+        existing_models = payload.get("provider")
+        existing_model = next(
+            (
+                item for item in existing_models
+                if isinstance(item, dict) and item.get("id") == normalized.model_id
+            ),
+            None,
+        ) if isinstance(existing_models, list) else None
+        model_payload["custom_extra_body"] = with_thinking_mode(
+            existing_model.get("custom_extra_body") if isinstance(existing_model, dict) else None,
+            normalized.thinking_enabled,
+        )
+        updated_model_fields += ("custom_extra_body",)
     payload["provider"] = _upsert_by_id(
         payload.get("provider"),
-        normalized.astrbot_model(),
-        updated_fields=("id", "provider_source_id", "model", "enable"),
+        model_payload,
+        updated_fields=updated_model_fields,
     )
     if make_default:
         provider_settings = payload.get("provider_settings")

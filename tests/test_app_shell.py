@@ -150,6 +150,62 @@ def test_first_provider_save_uses_jyjapi_grok_source(
     assert captured["make_default"] is True
 
 
+def test_new_mimo_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+
+    def fake_save(_root, profile, *, make_default=True):
+        captured["profile"] = profile
+        return profile.normalized()
+
+    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+    result = api.save_provider({
+        "api_key": "mimo-secret",
+        "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
+        "model": "mimo-v2.5",
+        "thinking_enabled": False,
+    })
+    assert result["ok"] is True
+    assert captured["profile"].thinking_enabled is False
+    assert api.save_provider({
+        "api_key": "secret", "api_base": "https://example.com/v1",
+        "model": "other", "thinking_enabled": False,
+    })["ok"] is False
+
+
+def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    provider_id = "custom_mimo/mimo-v2.5"
+    state = {"enabled": True}
+    calls = []
+
+    class FakeClient:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def set_provider_thinking(target, enabled):
+            calls.append((target, enabled))
+            state["enabled"] = enabled
+
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: FakeClient())
+    monkeypatch.setattr(
+        app_shell, "load_provider_services",
+        lambda _root: (SimpleNamespace(provider_id=provider_id, thinking_enabled=state["enabled"]),),
+    )
+    result = api.set_provider_thinking(provider_id, False)
+    assert result["ok"] is True
+    assert result["data"]["apply_state"] == "applied"
+    assert calls == [(provider_id, False)]
+    state["enabled"] = True
+    monkeypatch.setattr(FakeClient, "set_provider_thinking", staticmethod(lambda *_args: None))
+    assert api.set_provider_thinking(provider_id, False)["ok"] is False
+
+
 def test_new_provider_keeps_the_existing_reply_model(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -668,6 +724,19 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
+
+
+def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'name="thinking_enabled"' in markup
+    assert 'data-provider-thinking="${escapeHtml(item.id)}"' in script
+    assert 'api("set_provider_thinking", providerId, !service.thinking_enabled)' in script
+    assert 'role="switch"' in script
+    assert ".provider-thinking-switch:focus-visible" in styles
 
 
 def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() -> None:

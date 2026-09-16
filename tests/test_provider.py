@@ -11,6 +11,7 @@ from wechatrebot_manager.provider import (
     discover_openai_models,
     provider_display_name,
     provider_source_id,
+    supports_thinking_toggle,
 )
 
 
@@ -46,6 +47,23 @@ def test_provider_profile_allows_loopback_http() -> None:
         model="model",
     )
     assert profile.validate() == ()
+
+
+def test_mimo_thinking_switch_uses_only_supported_request_format() -> None:
+    base = "https://token-plan-cn.xiaomimimo.com/v1"
+    assert supports_thinking_toggle(base, "mimo-v2.5")
+    assert supports_thinking_toggle("https://api.xiaomimimo.com/v1", "mimo-v2.5-pro")
+    assert not supports_thinking_toggle("https://example.com/v1", "mimo-v2.5")
+    assert not supports_thinking_toggle(base, "other-model")
+    disabled = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled=False)
+    assert disabled.validate() == ()
+    assert disabled.astrbot_model()["custom_extra_body"] == {"thinking": {"type": "disabled"}}
+    enabled = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled=True)
+    assert enabled.astrbot_model()["custom_extra_body"] == {"thinking": {"type": "enabled"}}
+    unsupported = OpenAIProviderProfile("secret", "https://example.com/v1", "mimo-v2.5", thinking_enabled=False)
+    assert "不支持" in " ".join(unsupported.validate())
+    invalid = OpenAIProviderProfile("secret", base, "mimo-v2.5", thinking_enabled="false")
+    assert "只能选择" in " ".join(invalid.validate())
 
 
 def test_grok_46_defaults_expose_multimodal_capabilities() -> None:
