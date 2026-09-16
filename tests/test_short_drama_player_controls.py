@@ -261,7 +261,7 @@ def test_cinema_catalog_and_player_responsive(cinema_catalog, width):
 
 def test_speed_cycles_temporary_hint_and_seek_does_not_autoplay(player_page):
     page = player_page
-    for rate in [1.5, 2, 3, 1]:
+    for rate in [1.5, 2, 1]:
         page.locator("#speedButton").click()
         assert page.locator("#video").evaluate("video => video.playbackRate") == rate
         assert page.locator("#videoHint").inner_text() == f"{rate:.1f} 倍速"
@@ -334,45 +334,68 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_landscape_video_rotates_fullscreen_and_restores(player_page):
+def test_mobile_landscape_video_requests_device_orientation(player_page):
     page = player_page
     page.set_viewport_size({"width": 390, "height": 844})
-    # Exercise the WebKit/WeChat fallback where an element cannot enter native fullscreen.
-    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; }")
+    page.evaluate("""() => {
+      window.orientationCalls = [];
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async mode => {
+        window.orientationCalls.push({mode, native: document.fullscreenElement === document.getElementById('videoShell')});
+      }});
+    }""")
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    page.wait_for_function("window.orientationCalls.length === 1")
+    assert page.evaluate("window.orientationCalls") == [{"mode": "landscape", "native": True}]
     shell = page.locator("#videoShell")
-    style = shell.evaluate("node => ({ width: getComputedStyle(node).width, height: getComputedStyle(node).height, transform: getComputedStyle(node).transform })")
-    assert abs(float(style["width"].removesuffix("px")) - 844) < 1
-    assert abs(float(style["height"].removesuffix("px")) - 390) < 1
-    assert style["transform"] != "none"
+    assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
-    screenshots.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(screenshots / "mobile-landscape-fullscreen-390.png"))
+
+    page.locator("#speedButton").click()
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
+    play_click(page)
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('controls-hidden')")
+    page.wait_for_function("getComputedStyle(document.querySelector('.video-header')).opacity === '0' && getComputedStyle(document.querySelector('.video-controls')).opacity === '0'")
+    assert shell.locator(".video-header").evaluate("node => getComputedStyle(node).opacity") == "0"
+    assert shell.locator(".video-controls").evaluate("node => getComputedStyle(node).opacity") == "0"
+    video_bounds = page.locator("#video").bounding_box()
+    page.touchscreen.tap(video_bounds["x"] + 100, video_bounds["y"] + 120)
+    assert not shell.evaluate("node => node.classList.contains('controls-hidden')")
 
     page.get_by_role("button", name="选择剧集", exact=True).click()
     panel = page.locator(".sheet-panel").bounding_box()
     assert panel["x"] >= 0 and panel["y"] >= 0
     assert panel["x"] + panel["width"] <= 390 and panel["y"] + panel["height"] <= 844
     page.locator("#sheetClose").click()
-
-    page.set_viewport_size({"width": 844, "height": 390})
-    page.wait_for_function("!document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
-    assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
-
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
     page.get_by_label("退出全屏", exact=True).click()
-    page.wait_for_function("!document.getElementById('videoShell').classList.contains('pseudo-fullscreen') && !document.getElementById('videoShell').classList.contains('fullscreen-rotated')")
+    page.wait_for_function("!document.fullscreenElement")
     assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
 
-    shell.evaluate("node => { node.classList.remove('player--landscape', 'player--cinema'); node.classList.add('player--portrait'); }")
+
+@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
+def test_mobile_fullscreen_fallback_does_not_fake_rotation(player_page):
+    page = player_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
+    page.evaluate("""() => {
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async () => { throw Error('unavailable'); }});
+    }""")
     page.get_by_label("全屏播放", exact=True).click()
     page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
-    assert not shell.evaluate("node => node.classList.contains('fullscreen-rotated')")
+    shell = page.locator("#videoShell")
+    assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
+    assert page.locator("#videoHint").inner_text() == "请将手机横过来观看"
+    bounds = shell.bounding_box()
+    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+    page.set_viewport_size({"width": 844, "height": 390})
+    bounds = shell.bounding_box()
+    assert abs(bounds["width"] - 844) < 1 and abs(bounds["height"] - 390) < 1
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    assert page.get_by_role("dialog", name="选择剧集").is_visible()
+    page.locator("#sheetClose").click()
     page.get_by_label("退出全屏", exact=True).click()
+    assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
 
 
 @pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
@@ -386,6 +409,20 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page.route("**/aspect.mp4", lambda route: route.fulfill(body=clip.read_bytes(), content_type="video/mp4", headers={"Access-Control-Allow-Origin": "*"}))
     page.locator("#video").evaluate("video => { video.src = 'https://media.example/aspect.mp4'; video.load(); }")
     page.wait_for_function(f"document.getElementById('videoShell').classList.contains('player--{mode}') && document.getElementById('video').readyState >= 2")
+    if mode == "portrait":
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.evaluate("""() => {
+          window.orientationCalls = [];
+          Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async mode => window.orientationCalls.push(mode)});
+        }""")
+        page.get_by_label("全屏播放", exact=True).click()
+        page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell') || document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+        assert page.evaluate("window.orientationCalls") == []
+        shell = page.locator("#videoShell")
+        assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
+        bounds = shell.bounding_box()
+        assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+        page.get_by_label("退出全屏", exact=True).click()
     for viewport in [{"width": 390, "height": 844}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
         page.set_viewport_size(viewport)
         video = page.locator("#video").bounding_box()
