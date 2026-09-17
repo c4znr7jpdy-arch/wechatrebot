@@ -7,6 +7,8 @@
 - 在线安装器：只包含约 40 MB 的管理器引导程序；安装时通过 HTTPS 下载 `payload.wrb`，并校验固定 SHA-256。适合作为默认分发包。
 - 离线安装器：内嵌完整 `payload.wrb`，无需联网，但体积仍接近完整运行时载荷。适合离线环境。
 
+在线安装器需要先把同版本的完整载荷放在稳定的 HTTPS 地址上；仅仅缩小安装器下载体积，不会缩小实际安装后的运行时占用。`prepare_native_test_payload.py` 和 `create_native_smoke_payload.py` 生成的载荷只供本地烟测，不可用于客户交付。
+
 安装器不会绕过载荷清单校验。升级前只停止安装目录内的相关进程；检测到比安装器更高的已安装版本时会阻止降级。同版本可修复安装，旧版本可直接升级。
 
 ## 本地轻量校验
@@ -23,3 +25,5 @@ python .\scripts\build_native_installer.py `
 ```
 
 正式生成安装器需要预先安装 Inno Setup 7，并去掉 `--dry-run`。输出目录必须位于当前工作树的 `artifacts` 下。
+
+若机器上已有通过 `build_manager.py` 创建的工具环境，可用其 `--build-python` 参数复用 PyInstaller，避免每次重新下载依赖。商用分发前须确认 Inno Setup 商业授权与安装器签名；本地测试包不代表已签名或可发布。

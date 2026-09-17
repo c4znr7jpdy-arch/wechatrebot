@@ -69,11 +69,29 @@ def test_native_uninstall_stops_owned_processes_and_removes_locator(
     monkeypatch.setattr(native_setup, "validate_uninstall_root", lambda value: install)
     monkeypatch.setattr(native_setup, "stop_installation_processes", lambda value: 3)
     monkeypatch.setattr(native_setup, "locator_path", lambda: residual / "install-location.json")
+    monkeypatch.setattr(native_setup, "load_install_location", lambda: install)
 
     result = native_setup.prepare_native_uninstall(install)
 
     assert result == {"ok": True, "stopped_processes": 3}
     assert not residual.exists()
+
+
+def test_native_uninstall_does_not_remove_another_install_locator(
+    monkeypatch, tmp_path: Path
+) -> None:
+    install = tmp_path / "install"
+    residual = tmp_path / "WeChatReBot"
+    residual.mkdir()
+    (residual / "install-location.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(native_setup, "validate_uninstall_root", lambda value: install)
+    monkeypatch.setattr(native_setup, "stop_installation_processes", lambda value: 0)
+    monkeypatch.setattr(native_setup, "locator_path", lambda: residual / "install-location.json")
+    monkeypatch.setattr(native_setup, "load_install_location", lambda: tmp_path / "other")
+
+    native_setup.prepare_native_uninstall(install)
+
+    assert residual.exists()
 
 
 def test_inno_script_uses_native_scope_download_and_downgrade_guards() -> None:
@@ -83,7 +101,9 @@ def test_inno_script_uses_native_scope_download_and_downgrade_guards() -> None:
     assert "PrivilegesRequiredOverridesAllowed=dialog" in script
     assert "DefaultDirName={code:DefaultInstallDirectory}" in script
     assert "CreateDownloadPage" in script
+    assert "ArchiveExtraction=full" in script
     assert "PayloadSHA256" in script
     assert "ComparePackedVersion(InstalledVersion, SetupVersion) > 0" in script
     assert "install-from-native-setup" in script
     assert "prepare-native-uninstall" in script
+    assert "function InitializeUninstall: Boolean" in script

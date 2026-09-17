@@ -19,11 +19,18 @@
 
 #define ProductName "WeChat ReBot"
 #define ProductPublisher "WeChat ReBot"
-#define ProductAppId "{1C4802AA-38EB-4B98-9A1A-8D14A6C7DC31}"
-#define ProductAppIdRegistry "{1C4802AA-38EB-4B98-9A1A-8D14A6C7DC31}_is1"
+#ifdef SmokeInstaller
+  #define ProductAppIdRegistry "{374E927D-9F43-44D6-81C5-E89E7668F7B2}_is1"
+#else
+  #define ProductAppIdRegistry "{1C4802AA-38EB-4B98-9A1A-8D14A6C7DC31}_is1"
+#endif
 
 [Setup]
+#ifdef SmokeInstaller
+AppId={{374E927D-9F43-44D6-81C5-E89E7668F7B2}
+#else
 AppId={{1C4802AA-38EB-4B98-9A1A-8D14A6C7DC31}
+#endif
 AppName={#ProductName}
 AppVersion={#AppVersion}
 AppVerName={#ProductName} {#AppVersion}
@@ -45,7 +52,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 SetupArchitecture=x64
 MinVersion=10.0.17763
 WizardStyle=modern
-WizardResizable=no
 DisableWelcomePage=no
 DisableReadyPage=no
 DisableProgramGroupPage=auto
@@ -59,6 +65,7 @@ SetupIconFile=..\src\wechatrebot_manager\app_webui\assets\app-icon.ico
 UninstallDisplayIcon={app}\manager\WeChatReBot.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
+ArchiveExtraction=full
 OutputBaseFilename=WeChatReBot-Setup-{#AppVersion}
 CreateUninstallRegKey=yes
 Uninstallable=yes
@@ -83,9 +90,6 @@ Name: "{autodesktop}\{#ProductName}"; Filename: "{app}\manager\WeChatReBot.exe";
 
 [Run]
 Filename: "{app}\manager\WeChatReBot.exe"; Parameters: "gui --install-root ""{app}"""; Description: "启动 {#ProductName}"; Flags: postinstall nowait skipifsilent runasoriginaluser
-
-[UninstallRun]
-Filename: "{app}\manager\WeChatReBot.exe"; Parameters: "prepare-native-uninstall --install-root ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "PrepareWeChatReBotUninstall"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -228,12 +232,17 @@ function InstallVerifiedPayload: Boolean;
 var
   ExitCode: Integer;
   Params: String;
+  Status: AnsiString;
+  StatusFile: String;
 begin
   ExtractTemporaryFile('WeChatReBot-bootstrap.exe');
+  StatusFile := ExpandConstant('{tmp}\native-install-status.json');
   Params := 'install-from-native-setup --payload "' + PayloadStagingPath +
-    '" --install-root "' + WizardDirValue + '"';
+    '" --install-root "' + RemoveBackslashUnlessRoot(WizardDirValue) +
+    '" --status-file "' + StatusFile + '"';
   InstallPage.Show;
   InstallPage.Animate;
+  ExitCode := -1;
   try
     Result := Exec(
       ExpandConstant('{tmp}\WeChatReBot-bootstrap.exe'),
@@ -245,6 +254,9 @@ begin
   finally
     InstallPage.Hide;
   end;
+  Log(Format('Native install launched=%d exit=%d', [Ord(Result), ExitCode]));
+  if LoadStringFromFile(StatusFile, Status) then
+    Log('Native install status: ' + Utf8Decode(Status));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -258,4 +270,35 @@ begin
   except
     Result := '安装准备失败：' + GetExceptionMessage;
   end;
+end;
+
+function InitializeUninstall: Boolean;
+var
+  ExitCode: Integer;
+  Params: String;
+  Executable: String;
+  Root: String;
+  Status: AnsiString;
+  StatusFile: String;
+begin
+  Root := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  StatusFile := ExpandConstant('{tmp}\native-uninstall-status.json');
+  Params := 'prepare-native-uninstall --install-root "' + Root +
+    '" --status-file "' + StatusFile + '"';
+  Executable := Root + '\manager\WeChatReBot.exe';
+  ExitCode := -1;
+  Log('Native uninstall precheck: ' + Executable + ' ' + Params);
+  Result := Exec(
+    Executable,
+    Params,
+    Root,
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ExitCode);
+  Log(Format('Native uninstall precheck launched=%d exit=%d', [Ord(Result), ExitCode]));
+  if LoadStringFromFile(StatusFile, Status) then
+    Log('Native uninstall precheck status: ' + Utf8Decode(Status));
+  Result := Result and (ExitCode = 0);
+  if not Result then
+    SuppressibleMsgBox('卸载前检查失败，为保护现有数据，已停止卸载。', mbError, MB_OK, IDOK);
 end;

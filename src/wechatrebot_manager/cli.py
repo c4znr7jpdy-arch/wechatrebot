@@ -98,10 +98,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     native_install.add_argument("--payload", type=Path, required=True)
     native_install.add_argument("--install-root", type=Path, required=True)
+    native_install.add_argument("--status-file", type=Path)
     native_uninstall = subparsers.add_parser(
         "prepare-native-uninstall", help=argparse.SUPPRESS
     )
     native_uninstall.add_argument("--install-root", type=Path, required=True)
+    native_uninstall.add_argument("--status-file", type=Path)
     return parser
 
 
@@ -156,11 +158,17 @@ def main(argv: list[str] | None = None) -> int:
                 result = install_from_native_setup(args.payload, args.install_root)
             else:
                 result = prepare_native_uninstall(args.install_root)
-            _print_json(result, indent=2)
-            return 0
+            exit_code = 0
         except (OSError, RuntimeError, ValueError) as exc:
-            _print_json({"ok": False, "error": str(exc)}, indent=2)
-            return 1
+            result = {"ok": False, "error": str(exc)}
+            exit_code = 1
+        _print_json(result, indent=2)
+        if args.status_file is not None:
+            try:
+                write_json_atomic(args.status_file, result)
+            except OSError:
+                pass
+        return exit_code
     if args.command == "bootstrap":
         return run_bootstrap(args.payload)
     if args.command == "check-install-dir":

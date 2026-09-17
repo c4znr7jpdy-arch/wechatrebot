@@ -6,7 +6,7 @@ import shutil
 from .brand import BrandProfile
 from .install_paths import INSTALL_MARKER
 from .installer import InstallRequest, perform_install
-from .location import locator_path
+from .location import load_install_location, locator_path
 from .uninstaller import stop_installation_processes, validate_uninstall_root
 
 
@@ -54,7 +54,7 @@ def prepare_native_uninstall(install_root: str | Path) -> dict[str, object]:
     residual_root = locator_path().parent.resolve()
     if residual_root.parent == residual_root or residual_root.name != "WeChatReBot":
         raise RuntimeError("本机残留目录无效，已停止卸载。")
-    if residual_root != root:
+    if residual_root != root and load_install_location() == root:
         shutil.rmtree(residual_root, ignore_errors=True)
     return {"ok": True, "stopped_processes": stopped}
 

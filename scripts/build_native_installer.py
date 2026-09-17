@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tomllib
 from urllib.parse import urlsplit
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,25 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def _offline_manager_matches(payload: Path, manager: Path) -> bool:
+    """Reject a valid archive whose installed manager lacks the new setup commands."""
+    expected = _sha256(manager)
+    try:
+        with zipfile.ZipFile(payload) as archive:
+            manifest = json.loads(archive.read("release-manifest.json"))
+            declared = next(
+                item["sha256"].upper() for item in manifest["files"]
+                if item["path"] == "manager/WeChatReBot.exe"
+            )
+            digest = hashlib.sha256()
+            with archive.open("manager/WeChatReBot.exe") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    except (OSError, ValueError, KeyError, StopIteration, zipfile.BadZipFile) as exc:
+        raise ValueError("离线载荷缺少有效的管理器或清单。") from exc
+    return declared == expected and digest.hexdigest().upper() == expected
+
+
 def _version() -> str:
     payload = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return str(payload["project"]["version"])
@@ -35,12 +56,13 @@ def _iscc(candidate: Path | None) -> Path:
             return resolved
         raise FileNotFoundError(f"Inno Setup 编译器不存在：{resolved}")
     command = shutil.which("ISCC.exe") or shutil.which("ISCC")
+    local_app_data = os.environ.get("LOCALAPPDATA")
     candidates = (
         Path(command) if command else None,
+        Path(local_app_data) / "Programs" / "Inno Setup 7" / "ISCC.exe"
+        if local_app_data else None,
         Path(r"C:\Program Files (x86)\Inno Setup 7\ISCC.exe"),
         Path(r"C:\Program Files\Inno Setup 7\ISCC.exe"),
-        Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
-        Path(r"C:\Program Files\Inno Setup 6\ISCC.exe"),
     )
     for path in candidates:
         if path is not None and path.is_file():
@@ -103,6 +125,8 @@ def command_for(args: argparse.Namespace, *, require_compiler: bool) -> tuple[li
         payload = args.payload.expanduser().resolve()
         if not payload.is_file():
             raise FileNotFoundError(f"离线载荷不存在：{payload}")
+        if not _offline_manager_matches(payload, manager):
+            raise ValueError("离线载荷内的管理器与引导管理器不一致。")
         definitions.append(_definition("PayloadArchive", payload))
         values.update(
             payload=str(payload),

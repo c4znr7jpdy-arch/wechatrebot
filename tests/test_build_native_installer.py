@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -35,7 +38,15 @@ def test_online_installer_command_contains_pinned_https_payload(tmp_path: Path) 
 def test_offline_installer_records_payload_digest(tmp_path: Path) -> None:
     manager = _manager(tmp_path / "manager.exe")
     payload = tmp_path / "payload.wrb"
-    payload.write_bytes(b"payload")
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("manager/WeChatReBot.exe", manager.read_bytes())
+        archive.writestr(
+            "release-manifest.json",
+            json.dumps({"files": [{
+                "path": "manager/WeChatReBot.exe",
+                "sha256": hashlib.sha256(manager.read_bytes()).hexdigest(),
+            }]}),
+        )
     output = build_native_installer.ROOT / "artifacts" / "native-test-offline"
     args = argparse.Namespace(
         manager_exe=manager,
@@ -49,8 +60,32 @@ def test_offline_installer_records_payload_digest(tmp_path: Path) -> None:
     command, result = build_native_installer.command_for(args, require_compiler=False)
 
     assert result["mode"] == "offline"
-    assert result["payload_size"] == 7
+    assert result["payload_size"] == payload.stat().st_size
     assert any(item.startswith("/DPayloadArchive=") for item in command)
+
+
+def test_offline_installer_rejects_stale_embedded_manager(tmp_path: Path) -> None:
+    manager = _manager(tmp_path / "manager.exe")
+    payload = tmp_path / "payload.wrb"
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("manager/WeChatReBot.exe", b"MZold")
+        archive.writestr(
+            "release-manifest.json",
+            json.dumps({"files": [{
+                "path": "manager/WeChatReBot.exe",
+                "sha256": hashlib.sha256(b"MZold").hexdigest(),
+            }]}),
+        )
+    args = argparse.Namespace(
+        manager_exe=manager,
+        payload=payload,
+        payload_url=None,
+        payload_sha256=None,
+        output=build_native_installer.ROOT / "artifacts" / "native-stale-test",
+        iscc=None,
+    )
+    with pytest.raises(ValueError, match="不一致"):
+        build_native_installer.command_for(args, require_compiler=False)
 
 
 def test_online_installer_rejects_unpinned_or_non_https_payload(tmp_path: Path) -> None:
