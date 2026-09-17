@@ -162,7 +162,8 @@ def _asset_root() -> Path:
 
 
 class ApplicationApi:
-    def __init__(self, install_root: str | Path) -> None:
+    def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
+        self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
@@ -198,12 +199,14 @@ class ApplicationApi:
         }
         self._update_channel: UpdateChannel | None = None
         self._available_update: UpdateRelease | None = None
-        self._update_result = consume_update_result(self._install_root)
-        threading.Thread(
-            target=cleanup_stale_update_workdirs,
-            args=(self._install_root,),
-            daemon=True,
-        ).start()
+        self._update_result = None
+        if not development:
+            self._update_result = consume_update_result(self._install_root)
+            threading.Thread(
+                target=cleanup_stale_update_workdirs,
+                args=(self._install_root,),
+                daemon=True,
+            ).start()
 
     def _runtime_active(self) -> bool:
         status = self._lifecycle.refresh()
@@ -1389,7 +1392,8 @@ class ApplicationApi:
 
     def open_install_folder(self) -> dict[str, object]:
         try:
-            ensure_launcher_executable(self._install_root)
+            if not getattr(self, "_development", False):
+                ensure_launcher_executable(self._install_root)
             if os.name == "nt":
                 os.startfile(self._install_root)  # type: ignore[attr-defined]
             return self._ok({"opened": True})
@@ -1398,6 +1402,8 @@ class ApplicationApi:
 
     def open_uninstaller(self) -> dict[str, object]:
         try:
+            if getattr(self, "_development", False):
+                raise ValueError("源码验证模式不执行卸载，请使用正式安装版。")
             display_name = load_robot_settings(
                 self._install_root
             ).profile.display_name
@@ -1590,27 +1596,33 @@ class ApplicationApi:
             return self._failed(exc, "14003")
 
 
-def run_application(install_root: str | Path) -> int:
+def run_application(install_root: str | Path, *, development: bool = False) -> int:
     if os.name != "nt":
         return 2
     try:
         import webview
 
         brand = load_robot_settings(install_root).profile
-        try:
-            ensure_launcher_executable(install_root)
-            provision_uninstaller(
-                install_root,
-                display_name=brand.display_name,
-            )
-            refresh_windows_shortcuts(
-                install_root,
-                description=f"启动{brand.display_name}",
-            )
-        except (OSError, RuntimeError, ValueError):
-            pass
-        api = ApplicationApi(install_root)
+        if not development:
+            try:
+                ensure_launcher_executable(install_root)
+                provision_uninstaller(
+                    install_root,
+                    display_name=brand.display_name,
+                )
+                refresh_windows_shortcuts(
+                    install_root,
+                    description=f"启动{brand.display_name}",
+                )
+            except (OSError, RuntimeError, ValueError):
+                pass
+        api = (
+            ApplicationApi(install_root, development=True)
+            if development else ApplicationApi(install_root)
+        )
         title = f"{brand.display_name} · 机器人管理"
+        if development:
+            title += " [源码验证]"
         window = webview.create_window(
             title,
             (_asset_root() / "index.html").resolve().as_uri(),
@@ -1620,10 +1632,12 @@ def run_application(install_root: str | Path) -> int:
             background_color="#F3F6FA",
             text_select=True,
         )
-        tray = WindowsTrayController(window, brand.display_name)
-        window.events.shown += tray.start
-        window.events.closing += tray.handle_window_closing
-        window.events.closed += tray.stop
+        tray = None
+        if not development:
+            tray = WindowsTrayController(window, brand.display_name)
+            window.events.shown += tray.start
+            window.events.closing += tray.handle_window_closing
+            window.events.closed += tray.stop
         api._attach_window(window, tray)
         window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
         webview.start(gui="edgechromium", debug=False, private_mode=True)
