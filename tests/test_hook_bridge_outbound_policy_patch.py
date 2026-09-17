@@ -146,7 +146,7 @@ def test_patch_applies_cleanly_to_pinned_bridge_checkout(
     assert 'payload.get("_wechatrebot_wake")' in callback_source
 
 
-def test_new_group_defaults_to_mention_replies_and_no_proactive_delivery(
+def test_new_group_keeps_mention_replies_without_extra_proactive_gate(
     patched_modules,
     tmp_path: Path,
 ) -> None:
@@ -173,8 +173,7 @@ def test_new_group_defaults_to_mention_replies_and_no_proactive_delivery(
     assert ordinary_reply.allowed is False
     assert "明确点名" in ordinary_reply.message
     assert mentioned_reply.allowed is True
-    assert proactive.allowed is False
-    assert "主动消息总控已关闭" in proactive.message
+    assert proactive.allowed is True
 
 
 def test_router_hot_reads_saved_group_policy_before_every_send(
@@ -264,7 +263,7 @@ def test_reactive_raw_music_card_is_not_misclassified_as_proactive(
     ]
 
 
-def test_quiet_hours_and_daily_proactive_limit_are_enforced(
+def test_legacy_proactive_switch_and_scheduled_limits_do_not_block_cards(
     patched_modules,
     tmp_path: Path,
 ) -> None:
@@ -279,30 +278,18 @@ def test_quiet_hours_and_daily_proactive_limit_are_enforced(
     _save_policy(
         policy_path,
         _configured_policy(
-            proactive_enabled=True,
+            proactive_enabled=False,
             quiet_enabled=True,
             quiet_start="22:00",
             quiet_end="08:00",
-            daily_limit=2,
+            daily_limit=0,
         ),
     )
 
-    quiet = _run(
+    first = _run(
         policy.authorize(
             "wxid_bot", "new-room@chatroom", delivery="proactive"
         )
-    )
-    assert quiet.allowed is False
-    assert "安静时段" in quiet.message
-    assert not usage_path.exists()
-
-    _save_policy(
-        policy_path,
-        _configured_policy(
-            proactive_enabled=True,
-            quiet_enabled=False,
-            daily_limit=2,
-        ),
     )
     decisions = [
         _run(
@@ -312,10 +299,9 @@ def test_quiet_hours_and_daily_proactive_limit_are_enforced(
         )
         for _ in range(3)
     ]
-    assert [decision.allowed for decision in decisions] == [True, True, False]
-    assert "今日主动消息已达上限" in decisions[-1].message
-    usage = json.loads(usage_path.read_text(encoding="utf-8"))
-    assert usage["counts"]["wxid_bot"]["new-room@chatroom"]["2026-09-09"] == 2
+    assert first.allowed is True
+    assert all(decision.allowed for decision in decisions)
+    assert not usage_path.exists()
 
 
 def test_corrupt_policy_fails_closed_for_replies_and_proactive_delivery(

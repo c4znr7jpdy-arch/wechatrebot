@@ -98,7 +98,7 @@ def test_new_group_has_conservative_account_scoped_defaults(tmp_path: Path) -> N
     assert result["configured"] is False
     assert result["bot_enabled"] is True
     assert result["reply_mode"] == "mention"
-    assert result["proactive_enabled"] is False
+    assert "proactive_enabled" not in result
     assert result["allowed_features"] == list(DEFAULT_GROUP_FEATURES)
     assert result["permissions"]["group_role"] == "unknown"
     assert result["permissions"]["can_perform_group_admin_actions"] is False
@@ -115,7 +115,6 @@ def test_save_is_atomic_audited_and_isolated_by_account(tmp_path: Path) -> None:
         {
             "reply_mode": "natural",
             "allowed_features": ["jiang_commands"],
-            "proactive_enabled": True,
             "quiet_hours": {"enabled": True, "start": "23:30", "end": "07:00"},
             "daily_limit": 5,
         },
@@ -133,7 +132,6 @@ def test_save_is_atomic_audited_and_isolated_by_account(tmp_path: Path) -> None:
     assert payload["audit"][-1]["changed_fields"] == [
         "allowed_features",
         "daily_limit",
-        "proactive_enabled",
         "quiet_hours",
         "reply_mode",
     ]
@@ -255,8 +253,8 @@ def test_group_overview_exactly_summarizes_schedules_and_proactive_sources(tmp_p
         "feature:astrbot_plugin_proactive_chat",
     }
     assert proactive["running"] == 2
-    assert proactive["effective_enabled"] is False
-    assert proactive["message"] == "本群当前策略不允许主动消息。"
+    assert "effective_enabled" not in proactive
+    assert proactive["message"] == "主动聊天由各功能自行配置；定时任务按本群设置执行。"
     assert overview["features"][0]["name"] == "常用指令"
 
 

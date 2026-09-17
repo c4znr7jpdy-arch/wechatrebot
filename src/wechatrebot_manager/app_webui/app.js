@@ -1309,23 +1309,18 @@
     if (data.error) return `<section class="group-policy-form"><h3>本群机器人规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
-    const proactive = data.proactive || {};
     const allowed = new Set(policy.allowed_features || []);
     const featureChoices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span>${escapeHtml(feature.name)}</span></label>`).join("");
-    const sourceText = proactive.total
-      ? `${proactive.total} 个主动来源，${proactive.running || 0} 个正在运行`
-      : "本群还没有主动消息来源";
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <h3>本群机器人规则</h3>
       <label class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></label>
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>仅在点名或引用时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select><small>点名或引用会自动快速回应；此设置只影响当前群。</small></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
       <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
-      <label class="toggle-line"><span><strong>允许 AI 主动聊天</strong><small>${escapeHtml(sourceText)}；与统一定时任务分别控制</small></span><span class="toggle"><input name="proactive_enabled" type="checkbox" ${policy.proactive_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.proactive_enabled ? "已允许" : "已关闭"}</span></span></label>
-      <label class="toggle-line"><span><strong>安静时段</strong><small>此时段内不应主动打扰</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
+      <label class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
       <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
-      <label><span>每日主动与定时推送上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>两类推送共用上限；填 0 表示全部暂停。</small></label>
-      <div class="policy-summary">${escapeHtml(proactive.message || "本群当前策略不允许主动消息。")} 当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
+      <label><span>每日定时任务上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>只限制已配置的定时任务；填 0 表示暂停定时推送。</small></label>
+      <div class="policy-summary">普通消息与卡片不受定时任务限额影响；主动聊天由各功能自行配置。当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
     </form>`;
   }
 
@@ -1340,7 +1335,6 @@
       const values = {
         bot_enabled: form.elements.bot_enabled.checked,
         reply_mode: form.elements.reply_mode.value,
-        proactive_enabled: form.elements.proactive_enabled.checked,
         scheduled_enabled: form.elements.scheduled_enabled.checked,
         allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
         quiet_hours: {
@@ -3069,7 +3063,9 @@
     const input = event.currentTarget;
     const label = input.closest(".toggle")?.querySelector("span:last-child");
     if (!label) return;
-    label.textContent = input.checked ? (input.name === "proactive_enabled" ? "已允许" : "已启用") : "已关闭";
+    if (input.name === "scheduled_enabled") label.textContent = input.checked ? "已允许" : "已暂停";
+    else if (input.name === "bot_enabled") label.textContent = input.checked ? "已启用" : "已停用";
+    else label.textContent = input.checked ? "已启用" : "已关闭";
   }
 
   function fillExperience(experience) {
@@ -3689,8 +3685,8 @@
       memory: {enabled: true, recall_mode: "smart", explicit_recall_enabled: true, explicit_recall_phrases: ["上次说了什么", "还记得吗", "之前提到", "我说过", "你说过"], casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], proactive_enabled: false, scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
-    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {enabled: previewGroupPolicy.proactive_enabled, effective_enabled: previewGroupPolicy.proactive_enabled, total: 2, running: 1, paused: 1, message: previewGroupPolicy.proactive_enabled ? "主动消息总控已开启。" : "本群当前策略不允许主动消息。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
+    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
     const previewContacts = [

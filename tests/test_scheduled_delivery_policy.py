@@ -143,24 +143,24 @@ def _send(router, task, run, *, target=GROUP, message="提醒", **extra):
     }))
 
 
-def test_explicit_schedule_allowed_while_ai_proactive_stays_off(bridge, tmp_path):
+def test_explicit_schedule_and_other_group_cards_are_independent(bridge, tmp_path):
     _, task, run = _store(tmp_path, action="weather")
     _policy(tmp_path, allowed_features=["jiang_commands"], proactive_enabled=False)
     router = _router(bridge, tmp_path)
     assert _send(router, task, run)["status"] == "ok"
     decision = asyncio.run(router.outbound_policy.authorize(ACCOUNT, GROUP, delivery="proactive"))
-    assert not decision.allowed
+    assert decision.allowed
     assert len(router.hook.calls) == 1
 
 
-def test_new_group_default_allows_weather_schedule_without_ai_proactive(bridge, tmp_path):
+def test_new_group_default_allows_weather_schedule_and_group_cards(bridge, tmp_path):
     _, task, run = _store(tmp_path, action="weather")
     router = _router(bridge, tmp_path)
     assert not (tmp_path / "data/manager/group-policies.json").exists()
     assert _send(router, task, run)["status"] == "ok"
     assert len(router.hook.calls) == 1
     decision = asyncio.run(router.outbound_policy.authorize(ACCOUNT, GROUP, delivery="proactive"))
-    assert not decision.allowed
+    assert decision.allowed
 
 
 def test_null_group_feature_list_is_not_treated_as_new_group_defaults(bridge, tmp_path):
@@ -300,7 +300,7 @@ def test_existing_reply_and_private_message_behavior_is_preserved(bridge, tmp_pa
     proactive = asyncio.run(router.handle({"action": "send_group_msg", "params": {
         "group_id": GROUP, "message": "主动聊天", "_wechatrebot_delivery": "proactive",
     }}))
-    assert proactive["status"] == "failed"
+    assert proactive["status"] == "ok"
     _policy(tmp_path, target=CONTACT, bot_enabled=False, scheduled_enabled=False)
     private = asyncio.run(router.handle({"action": "send_private_msg", "params": {
         "user_id": CONTACT, "message": "普通私聊回复",
@@ -324,7 +324,7 @@ def test_scheduled_permission_is_account_scoped_and_does_not_enable_ai(tmp_path)
     groups = GroupPolicyService(tmp_path)
     saved = groups.save(ACCOUNT, GROUP, {"scheduled_enabled": False})
     assert saved["scheduled_enabled"] is False
-    assert saved["proactive_enabled"] is False
+    assert "proactive_enabled" not in saved
     assert groups.get("wxid_other", GROUP)["scheduled_enabled"] is True
     contacts = PrivateChatPolicyService(tmp_path)
     contacts.save(ACCOUNT, CONTACT, {"scheduled_enabled": False, "daily_limit": 5, "quiet_hours": {"enabled": True}})

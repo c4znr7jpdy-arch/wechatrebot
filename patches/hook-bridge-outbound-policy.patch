@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..7a29a10
 --- /dev/null
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/outbound_policy.py
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,189 @@
 +from __future__ import annotations
 +
 +import asyncio
@@ -15,7 +15,7 @@ index 0000000..7a29a10
 +import re
 +import tempfile
 +from typing import Any, Callable
-+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
++from zoneinfo import ZoneInfo
 +
 +
 +_ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
@@ -80,7 +80,6 @@ index 0000000..7a29a10
 +        return {
 +            "bot_enabled": True,
 +            "reply_mode": "mention",
-+            "proactive_enabled": False,
 +            "quiet_hours": {
 +                "enabled": False,
 +                "start": "22:00",
@@ -112,7 +111,7 @@ index 0000000..7a29a10
 +            return None
 +
 +        policy = self._default()
-+        for key in ("bot_enabled", "proactive_enabled"):
++        for key in ("bot_enabled",):
 +            if key in raw:
 +                if not isinstance(raw[key], bool):
 +                    return None
@@ -158,41 +157,6 @@ index 0000000..7a29a10
 +            return start <= current < end
 +        return current >= start or current < end
 +
-+    def _reserve(self, account_id: str, group_id: str, day: str, limit: int) -> bool:
-+        try:
-+            payload = json.loads(self.usage_path.read_text(encoding="utf-8-sig"))
-+        except FileNotFoundError:
-+            payload = {"schema_version": 1, "counts": {}}
-+        except (OSError, json.JSONDecodeError):
-+            return False
-+        if (
-+            not isinstance(payload, dict)
-+            or payload.get("schema_version") != 1
-+            or not isinstance(payload.get("counts"), dict)
-+        ):
-+            return False
-+        counts = payload["counts"]
-+        account = counts.setdefault(account_id, {})
-+        if not isinstance(account, dict):
-+            return False
-+        group = account.setdefault(group_id, {})
-+        if not isinstance(group, dict):
-+            return False
-+        value = group.get(day, 0)
-+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-+            return False
-+        if value >= limit:
-+            return False
-+        group[day] = value + 1
-+        if len(group) > 60:
-+            for old_day in sorted(group)[:-60]:
-+                group.pop(old_day, None)
-+        try:
-+            _atomic_json(self.usage_path, payload)
-+        except OSError:
-+            return False
-+        return True
-+
 +    async def authorize(
 +        self,
 +        account_id: str,
@@ -225,21 +189,7 @@ index 0000000..7a29a10
 +                    return OutboundDecision(False, delivery, "本群仅在明确点名时回复。")
 +                return OutboundDecision(True, delivery, "reply allowed")
 +
-+            if not policy["proactive_enabled"]:
-+                return OutboundDecision(False, delivery, "本群的主动消息总控已关闭。")
-+            limit = policy["daily_limit"]
-+            if limit <= 0:
-+                return OutboundDecision(False, delivery, "本群的每日主动消息上限为零。")
-+            try:
-+                zone = ZoneInfo(policy["quiet_hours"]["timezone"])
-+                current = self._now(zone)
-+            except (ZoneInfoNotFoundError, ValueError, OSError):
-+                return OutboundDecision(False, delivery, "群聊时区无法确认，主动消息已取消。")
-+            if self._in_quiet_hours(policy, current):
-+                return OutboundDecision(False, delivery, "当前处于本群的安静时段。")
-+            if not self._reserve(account_id, group_id, current.date().isoformat(), limit):
-+                return OutboundDecision(False, delivery, "本群今日主动消息已达上限或用量无法确认。")
-+            return OutboundDecision(True, delivery, "proactive delivery reserved")
++            return OutboundDecision(True, delivery, "group delivery allowed")
 +
 +
 +__all__ = ["OutboundDecision", "OutboundGroupPolicy"]
