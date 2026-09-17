@@ -150,6 +150,44 @@ def test_group_member_notice_has_independent_hot_read_switches(tmp_path: Path) -
     assert "old_label=old_label" in source
 
 
+def test_group_member_notice_cards_are_routed_as_reactive_group_events(
+    tmp_path: Path,
+) -> None:
+    source = _patched(tmp_path, "jiang_group_notice", "main.py")
+    calls = []
+
+    class Bot:
+        async def call_action(self, **kwargs):
+            calls.append(kwargs)
+
+    namespace = {
+        "AstrMessageEvent": object,
+        "logger": SimpleNamespace(info=lambda *_args: None, error=lambda *_args: None),
+    }
+    send_link_card = _function(source, "_send_link_card", namespace)
+
+    group_event = SimpleNamespace(
+        message_obj=SimpleNamespace(group_id="room@chatroom"),
+        bot=Bot(),
+    )
+    numeric_event = SimpleNamespace(
+        message_obj=SimpleNamespace(group_id="123456"),
+        bot=Bot(),
+    )
+
+    __import__("asyncio").run(
+        send_link_card(group_event, "title", "desc", "https://example.test", "image")
+    )
+    __import__("asyncio").run(
+        send_link_card(numeric_event, "title", "desc", "https://example.test", "image")
+    )
+
+    assert calls[0]["_wechatrebot_delivery"] == "reply"
+    assert calls[0]["_wechatrebot_wake"] is True
+    assert "_wechatrebot_delivery" not in calls[1]
+    assert calls[1]["group_id"] == 123456
+
+
 def test_image_generation_common_config_applies_stored_api_keys(tmp_path: Path) -> None:
     source = _patched(tmp_path, "jiang_image", "main.py", all_patches=True)
     schema = json.loads((tmp_path / "_conf_schema.json").read_text(encoding="utf-8"))

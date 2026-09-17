@@ -51,6 +51,27 @@ diff --git a/main.py b/main.py
 index 53c265f..1ddc8be 100644
 --- a/main.py
 +++ b/main.py
+@@ -78,6 +78,12 @@ async def _send_link_card(event: AstrMessageEvent, title: str, desc: str, url: s
+     # 尝试转 int（QQ 场景），微信保持字符串
+     group_id_typed = int(group_id) if isinstance(group_id, str) and group_id.isdigit() else group_id
+ 
++    routing_params = {}
++    if isinstance(group_id, str) and group_id.endswith("@chatroom"):
++        # A member-change notice is a reactive group event, not an AI-initiated message.
++        routing_params["_wechatrebot_delivery"] = "reply"
++        routing_params["_wechatrebot_wake"] = True
++
+     card_seg = {
+         "type": "wechat_link_card",
+         "data": {
+@@ -92,6 +98,7 @@ async def _send_link_card(event: AstrMessageEvent, title: str, desc: str, url: s
+             action="send_group_msg",
+             group_id=group_id_typed,
+             message=[card_seg],
++            **routing_params,
+         )
+         logger.info("群成员通知卡片已发送: group=%s title=%s", group_id, title)
+     except Exception as e:
 @@ -132,4 +132,10 @@ class Main(star.Star):
 -
 +
