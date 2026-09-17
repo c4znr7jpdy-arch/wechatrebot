@@ -126,7 +126,13 @@ def _feature_configuration_issues(plugin_root: Path, feature: dict[str, Any]) ->
     mode = str(feature.get("configuration") or "").strip()
     root = plugin_root / module
     issues: list[str] = []
-    if not module or not root.is_dir():
+    if not module:
+        return [f"{display_name}：功能目录缺失"]
+    if not root.is_dir():
+        # Optional features can be removed by the customer. Their absence must
+        # not prevent the remaining robot services from starting again.
+        if feature.get("default_enabled") is False:
+            return []
         return [f"{display_name}：功能目录缺失"]
     if mode in {"schema", "schema-and-page"}:
         schema, schema_error = _load_json(root / "_conf_schema.json")

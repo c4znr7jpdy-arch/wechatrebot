@@ -134,6 +134,42 @@ def test_diagnostics_require_real_feature_configuration_assets(tmp_path: Path) -
     assert report["configuration"]["feature_bundle"]["issue_count"] == 0
 
 
+def test_diagnostics_allow_uninstalled_optional_feature(tmp_path: Path) -> None:
+    legal = tmp_path / "legal"
+    plugin = tmp_path / "app" / "astrbot" / "data" / "plugins" / "required"
+    legal.mkdir(parents=True)
+    plugin.mkdir(parents=True)
+    (legal / "feature-set.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "module": "required",
+                        "display_name": "基础功能",
+                        "configuration": "none",
+                        "default_enabled": True,
+                    },
+                    {
+                        "module": "optional_removed",
+                        "display_name": "已卸载选配功能",
+                        "configuration": "schema",
+                        "default_enabled": False,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = collect_diagnostics(tmp_path)
+    feature_check = next(
+        item for item in report["checks"] if item["name"] == "feature-bundle"
+    )
+
+    assert feature_check["ok"] is True
+    assert report["configuration"]["feature_bundle"]["issue_count"] == 0
+
+
 def test_diagnostics_reject_feature_without_declared_configuration(tmp_path: Path) -> None:
     legal = tmp_path / "legal"
     plugin = tmp_path / "app" / "astrbot" / "data" / "plugins" / "broken"
