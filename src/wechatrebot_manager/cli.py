@@ -31,6 +31,18 @@ from .uninstaller import (
 from .wechat_path import discover_wechat_executables, validate_wechat_executable
 
 
+def _print_json(payload: object, *, indent: int | None = None) -> None:
+    """Write JSON without crashing on the Windows GBK console."""
+    stream = sys.stdout
+    if stream is None:
+        return
+    rendered = json.dumps(payload, ensure_ascii=False, indent=indent)
+    try:
+        stream.write(rendered + "\n")
+    except UnicodeEncodeError:
+        stream.write(json.dumps(payload, ensure_ascii=True, indent=indent) + "\n")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wechatrebot-manager")
     subparsers = parser.add_subparsers(dest="command")
@@ -131,36 +143,30 @@ def main(argv: list[str] | None = None) -> int:
         return run_bootstrap(args.payload)
     if args.command == "check-install-dir":
         result = validate_install_path(Path(args.path))
-        print(
-            json.dumps(
-                {
-                    "ok": result.ok,
-                    "path": str(result.path),
-                    "errors": result.errors,
-                    "warnings": result.warnings,
-                    "available_bytes": result.available_bytes,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+        _print_json(
+            {
+                "ok": result.ok,
+                "path": str(result.path),
+                "errors": result.errors,
+                "warnings": result.warnings,
+                "available_bytes": result.available_bytes,
+            },
+            indent=2,
         )
         return 0 if result.ok else 1
     if args.command == "discover-wechat":
         items = discover_wechat_executables()
-        print(
-            json.dumps(
-                [
-                    {
-                        "path": str(item.path),
-                        "version": item.version,
-                        "supported": item.supported,
-                        "errors": item.errors,
-                    }
-                    for item in items
-                ],
-                ensure_ascii=False,
-                indent=2,
-            )
+        _print_json(
+            [
+                {
+                    "path": str(item.path),
+                    "version": item.version,
+                    "supported": item.supported,
+                    "errors": item.errors,
+                }
+                for item in items
+            ],
+            indent=2,
         )
         return 0
     if args.command in {"verify-payload", "install-payload"}:
@@ -188,19 +194,16 @@ def main(argv: list[str] | None = None) -> int:
                     validation.path / INSTALL_MARKER,
                     {"schema_version": 1, "state": "payload-installed"},
                 )
-            print(
-                json.dumps(
-                    {
-                        "ok": True,
-                        "file_count": len(verified.files),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            _print_json(
+                {
+                    "ok": True,
+                    "file_count": len(verified.files),
+                },
+                indent=2,
             )
             return 0
         except (OSError, PayloadError) as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            _print_json({"ok": False, "error": str(exc)})
             return 1
     if args.command == "render-config":
         write_runtime_configs(
@@ -208,37 +211,34 @@ def main(argv: list[str] | None = None) -> int:
             args.wechat_exe,
             wechat_version=args.wechat_version,
         )
-        print(json.dumps({"ok": True}, ensure_ascii=False))
+        _print_json({"ok": True})
         return 0
     if args.command == "diagnose":
         report = collect_diagnostics(args.install_root)
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        _print_json(report, indent=2)
         return 0 if report["ok"] else 1
     if args.command == "start":
         try:
             return run_services_foreground(args.install_root)
         except (OSError, ServiceLaunchError, ValueError) as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            _print_json({"ok": False, "error": str(exc)})
             return 1
     if args.command == "plugin-center":
         try:
             return run_plugin_center(args.install_root, args.feature_id)
         except (OSError, ValueError, PluginCenterError) as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            _print_json({"ok": False, "error": str(exc)})
             return 1
 
     item = validate_wechat_executable(args.path)
-    print(
-        json.dumps(
-            {
-                "path": str(item.path),
-                "version": item.version,
-                "supported": item.supported,
-                "errors": item.errors,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+    _print_json(
+        {
+            "path": str(item.path),
+            "version": item.version,
+            "supported": item.supported,
+            "errors": item.errors,
+        },
+        indent=2,
     )
     return 0 if item.supported else 1
 
