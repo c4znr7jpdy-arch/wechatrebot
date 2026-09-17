@@ -524,7 +524,7 @@ class GroupPolicyService:
                 "id": item.module,
                 "name": item.display_name,
                 "allowed": item.module in allowed,
-                "globally_enabled_by_default": item.default_enabled,
+                "globally_enabled_by_default": True,
             }
             for item in self._features()
             if item.visible and item.module != "astrbot_plugin_angel_heart"

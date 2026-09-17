@@ -103,7 +103,7 @@ function pluginRequestData(payload) {
 }
 
 async function handlePluginPageRequest(message) {
-  if (!state.currentId || !state.detail?.enabled) throw new Error("请先启用这项功能。");
+  if (!state.currentId || !state.detail?.enabled) throw new Error("功能尚未加载，请重启机器人后再试。");
   const endpoint = encodePluginEndpoint(message.endpoint);
   const base = `/control/plugins/${encodeURIComponent(state.currentId)}/extension/${endpoint}`;
   let response;
@@ -182,7 +182,7 @@ window.addEventListener("message", async (event) => {
 
 function setBusy(value, activeButton = null, busyText = "处理中…") {
   state.busy = value;
-  [el("save-config"), el("toggle-plugin"), el("reload-plugin"), el("open-full-config")].forEach((button) => {
+  [el("save-config"), el("reload-plugin"), el("open-full-config")].forEach((button) => {
     button.disabled = value || button.dataset.locked === "true";
   });
   if (activeButton) {
@@ -745,17 +745,14 @@ function updateDetailHeader() {
   const detail = state.detail;
   el("plugin-title").textContent = customerText(detail.display_name);
   const summary = [];
-  summary.push(detail.enabled ? "当前已启用" : "当前已停用");
+  summary.push(detail.enabled ? "统一加载" : "等待机器人加载");
   if (detail.configurable) summary.push(`${detail.field_count} 项基础配置`);
   if (detail.model_field_count) summary.push(`${detail.model_field_count} 项模型绑定`);
   if (detail.pages.length) summary.push(`${detail.pages.length} 个高级管理页`);
   el("plugin-summary").textContent = summary.join(" · ");
-  el("toggle-plugin").textContent = detail.enabled ? "停用功能" : "启用功能";
-  el("toggle-plugin").dataset.locked = "false";
-  el("toggle-plugin").disabled = state.busy;
   el("reload-plugin").dataset.locked = (!detail.engine_online || !detail.enabled).toString();
   el("reload-plugin").disabled = !detail.engine_online || !detail.enabled;
-  el("reload-plugin").title = !detail.engine_online ? "请先在运行中心启动机器人" : (!detail.enabled ? "请先启用功能" : "立即重新载入这项功能");
+  el("reload-plugin").title = !detail.engine_online ? "请先在运行中心启动机器人" : (!detail.enabled ? "请重启机器人完成加载" : "立即重新载入这项功能");
   setEngineState(detail.engine_online);
   el("save-config").textContent = detail.engine_online && detail.enabled ? "保存并立即应用" : "保存设置";
   const fullConfigButton = el("open-full-config");
@@ -764,7 +761,7 @@ function updateDetailHeader() {
   fullConfigButton.disabled = state.busy || fullConfigLocked;
   fullConfigButton.title = !detail.engine_online
     ? "请先在运行中心启动机器人"
-    : (!detail.enabled ? "请先启用功能" : "打开这项功能的完整配置页");
+    : (!detail.enabled ? "请重启机器人完成加载" : "打开这项功能的完整配置页");
 }
 
 function applyConfigSearch() {
@@ -867,7 +864,7 @@ async function uploadLocalMemePack() {
   const status = el("meme-pack-status");
   if (state.currentId !== memeManagerFeatureId) return;
   if (!state.detail?.enabled) {
-    status.textContent = "请先启用表情管理，再导入本地表情包。";
+    status.textContent = "表情管理尚未加载，请重启机器人后再导入。";
     return;
   }
   const file = el("meme-pack-file").files?.[0];
@@ -1001,31 +998,6 @@ async function saveConfig(event) {
   }
 }
 
-async function togglePlugin() {
-  if (state.busy || !state.detail) return;
-  const button = el("toggle-plugin");
-  const enabled = !state.detail.enabled;
-  setBusy(true, button, enabled ? "正在启用…" : "正在停用…");
-  setNotice("");
-  try {
-    const data = await api(`/control/plugins/${encodeURIComponent(state.currentId)}/enabled`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled }),
-    });
-    state.detail.enabled = enabled;
-    const item = state.catalog.find((plugin) => plugin.id === state.currentId);
-    if (item) item.enabled = enabled;
-    renderCatalog();
-    setNotice(data.message, "success");
-    showToast(data.message);
-  } catch (error) {
-    setNotice(error.message, "error");
-  } finally {
-    setBusy(false, button);
-    updateDetailHeader();
-  }
-}
-
 async function reloadPlugin() {
   if (state.busy || !state.detail) return;
   const button = el("reload-plugin");
@@ -1073,7 +1045,7 @@ async function openFullConfigPage() {
   if (!state.detail.engine_online || !state.detail.enabled) {
     setNotice(!state.detail.engine_online
       ? "完整配置页需要机器人在线，请先在运行中心启动机器人。"
-      : "请先启用这项功能，再打开完整配置页。", "error");
+      : "功能尚未加载，请重启机器人后再打开完整配置页。", "error");
     return;
   }
   const openPage = async () => {
@@ -1148,7 +1120,6 @@ el("clear-search").addEventListener("click", () => { search.value = ""; renderCa
 configSearch.addEventListener("input", applyConfigSearch);
 el("clear-config-search").addEventListener("click", () => { configSearch.value = ""; applyConfigSearch(); configSearch.focus(); });
 el("config-form").addEventListener("submit", saveConfig);
-el("toggle-plugin").addEventListener("click", togglePlugin);
 el("reload-plugin").addEventListener("click", reloadPlugin);
 el("open-full-config").addEventListener("click", openFullConfigPage);
 el("basic-tab").addEventListener("click", () => showTab("basic"));

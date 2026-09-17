@@ -120,7 +120,7 @@
         </section>
 
         <section class="page" id="page-features" aria-labelledby="featureHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>每项功能都可以单独启停，并明确显示使用前还需要准备什么。</p></div><button class="button ghost" id="refreshFeatures" data-action-bound disabled><svg><use href="#i-refresh"/></svg>检查准备情况</button></div>
+          <div class="page-heading compact"><div><span class="eyebrow">功能管理</span><h1 id="featureHeading">功能中心</h1><p>功能统一保持加载；是否在群聊中使用，请到群聊&amp;私聊管理按群勾选。</p></div><button class="button ghost" id="refreshFeatures" data-action-bound disabled><svg><use href="#i-refresh"/></svg>检查准备情况</button></div>
           <div class="feature-layout">
             <aside class="feature-catalog panel">
             <label class="search-box" id="featureSearchBox"><svg><use href="#i-search"/></svg><input id="featureSearch" type="search" placeholder="搜索功能" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
@@ -129,7 +129,7 @@
               <div class="feature-list" id="featureList"></div>
             </aside>
             <section class="feature-detail panel" id="featureDetail">
-              <div class="empty-state"><div class="empty-symbol">功</div><h2>选择一项功能</h2><p>在左侧选择后，可查看开关、使用说明和常用设置。</p></div>
+              <div class="empty-state"><div class="empty-symbol">功</div><h2>选择一项功能</h2><p>在左侧选择后，可查看使用说明和常用设置。</p></div>
             </section>
           </div>
         </section>
@@ -251,7 +251,7 @@
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
             <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
-            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在群聊&amp;私聊管理中按聊天设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心调整开关和必要参数，详细用法回到帮助查看。</figcaption></figure></div>
+            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在群聊&amp;私聊管理中按聊天设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心填写必要参数，是否使用由每个群聊的勾选决定。</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
           <div class="help-feature-grid" id="helpFeatureGrid"><div class="loading-row panel">正在整理功能说明…</div></div>
@@ -287,7 +287,7 @@
                     <input name="provider_id" type="hidden">
                     <label><span>服务类型</span><select name="preset" id="providerPreset"><option value="free_grok">免费 Grok 4.6（推荐）</option><option value="deepseek">DeepSeek（自用）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">面向普通用户的默认回复服务</small></label>
                     <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 grok-4.6" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
-                    <label class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">所有模型均可设置；模型不支持时会自动忽略，不影响正常调用。</small></span><span class="toggle"><input name="thinking_enabled" type="checkbox" checked><span class="toggle-track"></span><span id="providerThinkingValue">已开启</span></span></label>
+                    <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">所有模型均可设置；模型不支持时会自动忽略，不影响正常调用。</small></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
                     <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="粘贴服务密钥；已保存的密钥不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">密钥只保存在本机</small></label>
                     <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong><small id="providerSaveIntentDetail">首个模型服务会自动用于机器人回复。</small></p></div>
                     <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
@@ -314,9 +314,9 @@
             <form class="settings-card panel" id="memoryForm" data-settings-section="memory" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">长期记忆</span><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
               <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
-              <label class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <div class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
               <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select><small>“在吗、你好”等短寒暄会直接回复，不等待记忆检索。</small></label>
-              <label class="toggle-line"><span><strong>明确问起往事时优先回忆</strong><small>例如“上次说了什么”“你还记得吗”</small></span><span class="toggle"><input name="explicit_recall_enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <div class="toggle-line"><span><strong>明确问起往事时优先回忆</strong><small>例如“上次说了什么”“你还记得吗”</small></span><span class="toggle"><input id="explicitRecallEnabled" name="explicit_recall_enabled" type="checkbox"><label class="toggle-track" for="explicitRecallEnabled" aria-label="切换优先回忆"></label><span>已启用</span></span></div>
               <label><span>回忆触发说法</span><textarea class="resize-none" name="explicit_recall_phrases" rows="3" placeholder="上次说了什么，还记得吗，之前提到"></textarea><small>用逗号分隔，最多 20 条。</small></label>
               <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
               <input name="casual_query_max_chars" type="hidden" value="24">
@@ -326,7 +326,7 @@
             <form class="settings-card panel" id="emotionForm" data-settings-section="memory" novalidate>
               <div class="panel-heading"><div><span class="eyebrow">情感成长</span><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
               <p class="settings-copy">只把精简的关系、好感度和心情放进回复上下文，不把完整学习记录塞给模型。</p>
-              <label class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input name="enabled" type="checkbox"><span class="toggle-track"></span><span>已启用</span></span></label>
+              <div class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input id="emotionEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="emotionEnabled" aria-label="切换情感成长"></label><span>已启用</span></span></div>
               <div class="option-grid compact-options"><label class="option-check"><input name="daily_mood" type="checkbox"><span>每天自然更换心情</span></label><label class="option-check"><input name="include_affection" type="checkbox"><span>回复时参考好感度</span></label><label class="option-check"><input name="include_mood" type="checkbox"><span>回复时参考当前心情</span></label></div>
               <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
             </form>

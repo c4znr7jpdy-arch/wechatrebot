@@ -464,6 +464,15 @@ def _project_customer_schema(
     schema: dict[str, Any],
 ) -> tuple[dict[str, Any], CustomerSchemaProfile | None]:
     """Project complex engine schemas into a small customer-facing form."""
+    if module_name == "meme_manager":
+        schema = copy.deepcopy(schema)
+        generation = schema.get("generation")
+        generation_items = generation.get("items") if isinstance(generation, dict) else None
+        # Emotion tag instructions are an internal runtime contract. Users
+        # describe the persona normally; the plugin injects this block only
+        # for chats whose policy permits meme_manager.
+        if isinstance(generation_items, dict):
+            generation_items.pop("prompt", None)
     if module_name == _GROUP_ANALYSIS_MODULE:
         schema = _group_analysis_ui_schema(schema)
     profile = _CUSTOMER_SCHEMA_PROFILES.get(module_name)
@@ -1821,11 +1830,15 @@ class PluginCenterService:
             "revision": _json_revision(saved),
             "message": ("已保存并确认生效，后续请求使用新设置。" if reloaded else
                         "已保存并加载新设置；所需服务尚未就绪，请按使用指引完成配置后再验证。" if apply_state == "pending_setup" else
-                        "已保存，启用此功能后使用新设置。" if online else
+                        "已保存；运行环境准备完成后使用新设置。" if online else
                         "已保存到本机，尚未确认生效。机器人启动后加载；若仍在运行，请恢复连接后重新保存。"),
         }
 
     def set_enabled(self, public_id: str, enabled: bool) -> dict[str, Any]:
+        if enabled is not True:
+            raise PluginCenterError(
+                "功能统一保持加载；请在群聊&私聊管理中按聊天取消对应功能。"
+            )
         with _CONFIG_WRITE_LOCK:
             item = self._plugin(public_id)
             module_name = item.module_name

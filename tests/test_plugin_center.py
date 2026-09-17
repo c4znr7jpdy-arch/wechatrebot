@@ -50,6 +50,29 @@ def test_secret_detection_does_not_treat_secretary_timing_as_a_password() -> Non
     assert plugin_center._is_secret_field("access_token", {}) is True
 
 
+def test_meme_prompt_schema_is_hidden_from_customer_configuration() -> None:
+    schema = {
+        "generation": {
+            "type": "object",
+            "items": {
+                "prompt": {
+                    "type": "object",
+                    "items": {"head": {"type": "text", "default": "internal"}},
+                },
+                "emotion": {"type": "object", "items": {}},
+            },
+        },
+        "storage": {
+            "type": "object",
+            "items": {"provider": {"type": "string", "default": "local"}},
+        },
+    }
+
+    projected, _profile = _project_customer_schema("meme_manager", schema)
+
+    assert "prompt" not in json.dumps(projected, ensure_ascii=False)
+
+
 def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
     schema = {
         "analyzer_model": {
@@ -1195,7 +1218,7 @@ def test_plugin_extension_path_is_scoped_to_selected_feature(tmp_path: Path) -> 
             service.extension_path(public_id, endpoint)
 
 
-def test_online_plugin_state_is_authoritative_and_toggle_persists_restart_state(
+def test_customer_feature_cannot_be_globally_disabled(
     tmp_path: Path,
 ) -> None:
     install, public_id = _install(tmp_path)
@@ -1221,12 +1244,11 @@ def test_online_plugin_state_is_authoritative_and_toggle_persists_restart_state(
         "/page/schedules"
     )
 
-    service.set_enabled(public_id, False)
-    assert live is False
+    with pytest.raises(PluginCenterError, match="按聊天取消"):
+        service.set_enabled(public_id, False)
+    assert live is True
     assert load_plugins(install)[0].enabled is False
-    assert module_name not in filters[-1]
-    with pytest.raises(PluginCenterError, match="请先启用"):
-        service.extension_path(public_id, "page/schedules")
+    assert filters == []
 
     service.set_enabled(public_id, True)
     assert live is True

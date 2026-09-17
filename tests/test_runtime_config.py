@@ -247,17 +247,20 @@ def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path
         )
     )
     assert preserved["analyzer_model"] == "custom/model"
-    assert updated_astrbot["plugin_set"] == ["astrbot_plugin_angel_heart"]
+    assert updated_astrbot["plugin_set"] == [
+        "astrbot_plugin_angel_heart",
+        "astrbot_plugin_music",
+    ]
 
 
-def test_existing_global_features_migrate_once_to_group_scoping(tmp_path: Path) -> None:
+def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> None:
     install = tmp_path / "install"
     legal = install / "legal"
     legal.mkdir(parents=True)
     (legal / "feature-set.json").write_text(json.dumps({"features": [
         {"module": "jiang_commands", "display_name": "指令", "configuration": "none", "default_enabled": True},
         {"module": "jiang_schedule", "display_name": "定时任务", "configuration": "none", "default_enabled": True},
-        {"module": "astrbot_plugin_self_iterative_core", "display_name": "实验", "configuration": "none", "default_enabled": False},
+        {"module": "astrbot_plugin_self_iterative_core", "display_name": "实验", "configuration": "none", "default_enabled": False, "visible": False},
     ]}), encoding="utf-8")
     path = install / "app" / "astrbot" / "data" / "cmd_config.json"
     path.parent.mkdir(parents=True)
@@ -265,14 +268,17 @@ def test_existing_global_features_migrate_once_to_group_scoping(tmp_path: Path) 
     write_runtime_configs(install)
     updated = json.loads(path.read_text(encoding="utf-8"))
     assert updated["plugin_set"] == ["jiang_commands", "jiang_schedule"]
-    assert updated["wechatrebot_feature_scope_version"] == 1
+    assert updated["wechatrebot_feature_scope_version"] == 2
     updated["plugin_set"] = ["jiang_commands"]
     path.write_text(json.dumps(updated), encoding="utf-8")
     write_runtime_configs(install)
-    assert json.loads(path.read_text(encoding="utf-8"))["plugin_set"] == ["jiang_commands"]
+    assert json.loads(path.read_text(encoding="utf-8"))["plugin_set"] == [
+        "jiang_commands",
+        "jiang_schedule",
+    ]
 
 
-def test_delivery_seeds_fast_single_memory_and_private_emotion_defaults(
+def test_delivery_loads_customer_features_and_private_emotion_defaults(
     tmp_path: Path,
 ) -> None:
     install = tmp_path / "install"
@@ -335,7 +341,7 @@ def test_delivery_seeds_fast_single_memory_and_private_emotion_defaults(
     )
 
     assert "astrbot_plugin_livingmemory" in engine["plugin_set"]
-    assert "astrbot_plugin_mnemosyne" not in engine["plugin_set"]
+    assert "astrbot_plugin_mnemosyne" in engine["plugin_set"]
     assert living["provider_settings"]["llm_provider_id"] == provider.model_id
     assert living["recall_engine"]["auto_recall_mode"] == "smart"
     assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8

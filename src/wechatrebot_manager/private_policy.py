@@ -182,7 +182,7 @@ class PrivateChatPolicyService:
                 "id": feature.module,
                 "name": feature.display_name,
                 "allowed": feature.module in allowed,
-                "globally_enabled_by_default": feature.default_enabled,
+                "globally_enabled_by_default": True,
             }
             for feature in self._features()
             if feature.visible and feature.module != "astrbot_plugin_angel_heart"

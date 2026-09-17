@@ -100,7 +100,6 @@
     read: () => api("get_robot_core"),
     request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
     save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
-    toggle: (id, enabled) => api("set_feature_enabled", id, enabled),
     applyBrand: (brand) => {
       state.bootstrap.brand = brand;
       applyBrand(brand);
@@ -570,8 +569,8 @@
     $("#featureSummary").textContent = `${items.length} / ${state.features.length} 项功能 · ${onlineText}`;
     $("#featureList").innerHTML = items.length ? items.map((item) => `
       <button class="feature-item ${state.selectedFeature === item.id ? "active" : ""}" data-feature-id="${escapeHtml(item.id)}">
-        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || (item.enabled ? "已启用" : "按需启用"))}</small></span>
-        <span class="feature-state ${item.enabled ? "enabled" : ""}" title="${item.enabled ? "已启用" : "已停用"}"></span>
+        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "已加载")}</small></span>
+        <span class="feature-state enabled" title="已加载"></span>
       </button>`).join("") : '<div class="loading-row">没有符合条件的功能</div>';
     $$(".feature-item").forEach((button) => button.addEventListener("click", () => openFeature(button.dataset.featureId)));
   }
@@ -662,7 +661,7 @@
     const helpId = fieldId + "-help";
     let control = "";
     if (type === "bool") {
-      control = `<label class="toggle"><input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="bool" type="checkbox" ${value ? "checked" : ""}><span class="toggle-track"></span><span>${value ? "已启用" : "已停用"}</span></label>`;
+      control = `<span class="toggle"><input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="bool" type="checkbox" ${value ? "checked" : ""}><label class="toggle-track" for="${fieldId}" aria-label="切换${encodedLabel}"></label><span>${value ? "已启用" : "已停用"}</span></span>`;
     } else if (type === "list" && ["line-list", "time-list"].includes(uiControl)) {
       const lines = Array.isArray(value) ? value.map(String).join("\n") : "";
       const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : "";
@@ -693,7 +692,10 @@
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
     const dependsOn = field._ui_depends_on ? ` data-depends-on="${escapeHtml(JSON.stringify([...path.slice(0, -1), field._ui_depends_on]))}"` : "";
-    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${field._ui_disclosure ? "disclosure-controller" : ""} ${field._ui_full || ["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"${dependsOn}><label for="${fieldId}">${escapeHtml(label)}</label>${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
+    const title = type === "bool"
+      ? `<span class="field-label">${escapeHtml(label)}</span>`
+      : `<label for="${fieldId}">${escapeHtml(label)}</label>`;
+    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${field._ui_disclosure ? "disclosure-controller" : ""} ${field._ui_full || ["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"${dependsOn}>${title}${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
   }
 
   function schemaMarkup(schema, config, prefix = [], namespace = "") {
@@ -758,11 +760,11 @@
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
-    const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : !detail.enabled ? "功能未启用：保存后启用时使用。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
+    const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
-        <label class="toggle"><input id="featureEnabled" type="checkbox" ${detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${detail.enabled ? "已启用" : "已停用"}</span></label>
+        <span class="status-badge online">统一加载</span>
       </div>
       ${detail.scheduled_action ? `<div class="feature-schedule-entry"><p>${detail.scheduled_action === "short_drama" ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。" : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。"}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>创建定时任务</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
@@ -773,9 +775,8 @@
         <div class="feature-savebar"><span class="form-note" id="featureNote" role="status">${escapeHtml(state.featureFeedback || (state.featureDirty ? "有修改尚未保存。" : defaultNote))}</span><div class="feature-save-actions">
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
-        <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online && detail.enabled ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数。上方开关控制是否使用，接入条件请按指引确认。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
-    $("#featureEnabled").addEventListener("change", toggleFeature);
+        <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online ? "保存并应用" : "保存设置"}</button></div></div>` :
+        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
@@ -846,9 +847,9 @@
     $("#helpSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
     root.innerHTML = items.length ? items.map((item) => {
       const guide = item.guide || {};
-      const steps = guide.setup_steps?.length ? guide.setup_steps : ["在功能中心确认开关，根据页面提示完成必要配置。", "在测试聊天中验证一次实际效果。"];
+      const steps = guide.setup_steps?.length ? guide.setup_steps : ["在功能中心完成必要配置，再到群聊中勾选使用范围。", "在测试聊天中验证一次实际效果。"];
       const prerequisite = (guide.prerequisites || []).join(" ");
-      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="feature-state ${item.enabled ? "enabled" : ""}" title="${item.enabled ? "已启用" : "已停用"}"></span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
+      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="feature-state enabled" title="已加载"></span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
     }).join("") : '<div class="empty-state compact panel"><h2>没有找到相关帮助</h2><p>换一个功能名或用法关键词试试。</p></div>';
     $$(".help-configure-feature", root).forEach((button) => button.addEventListener("click", async () => {
       await navigate("features");
@@ -881,25 +882,6 @@
       error.input.setAttribute("aria-describedby", error.input.id + "-help " + message.id);
       error.input.focus();
     }
-  }
-
-  async function toggleFeature(event) {
-    const input = event.currentTarget;
-    if (state.featureDirty || state.featureSaving) {
-      input.checked = !input.checked;
-      toast("请先保存修改，再切换功能开关。", "error"); return;
-    }
-    input.disabled = true;
-    try {
-      const data = await api("set_feature_enabled", state.selectedFeature, input.checked);
-      state.featureDetail.enabled = data.enabled;
-      if (state.featureDetails[state.selectedFeature]) state.featureDetails[state.selectedFeature].enabled = data.enabled;
-      const item = state.features.find((value) => value.id === state.selectedFeature);
-      if (item) item.enabled = data.enabled;
-      toast(data.message || "功能状态已更新。 ");
-      renderFeatureList(); renderFeatureDetail();
-    } catch (error) { input.checked = !input.checked; reportError(error); }
-    finally { input.disabled = false; }
   }
 
   function configFromForm(form = $("#featureForm"), source = state.featureDetail?.config || {}) {
@@ -1313,11 +1295,11 @@
     const featureChoices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span>${escapeHtml(feature.name)}</span></label>`).join("");
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <h3>本群机器人规则</h3>
-      <label class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></label>
+      <div class="toggle-line"><span><strong>在本群使用机器人</strong><small>关闭后本群不应触发回复或主动任务</small></span><span class="toggle"><input id="groupBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><label class="toggle-track" for="groupBotEnabled" aria-label="切换本群机器人"></label><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></div>
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>仅在点名或引用时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select><small>点名或引用会自动快速回应；此设置只影响当前群。</small></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
-      <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
-      <label class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
+      <div class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input id="groupScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="groupScheduledEnabled" aria-label="切换本群定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
+      <div class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label><span>每日定时任务上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>只限制已配置的定时任务；填 0 表示暂停定时推送。</small></label>
       <div class="policy-summary">普通消息与卡片不受定时任务限额影响；主动聊天由各功能自行配置。当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
@@ -1584,11 +1566,11 @@
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
-    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong>${feature.globally_enabled_by_default ? "" : "<small>新安装默认关闭，可先预设范围</small>"}</span></label>`).join("");
+    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
-      <label class="toggle-line"><span><strong>在此私聊使用机器人</strong><small>关闭后不在这段私聊中回复或发送定时任务</small></span><span class="toggle"><input name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></label>
-      <label class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停该联系人的全部定时推送</small></span><span class="toggle"><input name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><span class="toggle-track"></span><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></label>
-      <label class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></label>
+      <div class="toggle-line"><span><strong>在此私聊使用机器人</strong><small>关闭后不在这段私聊中回复或发送定时任务</small></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
+      <div class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停该联系人的全部定时推送</small></span><span class="toggle"><input id="privateScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateScheduledEnabled" aria-label="切换此私聊定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
+      <div class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
       <h3>可用功能</h3>
@@ -3612,12 +3594,11 @@
     const corePreviewDefaults = (schema) => Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, field.type === "object" ? corePreviewDefaults(field.items) : structuredClone(field.default)]));
     let corePreviewConfig = corePreviewDefaults(corePreviewSchema);
     let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin"};
-    let corePreviewEnabled = true;
     const corePreviewTemplates = [];
     const corePreviewBindings = {};
     let corePreviewRevision = 1;
     let corePreviewTemplateRevision = 1;
-    const corePreviewDetail = () => ({id: "feature-95a906d4b9173155", display_name: "机器人核心", enabled: corePreviewEnabled, engine_online: true, revision: String(corePreviewRevision), identity: structuredClone(corePreviewIdentity), basic_schema: Object.fromEntries(Object.entries(corePreviewSchema).filter(([key]) => !["analyzer_model", "energy", "leave_reply"].includes(key))), model_schema: {analyzer_model: corePreviewSchema.analyzer_model}, advanced_schema: structuredClone(corePreviewSchema), advanced_config: structuredClone(corePreviewConfig), template_schema: structuredClone(corePreviewTemplateSchema)});
+    const corePreviewDetail = () => ({id: "feature-95a906d4b9173155", display_name: "机器人核心", enabled: true, engine_online: true, revision: String(corePreviewRevision), identity: structuredClone(corePreviewIdentity), basic_schema: Object.fromEntries(Object.entries(corePreviewSchema).filter(([key]) => !["analyzer_model", "energy", "leave_reply"].includes(key))), model_schema: {analyzer_model: corePreviewSchema.analyzer_model}, advanced_schema: structuredClone(corePreviewSchema), advanced_config: structuredClone(corePreviewConfig), template_schema: structuredClone(corePreviewTemplateSchema)});
     const corePreviewChats = [{chat_id: "wechat:GroupMessage:51632940287@chatroom", display_name: "旅行交流群", kind: "group"}, {chat_id: "wechat:FriendMessage:wxid_zhangsan", display_name: "张三", kind: "private"}];
     const corePreviewRequest = (method, endpoint, payload = {}) => {
       if (method === "GET" && endpoint === "profiles") return {templates: structuredClone(corePreviewTemplates), bindings: {...corePreviewBindings}};
@@ -3791,7 +3772,7 @@
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_private_policy: (_accountId, contactId) => ok(previewPrivatePolicyOverview(contactId)),
       save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok(previewPrivatePolicyOverview(contactId).policy, "联系人可用功能已保存。"); },
-      set_feature_enabled: (id, enabled) => { if (id === "feature-95a906d4b9173155") corePreviewEnabled = enabled; return ok({enabled, message: "功能状态已立即更新。"}); }, save_feature: (id, config) => { if (id === "feature-95a906d4b9173155") { corePreviewConfig = structuredClone(config); corePreviewRevision += 1; } else previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
+      save_feature: (id, config) => { if (id === "feature-95a906d4b9173155") { corePreviewConfig = structuredClone(config); corePreviewRevision += 1; } else previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: (filters) => ok(previewConversations(filters)),
       get_messages: (conversationId, filters = {}) => {
         const search = String(filters.search || "").trim().toLocaleLowerCase("zh-CN");

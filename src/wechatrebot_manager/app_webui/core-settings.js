@@ -3,7 +3,7 @@
   "use strict";
 
   window.createRobotCoreSettings = function (helpers) {
-    const {read, request, save, toggle, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
+    const {read, request, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
     const state = {detail: null, stale: false, view: "global", tab: "basic", templateId: null, templates: [], bindings: {}, chats: [], statuses: [], config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", monitorBusy: false, feedback: "", kind: "all"};
@@ -37,8 +37,8 @@
         state.detail = detail; state.stale = false;
         if (!Object.keys(detail.basic_schema || {}).length) state.tab = "advanced";
         state.profilesAvailable = false; state.capabilityWarning = "";
-        if (!detail.engine_online || !detail.enabled) { state.view = "global"; state.templateId = null; }
-        if (detail.engine_online && detail.enabled) await loadProfiles();
+        if (!detail.engine_online) { state.view = "global"; state.templateId = null; }
+        if (detail.engine_online) await loadProfiles();
         if (!state.profilesAvailable) { state.view = "global"; state.templateId = null; }
         if (state.view === "template" && !currentTemplate()) { state.view = "global"; state.templateId = null; }
         resetDraft(); render();
@@ -66,8 +66,8 @@
     }
 
     function renderNavigation() {
-      const online = state.detail?.engine_online && state.detail?.enabled && state.profilesAvailable;
-      $("#coreStatus").textContent = !state.detail?.enabled ? "核心已停用" : state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
+      const online = state.detail?.engine_online && state.profilesAvailable;
+      $("#coreStatus").textContent = state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
       $$('[data-core-view]').forEach((button) => { button.classList.toggle("active", button.dataset.coreView === state.view); button.setAttribute("aria-pressed", String(button.dataset.coreView === state.view)); button.disabled = state.busy || (button.dataset.coreView === "monitor" && !online); });
       $("#newCoreTemplate").disabled = state.busy || !online || !Object.keys(state.detail?.template_schema || {}).length;
       $("#coreTemplateSource").disabled = $("#newCoreTemplate").disabled;
@@ -88,8 +88,8 @@
       if (state.view === "template") return "勾选“覆盖全局”后填写该模板的值；未勾选项跟随全局配置。";
       if (state.capabilityWarning) return state.capabilityWarning;
       if (!state.detail.engine_online) return "未连接到机器人：仅保存到本机，启动后加载。若机器人仍在运行，请恢复连接后重新保存。";
-      if (state.detail.enabled && !state.detail.advanced_config.analyzer_model) return "群聊分析模型尚未绑定；请到“模型设置”选择已配置模型，才能完整使用接话分析。";
-      return state.detail.enabled ? "保存后自动应用并核验。正在执行的工作可能被中断。" : "核心已停用：保存后启用时使用。";
+      if (!state.detail.advanced_config.analyzer_model) return "群聊分析模型尚未绑定；请到“模型设置”选择已配置模型，才能完整使用接话分析。";
+      return "保存后自动应用并核验。正在执行的工作可能被中断。";
     }
 
     function markDirty() {
@@ -129,10 +129,10 @@
       const template = currentTemplate();
       const schemas = {basic: state.detail.basic_schema || {}, models: state.detail.model_schema || {}, advanced: state.detail.advanced_schema || {}};
       const identityMarkup = state.view === "global" && state.tab === "basic" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><span class="eyebrow">常用设置</span><h3 id="coreIdentityTitle">机器人名称与管理员</h3><p>机器人名称同时用于窗口、导航、自我介绍和首个点名昵称。</p></div><span class="status-badge">统一身份</span></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" required value="${esc(state.identity.robot_name || "小妹")}"><small>默认名称为“小妹”；保存后不再保留旧名称。</small><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><small>留空表示暂不设置管理员；管理员权限在机器人重启后生效。</small><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
-      root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "全局配置")}</h2><p>${state.view === "template" ? "身份、唤醒、离场应答、回复长度、能量与节奏；其余参数跟随全局。" : "完整对话核心配置，机器人名称、管理员和群聊身份都从这里统一管理。"}</p></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : `<label class="toggle"><input id="coreEnabled" type="checkbox" ${state.detail.enabled ? "checked" : ""}><span class="toggle-track"></span><span>${state.detail.enabled ? "已启用" : "已停用"}</span></label>`}</div>
+      root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "全局配置")}</h2><p>${state.view === "template" ? "身份、唤醒、离场应答、回复长度、能量与节奏；其余参数跟随全局。" : "完整对话核心配置，机器人名称、管理员和群聊身份都从这里统一管理。"}</p></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : '<span class="status-badge online">统一加载</span>'}</div>
         ${state.view === "global" ? `<div class="config-tabs" aria-label="核心配置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key, label]) => `<button type="button" data-core-tab="${key}" aria-pressed="${state.tab === key}" class="${state.tab === key ? "active" : ""}">${label}</button>`).join("")}</div>${state.tab === "models" ? '<p class="feature-prerequisite">群聊分析模型是完整使用所必需的；这里的绑定不会改变日常回复模型。</p>' : ''}` : ''}
         <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<label class="form-field full">模板说明<textarea name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>` : ''}${identityMarkup}${schemaMarkup(schema(), state.config, [], "core-")}</form>
-        <div class="core-savebar"><span class="form-note" id="coreNote" role="status">${esc(note())}</span><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online && state.detail.enabled ? "保存并应用" : "保存设置"}</button></div>`;
+        <div class="core-savebar"><span class="form-note" id="coreNote" role="status">${esc(note())}</span><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
       if (state.view === "template") attachOverrides();
       else attachResets();
       $$('[data-core-tab]', root()).forEach((button) => button.addEventListener("click", () => {
@@ -145,11 +145,6 @@
       $$('.config-input[data-type="bool"]', root()).forEach((input) => input.addEventListener("change", () => { input.closest('.toggle').querySelector('span:last-child').textContent = input.checked ? "已启用" : "已停用"; }));
       $$('textarea', root()).forEach(growTextarea);
       $("#saveCore").addEventListener("click", saveCurrent);
-      $("#coreEnabled")?.addEventListener("change", async (event) => {
-        const enabled = event.target.checked;
-        if (guard(() => setEnabled(enabled))) { event.target.checked = !enabled; return; }
-        await setEnabled(enabled);
-      });
       $("#renameCoreTemplate")?.addEventListener("click", renameTemplate);
       $("#deleteCoreTemplate")?.addEventListener("click", deleteTemplate);
     }
@@ -221,16 +216,6 @@
         resetDraft(); state.feedback = result?.message || (state.view === 'template' ? '模板已保存，绑定聊天的后续消息使用新配置。' : '已保存，请确认生效状态。');
         render(); toast(state.feedback);
       });
-    }
-
-    async function setEnabled(enabled) {
-      await busy(async () => { const result = await toggle(state.detail.id, enabled); state.detail = await read(); if (enabled && state.detail.engine_online) await loadProfiles(); resetDraft(); render(); toast(result.message); });
-      // A failed write must not leave the switch showing an optimistic state.
-      const input = $("#coreEnabled");
-      if (input) {
-        input.checked = state.detail.enabled;
-        input.closest('.toggle').querySelector('span:last-child').textContent = state.detail.enabled ? "已启用" : "已停用";
-      }
     }
 
     function createTemplate() {

@@ -248,9 +248,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .feature-guide strong { display: block; margin: 3px 0 4px; color: var(--navy-900); font-size: 14px; }
 .feature-guide p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .feature-guide ol { display: grid; gap: 6px; margin: 0; padding-left: 22px; color: var(--navy-900); font-size: 12px; line-height: 1.55; }
-.toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font-weight: 700; }
+.toggle { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; }
 .toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.toggle-track { position: relative; width: 42px; height: 24px; border-radius: 20px; background: #b8c3cf; transition: background .15s; }
+.toggle-track { position: relative; width: 42px; height: 24px; flex: 0 0 42px; border-radius: 20px; background: #b8c3cf; transition: background .15s; cursor: pointer; }
 .toggle-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); transition: transform .15s; }
 .toggle input:checked + .toggle-track { background: var(--green-600); }
 .toggle input:checked + .toggle-track::after { transform: translateX(18px); }

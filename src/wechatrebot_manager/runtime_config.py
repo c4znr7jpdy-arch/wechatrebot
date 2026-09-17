@@ -331,24 +331,16 @@ def _sync_delivery_plugins(
 ) -> None:
     features = load_delivery_features(root)
     if features is not None:
-        allowed = [feature.module for feature in features]
-        configured = astrbot_payload.get("plugin_set", ["*"])
-        configured_names = (
-            {str(item) for item in configured}
-            if isinstance(configured, list)
-            else {"*"}
-        )
-        defaults = {feature.module for feature in features if feature.default_enabled}
-        # One-time transition from old global defaults to per-group grants.
-        # Later manual global disables must not be undone on every startup.
-        if astrbot_payload.get("wechatrebot_feature_scope_version") != 1:
-            if "astrbot_plugin_mnemosyne" in configured_names and "*" not in configured_names:
-                defaults.discard("astrbot_plugin_livingmemory")
-            configured_names = defaults if "*" in configured_names else configured_names | defaults
-            astrbot_payload["wechatrebot_feature_scope_version"] = 1
-        elif "*" in configured_names:
-            configured_names = defaults
-        astrbot_payload["plugin_set"] = [module for module in allowed if module in configured_names]
+        # Customer features stay loaded globally. Their actual use is granted
+        # per chat by group/private policy, so a stale global switch cannot
+        # silently override a chat selection. Hidden experimental features
+        # still follow their delivery default and remain outside customer UI.
+        astrbot_payload["plugin_set"] = [
+            feature.module
+            for feature in features
+            if feature.visible or feature.default_enabled
+        ]
+        astrbot_payload["wechatrebot_feature_scope_version"] = 2
 
 
 def _sync_angel_heart_model(
@@ -517,20 +509,6 @@ def _sync_emotion_config(astrbot_data_root: Path) -> None:
     write_json_atomic(path, payload)
 
 
-def _prefer_one_primary_memory(astrbot_payload: dict[str, object]) -> None:
-    configured = astrbot_payload.get("plugin_set")
-    if not isinstance(configured, list):
-        return
-    names = [str(item) for item in configured]
-    if (
-        "astrbot_plugin_livingmemory" in names
-        and "astrbot_plugin_mnemosyne" in names
-    ):
-        astrbot_payload["plugin_set"] = [
-            name for name in names if name != "astrbot_plugin_mnemosyne"
-        ]
-
-
 def write_runtime_configs(
     install_root: str | Path,
     wechat_exe_path: str | Path | None = None,
@@ -611,7 +589,6 @@ def write_runtime_configs(
     else:
         astrbot_payload = generated_astrbot
     _sync_delivery_plugins(root, astrbot_payload)
-    _prefer_one_primary_memory(astrbot_payload)
     dashboard = astrbot_payload.get("dashboard")
     if not isinstance(dashboard, dict):
         dashboard = {}

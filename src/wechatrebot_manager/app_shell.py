@@ -93,7 +93,6 @@ PUBLIC_API_METHODS = (
     "save_robot_core",
     "request_robot_core",
     "get_feature",
-    "set_feature_enabled",
     "save_feature",
     "reload_feature",
     "open_feature_center",
@@ -446,14 +445,6 @@ class ApplicationApi:
     def get_feature(self, feature_id: str) -> dict[str, object]:
         try:
             return self._ok(self._features.detail(feature_id))
-        except (OSError, ValueError, PluginCenterError) as exc:
-            return self._failed(exc, "13003")
-
-    def set_feature_enabled(
-        self, feature_id: str, enabled: bool
-    ) -> dict[str, object]:
-        try:
-            return self._ok(self._features.set_enabled(feature_id, bool(enabled)))
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 

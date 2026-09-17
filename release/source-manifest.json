@@ -251,6 +251,11 @@
       ]
     },
     {
+      "origin": "commercial",
+      "source": "runtime/meme_manager/wechatrebot_group_policy.py",
+      "target": "app/astrbot/data/plugins/meme_manager/wechatrebot_group_policy.py"
+    },
+    {
       "origin": "project",
       "source": "data/config/jiang_short_drama_config.json",
       "target": "app/astrbot/data/config/jiang_short_drama_config.json"
