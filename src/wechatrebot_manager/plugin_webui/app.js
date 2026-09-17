@@ -1043,7 +1043,9 @@ async function loadCatalog() {
     }
     if (data.product_name) {
       el("product-title").textContent = `${customerText(data.product_name)} · 功能配置`;
-      document.title = `${customerText(data.product_name)} · 功能配置`;
+      document.title = requested
+        ? `${customerText(data.product_name)} · ${customerText(requested.display_name)}配置`
+        : `${customerText(data.product_name)} · 功能配置`;
     }
     setEngineState(data.engine_online);
     renderCatalog();

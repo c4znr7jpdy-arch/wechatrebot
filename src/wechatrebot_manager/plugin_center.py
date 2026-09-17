@@ -2144,13 +2144,52 @@ def launch_plugin_center(
     install_root: str | Path, feature_id: str | None = None
 ) -> subprocess.Popen[bytes]:
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    return subprocess.Popen(
+    process = subprocess.Popen(
         plugin_center_command(install_root, feature_id),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=creation_flags,
     )
+    try:
+        exit_code = process.wait(timeout=0.35)
+    except subprocess.TimeoutExpired:
+        return process
+    if exit_code == 0:
+        return process
+    if exit_code == 3:
+        raise PluginCenterError("配置窗口已打开，但未能切换到前台；请在任务栏中打开对应窗口。")
+    raise PluginCenterError("配置窗口启动失败，请检查管理器安装后重试。")
+
+
+def _plugin_center_window_title(root: Path, selected: str) -> str:
+    brand = load_robot_settings(root).profile.display_name
+    if not selected:
+        return f"{brand} · 功能配置"
+    for feature in load_delivery_features(root) or ():
+        if _public_plugin_id(feature.module) == selected:
+            return f"{brand} · {feature.display_name}配置"
+    return f"{brand} · 功能配置 · {selected}"
+
+
+def _focus_plugin_center_window(title: str) -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.FindWindowW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR)
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return False
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    return bool(user32.SetForegroundWindow(hwnd))
 
 
 def run_plugin_center(
@@ -2160,9 +2199,10 @@ def run_plugin_center(
     selected = str(feature_id or "").strip()
     if selected and not _PUBLIC_PLUGIN_ID.fullmatch(selected):
         raise PluginCenterError("功能标识无效。")
-    lock = SingleInstanceLock(f"plugin-center:{root}")
+    title = _plugin_center_window_title(root, selected)
+    lock = SingleInstanceLock(f"plugin-center:{root}:{selected or 'all'}")
     if not lock.acquire():
-        return 3
+        return 0 if _focus_plugin_center_window(title) else 3
     server: ThreadingHTTPServer | None = None
     try:
         server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(PluginCenterService(root)))
@@ -2171,11 +2211,10 @@ def run_plugin_center(
         thread.start()
         import webview
 
-        brand = load_robot_settings(root).profile
         query = f"?feature={quote(selected, safe='')}" if selected else ""
         url = f"http://127.0.0.1:{server.server_port}/{query}"
         webview.create_window(
-            f"{brand.display_name} · 功能配置",
+            title,
             url,
             width=1180,
             height=760,

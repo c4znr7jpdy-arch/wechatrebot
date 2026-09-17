@@ -8,6 +8,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -33,6 +34,7 @@ from wechatrebot_manager.plugin_center import (
 from wechatrebot_manager.runtime_config import write_runtime_configs
 from wechatrebot_manager.provider import OpenAIProviderProfile
 from wechatrebot_manager.customer_config import load_plugins, set_plugin_enabled
+from wechatrebot_manager.feature_policy import DeliveryFeature
 
 
 def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
@@ -928,6 +930,60 @@ def test_plugin_center_command_can_open_selected_feature(tmp_path: Path) -> None
     assert command[-1] == "feature-0123456789abcdef"
     with pytest.raises(PluginCenterError, match="标识无效"):
         plugin_center_command(tmp_path, "../not-a-feature")
+
+
+def test_plugin_center_uses_a_separate_window_for_each_feature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    voice = plugin_center._public_plugin_id("astrbot_plugin_mimo_tts_clone")
+    meme = plugin_center._public_plugin_id("meme_manager")
+    monkeypatch.setattr(
+        plugin_center, "load_robot_settings",
+        lambda root: SimpleNamespace(profile=SimpleNamespace(display_name="小妹")),
+    )
+    monkeypatch.setattr(
+        plugin_center, "load_delivery_features",
+        lambda root: (
+            DeliveryFeature("astrbot_plugin_mimo_tts_clone", "语音克隆", "page"),
+            DeliveryFeature("meme_manager", "表情管理", "schema-and-page"),
+        ),
+    )
+    locks: list[str] = []
+    focused: list[str] = []
+
+    class ExistingWindowLock:
+        def __init__(self, key: str) -> None:
+            locks.append(key)
+
+        def acquire(self) -> bool:
+            return False
+
+    monkeypatch.setattr(plugin_center, "SingleInstanceLock", ExistingWindowLock)
+    monkeypatch.setattr(
+        plugin_center, "_focus_plugin_center_window",
+        lambda title: focused.append(title) or True,
+    )
+
+    assert plugin_center.run_plugin_center(tmp_path, voice) == 0
+    assert plugin_center.run_plugin_center(tmp_path, meme) == 0
+    assert locks == [
+        f"plugin-center:{tmp_path.resolve()}:{voice}",
+        f"plugin-center:{tmp_path.resolve()}:{meme}",
+    ]
+    assert focused == ["小妹 · 语音克隆配置", "小妹 · 表情管理配置"]
+
+
+def test_plugin_center_launch_reports_an_existing_window_that_cannot_be_focused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ExitedProcess:
+        def wait(self, *, timeout: float) -> int:
+            assert timeout > 0
+            return 3
+
+    monkeypatch.setattr(plugin_center.subprocess, "Popen", lambda *args, **kwargs: ExitedProcess())
+    with pytest.raises(PluginCenterError, match="任务栏"):
+        plugin_center.launch_plugin_center(tmp_path, "feature-0123456789abcdef")
 
 
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
