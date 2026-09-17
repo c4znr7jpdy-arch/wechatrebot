@@ -1,0 +1,95 @@
+--- a/core/parsers/douyin/__init__.py
++++ b/core/parsers/douyin/__init__.py
+@@ -1,5 +1,8 @@
+ import re
++from asyncio import Task
++from collections import OrderedDict
+ from dataclasses import dataclass
++from pathlib import Path
+ from typing import TYPE_CHECKING, ClassVar
+ from urllib.parse import urlparse
+ 
+@@ -32,7 +35,7 @@
+ class DouyinParser(BaseParser):
+     # 平台信息
+     platform: ClassVar[Platform] = Platform(name="douyin", display_name="抖音")
+-    PLAY_RATIOS: ClassVar[tuple[str, ...]] = ("1080p", "720p", "540p", "360p")
++    PLAY_RATIOS: ClassVar[tuple[str, ...]] = ("720p", "1080p", "540p", "360p")
+     TTWID_REGISTER_URL: ClassVar[str] = (
+         "https://ttwid.bytedance.com/ttwid/union/register/"
+     )
+@@ -42,6 +45,7 @@
+         self.mycfg = config.parser.douyin
+         self.cookiejar = CookieJar(config, self.mycfg, domain="douyin.com")
+         self._set_cookies()
++        self._video_downloads: OrderedDict[str, Task[Path]] = OrderedDict()
+ 
+     def _set_cookies(self, cookies_str: str = ""):
+         """设置cookie到请求头"""
+@@ -258,9 +262,12 @@
+                     logger.warning(f"[抖音] play 端点探测失败，回退 play_addr: {e}")
+             video_url = video_url or video_data.video_url
+             if video_url:
++                video_task = self._download_video_once(
++                    video_data.play_token or url, video_url, video_headers
++                )
+                 contents.append(
+-                    self.create_video_content(
+-                        video_url, cover_url, duration, headers=video_headers
++                    self.create_video_content_by_task(
++                        video_task, cover_url, duration, headers=video_headers
+                     )
+                 )
+ 
+@@ -288,9 +295,30 @@
+         headers["Referer"] = referer
+         return headers
+ 
++    def _download_video_once(
++        self, resource_key: str, video_url: str, headers: dict[str, str]
++    ) -> Task[Path]:
++        """Share an active or completed download across conversations."""
++        cached = self._video_downloads.get(resource_key)
++        if cached is not None:
++            if not cached.done() or (
++                not cached.cancelled()
++                and cached.exception() is None
++                and cached.result().is_file()
++            ):
++                self._video_downloads.move_to_end(resource_key)
++                return cached
++            self._video_downloads.pop(resource_key)
++
++        task = self.downloader.download_video(
++            video_url, headers=headers, proxy=self.proxy
++        )
++        self._video_downloads[resource_key] = task
++        if len(self._video_downloads) > 128:
++            self._video_downloads.popitem(last=False)
++        return task
++
+     async def probe_video_url(self, video_id: str, referer: str) -> ProbedVideo:
+-        probed_by_size: dict[int, ProbedVideo] = {}
+-
+         for ratio in self.PLAY_RATIOS:
+             play_url = self._build_play_url(video_id, ratio)
+             headers = self._build_media_headers(referer)
+@@ -315,14 +343,10 @@
+                 logger.debug(f"[抖音] ratio={ratio} 探测请求失败: {e}")
+                 continue
+ 
+-            probed_by_size.setdefault(
+-                size, ProbedVideo(final_url, size, self._build_media_headers(referer))
+-            )
+-
+-        if not probed_by_size:
+-            raise ParseException("can't probe play endpoint")
+-
+-        return max(probed_by_size.values(), key=lambda item: item.size)
++            logger.debug(f"[抖音] 选用 ratio={ratio}，文件大小: {size} 字节")
++            return ProbedVideo(final_url, size, self._build_media_headers(referer))
++
++        raise ParseException("can't probe play endpoint")
+ 
+     @staticmethod
+     def _extract_response_size(headers) -> int:

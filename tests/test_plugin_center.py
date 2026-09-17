@@ -24,6 +24,7 @@ from wechatrebot_manager.plugin_center import (
     PluginCenterService,
     _asset_root,
     _handler,
+    _hide_customer_internal_schema,
     _model_field_kind,
     _normalize_config,
     _json_revision,
@@ -68,9 +69,12 @@ def test_meme_prompt_schema_is_hidden_from_customer_configuration() -> None:
         },
     }
 
+    visible_schema = _hide_customer_internal_schema("meme_manager", schema)
     projected, _profile = _project_customer_schema("meme_manager", schema)
 
+    assert "prompt" not in json.dumps(visible_schema, ensure_ascii=False)
     assert "prompt" not in json.dumps(projected, ensure_ascii=False)
+    assert "prompt" in schema["generation"]["items"]
 
 
 def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:

@@ -459,20 +459,30 @@ def _group_analysis_ui_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _hide_customer_internal_schema(
+    module_name: str,
+    schema: dict[str, Any],
+) -> dict[str, Any]:
+    """Remove runtime-only fields from every customer-facing schema view."""
+    if module_name != "meme_manager":
+        return schema
+    visible_schema = copy.deepcopy(schema)
+    generation = visible_schema.get("generation")
+    generation_items = generation.get("items") if isinstance(generation, dict) else None
+    # Emotion tag instructions are an internal runtime contract. Users
+    # describe the persona normally; the plugin injects this block only
+    # for chats whose policy permits meme_manager.
+    if isinstance(generation_items, dict):
+        generation_items.pop("prompt", None)
+    return visible_schema
+
+
 def _project_customer_schema(
     module_name: str,
     schema: dict[str, Any],
 ) -> tuple[dict[str, Any], CustomerSchemaProfile | None]:
     """Project complex engine schemas into a small customer-facing form."""
-    if module_name == "meme_manager":
-        schema = copy.deepcopy(schema)
-        generation = schema.get("generation")
-        generation_items = generation.get("items") if isinstance(generation, dict) else None
-        # Emotion tag instructions are an internal runtime contract. Users
-        # describe the persona normally; the plugin injects this block only
-        # for chats whose policy permits meme_manager.
-        if isinstance(generation_items, dict):
-            generation_items.pop("prompt", None)
+    schema = _hide_customer_internal_schema(module_name, schema)
     if module_name == _GROUP_ANALYSIS_MODULE:
         schema = _group_analysis_ui_schema(schema)
     profile = _CUSTOMER_SCHEMA_PROFILES.get(module_name)
@@ -1746,6 +1756,7 @@ class PluginCenterService:
             rerank_providers=rerank_providers,
             personas=personas,
         )
+        runtime_schema = _hide_customer_internal_schema(module_name, runtime_schema)
         if module_name == _GROUP_ANALYSIS_MODULE:
             runtime_schema = _group_analysis_ui_schema(runtime_schema)
         customer_schema, profile = _project_customer_schema(module_name, runtime_schema)
