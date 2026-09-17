@@ -986,6 +986,61 @@ def test_plugin_center_launch_reports_an_existing_window_that_cannot_be_focused(
         plugin_center.launch_plugin_center(tmp_path, "feature-0123456789abcdef")
 
 
+def test_meme_market_requests_wait_for_install_and_other_posts_keep_short_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = EngineApiClient(tmp_path)
+    monkeypatch.setattr(client, "_token", lambda: "test-token")
+    monkeypatch.setattr(client, "_url", lambda path: f"http://127.0.0.1{path}")
+    timeouts: list[float] = []
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(_request, *, timeout: float):
+        timeouts.append(timeout)
+        return Response()
+
+    monkeypatch.setattr(plugin_center, "urlopen", fake_urlopen)
+    client.raw_request("POST", "/api/plug/meme_manager/community/install", body=b"{}")
+    client.raw_request("POST", "/api/plug/another_plugin/settings", body=b"{}")
+    assert timeouts == [600, 60]
+
+
+def test_meme_pack_upload_has_its_own_limit_and_storage_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    multipart = "multipart/form-data; boundary=test"
+    assert plugin_center._extension_body_limit(
+        "/api/plug/meme_manager/packs/import", multipart,
+    ) == 120 * 1024 * 1024
+    assert plugin_center._extension_body_limit(
+        "/api/plug/meme_manager/emoji/add/happy", multipart,
+    ) == 12 * 1024 * 1024
+    assert plugin_center._extension_body_limit(
+        "/api/plug/meme_manager/packs/import", "application/json",
+    ) == 4 * 1024 * 1024
+
+    service = PluginCenterService(tmp_path)
+    monkeypatch.setattr(service, "_plugin", lambda _id: SimpleNamespace(module_name="meme_manager"))
+    path = Path(service.meme_pack_storage("feature-0123456789abcdef")["path"])
+    assert path == tmp_path / "app" / "astrbot" / "data" / "plugin_data" / "meme_manager" / "packs"
+    assert path.is_dir()
+    monkeypatch.setattr(service, "_plugin", lambda _id: SimpleNamespace(module_name="another_plugin"))
+    with pytest.raises(PluginCenterError, match="没有本地表情包目录"):
+        service.meme_pack_storage("feature-0123456789abcdef")
+
+
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)

@@ -45,6 +45,13 @@ _PROXY_PREFIXES = (
 )
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+_MAX_MEME_PACK_UPLOAD_BYTES = 120 * 1024 * 1024
+_LONG_MEME_REQUEST_PATHS = frozenset({
+    "/api/plug/meme_manager/community/install",
+    "/api/plug/meme_manager/community/install_official_first",
+    "/api/plug/meme_manager/packs/import",
+    "/api/plug/meme_manager/settings/backup/import",
+})
 _CONFIG_WRITE_LOCK = threading.RLock()
 _SECRET_FIELD = re.compile(
     r"(?:^|[^a-z0-9])(?:api.?key|access.?key|authorization|cookie|credential|password|secret|token)(?:$|[^a-z0-9])",
@@ -536,6 +543,14 @@ def _normalize_plugin_extension_endpoint(endpoint: str) -> str:
     ):
         raise PluginCenterError("高级配置页请求无效。")
     return "/".join(parts)
+
+
+def _extension_body_limit(upstream_path: str, content_type: str) -> int:
+    if not content_type.casefold().startswith("multipart/form-data;"):
+        return _MAX_BODY_BYTES
+    if urlsplit(upstream_path).path == "/api/plug/meme_manager/packs/import":
+        return _MAX_MEME_PACK_UPLOAD_BYTES
+    return _MAX_UPLOAD_BYTES
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -1128,11 +1143,23 @@ class EngineApiClient:
             headers["Content-Type"] = content_type
         request = Request(self._url(path), data=body, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=max(self.timeout, 60) if method in {"PUT", "PATCH", "POST"} else self.timeout) as response:
+            timeout = (
+                max(self.timeout, 600)
+                if method == "POST" and urlsplit(path).path in _LONG_MEME_REQUEST_PATHS
+                else max(self.timeout, 60) if method in {"PUT", "PATCH", "POST"}
+                else self.timeout
+            )
+            with urlopen(request, timeout=timeout) as response:
                 return response.status, dict(response.headers.items()), response.read()
         except HTTPError as exc:
             return exc.code, dict(exc.headers.items()), exc.read()
-        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+        except (TimeoutError, socket.timeout) as exc:
+            raise EngineUnavailableError("操作等待超时，后台可能仍在处理；请刷新已安装列表确认结果。") from exc
+        except URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise EngineUnavailableError("操作等待超时，后台可能仍在处理；请刷新已安装列表确认结果。") from exc
+            raise EngineUnavailableError("回复引擎尚未在线，请先在运行中心启动机器人。") from exc
+        except OSError as exc:
             raise EngineUnavailableError("回复引擎尚未在线，请先在运行中心启动机器人。") from exc
 
     def request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
@@ -1865,6 +1892,13 @@ class PluginCenterService:
         encoded_endpoint = quote(normalized, safe="/")
         return f"/api/plug/{encoded_module}/{encoded_endpoint}"
 
+    def meme_pack_storage(self, public_id: str) -> dict[str, str]:
+        if self._plugin(public_id).module_name != "meme_manager":
+            raise PluginCenterError("当前功能没有本地表情包目录。")
+        packs_dir = self.install_root / "app" / "astrbot" / "data" / "plugin_data" / "meme_manager" / "packs"
+        packs_dir.mkdir(parents=True, exist_ok=True)
+        return {"path": str(packs_dir)}
+
 
 def _asset_root() -> Path:
     candidates = [Path(__file__).with_name("plugin_webui")]
@@ -1997,7 +2031,7 @@ def _handler(service: PluginCenterService):
             except ValueError as exc:
                 raise PluginCenterError("请求长度无效。") from exc
             content_type = self.headers.get("Content-Type", "application/json")
-            limit = _MAX_UPLOAD_BYTES if content_type.casefold().startswith("multipart/form-data;") else _MAX_BODY_BYTES
+            limit = _extension_body_limit(upstream_path, content_type)
             if length > limit:
                 raise PluginCenterError("请求内容过大。")
             body = self.rfile.read(length) if length else None
@@ -2045,6 +2079,9 @@ def _handler(service: PluginCenterService):
                     return
                 if len(parts) == 3 and parts[:2] == ["control", "plugins"]:
                     self._send_json(HTTPStatus.OK, {"ok": True, "data": service.detail(parts[2])})
+                    return
+                if len(parts) == 4 and parts[:2] == ["control", "plugins"] and parts[3] == "pack-storage":
+                    self._send_json(HTTPStatus.OK, {"ok": True, "data": service.meme_pack_storage(parts[2])})
                     return
                 if len(parts) == 6 and parts[:2] == ["control", "plugins"] and parts[3] == "pages" and parts[5] == "entry":
                     self._send_json(HTTPStatus.OK, {"ok": True, "data": service.page_entry(parts[2], parts[4])})

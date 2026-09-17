@@ -212,6 +212,15 @@ textarea:focus-visible,
 .page-picker { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 14px; }
 .page-button { height: 38px; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); cursor: pointer; }
 .page-button.active { border-color: var(--primary); color: var(--primary); background: #eef5ff; }
+.meme-pack-import { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #cfe0fb; border-radius: 8px; background: #f5f9ff; }
+.meme-pack-import[hidden] { display: none; }
+.meme-pack-import-copy { display: grid; gap: 4px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.meme-pack-import-copy strong { color: var(--text); font-size: 14px; }
+.meme-pack-import-copy code { overflow-wrap: anywhere; color: var(--text); font-family: inherit; }
+.meme-pack-import-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.meme-pack-import-actions input[type="file"] { max-width: 100%; }
+.meme-pack-import-actions label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
+#meme-pack-status { min-height: 18px; color: var(--muted); font-size: 12px; }
 #plugin-frame { width: 100%; min-height: 560px; border: 1px solid var(--border); background: white; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(8, 24, 43, .48); }
