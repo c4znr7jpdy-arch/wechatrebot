@@ -1,0 +1,30 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/state.py b/hook_41827_astrbot_bridge/src/hook_bridge/state.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/state.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/state.py
+@@ -69,7 +69,10 @@ class BridgeState:
+             self._dedup.popitem(last=False)
+         self._dedup[message_id] = current
+         return True
+ 
++    def forget_message(self, message_id: str) -> None:
++        self._dedup.pop(message_id, None)
++
+     def set_identity(self, wxid: str, nickname: str = "", avatar: str = "") -> bool:
+         changed = wxid != self.bot_wxid
+         self.bot_wxid = wxid
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -793,7 +793,12 @@ class BridgeApplication:
+                 member_id,
+             )
+             return False
+ 
++        # A leave followed by a join is a new membership transition, even
++        # within the callback/poll de-dup TTL. Keep only the current kind.
++        opposite_kind = "group_decrease" if event.kind == "group_increase" else "group_increase"
++        self.state.forget_message(f"group-member:{opposite_kind}:{room_id}:{member_id}")
++
+         self_id = self.state.bot_wxid or event.account_id or "wechat_bot"
+         await self.onebot.send_event(encode_group_member_notice(event, self_id))
+         logger.info(
