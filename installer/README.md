@@ -26,4 +26,6 @@ python .\scripts\build_native_installer.py `
 
 正式生成安装器需要预先安装 Inno Setup 7，并去掉 `--dry-run`。输出目录必须位于当前工作树的 `artifacts` 下。
 
-若机器上已有通过 `build_manager.py` 创建的工具环境，可用其 `--build-python` 参数复用 PyInstaller，避免每次重新下载依赖。商用分发前须确认 Inno Setup 商业授权与安装器签名；本地测试包不代表已签名或可发布。
+若机器上已有通过 `build_manager.py` 创建的工具环境，可用其 `--build-python` 参数复用 PyInstaller，避免每次重新下载依赖。
+
+当前按非商用用途分发标准 Inno Setup 安装器，默认不做 Windows Authenticode 代码签名；商用用途发生变化时须重新核对 Inno Setup 授权和签名方案。省略 Windows 代码签名不等于省略 `payload.wrb` 的固定 SHA-256 校验，也不改变远程更新清单的 Ed25519 签名要求。本地烟测载荷及其安装器不属于可正式分发的产物。
