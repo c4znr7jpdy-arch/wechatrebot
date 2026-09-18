@@ -39,6 +39,37 @@ def test_sha256_is_uppercase(tmp_path: Path) -> None:
     assert digest == digest.upper()
 
 
+def test_build_can_reuse_existing_toolchain(monkeypatch, tmp_path: Path) -> None:
+    builder = _builder()
+    builder.__file__ = str(tmp_path / "scripts/build_manager.py")
+    monkeypatch.setattr(builder, "sys", SimpleNamespace(version_info=(3, 13), executable="python.exe"))
+    monkeypatch.setattr(builder.platform, "architecture", lambda: ("64bit", ""))
+    build_python = tmp_path / "cached-python.exe"
+    build_python.write_bytes(b"MZ")
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        if "PyInstaller" in argv and "--distpath" in argv:
+            dist = Path(argv[argv.index("--distpath") + 1])
+            dist.mkdir(parents=True)
+            (dist / "WeChatReBot.exe").write_bytes(b"MZ")
+        elif "self-test" in argv:
+            report = {
+                "ok": True, "frozen": True, "architecture": 64,
+                "manager_version": "test", "timezone_data": True,
+            }
+            Path(argv[argv.index("--output") + 1]).write_text(json.dumps(report), encoding="utf-8")
+
+    monkeypatch.setattr(builder, "_run", fake_run)
+    output = tmp_path / "artifacts" / "manager"
+    assert builder.main([
+        "--output", str(output), "--build-python", str(build_python),
+    ]) == 0
+    assert not any("pip" in command or "venv" in command for command in calls)
+    assert any(command[:2] == [str(build_python), "-c"] for command in calls)
+
+
 @pytest.mark.parametrize('timezone_ready', [True, False, None])
 def test_build_collects_timezone_package_and_requires_frozen_self_test(
     monkeypatch, tmp_path, timezone_ready,

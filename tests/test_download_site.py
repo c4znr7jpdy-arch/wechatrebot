@@ -25,6 +25,10 @@ def test_download_page_has_safe_progressive_download_ui() -> None:
     assert "完整解压" in page
     assert "不要直接在压缩包内运行" in page
     assert "@media (prefers-reduced-motion: reduce)" in page
+    assert '"https://jiangxiaomei-releases-bj.oss-cn-beijing.aliyuncs.com"' in page
+    assert 'installer.kind === "inno-online"' in page
+    assert "payload_size" in page
+    assert "安装时需联网" in page
 
 
 def test_nginx_exposes_page_metadata_and_customer_archives() -> None:
