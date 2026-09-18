@@ -368,6 +368,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .member-list article { display: grid; grid-template-columns: 32px minmax(0,1fr); gap: 9px; align-items: center; padding: 9px 0; border-top: 1px solid #edf1f5; }
 .member-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: #fff; background: var(--green-700); font-size: 11px; font-weight: 800; }
 .member-list strong, .member-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-identities { display: grid; gap: 2px; min-width: 0; }
+.member-identities small span { display: inline-block; margin-right: 4px; color: var(--muted); }
 .member-list small { color: var(--subtle); font-size: 10px; }
 .member-empty { margin-top: 10px; padding: 22px 14px; color: var(--muted); background: #f7f9fc; border-radius: 8px; text-align: center; font-size: 12px; }
 .member-empty.error { color: var(--red-700); background: var(--red-100); }
