@@ -762,6 +762,22 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
     assert "form.elements.model.value = items[0]" not in model_discovery
 
 
+def test_feature_detail_guards_optional_model_bindings_without_a_form() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+    feature_renderer = script[
+        script.index("function renderFeatureDetail") : script.index(
+            "function helpAudienceMatch"
+        )
+    ]
+
+    assert 'const featureForm = $("#featureForm");' in feature_renderer
+    assert "if (featureForm) {" in feature_renderer
+    assert "$$('[data-optional-group-toggle]', featureForm)" in feature_renderer
+    assert "$$('[data-optional-group-toggle]', $(\"#featureForm\"))" not in feature_renderer
+
+
 def test_feature_details_are_warmed_in_the_background() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
