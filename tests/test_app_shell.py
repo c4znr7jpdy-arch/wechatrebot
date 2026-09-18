@@ -838,6 +838,10 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert "管理机器人所在群聊的回复规则、可用功能和成员信息" in markup
     assert 'api("get_groups", refresh)' in script
     assert 'api("get_group_members", groupId)' in script
+    assert '<span>微信号</span>' in script
+    assert '<span>微信标识</span>' in script
+    assert 'item.wechat_id || "未提供"' in script
+    assert 'item.user_id || "未提供"' in script
     assert 'previousAccount !== state.groupAccount' in script
     assert "当前接口未提供" in script
     assert "从群聊列表添加" in script
