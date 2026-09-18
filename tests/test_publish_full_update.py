@@ -57,6 +57,11 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
         "_fetch_live_manifest",
         lambda _channel: {"version": "0.8.6"},
     )
+    monkeypatch.setattr(
+        module.publisher,
+        "_fetch_download_version",
+        lambda _base_url: "0.8.6",
+    )
     monkeypatch.setattr(module, "_run", lambda argv, **_kwargs: commands.append(argv))
     release = module.BuiltFullUpdate(
         version="0.8.7",

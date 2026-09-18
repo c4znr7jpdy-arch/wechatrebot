@@ -2532,13 +2532,14 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, confirmText = "确认", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
+  function confirmAction({title, message, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
     $("#modalTitle").textContent = title;
     $("#modalMessage").textContent = message;
     confirm.textContent = confirmText;
+    cancel.textContent = cancelText;
     confirm.className = `button ${["primary", "secondary", "danger"].includes(intent) ? intent : "danger"}`;
     const fieldControl = field?.type === "select"
       ? `<select id="modalInput">${(field.options || []).map((option) => `<option value="${escapeHtml(option.value)}" ${String(option.value) === String(field.value ?? "") ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
@@ -3234,10 +3235,13 @@
       } else {
         const release = data.release;
         $("#updateStatus").textContent = `发现 v${release.version}`;
+        const packageSize = formatBytes(release.package_size);
         confirmAction({
           title: `发现新版本 v${release.version}`,
-          message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。安装前请先停止机器人，更新失败会自动恢复原版本。`,
+          message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${packageSize}，安装前请先停止机器人；更新失败会自动恢复原版本。`,
           confirmText: "下载并安装",
+          cancelText: "稍后提醒",
+          intent: "primary",
           pendingText: "正在下载…",
           pendingMessage: `正在下载并校验 v${release.version}，完成后软件会自动重启。请勿关闭软件。`,
           onConfirm: async () => {

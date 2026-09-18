@@ -13,7 +13,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
+import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -47,6 +50,7 @@ DEFAULT_HOST = "root@ss.xiuxianjyj.xin"
 DEFAULT_REMOTE_ROOT = "/srv/wechatrebot-updates"
 DEFAULT_BASE_URL = "https://ss.xiuxianjyj.xin/wechatrebot-updates"
 ONEFILE_SAFE_UPDATER_VERSION = Version("0.8.7")
+MAX_DOWNLOAD_METADATA_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +74,48 @@ def _require_safe_delta_base(live_version: str) -> None:
             f"线上稳定版 {live_version} 仍使用旧单文件更新器，不能发布管理器增量包；"
             "请先通过完整载荷发布 0.8.7。"
         )
+
+
+def _fetch_download_version(base_url: str, *, timeout: int = 20) -> str:
+    url = f"{base_url.rstrip('/')}/download.json"
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme.casefold() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("下载页版本地址必须是无账号信息的 HTTPS 地址")
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "Cache-Control": "no-cache"},
+    )
+    last_error: BaseException | None = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                body = response.read(MAX_DOWNLOAD_METADATA_BYTES + 1)
+            break
+        except (OSError, urllib.error.URLError) as exc:
+            last_error = exc
+            if attempt == 2:
+                raise ValueError("暂时无法读取下载页版本信息") from exc
+            time.sleep(0.5 * (attempt + 1))
+    else:  # pragma: no cover - loop always returns or raises
+        raise ValueError("暂时无法读取下载页版本信息") from last_error
+    if len(body) > MAX_DOWNLOAD_METADATA_BYTES:
+        raise ValueError("下载页版本信息过大")
+    try:
+        payload = json.loads(body.decode("utf-8-sig"))
+        if not isinstance(payload, dict):
+            raise ValueError
+        return str(Version(str(payload["version"])))
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("下载页版本信息无效") from exc
+
+
+def _published_version_floor(stable_version: str, download_version: str) -> str:
+    return str(max(Version(stable_version), Version(download_version)))
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -447,15 +493,18 @@ def main(argv: list[str] | None = None) -> int:
     ).rstrip("/")
     live_manifest = _fetch_live_manifest(channel)
     live_version = str(Version(str(live_manifest["version"])))
+    download_version = _fetch_download_version(args.base_url)
+    published_floor = _published_version_floor(live_version, download_version)
     try:
         _require_safe_delta_base(live_version)
     except ValueError as exc:
         parser.error(str(exc))
-    if Version(version) < Version(live_version) or (
-        Version(version) == Version(live_version) and not args.dry_run
+    if Version(version) < Version(published_floor) or (
+        Version(version) == Version(published_floor) and not args.dry_run
     ):
         parser.error(
-            f"项目版本 {version} 必须高于线上稳定版本 {live_version}；请先提升版本号"
+            f"项目版本 {version} 必须高于线上已发布版本 {published_floor}"
+            f"（更新通道 {live_version}，下载页 {download_version}）；请先提升版本号"
         )
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")

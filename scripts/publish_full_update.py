@@ -464,11 +464,16 @@ def main(argv: list[str] | None = None) -> int:
     ).rstrip("/")
     live_manifest = publisher._fetch_live_manifest(channel)
     live_version = str(Version(str(live_manifest["version"])))
-    if Version(version) < Version(live_version) or (
-        Version(version) == Version(live_version) and not args.dry_run
+    download_version = publisher._fetch_download_version(args.base_url)
+    published_floor = publisher._published_version_floor(
+        live_version, download_version
+    )
+    if Version(version) < Version(published_floor) or (
+        Version(version) == Version(published_floor) and not args.dry_run
     ):
         parser.error(
-            f"项目版本 {version} 必须高于线上稳定版本 {live_version}；请先提升版本号"
+            f"项目版本 {version} 必须高于线上已发布版本 {published_floor}"
+            f"（更新通道 {live_version}，下载页 {download_version}）；请先提升版本号"
         )
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
