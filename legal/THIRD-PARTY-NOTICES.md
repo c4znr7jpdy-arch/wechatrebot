@@ -12,7 +12,6 @@
 | delivered-plugin | astrbot_plugin_bittorrent | 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_livingmemory | 2.3.6 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_mimo_tts_clone | 0.7.2 | MIT |
-| delivered-plugin | astrbot_plugin_mnemosyne | 2.1.5 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_music | 2.1.1 | MIT |
 | delivered-plugin | astrbot_plugin_parser | 1.5.6 | MIT |
 | delivered-plugin | astrbot_plugin_patch_at_wxid | UNKNOWN | Proprietary |
