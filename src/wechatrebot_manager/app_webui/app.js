@@ -3059,8 +3059,6 @@
     const memoryForm = $("#memoryForm");
     memoryForm.elements.enabled.checked = Boolean(memory.enabled);
     memoryForm.elements.recall_mode.value = memory.recall_mode || "smart";
-    memoryForm.elements.explicit_recall_enabled.checked = Boolean(memory.explicit_recall_enabled);
-    memoryForm.elements.explicit_recall_phrases.value = (memory.explicit_recall_phrases || []).join("，");
     memoryForm.elements.casual_query_max_chars.value = memory.casual_query_max_chars || 24;
     memoryForm.elements.top_k.value = memory.top_k || 3;
     memoryForm.elements.summary_trigger_rounds.value = memory.summary_trigger_rounds || 10;
@@ -3666,7 +3664,7 @@
       memory_explanation: "聊天摘要和相关往事由长期记忆保存与召回；明确问起上次内容时优先回忆，普通寒暄不查询。",
       readiness: {memory: true},
       persona: {tone: "natural", reply_length: "brief", mention_only: false, fast_reply: true, alias: "小妹", identity_prompt: "你是小妹，是群聊里的熟人型机器人。说话随意、直接、简短，不使用机械的客服措辞。", reply_guide: "一次只处理当前最相关的话题，不抢话，不连续刷屏。"},
-      memory: {enabled: true, recall_mode: "smart", explicit_recall_enabled: true, explicit_recall_phrases: ["上次说了什么", "还记得吗", "之前提到", "我说过", "你说过"], casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
+      memory: {enabled: true, recall_mode: "smart", casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
     let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};

@@ -363,7 +363,7 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
     assert living["recall_engine"]["auto_recall_mode"] == "smart"
     assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8
     assert living["graph_memory"]["enabled"] is False
-    assert "上次说了什么" in living["recall_engine"]["explicit_recall_phrases"]
+    assert "explicit_recall_phrases" not in living["recall_engine"]
     assert emotion["Self_Learning_Basic"]["enable_message_capture"] is False
     assert emotion["Advanced_Settings"]["save_raw_messages"] is False
     assert emotion["Runtime_Internal_Settings"]["llm_hook_profile"] == "compact"

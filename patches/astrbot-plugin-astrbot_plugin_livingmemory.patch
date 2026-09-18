@@ -2,18 +2,11 @@ diff --git a/_conf_schema.json b/_conf_schema.json
 index c405e95..e9334e6 100644
 --- a/_conf_schema.json
 +++ b/_conf_schema.json
-@@ -159,6 +159,13 @@
+@@ -159,6 +159,6 @@
                  "default": "smart",
 -                "options": ["smart", "always", "off"]
 +                "options": ["smart", "always", "manual", "off"]
              },
-+            "explicit_recall_phrases": {
-+                "description": "明确回忆说法",
-+                "hint": "smart 模式下，消息包含任一说法时必定尝试长期记忆检索。最多读取 20 条，状态中不会暴露消息和记忆内容。",
-+                "type": "list",
-+                "items": {"type": "string"},
-+                "default": ["上次说了什么", "你还记得吗", "之前提到", "我说过", "你说过"]
-+            },
              "casual_query_max_chars": {
                  "description": "短闲聊识别长度",
                  "hint": "smart 模式下，只有小于该长度且命中闲聊模板的消息才会跳过召回。",
@@ -109,7 +102,7 @@ diff --git a/core/event_handler_modules/memory_recall.py b/core/event_handler_mo
 index 04b709a..0460693 100644
 --- a/core/event_handler_modules/memory_recall.py
 +++ b/core/event_handler_modules/memory_recall.py
-@@ -31,12 +31,19 @@ if TYPE_CHECKING:
+@@ -31,12 +31,12 @@ if TYPE_CHECKING:
  class MemoryRecall:
      """记忆召回类"""
  
@@ -118,13 +111,6 @@ index 04b709a..0460693 100644
          r"(记得|还记得|之前|上次|以前|当时|我说过|我喜欢|我叫|我是谁|谁是|哪天|什么时候|remember|last time|before)",
          re.IGNORECASE,
      )
-+    _DEFAULT_EXPLICIT_RECALL_PHRASES = (
-+        "上次说了什么",
-+        "你还记得吗",
-+        "之前提到",
-+        "我说过",
-+        "你说过",
-+    )
      _CASUAL_RE = re.compile(
 -        r"^(@?[一-鿿\w-]+\s*)?(在干嘛|干嘛|干吗|在吗|吃了吗|睡了吗|干啥|在干啥|早|早上好|下午好|晚上好|晚安|哈喽|喂+|哈哈+|嗯+|哦+|好的|行|可以|收到|谢谢|谢了|在呢|没干嘛|怎么了|啥事)[！!？?~。.]*$",
 +        r"^((?:你?好)+|在干嘛|干嘛|干吗|在吗|吃了吗|睡了吗|干啥|在干啥|早|早上好|下午好|晚上好|晚安|哈喽|喂+|哈哈+|嗯+|哦+|好的|行|可以|收到|谢谢|谢了|在呢|没干嘛|怎么了|啥事)[！!？?~。.]*$",
@@ -216,7 +202,7 @@ index 04b709a..0460693 100644
              logger.error(f"处理 on_llm_request 钩子时发生错误: {e}", exc_info=True)
  
      def _should_auto_recall(self, query: str) -> tuple[bool, str]:
-@@ -321,14 +334,29 @@ class MemoryRecall:
+@@ -321,14 +321,15 @@ class MemoryRecall:
          ).strip().lower()
          if mode == "off":
              return False, "auto_recall_off"
@@ -228,20 +214,6 @@ index 04b709a..0460693 100644
              return False, "empty_after_normalize"
 -        if self._MEMORY_INTENT_RE.search(text):
 -            return True, "memory_intent"
-+
-+        configured_phrases = self.config_manager.get(
-+            "recall_engine.explicit_recall_phrases",
-+            self._DEFAULT_EXPLICIT_RECALL_PHRASES,
-+        )
-+        if isinstance(configured_phrases, str):
-+            configured_phrases = re.split(r"[,，;；\n]+", configured_phrases)
-+        if not isinstance(configured_phrases, (list, tuple, set)):
-+            configured_phrases = self._DEFAULT_EXPLICIT_RECALL_PHRASES
-+        folded_text = text.casefold()
-+        for phrase in list(configured_phrases)[:20]:
-+            normalized_phrase = str(phrase or "").strip().casefold()
-+            if normalized_phrase and normalized_phrase[:40] in folded_text:
-+                return True, "explicit_memory_request"
 +        if self._EXPLICIT_MEMORY_INTENT_RE.search(text):
 +            return True, "explicit_memory_request"
 +        if mode == "manual":

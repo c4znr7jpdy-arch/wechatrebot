@@ -147,26 +147,19 @@ def test_patch_forces_explicit_recall_and_skips_repeated_greetings(
     assert "mem.content[:100]" not in source
 
 
-def test_patch_supports_custom_phrases_and_respects_master_off(
+def test_patch_uses_builtin_intent_and_respects_master_off(
     patched_plugin: Path,
 ) -> None:
     source = (
         patched_plugin / "core" / "event_handler_modules" / "memory_recall.py"
     ).read_text(encoding="utf-8")
     recall_type = _recall_type(source)
-    custom = _router(
-        recall_type,
-        {"recall_engine.explicit_recall_phrases": ["老规矩"]},
-    )
     disabled = _router(
         recall_type,
-        {
-            "recall_engine.auto_recall_mode": "off",
-            "recall_engine.explicit_recall_phrases": ["老规矩"],
-        },
+        {"recall_engine.auto_recall_mode": "off"},
     )
 
-    assert custom._should_auto_recall("还是老规矩处理") == (
+    assert _router(recall_type)._should_auto_recall("上次说了什么") == (
         True,
         "explicit_memory_request",
     )
@@ -176,16 +169,13 @@ def test_patch_supports_custom_phrases_and_respects_master_off(
     )
     manual = _router(
         recall_type,
-        {
-            "recall_engine.auto_recall_mode": "manual",
-            "recall_engine.explicit_recall_phrases": ["老规矩"],
-        },
+        {"recall_engine.auto_recall_mode": "manual"},
     )
     assert manual._should_auto_recall("我们周末去哪里比较好") == (
         False,
         "manual_no_explicit_request",
     )
-    assert manual._should_auto_recall("还是老规矩处理") == (
+    assert manual._should_auto_recall("上次说了什么") == (
         True,
         "explicit_memory_request",
     )
@@ -197,13 +187,11 @@ def test_patch_adds_customer_config_and_bounded_observability(
     schema = json.loads(
         (patched_plugin / "_conf_schema.json").read_text(encoding="utf-8")
     )
-    field = schema["recall_engine"]["items"]["explicit_recall_phrases"]
     source = (
         patched_plugin / "core" / "event_handler_modules" / "memory_recall.py"
     ).read_text(encoding="utf-8")
 
-    assert field["type"] == "list"
-    assert "上次说了什么" in field["default"]
+    assert "explicit_recall_phrases" not in schema["recall_engine"]["items"]
     assert 'event.set_extra("livingmemory_recall_state", state)' in source
     assert 'event.set_extra("livingmemory_recall_reason", reason)' in source
 

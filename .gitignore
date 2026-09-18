@@ -18,5 +18,12 @@ config/local/
 *.db-wal
 .env*
 
+# Local Codex and investigation workspaces.
+.codex-memory-patch/
+.tmp-*/
+.tmp_codex_home/
+.tmp_probe.py
+.workbuddy-ai/
+
 # Remote-update signing keys must never be committed.
 config/local/update-signing-private.pem

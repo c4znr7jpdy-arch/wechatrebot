@@ -316,8 +316,6 @@
               <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
               <div class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
               <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select><small>“在吗、你好”等短寒暄会直接回复，不等待记忆检索。</small></label>
-              <div class="toggle-line"><span><strong>明确问起往事时优先回忆</strong><small>例如“上次说了什么”“你还记得吗”</small></span><span class="toggle"><input id="explicitRecallEnabled" name="explicit_recall_enabled" type="checkbox"><label class="toggle-track" for="explicitRecallEnabled" aria-label="切换优先回忆"></label><span>已启用</span></span></div>
-              <label><span>回忆触发说法</span><textarea class="resize-none" name="explicit_recall_phrases" rows="3" placeholder="上次说了什么，还记得吗，之前提到"></textarea><small>用逗号分隔，最多 20 条。</small></label>
               <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
               <input name="casual_query_max_chars" type="hidden" value="24">
               <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>

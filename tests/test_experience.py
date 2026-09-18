@@ -57,7 +57,7 @@ def test_save_persona_preserves_advanced_plugin_fields_when_offline(tmp_path: Pa
     assert saved["wake_interaction"]["direct_wake_fast_path"] is True
 
 
-def test_save_memory_maps_manual_and_explicit_recall(tmp_path: Path) -> None:
+def test_save_memory_keeps_builtin_recall_without_custom_phrases(tmp_path: Path) -> None:
     path = _plugin(tmp_path, "astrbot_plugin_livingmemory", {"graph_memory": {"enabled": False}})
     service = ExperienceService(tmp_path)
     service.engine.is_available = lambda: False
@@ -66,8 +66,6 @@ def test_save_memory_maps_manual_and_explicit_recall(tmp_path: Path) -> None:
         {
             "enabled": True,
             "recall_mode": "manual",
-            "explicit_recall_enabled": True,
-            "explicit_recall_phrases": "上次说了什么，你还记得吗",
             "casual_query_max_chars": 30,
             "top_k": 4,
             "summary_trigger_rounds": 12,
@@ -76,7 +74,7 @@ def test_save_memory_maps_manual_and_explicit_recall(tmp_path: Path) -> None:
 
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["recall_engine"]["auto_recall_mode"] == "manual"
-    assert saved["recall_engine"]["explicit_recall_phrases"] == ["上次说了什么", "你还记得吗"]
+    assert "explicit_recall_phrases" not in saved["recall_engine"]
     assert saved["reflection_engine"]["summary_trigger_rounds"] == 12
     assert saved["graph_memory"] == {"enabled": False}
 

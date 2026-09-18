@@ -17,14 +17,6 @@ ANGEL_HEART_MODULE = "astrbot_plugin_angel_heart"
 LIVING_MEMORY_MODULE = "astrbot_plugin_livingmemory"
 EMOTION_MODULE = "astrbot_plugin_self_learning"
 
-DEFAULT_EXPLICIT_RECALL_PHRASES = (
-    "上次说了什么",
-    "还记得吗",
-    "之前提到",
-    "我说过",
-    "你说过",
-)
-
 _DEFAULT_STATE: dict[str, Any] = {
     "schema_version": 1,
     "onboarding_complete": False,
@@ -40,8 +32,6 @@ _DEFAULT_STATE: dict[str, Any] = {
     "memory": {
         "enabled": True,
         "recall_mode": "smart",
-        "explicit_recall_enabled": True,
-        "explicit_recall_phrases": list(DEFAULT_EXPLICIT_RECALL_PHRASES),
         "casual_query_max_chars": 24,
         "top_k": 3,
         "summary_trigger_rounds": 10,
@@ -128,6 +118,10 @@ class ExperienceService:
             value = saved.get(key)
             if isinstance(value, dict):
                 state[key].update(value)
+        # Remove fields from the retired custom trigger-phrase control when
+        # reading state written by an older manager version.
+        state["memory"].pop("explicit_recall_enabled", None)
+        state["memory"].pop("explicit_recall_phrases", None)
         state["onboarding_complete"] = bool(saved.get("onboarding_complete", False))
         return state
 
@@ -247,21 +241,9 @@ class ExperienceService:
         recall_mode = str(values.get("recall_mode") or "smart").strip()
         if recall_mode not in {"smart", "always", "manual"}:
             raise ExperienceError("请选择有效的回忆方式。")
-        phrases_value = values.get("explicit_recall_phrases")
-        if isinstance(phrases_value, str):
-            phrases = [item.strip() for item in phrases_value.replace("，", ",").split(",")]
-        elif isinstance(phrases_value, list):
-            phrases = [str(item).strip() for item in phrases_value]
-        else:
-            phrases = list(DEFAULT_EXPLICIT_RECALL_PHRASES)
-        phrases = list(dict.fromkeys(item for item in phrases if item))[:20]
-        if not phrases:
-            phrases = list(DEFAULT_EXPLICIT_RECALL_PHRASES)
         memory = {
             "enabled": enabled,
             "recall_mode": recall_mode,
-            "explicit_recall_enabled": bool(values.get("explicit_recall_enabled", True)),
-            "explicit_recall_phrases": phrases,
             "casual_query_max_chars": _bounded_int(
                 values.get("casual_query_max_chars", 24),
                 minimum=4,
@@ -280,9 +262,7 @@ class ExperienceService:
         def update(config: dict[str, Any]) -> None:
             recall = _nested(config, "recall_engine")
             recall["auto_recall_mode"] = "off" if not enabled else recall_mode
-            recall["explicit_recall_phrases"] = (
-                phrases if memory["explicit_recall_enabled"] and enabled else []
-            )
+            recall.pop("explicit_recall_phrases", None)
             recall["casual_query_max_chars"] = memory["casual_query_max_chars"]
             recall["top_k"] = memory["top_k"]
             reflection = _nested(config, "reflection_engine")

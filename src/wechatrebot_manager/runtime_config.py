@@ -412,13 +412,6 @@ def _sync_living_memory_config(
             "recall_engine": {
                 "top_k": 3,
                 "auto_recall_mode": "smart",
-                "explicit_recall_phrases": [
-                    "上次说了什么",
-                    "还记得吗",
-                    "之前提到",
-                    "我说过",
-                    "你说过",
-                ],
                 "casual_query_max_chars": 24,
                 "injection_method": "extra_user_content",
                 "inject_with_recent_context": False,
