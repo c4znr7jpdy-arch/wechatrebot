@@ -553,6 +553,24 @@ class ProcessSupervisor:
         self.adoption_complete = False
         self._clear_state()
 
+    def force_stop(self) -> None:
+        """Terminate every managed service immediately, without a grace period."""
+        for running in reversed(self.running):
+            process = running.process
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except Exception:
+                    pass
+            running.log_handle.close()
+        self.running.clear()
+        self.adoption_complete = False
+        self._clear_state()
+
     def wait(self) -> int:
         if not self.running:
             raise ServiceLaunchError("没有正在监督的服务。")

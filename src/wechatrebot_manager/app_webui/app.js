@@ -315,6 +315,22 @@
     const connectionMode = online || wechatLoggedIn ? "done" : waiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
     setStage($("#stageConnection"), connectionMode, online ? "已连接" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
+    const canForceStop = current !== "STOPPED" && current !== "ERROR" && !status.busy;
+    const coreStop = $("#stageCoreStop");
+    const connectionStop = $("#stageConnectionStop");
+    if (coreStop) {
+      coreStop.hidden = !(canForceStop && (coreStarted || active));
+      coreStop.disabled = !canForceStop;
+      coreStop.setAttribute("aria-label", "强制停止机器人功能");
+    }
+    if (connectionStop) {
+      const connectionActive = online || wechatLoggedIn || runtime.connection_ready
+        || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "RUNNING", "STOP_WAIT_WECHAT"].includes(current);
+      connectionStop.hidden = !(canForceStop && connectionActive);
+      connectionStop.disabled = !canForceStop;
+      connectionStop.setAttribute("aria-label", "强制停止消息连接");
+    }
+
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${environment.process_running ? "检测到微信进程" : "尚未运行"}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : active ? "正在启动" : "未启动";
@@ -351,6 +367,20 @@
       reportError(error);
       await refreshStatus();
     }
+  }
+
+  function runForceStop() {
+    confirmAction({
+      title: "强制停止机器人？",
+      message: "将立即结束机器人功能和消息连接，不等待微信自行关闭。正在处理的消息可能会中断。",
+      confirmText: "强制停止",
+      pendingText: "正在强制停止…",
+      onConfirm: async () => {
+        const result = await api("force_stop_robot");
+        if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
+        window.setTimeout(refreshStatus, 150);
+      },
+    });
   }
 
   async function checkEnvironment() {
@@ -3406,6 +3436,7 @@
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
     $("#primaryAction").addEventListener("click", runPrimaryAction);
+    $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
     $("#settingsCheckWechat").addEventListener("click", checkEnvironment);
     $("#chooseWechat").addEventListener("click", chooseWechat);
@@ -3874,7 +3905,7 @@
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
-      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
+      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), force_stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
       save_robot_core: (config, _revision, identity) => {

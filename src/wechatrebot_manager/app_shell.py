@@ -91,6 +91,7 @@ PUBLIC_API_METHODS = (
     "check_environment",
     "start_robot",
     "stop_robot",
+    "force_stop_robot",
     "select_wechat",
     "open_wechat_download",
     "get_features",
@@ -374,6 +375,21 @@ class ApplicationApi:
 
         threading.Thread(target=worker, daemon=True).start()
         return self._ok({"accepted": True}, message="正在停止机器人。")
+
+    def force_stop_robot(self) -> dict[str, object]:
+        if not self._action_lock.acquire(blocking=False):
+            return self._ok({"accepted": False}, message="正在处理上一个操作。")
+
+        def worker() -> None:
+            try:
+                self._lifecycle.force_stop()
+            except Exception as exc:  # pragma: no cover - final UI safety net
+                self._failed(exc)
+            finally:
+                self._action_lock.release()
+
+        threading.Thread(target=worker, daemon=True).start()
+        return self._ok({"accepted": True}, message="正在强制停止机器人。")
 
     def select_wechat(self, value: str = "") -> dict[str, object]:
         try:
