@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.customer_config import (
     RobotSettings,
@@ -257,7 +259,7 @@ def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path
     assert "astrbot_plugin_music" not in config["plugin_set"]
 
 
-def test_plugin_toggle_preserves_hidden_foundations_and_memory_is_exclusive(
+def test_plugin_toggle_preserves_hidden_foundations_and_retires_old_vector_memory(
     tmp_path: Path,
 ) -> None:
     install, _ = _install(tmp_path)
@@ -278,11 +280,11 @@ def test_plugin_toggle_preserves_hidden_foundations_and_memory_is_exclusive(
     updated = json.loads(config_path.read_text(encoding="utf-8"))
     assert "astrbot_plugin_livingmemory" in updated["plugin_set"]
     assert "astrbot_plugin_self_learning" in updated["plugin_set"]
-
-    set_plugin_enabled(install, "astrbot_plugin_mnemosyne", True)
-    switched = json.loads(config_path.read_text(encoding="utf-8"))
-    assert "astrbot_plugin_mnemosyne" in switched["plugin_set"]
-    assert "astrbot_plugin_livingmemory" not in switched["plugin_set"]
+    assert "astrbot_plugin_mnemosyne" not in {
+        item.module_name for item in load_plugins(install)
+    }
+    with pytest.raises(ValueError, match="不存在或尚未交付"):
+        set_plugin_enabled(install, "astrbot_plugin_mnemosyne", True)
 
 
 def test_logs_and_diagnostics_remove_implementation_brand(tmp_path: Path) -> None:

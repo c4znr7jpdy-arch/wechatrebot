@@ -278,7 +278,7 @@ def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> N
     ]
 
 
-def test_delivery_loads_customer_features_and_private_emotion_defaults(
+def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
     tmp_path: Path,
 ) -> None:
     install = tmp_path / "install"
@@ -341,7 +341,7 @@ def test_delivery_loads_customer_features_and_private_emotion_defaults(
     )
 
     assert "astrbot_plugin_livingmemory" in engine["plugin_set"]
-    assert "astrbot_plugin_mnemosyne" in engine["plugin_set"]
+    assert "astrbot_plugin_mnemosyne" not in engine["plugin_set"]
     assert living["provider_settings"]["llm_provider_id"] == provider.model_id
     assert living["recall_engine"]["auto_recall_mode"] == "smart"
     assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8

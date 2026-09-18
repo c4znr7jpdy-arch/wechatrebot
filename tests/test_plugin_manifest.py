@@ -71,12 +71,13 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
         and Path(item["target"]).parts[4] != "_nonebot_stubs.py"
     }
 
-    assert len(delivered) == 24
+    assert len(delivered) == 23
     assert delivered == feature_modules == source_modules
     assert excluded == {
         "astrbot_plugin_apis",
         "astrbot_plugin_hapi_connector_disabled",
         "astrbot_plugin_kimi_web_search",
+        "astrbot_plugin_mnemosyne",
         "astrbot_plugin_twitter",
         "astrbot_plugin_zhenxunribao",
         "jiang_12123_notify",
@@ -99,7 +100,6 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
     }
     assert set(template["plugin_set"]) == safe_defaults
     assert delivered - safe_defaults == {
-        "astrbot_plugin_mnemosyne",  # alternative primary memory cannot run alongside livingmemory
         "astrbot_plugin_self_iterative_core",  # hidden code-writing experiment
     }
 
@@ -132,9 +132,7 @@ def test_source_manifest_excludes_development_and_local_config_artifacts() -> No
     )["entries"]
     by_source = {item["source"]: item for item in entries}
 
-    assert "WINDOWS_TUTORIAL.md" in by_source[
-        "data/plugins/astrbot_plugin_mnemosyne"
-    ]["exclude"]
+    assert "data/plugins/astrbot_plugin_mnemosyne" not in by_source
     assert "example.py" in by_source[
         "data/plugins/astrbot_plugin_parser"
     ]["exclude"]
@@ -172,7 +170,7 @@ def test_group_analysis_keeps_customer_facing_policy() -> None:
     assert feature["default_enabled"] is True
 
 
-def test_new_install_enables_all_safe_features_without_conflicting_memory_or_code_writes() -> None:
+def test_new_install_excludes_retired_vector_memory_and_code_writes() -> None:
     commercial_root = Path(__file__).parents[1]
     features = json.loads(
         (commercial_root / "release" / "feature-set.json").read_text(
@@ -184,8 +182,13 @@ def test_new_install_enables_all_safe_features_without_conflicting_memory_or_cod
     }
 
     assert {item["module"] for item in features} - enabled == {
-        "astrbot_plugin_mnemosyne",
         "astrbot_plugin_self_iterative_core",
     }
-    assert all(item.get("default_enabled", True) for item in features
-               if item.get("visible", True) and item["module"] != "astrbot_plugin_mnemosyne")
+    assert "astrbot_plugin_mnemosyne" not in {
+        item["module"] for item in features
+    }
+    assert all(
+        item.get("default_enabled", True)
+        for item in features
+        if item.get("visible", True)
+    )

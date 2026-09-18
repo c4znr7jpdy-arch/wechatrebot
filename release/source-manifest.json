@@ -173,14 +173,6 @@
     },
     {
       "origin": "project",
-      "source": "data/plugins/astrbot_plugin_mnemosyne",
-      "target": "app/astrbot/data/plugins/astrbot_plugin_mnemosyne",
-      "exclude": [
-        "WINDOWS_TUTORIAL.md"
-      ]
-    },
-    {
-      "origin": "project",
       "source": "data/plugins/astrbot_plugin_parser",
       "target": "app/astrbot/data/plugins/astrbot_plugin_parser",
       "exclude": [

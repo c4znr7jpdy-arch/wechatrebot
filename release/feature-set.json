@@ -6,7 +6,6 @@
     {"module": "astrbot_plugin_self_learning", "display_name": "情感与关系", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "提供好感度、情绪和精简社交上下文；默认不抓取原始消息、不自动学习或覆盖人格。"},
     {"module": "astrbot_plugin_bittorrent", "display_name": "资源检索", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"},
     {"module": "astrbot_plugin_mimo_tts_clone", "display_name": "语音克隆", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "管理授权音色，让文字回复按需要转换为语音。"},
-    {"module": "astrbot_plugin_mnemosyne", "display_name": "外部向量记忆（进阶替代）", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "description": "需要 Milvus 和 Embedding 模型，只作为长期记忆的进阶替代；启用时会自动停用基础长期记忆，不能同时作为主记忆。"},
     {"module": "astrbot_plugin_music", "display_name": "点歌", "ownership": "third-party", "configuration": "none", "default_enabled": true, "description": "默认使用在线接口并自动回退到直连音源，无需额外配置。"},
     {"module": "astrbot_plugin_parser", "display_name": "链接解析", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "识别常见内容平台链接并整理视频、图集和音频信息。"},
     {"module": "astrbot_plugin_patch_at_wxid", "display_name": "群聊兼容", "ownership": "local-patch", "configuration": "none", "default_enabled": true, "visible": false, "description": "自动兼容微信群成员标识，无需额外配置。"},

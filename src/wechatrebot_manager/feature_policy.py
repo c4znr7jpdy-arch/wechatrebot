@@ -17,6 +17,11 @@ FEATURE_CONFIGURATION_MODES = frozenset(
 )
 _MODULE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
+# These modules shipped in older full payloads but are no longer part of the
+# customer product.  Manager-only updates cannot replace the installed legal
+# manifest, so filter them here as well as removing them from future payloads.
+RETIRED_PLUGIN_MODULES = frozenset({"astrbot_plugin_mnemosyne"})
+
 
 @dataclass(frozen=True, slots=True)
 class DeliveryFeature:
@@ -67,6 +72,8 @@ def load_delivery_features(
         visible = raw.get("visible", True)
         if not _MODULE_NAME.fullmatch(module) or not display_name:
             raise ValueError("交付功能清单包含无效的功能名称。")
+        if module in RETIRED_PLUGIN_MODULES:
+            continue
         if configuration not in FEATURE_CONFIGURATION_MODES:
             raise ValueError(f"{display_name} 的配置方式无效。")
         if not isinstance(default_enabled, bool):
@@ -92,5 +99,6 @@ def load_delivery_features(
 __all__ = [
     "DeliveryFeature",
     "FEATURE_CONFIGURATION_MODES",
+    "RETIRED_PLUGIN_MODULES",
     "load_delivery_features",
 ]

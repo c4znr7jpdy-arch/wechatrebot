@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .brand import BrandProfile
+from .feature_policy import RETIRED_PLUGIN_MODULES
 from .json_io import write_json_atomic
 from .provider import (
     DEFAULT_PROVIDER_MODEL,
@@ -550,7 +551,6 @@ _PLUGIN_LABELS = {
     "astrbot_plugin_bittorrent": "资源检索",
     "astrbot_plugin_livingmemory": "长期记忆",
     "astrbot_plugin_mimo_tts_clone": "语音克隆",
-    "astrbot_plugin_mnemosyne": "记忆管理",
     "astrbot_plugin_music": "点歌",
     "astrbot_plugin_parser": "链接解析",
     "astrbot_plugin_patch_at_wxid": "群聊兼容",
@@ -574,6 +574,7 @@ _PLUGIN_LABELS = {
 
 _HIDDEN_CUSTOMER_PLUGINS = {
     "astrbot_plugin_self_learning",
+    *RETIRED_PLUGIN_MODULES,
 }
 
 
@@ -635,10 +636,6 @@ def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> Non
         }
     if enabled:
         names.add(module_name)
-        if module_name == "astrbot_plugin_mnemosyne":
-            names.discard("astrbot_plugin_livingmemory")
-        elif module_name == "astrbot_plugin_livingmemory":
-            names.discard("astrbot_plugin_mnemosyne")
     else:
         names.discard(module_name)
     engine["plugin_set"] = sorted(names)

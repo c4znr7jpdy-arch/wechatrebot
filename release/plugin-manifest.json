@@ -17,7 +17,7 @@
     {"name": "jiang_yanyun_checkin", "version": "2.0.3", "ownership": "excluded", "license": "Proprietary", "review_status": "excluded"},
     {"name": "astrbot_plugin_livingmemory", "version": "2.3.6", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_mimo_tts_clone", "version": "0.7.2", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
-    {"name": "astrbot_plugin_mnemosyne", "version": "2.1.5", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
+    {"name": "astrbot_plugin_mnemosyne", "version": "2.1.5", "ownership": "excluded", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "excluded"},
     {"name": "astrbot_plugin_music", "version": "2.1.1", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
     {"name": "astrbot_plugin_parser", "version": "1.5.6", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
     {"name": "astrbot_plugin_patch_at_wxid", "version": "0.1.0", "ownership": "local-patch", "license": "Proprietary", "review_status": "owner-rights-pending"},

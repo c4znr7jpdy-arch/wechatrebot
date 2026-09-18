@@ -3506,7 +3506,6 @@
       previewFeature("feature-long-memory", "长期记忆", "schema-and-page", "保存对话总结并在需要时召回；明确询问过去内容时强制尝试召回，普通寒暄默认跳过。", {page: "dashboard", readiness: "智能召回已就绪"}),
       previewFeature("feature-bittorrent", "资源检索", "schema", "按关键词检索公开的资源索引，使用前请遵守当地法律与内容授权规则。"),
       previewFeature("feature-voice-clone", "语音克隆", "page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
-      previewFeature("feature-memory-manager", "外部向量记忆（进阶替代）", "schema", "需要 Milvus 和 Embedding 模型；与基础长期记忆只能选择其中一种作为主记忆。", {enabled: false, readiness: "需先停用基础长期记忆并配置外部服务"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
