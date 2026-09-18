@@ -113,7 +113,7 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
 
     assert result["ok"] is True
     assert result["data"]["update"]["enabled"] is True
-    assert result["data"]["update"]["check_interval_seconds"] == 21_600
+    assert result["data"]["update"]["check_interval_seconds"] == 600
     assert result["data"]["provider"] == {
         "configured": False,
         "api_base": "https://api.xiuxianjyj.xin/v1",

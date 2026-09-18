@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         "manifest_url": args.manifest_url.strip(),
         "key_id": key_id,
         "public_key_base64": base64.b64encode(public_bytes).decode("ascii"),
-        "check_interval_seconds": 21_600,
+        "check_interval_seconds": 600,
         "request_timeout_seconds": 20,
         "max_package_bytes": 2 * 1024**3,
     }

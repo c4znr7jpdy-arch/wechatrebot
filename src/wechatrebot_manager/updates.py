@@ -48,7 +48,7 @@ class UpdateChannel:
     channel: str
     key_id: str
     public_key: bytes
-    check_interval_seconds: int = 21_600
+    check_interval_seconds: int = 600
     request_timeout_seconds: int = 20
     max_package_bytes: int = 2 * 1024**3
 
@@ -131,7 +131,7 @@ def load_update_channel(install_root: str | Path | None = None) -> UpdateChannel
     if payload.get("schema_version") != 1:
         raise UpdateError("不支持的更新配置版本。")
     manifest_url = _safe_https_url(payload.get("manifest_url"), allow_empty=True)
-    check_interval = payload.get("check_interval_seconds", 21_600)
+    check_interval = payload.get("check_interval_seconds", 600)
     timeout = payload.get("request_timeout_seconds", 20)
     if install_root is not None:
         override_path = (

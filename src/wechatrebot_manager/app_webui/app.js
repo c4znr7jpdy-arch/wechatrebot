@@ -3276,7 +3276,7 @@
 
   function automaticUpdateIntervalMs() {
     const configured = Number(state.bootstrap?.update?.check_interval_seconds);
-    const seconds = Number.isFinite(configured) && configured >= 300 ? configured : 21600;
+    const seconds = Number.isFinite(configured) && configured >= 300 ? configured : 600;
     return seconds * 1000;
   }
 
@@ -3740,7 +3740,7 @@
     };
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
-      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 21600, result: null}}),
+      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),

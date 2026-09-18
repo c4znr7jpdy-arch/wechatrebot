@@ -30,6 +30,7 @@ def test_update_popup_describes_release_and_offers_later_action() -> None:
     assert "formatBytes(release.package_size)" in script
     assert "release.notes.join" in script
     assert "scheduleAutomaticUpdateCheck(1800)" in script
+    assert "configured : 600" in script
 
 
 def test_download_page_version_participates_in_release_floor(monkeypatch) -> None:
