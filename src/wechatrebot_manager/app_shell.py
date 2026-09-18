@@ -1630,7 +1630,12 @@ class ApplicationApi:
         try:
             view = self._lifecycle.refresh()
             if view.state.value != "STOPPED" or view.online or view.can_stop:
-                raise ValueError("请先在运行中心停止机器人，再安装新版本。")
+                error = self._failed(
+                    ValueError("机器人正在运行，请先在运行中心停止机器人，再进行更新。"),
+                    "14004",
+                )
+                self._update_lock.release()
+                return error
             if not getattr(sys, "frozen", False):
                 raise ValueError("开发运行方式不执行自更新，请使用正式安装版验证。")
             channel = self._load_update_channel()

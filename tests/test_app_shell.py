@@ -698,7 +698,8 @@ def test_install_update_requires_stopped_robot(monkeypatch, tmp_path: Path) -> N
     result = api.install_update("0.9.0")
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "14003"
+    assert result["error"]["code"] == "14004"
+    assert result["error"]["title"] == "请先停止机器人"
     assert api._lifecycle.events.items[-1][0][:2] == ("APP_ERROR", "failed")
 
 

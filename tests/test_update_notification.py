@@ -33,6 +33,18 @@ def test_update_popup_describes_release_and_offers_later_action() -> None:
     assert "configured : 600" in script
 
 
+def test_update_catalog_has_explicit_running_robot_prerequisite() -> None:
+    catalog = json.loads(
+        (ROOT / "src" / "wechatrebot_manager" / "error-codes.zh-CN.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    error = catalog["errors"]["14004"]
+    assert error["title"] == "请先停止机器人"
+    assert "停止机器人" in error["message"]
+
+
 def test_download_page_version_participates_in_release_floor(monkeypatch) -> None:
     publisher = _publisher()
     response = io.BytesIO(json.dumps({"version": "0.9.2"}).encode())
