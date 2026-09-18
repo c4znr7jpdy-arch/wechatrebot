@@ -818,31 +818,34 @@
         $(`.config-tabs button[data-tab="${state.featureTab}"]`)?.focus();
       } catch (error) { showFeatureError(error); }
     }));
-    $("#featureForm")?.addEventListener("input", () => {
+    const featureForm = $("#featureForm");
+    featureForm?.addEventListener("input", () => {
       state.featureDirty = true; state.featureFeedback = "";
       $("#featureNote").textContent = "有修改尚未保存。";
-      $$("textarea", $("#featureForm")).forEach(growTextarea);
+      $$("textarea", featureForm).forEach(growTextarea);
     });
-    if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
-    $("#featureForm")?.addEventListener("submit", (event) => { event.preventDefault(); saveFeature(); });
+    if (featureForm) syncFeatureDependencies(featureForm);
+    featureForm?.addEventListener("submit", (event) => { event.preventDefault(); saveFeature(); });
     $$(".config-input[data-type='bool']").forEach((input) => input.addEventListener("change", () => {
       const label = input.closest(".toggle")?.querySelector("span:last-child");
       if (label) label.textContent = input.checked ? "已启用" : "已停用";
-      if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
+      if (featureForm) syncFeatureDependencies(featureForm);
     }));
-    $$('[data-optional-group-toggle]', $("#featureForm")).forEach((button) => button.addEventListener("click", () => {
-      const section = button.closest(".optional-model-group");
-      const controller = $$(".config-input[data-type='bool']", section).find((input) => input.dataset.path === button.dataset.path);
-      if (!controller) return;
-      controller.checked = !controller.checked;
-      section.querySelector(".config-section-grid").hidden = !controller.checked;
-      button.setAttribute("aria-expanded", String(controller.checked));
-      button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";
-      state.featureDirty = true;
-      state.featureFeedback = "";
-      $("#featureNote").textContent = "有修改尚未保存。";
-      syncFeatureDependencies($("#featureForm"));
-    }));
+    if (featureForm) {
+      $$('[data-optional-group-toggle]', featureForm).forEach((button) => button.addEventListener("click", () => {
+        const section = button.closest(".optional-model-group");
+        const controller = $$(".config-input[data-type='bool']", section).find((input) => input.dataset.path === button.dataset.path);
+        if (!controller) return;
+        controller.checked = !controller.checked;
+        section.querySelector(".config-section-grid").hidden = !controller.checked;
+        button.setAttribute("aria-expanded", String(controller.checked));
+        button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";
+        state.featureDirty = true;
+        state.featureFeedback = "";
+        $("#featureNote").textContent = "有修改尚未保存。";
+        syncFeatureDependencies(featureForm);
+      }));
+    }
     $$(".secret-reveal").forEach((button) => button.addEventListener("click", () => {
       const input = document.getElementById(button.getAttribute("aria-controls"));
       const visible = input.type === "password";
