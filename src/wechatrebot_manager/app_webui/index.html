@@ -99,8 +99,8 @@
               <div class="panel-heading"><div><span class="eyebrow">启动进度</span><h2>连接台账</h2></div></div>
               <ol class="stage-list">
                 <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong><small>安装路径与兼容版本</small></div><em>待检查</em></li>
-                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em></li>
-                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em></li>
+                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em><button class="stage-stop-button" id="stageCoreStop" data-stage-stop hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
+                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em><button class="stage-stop-button" id="stageConnectionStop" data-stage-stop hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
               </ol>
               <div class="ready-rule"><strong>可用判定</strong><p>只有以上三项全部通过，软件才会显示“机器人可用”。</p></div>
             </section>

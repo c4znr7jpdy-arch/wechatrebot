@@ -42,6 +42,10 @@ class _Supervisor:
         self.stopped = True
         self.running.clear()
 
+    def force_stop(self) -> None:
+        self.forced = True
+        self.running.clear()
+
 
 def test_start_is_gated_when_wechat_is_missing(tmp_path: Path) -> None:
     controller = LifecycleController(
@@ -236,6 +240,40 @@ def test_stop_ignores_personal_wechat_after_bot_hook_closes(tmp_path: Path) -> N
     assert was_running_during_confirmation is True
     assert stopped.state == LifecycleState.STOPPED
     assert holder["supervisor"].stopped is True
+
+
+def test_force_stop_bypasses_wechat_wait_and_returns_to_stopped(tmp_path: Path) -> None:
+    snapshots = iter(
+        (
+            RuntimeSnapshot(False, False, ""),
+            RuntimeSnapshot(True, True, "wxid_bot", True, True, True),
+            RuntimeSnapshot(False, False, ""),
+        )
+    )
+    holder = {}
+
+    def factory(progress):
+        holder["supervisor"] = _Supervisor(progress)
+        holder["supervisor"].forced = False
+        return holder["supervisor"]
+
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: _environment(tmp_path),
+        environment_saver=lambda root, environment: None,
+        snapshotter=lambda: next(snapshots),
+        process_probe=lambda: ("weixin.exe",),
+        preflight=lambda root: (),
+        supervisor_factory=factory,
+    )
+    controller.start()
+
+    stopped = controller.force_stop()
+
+    assert stopped.state == LifecycleState.STOPPED
+    assert stopped.can_stop is False
+    assert stopped.can_start is True
+    assert holder["supervisor"].forced is True
 
 
 def test_closing_personal_wechat_does_not_stop_bot_while_hook_is_alive(

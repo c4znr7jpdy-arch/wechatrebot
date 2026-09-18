@@ -723,10 +723,23 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
         for match in __import__("re").findall(r'api\("[a-z_]+"', script)
     }
 
-    assert called | {"start_robot", "stop_robot"} == set(
+    assert called | {"start_robot", "stop_robot", "force_stop_robot"} == set(
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
+
+
+def test_run_center_force_stop_controls_are_present() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'id="stageCoreStop"' in markup
+    assert 'id="stageConnectionStop"' in markup
+    assert 'api("force_stop_robot")' in script
+    assert '[data-stage-stop]' in script
+    assert '.stage-stop-button[hidden]' in styles
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:

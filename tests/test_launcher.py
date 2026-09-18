@@ -158,6 +158,29 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
 
 
+def test_supervisor_force_stop_kills_services_in_reverse_order(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    events: list[str] = []
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        events.append(f"start:{name}")
+        return _FakeProcess(name, events)
+
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(
+        specs, popen_factory=popen, readiness_waiter=lambda spec, process: True
+    )
+    supervisor.start()
+    supervisor.force_stop()
+
+    assert events[-2:] == ["kill:new-hook-bridge", "kill:astrbot"]
+    assert supervisor.running == []
+
+
 def test_preflight_rejects_missing_hook_before_any_process_starts(
     tmp_path: Path, monkeypatch
 ) -> None:
