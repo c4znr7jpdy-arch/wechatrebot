@@ -16,16 +16,20 @@ from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     delete_provider_profile,
     delete_provider_thinking_preference,
+    apply_web_search_values,
     load_provider_profile,
     load_provider_services,
+    load_web_search_settings,
     load_robot_settings,
     provider_reference_modules,
     replace_provider_references,
     replace_provider_value,
     save_provider_profile,
+    save_web_search_settings,
     save_provider_thinking_preference,
     set_default_provider,
     set_provider_thinking,
+    web_search_settings_from_config,
 )
 from .customer_maintenance import (
     CustomerMaintenanceService,
@@ -129,6 +133,8 @@ PUBLIC_API_METHODS = (
     "save_emotion_settings",
     "complete_onboarding",
     "get_providers",
+    "get_web_search_settings",
+    "save_web_search_settings",
     "save_provider",
     "set_default_provider",
     "set_provider_thinking",
@@ -1120,6 +1126,51 @@ class ApplicationApi:
                 ]
             )
         except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
+    def get_web_search_settings(self) -> dict[str, object]:
+        try:
+            client = EngineApiClient(self._install_root)
+            if client.is_available():
+                system = client.request("GET", "/api/v1/system-config")
+                config = system.get("config") if isinstance(system, dict) else None
+                if not isinstance(config, dict):
+                    raise PluginCenterError("无法读取当前机器人核心配置，请刷新后重试。")
+                settings = web_search_settings_from_config(config)
+                settings["apply_state"] = "applied"
+                return self._ok(settings)
+            return self._ok(load_web_search_settings(self._install_root))
+        except (OSError, ValueError, PluginCenterError, EngineUnavailableError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_web_search_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        try:
+            client = EngineApiClient(self._install_root)
+            hot_applied = client.is_available()
+            if hot_applied:
+                system = client.request("GET", "/api/v1/system-config")
+                config = system.get("config") if isinstance(system, dict) else None
+                if not isinstance(config, dict):
+                    raise PluginCenterError("无法读取当前机器人核心配置，请刷新后重试。")
+                apply_web_search_values(config, values)
+                client.request("PUT", "/api/v1/system-config", config)
+                verified = client.request("GET", "/api/v1/system-config")
+                verified_config = verified.get("config") if isinstance(verified, dict) else None
+                if not isinstance(verified_config, dict):
+                    raise PluginCenterError("联网搜索设置已提交，但没有收到生效确认，请刷新后重试。")
+                saved = web_search_settings_from_config(verified_config)
+            else:
+                saved = save_web_search_settings(self._install_root, values)
+            saved["apply_state"] = "applied" if hot_applied else "saved_for_start"
+            return self._ok(
+                saved,
+                message=(
+                    "联网搜索设置已热更新，下一条消息使用新配置。"
+                    if hot_applied
+                    else "联网搜索设置已保存，机器人启动时使用。"
+                ),
+            )
+        except (OSError, ValueError, PluginCenterError, EngineUnavailableError) as exc:
             return self._failed(exc, "15001")
 
     def set_default_provider(self, provider_id: str) -> dict[str, object]:

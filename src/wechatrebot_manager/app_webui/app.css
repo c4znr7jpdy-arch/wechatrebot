@@ -1307,6 +1307,18 @@ tbody tr:hover { background: #fbfdff; }
 .core-detail-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
 .core-detail-heading h2 { margin: 0 0 6px; font-size: 20px; }
 .core-detail-heading p { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.core-subtabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.core-subtabs button { min-height: 62px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; cursor: pointer; text-align: left; font: inherit; font-size: 12px; font-weight: 800; transition: border-color .2s ease, background-color .2s ease, color .2s ease; }
+.core-subtabs button span { display: block; margin-top: 4px; color: var(--subtle); font-size: 10px; font-weight: 600; line-height: 1.4; }
+.core-subtabs button:hover { border-color: var(--blue-300); color: var(--blue-700); }
+.core-subtabs button.active { border-color: var(--blue-500); background: var(--blue-50); color: var(--blue-700); box-shadow: inset 3px 0 var(--blue-600); }
+.web-search-settings-card { grid-column: 1 / -1; min-height: 0; }
+.web-search-settings-card .panel-heading p { max-width: 680px; }
+.web-search-provider-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.web-search-provider-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; }
+.web-search-provider-row.active { border-color: var(--blue-300); background: var(--blue-50); }
+.web-search-provider-row strong, .web-search-provider-row small { display: block; }
+.web-search-provider-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .core-form { padding-bottom: 22px; }
 .core-identity-card { grid-column: 1 / -1; margin: 16px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
 .core-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
@@ -1333,6 +1345,8 @@ tbody tr:hover { background: #fbfdff; }
   .core-form .config-section-grid, .core-monitor-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
+  .core-subtabs { grid-template-columns: 1fr; }
+  .web-search-provider-list { grid-template-columns: 1fr; }
   .core-layout { grid-template-columns: 1fr; }
   .core-heading, .core-detail { padding: 16px; }
   .core-sidebar { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }

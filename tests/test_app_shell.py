@@ -1,8 +1,9 @@
-from pathlib import Path
-from types import SimpleNamespace
+import copy
 import json
+from pathlib import Path
 import sys
 import threading
+from types import SimpleNamespace
 
 from wechatrebot_manager import app_shell
 from wechatrebot_manager.error_catalog import load_error_catalog
@@ -176,6 +177,77 @@ def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_
     })
     assert generic["ok"] is True
     assert captured["profile"].thinking_enabled is False
+
+
+def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    config = {
+        "provider_settings": {
+            "web_search": False,
+            "websearch_provider": "tavily",
+            "websearch_tavily_key": [],
+        }
+    }
+    calls = []
+
+    class HotClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def request(method, path, payload=None):
+            calls.append((method, path))
+            if path == "/api/v1/plugins":
+                return []
+            if method == "GET":
+                return {"config": copy.deepcopy(config)}
+            config.clear()
+            config.update(copy.deepcopy(payload))
+            return {}
+
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: HotClient())
+    result = api.save_web_search_settings(
+        {"enabled": True, "provider": "bocha", "link_enabled": True, "key": "bocha-key"}
+    )
+    assert result["ok"] is True
+    assert result["data"]["apply_state"] == "applied"
+    assert config["provider_settings"]["websearch_provider"] == "bocha"
+    assert config["provider_settings"]["websearch_bocha_key"] == ["bocha-key"]
+    assert calls == [
+        ("GET", "/api/v1/system-config"),
+        ("PUT", "/api/v1/system-config"),
+        ("GET", "/api/v1/system-config"),
+    ]
+    live = api.get_web_search_settings()
+    assert live["ok"] is True
+    assert live["data"]["apply_state"] == "applied"
+    assert live["data"]["provider"] == "bocha"
+    assert calls[-2:] == [
+        ("GET", "/api/v1/system-config"),
+        ("GET", "/api/v1/system-config"),
+    ]
+
+    captured = {}
+    monkeypatch.setattr(
+        app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False)
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "save_web_search_settings",
+        lambda _root, values: captured.setdefault("values", values) or {
+            "enabled": False,
+            "provider": "tavily",
+            "link_enabled": False,
+            "providers": {},
+        },
+    )
+    fallback = api.save_web_search_settings(
+        {"enabled": False, "provider": "tavily", "link_enabled": False}
+    )
+    assert fallback["ok"] is True
+    assert fallback["data"]["apply_state"] == "saved_for_start"
+    assert captured["values"]["provider"] == "tavily"
 
 
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
