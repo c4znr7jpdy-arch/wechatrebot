@@ -58,6 +58,7 @@ from .provider import (
     supports_thinking_toggle,
 )
 from .response_trace import ResponseTraceService
+from .retired_plugins import purge_retired_plugins
 from .schedules import ScheduleService
 from .scheduled_task_service import ScheduledTaskService
 from .task_store import next_occurrences, parse_command, schedule_text
@@ -165,6 +166,7 @@ class ApplicationApi:
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
+        purge_retired_plugins(self._install_root)
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
         self._history = ChatHistoryService(self._install_root)

@@ -8,13 +8,14 @@ import re
 import secrets
 
 from .brand import BrandProfile
-from .feature_policy import load_delivery_features
+from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
 from .json_io import write_json_atomic
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     with_thinking_mode,
 )
+from .retired_plugins import purge_retired_plugins
 
 
 _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
@@ -341,6 +342,12 @@ def _sync_delivery_plugins(
             if feature.visible or feature.default_enabled
         ]
         astrbot_payload["wechatrebot_feature_scope_version"] = 2
+    configured = astrbot_payload.get("plugin_set")
+    if isinstance(configured, list):
+        astrbot_payload["plugin_set"] = [
+            name for name in configured
+            if str(name) not in RETIRED_PLUGIN_MODULES
+        ]
 
 
 def _sync_angel_heart_model(
@@ -535,6 +542,7 @@ def write_runtime_configs(
     astrbot_data_root = astrbot_root / "data"
     astrbot_data_root.mkdir(parents=True, exist_ok=True)
     (astrbot_data_root / "config").mkdir(parents=True, exist_ok=True)
+    purge_retired_plugins(root)
     (astrbot_root / ".astrbot").touch(exist_ok=True)
     astrbot_path = astrbot_data_root / "cmd_config.json"
     generated_astrbot = astrbot_config_payload(

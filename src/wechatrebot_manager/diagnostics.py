@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .feature_policy import RETIRED_PLUGIN_MODULES
 from .install_paths import INSTALL_MARKER
 from .launcher import port_accepting
 from .payload import sha256_file
@@ -196,18 +197,27 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
 
     feature_set, feature_error = _load_json(root / "legal" / "feature-set.json")
     feature_items = feature_set.get("features") if feature_set is not None else None
+    active_feature_items = (
+        [
+            feature for feature in feature_items
+            if not isinstance(feature, dict)
+            or str(feature.get("module") or "") not in RETIRED_PLUGIN_MODULES
+        ]
+        if isinstance(feature_items, list)
+        else None
+    )
     feature_issues: list[str] = []
-    if isinstance(feature_items, list):
+    if isinstance(active_feature_items, list):
         plugin_root = root / "app" / "astrbot" / "data" / "plugins"
-        for feature in feature_items:
+        for feature in active_feature_items:
             if not isinstance(feature, dict):
                 feature_issues.append("功能清单条目格式错误")
                 continue
             feature_issues.extend(_feature_configuration_issues(plugin_root, feature))
     feature_ready = (
         feature_error is None
-        and isinstance(feature_items, list)
-        and bool(feature_items)
+        and isinstance(active_feature_items, list)
+        and bool(active_feature_items)
         and not feature_issues
     )
     checks.append(
@@ -219,13 +229,13 @@ def collect_diagnostics(install_root: str | Path) -> dict[str, Any]:
             or (
                 "；".join(feature_issues)
                 if feature_issues
-                else f"已交付 {len(feature_items)} 项功能"
+                else f"已交付 {len(active_feature_items)} 项功能"
             ),
         )
     )
-    if isinstance(feature_items, list):
+    if isinstance(active_feature_items, list):
         captured["feature_bundle"] = {
-            "feature_count": len(feature_items),
+            "feature_count": len(active_feature_items),
             "issue_count": len(feature_issues),
         }
 

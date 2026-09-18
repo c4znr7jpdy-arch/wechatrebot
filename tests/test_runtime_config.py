@@ -289,7 +289,20 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
         "astrbot_plugin_self_learning",
     ):
         (data / "plugins" / module).mkdir(parents=True)
-    (install / "legal").mkdir(parents=True)
+    retired_config = data / "config" / "astrbot_plugin_mnemosyne_config.json"
+    retired_config.parent.mkdir(parents=True)
+    retired_config.write_text("{}", encoding="utf-8")
+    retired_data = data / "plugin_data" / "astrbot_plugin_mnemosyne"
+    retired_data.mkdir(parents=True)
+    retired_source = (
+        install
+        / "legal"
+        / "corresponding-source"
+        / "astrbot-plugin-astrbot_plugin_mnemosyne.patch"
+    )
+    retired_source.parent.mkdir(parents=True)
+    retired_source.write_text("legacy", encoding="utf-8")
+    (install / "legal").mkdir(parents=True, exist_ok=True)
     (install / "legal" / "feature-set.json").write_text(
         json.dumps(
             {
@@ -342,6 +355,10 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
 
     assert "astrbot_plugin_livingmemory" in engine["plugin_set"]
     assert "astrbot_plugin_mnemosyne" not in engine["plugin_set"]
+    assert not (data / "plugins" / "astrbot_plugin_mnemosyne").exists()
+    assert not retired_config.exists()
+    assert not retired_data.exists()
+    assert not retired_source.exists()
     assert living["provider_settings"]["llm_provider_id"] == provider.model_id
     assert living["recall_engine"]["auto_recall_mode"] == "smart"
     assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8
