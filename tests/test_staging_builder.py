@@ -405,6 +405,34 @@ def test_staging_applies_base_then_named_extension_patch_to_same_plugin(
     )
 
 
+def test_staging_skips_patch_for_excluded_plugin_missing_from_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _builder()
+    commercial = tmp_path / "commercial"
+    output = commercial / "artifacts" / "staging"
+    patches = commercial / "patches"
+    patches.mkdir(parents=True)
+    (commercial / "release").mkdir(parents=True)
+    (commercial / "release" / "plugin-manifest.json").write_text(
+        json.dumps({"plugins": [{"name": "retired_plugin", "ownership": "excluded"}]}),
+        encoding="utf-8",
+    )
+    (patches / "astrbot-plugin-retired_plugin.patch").write_text(
+        "retired", encoding="utf-8"
+    )
+    calls = []
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    module._apply_plugin_patches(commercial, output)
+
+    assert calls == []
+
+
 def test_staging_keeps_legacy_update_bootstrap_marker(tmp_path: Path) -> None:
     module = _builder()
     source_manifest = tmp_path / "source-manifest.json"

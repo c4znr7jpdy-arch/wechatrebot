@@ -87,6 +87,18 @@ def _copied_record(target: Path, output: Path) -> dict[str, str]:
 
 def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
     prefix = "astrbot-plugin-"
+    plugin_manifest_path = commercial_root / "release" / "plugin-manifest.json"
+    excluded_modules: set[str] = set()
+    if plugin_manifest_path.is_file():
+        try:
+            plugin_manifest = json.loads(plugin_manifest_path.read_text(encoding="utf-8"))
+            excluded_modules = {
+                str(item["name"])
+                for item in plugin_manifest.get("plugins", [])
+                if isinstance(item, dict) and item.get("ownership") == "excluded"
+            }
+        except (OSError, json.JSONDecodeError, TypeError, KeyError):
+            excluded_modules = set()
     def patch_order(path: Path) -> tuple[str, int, str]:
         raw = path.stem.removeprefix(prefix)
         module, separator, variant = raw.partition("--")
@@ -99,6 +111,8 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
         module = patch.stem.removeprefix(prefix).split("--", 1)[0]
         plugin_root = output / "app" / "astrbot" / "data" / "plugins" / module
         if not plugin_root.is_dir():
+            if module in excluded_modules:
+                continue
             raise RuntimeError(f"plugin patch target is missing: {module}")
         plugin_relative = plugin_root.relative_to(commercial_root).as_posix()
         command = [
