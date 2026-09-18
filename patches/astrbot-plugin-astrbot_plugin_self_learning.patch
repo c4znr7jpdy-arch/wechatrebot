@@ -1,49 +1,20 @@
 diff --git a/core/page_api.py b/core/page_api.py
 --- a/core/page_api.py
 +++ b/core/page_api.py
-@@ -703,6 +703,11 @@ class PluginPageApi:
-         effective_persona = current or default_persona or {}
-         angel_cfg = getattr(angel, "config_manager", None)
-         living_cfg = getattr(living, "config_manager", None)
-+        memory_explicit_phrases = (
-+            living_cfg.get("recall_engine.explicit_recall_phrases", [])
-+            if living_cfg
-+            else []
-+        )
-         return self._ok(
-             {
-                 "group_id": group_id,
-@@ -741,6 +746,11 @@ class PluginPageApi:
-                         living_cfg.get("recall_engine.vector_search_timeout_seconds", 0.8)
-                         if living_cfg else 0.8
-                     ),
-+                    "memory_explicit_phrases": [
-+                        str(item).strip()
-+                        for item in memory_explicit_phrases
-+                        if str(item).strip()
-+                    ][:20] if isinstance(memory_explicit_phrases, (list, tuple)) else [],
-                     "compact_emotion_context": bool(
-                         getattr(own, "enable_llm_hooks", True)
-                         and getattr(own, "llm_hook_profile", "compact") == "compact"
-@@ -751,7 +761,7 @@ class PluginPageApi:
-                     ),
-                 },
+@@ -753,5 +753,5 @@ class PluginPageApi:
                  "pipeline": [
 -                    {"key": "persona", "label": "稳定人格", "state": "always", "detail": "AstrBot 原生人格，唯一性格真相源"},
 +                    {"key": "persona", "label": "稳定人格", "state": "always", "detail": "当前人格设定是唯一性格真相源"},
                      {"key": "gate", "label": "回复门控", "state": "fast", "detail": "点名/引用走快路径，普通群聊才请秘书判断"},
                      {"key": "emotion", "label": "关系与情绪", "state": "compact", "detail": "只调整语气，不能覆盖人格和事实"},
                      {"key": "memory", "label": "长期记忆", "state": "smart", "detail": "记忆型问题才自动召回，闲聊直接跳过"},
-@@ -771,7 +781,7 @@ class PluginPageApi:
- 
+@@ -772,4 +772,4 @@ class PluginPageApi:
          angel = self._active_angelheart()
          if angel is None:
 -            errors.append("AngelHeart 运行实例未就绪")
 +            errors.append("回复策略运行实例未就绪")
          else:
-             try:
-                 angel.apply_runtime_config(
-@@ -786,13 +796,37 @@ class PluginPageApi:
+@@ -786,11 +786,11 @@ class PluginPageApi:
                      }
                  )
              except Exception as exc:
@@ -56,39 +27,8 @@ diff --git a/core/page_api.py b/core/page_api.py
 +            errors.append("长期记忆运行实例未就绪")
          else:
              try:
-+                raw_phrases = values.get("memory_explicit_phrases")
-+                if raw_phrases is None:
-+                    living_cfg = getattr(living, "config_manager", None)
-+                    raw_phrases = (
-+                        living_cfg.get("recall_engine.explicit_recall_phrases", [])
-+                        if living_cfg
-+                        else []
-+                    )
-+                if isinstance(raw_phrases, str):
-+                    phrase_items = raw_phrases.replace("，", ",").split(",")
-+                elif isinstance(raw_phrases, (list, tuple)):
-+                    phrase_items = raw_phrases
-+                else:
-+                    phrase_items = []
-+                phrases: list[str] = []
-+                seen_phrases: set[str] = set()
-+                for item in phrase_items:
-+                    phrase = str(item).strip()
-+                    if not phrase or phrase in seen_phrases:
-+                        continue
-+                    phrases.append(phrase)
-+                    seen_phrases.add(phrase)
-+                    if len(phrases) >= 20:
-+                        break
                  memory_mode = str(values.get("memory_mode") or "smart").lower()
-                 if memory_mode not in {"smart", "always", "off"}:
-                     memory_mode = "smart"
-@@ -802,12 +836,13 @@ class PluginPageApi:
-                             "auto_recall_mode": memory_mode,
-                             "top_k": int(self._bounded_float(values.get("memory_top_k"), 0, 10, 3)),
-                             "vector_search_timeout_seconds": self._bounded_float(values.get("memory_timeout"), 0.1, 5.0, 0.8),
-+                            "explicit_recall_phrases": phrases,
-                             "casual_query_max_chars": 24,
+@@ -806,7 +806,7 @@ class PluginPageApi:
                          }
                      }
                  )
@@ -97,8 +37,7 @@ diff --git a/core/page_api.py b/core/page_api.py
 +                errors.append(f"长期记忆: {exc}")
  
          try:
-             ConfigService = self._imports().ConfigService
-@@ -822,9 +857,9 @@ class PluginPageApi:
+@@ -822,9 +822,9 @@ class PluginPageApi:
                  }
              )
              if not success:

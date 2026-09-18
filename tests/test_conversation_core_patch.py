@@ -10,7 +10,7 @@ SOURCE = Path("E:/Project/data/plugins/astrbot_plugin_self_learning")
 PATCH = ROOT / "patches" / "astrbot-plugin-astrbot_plugin_self_learning.patch"
 
 
-def test_conversation_core_hot_update_includes_explicit_memory_phrases(
+def test_conversation_core_hot_update_removes_explicit_memory_phrases(
     tmp_path: Path,
 ) -> None:
     if not SOURCE.is_dir():
@@ -38,8 +38,8 @@ def test_conversation_core_hot_update_includes_explicit_memory_phrases(
     )
 
     source = (target / "core" / "page_api.py").read_text(encoding="utf-8")
-    assert '"memory_explicit_phrases"' in source
-    assert '"explicit_recall_phrases": phrases' in source
-    assert "if len(phrases) >= 20" in source
+    assert '"memory_explicit_phrases"' not in source
+    assert '"explicit_recall_phrases": phrases' not in source
+    assert "if len(phrases) >= 20" not in source
     assert 'errors.append(f"长期记忆: {exc}")' in source
     assert 'errors.append(f"情感状态: {exc}")' in source

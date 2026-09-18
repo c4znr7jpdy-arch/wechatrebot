@@ -323,7 +323,6 @@ class ExperienceService:
 
 __all__ = [
     "ANGEL_HEART_MODULE",
-    "DEFAULT_EXPLICIT_RECALL_PHRASES",
     "EMOTION_MODULE",
     "ExperienceError",
     "ExperienceService",
