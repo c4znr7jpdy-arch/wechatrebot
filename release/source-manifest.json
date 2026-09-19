@@ -181,6 +181,11 @@
     },
     {
       "origin": "project",
+      "source": "data/plugins/astrbot_plugin_twitter",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_twitter"
+    },
+    {
+      "origin": "project",
       "source": "data/plugins/astrbot_plugin_patch_at_wxid",
       "target": "app/astrbot/data/plugins/astrbot_plugin_patch_at_wxid"
     },

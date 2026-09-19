@@ -13,13 +13,14 @@ _GUIDES = {
     "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "打开专属配置页填写语音服务密钥，管理授权音色、使用范围和语音参数；保存后查看页面反馈并在测试聊天中验证。", "需要 MiMo 语音服务和已授权的参考音频；自动语音会产生服务用量。", ()),
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),
     "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
+    "astrbot_plugin_twitter": ("订阅 X/Twitter 推主并推送新推文", "先选择 FxTwitter 或 Nitter 数据源并配置网络访问，再在群聊或私聊中使用“/推特关注 用户名”建立订阅；需要管理群级订阅时打开专属订阅管理页。", "推送依赖可用的数据源和网络代理；这是按会话保存的订阅，不会自动把所有推主消息发送到全部聊天。", ("basic.twitter_data_provider", "basic.twitter_fxtwitter_api_base", "basic.twitter_proxy", "basic.twitter_poll_interval", "basic.twitter_poll_max_tweets_per_user", "content_filter.twitter_link_recognition_enabled")),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
     "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "只填写允许主动联系的会话，再打开对应的群聊或私聊开关。", "主动消息会发送给真实联系人；先在测试会话试用，避免打扰。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.session_list", "group_settings.group_idle_trigger_minutes")),
     "astrbot_plugin_qq_group_daily_analysis": ("把一天群聊整理成日报", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
-    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；安排青岛天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
+    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；具体指令见下方列表。安排天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先填写一个主生图模型即可；确有需要时点击“添加备用模型”再填写第二个。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
@@ -33,6 +34,75 @@ _GUIDES = {
 }
 
 
+# Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
+# even when the plugin source contains internal or administrator-only helpers.
+_COMMANDS = {
+    "jiang_commands": (
+        {
+            "title": "常用查询",
+            "items": (
+                ("\\新闻", "今日热点新闻"),
+                ("\\城市天气", "例如：\\绵阳天气、\\青岛天气902"),
+                ("\\油价省份", "例如：\\油价四川"),
+                ("\\epic", "Epic 喜加一"),
+                ("\\kfc", "疯狂星期四文案"),
+                ("\\理想", "发送 20 秒《理想进行曲》语音条"),
+                ("\\燕云", "燕云十六声动态"),
+            ),
+        },
+        {
+            "title": "AI 互动",
+            "items": (
+                ("@姜小妹 科普/查一下/介绍一下", "自动联网搜索总结"),
+                ("@姜小妹 提问", "自由提问，AI 对话回复"),
+                ("@姜小妹 帮我画 xxx", "文生图"),
+                ("@姜小妹 P图/改图/图生图", "编辑图片（需引用图片）"),
+            ),
+        },
+        {
+            "title": "趣味与游戏",
+            "items": (
+                ("\\占卜", "抽四张塔罗牌占卜"),
+                ("\\塔罗牌", "抽一张塔罗牌"),
+                ("\\洛克", "查看洛克王国全部指令"),
+                ("\\洛克档案 \\战绩 \\背包", "查询角色数据"),
+                ("\\洛克阵容 \\查蛋 \\配种", "阵容与宠物"),
+                ("\\洛克交换大厅 \\远行商人", "交易与商店"),
+                ("\\订阅远行商人 \\家园菜园", "订阅通知"),
+            ),
+        },
+        {
+            "title": "定时任务（管理员）",
+            "items": (
+                ("\\定时新闻 8点", "每日推送热点"),
+                ("\\定时天气 绵阳 8点", "每日天气"),
+                ("\\定时kfc 周四 12点", "每周 KFC 文案"),
+                ("\\定时列表 \\定时删除", "管理定时任务"),
+            ),
+        },
+        {
+            "title": "B站订阅（管理员）",
+            "items": (
+                ("\\订阅动态 UID", "订阅 B 站用户动态"),
+                ("\\取消订阅动态 UID", "取消订阅"),
+                ("\\订阅列表", "查看当前订阅"),
+            ),
+        },
+        {
+            "title": "其他",
+            "items": (
+                ("发送链接", "抖音/TikTok/B站链接自动解析"),
+                ("\\启用 \\禁用 插件名", "插件开关（管理员）"),
+                ("\\插件列表", "查看所有插件（管理员）"),
+                ("\\切换模型 \\图片模型", "切换 AI 后端（管理员）"),
+                ("\\语音 文字", "TTS 语音合成"),
+                ("\\米游社帮助", "查看米游社相关功能"),
+            ),
+        },
+    ),
+}
+
+
 # audience, readiness, recommendation.  This is product guidance only: it never
 # toggles, deletes, or rewrites a customer's existing plugin configuration.
 _ASSESSMENTS = {
@@ -42,6 +112,7 @@ _ASSESSMENTS = {
     "astrbot_plugin_mimo_tts_clone": ("进阶选配", "需要外部服务", "只有确实需要授权音色和语音回复时使用；默认文字回复更省成本。"),
     "astrbot_plugin_music": ("群聊常用", "可直接试用", "保留为低门槛娱乐能力；播放结果仍取决于在线音源与授权。"),
     "astrbot_plugin_parser": ("群聊常用", "可直接试用", "建议保留。群内分享链接频繁时价值高，并建议默认要求点名机器人。"),
+    "astrbot_plugin_twitter": ("兴趣选配", "需要数据源和网络访问", "只为明确需要的群或好友建立订阅；先用 FxTwitter 测试网络，再逐个订阅推主，避免不必要的轮询请求。"),
     "astrbot_plugin_patch_at_wxid": ("底层支持", "无需用户配置", "必须保留并在普通功能列表弱化展示；它负责微信群点名兼容。"),
     "astrbot_plugin_proactive_chat": ("进阶选配", "会主动发送消息", "全局启用不等于向所有群发言；默认群主动聊天关闭，只为明确选择的群开启，并先在测试群验证频率。"),
     "astrbot_plugin_qq_group_daily_analysis": ("群管理常用", "已适配本机消息记录", "建议保留并按需启用；只分析当前机器人账号成功接收后的本机群消息，首次使用需先积累记录。"),
@@ -78,6 +149,8 @@ def get_plugin_guide(module_name: str) -> dict[str, Any]:
         "prerequisites": (prerequisite,),
         "common_fields": paths,
     }
+    if module_name in _COMMANDS:
+        guide["commands"] = copy.deepcopy(_COMMANDS[module_name])
     assessment = _ASSESSMENTS.get(module_name)
     if assessment:
         guide.update({

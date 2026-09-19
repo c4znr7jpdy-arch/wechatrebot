@@ -55,6 +55,7 @@
     "astrbot_plugin_music",
     "astrbot_plugin_parser",
     "astrbot_plugin_patch_at_wxid",
+    "astrbot_plugin_twitter",
     "astrbot_plugin_proactive_chat",
     "astrbot_plugin_qq_group_daily_analysis",
     "astrbot_plugin_self_learning",

@@ -95,6 +95,7 @@
   const HISTORY_PRELOAD_THRESHOLD = 120;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
+  const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -120,11 +121,36 @@
   function avatarMarkup(className, name, value) {
     const fallback = String(name || "聊").trim().slice(0, 1) || "聊";
     const source = safeImageUrl(value);
-    return `<span class="${className} avatar-frame" aria-hidden="true"><span class="avatar-fallback">${escapeHtml(fallback)}</span>${source ? `<img src="${escapeHtml(source)}" alt="" loading="lazy">` : ""}</span>`;
+    return `<span class="${className} avatar-frame" aria-hidden="true"><span class="avatar-fallback">${escapeHtml(fallback)}</span>${source ? `<img src="${escapeHtml(source)}" data-avatar-source="${escapeHtml(source)}" alt="" loading="lazy">` : ""}</span>`;
   }
 
   function bindAvatarFallbacks(root = document) {
-    $$(".avatar-frame img", root).forEach((image) => image.addEventListener("error", () => image.remove(), {once: true}));
+    $$(".avatar-frame img", root).forEach((image) => {
+      if (image.dataset.avatarFallbackBound === "true") return;
+      image.dataset.avatarFallbackBound = "true";
+      image.addEventListener("error", () => {
+        const frame = image.closest(".avatar-frame");
+        const retry = Number(image.dataset.avatarRetry || "0");
+        if (!frame || retry >= AVATAR_RETRY_DELAYS_MS.length) {
+          image.remove();
+          return;
+        }
+
+        image.dataset.avatarRetry = String(retry + 1);
+        image.hidden = true;
+        window.setTimeout(() => {
+          if (!image.isConnected) return;
+          try {
+            const source = new URL(image.dataset.avatarSource || image.src);
+            source.searchParams.set("avatar_retry", `${Date.now()}-${retry}`);
+            image.src = source.href;
+            image.hidden = false;
+          } catch (_error) {
+            image.remove();
+          }
+        }, AVATAR_RETRY_DELAYS_MS[retry]);
+      });
+    });
   }
 
   function toast(message, type = "success") {
@@ -780,7 +806,7 @@
       const path = [...prefix, key];
       if (field.type === "object" && field.items && typeof field.items === "object") {
         flushGroup();
-        markup.push(`<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path, namespace)}</div></section>`);
+        markup.push(`<section class="config-section" data-config-section="${escapeHtml(path.join("."))}"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path, namespace)}</div></section>`);
         return;
       }
       const fieldHtml = fieldMarkup(key, field, getAtPath(config, path), path, namespace);
@@ -821,14 +847,24 @@
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
+    const commandGroups = Array.isArray(guide.commands) ? guide.commands : [];
+    const commandMarkup = commandGroups.length ? `<section class="feature-command-list" aria-labelledby="feature-command-title"><div class="feature-command-heading"><div><span class="eyebrow">快速参考</span><h3 id="feature-command-title">常用指令</h3></div><span>复制到聊天即可使用</span></div><div class="feature-command-groups">${commandGroups.map((group) => `<div class="feature-command-group"><strong>${escapeHtml(group.title || "指令")}</strong><div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map((item) => `<div class="feature-command-item"><code>${escapeHtml(item[0] || "")}</code><span>${escapeHtml(item[1] || "")}</span></div>`).join("")}</div></div>`).join("")}</div></section>` : "";
+    const scheduleAction = detail.scheduled_action || "";
+    const scheduleCopy = scheduleAction === "short_drama"
+      ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。"
+      : scheduleAction === "group_analysis"
+        ? "选择自动日报群和每天生成时间，群聊分析会按群生成独立日报。"
+        : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
+    const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
         <span class="status-badge online">统一加载</span>
       </div>
-      ${detail.scheduled_action ? `<div class="feature-schedule-entry"><p>${detail.scheduled_action === "short_drama" ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。" : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。"}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>创建定时任务</button></div>` : ""}
+      ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
+      ${commandMarkup}
       ${detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
@@ -1219,7 +1255,7 @@
         };
       });
       groupDirectoryStatus(data);
-      if (!background || previousGroups !== JSON.stringify(state.groups)
+      if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
           || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
         renderGroups({preserveInspector: background});
       } else {
@@ -2037,6 +2073,21 @@
     await loadGroups(false, {background: true});
   }
 
+  async function refreshVisibleChatData() {
+    if (document.visibilityState === "hidden") return;
+    if (state.activePage === "groups" && state.chatManagementTab === "groups") {
+      await loadGroups(true, {background: true});
+      return;
+    }
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    state.historyPolling = true;
+    try {
+      await loadConversations({silent: true, refreshGroups: true});
+    } finally {
+      state.historyPolling = false;
+    }
+  }
+
   function renderConversationInspector(item) {
     const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
     const senderName = latestSender ? (latestSender.group_nickname || latestSender.wechat_name || latestSender.sender_name || "未知发送者") : "尚无发送者";
@@ -2445,6 +2496,16 @@
   async function openScheduledFromFeature() {
     if (state.featureDirty) { discardFeatureChanges(openScheduledFromFeature); return; }
     const action = state.featureDetail?.scheduled_action || "weather";
+    if (action === "group_analysis") {
+      state.featureTab = "basic";
+      renderFeatureDetail();
+      const section = $("#featureForm .config-section[data-config-section='auto_analysis']");
+      section?.scrollIntoView({behavior: "smooth", block: "start"});
+      const target = section?.querySelector("textarea, input, select");
+      target?.focus({preventScroll: true});
+      toast("已定位到自动日报设置；选择群聊和时间后保存即可。 ");
+      return;
+    }
     await navigate("schedules");
     if (state.activePage === "schedules") await openScheduledEditor(null, false, action);
   }
@@ -3580,6 +3641,10 @@
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
     window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
+    window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshVisibleChatData().catch(reportError);
+    });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
       const targets = $$("button:not(:disabled), input:not(:disabled)", $("#modalBackdrop"));
@@ -3635,7 +3700,7 @@
     const previewAudience = {
       "feature-memory": "群聊常用", "feature-long-memory": "群聊常用", "feature-bittorrent": "群聊常用",
       "feature-voice-clone": "进阶选配", "feature-memory-manager": "进阶选配",
-      "feature-music": "群聊常用", "feature-parser": "群聊常用",
+      "feature-music": "群聊常用", "feature-parser": "群聊常用", "feature-twitter": "兴趣选配",
       "feature-proactive": "进阶选配", "feature-group-analysis": "群管理常用", "feature-self-iterative": "不建议默认启用",
       "feature-router": "底层支持", "feature-commands": "群聊常用", "feature-group-notice": "群管理常用",
       "feature-image": "场景选配", "feature-emoji-voice": "进阶选配",
@@ -3664,8 +3729,9 @@
       previewFeature("feature-voice-clone", "语音克隆", "page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
+      previewFeature("feature-twitter", "推特推送", "schema-and-page", "订阅 X/Twitter 推主，按会话管理订阅并定时推送新推文；支持链接解析、媒体和翻译配置。", {page: "plugin-settings", fieldCount: 8}),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
-      previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true}),
+      previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true, scheduledAction: "group_analysis", scheduleProvider: true}),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
       previewFeature("feature-group-notice", "群成员变动通知", "schema", "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"),
       previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models", fieldCount: 9}),
@@ -3834,7 +3900,7 @@
         ["baidu_app_builder", "百度 AI Search"], ["firecrawl", "Firecrawl"], ["exa", "Exa"],
       ].map(([id, name]) => [id, {id, name, description: "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
