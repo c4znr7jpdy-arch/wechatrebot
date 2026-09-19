@@ -553,6 +553,7 @@ _PLUGIN_LABELS = {
     "astrbot_plugin_mimo_tts_clone": "语音克隆",
     "astrbot_plugin_music": "点歌",
     "astrbot_plugin_parser": "链接解析",
+    "astrbot_plugin_twitter": "推特推送",
     "astrbot_plugin_patch_at_wxid": "群聊兼容",
     "astrbot_plugin_proactive_chat": "主动聊天",
     "astrbot_plugin_qq_group_daily_analysis": "群聊分析",
