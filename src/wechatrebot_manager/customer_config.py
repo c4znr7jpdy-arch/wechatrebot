@@ -23,6 +23,109 @@ from .provider import (
 from .runtime_config import normalize_admin_id, write_runtime_configs
 
 
+WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str], ...] = (
+    ("tavily", "Tavily", "适合通用英文与国际资讯搜索。"),
+    ("bocha", "博查 Bocha", "中文资讯与网页搜索，国内访问更友好。"),
+    ("brave", "Brave Search", "隐私优先的通用网页搜索。"),
+    ("baidu_app_builder", "百度 AI Search", "百度生态的中文搜索服务。"),
+    ("firecrawl", "Firecrawl", "适合网页抓取与深度内容提取。"),
+    ("exa", "Exa", "适合语义检索与研究型搜索。"),
+)
+_WEB_SEARCH_PROVIDER_KEYS = {item[0] for item in WEB_SEARCH_PROVIDERS}
+_WEB_SEARCH_KEY_FIELDS = {
+    "tavily": "websearch_tavily_key",
+    "bocha": "websearch_bocha_key",
+    "brave": "websearch_brave_key",
+    "baidu_app_builder": "websearch_baidu_app_builder_key",
+    "firecrawl": "websearch_firecrawl_key",
+    "exa": "websearch_exa_key",
+}
+
+
+def _web_search_provider_items(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for provider_id, name, description in WEB_SEARCH_PROVIDERS:
+        raw = settings.get(_WEB_SEARCH_KEY_FIELDS[provider_id])
+        if provider_id == "baidu_app_builder":
+            configured = bool(str(raw or "").strip())
+            key_count = 1 if configured else 0
+        else:
+            keys = raw if isinstance(raw, list) else []
+            configured_keys = [str(item).strip() for item in keys if str(item).strip()]
+            configured = bool(configured_keys)
+            key_count = len(configured_keys)
+        result[provider_id] = {
+            "id": provider_id,
+            "name": name,
+            "description": description,
+            "configured": configured,
+            "key_count": key_count,
+        }
+    return result
+
+
+def web_search_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
+    settings = config.get("provider_settings")
+    if not isinstance(settings, dict):
+        settings = {}
+    provider = str(settings.get("websearch_provider") or "tavily").strip().casefold()
+    if provider not in _WEB_SEARCH_PROVIDER_KEYS:
+        provider = "tavily"
+    return {
+        "enabled": bool(settings.get("web_search")),
+        "provider": provider,
+        "link_enabled": bool(settings.get("web_search_link")),
+        "providers": _web_search_provider_items(settings),
+    }
+
+
+def apply_web_search_values(
+    config: dict[str, Any], values: dict[str, Any], *, preserve_empty_key: bool = True,
+) -> dict[str, Any]:
+    settings = config.get("provider_settings")
+    if not isinstance(settings, dict):
+        settings = {}
+        config["provider_settings"] = settings
+    enabled = values.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("联网搜索开关格式无效。")
+    provider = str(values.get("provider") or "").strip().casefold()
+    if provider not in _WEB_SEARCH_PROVIDER_KEYS:
+        raise ValueError("联网搜索服务商不受支持，请重新选择。")
+    link_enabled = values.get("link_enabled", False)
+    if not isinstance(link_enabled, bool):
+        raise ValueError("搜索结果链接开关格式无效。")
+    settings["web_search"] = enabled
+    settings["websearch_provider"] = provider
+    settings["web_search_link"] = link_enabled
+
+    key_value = values.get("key")
+    clear_key = bool(values.get("clear_key"))
+    if clear_key:
+        settings[_WEB_SEARCH_KEY_FIELDS[provider]] = "" if provider == "baidu_app_builder" else []
+    elif isinstance(key_value, str) and key_value.strip():
+        normalized_key = key_value.strip()
+        settings[_WEB_SEARCH_KEY_FIELDS[provider]] = (
+            normalized_key if provider == "baidu_app_builder" else [normalized_key]
+        )
+    elif not preserve_empty_key and key_value is not None:
+        settings[_WEB_SEARCH_KEY_FIELDS[provider]] = "" if provider == "baidu_app_builder" else []
+    return config
+
+
+def load_web_search_settings(root: str | Path) -> dict[str, Any]:
+    _, _, engine_path = _paths(root)
+    return web_search_settings_from_config(_object(engine_path))
+
+
+def save_web_search_settings(root: str | Path, values: dict[str, Any]) -> dict[str, Any]:
+    _, _, engine_path = _paths(root)
+    engine = _object(engine_path)
+    apply_web_search_values(engine, values)
+    write_json_atomic(engine_path, engine)
+    return web_search_settings_from_config(engine)
+
+
 def _object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -646,11 +749,14 @@ __all__ = [
     "PluginEntry",
     "ProviderService",
     "RobotSettings",
+    "WEB_SEARCH_PROVIDERS",
+    "apply_web_search_values",
     "delete_provider_profile",
     "delete_provider_thinking_preference",
     "load_plugins",
     "load_provider_profile",
     "load_provider_services",
+    "load_web_search_settings",
     "provider_reference_modules",
     "replace_provider_references",
     "replace_provider_value",
@@ -658,7 +764,9 @@ __all__ = [
     "save_provider_profile",
     "save_provider_thinking_preference",
     "save_robot_settings",
+    "save_web_search_settings",
     "set_plugin_enabled",
     "set_default_provider",
     "set_provider_thinking",
+    "web_search_settings_from_config",
 ]

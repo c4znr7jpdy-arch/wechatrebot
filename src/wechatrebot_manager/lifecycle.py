@@ -41,6 +41,8 @@ class SupervisorLike(Protocol):
 
     def stop(self, timeout_seconds: float = 15) -> None: ...
 
+    def force_stop(self) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class LifecycleView:
@@ -323,6 +325,30 @@ class LifecycleController:
                 self._wechat_closed_confirmations = 0
                 return self.view()
             return self._finish_stop()
+
+    def force_stop(self) -> LifecycleView:
+        """Stop owned services immediately, without waiting for WeChat."""
+        with self._lock:
+            supervisor = self._supervisor
+            if supervisor is None or not supervisor.running:
+                self.state = LifecycleState.STOPPED
+                self._error = None
+                return self.view()
+            self.state = LifecycleState.STOPPING
+            self._error = None
+            force_stop = getattr(supervisor, "force_stop", None)
+            if callable(force_stop):
+                force_stop()
+            else:
+                # Keep test/custom supervisors compatible while still forcing
+                # the production supervisor down without a grace period.
+                supervisor.stop(timeout_seconds=0)
+            self._supervisor = None
+            self._runtime = self._snapshotter()
+            self.state = LifecycleState.STOPPED
+            self._running_events_emitted = False
+            self._wechat_closed_confirmations = 0
+            return self.view()
 
     def _bot_wechat_active(self) -> bool:
         """Track only the WeChat instance owned by the active HOOK session.

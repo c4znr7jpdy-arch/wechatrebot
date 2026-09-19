@@ -77,6 +77,7 @@ def perform_install(
     progress_callback: InstallProgress | None = None,
     save_locator: bool = True,
     create_shortcuts: bool = True,
+    create_entrypoints: bool = True,
 ) -> VerifiedPayload | None:
     errors = request.validate()
     if errors:
@@ -116,11 +117,12 @@ def perform_install(
                 "state": "ready" if verified is not None else "configured",
             },
         )
-        ensure_launcher_executable(root)
-        provision_uninstaller(
-            root,
-            display_name=normalized_brand.display_name,
-        )
+        if create_entrypoints:
+            ensure_launcher_executable(root)
+            provision_uninstaller(
+                root,
+                display_name=normalized_brand.display_name,
+            )
         if save_locator:
             try:
                 save_install_location(root)

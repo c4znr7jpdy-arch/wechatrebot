@@ -1,8 +1,9 @@
-from pathlib import Path
-from types import SimpleNamespace
+import copy
 import json
+from pathlib import Path
 import sys
 import threading
+from types import SimpleNamespace
 
 from wechatrebot_manager import app_shell
 from wechatrebot_manager.error_catalog import load_error_catalog
@@ -176,6 +177,77 @@ def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_
     })
     assert generic["ok"] is True
     assert captured["profile"].thinking_enabled is False
+
+
+def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    config = {
+        "provider_settings": {
+            "web_search": False,
+            "websearch_provider": "tavily",
+            "websearch_tavily_key": [],
+        }
+    }
+    calls = []
+
+    class HotClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def request(method, path, payload=None):
+            calls.append((method, path))
+            if path == "/api/v1/plugins":
+                return []
+            if method == "GET":
+                return {"config": copy.deepcopy(config)}
+            config.clear()
+            config.update(copy.deepcopy(payload))
+            return {}
+
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: HotClient())
+    result = api.save_web_search_settings(
+        {"enabled": True, "provider": "bocha", "link_enabled": True, "key": "bocha-key"}
+    )
+    assert result["ok"] is True
+    assert result["data"]["apply_state"] == "applied"
+    assert config["provider_settings"]["websearch_provider"] == "bocha"
+    assert config["provider_settings"]["websearch_bocha_key"] == ["bocha-key"]
+    assert calls == [
+        ("GET", "/api/v1/system-config"),
+        ("PUT", "/api/v1/system-config"),
+        ("GET", "/api/v1/system-config"),
+    ]
+    live = api.get_web_search_settings()
+    assert live["ok"] is True
+    assert live["data"]["apply_state"] == "applied"
+    assert live["data"]["provider"] == "bocha"
+    assert calls[-2:] == [
+        ("GET", "/api/v1/system-config"),
+        ("GET", "/api/v1/system-config"),
+    ]
+
+    captured = {}
+    monkeypatch.setattr(
+        app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False)
+    )
+    monkeypatch.setattr(
+        app_shell,
+        "save_web_search_settings",
+        lambda _root, values: captured.setdefault("values", values) or {
+            "enabled": False,
+            "provider": "tavily",
+            "link_enabled": False,
+            "providers": {},
+        },
+    )
+    fallback = api.save_web_search_settings(
+        {"enabled": False, "provider": "tavily", "link_enabled": False}
+    )
+    assert fallback["ok"] is True
+    assert fallback["data"]["apply_state"] == "saved_for_start"
+    assert captured["values"]["provider"] == "tavily"
 
 
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
@@ -626,7 +698,8 @@ def test_install_update_requires_stopped_robot(monkeypatch, tmp_path: Path) -> N
     result = api.install_update("0.9.0")
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "14003"
+    assert result["error"]["code"] == "14004"
+    assert result["error"]["title"] == "请先停止机器人"
     assert api._lifecycle.events.items[-1][0][:2] == ("APP_ERROR", "failed")
 
 
@@ -723,10 +796,23 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
         for match in __import__("re").findall(r'api\("[a-z_]+"', script)
     }
 
-    assert called | {"start_robot", "stop_robot"} == set(
+    assert called | {"start_robot", "stop_robot", "force_stop_robot"} == set(
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
+
+
+def test_run_center_force_stop_controls_are_present() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'id="stageCoreStop"' in markup
+    assert 'id="stageConnectionStop"' in markup
+    assert 'api("force_stop_robot")' in script
+    assert '[data-stage-stop]' in script
+    assert '.stage-stop-button[hidden]' in styles
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
@@ -760,6 +846,22 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
     assert "if (!force) return;" in feature_loader
     assert 'await api("get_feature", featureId)' in feature_loader
     assert "form.elements.model.value = items[0]" not in model_discovery
+
+
+def test_feature_detail_guards_optional_model_bindings_without_a_form() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+    feature_renderer = script[
+        script.index("function renderFeatureDetail") : script.index(
+            "function helpAudienceMatch"
+        )
+    ]
+
+    assert 'const featureForm = $("#featureForm");' in feature_renderer
+    assert "if (featureForm) {" in feature_renderer
+    assert "$$('[data-optional-group-toggle]', featureForm)" in feature_renderer
+    assert "$$('[data-optional-group-toggle]', $(\"#featureForm\"))" not in feature_renderer
 
 
 def test_feature_details_are_warmed_in_the_background() -> None:
@@ -838,6 +940,10 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert "管理机器人所在群聊的回复规则、可用功能和成员信息" in markup
     assert 'api("get_groups", refresh)' in script
     assert 'api("get_group_members", groupId)' in script
+    assert '<span>微信号</span>' in script
+    assert '<span>微信标识</span>' in script
+    assert 'item.wechat_id || "未提供"' in script
+    assert 'item.user_id || "未提供"' in script
     assert 'previousAccount !== state.groupAccount' in script
     assert "当前接口未提供" in script
     assert "从群聊列表添加" in script

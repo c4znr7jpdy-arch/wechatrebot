@@ -10,10 +10,12 @@ from wechatrebot_manager.customer_config import (
     load_plugins,
     load_provider_profile,
     load_provider_services,
+    load_web_search_settings,
     load_robot_settings,
     provider_reference_modules,
     replace_provider_references,
     save_provider_profile,
+    save_web_search_settings,
     save_robot_settings,
     set_plugin_enabled,
     set_default_provider,
@@ -58,6 +60,39 @@ def test_robot_and_provider_settings_round_trip(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.api_key == "customer-key"
     assert loaded.model == "chat-model"
+
+
+def test_web_search_settings_round_trip_and_key_redaction(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    initial = load_web_search_settings(install)
+    assert initial["enabled"] is False
+    assert initial["provider"] == "tavily"
+    assert initial["providers"]["bocha"]["configured"] is False
+
+    saved = save_web_search_settings(
+        install,
+        {"enabled": True, "provider": "bocha", "link_enabled": True, "key": "bocha-key"},
+    )
+    assert saved["enabled"] is True
+    assert saved["provider"] == "bocha"
+    assert saved["link_enabled"] is True
+    assert saved["providers"]["bocha"]["configured"] is True
+    assert "key" not in saved["providers"]["bocha"]
+
+    config_path = install / "app/astrbot/data/cmd_config.json"
+    engine = json.loads(config_path.read_text(encoding="utf-8"))
+    assert engine["provider_settings"]["web_search"] is True
+    assert engine["provider_settings"]["websearch_provider"] == "bocha"
+    assert engine["provider_settings"]["websearch_bocha_key"] == ["bocha-key"]
+
+    cleared = save_web_search_settings(
+        install,
+        {"enabled": False, "provider": "bocha", "link_enabled": False, "clear_key": True},
+    )
+    assert cleared["enabled"] is False
+    assert cleared["providers"]["bocha"]["configured"] is False
+    engine = json.loads(config_path.read_text(encoding="utf-8"))
+    assert engine["provider_settings"]["websearch_bocha_key"] == []
 
 
 def test_multiple_model_services_share_one_catalog_and_default(tmp_path: Path) -> None:

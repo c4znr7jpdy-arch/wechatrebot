@@ -26,6 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the frozen Windows manager.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--host-python", type=Path, default=Path(sys.executable))
+    parser.add_argument(
+        "--build-python", type=Path,
+        help="reuse an existing Python 3.13 x64 build environment instead of reinstalling tools",
+    )
     args = parser.parse_args(argv)
 
     commercial_root = Path(__file__).resolve().parents[1]
@@ -51,23 +55,38 @@ def main(argv: list[str] | None = None) -> int:
         cwd=commercial_root,
     )
 
-    build_venv = output / "build-venv"
-    _run([str(host_python), "-m", "venv", str(build_venv)], cwd=commercial_root)
-    build_python = build_venv / "Scripts" / "python.exe"
-    requirements = commercial_root / "release" / "build-requirements.lock"
-    _run(
-        [
-            str(build_python),
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--no-cache-dir",
-            "--requirement",
-            str(requirements),
-        ],
-        cwd=commercial_root,
-    )
+    if args.build_python is not None:
+        build_python = args.build_python.expanduser().resolve()
+        if not build_python.is_file():
+            parser.error(f"build Python does not exist: {build_python}")
+        _run(
+            [
+                str(build_python), "-c",
+                "import platform,sys,PyInstaller;"
+                "assert sys.version_info[:2] == (3,13);"
+                "assert platform.architecture()[0] == '64bit';"
+                "assert PyInstaller.__version__ == '6.22.2'",
+            ],
+            cwd=commercial_root,
+        )
+    else:
+        build_venv = output / "build-venv"
+        _run([str(host_python), "-m", "venv", str(build_venv)], cwd=commercial_root)
+        build_python = build_venv / "Scripts" / "python.exe"
+        requirements = commercial_root / "release" / "build-requirements.lock"
+        _run(
+            [
+                str(build_python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-cache-dir",
+                "--requirement",
+                str(requirements),
+            ],
+            cwd=commercial_root,
+        )
 
     dist = output / "dist"
     _run(

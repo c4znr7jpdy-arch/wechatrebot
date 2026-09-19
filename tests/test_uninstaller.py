@@ -174,3 +174,16 @@ def test_uninstall_helper_uses_independent_frozen_environment(monkeypatch, tmp_p
     plan = uninstaller.UninstallPlan(tmp_path / "plan.json", tmp_path / "helper.exe")
     uninstaller.launch_uninstall_helper(plan)
     assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+
+def test_unrelated_untrusted_process_path_does_not_block_stop(monkeypatch, tmp_path: Path) -> None:
+    from wechatrebot_manager import launcher
+
+    root = _installation(tmp_path / "install")
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda: (987654,))
+    monkeypatch.setattr(
+        launcher, "process_identity",
+        lambda _pid: (_ for _ in ()).throw(OSError(448, "untrusted mount point")),
+    )
+
+    assert uninstaller.stop_installation_processes(root) == 0

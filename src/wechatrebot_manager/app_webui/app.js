@@ -76,6 +76,9 @@
     updateChecking: false,
     updateCheckTimer: 0,
     settingsSection: "model",
+    coreSettingsTab: "search",
+    webSearch: null,
+    webSearchDirty: false,
     providerScreen: "overview",
     providerDirty: false,
     providerBaseline: "",
@@ -312,6 +315,22 @@
     const connectionMode = online || wechatLoggedIn ? "done" : waiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
     setStage($("#stageConnection"), connectionMode, online ? "已连接" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
+    const canForceStop = current !== "STOPPED" && current !== "ERROR" && !status.busy;
+    const coreStop = $("#stageCoreStop");
+    const connectionStop = $("#stageConnectionStop");
+    if (coreStop) {
+      coreStop.hidden = !(canForceStop && (coreStarted || active));
+      coreStop.disabled = !canForceStop;
+      coreStop.setAttribute("aria-label", "强制停止机器人功能");
+    }
+    if (connectionStop) {
+      const connectionActive = online || wechatLoggedIn || runtime.connection_ready
+        || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "RUNNING", "STOP_WAIT_WECHAT"].includes(current);
+      connectionStop.hidden = !(canForceStop && connectionActive);
+      connectionStop.disabled = !canForceStop;
+      connectionStop.setAttribute("aria-label", "强制停止消息连接");
+    }
+
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${environment.process_running ? "检测到微信进程" : "尚未运行"}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : active ? "正在启动" : "未启动";
@@ -350,6 +369,20 @@
     }
   }
 
+  function runForceStop() {
+    confirmAction({
+      title: "强制停止机器人？",
+      message: "将立即结束机器人功能和消息连接，不等待微信自行关闭。正在处理的消息可能会中断。",
+      confirmText: "强制停止",
+      pendingText: "正在强制停止…",
+      onConfirm: async () => {
+        const result = await api("force_stop_robot");
+        if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
+        window.setTimeout(refreshStatus, 150);
+      },
+    });
+  }
+
   async function checkEnvironment() {
     try { renderStatus(await api("check_environment")); }
     catch (error) { reportError(error); }
@@ -370,7 +403,7 @@
     schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "core", "memory", "system"]);
+  const SETTINGS_SECTIONS = new Set(["model", "core", "system"]);
 
   function providerFormSnapshot() {
     const form = $("#providerForm");
@@ -446,7 +479,11 @@
     state.settingsSection = section;
     const page = $("#page-settings");
     page.dataset.settingsSection = section;
-    $$('[data-settings-section]', page).forEach((item) => { item.hidden = item.dataset.settingsSection !== section; });
+    $$('[data-settings-section]', page).forEach((item) => {
+      const matches = item.dataset.settingsSection === section;
+      const coreMemory = section === "core" && item.dataset.settingsSection === "core" && item.dataset.coreSubsection === "memory";
+      item.hidden = !matches || (coreMemory && state.coreSettingsTab !== "memory");
+    });
     $$("#settingsTabs [data-settings-tab]").forEach((button) => {
       const active = button.dataset.settingsTab === section;
       button.classList.toggle("active", active);
@@ -458,6 +495,30 @@
       $("#providerEditorPage").hidden = state.providerScreen !== "editor";
     }
     if (section === "core") void coreSettings.load();
+    if (section === "core") {
+      setCoreSettingsTab(state.coreSettingsTab, false);
+      void loadWebSearchSettings();
+    }
+  }
+
+  function setCoreSettingsTab(tab, focus = false) {
+    if (!["search", "conversation", "memory"].includes(tab)) return;
+    state.coreSettingsTab = tab;
+    const page = $("#page-settings");
+    $$('[data-core-settings-tab]', page).forEach((button) => {
+      const active = button.dataset.coreSettingsTab === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      if (focus && active) button.focus();
+    });
+    $$('[data-core-subsection]', page).forEach((item) => {
+      item.hidden = item.dataset.coreSubsection !== tab;
+    });
+    if (tab === "memory") {
+      const experience = state.experience;
+      if (experience) fillExperience(experience);
+    }
+    if (tab === "conversation") void coreSettings.load();
   }
 
   async function navigate(page) {
@@ -787,31 +848,34 @@
         $(`.config-tabs button[data-tab="${state.featureTab}"]`)?.focus();
       } catch (error) { showFeatureError(error); }
     }));
-    $("#featureForm")?.addEventListener("input", () => {
+    const featureForm = $("#featureForm");
+    featureForm?.addEventListener("input", () => {
       state.featureDirty = true; state.featureFeedback = "";
       $("#featureNote").textContent = "有修改尚未保存。";
-      $$("textarea", $("#featureForm")).forEach(growTextarea);
+      $$("textarea", featureForm).forEach(growTextarea);
     });
-    if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
-    $("#featureForm")?.addEventListener("submit", (event) => { event.preventDefault(); saveFeature(); });
+    if (featureForm) syncFeatureDependencies(featureForm);
+    featureForm?.addEventListener("submit", (event) => { event.preventDefault(); saveFeature(); });
     $$(".config-input[data-type='bool']").forEach((input) => input.addEventListener("change", () => {
       const label = input.closest(".toggle")?.querySelector("span:last-child");
       if (label) label.textContent = input.checked ? "已启用" : "已停用";
-      if ($("#featureForm")) syncFeatureDependencies($("#featureForm"));
+      if (featureForm) syncFeatureDependencies(featureForm);
     }));
-    $$('[data-optional-group-toggle]', $("#featureForm")).forEach((button) => button.addEventListener("click", () => {
-      const section = button.closest(".optional-model-group");
-      const controller = $$(".config-input[data-type='bool']", section).find((input) => input.dataset.path === button.dataset.path);
-      if (!controller) return;
-      controller.checked = !controller.checked;
-      section.querySelector(".config-section-grid").hidden = !controller.checked;
-      button.setAttribute("aria-expanded", String(controller.checked));
-      button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";
-      state.featureDirty = true;
-      state.featureFeedback = "";
-      $("#featureNote").textContent = "有修改尚未保存。";
-      syncFeatureDependencies($("#featureForm"));
-    }));
+    if (featureForm) {
+      $$('[data-optional-group-toggle]', featureForm).forEach((button) => button.addEventListener("click", () => {
+        const section = button.closest(".optional-model-group");
+        const controller = $$(".config-input[data-type='bool']", section).find((input) => input.dataset.path === button.dataset.path);
+        if (!controller) return;
+        controller.checked = !controller.checked;
+        section.querySelector(".config-section-grid").hidden = !controller.checked;
+        button.setAttribute("aria-expanded", String(controller.checked));
+        button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";
+        state.featureDirty = true;
+        state.featureFeedback = "";
+        $("#featureNote").textContent = "有修改尚未保存。";
+        syncFeatureDependencies(featureForm);
+      }));
+    }
     $$(".secret-reveal").forEach((button) => button.addEventListener("click", () => {
       const input = document.getElementById(button.getAttribute("aria-controls"));
       const visible = input.type === "password";
@@ -1263,7 +1327,7 @@
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
-      : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><small>${escapeHtml(item.wechat_id || item.user_id || "标识未提供")}</small></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
+      : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><div class="member-identities"><small><span>微信号</span>${escapeHtml(item.wechat_id || "未提供")}</small><small><span>微信标识</span>${escapeHtml(item.user_id || "未提供")}</small></div></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
     const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
     const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
@@ -3079,6 +3143,77 @@
     });
   }
 
+  function renderWebSearch(settings) {
+    state.webSearch = settings || {enabled: false, provider: "tavily", link_enabled: false, providers: {}};
+    state.webSearchDirty = false;
+    state.webSearchClearKey = false;
+    const form = $("#webSearchForm");
+    if (!form) return;
+    const providerSelect = form.elements.provider;
+    const providers = state.webSearch.providers || {};
+    providerSelect.innerHTML = Object.values(providers).map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.configured ? " · 已配置" : ""}</option>`).join("");
+    providerSelect.value = state.webSearch.provider || "tavily";
+    form.elements.enabled.checked = Boolean(state.webSearch.enabled);
+    form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
+    updateToggleCopy({currentTarget: form.elements.enabled});
+    updateWebSearchProviderCopy();
+    $("#webSearchStatus").textContent = state.webSearch.enabled ? "已启用" : "未启用";
+    $("#webSearchStatus").classList.toggle("online", Boolean(state.webSearch.enabled));
+    $("#webSearchNote").textContent = state.webSearch.enabled
+      ? "服务商已选择；保存后会在需要时调用。"
+      : "联网搜索当前关闭。保存后机器人不会发起搜索请求。";
+  }
+
+  function updateWebSearchProviderCopy() {
+    const form = $("#webSearchForm");
+    if (!form || !state.webSearch) return;
+    const id = form.elements.provider.value;
+    const item = state.webSearch.providers?.[id] || {};
+    $("#webSearchProviderHint").textContent = item.description || "选择后使用对应服务商的密钥。";
+    $("#webSearchKeyHint").textContent = item.configured
+      ? `当前服务商已保存 ${item.key_count || 1} 个密钥；输入新密钥会替换当前服务商密钥。`
+      : "当前服务商尚未配置密钥；密钥仅保存在本机。";
+    $("#webSearchProviderList").innerHTML = Object.values(state.webSearch.providers || {}).map((provider) => `<div class="web-search-provider-row ${provider.id === id ? "active" : ""}"><span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(provider.description)}</small></span><span class="status-badge ${provider.configured ? "online" : ""}">${provider.configured ? `已配置 ${provider.key_count || 1} 个` : "未配置"}</span></div>`).join("");
+  }
+
+  async function loadWebSearchSettings() {
+    try {
+      renderWebSearch(await api("get_web_search_settings"));
+    } catch (error) {
+      $("#webSearchNote").textContent = error.message || "联网搜索设置读取失败。";
+      reportError(error);
+    }
+  }
+
+  async function saveWebSearchSettings(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button[type='submit']");
+    const note = $("#webSearchNote");
+    button.disabled = true;
+    button.textContent = "正在保存…";
+    note.textContent = "正在保存并确认联网搜索设置…";
+    try {
+      const values = {
+        enabled: form.elements.enabled.checked,
+        provider: form.elements.provider.value,
+        link_enabled: form.elements.link_enabled.value === "true",
+        key: form.elements.key.value.trim(),
+        clear_key: Boolean(state.webSearchClearKey),
+      };
+      const saved = await api("save_web_search_settings", values);
+      renderWebSearch(saved);
+      note.textContent = saved.apply_state === "applied" ? "已热更新，下一条消息使用新配置。" : "已保存，机器人下次启动时使用。";
+      toast(note.textContent);
+    } catch (error) {
+      note.textContent = error.message || "联网搜索设置保存失败。";
+      reportError(error);
+    } finally {
+      button.disabled = false;
+      button.textContent = "保存联网搜索";
+    }
+  }
+
   async function saveExperience(event, save, section, noteSelector) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -3301,6 +3436,7 @@
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
     $("#primaryAction").addEventListener("click", runPrimaryAction);
+    $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
     $("#settingsCheckWechat").addEventListener("click", checkEnvironment);
     $("#chooseWechat").addEventListener("click", chooseWechat);
@@ -3368,6 +3504,28 @@
     $("#refreshActivity").addEventListener("click", loadActivity);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     coreSettings.init();
+    $$('[data-core-settings-tab]').forEach((button) => button.addEventListener("click", () => setCoreSettingsTab(button.dataset.coreSettingsTab, true)));
+    $("#webSearchForm").addEventListener("submit", saveWebSearchSettings);
+    $("#webSearchProvider").addEventListener("change", () => {
+      $("#webSearchKey").value = "";
+      state.webSearchClearKey = false;
+      updateWebSearchProviderCopy();
+    });
+    $("#webSearchForm").addEventListener("change", (event) => {
+      if (event.target.name === "enabled") updateToggleCopy(event);
+    });
+    $("#revealWebSearchKey").addEventListener("click", (event) => {
+      const input = $("#webSearchKey");
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      event.currentTarget.textContent = showing ? "显示" : "隐藏";
+      event.currentTarget.setAttribute("aria-pressed", String(!showing));
+    });
+    $("#clearWebSearchKey").addEventListener("click", () => {
+      $("#webSearchKey").value = "";
+      state.webSearchClearKey = true;
+      $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
+    });
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
@@ -3667,6 +3825,15 @@
       memory: {enabled: true, recall_mode: "smart", casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
+    let previewWebSearch = {
+      enabled: false,
+      provider: "bocha",
+      link_enabled: false,
+      providers: Object.fromEntries([
+        ["tavily", "Tavily"], ["bocha", "博查 Bocha"], ["brave", "Brave Search"],
+        ["baidu_app_builder", "百度 AI Search"], ["firecrawl", "Firecrawl"], ["exa", "Exa"],
+      ].map(([id, name]) => [id, {id, name, description: "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
+    };
     let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
@@ -3738,7 +3905,7 @@
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
     return {
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
-      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
+      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), force_stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
       save_robot_core: (config, _revision, identity) => {
@@ -3814,6 +3981,15 @@
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       get_response_traces: () => ok([{time: new Date(Date.now() - 18000).toISOString(), title: "群聊点名", duration_text: "3.4 秒", stages: [{label: "点名快路径", status: "success", detail: "已跳过额外判断", duration_text: "0.4 秒"}, {label: "长期记忆", status: "skipped", detail: "普通寒暄无需回忆", duration_text: "<0.1 秒"}, {label: "精简情感", status: "success", detail: "已加入好感度与心情", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "2.6 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}, {time: new Date(Date.now() - 82000).toISOString(), title: "询问上次内容", duration_text: "5.1 秒", stages: [{label: "点名快路径", status: "success", duration_text: "0.4 秒"}, {label: "长期记忆 3 条", status: "success", detail: "命中明确回忆说法", duration_text: "0.8 秒"}, {label: "精简情感", status: "success", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "3.5 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}]),
       get_experience: () => ok(structuredClone(previewExperience)),
+      get_web_search_settings: () => ok(structuredClone(previewWebSearch)),
+      save_web_search_settings: (values) => {
+        const selected = previewWebSearch.providers[values.provider];
+        if (!selected) return Promise.resolve({ok: false, error: {message: "预览请求无效。"}});
+        if (values.clear_key) { selected.configured = false; selected.key_count = 0; }
+        else if (values.key) { selected.configured = true; selected.key_count = 1; }
+        previewWebSearch = {...previewWebSearch, enabled: Boolean(values.enabled), provider: values.provider, link_enabled: Boolean(values.link_enabled)};
+        return ok({...structuredClone(previewWebSearch), apply_state: "applied"}, "联网搜索设置已热更新，下一条消息使用新配置。");
+      },
       save_memory_settings: (values) => ok({...values, apply_state: "applied"}, "长期记忆设置已热更新，下一条消息立即使用。"),
       save_emotion_settings: (values) => ok({...values, apply_state: "applied"}, "情感设置已热更新，下一条消息立即使用。"),
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },

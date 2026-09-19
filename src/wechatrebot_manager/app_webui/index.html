@@ -99,8 +99,8 @@
               <div class="panel-heading"><div><span class="eyebrow">启动进度</span><h2>连接台账</h2></div></div>
               <ol class="stage-list">
                 <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong><small>安装路径与兼容版本</small></div><em>待检查</em></li>
-                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em></li>
-                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em></li>
+                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em><button class="stage-stop-button" id="stageCoreStop" data-stage-stop hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
+                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em><button class="stage-stop-button" id="stageConnectionStop" data-stage-stop hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
               </ol>
               <div class="ready-rule"><strong>可用判定</strong><p>只有以上三项全部通过，软件才会显示“机器人可用”。</p></div>
             </section>
@@ -260,9 +260,8 @@
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
           <div class="page-heading compact"><div><span class="eyebrow">统一配置</span><h1 id="settingsHeading">设置</h1><p>先完成推荐项，只有需要时再展开高级设置。</p></div></div>
           <div class="settings-tabs" id="settingsTabs" aria-label="设置分类">
-            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>模型服务</button>
+            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>全局模型配置</button>
             <button type="button" data-settings-tab="core" data-action-bound disabled>机器人核心</button>
-            <button type="button" data-settings-tab="memory" data-action-bound disabled>记忆与情感</button>
             <button type="button" data-settings-tab="system" data-action-bound disabled>系统信息</button>
             <span>修改后会明确提示“已应用”或“启动时使用”</span>
           </div>
@@ -307,11 +306,24 @@
             </section>
 
             <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="机器人核心配置">
-              <div class="core-heading panel"><div><span class="eyebrow">对话与群聊协调</span><h2>机器人核心</h2><p>统一管理身份、唤醒、回复节奏与完整上下文参数；支持按聊天绑定配置模板。</p><small>群聊&amp;私聊管理中的聊天总开关、回复模式与功能范围仍是最终边界。</small></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button">重新读取</button></div></div>
-              <div class="core-layout"><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-core-view="global">全局配置<span>未绑定聊天的默认配置</span></button><button class="core-nav" type="button" data-core-view="monitor">联系人监控与绑定<span>在场状态、能量与最近决策</span></button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button">新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div><p class="core-sidebar-note">模板未覆盖的参数跟随全局配置；删除模板后，绑定聊天自动回到全局配置。</p></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取机器人核心…</div></section></div>
+              <div class="core-heading panel"><div><span class="eyebrow">对话、搜索与长期关系</span><h2>机器人核心</h2><p>把会影响机器人回答方式的配置集中在这里，按功能分成三个清晰的 tab。</p><small>群聊&amp;私聊管理中的聊天总开关、回复模式与功能范围仍是最终边界。</small></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button">重新读取</button></div></div>
+              <div class="core-subtabs" id="coreSettingsTabs" role="tablist" aria-label="机器人核心分类">
+                <button class="active" type="button" data-core-settings-tab="search" role="tab" aria-selected="true">联网搜索<span>让回答引用最新网页信息</span></button>
+                <button type="button" data-core-settings-tab="conversation" role="tab" aria-selected="false">对话配置<span>原机器人核心配置</span></button>
+                <button type="button" data-core-settings-tab="memory" role="tab" aria-selected="false">记忆和情感<span>长期记忆与关系状态</span></button>
+              </div>
+              <form class="settings-card panel web-search-settings-card" id="webSearchForm" data-core-subsection="search" novalidate>
+                <div class="panel-heading"><div><span class="eyebrow">实时信息</span><h2>联网搜索</h2><p>启用后，机器人会在需要最新信息时调用所选搜索服务，并将结果交给对话模型整理。</p></div><span class="status-badge" id="webSearchStatus">等待读取</span></div>
+                <div class="toggle-line"><span><strong>允许联网搜索</strong><small>关闭后不会向搜索服务发起请求</small></span><span class="toggle"><input id="webSearchEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="webSearchEnabled" aria-label="切换联网搜索"></label><span>已关闭</span></span></div>
+                <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select><small id="webSearchProviderHint">选择后使用对应服务商的密钥。</small></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select><small>保留来源链接便于核验，但会增加回复长度。</small></label></div>
+                <div class="web-search-provider-list" id="webSearchProviderList" aria-live="polite"></div>
+                <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
+                <div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button">清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
+              </form>
+              <div class="core-layout" data-core-subsection="conversation" hidden><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-core-view="global">全局配置<span>未绑定聊天的默认配置</span></button><button class="core-nav" type="button" data-core-view="monitor">联系人监控与绑定<span>在场状态、能量与最近决策</span></button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button">新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div><p class="core-sidebar-note">模板未覆盖的参数跟随全局配置；删除模板后，绑定聊天自动回到全局配置。</p></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取对话配置…</div></section></div>
             </section>
 
-            <form class="settings-card panel" id="memoryForm" data-settings-section="memory" novalidate>
+            <form class="settings-card panel" id="memoryForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
               <div class="panel-heading"><div><span class="eyebrow">长期记忆</span><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
               <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
               <div class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
@@ -321,7 +333,7 @@
               <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
             </form>
 
-            <form class="settings-card panel" id="emotionForm" data-settings-section="memory" novalidate>
+            <form class="settings-card panel" id="emotionForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
               <div class="panel-heading"><div><span class="eyebrow">情感成长</span><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
               <p class="settings-copy">只把精简的关系、好感度和心情放进回复上下文，不把完整学习记录塞给模型。</p>
               <div class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input id="emotionEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="emotionEnabled" aria-label="切换情感成长"></label><span>已启用</span></span></div>

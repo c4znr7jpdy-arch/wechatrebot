@@ -57,7 +57,7 @@ def _path_within(path: str | Path, parent: str | Path) -> bool:
             Path(os.path.realpath(str(parent)))
         )
         return True
-    except ValueError:
+    except (OSError, ValueError):
         return False
 
 
@@ -443,16 +443,24 @@ def stop_installation_processes(install_root: str | Path) -> int:
     for _attempt in range(2):
         candidates: list[int] = []
         for pid in _iter_windows_process_ids():
-            if pid in {0, os.getpid()}:
+            if pid in {0, os.getpid(), os.getppid()}:
                 continue
-            identity = process_identity(pid)
+            try:
+                identity = process_identity(pid)
+            except OSError:
+                continue
+            if identity and Path(identity.executable).name.casefold().startswith("unins"):
+                continue
             executable_in_root = bool(
                 identity and _path_within(identity.executable, root)
             )
-            module_in_root = not executable_in_root and any(
-                _path_within(module_path, root)
-                for module_path in _process_module_paths(pid)
-            )
+            try:
+                module_in_root = not executable_in_root and any(
+                    _path_within(module_path, root)
+                    for module_path in _process_module_paths(pid)
+                )
+            except OSError:
+                module_in_root = False
             if executable_in_root or module_in_root:
                 candidates.append(pid)
         if not candidates:

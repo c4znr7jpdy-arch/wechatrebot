@@ -93,6 +93,17 @@ def _parser() -> argparse.ArgumentParser:
         "apply-uninstall", help=argparse.SUPPRESS
     )
     apply_uninstall.add_argument("--plan", type=Path, required=True)
+    native_install = subparsers.add_parser(
+        "install-from-native-setup", help=argparse.SUPPRESS
+    )
+    native_install.add_argument("--payload", type=Path, required=True)
+    native_install.add_argument("--install-root", type=Path, required=True)
+    native_install.add_argument("--status-file", type=Path)
+    native_uninstall = subparsers.add_parser(
+        "prepare-native-uninstall", help=argparse.SUPPRESS
+    )
+    native_uninstall.add_argument("--install-root", type=Path, required=True)
+    native_uninstall.add_argument("--status-file", type=Path)
     return parser
 
 
@@ -139,6 +150,25 @@ def main(argv: list[str] | None = None) -> int:
         return run_uninstaller(args.install_root)
     if args.command == "apply-uninstall":
         return apply_uninstall_plan(args.plan)
+    if args.command in {"install-from-native-setup", "prepare-native-uninstall"}:
+        from .native_setup import install_from_native_setup, prepare_native_uninstall
+
+        try:
+            if args.command == "install-from-native-setup":
+                result = install_from_native_setup(args.payload, args.install_root)
+            else:
+                result = prepare_native_uninstall(args.install_root)
+            exit_code = 0
+        except (OSError, RuntimeError, ValueError) as exc:
+            result = {"ok": False, "error": str(exc)}
+            exit_code = 1
+        _print_json(result, indent=2)
+        if args.status_file is not None:
+            try:
+                write_json_atomic(args.status_file, result)
+            except OSError:
+                pass
+        return exit_code
     if args.command == "bootstrap":
         return run_bootstrap(args.payload)
     if args.command == "check-install-dir":
