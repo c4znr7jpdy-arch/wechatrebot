@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release_version": "0.9.5",
+  "release_version": "0.9.6",
   "status": "pending",
   "requirements": [
     {"id": "hook-redistribution", "status": "pending", "reviewer": "", "approved_at": "", "evidence": []},
