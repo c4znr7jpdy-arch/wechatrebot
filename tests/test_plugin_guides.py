@@ -31,6 +31,21 @@ def test_high_risk_and_misnamed_features_are_explained_truthfully():
     assert "不建议默认启用" == iterative["audience"]
 
 
+def test_common_commands_guide_exposes_grouped_customer_commands():
+    guide = get_plugin_guide("jiang_commands")
+
+    assert [group["title"] for group in guide["commands"]] == [
+        "常用查询",
+        "AI 互动",
+        "趣味与游戏",
+        "定时任务（管理员）",
+        "B站订阅（管理员）",
+        "其他",
+    ]
+    assert guide["commands"][0]["items"][0] == ("\\新闻", "今日热点新闻")
+    assert any(item[0] == "\\订阅列表" for item in guide["commands"][4]["items"])
+
+
 def test_curated_paths_match_local_delivered_schemas():
     import pytest
     root = Path(__file__).parents[1] / "artifacts/staging-hot-config-validation-20260907-final/app/astrbot/data/plugins"

@@ -20,7 +20,7 @@ _GUIDES = {
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
-    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；安排青岛天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
+    "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；具体指令见下方列表。安排天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先填写一个主生图模型即可；确有需要时点击“添加备用模型”再填写第二个。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
@@ -31,6 +31,75 @@ _GUIDES = {
     "jiang_short_drama": ("搜索内容并安排推送", "在定时任务中选择影视推荐、分类、数量和发送聊天；播放卡片统一打开托管中间页，无需在本机启动服务。旧版计划只在兼容页管理。", "仅访问有权使用的内容；播放依赖内容源与托管播放页可用。", ()),
     "jiang_video_understanding": ("总结微信短视频", "发送视频后使用 /总结视频；先保留当前抽帧数量。", "需要能理解图片的模型；音频不可用时会退回画面分析。", ("max_duration_seconds", "max_file_size_mb", "frame_count", "vision_provider_id", "audio_provider_id", "semantic_fallback_provider_id")),
     "meme_manager": ("管理聊天使用的表情包", "打开专属配置页导入表情包，再到群聊&私聊管理为需要的群勾选“表情管理”。人格只需正常填写，系统会在允许表情的群聊中自动加入隐藏的情绪标签规则。", "只导入有权使用的表情；云端同步需要相应图床或存储账号。", ("storage.provider", "sync.status_cache_ttl_seconds")),
+}
+
+
+# Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
+# even when the plugin source contains internal or administrator-only helpers.
+_COMMANDS = {
+    "jiang_commands": (
+        {
+            "title": "常用查询",
+            "items": (
+                ("\\新闻", "今日热点新闻"),
+                ("\\城市天气", "例如：\\绵阳天气、\\青岛天气902"),
+                ("\\油价省份", "例如：\\油价四川"),
+                ("\\epic", "Epic 喜加一"),
+                ("\\kfc", "疯狂星期四文案"),
+                ("\\理想", "发送 20 秒《理想进行曲》语音条"),
+                ("\\燕云", "燕云十六声动态"),
+            ),
+        },
+        {
+            "title": "AI 互动",
+            "items": (
+                ("@姜小妹 科普/查一下/介绍一下", "自动联网搜索总结"),
+                ("@姜小妹 提问", "自由提问，AI 对话回复"),
+                ("@姜小妹 帮我画 xxx", "文生图"),
+                ("@姜小妹 P图/改图/图生图", "编辑图片（需引用图片）"),
+            ),
+        },
+        {
+            "title": "趣味与游戏",
+            "items": (
+                ("\\占卜", "抽四张塔罗牌占卜"),
+                ("\\塔罗牌", "抽一张塔罗牌"),
+                ("\\洛克", "查看洛克王国全部指令"),
+                ("\\洛克档案 \\战绩 \\背包", "查询角色数据"),
+                ("\\洛克阵容 \\查蛋 \\配种", "阵容与宠物"),
+                ("\\洛克交换大厅 \\远行商人", "交易与商店"),
+                ("\\订阅远行商人 \\家园菜园", "订阅通知"),
+            ),
+        },
+        {
+            "title": "定时任务（管理员）",
+            "items": (
+                ("\\定时新闻 8点", "每日推送热点"),
+                ("\\定时天气 绵阳 8点", "每日天气"),
+                ("\\定时kfc 周四 12点", "每周 KFC 文案"),
+                ("\\定时列表 \\定时删除", "管理定时任务"),
+            ),
+        },
+        {
+            "title": "B站订阅（管理员）",
+            "items": (
+                ("\\订阅动态 UID", "订阅 B 站用户动态"),
+                ("\\取消订阅动态 UID", "取消订阅"),
+                ("\\订阅列表", "查看当前订阅"),
+            ),
+        },
+        {
+            "title": "其他",
+            "items": (
+                ("发送链接", "抖音/TikTok/B站链接自动解析"),
+                ("\\启用 \\禁用 插件名", "插件开关（管理员）"),
+                ("\\插件列表", "查看所有插件（管理员）"),
+                ("\\切换模型 \\图片模型", "切换 AI 后端（管理员）"),
+                ("\\语音 文字", "TTS 语音合成"),
+                ("\\米游社帮助", "查看米游社相关功能"),
+            ),
+        },
+    ),
 }
 
 
@@ -80,6 +149,8 @@ def get_plugin_guide(module_name: str) -> dict[str, Any]:
         "prerequisites": (prerequisite,),
         "common_fields": paths,
     }
+    if module_name in _COMMANDS:
+        guide["commands"] = copy.deepcopy(_COMMANDS[module_name])
     assessment = _ASSESSMENTS.get(module_name)
     if assessment:
         guide.update({

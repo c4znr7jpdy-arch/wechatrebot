@@ -1173,6 +1173,13 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert 'previewFeature("feature-group-analysis", "群聊分析"' in script
     assert 'fieldCount: 10, modelFieldCount: 1' in script
     assert 'simplified: true' in script
+    assert 'scheduledAction: "group_analysis"' in script
+    assert '配置自动日报' in script
+    assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
+    assert 'if (action === "group_analysis")' in script
+    assert '已定位到自动日报设置' in script
+    assert 'feature-command-list' in script
+    assert 'guide.commands' in script
     assert '_ui_control: "line-list"' in script
     assert '_ui_control: "time-list"' in script
     assert '手账风（示例样式）' in script

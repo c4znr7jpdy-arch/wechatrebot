@@ -745,7 +745,7 @@
       const path = [...prefix, key];
       if (field.type === "object" && field.items && typeof field.items === "object") {
         flushGroup();
-        markup.push(`<section class="config-section"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path, namespace)}</div></section>`);
+        markup.push(`<section class="config-section" data-config-section="${escapeHtml(path.join("."))}"><h3>${escapeHtml(field.description || field.title || key.replaceAll("_", " "))}</h3><div class="config-section-grid">${schemaMarkup(field.items, config, path, namespace)}</div></section>`);
         return;
       }
       const fieldHtml = fieldMarkup(key, field, getAtPath(config, path), path, namespace);
@@ -786,14 +786,24 @@
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
+    const commandGroups = Array.isArray(guide.commands) ? guide.commands : [];
+    const commandMarkup = commandGroups.length ? `<section class="feature-command-list" aria-labelledby="feature-command-title"><div class="feature-command-heading"><div><span class="eyebrow">快速参考</span><h3 id="feature-command-title">常用指令</h3></div><span>复制到聊天即可使用</span></div><div class="feature-command-groups">${commandGroups.map((group) => `<div class="feature-command-group"><strong>${escapeHtml(group.title || "指令")}</strong><div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map((item) => `<div class="feature-command-item"><code>${escapeHtml(item[0] || "")}</code><span>${escapeHtml(item[1] || "")}</span></div>`).join("")}</div></div>`).join("")}</div></section>` : "";
+    const scheduleAction = detail.scheduled_action || "";
+    const scheduleCopy = scheduleAction === "short_drama"
+      ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。"
+      : scheduleAction === "group_analysis"
+        ? "选择自动日报群和每天生成时间，群聊分析会按群生成独立日报。"
+        : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
+    const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
         <span class="status-badge online">统一加载</span>
       </div>
-      ${detail.scheduled_action ? `<div class="feature-schedule-entry"><p>${detail.scheduled_action === "short_drama" ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。" : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。"}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>创建定时任务</button></div>` : ""}
+      ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
+      ${commandMarkup}
       ${detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
@@ -2422,6 +2432,16 @@
   async function openScheduledFromFeature() {
     if (state.featureDirty) { discardFeatureChanges(openScheduledFromFeature); return; }
     const action = state.featureDetail?.scheduled_action || "weather";
+    if (action === "group_analysis") {
+      state.featureTab = "basic";
+      renderFeatureDetail();
+      const section = $("#featureForm .config-section[data-config-section='auto_analysis']");
+      section?.scrollIntoView({behavior: "smooth", block: "start"});
+      const target = section?.querySelector("textarea, input, select");
+      target?.focus({preventScroll: true});
+      toast("已定位到自动日报设置；选择群聊和时间后保存即可。 ");
+      return;
+    }
     await navigate("schedules");
     if (state.activePage === "schedules") await openScheduledEditor(null, false, action);
   }
@@ -3553,7 +3573,7 @@
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
       previewFeature("feature-twitter", "推特推送", "schema-and-page", "订阅 X/Twitter 推主，按会话管理订阅并定时推送新推文；支持链接解析、媒体和翻译配置。", {page: "plugin-settings", fieldCount: 8}),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
-      previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true}),
+      previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true, scheduledAction: "group_analysis", scheduleProvider: true}),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
       previewFeature("feature-group-notice", "群成员变动通知", "schema", "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"),
       previewFeature("feature-image", "图片生成", "schema-and-page", "提供文生图、图生图和模型管理能力。", {page: "image-models", fieldCount: 9}),

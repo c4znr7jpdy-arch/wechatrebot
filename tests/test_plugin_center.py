@@ -670,6 +670,10 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     detail = service.detail(catalog_item["id"])
 
     assert catalog_item["display_name"] == "群聊分析"
+    assert catalog_item["scheduled_action"] == "group_analysis"
+    assert catalog_item["schedule_provider"] is True
+    assert detail["scheduled_action"] == "group_analysis"
+    assert detail["schedule_provider"] is True
     assert catalog_item["field_count"] == 9
     assert catalog_item["model_field_count"] == 1
     assert catalog_item["simplified"] is True

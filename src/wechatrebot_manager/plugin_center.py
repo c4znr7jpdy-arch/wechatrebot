@@ -548,6 +548,9 @@ ROBOT_CORE_FEATURE_ID = _public_plugin_id(_ANGEL_HEART_MODULE)
 def _scheduled_action(module_name: str) -> str:
     if module_name == "jiang_short_drama":
         return "short_drama"
+    if module_name == _GROUP_ANALYSIS_MODULE:
+        # 群分析有自己的按群日报调度器，不能走统一内容任务运行时。
+        return "group_analysis"
     if module_name in {"jiang_commands", "jiang_schedule"}:
         return "weather"
     return ""
@@ -1669,7 +1672,7 @@ class PluginCenterService:
                     "readiness": guide.get("readiness", "请按说明准备"),
                     "guide": guide,
                     "scheduled_action": _scheduled_action(plugin.module_name),
-                    "schedule_provider": plugin.module_name in {"jiang_commands", "jiang_short_drama"},
+                    "schedule_provider": plugin.module_name in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
                 }
             )
         return {
@@ -1795,7 +1798,7 @@ class PluginCenterService:
             "personas": personas,
             "engine_online": engine_online,
             "scheduled_action": _scheduled_action(module_name),
-            "schedule_provider": module_name in {"jiang_commands", "jiang_short_drama"},
+            "schedule_provider": module_name in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
         }
 
     def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
