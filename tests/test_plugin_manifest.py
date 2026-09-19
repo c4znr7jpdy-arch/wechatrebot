@@ -71,14 +71,13 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
         and Path(item["target"]).parts[4] != "_nonebot_stubs.py"
     }
 
-    assert len(delivered) == 23
+    assert len(delivered) == 24
     assert delivered == feature_modules == source_modules
     assert excluded == {
         "astrbot_plugin_apis",
         "astrbot_plugin_hapi_connector_disabled",
         "astrbot_plugin_kimi_web_search",
         "astrbot_plugin_mnemosyne",
-        "astrbot_plugin_twitter",
         "astrbot_plugin_zhenxunribao",
         "jiang_12123_notify",
         "jiang_lol_match",
