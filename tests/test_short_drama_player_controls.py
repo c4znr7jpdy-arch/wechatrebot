@@ -398,6 +398,20 @@ def test_mobile_fullscreen_fallback_does_not_fake_rotation(player_page):
     assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
 
 
+@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
+def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
+    page = player_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = async () => {}; node.webkitRequestFullscreen = undefined; }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+    shell = page.locator("#videoShell")
+    bounds = shell.bounding_box()
+    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+    page.get_by_label("退出全屏", exact=True).click()
+    assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
+
+
 @pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
 def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page = player_page
