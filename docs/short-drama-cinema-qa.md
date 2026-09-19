@@ -97,6 +97,9 @@ final result: passed
 
 `f13f87a` 已于 2026-09-16 更新线上托管静态页 `/var/www/short-drama-player/index.html`。替换前页面 SHA-256 为 `82a41fcfe58e5b9c20cec3dfa6c95359e1f450ea5b5887eb6a075e7a03b8a8a0`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260916-f13f87a`。替换后服务器文件、公网 HTTPS 页面与本地候选页的 SHA-256 均为 `6dd7ba0ceae6eae875404a333ece0d3b8fded30aee0c672aec1f454225102fd5`；`nginx -t` 通过，短剧状态服务 active，推荐接口返回 12 部候选。状态服务文件和 Nginx 配置哈希未变化。本次没有制作或发布客户端安装包。
 
-`bb00975` 已于 2026-09-19 按用户“推送线上托管页”更新同一静态入口。替换前页面 SHA-256 为 `6dd7ba0ceae6eae875404a333ece0d3b8fded30aee0c672aec1f454225102fd5`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260919-bb00975`；候选页仅增加原生全屏 API 静默失败后的页面全屏兜底。替换后服务器文件与公网 `https://player.xiuxianjyj.xin/short-drama/player` 响应 SHA-256 均为 `dcbdf9c703eafea0502f5edbb379f6e3c500e8f9968aff18770bff3b8e9fda0d`，HTTP 200，`short-drama-state` 保持 active，`nginx -t` 通过。状态服务、Nginx 配置和客户端安装包未变更。
+### 方向锁定失败时的全屏旋转兜底
 
-`e7f4ee0` 已于 2026-09-19 再次更新线上静态入口，补充 iOS/微信 WebKit 视频原生全屏 `webkitEnterFullscreen()` 及进入/退出事件同步。替换前页面 SHA-256 为 `dcbdf9c703eafea0502f5edbb379f6e3c500e8f9968aff18770bff3b8e9fda0d`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260919-e7f4ee0`。替换后服务器文件与公网响应 SHA-256 均为 `4ed6bcebf7b7ebc5234473f035d0c83384eb5d3b58ecb5a5909ebc80b8a2ec13`，HTTP 200，`short-drama-state` 保持 active，`nginx -t` 通过；状态服务、Nginx 配置和客户端安装包未变更。
+用户实机反馈 iOS/微信内置浏览器仍停留在竖屏并显示“请将手机横过来观看”，说明宿主拒绝了方向锁定。`pseudo-fullscreen` 在横屏视频、触屏竖持且原生全屏/方向锁定不可用时增加 `pseudo-landscape`：播放器、控件和选集弹窗整体旋转 90°并占满当前视口；设备转为横屏或退出全屏时自动移除旋转。原生 WebKit 视频全屏仍优先使用，页面旋转只作为失败兜底。
+
+- 播放器专项测试：`31 passed`；新增/更新的 4 个全屏路径测试全部通过；托管安全与补丁检查：`6 passed`。
+- `db60cac` 已于 2026-09-19 更新线上托管静态页 `/var/www/short-drama-player/index.html`。替换前页面 SHA-256 为 `4ed6bcebf7b7ebc5234473f035d0c83384eb5d3b58ecb5a5909ebc80b8a2ec13`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260919-db60cac`；替换后服务器文件、公网 HTTPS 页面与本地候选页的 SHA-256 均为 `036f8a828b3100c34e8b1998c107df0be8a9e64ecd8f73766b10843d232c9512`，`HTTP 200`，状态服务 `active`，`nginx -t` 通过。本次仍未制作或发布客户端安装包。
