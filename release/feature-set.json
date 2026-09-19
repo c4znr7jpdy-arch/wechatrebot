@@ -8,6 +8,7 @@
     {"module": "astrbot_plugin_mimo_tts_clone", "display_name": "语音克隆", "ownership": "third-party", "configuration": "page", "default_enabled": true, "description": "管理授权音色，让文字回复按需要转换为语音。"},
     {"module": "astrbot_plugin_music", "display_name": "点歌", "ownership": "third-party", "configuration": "none", "default_enabled": true, "description": "默认使用在线接口并自动回退到直连音源，无需额外配置。"},
     {"module": "astrbot_plugin_parser", "display_name": "链接解析", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "识别常见内容平台链接并整理视频、图集和音频信息。"},
+    {"module": "astrbot_plugin_twitter", "display_name": "推特推送", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "订阅 X（Twitter）账号并按会话推送新推文，支持 FxTwitter、链接识别、媒体和翻译设置。"},
     {"module": "astrbot_plugin_patch_at_wxid", "display_name": "群聊兼容", "ownership": "local-patch", "configuration": "none", "default_enabled": true, "visible": false, "description": "自动兼容微信群成员标识，无需额外配置。"},
     {"module": "astrbot_plugin_proactive_chat", "display_name": "主动聊天", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "按活跃度、时间段和会话上下文主动发起合适的消息。"},
     {"module": "astrbot_plugin_qq_group_daily_analysis", "display_name": "群聊分析", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。"},
