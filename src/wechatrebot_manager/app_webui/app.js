@@ -92,6 +92,7 @@
   const HISTORY_PRELOAD_THRESHOLD = 120;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
+  const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -117,11 +118,36 @@
   function avatarMarkup(className, name, value) {
     const fallback = String(name || "聊").trim().slice(0, 1) || "聊";
     const source = safeImageUrl(value);
-    return `<span class="${className} avatar-frame" aria-hidden="true"><span class="avatar-fallback">${escapeHtml(fallback)}</span>${source ? `<img src="${escapeHtml(source)}" alt="" loading="lazy">` : ""}</span>`;
+    return `<span class="${className} avatar-frame" aria-hidden="true"><span class="avatar-fallback">${escapeHtml(fallback)}</span>${source ? `<img src="${escapeHtml(source)}" data-avatar-source="${escapeHtml(source)}" alt="" loading="lazy">` : ""}</span>`;
   }
 
   function bindAvatarFallbacks(root = document) {
-    $$(".avatar-frame img", root).forEach((image) => image.addEventListener("error", () => image.remove(), {once: true}));
+    $$(".avatar-frame img", root).forEach((image) => {
+      if (image.dataset.avatarFallbackBound === "true") return;
+      image.dataset.avatarFallbackBound = "true";
+      image.addEventListener("error", () => {
+        const frame = image.closest(".avatar-frame");
+        const retry = Number(image.dataset.avatarRetry || "0");
+        if (!frame || retry >= AVATAR_RETRY_DELAYS_MS.length) {
+          image.remove();
+          return;
+        }
+
+        image.dataset.avatarRetry = String(retry + 1);
+        image.hidden = true;
+        window.setTimeout(() => {
+          if (!image.isConnected) return;
+          try {
+            const source = new URL(image.dataset.avatarSource || image.src);
+            source.searchParams.set("avatar_retry", `${Date.now()}-${retry}`);
+            image.src = source.href;
+            image.hidden = false;
+          } catch (_error) {
+            image.remove();
+          }
+        }, AVATAR_RETRY_DELAYS_MS[retry]);
+      });
+    });
   }
 
   function toast(message, type = "success") {
@@ -1155,7 +1181,7 @@
         };
       });
       groupDirectoryStatus(data);
-      if (!background || previousGroups !== JSON.stringify(state.groups)
+      if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
           || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
         renderGroups({preserveInspector: background});
       } else {
@@ -1971,6 +1997,21 @@
   async function pollGroups() {
     if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || !state.groupsLoaded) return;
     await loadGroups(false, {background: true});
+  }
+
+  async function refreshVisibleChatData() {
+    if (document.visibilityState === "hidden") return;
+    if (state.activePage === "groups" && state.chatManagementTab === "groups") {
+      await loadGroups(true, {background: true});
+      return;
+    }
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    state.historyPolling = true;
+    try {
+      await loadConversations({silent: true, refreshGroups: true});
+    } finally {
+      state.historyPolling = false;
+    }
   }
 
   function renderConversationInspector(item) {
@@ -3422,6 +3463,10 @@
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
     window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
+    window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshVisibleChatData().catch(reportError);
+    });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
       const targets = $$("button:not(:disabled), input:not(:disabled)", $("#modalBackdrop"));

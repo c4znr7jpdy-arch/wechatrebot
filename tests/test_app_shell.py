@@ -912,6 +912,11 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     assert 'avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)' in script
     assert 'avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)' in script
     assert 'bindAvatarFallbacks($("#groupRows"));' in script
+    assert "const AVATAR_RETRY_DELAYS_MS = [1200, 4000];" in script
+    assert "data-avatar-source" in script
+    assert "async function refreshVisibleChatData()" in script
+    assert 'document.addEventListener("visibilitychange"' in script
+    assert "if (!background || refresh || previousGroups !== JSON.stringify(state.groups)" in script
     assert ".group-inspector.empty" in styles
     assert '.group-policy-form input[type="time"]' in styles
     assert ".message-pane > header > .status-badge" in styles
