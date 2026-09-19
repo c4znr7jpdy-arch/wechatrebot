@@ -589,7 +589,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,275 @@
+@@ -406,8 +274,304 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -722,8 +722,12 @@ diff --git a/index.html b/index.html
 +      let orientationLockRequested = false, orientationLockPending = false;
 +      const hasHorizontalVideo = () => video.videoWidth > video.videoHeight && video.videoHeight > 0;
 +      const activeFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
++      const nativeVideoFullscreenActive = () => video.webkitDisplayingFullscreen === true;
++      const playerFullscreenActive = () => activeFullscreenElement() === videoShell
++        || videoShell.classList.contains('pseudo-fullscreen')
++        || nativeVideoFullscreenActive();
 +      const syncFullscreen = () => {
-+        const active = activeFullscreenElement() === videoShell || videoShell.classList.contains('pseudo-fullscreen');
++        const active = playerFullscreenActive();
 +        document.body.classList.toggle('player-fullscreen', active);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
 +        if ((!active || !hasHorizontalVideo()) && orientationLockRequested) {
@@ -741,7 +745,7 @@ diff --git a/index.html b/index.html
 +          orientationLockRequested = true;
 +        } catch (_error) {} finally { orientationLockPending = false; }
 +        syncFullscreen();
-+        if (!orientationLockRequested && (activeFullscreenElement() === videoShell || videoShell.classList.contains('pseudo-fullscreen')) && window.innerHeight > window.innerWidth && matchMedia('(pointer: coarse)').matches) {
++        if (!orientationLockRequested && playerFullscreenActive() && window.innerHeight > window.innerWidth && matchMedia('(pointer: coarse)').matches) {
 +          showHint('请将手机横过来观看');
 +        }
 +      };
@@ -761,25 +765,50 @@ diff --git a/index.html b/index.html
 +        timer = setTimeout(finish, 220);
 +        Promise.resolve(request).catch(() => {}).finally(check);
 +      });
++      const waitForNativeVideoFullscreen = () => new Promise((resolve) => {
++        let timer = null;
++        const finish = () => {
++          if (timer !== null) clearTimeout(timer);
++          video.removeEventListener('webkitbeginfullscreen', check);
++          video.removeEventListener('webkitendfullscreen', check);
++          resolve(nativeVideoFullscreenActive());
++        };
++        const check = () => {
++          if (nativeVideoFullscreenActive()) finish();
++        };
++        video.addEventListener('webkitbeginfullscreen', check);
++        video.addEventListener('webkitendfullscreen', check);
++        timer = setTimeout(finish, 220);
++        check();
++      });
 +      fullButton.addEventListener('click', async () => {
 +        let entering = false;
 +        try {
-+          if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-+          else if (videoShell.classList.contains('pseudo-fullscreen')) videoShell.classList.remove('pseudo-fullscreen');
++          if (playerFullscreenActive()) {
++            if (nativeVideoFullscreenActive()) video.webkitExitFullscreen?.();
++            else if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
++            else videoShell.classList.remove('pseudo-fullscreen');
++          }
 +          else if (videoShell.requestFullscreen) {
 +            entering = true;
 +            if (!await waitForNativeFullscreen(videoShell.requestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
 +          } else if (videoShell.webkitRequestFullscreen) {
 +            entering = true;
 +            if (!await waitForNativeFullscreen(videoShell.webkitRequestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
++          } else if (video.webkitEnterFullscreen) {
++            entering = true;
++            video.webkitEnterFullscreen();
++            if (!await waitForNativeVideoFullscreen()) videoShell.classList.add('pseudo-fullscreen');
 +          }
 +          else { entering = true; videoShell.classList.add('pseudo-fullscreen'); }
-+        } catch (_error) { if (!activeFullscreenElement()) { entering = true; videoShell.classList.add('pseudo-fullscreen'); } }
++        } catch (_error) { if (!playerFullscreenActive()) { entering = true; videoShell.classList.add('pseudo-fullscreen'); } }
 +        syncFullscreen();
 +        if (entering) await requestLandscapeOrientation();
 +      });
 +      document.addEventListener('fullscreenchange', syncFullscreen);
 +      document.addEventListener('webkitfullscreenchange', syncFullscreen);
++      video.addEventListener('webkitbeginfullscreen', syncFullscreen);
++      video.addEventListener('webkitendfullscreen', syncFullscreen);
 +      window.addEventListener('resize', syncFullscreen);
 +      screen.orientation?.addEventListener?.('change', syncFullscreen);
 +      document.addEventListener('keydown', (event) => {
@@ -1059,7 +1088,7 @@ diff --git a/index.html b/index.html
 -      };
 +        videoShell.classList.add(`player--${videoAspectMode(video.videoWidth, video.videoHeight)}`);
 +        syncFullscreen();
-+        if ((activeFullscreenElement() === videoShell || videoShell.classList.contains('pseudo-fullscreen')) && hasHorizontalVideo()) requestLandscapeOrientation();
++        if (playerFullscreenActive() && hasHorizontalVideo()) requestLandscapeOrientation();
 +        requestAnimationFrame(followEpisode);
 +      };
 +
