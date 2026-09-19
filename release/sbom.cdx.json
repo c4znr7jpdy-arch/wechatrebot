@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:6d68a398-f900-510f-b5c2-a934dd6d4a04",
+  "serialNumber": "urn:uuid:0bc15292-5b55-55ee-bcbd-3971f145a6ff",
   "version": 1,
   "metadata": {
     "component": {
@@ -6209,6 +6209,31 @@
         {
           "type": "vcs",
           "url": "https://github.com/Zhalslar/astrbot_plugin_parser"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
+      "name": "astrbot_plugin_twitter",
+      "version": "1.10.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "third-party"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Ars1027/astrbot_plugin_twitter"
         }
       ]
     },

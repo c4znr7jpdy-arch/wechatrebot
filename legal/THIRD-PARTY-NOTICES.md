@@ -19,6 +19,7 @@
 | delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 4.10.9.3 # 本地兼容版：模板 1 更换为姜小妹主题 | MIT |
 | delivered-plugin | astrbot_plugin_self_iterative_core | 1.1.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_self_learning | 3.4.5 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_twitter | 1.10.1 | AGPL-3.0-only |
 | delivered-plugin | jiang_capability_router | 1.1.0 | Proprietary |
 | delivered-plugin | jiang_commands | 1.1.2 | Proprietary |
 | delivered-plugin | jiang_group_notice | 1.0.0 | Proprietary |

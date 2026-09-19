@@ -123,12 +123,26 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
             f"--directory={plugin_relative}",
             str(patch),
         ]
-        subprocess.run(
-            [*command[:2], "--check", *command[2:]],
-            cwd=commercial_root,
-            check=True,
-        )
-        subprocess.run(command, cwd=commercial_root, check=True)
+        check_command = [*command[:2], "--check", *command[2:]]
+        try:
+            subprocess.run(
+                check_command,
+                cwd=commercial_root,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            # Some source checkouts already contain the reviewed patch. Keep
+            # the patch in corresponding-source without applying it twice.
+            try:
+                subprocess.run(
+                    [*command[:2], "--reverse", "--check", *command[2:]],
+                    cwd=commercial_root,
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                raise exc
+        else:
+            subprocess.run(command, cwd=commercial_root, check=True)
         patch_target = output / "legal" / "corresponding-source" / patch.name
         patch_target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(patch, patch_target)
