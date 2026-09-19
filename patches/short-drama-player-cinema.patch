@@ -589,7 +589,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,254 @@
+@@ -406,8 +274,275 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -745,13 +745,34 @@ diff --git a/index.html b/index.html
 +          showHint('请将手机横过来观看');
 +        }
 +      };
++      const waitForNativeFullscreen = (request) => new Promise((resolve) => {
++        let timer = null;
++        const finish = () => {
++          if (timer !== null) clearTimeout(timer);
++          document.removeEventListener('fullscreenchange', check);
++          document.removeEventListener('webkitfullscreenchange', check);
++          resolve(activeFullscreenElement() === videoShell);
++        };
++        const check = () => {
++          if (activeFullscreenElement() === videoShell) finish();
++        };
++        document.addEventListener('fullscreenchange', check);
++        document.addEventListener('webkitfullscreenchange', check);
++        timer = setTimeout(finish, 220);
++        Promise.resolve(request).catch(() => {}).finally(check);
++      });
 +      fullButton.addEventListener('click', async () => {
 +        let entering = false;
 +        try {
 +          if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
 +          else if (videoShell.classList.contains('pseudo-fullscreen')) videoShell.classList.remove('pseudo-fullscreen');
-+          else if (videoShell.requestFullscreen) { entering = true; await videoShell.requestFullscreen(); }
-+          else if (videoShell.webkitRequestFullscreen) { entering = true; await videoShell.webkitRequestFullscreen(); }
++          else if (videoShell.requestFullscreen) {
++            entering = true;
++            if (!await waitForNativeFullscreen(videoShell.requestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
++          } else if (videoShell.webkitRequestFullscreen) {
++            entering = true;
++            if (!await waitForNativeFullscreen(videoShell.webkitRequestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
++          }
 +          else { entering = true; videoShell.classList.add('pseudo-fullscreen'); }
 +        } catch (_error) { if (!activeFullscreenElement()) { entering = true; videoShell.classList.add('pseudo-fullscreen'); } }
 +        syncFullscreen();
