@@ -662,6 +662,7 @@ _PLUGIN_LABELS = {
     "astrbot_plugin_qq_group_daily_analysis": "群聊分析",
     "astrbot_plugin_self_iterative_core": "自动改代码（实验）",
     "astrbot_plugin_self_learning": "情感与关系",
+    "astrbot_plugin_twitter": "推特推送",
     "jiang_capability_router": "功能调度",
     "jiang_commands": "常用指令",
     "jiang_group_notice": "群成员变动通知",

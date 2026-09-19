@@ -59,6 +59,7 @@
     "astrbot_plugin_proactive_chat",
     "astrbot_plugin_qq_group_daily_analysis",
     "astrbot_plugin_self_learning",
+    "astrbot_plugin_twitter",
     "jiang_capability_router",
     "jiang_commands",
     "jiang_group_notice",
