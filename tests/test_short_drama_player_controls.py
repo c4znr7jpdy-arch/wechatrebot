@@ -374,7 +374,7 @@ def test_mobile_landscape_video_requests_device_orientation(player_page):
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_fullscreen_fallback_does_not_fake_rotation(player_page):
+def test_mobile_fullscreen_fallback_rotates_landscape_video(player_page):
     page = player_page
     page.set_viewport_size({"width": 390, "height": 844})
     page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
@@ -384,11 +384,12 @@ def test_mobile_fullscreen_fallback_does_not_fake_rotation(player_page):
     page.get_by_label("全屏播放", exact=True).click()
     page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
     shell = page.locator("#videoShell")
-    assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
-    assert page.locator("#videoHint").inner_text() == "请将手机横过来观看"
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
+    assert shell.evaluate("node => getComputedStyle(node).transform") != "none"
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
     page.set_viewport_size({"width": 844, "height": 390})
+    page.wait_for_function("!document.getElementById('videoShell').classList.contains('pseudo-landscape')")
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 844) < 1 and abs(bounds["height"] - 390) < 1
     page.get_by_role("button", name="选择剧集", exact=True).click()
@@ -405,11 +406,14 @@ def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
     page.locator("#videoShell").evaluate("node => { node.requestFullscreen = async () => {}; node.webkitRequestFullscreen = undefined; }")
     page.get_by_label("全屏播放", exact=True).click()
     page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
     shell = page.locator("#videoShell")
+    assert shell.evaluate("node => getComputedStyle(node).transform") != "none"
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
     page.get_by_label("退出全屏", exact=True).click()
     assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
+    assert not shell.evaluate("node => node.classList.contains('pseudo-landscape')")
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)

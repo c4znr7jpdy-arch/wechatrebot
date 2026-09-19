@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,237 @@
+@@ -5,369 +5,238 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -483,6 +483,7 @@ diff --git a/index.html b/index.html
 +    .video-shell:fullscreen, .video-shell:-webkit-full-screen, .video-shell.pseudo-fullscreen { width: 100vw; height: 100dvh; max-height: none; position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
 +    .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet, .video-shell.pseudo-fullscreen .sheet { position: absolute; align-items: center; justify-content: flex-end; padding: 16px; }
 +    .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: min(46vw, 420px); max-height: calc(100dvh - 32px); border-radius: 16px; }
++    .video-shell.pseudo-fullscreen.pseudo-landscape { inset: auto; top: 50%; left: 50%; width: 100dvh; height: 100vw; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center; }
 +    .related { padding: 18px 20px 20px; }
 +    .related-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 +    #refreshRelated { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 90px; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
@@ -589,7 +590,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,304 @@
+@@ -406,8 +274,309 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -726,8 +727,16 @@ diff --git a/index.html b/index.html
 +      const playerFullscreenActive = () => activeFullscreenElement() === videoShell
 +        || videoShell.classList.contains('pseudo-fullscreen')
 +        || nativeVideoFullscreenActive();
++      const syncPseudoFullscreenLayout = () => {
++        const rotate = videoShell.classList.contains('pseudo-fullscreen')
++          && hasHorizontalVideo()
++          && window.innerHeight > window.innerWidth
++          && matchMedia('(pointer: coarse)').matches;
++        videoShell.classList.toggle('pseudo-landscape', rotate);
++      };
 +      const syncFullscreen = () => {
 +        const active = playerFullscreenActive();
++        syncPseudoFullscreenLayout();
 +        document.body.classList.toggle('player-fullscreen', active);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
 +        if ((!active || !hasHorizontalVideo()) && orientationLockRequested) {
@@ -745,9 +754,6 @@ diff --git a/index.html b/index.html
 +          orientationLockRequested = true;
 +        } catch (_error) {} finally { orientationLockPending = false; }
 +        syncFullscreen();
-+        if (!orientationLockRequested && playerFullscreenActive() && window.innerHeight > window.innerWidth && matchMedia('(pointer: coarse)').matches) {
-+          showHint('请将手机横过来观看');
-+        }
 +      };
 +      const waitForNativeFullscreen = (request) => new Promise((resolve) => {
 +        let timer = null;
@@ -787,7 +793,7 @@ diff --git a/index.html b/index.html
 +          if (playerFullscreenActive()) {
 +            if (nativeVideoFullscreenActive()) video.webkitExitFullscreen?.();
 +            else if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-+            else videoShell.classList.remove('pseudo-fullscreen');
++            else videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape');
 +          }
 +          else if (videoShell.requestFullscreen) {
 +            entering = true;
@@ -815,7 +821,7 @@ diff --git a/index.html b/index.html
 +        if (event.isComposing) return;
 +        if (event.key === 'Escape' && episodeSheet.hidden) {
 +          if (!morePanel.hidden) { morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false'); moreButton.focus(); }
-+          else if (videoShell.classList.contains('pseudo-fullscreen')) { videoShell.classList.remove('pseudo-fullscreen'); syncFullscreen(); }
++          else if (videoShell.classList.contains('pseudo-fullscreen')) { videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape'); syncFullscreen(); }
 +        }
 +        if (event.target === video && [' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
 +          event.preventDefault();
