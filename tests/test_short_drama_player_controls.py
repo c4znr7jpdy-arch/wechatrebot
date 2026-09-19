@@ -412,6 +412,20 @@ def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
     assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
 
 
+@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
+def test_mobile_fullscreen_uses_webkit_video_fullscreen_when_available(player_page):
+    page = player_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
+    page.locator("#video").evaluate("node => { node.__webkitFullscreen = false; node.webkitEnterFullscreen = () => { node.__webkitFullscreen = true; node.dispatchEvent(new Event('webkitbeginfullscreen')); }; node.webkitExitFullscreen = () => { node.__webkitFullscreen = false; node.dispatchEvent(new Event('webkitendfullscreen')); }; Object.defineProperty(node, 'webkitDisplayingFullscreen', { configurable: true, get: () => node.__webkitFullscreen }); }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === true")
+    assert page.get_by_label("退出全屏", exact=True).is_visible()
+    page.get_by_label("退出全屏", exact=True).click()
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === false")
+    assert not page.locator("#videoShell").evaluate("node => node.classList.contains('pseudo-fullscreen')")
+
+
 @pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
 def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page = player_page
