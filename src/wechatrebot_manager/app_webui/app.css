@@ -343,7 +343,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .group-table th:nth-child(2) { width: 34%; }
 .group-table th:nth-child(3) { width: 12%; }
 .group-table th:nth-child(4) { width: 30%; }
-.group-table thead { position: sticky; top: 0; z-index: 1; }
+.group-table thead { position: static; }
 .group-row { cursor: pointer; }
 .group-row:hover { background: #f7faff; }
 .group-row:focus-visible { outline: 3px solid rgba(11,111,232,.22); outline-offset: -3px; }
@@ -1129,7 +1129,7 @@ tbody tr:hover { background: #fbfdff; }
 .contact-table th:nth-child(2) { width: 29%; }
 .contact-table th:nth-child(3) { width: 28%; }
 .contact-table th:nth-child(4) { width: 16%; }
-.contact-table thead { position: sticky; top: 0; z-index: 1; }
+.contact-table thead { position: static; }
 .contact-row { cursor: pointer; }
 .contact-row:hover { background: #f7faff; }
 .contact-row:focus-visible { outline: 3px solid rgba(11,111,232,.22); outline-offset: -3px; }
