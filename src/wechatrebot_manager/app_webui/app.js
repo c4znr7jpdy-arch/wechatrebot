@@ -96,6 +96,8 @@
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
   const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
+  let groupMemberRequestQueue = Promise.resolve();
+  const groupMemberLoadsInFlight = new Set();
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -1244,7 +1246,7 @@
         ? state.groupMemberLoad : ++state.groupMemberLoad;
       const groupsNeedingCounts = state.groups.filter((item) =>
         !Number.isInteger(item.member_count)
-        && (!background || !state.groupMembers[item.group_id] || state.groupMembers[item.group_id].loading));
+        && (!background || !state.groupMembers[item.group_id]));
       groupsNeedingCounts.forEach((item) => {
         const previous = state.groupMembers[item.group_id] || {};
         state.groupMembers[item.group_id] = {
@@ -1435,61 +1437,76 @@
 
   async function hydrateGroupMemberCounts(groupIds, generation) {
     const pending = [...new Set(groupIds)];
-    let next = 0;
-    const worker = async () => {
-      while (next < pending.length && generation === state.groupMemberLoad) {
-        const groupId = pending[next++];
-        await loadGroupMembers(groupId, {background: true, generation});
-      }
-    };
-    await Promise.all(Array.from({length: Math.min(2, pending.length)}, () => worker()));
+    for (const groupId of pending) {
+      if (generation !== state.groupMemberLoad) return;
+      await loadGroupMembers(groupId, {background: true, generation});
+    }
+  }
+
+  function queueGroupMemberRequest(groupId, generation, background) {
+    const request = groupMemberRequestQueue.then(() => {
+      if (generation !== state.groupMemberLoad
+          || !state.groups.some((item) => item.group_id === groupId)
+          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return null;
+      return api("get_group_members", groupId);
+    });
+    groupMemberRequestQueue = request.catch(() => undefined);
+    return request;
   }
 
   async function loadGroupMembers(groupId, options = {}) {
     const background = options?.background === true;
     const generation = options?.generation ?? state.groupMemberLoad;
     if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-    const previous = state.groupMembers[groupId] || {};
-    state.groupMembers[groupId] = {
-      ...previous,
-      loading: true,
-      error: "",
-      items: Array.isArray(previous.items) ? previous.items : [],
-    };
-    if (!background) renderGroups();
-    let lastError = null;
-    for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
-      if (attempt) {
-        await new Promise((resolve) => window.setTimeout(resolve, GROUP_MEMBER_RETRY_DELAYS_MS[attempt - 1]));
+    const requestKey = `${generation}:${groupId}`;
+    if (groupMemberLoadsInFlight.has(requestKey)) return;
+    groupMemberLoadsInFlight.add(requestKey);
+    try {
+      const previous = state.groupMembers[groupId] || {};
+      state.groupMembers[groupId] = {
+        ...previous,
+        loading: true,
+        error: "",
+        items: Array.isArray(previous.items) ? previous.items : [],
+      };
+      if (!background) renderGroups();
+      let lastError = null;
+      for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt) {
+          await new Promise((resolve) => window.setTimeout(resolve, GROUP_MEMBER_RETRY_DELAYS_MS[attempt - 1]));
+        }
+        if (generation !== state.groupMemberLoad
+            || !state.groups.some((item) => item.group_id === groupId)
+            || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
+        try {
+          const data = await queueGroupMemberRequest(groupId, generation, background);
+          if (!data) return;
+          if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
+          const items = Array.isArray(data.items) ? data.items : [];
+          const total = Number.isInteger(data.total) ? data.total : items.length;
+          state.groupMembers[groupId] = {
+            loading: false,
+            items,
+            total,
+            truncated: Boolean(data.truncated),
+          };
+          const group = state.groups.find((item) => item.group_id === groupId);
+          if (group) group.member_count = total;
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
       }
-      if (generation !== state.groupMemberLoad
-          || !state.groups.some((item) => item.group_id === groupId)
-          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
-      try {
-        const data = await api("get_group_members", groupId);
+      if (lastError) {
         if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-        const items = Array.isArray(data.items) ? data.items : [];
-        const total = Number.isInteger(data.total) ? data.total : items.length;
-        state.groupMembers[groupId] = {
-          loading: false,
-          items,
-          total,
-          truncated: Boolean(data.truncated),
-        };
-        const group = state.groups.find((item) => item.group_id === groupId);
-        if (group) group.member_count = total;
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
+        state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
+        if (!background) reportError(lastError);
       }
+      renderGroups({preserveInspector: background});
+    } finally {
+      groupMemberLoadsInFlight.delete(requestKey);
     }
-    if (lastError) {
-      if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-      state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
-      if (!background) reportError(lastError);
-    }
-    renderGroups({preserveInspector: background});
   }
 
   function contactDisplayName(contact) {

@@ -18,11 +18,19 @@ def test_group_directory_first_load_retries_without_manual_refresh() -> None:
     assert "if (state.groupStale) scheduleGroupRefreshRetry(retryAttempt);" in script
 
 
-def test_group_member_counts_retry_with_lower_concurrency() -> None:
+def test_group_member_counts_retry_serially() -> None:
     script = _script()
 
     assert "const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];" in script
-    assert "Math.min(2, pending.length)" in script
+    assert "for (const groupId of pending)" in script
+    assert "let groupMemberRequestQueue = Promise.resolve();" in script
+    assert "const groupMemberLoadsInFlight = new Set();" in script
+    assert "queueGroupMemberRequest(groupId, generation, background)" in script
+    assert "groupMemberRequestQueue = request.catch(() => undefined);" in script
+    assert "if (groupMemberLoadsInFlight.has(requestKey)) return;" in script
+    assert "groupMemberLoadsInFlight.delete(requestKey);" in script
+    assert "&& (!background || !state.groupMembers[item.group_id]));" in script
+    assert "Math.min(2, pending.length)" not in script
     assert "attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length" in script
     assert 'background && (state.activePage !== "groups"' in script
 
