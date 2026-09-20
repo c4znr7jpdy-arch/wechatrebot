@@ -1033,6 +1033,24 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     assert "max-width: min(68%, 560px)" in styles
 
 
+def test_history_message_avatars_select_sender_in_inspector() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'selectedSenderKey: ""' in script
+    assert "function messageSenderKey(message)" in script
+    assert 'class="message-avatar-button${selected ? " selected" : ""}"' in script
+    assert 'aria-label="选中消息发送者：${escapeHtml(name)}"' in script
+    assert "function bindMessageSenderSelection" in script
+    assert "selectMessageSender(button.dataset.senderKey || \"\")" in script
+    assert "const selectedSender = state.selectedSenderKey" in script
+    assert "const currentSender = selectedSender || latestSender;" in script
+    assert ".message-avatar-button:hover" in styles
+    assert ".message-avatar-button:focus-visible" in styles
+    assert ".message-avatar-button.selected" in styles
+
+
 def test_history_default_date_rolls_forward_across_midnight() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
