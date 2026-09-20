@@ -951,6 +951,8 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert "群聊数量暂不可用" in script
     assert "等待读取群聊" in markup
     assert ".group-table { min-width: 620px; table-layout: fixed; }" in styles
+    assert ".group-table thead { position: static; }" in styles
+    assert ".contact-table thead { position: static; }" in styles
 
 
 def test_chat_management_adds_private_directory_profile_and_feature_scope() -> None:
