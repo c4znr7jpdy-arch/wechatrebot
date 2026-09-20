@@ -1391,7 +1391,6 @@
     state.selectedGroup = groupId;
     state.groupInspectorView = "policy";
     renderGroups();
-    $("#groupInspector").scrollIntoView({block: "nearest", behavior: "smooth"});
     loadGroupPolicy(groupId);
   }
 
