@@ -1200,6 +1200,23 @@ def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() ->
     assert "请打开专属配置页填写服务密钥" in script
 
 
+def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page() -> None:
+    root = Path(app_shell.__file__).parents[2]
+    script = (Path(app_shell.__file__).with_name("app_webui") / "app.js").read_text(
+        encoding="utf-8"
+    )
+    features = json.loads(
+        (root / "release" / "feature-set.json").read_text(encoding="utf-8")
+    )["features"]
+    drama = next(item for item in features if item["module"] == "jiang_short_drama")
+
+    assert drama["configuration"] == "none"
+    assert 'previewFeature("feature-drama", "短剧", "none"' in script
+    assert 'page: "recommendation-schedules"' not in script
+    assert "管理旧版短剧计划" not in script
+    assert "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" in script
+
+
 def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")

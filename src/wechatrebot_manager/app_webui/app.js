@@ -873,7 +873,7 @@
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
+        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
@@ -3740,7 +3740,7 @@
       previewFeature("feature-repeater", "复读功能", "none", "在群内出现连续相同消息时进行轻量互动。"),
       previewFeature("feature-rocom", "洛克王国助手", "none", "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"),
       previewFeature("feature-schedule", "定时任务", "page-and-global-schedule-center", "集中管理新闻、天气、内容推送和多站点签到计划。", {page: "schedule-center", scheduledAction: "weather"}),
-      previewFeature("feature-drama", "短剧", "page-and-global-schedule-center", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {page: "recommendation-schedules", scheduledAction: "short_drama", scheduleProvider: true}),
+      previewFeature("feature-drama", "短剧", "none", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {scheduledAction: "short_drama", scheduleProvider: true}),
       previewFeature("feature-video", "视频理解", "schema", "从微信短视频提取关键帧和音轨，并由 Grok 4.6 生成时间线摘要。", {modelFieldCount: 3}),
       previewFeature("feature-meme", "表情管理", "schema-and-page", "管理多套表情包、会话绑定、资源目录和同步设置。", {page: "meme-management"}),
     ];

@@ -900,10 +900,11 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     by_name = {item["display_name"]: item for item in catalog}
     assert by_name["点歌"]["configurable"] is False
     assert by_name["短剧"]["configurable"] is False
+    assert by_name["短剧"]["configuration"] == "none"
     assert by_name["短剧"]["scheduled_action"] == "short_drama"
     assert by_name["短剧"]["schedule_provider"] is True
     assert by_name["点歌"]["pages"] == ()
-    assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
+    assert by_name["短剧"]["pages"] == ()
     angel = service.detail(plugin_center.ROBOT_CORE_FEATURE_ID)
     assert angel["configurable"] is True
     assert angel["model_field_count"] == 1
@@ -914,6 +915,8 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     assert list(angel["basic_schema"]) == ["personality"]
     assert music["schema"] == music["config"] == {}
     assert drama["schema"] == drama["config"] == {}
+    assert drama["configuration"] == "none"
+    assert drama["pages"] == ()
     assert drama["scheduled_action"] == "short_drama"
     with pytest.raises(PluginCenterError, match="没有可编辑"):
         service.save(by_name["点歌"]["id"], {}, music["revision"])
