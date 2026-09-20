@@ -48,6 +48,7 @@
     conversations: [],
     selectedConversation: null,
     selectedMessages: [],
+    selectedSenderKey: "",
     historyLoad: 0,
     messageLoad: 0,
     historyPolling: false,
@@ -1783,6 +1784,7 @@
         state.historyLoadingOlder = false;
         state.historyMessageQuery = "";
         state.selectedMessages = [];
+        state.selectedSenderKey = "";
         $("#conversationHeader").textContent = "没有匹配的聊天";
         $("#messageList").removeAttribute("aria-busy");
         $("#messageList").innerHTML = '<div class="empty-state compact"><h2>没有找到匹配消息</h2><p>调整昵称、微信号或日期后再试。</p></div>';
@@ -1942,6 +1944,19 @@
     return rawMessagePresentation(value).preview;
   }
 
+  function messageSenderKey(message) {
+    if (!message || message.role === "assistant") return "";
+    return String(message.sender_id || message.wechat_id || message.sender_name || message.group_nickname || "").trim();
+  }
+
+  function messageSenderName(message) {
+    return message?.group_nickname || message?.wechat_name || message?.sender_name || message?.sender_id || "用户";
+  }
+
+  function messageSenderIdentity(message) {
+    return message?.wechat_id || message?.sender_id || "";
+  }
+
   function messageBubbleMarkup(message) {
     const presentation = messagePresentation(message);
     if (presentation.messageKind === "quote") {
@@ -1957,9 +1972,39 @@
 
   function messageMarkup(message) {
     const assistant = message.role === "assistant";
-    const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
-    const identity = !assistant ? (message.wechat_id || message.sender_id || "") : "";
-    return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
+    const name = assistant ? "机器人" : messageSenderName(message);
+    const identity = !assistant ? messageSenderIdentity(message) : "";
+    const senderKey = messageSenderKey(message);
+    const selected = !assistant && senderKey && senderKey === state.selectedSenderKey;
+    const avatar = assistant || !senderKey
+      ? avatarMarkup("message-avatar", name, message.avatar)
+      : `<button class="message-avatar-button${selected ? " selected" : ""}" type="button" data-sender-key="${escapeHtml(senderKey)}" aria-label="选中消息发送者：${escapeHtml(name)}" aria-pressed="${selected ? "true" : "false"}">${avatarMarkup("message-avatar", name, message.avatar)}</button>`;
+    return `<article class="message ${assistant ? "assistant" : ""}">${avatar}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
+  }
+
+  function updateSelectedSenderButtons() {
+    $$(".message-avatar-button", $("#messageList")).forEach((button) => {
+      const selected = Boolean(state.selectedSenderKey && button.dataset.senderKey === state.selectedSenderKey);
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+  }
+
+  function selectMessageSender(senderKey) {
+    if (!senderKey) return;
+    const sender = [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === senderKey);
+    if (!sender) return;
+    state.selectedSenderKey = senderKey;
+    updateSelectedSenderButtons();
+    if (state.selectedConversation) renderConversationInspector(state.selectedConversation);
+  }
+
+  function bindMessageSenderSelection(root = $("#messageList")) {
+    $$(".message-avatar-button", root).forEach((button) => {
+      if (button.dataset.senderSelectionBound === "true") return;
+      button.dataset.senderSelectionBound = "true";
+      button.addEventListener("click", () => selectMessageSender(button.dataset.senderKey || ""));
+    });
   }
 
   function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
@@ -1970,6 +2015,8 @@
     list.innerHTML = messages.length ? messages.map(messageMarkup).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
     bindAvatarFallbacks(list);
     state.selectedMessages = messages;
+    bindMessageSenderSelection(list);
+    updateSelectedSenderButtons();
     const newButton = $("#newMessageButton");
     if (forceBottom || nearBottom) {
       list.scrollTop = list.scrollHeight;
@@ -1993,6 +2040,8 @@
     list.insertAdjacentHTML("afterbegin", older.map(messageMarkup).join(""));
     bindAvatarFallbacks(list);
     state.selectedMessages = mergeMessages(older, state.selectedMessages);
+    bindMessageSenderSelection(list);
+    updateSelectedSenderButtons();
     list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
   }
 
@@ -2007,6 +2056,7 @@
     state.selectedConversation = item;
     if (changed) {
       state.selectedMessages = [];
+      state.selectedSenderKey = "";
       state.historyHasMore = false;
       state.historyLoadingOlder = false;
       state.historyMessageQuery = query;
@@ -2090,19 +2140,24 @@
 
   function renderConversationInspector(item) {
     const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
-    const senderName = latestSender ? (latestSender.group_nickname || latestSender.wechat_name || latestSender.sender_name || "未知发送者") : "尚无发送者";
-    const senderId = latestSender?.wechat_id || latestSender?.sender_id || "标识未提供";
+    const selectedSender = state.selectedSenderKey
+      ? [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === state.selectedSenderKey)
+      : null;
+    const currentSender = selectedSender || latestSender;
+    const senderName = currentSender ? messageSenderName(currentSender) : "尚无发送者";
+    const senderId = currentSender ? (messageSenderIdentity(currentSender) || "标识未提供") : "标识未提供";
     const identityFacts = item.type === "group"
       ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
       : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, latestSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${latestSender?.wechat_id && latestSender.wechat_id !== latestSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
-    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, "微信号"));
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
     $("#deleteConversation")?.addEventListener("click", () => confirmAction({
       title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
       onConfirm: async () => {
         await api("delete_conversation", item.conversation_id);
         state.selectedConversation = null;
+        state.selectedSenderKey = "";
         $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
         $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><h2>尚未选择</h2>';
         await loadConversations(); toast("聊天记录副本已删除。 ");
