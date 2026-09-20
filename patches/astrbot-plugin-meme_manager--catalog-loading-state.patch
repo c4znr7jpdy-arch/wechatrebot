@@ -1,0 +1,159 @@
+diff --git a/pages/catalog/index.html b/pages/catalog/index.html
+index 83b6435..3da78ae 100644
+--- a/pages/catalog/index.html
++++ b/pages/catalog/index.html
+@@ -34,21 +34,25 @@
+     </header>
+ 
+     <main class="layout">
++      <div id="catalog-status" class="catalog-status" role="status" aria-live="polite">
++        <span id="catalog-status-text">正在读取资源索引…</span>
++        <button id="catalog-retry" class="ghost" type="button" hidden>重新读取</button>
++      </div>
+       <section class="panel catalog-list official-zone">
+         <div class="panel-header">
+           <h2><i class="fas fa-crown icon"></i>官方包</h2>
+-          <span id="official-pack-count" class="badge">0</span>
++          <span id="official-pack-count" class="badge">读取中</span>
+         </div>
+         <div id="official-grid" class="catalog-grid empty">
+-          <p>暂无官方包。</p>
++          <p>正在读取官方包…</p>
+         </div>
+       </section>
+ 
+       <section class="panel catalog-list community-zone">
+         <div class="panel-header">
+           <h2><i class="fas fa-users icon"></i>社区包</h2>
+-          <span id="community-pack-count" class="badge">0</span>
++          <span id="community-pack-count" class="badge">读取中</span>
+         </div>
+         <div id="community-grid" class="catalog-grid empty">
+-          <p>暂无社区包。</p>
++          <p>正在读取社区包…</p>
+         </div>
+diff --git a/pages/catalog/style.css b/pages/catalog/style.css
+index e5b05a5..148ab3f 100644
+--- a/pages/catalog/style.css
++++ b/pages/catalog/style.css
+@@ -112,7 +112,36 @@ h1 {
+   grid-column: span 12;
+ }
+ 
++.catalog-status {
++  grid-column: span 12;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  min-height: 42px;
++  padding: 10px 14px;
++  border: 1px solid #cde5da;
++  border-radius: 10px;
++  background: rgba(255, 255, 255, 0.9);
++  color: var(--muted);
++  font-size: 13px;
++}
++
++.catalog-status[hidden] {
++  display: none;
++}
++
++.catalog-status.error {
++  border-color: #edc2bc;
++  color: var(--danger);
++}
++
++.catalog-status .ghost {
++  flex: 0 0 auto;
++  padding: 7px 10px;
++}
++
+ .official-zone {
+   border-color: #ecd8a2;
+   background: linear-gradient(180deg, #fffdf6 0%, #ffffff 100%);
+ }
+diff --git a/pages/catalog/script.js b/pages/catalog/script.js
+index 07ccfe4..9b9e5e0 100644
+--- a/pages/catalog/script.js
++++ b/pages/catalog/script.js
+@@ -76,6 +76,9 @@ async function initCatalogPage() {
+   const communityGrid = document.getElementById("community-grid");
+   const officialPackCount = document.getElementById("official-pack-count");
+   const communityPackCount = document.getElementById("community-pack-count");
++  const catalogStatus = document.getElementById("catalog-status");
++  const catalogStatusText = document.getElementById("catalog-status-text");
++  const catalogRetry = document.getElementById("catalog-retry");
+   const logList = document.getElementById("log-list");
+ 
+   await applySecureNavLinks();
+@@ -84,6 +87,25 @@ async function initCatalogPage() {
+   let installedPackIds = new Set();
+   let pendingInstallAction = null;
+ 
++  function setCatalogStatus(kind, message = "") {
++    const visible = kind !== "ready";
++    catalogStatus.hidden = !visible;
++    catalogStatus.classList.toggle("error", kind === "error");
++    catalogStatusText.textContent = message;
++    catalogRetry.hidden = kind !== "error";
++    catalogRetry.disabled = false;
++  }
++
++  function showCatalogError(message) {
++    officialPackCount.textContent = "-";
++    communityPackCount.textContent = "-";
++    officialGrid.classList.add("empty");
++    communityGrid.classList.add("empty");
++    officialGrid.innerHTML = "<p>暂时无法读取官方包。</p>";
++    communityGrid.innerHTML = "<p>暂时无法读取社区包。</p>";
++    setCatalogStatus("error", message);
++  }
++
+   async function apiGet(endpoint, params = {}) {
+     return window.AstrBotPluginPage.apiGet(endpoint, params);
+   }
+@@ -361,6 +383,7 @@ async function initCatalogPage() {
+ 
+     officialPackCount.textContent = String(officialPacks.length);
+     communityPackCount.textContent = String(communityPacks.length);
++    setCatalogStatus("ready");
+ 
+     if (!officialPacks.length) {
+       officialGrid.classList.add("empty");
+@@ -387,6 +410,10 @@ async function initCatalogPage() {
+   }
+ 
+   async function fetchIndex() {
++    setCatalogStatus(
++      cachedIndex ? "refreshing" : "loading",
++      cachedIndex ? "正在更新资源索引…" : "正在读取资源索引…",
++    );
+     try {
+       const response = await apiPost("community/index/fetch", {
+         index_url: FIXED_INDEX_URL,
+@@ -401,6 +428,11 @@ async function initCatalogPage() {
+       renderCatalog();
+       addLog(`索引拉取成功，共 ${response.pack_count || 0} 个条目`);
+     } catch (error) {
+       addLog(`索引拉取失败: ${error?.message || String(error)}`, true);
++      if (!cachedIndex) {
++        showCatalogError("资源索引读取失败，请稍后重试。");
++      } else {
++        setCatalogStatus("ready");
++      }
+     }
+   }
+@@ -511,6 +543,11 @@ async function initCatalogPage() {
+     }
+   });
+ 
++  catalogRetry.addEventListener("click", () => {
++    catalogRetry.disabled = true;
++    void fetchIndex();
++  });
++
++  setCatalogStatus("loading", "正在读取资源索引…");
+   await refreshInstalledSet();
+-  renderCatalog();
+   addLog("资源广场已就绪");
