@@ -403,6 +403,11 @@ _CUSTOMER_SCHEMA_PROFILES = {
 # updates cannot replace legal/feature-set.json, so keep this narrow UI policy
 # override until those installations have received a newer full payload.
 _MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
+# Page-only features must stay page-only on older installations whose signed
+# feature manifest still declares the legacy schema-and-page mode.
+_MANAGER_PAGE_ONLY_MODULES = frozenset(
+    {"astrbot_plugin_mimo_tts_clone", "astrbot_plugin_twitter"}
+)
 
 
 def _group_analysis_ui_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -1606,9 +1611,12 @@ class PluginCenterService:
             plugin_dir = root / module_name
             raw_schema = _read_object(plugin_dir / "_conf_schema.json")
             exposes_schema = (
-                policy is None
-                or policy.exposes_schema
-                or module_name in _MANAGER_SCHEMA_POLICY_OVERRIDES
+                module_name not in _MANAGER_PAGE_ONLY_MODULES
+                and (
+                    policy is None
+                    or policy.exposes_schema
+                    or module_name in _MANAGER_SCHEMA_POLICY_OVERRIDES
+                )
             )
             exposes_pages = policy is None or policy.exposes_pages
             schema, profile = _project_customer_schema(
@@ -1642,7 +1650,11 @@ class PluginCenterService:
                     field_count=_field_count(basic_schema),
                     model_field_count=_field_count(model_schema),
                     pages=pages,
-                    configuration=(policy.configuration if policy else "schema-and-page"),
+                    configuration=(
+                        "page"
+                        if module_name in _MANAGER_PAGE_ONLY_MODULES
+                        else (policy.configuration if policy else "schema-and-page")
+                    ),
                     description=(policy.description if policy else ""),
                     simplified=profile is not None,
                 )

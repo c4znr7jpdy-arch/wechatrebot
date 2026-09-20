@@ -955,6 +955,40 @@ def test_voice_clone_uses_only_its_page_even_with_old_schema_delivery(tmp_path: 
         service.save(entry["id"], {}, detail["revision"])
 
 
+def test_twitter_uses_only_its_subscription_page_even_with_old_schema_delivery(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    module = "astrbot_plugin_twitter"
+    plugin = install / "app" / "astrbot" / "data" / "plugins" / module
+    page = plugin / "pages" / "subscriptions"
+    page.mkdir(parents=True)
+    (page / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps({"twitter_data_provider": {"type": "string", "default": "fxtwitter"}}),
+        encoding="utf-8",
+    )
+    legal = install / "legal"
+    legal.mkdir(parents=True, exist_ok=True)
+    (legal / "feature-set.json").write_text(
+        json.dumps({"features": [{
+            "module": module, "display_name": "推特推送",
+            "configuration": "schema-and-page",
+        }]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    entry = service.catalog()["plugins"][0]
+    detail = service.detail(entry["id"])
+
+    assert entry["configuration"] == "page"
+    assert entry["configurable"] is False
+    assert entry["field_count"] == entry["model_field_count"] == 0
+    assert detail["basic_schema"] == detail["model_schema"] == detail["advanced_schema"] == {}
+    assert detail["pages"] == ("subscriptions",)
+    with pytest.raises(PluginCenterError, match="没有可编辑"):
+        service.save(entry["id"], {}, detail["revision"])
+
+
 def test_plugin_center_command_can_open_selected_feature(tmp_path: Path) -> None:
     command = plugin_center_command(tmp_path, "feature-0123456789abcdef")
 

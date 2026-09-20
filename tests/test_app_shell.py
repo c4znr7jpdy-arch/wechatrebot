@@ -1200,6 +1200,32 @@ def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() ->
     assert "请打开专属配置页填写服务密钥" in script
 
 
+def test_twitter_is_embedded_in_feature_center_without_generic_configuration() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    features = json.loads(
+        (webui.parents[2] / "release" / "feature-set.json").read_text(encoding="utf-8")
+    )["features"]
+    twitter = next(item for item in features if item["module"] == "astrbot_plugin_twitter")
+
+    assert twitter["configuration"] == "page"
+    assert 'id="featurePageFrame"' in script
+    assert 'api("get_feature_page", detail.id)' in script
+    assert 'api("request_feature_page", state.selectedFeature, "POST"' in script
+    assert "const TWITTER_FEATURE_IDS" in script
+    assert "const pageOnly = TWITTER_FEATURE_IDS.has(detail.id)" in script
+    assert "get_feature_page" in app_shell.PUBLIC_API_METHODS
+    assert "request_feature_page" in app_shell.PUBLIC_API_METHODS
+
+
+def test_feature_page_bridge_unwraps_plugin_page_success_and_error_envelopes() -> None:
+    source = Path(app_shell.__file__).read_text(encoding="utf-8")
+
+    assert 'result.get("status") == "error"' in source
+    assert 'result.get("status") == "ok"' in source
+    assert 'result = result["data"]' in source
+
+
 def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
