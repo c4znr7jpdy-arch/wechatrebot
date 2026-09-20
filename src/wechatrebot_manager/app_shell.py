@@ -1821,7 +1821,9 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
             webview.start(gui="edgechromium", debug=False, private_mode=True)
             return 0
         finally:
-            api._close_feature_page_server()
+            close_feature_page_server = getattr(api, "_close_feature_page_server", None)
+            if close_feature_page_server is not None:
+                close_feature_page_server()
     except ImportError as exc:
         raise RuntimeError("主界面组件缺失，请重新安装软件。") from exc
 
