@@ -19,6 +19,7 @@
     featurePrefetch: 0,
     featureDetails: {},
     featureFeedback: "",
+    featurePageLoad: 0,
     groupsLoaded: false,
     groupsBusy: false,
     groups: [],
@@ -99,6 +100,7 @@
   const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
   let groupMemberRequestQueue = Promise.resolve();
   const groupMemberLoadsInFlight = new Set();
+  const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -860,6 +862,7 @@
         : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
     const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
+    const pageOnly = TWITTER_FEATURE_IDS.has(detail.id) && detail.configuration === "page" && detail.pages?.length;
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
@@ -868,7 +871,11 @@
       ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
       ${commandMarkup}
-      ${detail.configurable ? `
+      ${pageOnly ? `
+        <section class="feature-page-panel" aria-label="${escapeHtml(detail.display_name)}专属配置">
+          <div class="feature-page-status" id="featurePageStatus" role="status">正在打开专属配置页…</div>
+          <iframe id="featurePageFrame" title="${escapeHtml(detail.display_name)}专属配置页" hidden></iframe>
+        </section>` : detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
         <form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema).length ? '<div class="empty-state compact"><p>此分类无需配置</p></div>' : ""}</form>
@@ -929,7 +936,59 @@
     $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
     $("#openFeatureHelp")?.addEventListener("click", () => openHelpForFeature(detail.display_name));
     $$("[data-action-bound]", $("#featureDetail")).forEach((button) => { button.disabled = false; });
+    if (pageOnly) void openEmbeddedFeaturePage(detail);
   }
+
+  async function openEmbeddedFeaturePage(detail) {
+    const loadId = ++state.featurePageLoad;
+    const status = $("#featurePageStatus");
+    const frame = $("#featurePageFrame");
+    if (!status || !frame || state.selectedFeature !== detail.id) return;
+    if (!detail.engine_online) {
+      status.textContent = "专属配置页需要机器人在线，请先在运行中心启动机器人。";
+      return;
+    }
+    try {
+      const page = await api("get_feature_page", detail.id);
+      if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
+      frame.src = page.url;
+      frame.hidden = false;
+      status.hidden = true;
+    } catch (error) {
+      if (loadId !== state.featurePageLoad) return;
+      status.textContent = error?.message || "专属配置页暂时无法打开，请稍后重试。";
+      reportError(error);
+    }
+  }
+
+  const featurePageChannel = "astrbot-plugin-page";
+  async function handleEmbeddedFeaturePageRequest(message) {
+    const detail = state.featureDetail;
+    if (!detail || detail.configuration !== "page" || !state.selectedFeature) {
+      throw new Error("当前功能没有可用的专属配置页。 ");
+    }
+    if (message.action === "api:get") {
+      return api("request_feature_page", state.selectedFeature, "GET", message.endpoint, null, message.params ?? null);
+    }
+    if (message.action === "api:post") {
+      return api("request_feature_page", state.selectedFeature, "POST", message.endpoint, message.body ?? {});
+    }
+    throw new Error("当前专属配置页使用了尚未支持的操作。 ");
+  }
+
+  window.addEventListener("message", async (event) => {
+    const frame = $("#featurePageFrame");
+    const message = event.data;
+    if (!frame || event.source !== frame.contentWindow || !message
+      || message.channel !== featurePageChannel || message.kind !== "request"
+      || typeof message.requestId !== "string") return;
+    try {
+      const data = await handleEmbeddedFeaturePageRequest(message);
+      event.source.postMessage({channel: featurePageChannel, kind: "response", requestId: message.requestId, ok: true, data}, "*");
+    } catch (error) {
+      event.source.postMessage({channel: featurePageChannel, kind: "response", requestId: message.requestId, ok: false, error: error?.message || "专属配置页请求失败。"}, "*");
+    }
+  });
 
   function helpAudienceMatch(item) {
     const label = String(item.audience || "");
@@ -3802,7 +3861,7 @@
       previewFeature("feature-voice-clone", "语音克隆", "page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
-      previewFeature("feature-twitter", "推特推送", "schema-and-page", "订阅 X/Twitter 推主，按会话管理订阅并定时推送新推文；支持链接解析、媒体和翻译配置。", {page: "plugin-settings", fieldCount: 8}),
+      previewFeature("feature-twitter", "推特推送", "page", "在专属订阅管理页配置 X/Twitter 数据源、订阅会话和推送选项。", {page: "subscriptions"}),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
       previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true, scheduledAction: "group_analysis", scheduleProvider: true}),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
@@ -4060,6 +4119,8 @@
       },
       request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
+      get_feature_page: () => ok({url: "data:text/html;charset=utf-8,%3Cstyle%3Ebody%7Bfont-family%3Asans-serif%3Bpadding%3A32px%3Bcolor%3A%23102a49%7D%3C%2Fstyle%3E%3Ch2%3E推特订阅管理（预览）%3C%2Fh2%3E%3Cp%3E正式版本将在此处加载实际订阅管理页。%3C%2Fp%3E", origin: window.location.origin}),
+      request_feature_page: () => ok({status: "ok", data: {}}),
       get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 6, items: [
         {group_id: "51632940287@chatroom", name: "旅行交流群", member_count: 128},
         {group_id: "81263495012@chatroom", name: "短剧分享群", member_count: 76},

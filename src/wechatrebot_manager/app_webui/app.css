@@ -236,6 +236,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .feature-state { align-self: center; width: 8px; height: 8px; border-radius: 50%; background: #9ba8b7; }
 .feature-state.enabled { background: var(--green-600); }
 .feature-detail { min-width: 0; padding: 22px; overflow: auto; }
+.feature-page-panel { display: grid; grid-template-rows: auto minmax(560px, 1fr); gap: 10px; min-height: 620px; padding-top: 18px; }
+.feature-page-status { display: grid; place-items: center; min-height: 92px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); color: var(--muted); text-align: center; }
+.feature-page-panel iframe { width: 100%; min-height: 560px; height: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .empty-state { min-height: 440px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); }
 .empty-state.compact { min-height: 260px; }
 .empty-state h2 { margin: 12px 0 2px; color: var(--ink); font-size: 17px; }
@@ -1233,6 +1236,8 @@ tbody tr:hover { background: #fbfdff; }
   .feature-catalog { max-height: 330px; }
   .feature-catalog, .feature-detail { height: auto; }
   .feature-detail { overflow: visible; }
+  .feature-page-panel { min-height: 560px; }
+  .feature-page-panel iframe { min-height: 560px; }
   .group-table-panel,
   .group-inspector,
   .contact-table-panel,

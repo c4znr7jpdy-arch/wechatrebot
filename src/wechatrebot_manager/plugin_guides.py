@@ -111,7 +111,13 @@ _ASSESSMENTS = {
 }
 
 _HIDE_ALL_SETTINGS = frozenset(
-    {"jiang_commands", "jiang_short_drama", "astrbot_plugin_parser", "astrbot_plugin_mimo_tts_clone"}
+    {
+        "jiang_commands",
+        "jiang_short_drama",
+        "astrbot_plugin_parser",
+        "astrbot_plugin_mimo_tts_clone",
+        "astrbot_plugin_twitter",
+    }
 )
 _HIDE_ADVANCED_SETTINGS = frozenset({"jiang_image"})
 
