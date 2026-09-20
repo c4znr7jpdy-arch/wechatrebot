@@ -31,3 +31,12 @@ def test_switch_text_and_rows_do_not_toggle_hidden_checkbox() -> None:
     assert '<span class="field-label">' in app
     assert '<label class="toggle-track" for="${fieldId}"' in app
     assert ".toggle-track" in css and "cursor: pointer" in css
+
+
+def test_dedicated_config_iframe_fills_remaining_detail_height() -> None:
+    plugin_webui = Path(app_shell.__file__).with_name("plugin_webui")
+    styles = (plugin_webui / "app.css").read_text(encoding="utf-8")
+
+    assert "#detail-view:not([hidden]) { min-height: 100%; display: flex; flex-direction: column; }" in styles
+    assert "#pages-panel:not([hidden]) { min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column; }" in styles
+    assert "#plugin-frame { width: 100%; height: auto; min-height: 560px; flex: 1 1 auto;" in styles
