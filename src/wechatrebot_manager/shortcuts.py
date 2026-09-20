@@ -30,7 +30,7 @@ if (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET) {
     $shortcut.TargetPath = $env:WECHATREBOT_UNINSTALL_TARGET
     $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
-    $shortcut.Description = '彻底卸载微信机器人及本机数据'
+$shortcut.Description = '彻底卸载微信机器人（保留聊天记录）'
     $shortcut.Save()
 }
 $folderIni = Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR 'desktop.ini'

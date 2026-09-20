@@ -87,7 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     plugin_center.add_argument("feature_id", nargs="?")
     apply_update = subparsers.add_parser("apply-update", help=argparse.SUPPRESS)
     apply_update.add_argument("--plan", type=Path, required=True)
-    uninstall = subparsers.add_parser("uninstall", help="彻底卸载软件和本机数据")
+    uninstall = subparsers.add_parser("uninstall", help="彻底卸载软件并保留聊天记录")
     uninstall.add_argument("--install-root", type=Path, required=True)
     apply_uninstall = subparsers.add_parser(
         "apply-uninstall", help=argparse.SUPPRESS

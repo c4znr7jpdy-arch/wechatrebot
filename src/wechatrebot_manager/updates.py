@@ -713,6 +713,13 @@ def apply_update_plan(
         for pid in _plan_wait_pids(plan, int(plan["parent_pid"])):
             _wait_for_process_exit(pid)
         install_payload(payload_root, root)
+        # Manager-only updates must also refresh the standalone uninstall
+        # entrypoint.  Otherwise a customer who double-clicks the old copy
+        # could still run pre-update deletion rules.
+        from .uninstaller import ensure_uninstall_executable
+
+        if not ensure_uninstall_executable(root):
+            raise UpdateError("无法刷新卸载程序。")
         write_json_atomic(
             root / INSTALL_MARKER,
             {"schema_version": 1, "state": "ready"},

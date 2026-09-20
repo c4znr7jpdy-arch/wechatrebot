@@ -182,7 +182,10 @@ class ApplicationApi:
         purge_retired_plugins(self._install_root)
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
-        self._history = ChatHistoryService(self._install_root)
+        self._history = ChatHistoryService(
+            self._install_root,
+            local_app_data=os.environ.get("LOCALAPPDATA"),
+        )
         self._contacts = ContactDirectoryService(self._install_root)
         self._groups = GroupDirectoryService(self._install_root)
         self._schedules = ScheduleService(self._install_root)

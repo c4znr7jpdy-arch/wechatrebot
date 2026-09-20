@@ -212,6 +212,7 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     assert plan_payload["wait_pids"] == [0]
     assert apply_update_plan(plan.plan_path, restart=False) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
+    assert (install / "卸载机器人.exe").read_bytes() == b"new-manager"
     assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "updated"
     result = json.loads(
         (install / "updates" / "update-result.json").read_text(encoding="utf-8")
