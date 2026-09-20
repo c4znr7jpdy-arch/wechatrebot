@@ -1165,6 +1165,10 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     service.engine.plugin_states = lambda: {  # type: ignore[method-assign]
         "sample_configurable_feature": True
     }
+    service.engine.get_config = lambda _module: {  # type: ignore[method-assign]
+        "config": json.loads(config_path.read_text(encoding="utf-8")),
+        "revision": _json_revision(json.loads(config_path.read_text(encoding="utf-8"))),
+    }
 
     def save_config(module_name: str, config: dict, base_revision=None) -> dict:
         calls.append(("save", module_name, config))
@@ -1201,6 +1205,46 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     ]
     filter_call = next(call for call in calls if call[0] == "filter")
     assert "sample_configurable_feature" in filter_call[1]
+
+
+def test_online_group_save_uses_live_config_when_disk_snapshot_is_stale(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "sample_configurable_feature_config.json"
+    )
+    disk_config = json.loads(config_path.read_text(encoding="utf-8"))
+    live_config = json.loads(json.dumps(disk_config))
+    live_config["model_group"]["provider_id"] = "live/vendor-model"
+    config_path.write_text(json.dumps(disk_config, ensure_ascii=False), encoding="utf-8")
+    service.engine.is_available = lambda: True  # type: ignore[method-assign]
+    service.engine.plugin_states = lambda: {"sample_configurable_feature": True}  # type: ignore[method-assign]
+    service.engine.get_config = lambda _module: {  # type: ignore[method-assign]
+        "config": live_config,
+        "revision": _json_revision(live_config),
+    }
+
+    def save_config(_module: str, config: dict, base_revision=None) -> dict:
+        assert config["model_group"]["provider_id"] == "new/vendor-model"
+        assert base_revision == _json_revision(live_config)
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        return {"verified": True, "state": "applied", "revision": _json_revision(config)}
+
+    service.engine.save_config = save_config  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    assert detail["config"]["model_group"]["provider_id"] == "live/vendor-model"
+    assert detail["revision"] == _json_revision(live_config)
+    detail["config"]["model_group"]["provider_id"] = "new/vendor-model"
+
+    saved = service.save(public_id, detail["config"], detail["revision"])
+
+    assert saved["saved"] is True
+    assert json.loads(config_path.read_text(encoding="utf-8"))["model_group"]["provider_id"] == "new/vendor-model"
 
 
 def test_engine_api_routes_match_installed_runtime_contract(tmp_path: Path) -> None:

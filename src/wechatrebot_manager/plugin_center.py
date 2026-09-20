@@ -1724,6 +1724,18 @@ class PluginCenterService:
         )
         schema = raw_schema if item.configurable else {}
         stored = _read_object(_config_path(self.install_root, module_name))
+        live_revision = ""
+        if engine_online and item.configurable:
+            # The running engine is authoritative after a hot reload.  Its
+            # in-memory config can briefly differ from the file on disk while
+            # the manager is starting or another settings window is saving.
+            try:
+                live = self.engine.get_config(module_name)
+            except (EngineUnavailableError, PluginCenterError):
+                live = None
+            if isinstance(live, dict) and isinstance(live.get("config"), dict):
+                stored = live["config"]
+                live_revision = str(live.get("revision") or "")
         config = _normalize_config(schema, _merge_defaults(schema, stored))
         engine_config = _read_object(_dashboard_path(self.install_root))
         providers: list[dict[str, str]] = []
@@ -1813,7 +1825,7 @@ class PluginCenterService:
             "basic_schema": clean_basic_schema,
             "model_schema": clean_model_schema,
             "config": customer_config,
-            "revision": _json_revision(stored),
+            "revision": live_revision or _json_revision(stored),
             "providers": providers,
             "embedding_providers": embedding_providers,
             "rerank_providers": rerank_providers,
@@ -1834,7 +1846,18 @@ class PluginCenterService:
             raise PluginCenterError("这项功能没有可编辑的基础配置。")
         path = _config_path(self.install_root, module_name)
         stored = _read_object(path)
-        if base_revision and base_revision != _json_revision(stored):
+        live_revision = ""
+        online = self.engine.is_available()
+        if online:
+            # Compare against the live engine snapshot, not a stale file that
+            # may predate startup normalization or a previous hot reload.
+            live = self.engine.get_config(module_name)
+            if not isinstance(live.get("config"), dict):
+                raise PluginCenterError("无法读取当前功能设置，请刷新后重试。")
+            stored = live["config"]
+            live_revision = str(live.get("revision") or "")
+        current_revision = live_revision or _json_revision(stored)
+        if base_revision and base_revision != current_revision:
             raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
         schema = _read_object(
             _plugin_root(self.install_root) / module_name / "_conf_schema.json"
@@ -1844,12 +1867,11 @@ class PluginCenterService:
         _validate_config(schema, normalized)
         if module_name == "jiang_image" and "local_proxy_port" in schema:
             _validate_image_proxy_port(normalized)
-        online = self.engine.is_available()
         reloaded = False
         apply_state = "pending_start" if not online else "pending_enable"
         receipt = {}
         if online:
-            receipt = self.engine.save_config(module_name, normalized, _json_revision(stored))
+            receipt = self.engine.save_config(module_name, normalized, current_revision)
             if not isinstance(receipt, dict) or receipt.get("verified") is not True:
                 raise PluginCenterError("未收到配置生效确认，请重新读取设置检查结果。")
             apply_state = receipt["state"]
