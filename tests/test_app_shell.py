@@ -1263,6 +1263,19 @@ def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
     assert "tertiary_enabled" not in app_script
 
 
+def test_web_search_settings_show_only_selected_provider() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'id="webSearchProviderSummary"' in markup
+    assert 'id="webSearchProviderList"' not in markup
+    assert "web-search-provider-summary" in styles
+    assert "webSearchProviderSummary" in script
+    assert 'Object.values(state.webSearch.providers || {}).map' not in script
+
+
 def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")

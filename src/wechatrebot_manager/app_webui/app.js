@@ -3230,7 +3230,8 @@
     const providerSelect = form.elements.provider;
     const providers = state.webSearch.providers || {};
     providerSelect.innerHTML = Object.values(providers).map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.configured ? " · 已配置" : ""}</option>`).join("");
-    providerSelect.value = state.webSearch.provider || "tavily";
+    const requestedProvider = state.webSearch.provider || "tavily";
+    providerSelect.value = providers[requestedProvider] ? requestedProvider : (Object.keys(providers)[0] || "");
     form.elements.enabled.checked = Boolean(state.webSearch.enabled);
     form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
     updateToggleCopy({currentTarget: form.elements.enabled});
@@ -3251,7 +3252,7 @@
     $("#webSearchKeyHint").textContent = item.configured
       ? `当前服务商已保存 ${item.key_count || 1} 个密钥；输入新密钥会替换当前服务商密钥。`
       : "当前服务商尚未配置密钥；密钥仅保存在本机。";
-    $("#webSearchProviderList").innerHTML = Object.values(state.webSearch.providers || {}).map((provider) => `<div class="web-search-provider-row ${provider.id === id ? "active" : ""}"><span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(provider.description)}</small></span><span class="status-badge ${provider.configured ? "online" : ""}">${provider.configured ? `已配置 ${provider.key_count || 1} 个` : "未配置"}</span></div>`).join("");
+    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${escapeHtml(item.description || "请先选择一个搜索服务商。")}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
   }
 
   async function loadWebSearchSettings() {
