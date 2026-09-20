@@ -196,3 +196,45 @@ def test_private_link_preserves_existing_delivery_state(parser):
 
     assert seen_wake == [False]
     assert event.is_at_or_wake_command is False
+
+
+def test_wechat_media_chain_does_not_wrap_segments_in_forward_nodes(tmp_path):
+    source = _patched(
+        tmp_path,
+        "astrbot_plugin_parser",
+        "core/sender.py",
+        all_patches=True,
+    )
+
+    class WeChatEvent:
+        def __init__(self, self_id="wxid_bot"):
+            self.self_id = self_id
+
+        def get_self_id(self):
+            return self.self_id
+
+    class Node:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class Nodes:
+        def __init__(self, nodes):
+            self.nodes = nodes
+
+    merge = _function(
+        source,
+        "_merge_segments_if_needed",
+        {
+            "AiocqhttpMessageEvent": WeChatEvent,
+            "Node": Node,
+            "Nodes": Nodes,
+        },
+    )
+    sender = SimpleNamespace()
+    segments = [object(), object()]
+
+    assert merge(sender, WeChatEvent(), segments, True) is segments
+
+    qq_result = merge(sender, WeChatEvent("123456"), segments, True)
+    assert len(qq_result) == 1
+    assert [node.content for node in qq_result[0].nodes] == [[segments[0]], [segments[1]]]
