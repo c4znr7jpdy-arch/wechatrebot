@@ -285,6 +285,7 @@
   }
 
   function renderStatus(rawStatus) {
+    const wasOnline = Boolean(state.status?.online);
     const status = reconcileStartPending(rawStatus);
     state.status = status;
     const runtime = status.runtime || {};
@@ -296,6 +297,24 @@
     const active = !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const wechatLoggedIn = Boolean(runtime.wechat_identity);
+
+    // Details prefetched while the engine is starting can carry a stale
+    // offline flag. Once the run center confirms the robot is online, force
+    // the visible feature to read its live state again without touching a
+    // user's unsaved draft.
+    if (
+      !wasOnline
+      && online
+      && state.activePage === "features"
+      && state.selectedFeature
+      && !state.featureDirty
+      && !state.featureSaving
+    ) {
+      state.featurePrefetch += 1;
+      state.featureDetails = {};
+      state.featuresEngineOnline = true;
+      void openFeature(state.selectedFeature, false, true);
+    }
 
     $("#stateTitle").textContent = status.title;
     $("#stateMessage").textContent = status.message;
@@ -697,15 +716,17 @@
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
+    const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);
     if (cached) {
       useFeatureDetail(cached, afterSave, preserveTab);
       renderFeatureDetail();
       const note = $("#featureNote");
-      if (note && force) note.textContent = "正在重新读取最新设置…";
+      if (note && (force || cacheNeedsRefresh)) note.textContent = "正在重新读取最新设置…";
       // Switching back to a detail already read in this window is instant.
       // Saving and the explicit refresh button pass force=true and still read
-      // the engine back for hot-apply verification.
-      if (!force) return;
+      // the engine back for hot-apply verification. An offline cache is also
+      // stale once the run center reports that the robot is online.
+      if (!force && !cacheNeedsRefresh) return;
     } else {
       $("#featureDetail").innerHTML = '<div class="loading-row">正在读取功能设置…</div>';
     }
@@ -944,7 +965,7 @@
     const status = $("#featurePageStatus");
     const frame = $("#featurePageFrame");
     if (!status || !frame || state.selectedFeature !== detail.id) return;
-    if (!detail.engine_online) {
+    if (!detail.engine_online && !state.status?.online) {
       status.textContent = "专属配置页需要机器人在线，请先在运行中心启动机器人。";
       return;
     }

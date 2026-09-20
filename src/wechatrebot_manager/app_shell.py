@@ -233,6 +233,9 @@ class ApplicationApi:
         state = getattr(getattr(status, "state", ""), "value", getattr(status, "state", ""))
         return str(state) != "STOPPED"
 
+    def _runtime_online(self) -> bool:
+        return bool(getattr(self._lifecycle.refresh(), "online", False))
+
     def _experience_service(self) -> ExperienceService:
         service = getattr(self, "_experience", None)
         return service if service is not None else ExperienceService(self._install_root)
@@ -279,7 +282,12 @@ class ApplicationApi:
     def get_feature_page(self, feature_id: str) -> dict[str, object]:
         try:
             detail = self._features.detail(str(feature_id or ""))
-            if not detail.get("engine_online"):
+            # The engine probe used by the feature catalog can briefly lag
+            # behind the lifecycle probe while services are settling. The run
+            # center's online state is authoritative for this gate; the page
+            # request itself still reports a concrete API failure if the
+            # management endpoint cannot be reached.
+            if not detail.get("engine_online") and not self._runtime_online():
                 raise PluginCenterError("专属配置页需要机器人在线，请先在运行中心启动机器人。")
             if not detail.get("enabled"):
                 raise PluginCenterError("这项功能尚未加载，请重启机器人后再打开专属配置页。")
