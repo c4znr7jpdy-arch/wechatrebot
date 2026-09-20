@@ -208,10 +208,8 @@ class ContentService:
                 self._short_drama_configuration().get("stateless_player_url")
             ):
                 return {"ready": False, "message": "影视播放服务尚未配置，请更新或重新安装"}
-            content_config = self._configuration() if feature == "jiang_commands" else {}
-            if action == "news" and not all(str(content_config.get(key) or "").strip()
-                                            for key in ("content_api_id", "content_api_key")):
-                return {"ready": False, "message": "请先在常用命令中填写热点服务账号和密钥"}
+            if feature == "jiang_commands":
+                self._configuration()
         except (OSError, ValueError, AttributeError):
             return {"ready": False, "message": "无法确认内容功能是否就绪，请检查功能中心"}
         return {"ready": True, "message": ""}

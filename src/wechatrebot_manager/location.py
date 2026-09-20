@@ -17,6 +17,18 @@ def locator_path(local_app_data: str | Path | None = None) -> Path:
     return base / "WeChatReBot" / "install-location.json"
 
 
+def local_data_root(local_app_data: str | Path | None = None) -> Path:
+    """Return the per-Windows-user data root that survives installation updates."""
+
+    return locator_path(local_app_data).parent
+
+
+def chat_history_path(local_app_data: str | Path | None = None) -> Path:
+    """Return the stable per-computer chat-history database location."""
+
+    return local_data_root(local_app_data) / "data" / "chat-history.db"
+
+
 def save_install_location(
     install_root: str | Path,
     *,

@@ -276,6 +276,11 @@
       ]
     },
     {
+      "origin": "commercial",
+      "source": "runtime/ai_plugin/news.py",
+      "target": "app/astrbot/ai_plugin/ai_plugin/news.py"
+    },
+    {
       "origin": "project",
       "source": "nonebot-plugin-mystool/src/nonebot_plugin_mystool",
       "target": "app/astrbot/nonebot-plugin-mystool/src/nonebot_plugin_mystool"

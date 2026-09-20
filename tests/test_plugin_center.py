@@ -900,10 +900,11 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     by_name = {item["display_name"]: item for item in catalog}
     assert by_name["点歌"]["configurable"] is False
     assert by_name["短剧"]["configurable"] is False
+    assert by_name["短剧"]["configuration"] == "none"
     assert by_name["短剧"]["scheduled_action"] == "short_drama"
     assert by_name["短剧"]["schedule_provider"] is True
     assert by_name["点歌"]["pages"] == ()
-    assert by_name["短剧"]["pages"] == ("recommendation-schedules",)
+    assert by_name["短剧"]["pages"] == ()
     angel = service.detail(plugin_center.ROBOT_CORE_FEATURE_ID)
     assert angel["configurable"] is True
     assert angel["model_field_count"] == 1
@@ -914,6 +915,8 @@ def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path
     assert list(angel["basic_schema"]) == ["personality"]
     assert music["schema"] == music["config"] == {}
     assert drama["schema"] == drama["config"] == {}
+    assert drama["configuration"] == "none"
+    assert drama["pages"] == ()
     assert drama["scheduled_action"] == "short_drama"
     with pytest.raises(PluginCenterError, match="没有可编辑"):
         service.save(by_name["点歌"]["id"], {}, music["revision"])
@@ -951,6 +954,40 @@ def test_voice_clone_uses_only_its_page_even_with_old_schema_delivery(tmp_path: 
     assert entry["field_count"] == entry["model_field_count"] == 0
     assert detail["basic_schema"] == detail["model_schema"] == detail["advanced_schema"] == {}
     assert detail["pages"] == ("settings",)
+    with pytest.raises(PluginCenterError, match="没有可编辑"):
+        service.save(entry["id"], {}, detail["revision"])
+
+
+def test_twitter_uses_only_its_subscription_page_even_with_old_schema_delivery(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    module = "astrbot_plugin_twitter"
+    plugin = install / "app" / "astrbot" / "data" / "plugins" / module
+    page = plugin / "pages" / "subscriptions"
+    page.mkdir(parents=True)
+    (page / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (plugin / "_conf_schema.json").write_text(
+        json.dumps({"twitter_data_provider": {"type": "string", "default": "fxtwitter"}}),
+        encoding="utf-8",
+    )
+    legal = install / "legal"
+    legal.mkdir(parents=True, exist_ok=True)
+    (legal / "feature-set.json").write_text(
+        json.dumps({"features": [{
+            "module": module, "display_name": "推特推送",
+            "configuration": "schema-and-page",
+        }]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    entry = service.catalog()["plugins"][0]
+    detail = service.detail(entry["id"])
+
+    assert entry["configuration"] == "page"
+    assert entry["configurable"] is False
+    assert entry["field_count"] == entry["model_field_count"] == 0
+    assert detail["basic_schema"] == detail["model_schema"] == detail["advanced_schema"] == {}
+    assert detail["pages"] == ("subscriptions",)
     with pytest.raises(PluginCenterError, match="没有可编辑"):
         service.save(entry["id"], {}, detail["revision"])
 

@@ -99,7 +99,7 @@ class UninstallProgressWindow:
                     return
                 self.root.title("微信机器人 · 卸载完成")
                 self.heading.configure(text="卸载完成")
-                self.status.set("微信机器人及其本机数据和残留文件已全部清理。")
+                self.status.set("微信机器人程序和残留文件已清理，聊天记录已保留。")
                 self.progress.configure(mode="determinate", value=100)
                 self.hint.configure(text="可以关闭此窗口。")
                 self.close_button.configure(state="normal", cursor="hand2")

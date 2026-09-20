@@ -951,6 +951,8 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert "群聊数量暂不可用" in script
     assert "等待读取群聊" in markup
     assert ".group-table { min-width: 620px; table-layout: fixed; }" in styles
+    assert ".group-table thead { position: static; }" in styles
+    assert ".contact-table thead { position: static; }" in styles
 
 
 def test_chat_management_adds_private_directory_profile_and_feature_scope() -> None:
@@ -1029,6 +1031,24 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     assert "flex-basis: 36px" in styles
     assert "width: fit-content; max-width: 100%" in styles
     assert "max-width: min(68%, 560px)" in styles
+
+
+def test_history_message_avatars_select_sender_in_inspector() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'selectedSenderKey: ""' in script
+    assert "function messageSenderKey(message)" in script
+    assert 'class="message-avatar-button${selected ? " selected" : ""}"' in script
+    assert 'aria-label="选中消息发送者：${escapeHtml(name)}"' in script
+    assert "function bindMessageSenderSelection" in script
+    assert "selectMessageSender(button.dataset.senderKey || \"\")" in script
+    assert "const selectedSender = state.selectedSenderKey" in script
+    assert "const currentSender = selectedSender || latestSender;" in script
+    assert ".message-avatar-button:hover" in styles
+    assert ".message-avatar-button:focus-visible" in styles
+    assert ".message-avatar-button.selected" in styles
 
 
 def test_history_default_date_rolls_forward_across_midnight() -> None:
@@ -1200,6 +1220,49 @@ def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() ->
     assert "请打开专属配置页填写服务密钥" in script
 
 
+def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page() -> None:
+    root = Path(app_shell.__file__).parents[2]
+    script = (Path(app_shell.__file__).with_name("app_webui") / "app.js").read_text(
+        encoding="utf-8"
+    )
+    features = json.loads(
+        (root / "release" / "feature-set.json").read_text(encoding="utf-8")
+    )["features"]
+    drama = next(item for item in features if item["module"] == "jiang_short_drama")
+
+    assert drama["configuration"] == "none"
+    assert 'previewFeature("feature-drama", "短剧", "none"' in script
+    assert 'page: "recommendation-schedules"' not in script
+    assert "管理旧版短剧计划" not in script
+    assert "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" in script
+
+
+def test_twitter_is_embedded_in_feature_center_without_generic_configuration() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    features = json.loads(
+        (webui.parents[2] / "release" / "feature-set.json").read_text(encoding="utf-8")
+    )["features"]
+    twitter = next(item for item in features if item["module"] == "astrbot_plugin_twitter")
+
+    assert twitter["configuration"] == "page"
+    assert 'id="featurePageFrame"' in script
+    assert 'api("get_feature_page", detail.id)' in script
+    assert 'api("request_feature_page", state.selectedFeature, "POST"' in script
+    assert "const TWITTER_FEATURE_IDS" in script
+    assert "const pageOnly = TWITTER_FEATURE_IDS.has(detail.id)" in script
+    assert "get_feature_page" in app_shell.PUBLIC_API_METHODS
+    assert "request_feature_page" in app_shell.PUBLIC_API_METHODS
+
+
+def test_feature_page_bridge_unwraps_plugin_page_success_and_error_envelopes() -> None:
+    source = Path(app_shell.__file__).read_text(encoding="utf-8")
+
+    assert 'result.get("status") == "error"' in source
+    assert 'result.get("status") == "ok"' in source
+    assert 'result = result["data"]' in source
+
+
 def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
@@ -1259,6 +1322,19 @@ def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
     assert 'controller.dispatchEvent(new Event("change", { bubbles: true }));' in plugin_script
     assert ".optional-group-heading" in plugin_styles
     assert "tertiary_enabled" not in app_script
+
+
+def test_web_search_settings_show_only_selected_provider() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert 'id="webSearchProviderSummary"' in markup
+    assert 'id="webSearchProviderList"' not in markup
+    assert "web-search-provider-summary" in styles
+    assert "webSearchProviderSummary" in script
+    assert 'Object.values(state.webSearch.providers || {}).map' not in script
 
 
 def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:

@@ -19,6 +19,7 @@
     featurePrefetch: 0,
     featureDetails: {},
     featureFeedback: "",
+    featurePageLoad: 0,
     groupsLoaded: false,
     groupsBusy: false,
     groups: [],
@@ -48,6 +49,7 @@
     conversations: [],
     selectedConversation: null,
     selectedMessages: [],
+    selectedSenderKey: "",
     historyLoad: 0,
     messageLoad: 0,
     historyPolling: false,
@@ -96,6 +98,9 @@
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
   const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
+  let groupMemberRequestQueue = Promise.resolve();
+  const groupMemberLoadsInFlight = new Set();
+  const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -857,6 +862,7 @@
         : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
     const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
+    const pageOnly = TWITTER_FEATURE_IDS.has(detail.id) && detail.configuration === "page" && detail.pages?.length;
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
@@ -865,7 +871,11 @@
       ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
       ${commandMarkup}
-      ${detail.configurable ? `
+      ${pageOnly ? `
+        <section class="feature-page-panel" aria-label="${escapeHtml(detail.display_name)}专属配置">
+          <div class="feature-page-status" id="featurePageStatus" role="status">正在打开专属配置页…</div>
+          <iframe id="featurePageFrame" title="${escapeHtml(detail.display_name)}专属配置页" hidden></iframe>
+        </section>` : detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
         ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
         <form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema).length ? '<div class="empty-state compact"><p>此分类无需配置</p></div>' : ""}</form>
@@ -873,7 +883,7 @@
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "新计划统一从上方创建；旧版短剧计划仍可打开兼容页面管理，避免升级后丢失或重复创建。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>${detail.scheduled_action === "short_drama" ? "管理旧版短剧计划" : "打开专属配置页"}</button>` : ""}</div>`}`;
+        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
@@ -926,7 +936,59 @@
     $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
     $("#openFeatureHelp")?.addEventListener("click", () => openHelpForFeature(detail.display_name));
     $$("[data-action-bound]", $("#featureDetail")).forEach((button) => { button.disabled = false; });
+    if (pageOnly) void openEmbeddedFeaturePage(detail);
   }
+
+  async function openEmbeddedFeaturePage(detail) {
+    const loadId = ++state.featurePageLoad;
+    const status = $("#featurePageStatus");
+    const frame = $("#featurePageFrame");
+    if (!status || !frame || state.selectedFeature !== detail.id) return;
+    if (!detail.engine_online) {
+      status.textContent = "专属配置页需要机器人在线，请先在运行中心启动机器人。";
+      return;
+    }
+    try {
+      const page = await api("get_feature_page", detail.id);
+      if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
+      frame.src = page.url;
+      frame.hidden = false;
+      status.hidden = true;
+    } catch (error) {
+      if (loadId !== state.featurePageLoad) return;
+      status.textContent = error?.message || "专属配置页暂时无法打开，请稍后重试。";
+      reportError(error);
+    }
+  }
+
+  const featurePageChannel = "astrbot-plugin-page";
+  async function handleEmbeddedFeaturePageRequest(message) {
+    const detail = state.featureDetail;
+    if (!detail || detail.configuration !== "page" || !state.selectedFeature) {
+      throw new Error("当前功能没有可用的专属配置页。 ");
+    }
+    if (message.action === "api:get") {
+      return api("request_feature_page", state.selectedFeature, "GET", message.endpoint, null, message.params ?? null);
+    }
+    if (message.action === "api:post") {
+      return api("request_feature_page", state.selectedFeature, "POST", message.endpoint, message.body ?? {});
+    }
+    throw new Error("当前专属配置页使用了尚未支持的操作。 ");
+  }
+
+  window.addEventListener("message", async (event) => {
+    const frame = $("#featurePageFrame");
+    const message = event.data;
+    if (!frame || event.source !== frame.contentWindow || !message
+      || message.channel !== featurePageChannel || message.kind !== "request"
+      || typeof message.requestId !== "string") return;
+    try {
+      const data = await handleEmbeddedFeaturePageRequest(message);
+      event.source.postMessage({channel: featurePageChannel, kind: "response", requestId: message.requestId, ok: true, data}, "*");
+    } catch (error) {
+      event.source.postMessage({channel: featurePageChannel, kind: "response", requestId: message.requestId, ok: false, error: error?.message || "专属配置页请求失败。"}, "*");
+    }
+  });
 
   function helpAudienceMatch(item) {
     const label = String(item.audience || "");
@@ -1244,7 +1306,7 @@
         ? state.groupMemberLoad : ++state.groupMemberLoad;
       const groupsNeedingCounts = state.groups.filter((item) =>
         !Number.isInteger(item.member_count)
-        && (!background || !state.groupMembers[item.group_id] || state.groupMembers[item.group_id].loading));
+        && (!background || !state.groupMembers[item.group_id]));
       groupsNeedingCounts.forEach((item) => {
         const previous = state.groupMembers[item.group_id] || {};
         state.groupMembers[item.group_id] = {
@@ -1435,61 +1497,76 @@
 
   async function hydrateGroupMemberCounts(groupIds, generation) {
     const pending = [...new Set(groupIds)];
-    let next = 0;
-    const worker = async () => {
-      while (next < pending.length && generation === state.groupMemberLoad) {
-        const groupId = pending[next++];
-        await loadGroupMembers(groupId, {background: true, generation});
-      }
-    };
-    await Promise.all(Array.from({length: Math.min(2, pending.length)}, () => worker()));
+    for (const groupId of pending) {
+      if (generation !== state.groupMemberLoad) return;
+      await loadGroupMembers(groupId, {background: true, generation});
+    }
+  }
+
+  function queueGroupMemberRequest(groupId, generation, background) {
+    const request = groupMemberRequestQueue.then(() => {
+      if (generation !== state.groupMemberLoad
+          || !state.groups.some((item) => item.group_id === groupId)
+          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return null;
+      return api("get_group_members", groupId);
+    });
+    groupMemberRequestQueue = request.catch(() => undefined);
+    return request;
   }
 
   async function loadGroupMembers(groupId, options = {}) {
     const background = options?.background === true;
     const generation = options?.generation ?? state.groupMemberLoad;
     if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-    const previous = state.groupMembers[groupId] || {};
-    state.groupMembers[groupId] = {
-      ...previous,
-      loading: true,
-      error: "",
-      items: Array.isArray(previous.items) ? previous.items : [],
-    };
-    if (!background) renderGroups();
-    let lastError = null;
-    for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
-      if (attempt) {
-        await new Promise((resolve) => window.setTimeout(resolve, GROUP_MEMBER_RETRY_DELAYS_MS[attempt - 1]));
+    const requestKey = `${generation}:${groupId}`;
+    if (groupMemberLoadsInFlight.has(requestKey)) return;
+    groupMemberLoadsInFlight.add(requestKey);
+    try {
+      const previous = state.groupMembers[groupId] || {};
+      state.groupMembers[groupId] = {
+        ...previous,
+        loading: true,
+        error: "",
+        items: Array.isArray(previous.items) ? previous.items : [],
+      };
+      if (!background) renderGroups();
+      let lastError = null;
+      for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt) {
+          await new Promise((resolve) => window.setTimeout(resolve, GROUP_MEMBER_RETRY_DELAYS_MS[attempt - 1]));
+        }
+        if (generation !== state.groupMemberLoad
+            || !state.groups.some((item) => item.group_id === groupId)
+            || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
+        try {
+          const data = await queueGroupMemberRequest(groupId, generation, background);
+          if (!data) return;
+          if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
+          const items = Array.isArray(data.items) ? data.items : [];
+          const total = Number.isInteger(data.total) ? data.total : items.length;
+          state.groupMembers[groupId] = {
+            loading: false,
+            items,
+            total,
+            truncated: Boolean(data.truncated),
+          };
+          const group = state.groups.find((item) => item.group_id === groupId);
+          if (group) group.member_count = total;
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
       }
-      if (generation !== state.groupMemberLoad
-          || !state.groups.some((item) => item.group_id === groupId)
-          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
-      try {
-        const data = await api("get_group_members", groupId);
+      if (lastError) {
         if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-        const items = Array.isArray(data.items) ? data.items : [];
-        const total = Number.isInteger(data.total) ? data.total : items.length;
-        state.groupMembers[groupId] = {
-          loading: false,
-          items,
-          total,
-          truncated: Boolean(data.truncated),
-        };
-        const group = state.groups.find((item) => item.group_id === groupId);
-        if (group) group.member_count = total;
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
+        state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
+        if (!background) reportError(lastError);
       }
+      renderGroups({preserveInspector: background});
+    } finally {
+      groupMemberLoadsInFlight.delete(requestKey);
     }
-    if (lastError) {
-      if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
-      state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
-      if (!background) reportError(lastError);
-    }
-    renderGroups({preserveInspector: background});
   }
 
   function contactDisplayName(contact) {
@@ -1783,6 +1860,7 @@
         state.historyLoadingOlder = false;
         state.historyMessageQuery = "";
         state.selectedMessages = [];
+        state.selectedSenderKey = "";
         $("#conversationHeader").textContent = "没有匹配的聊天";
         $("#messageList").removeAttribute("aria-busy");
         $("#messageList").innerHTML = '<div class="empty-state compact"><h2>没有找到匹配消息</h2><p>调整昵称、微信号或日期后再试。</p></div>';
@@ -1942,6 +2020,19 @@
     return rawMessagePresentation(value).preview;
   }
 
+  function messageSenderKey(message) {
+    if (!message || message.role === "assistant") return "";
+    return String(message.sender_id || message.wechat_id || message.sender_name || message.group_nickname || "").trim();
+  }
+
+  function messageSenderName(message) {
+    return message?.group_nickname || message?.wechat_name || message?.sender_name || message?.sender_id || "用户";
+  }
+
+  function messageSenderIdentity(message) {
+    return message?.wechat_id || message?.sender_id || "";
+  }
+
   function messageBubbleMarkup(message) {
     const presentation = messagePresentation(message);
     if (presentation.messageKind === "quote") {
@@ -1957,9 +2048,39 @@
 
   function messageMarkup(message) {
     const assistant = message.role === "assistant";
-    const name = assistant ? "机器人" : (message.group_nickname || message.wechat_name || message.sender_name || message.sender_id || "用户");
-    const identity = !assistant ? (message.wechat_id || message.sender_id || "") : "";
-    return `<article class="message ${assistant ? "assistant" : ""}">${avatarMarkup("message-avatar", name, message.avatar)}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
+    const name = assistant ? "机器人" : messageSenderName(message);
+    const identity = !assistant ? messageSenderIdentity(message) : "";
+    const senderKey = messageSenderKey(message);
+    const selected = !assistant && senderKey && senderKey === state.selectedSenderKey;
+    const avatar = assistant || !senderKey
+      ? avatarMarkup("message-avatar", name, message.avatar)
+      : `<button class="message-avatar-button${selected ? " selected" : ""}" type="button" data-sender-key="${escapeHtml(senderKey)}" aria-label="选中消息发送者：${escapeHtml(name)}" aria-pressed="${selected ? "true" : "false"}">${avatarMarkup("message-avatar", name, message.avatar)}</button>`;
+    return `<article class="message ${assistant ? "assistant" : ""}">${avatar}<div class="message-content"><div class="message-meta"><span class="message-author"><span class="message-author-name">${escapeHtml(name)}</span>${identity ? `<small class="message-author-id">${escapeHtml(identity)}</small>` : ""}</span><time>${escapeHtml(fullTime(message.timestamp))}</time></div>${messageBubbleMarkup(message)}</div></article>`;
+  }
+
+  function updateSelectedSenderButtons() {
+    $$(".message-avatar-button", $("#messageList")).forEach((button) => {
+      const selected = Boolean(state.selectedSenderKey && button.dataset.senderKey === state.selectedSenderKey);
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+  }
+
+  function selectMessageSender(senderKey) {
+    if (!senderKey) return;
+    const sender = [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === senderKey);
+    if (!sender) return;
+    state.selectedSenderKey = senderKey;
+    updateSelectedSenderButtons();
+    if (state.selectedConversation) renderConversationInspector(state.selectedConversation);
+  }
+
+  function bindMessageSenderSelection(root = $("#messageList")) {
+    $$(".message-avatar-button", root).forEach((button) => {
+      if (button.dataset.senderSelectionBound === "true") return;
+      button.dataset.senderSelectionBound = "true";
+      button.addEventListener("click", () => selectMessageSender(button.dataset.senderKey || ""));
+    });
   }
 
   function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
@@ -1970,6 +2091,8 @@
     list.innerHTML = messages.length ? messages.map(messageMarkup).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
     bindAvatarFallbacks(list);
     state.selectedMessages = messages;
+    bindMessageSenderSelection(list);
+    updateSelectedSenderButtons();
     const newButton = $("#newMessageButton");
     if (forceBottom || nearBottom) {
       list.scrollTop = list.scrollHeight;
@@ -1993,6 +2116,8 @@
     list.insertAdjacentHTML("afterbegin", older.map(messageMarkup).join(""));
     bindAvatarFallbacks(list);
     state.selectedMessages = mergeMessages(older, state.selectedMessages);
+    bindMessageSenderSelection(list);
+    updateSelectedSenderButtons();
     list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
   }
 
@@ -2007,6 +2132,7 @@
     state.selectedConversation = item;
     if (changed) {
       state.selectedMessages = [];
+      state.selectedSenderKey = "";
       state.historyHasMore = false;
       state.historyLoadingOlder = false;
       state.historyMessageQuery = query;
@@ -2090,19 +2216,24 @@
 
   function renderConversationInspector(item) {
     const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
-    const senderName = latestSender ? (latestSender.group_nickname || latestSender.wechat_name || latestSender.sender_name || "未知发送者") : "尚无发送者";
-    const senderId = latestSender?.wechat_id || latestSender?.sender_id || "标识未提供";
+    const selectedSender = state.selectedSenderKey
+      ? [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === state.selectedSenderKey)
+      : null;
+    const currentSender = selectedSender || latestSender;
+    const senderName = currentSender ? messageSenderName(currentSender) : "尚无发送者";
+    const senderId = currentSender ? (messageSenderIdentity(currentSender) || "标识未提供") : "标识未提供";
     const identityFacts = item.type === "group"
       ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
       : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, latestSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${latestSender?.wechat_id && latestSender.wechat_id !== latestSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
-    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, "微信号"));
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
     $("#deleteConversation")?.addEventListener("click", () => confirmAction({
       title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
       onConfirm: async () => {
         await api("delete_conversation", item.conversation_id);
         state.selectedConversation = null;
+        state.selectedSenderKey = "";
         $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
         $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><h2>尚未选择</h2>';
         await loadConversations(); toast("聊天记录副本已删除。 ");
@@ -3213,7 +3344,8 @@
     const providerSelect = form.elements.provider;
     const providers = state.webSearch.providers || {};
     providerSelect.innerHTML = Object.values(providers).map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.configured ? " · 已配置" : ""}</option>`).join("");
-    providerSelect.value = state.webSearch.provider || "tavily";
+    const requestedProvider = state.webSearch.provider || "tavily";
+    providerSelect.value = providers[requestedProvider] ? requestedProvider : (Object.keys(providers)[0] || "");
     form.elements.enabled.checked = Boolean(state.webSearch.enabled);
     form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
     updateToggleCopy({currentTarget: form.elements.enabled});
@@ -3234,7 +3366,7 @@
     $("#webSearchKeyHint").textContent = item.configured
       ? `当前服务商已保存 ${item.key_count || 1} 个密钥；输入新密钥会替换当前服务商密钥。`
       : "当前服务商尚未配置密钥；密钥仅保存在本机。";
-    $("#webSearchProviderList").innerHTML = Object.values(state.webSearch.providers || {}).map((provider) => `<div class="web-search-provider-row ${provider.id === id ? "active" : ""}"><span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(provider.description)}</small></span><span class="status-badge ${provider.configured ? "online" : ""}">${provider.configured ? `已配置 ${provider.key_count || 1} 个` : "未配置"}</span></div>`).join("");
+    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${escapeHtml(item.description || "请先选择一个搜索服务商。")}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
   }
 
   async function loadWebSearchSettings() {
@@ -3729,7 +3861,7 @@
       previewFeature("feature-voice-clone", "语音克隆", "page", "管理授权音色，让文字回复按需要转换为语音。", {page: "voice-management"}),
       previewFeature("feature-music", "点歌", "none", "默认使用在线接口并自动回退到直连音源，无需额外配置。"),
       previewFeature("feature-parser", "链接解析", "none", "启用后直接使用内置配置解析抖音等常见平台分享链接。"),
-      previewFeature("feature-twitter", "推特推送", "schema-and-page", "订阅 X/Twitter 推主，按会话管理订阅并定时推送新推文；支持链接解析、媒体和翻译配置。", {page: "plugin-settings", fieldCount: 8}),
+      previewFeature("feature-twitter", "推特推送", "page", "在专属订阅管理页配置 X/Twitter 数据源、订阅会话和推送选项。", {page: "subscriptions"}),
       previewFeature("feature-proactive", "主动聊天", "schema", "按活跃度、时间段和会话上下文主动发起合适的消息。"),
       previewFeature("feature-group-analysis", "群聊分析", "schema", "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。", {fieldCount: 10, modelFieldCount: 1, simplified: true, scheduledAction: "group_analysis", scheduleProvider: true}),
       previewFeature("feature-commands", "常用指令", "schema", "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。", {scheduledAction: "weather", scheduleProvider: true}),
@@ -3740,7 +3872,7 @@
       previewFeature("feature-repeater", "复读功能", "none", "在群内出现连续相同消息时进行轻量互动。"),
       previewFeature("feature-rocom", "洛克王国助手", "none", "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"),
       previewFeature("feature-schedule", "定时任务", "page-and-global-schedule-center", "集中管理新闻、天气、内容推送和多站点签到计划。", {page: "schedule-center", scheduledAction: "weather"}),
-      previewFeature("feature-drama", "短剧", "page-and-global-schedule-center", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {page: "recommendation-schedules", scheduledAction: "short_drama", scheduleProvider: true}),
+      previewFeature("feature-drama", "短剧", "none", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {scheduledAction: "short_drama", scheduleProvider: true}),
       previewFeature("feature-video", "视频理解", "schema", "从微信短视频提取关键帧和音轨，并由 Grok 4.6 生成时间线摘要。", {modelFieldCount: 3}),
       previewFeature("feature-meme", "表情管理", "schema-and-page", "管理多套表情包、会话绑定、资源目录和同步设置。", {page: "meme-management"}),
     ];
@@ -3987,6 +4119,8 @@
       },
       request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
+      get_feature_page: () => ok({url: "data:text/html;charset=utf-8,%3Cstyle%3Ebody%7Bfont-family%3Asans-serif%3Bpadding%3A32px%3Bcolor%3A%23102a49%7D%3C%2Fstyle%3E%3Ch2%3E推特订阅管理（预览）%3C%2Fh2%3E%3Cp%3E正式版本将在此处加载实际订阅管理页。%3C%2Fp%3E", origin: window.location.origin}),
+      request_feature_page: () => ok({status: "ok", data: {}}),
       get_groups: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: 6, items: [
         {group_id: "51632940287@chatroom", name: "旅行交流群", member_count: 128},
         {group_id: "81263495012@chatroom", name: "短剧分享群", member_count: 76},

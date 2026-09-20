@@ -316,7 +316,7 @@
                 <div class="panel-heading"><div><span class="eyebrow">实时信息</span><h2>联网搜索</h2><p>启用后，机器人会在需要最新信息时调用所选搜索服务，并将结果交给对话模型整理。</p></div><span class="status-badge" id="webSearchStatus">等待读取</span></div>
                 <div class="toggle-line"><span><strong>允许联网搜索</strong><small>关闭后不会向搜索服务发起请求</small></span><span class="toggle"><input id="webSearchEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="webSearchEnabled" aria-label="切换联网搜索"></label><span>已关闭</span></span></div>
                 <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select><small id="webSearchProviderHint">选择后使用对应服务商的密钥。</small></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select><small>保留来源链接便于核验，但会增加回复长度。</small></label></div>
-                <div class="web-search-provider-list" id="webSearchProviderList" aria-live="polite"></div>
+                <div class="web-search-provider-summary" id="webSearchProviderSummary" aria-live="polite" aria-atomic="true"></div>
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
                 <div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button">清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
@@ -358,7 +358,7 @@
               <div class="maintenance-row"><div><strong>使用帮助</strong><span>查看快速开始、群聊&amp;私聊管理和全部功能说明</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
-              <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、聊天记录、日志、备份及全部本机残留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
+              <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、日志、备份及本机残留，聊天记录会保留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
             </section>
             </div>
           </div>

@@ -38,12 +38,23 @@ def test_common_commands_guide_exposes_grouped_customer_commands():
         "常用查询",
         "AI 互动",
         "趣味与游戏",
-        "定时任务（管理员）",
-        "B站订阅（管理员）",
         "其他",
     ]
-    assert guide["commands"][0]["items"][0] == ("\\新闻", "今日热点新闻")
-    assert any(item[0] == "\\订阅列表" for item in guide["commands"][4]["items"])
+    assert guide["commands"][0]["items"][0] == ("/新闻", "今日热点新闻")
+    assert guide["commands"][1]["items"] == (
+        ("@机器人 帮我画 xxx", "文生图"),
+        ("@机器人 P图/改图/图生图", "编辑图片（需引用图片）"),
+    )
+    rendered = [item[0] for group in guide["commands"] for item in group["items"]]
+    assert all("\\" not in item for item in rendered)
+    assert all("姜小妹" not in item for item in rendered)
+    assert all("燕云" not in item for item in rendered)
+    assert all("定时" not in item for item in rendered)
+    assert all("订阅动态" not in item for item in rendered)
+    assert all("启用" not in item and "禁用" not in item for item in rendered)
+    assert all("插件列表" not in item for item in rendered)
+    assert all("切换模型" not in item and "图片模型" not in item for item in rendered)
+    assert all("语音" not in item for item in rendered)
 
 
 def test_curated_paths_match_local_delivered_schemas():

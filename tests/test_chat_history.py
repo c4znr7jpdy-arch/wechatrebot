@@ -146,6 +146,24 @@ def test_history_prefers_bridge_journal_without_memory_plugin(tmp_path: Path) ->
     assert service.messages("456@chatroom")[0]["content"] == "点歌 发如雪"
 
 
+def test_history_migrates_legacy_database_to_stable_local_data(
+    tmp_path: Path,
+) -> None:
+    _source(tmp_path)
+    stable_app_data = tmp_path / "local-app-data"
+    legacy_service = ChatHistoryService(tmp_path)
+    legacy_service.sync()
+
+    stable_path = stable_app_data / "WeChatReBot" / "data" / "chat-history.db"
+    # Verify the one-time migration on a customer install where LOCALAPPDATA
+    # points outside the replaceable install root.
+    stable_service = ChatHistoryService(tmp_path, local_app_data=stable_app_data)
+
+    assert stable_service.path == stable_path
+    assert stable_service.conversations()["summary"]["messages"] == 3
+    assert stable_path.is_file()
+
+
 def test_history_messages_use_stable_twenty_item_cursor_pages(tmp_path: Path) -> None:
     source = _source(tmp_path)
     with sqlite3.connect(source) as connection:

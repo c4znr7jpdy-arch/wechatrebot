@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -8,6 +9,8 @@ import sys
 import threading
 from typing import Any, Callable
 import webbrowser
+from http.server import ThreadingHTTPServer
+from urllib.parse import urlencode
 
 from . import __version__
 from .chat_history import ChatHistoryService
@@ -48,6 +51,7 @@ from .plugin_center import (
     EngineUnavailableError,
     PluginCenterError,
     PluginCenterService,
+    _handler as plugin_center_handler,
     launch_plugin_center,
 )
 from .provider import (
@@ -101,6 +105,8 @@ PUBLIC_API_METHODS = (
     "get_feature",
     "save_feature",
     "reload_feature",
+    "get_feature_page",
+    "request_feature_page",
     "open_feature_center",
     "get_conversations",
     "get_groups",
@@ -176,7 +182,10 @@ class ApplicationApi:
         purge_retired_plugins(self._install_root)
         self._lifecycle = LifecycleController(self._install_root)
         self._features = PluginCenterService(self._install_root)
-        self._history = ChatHistoryService(self._install_root)
+        self._history = ChatHistoryService(
+            self._install_root,
+            local_app_data=os.environ.get("LOCALAPPDATA"),
+        )
         self._contacts = ContactDirectoryService(self._install_root)
         self._groups = GroupDirectoryService(self._install_root)
         self._schedules = ScheduleService(self._install_root)
@@ -193,6 +202,8 @@ class ApplicationApi:
         self._catalog = load_error_catalog(self._install_root)
         self._window: Any | None = None
         self._tray: WindowsTrayController | None = None
+        self._feature_page_server: ThreadingHTTPServer | None = None
+        self._feature_page_thread: threading.Thread | None = None
         self._history_group_members: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
         self._action_lock = threading.Lock()
         self._update_lock = threading.Lock()
@@ -241,7 +252,99 @@ class ApplicationApi:
         self._window = window
         self._tray = tray
 
+    def _ensure_feature_page_server(self) -> ThreadingHTTPServer:
+        server = getattr(self, "_feature_page_server", None)
+        if server is not None:
+            return server
+        server = ThreadingHTTPServer(("127.0.0.1", 0), plugin_center_handler(self._features))
+        server.daemon_threads = True
+        thread = threading.Thread(
+            target=server.serve_forever,
+            daemon=True,
+            name="wechatrebot-feature-page",
+        )
+        thread.start()
+        self._feature_page_server = server
+        self._feature_page_thread = thread
+        return server
+
+    def _close_feature_page_server(self) -> None:
+        server = getattr(self, "_feature_page_server", None)
+        self._feature_page_server = None
+        self._feature_page_thread = None
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+
+    def get_feature_page(self, feature_id: str) -> dict[str, object]:
+        try:
+            detail = self._features.detail(str(feature_id or ""))
+            if not detail.get("engine_online"):
+                raise PluginCenterError("专属配置页需要机器人在线，请先在运行中心启动机器人。")
+            if not detail.get("enabled"):
+                raise PluginCenterError("这项功能尚未加载，请重启机器人后再打开专属配置页。")
+            pages = detail.get("pages") or ()
+            if not pages:
+                raise PluginCenterError("当前功能没有专属配置页。")
+            content_path = self._features.page_entry(str(feature_id), str(pages[0]))["content_path"]
+            server = self._ensure_feature_page_server()
+            base = f"http://127.0.0.1:{server.server_port}"
+            return self._ok({"url": f"{base}{content_path}", "origin": base})
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "13003")
+
+    def request_feature_page(
+        self,
+        feature_id: str,
+        method: str,
+        endpoint: str,
+        payload: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> object:
+        try:
+            normalized_method = str(method or "").upper()
+            if normalized_method not in {"GET", "POST"}:
+                raise PluginCenterError("专属配置页请求方式无效。")
+            upstream_path = self._features.extension_path(
+                str(feature_id or ""), str(endpoint or "")
+            )
+            if normalized_method == "GET" and params:
+                query = urlencode(
+                    {str(key): str(value) for key, value in params.items() if value is not None}
+                )
+                if query:
+                    upstream_path = f"{upstream_path}?{query}"
+            body = None
+            if normalized_method == "POST":
+                body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+            status, _headers, raw = self._features.engine.raw_request(
+                normalized_method,
+                upstream_path,
+                body=body,
+                content_type="application/json",
+                accept_language="zh-CN",
+            )
+            try:
+                result = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise PluginCenterError("专属配置页返回了无法识别的数据。") from exc
+            if isinstance(result, dict) and result.get("status") == "error":
+                raise PluginCenterError(str(result.get("message") or "专属配置页请求失败。"))
+            if (
+                isinstance(result, dict)
+                and result.get("status") == "ok"
+                and "data" in result
+            ):
+                result = result["data"]
+            if status >= 400:
+                message = result.get("message") if isinstance(result, dict) else ""
+                raise PluginCenterError(str(message or "专属配置页请求失败。"))
+            return self._ok(result)
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "13003")
+
     def _close_window_for_update(self) -> None:
+        self._close_feature_page_server()
         if self._tray is not None:
             self._tray.permit_programmatic_close()
         if self._window is not None:
@@ -1714,8 +1817,11 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
             window.events.closed += tray.stop
         api._attach_window(window, tray)
         window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
-        webview.start(gui="edgechromium", debug=False, private_mode=True)
-        return 0
+        try:
+            webview.start(gui="edgechromium", debug=False, private_mode=True)
+            return 0
+        finally:
+            api._close_feature_page_server()
     except ImportError as exc:
         raise RuntimeError("主界面组件缺失，请重新安装软件。") from exc
 

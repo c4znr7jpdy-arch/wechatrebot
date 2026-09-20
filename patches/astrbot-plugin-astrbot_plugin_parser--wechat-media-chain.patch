@@ -1,0 +1,26 @@
+diff --git a/core/sender.py b/core/sender.py
+--- a/core/sender.py
++++ b/core/sender.py
+@@ -13,5 +13,8 @@
+     Video,
+ )
+ from astrbot.core.platform.astr_message_event import AstrMessageEvent
++from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
++    AiocqhttpMessageEvent,
++)
+ 
+ from .config import PluginConfig
+@@ -236,6 +239,13 @@
+         - 每个原始消息段成为一个 Node
+         - 统一使用机器人自身身份
+         """
++        # The WeChat compatibility bridge does not have native forward-message
++        # support and expands each node into a separate message. Keeping the
++        # node wrapper there repeats the sender label ("解析器:") per image.
++        self_id = str(event.get_self_id())
++        if isinstance(event, AiocqhttpMessageEvent) and not self_id.isdigit():
++            return segs
++
+         if not force_merge or not segs:
+             return segs
+ 
