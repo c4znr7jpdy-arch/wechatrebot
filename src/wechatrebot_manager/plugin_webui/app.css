@@ -96,6 +96,7 @@ textarea:focus-visible,
 .rail-empty { padding: 20px; color: #b7c6d7; text-align: center; }
 
 .detail-pane { min-width: 0; min-height: 0; overflow: auto; padding: 28px 32px 36px; background: var(--canvas); scrollbar-color: #b9c4d2 transparent; scrollbar-width: thin; }
+#detail-view:not([hidden]) { min-height: 100%; display: flex; flex-direction: column; }
 .state-view { min-height: 420px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); text-align: center; }
 .state-view strong { color: var(--text); font-size: 18px; }
 .state-view.compact { min-height: 190px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
@@ -212,6 +213,7 @@ textarea:focus-visible,
 .page-picker { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 14px; }
 .page-button { height: 38px; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); cursor: pointer; }
 .page-button.active { border-color: var(--primary); color: var(--primary); background: #eef5ff; }
+#pages-panel:not([hidden]) { min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column; }
 .meme-pack-import { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #cfe0fb; border-radius: 8px; background: #f5f9ff; }
 .meme-pack-import[hidden] { display: none; }
 .meme-pack-import-copy { display: grid; gap: 4px; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -221,7 +223,7 @@ textarea:focus-visible,
 .meme-pack-import-actions input[type="file"] { max-width: 100%; }
 .meme-pack-import-actions label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
 #meme-pack-status { min-height: 18px; color: var(--muted); font-size: 12px; }
-#plugin-frame { width: 100%; min-height: 560px; border: 1px solid var(--border); background: white; }
+#plugin-frame { width: 100%; height: auto; min-height: 560px; flex: 1 1 auto; border: 1px solid var(--border); background: white; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(8, 24, 43, .48); }
 .modal { width: min(420px, calc(100vw - 40px)); padding: 24px; border: 1px solid var(--border); border-radius: 10px; background: white; box-shadow: 0 20px 55px rgba(8,24,43,.2); }
