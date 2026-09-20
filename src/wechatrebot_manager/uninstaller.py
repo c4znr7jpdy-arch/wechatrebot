@@ -16,7 +16,7 @@ from . import __version__
 from .install_paths import INSTALL_MARKER
 from .installed_entries import copy_manager_executable
 from .json_io import write_json_atomic
-from .location import locator_path
+from .location import chat_history_path, locator_path
 from .shortcuts import remove_windows_shortcuts
 from .updates import _update_wait_pids, _wait_for_process_exit
 
@@ -495,6 +495,30 @@ def _remove_tree(path: Path, *, attempts: int = 10) -> None:
     raise UninstallError(f"无法删除目录：{path}（{last_error}）")
 
 
+def remove_local_residuals(
+    local_app_data: str | Path | None = None,
+) -> None:
+    """Remove locator/log residue while deliberately retaining chat history."""
+
+    residual_root = locator_path(local_app_data).parent.resolve()
+    if residual_root.parent == residual_root or residual_root.name != "WeChatReBot":
+        raise UninstallError("本机残留目录无效，已停止操作。")
+    locator = residual_root / "install-location.json"
+    if locator.is_symlink() or locator.is_file():
+        locator.unlink(missing_ok=True)
+    elif locator.exists():
+        raise UninstallError("本机定位文件不是普通文件，已停止操作。")
+    logs = residual_root / "logs"
+    if logs.exists():
+        _remove_tree(logs)
+    # The data directory contains chat-history.db and is intentionally never
+    # traversed or removed.  Remove only the now-empty product container.
+    try:
+        residual_root.rmdir()
+    except OSError:
+        pass
+
+
 def remove_installation(
     install_root: str | Path,
     *,
@@ -517,9 +541,9 @@ def remove_installation(
     registry_remover()
     progress("正在删除程序和本机数据，文件较多时需要稍候…")
     _remove_tree(root)
-    progress("正在清理本机残留文件…")
+    progress("正在清理本机残留：定位和启动日志（聊天记录会保留）…")
     if not _same_path(residual_root, root):
-        _remove_tree(residual_root)
+        remove_local_residuals(local_app_data)
 
 
 _SELF_CLEANUP_SCRIPT = r"""
@@ -583,8 +607,9 @@ def run_uninstaller(install_root: str | Path) -> int:
         return 1
     answer = _message_box(
         "即将彻底卸载微信机器人。\n\n"
-        "将关闭机器人相关进程及与机器人连接的微信窗口，并永久删除程序、运行时、插件、配置、"
-        "聊天记录、日志、缓存、备份、更新文件、快捷方式及本机残留。\n\n"
+        "将关闭机器人相关进程及与机器人连接的微信窗口，并删除程序、运行时、插件、配置、"
+        "日志、缓存、备份、更新文件、快捷方式及本机定位残留。\n"
+        f"聊天记录不会被删除，会保留在本机聊天记录目录：{chat_history_path()}，重新安装后可继续使用。\n\n"
         f"安装目录：{root}\n\n此操作无法撤销，是否继续？",
         "微信机器人 · 确认彻底卸载",
         0x00000004 | 0x00000030 | 0x00000100,
@@ -669,6 +694,7 @@ __all__ = [
     "provision_uninstaller",
     "register_windows_uninstaller",
     "remove_installation",
+    "remove_local_residuals",
     "remove_windows_uninstaller_registration",
     "run_uninstaller",
     "stop_installation_processes",

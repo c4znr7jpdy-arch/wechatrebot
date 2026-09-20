@@ -4,10 +4,14 @@ import csv
 from datetime import datetime, timezone
 from html import unescape
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
 from typing import Any
+import uuid
+
+from .location import chat_history_path
 
 
 _GROUP_ID = re.compile(r"([^:]+@chatroom)")
@@ -231,9 +235,23 @@ def _history_metadata(value: object) -> dict[str, str]:
 class ChatHistoryService:
     """Product history index sourced from the bridge with a legacy fallback."""
 
-    def __init__(self, install_root: str | Path) -> None:
+    def __init__(
+        self,
+        install_root: str | Path,
+        *,
+        local_app_data: str | Path | None = None,
+    ) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
-        self.path = self.install_root / "data" / "chat-history.db"
+        # The manager passes LOCALAPPDATA for customer installs.  Keeping the
+        # legacy default makes the service useful for portable/development
+        # callers while the shipped application stores history outside the
+        # replaceable installation directory.
+        self.path = (
+            chat_history_path(local_app_data)
+            if local_app_data is not None
+            else self.install_root / "data" / "chat-history.db"
+        )
+        self.legacy_path = self.install_root / "data" / "chat-history.db"
         self.source = (
             self.install_root
             / "app"
@@ -250,7 +268,35 @@ class ChatHistoryService:
             / "var"
             / "message-history.db"
         )
+        self._migrate_legacy_history()
         self._initialize()
+
+    def _migrate_legacy_history(self) -> None:
+        """Copy an installation-local history database to stable user data."""
+
+        if (
+            self.path == self.legacy_path
+            or self.path.exists()
+            or not self.legacy_path.is_file()
+        ):
+            return
+        temporary = self.path.with_name(
+            f".{self.path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(self.legacy_path, timeout=5)
+            target = sqlite3.connect(temporary, timeout=5)
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+                source.close()
+            os.replace(temporary, self.path)
+        except (OSError, sqlite3.Error):
+            # A damaged or locked legacy file must not prevent startup, and a
+            # partial target must not block the next migration attempt.
+            temporary.unlink(missing_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)

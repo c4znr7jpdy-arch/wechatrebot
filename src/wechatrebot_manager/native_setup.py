@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
 
 from .brand import BrandProfile
 from .install_paths import INSTALL_MARKER
 from .installer import InstallRequest, perform_install
 from .location import load_install_location, locator_path
-from .uninstaller import stop_installation_processes, validate_uninstall_root
+from .uninstaller import (
+    remove_local_residuals,
+    stop_installation_processes,
+    validate_uninstall_root,
+)
 
 
 DEFAULT_NATIVE_BRAND = BrandProfile(
@@ -47,7 +50,7 @@ def install_from_native_setup(
 
 
 def prepare_native_uninstall(install_root: str | Path) -> dict[str, object]:
-    """Stop owned processes and remove the per-user locator before Inno removes files."""
+    """Stop processes and remove locator/log residue before Inno removes files."""
 
     root = validate_uninstall_root(install_root)
     stopped = stop_installation_processes(root)
@@ -55,7 +58,7 @@ def prepare_native_uninstall(install_root: str | Path) -> dict[str, object]:
     if residual_root.parent == residual_root or residual_root.name != "WeChatReBot":
         raise RuntimeError("本机残留目录无效，已停止卸载。")
     if residual_root != root and load_install_location() == root:
-        shutil.rmtree(residual_root, ignore_errors=True)
+        remove_local_residuals(residual_root.parent)
     return {"ok": True, "stopped_processes": stopped}
 
 

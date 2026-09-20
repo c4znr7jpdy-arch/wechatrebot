@@ -66,6 +66,29 @@ def test_remove_installation_cleans_product_and_local_residuals(
     assert calls == ["stop:install", "shortcuts", "registry"]
 
 
+def test_remove_installation_preserves_stable_chat_history(tmp_path: Path) -> None:
+    root = _installation(tmp_path / "install")
+    local = tmp_path / "local-app-data"
+    residual = local / "WeChatReBot"
+    history = residual / "data" / "chat-history.db"
+    history.parent.mkdir(parents=True)
+    history.write_bytes(b"chat history")
+    (residual / "install-location.json").write_text("{}", encoding="utf-8")
+    (residual / "logs").mkdir()
+    (residual / "logs" / "startup-error.log").write_text("error", encoding="utf-8")
+
+    uninstaller.remove_installation(
+        root,
+        local_app_data=local,
+        process_stopper=lambda _root: 0,
+        shortcut_remover=lambda: True,
+        registry_remover=lambda: True,
+    )
+
+    assert history.read_bytes() == b"chat history"
+    assert not (residual / "logs").exists()
+
+
 def test_apply_uninstall_plan_removes_everything_without_ui(
     tmp_path: Path,
 ) -> None:
