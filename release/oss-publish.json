@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "enabled": false,
+  "enabled": true,
   "bucket": "jiangxiaomei-releases-bj",
   "region": "cn-beijing",
   "endpoint": "oss-cn-beijing.aliyuncs.com",

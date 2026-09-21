@@ -69,21 +69,21 @@ python scripts\build_update_status.py `
 
 ## OSS/CDN 大文件分发
 
-`release/oss-publish.json` 保存不含密钥的 OSS 目标配置。当前目标为北京地域的私有 Bucket `jiangxiaomei-releases-bj`，对象前缀为 `wechatrebot-updates`。配置中的 `enabled` 默认保持 `false`，因此现有一键发布仍使用服务器存储，不会意外上传 OSS。
+`release/oss-publish.json` 保存不含密钥的 OSS 目标配置。当前目标为北京地域的私有 Bucket `jiangxiaomei-releases-bj`，对象前缀为 `wechatrebot-updates`。从 0.9.8 起启用 OSS/CDN，正式完整载荷发布必须先确认 RAM 凭证、上传工具和私有 Bucket 回源可用。
 
-接入 CDN 并完成公网下载验证后，将 `public_base_url` 设置为 CDN HTTPS 地址，再显式使用 `--artifact-storage oss` 试运行。`--dry-run` 只生成和校验本地产物，不查找 `ossutil`、不上传 OSS、也不修改服务器状态。同版本允许用于本地试构建，但正式发布仍要求项目版本高于线上稳定版本。
+`public_base_url` 指向 CDN HTTPS 地址。`--dry-run` 只生成和校验本地产物，不查找 `ossutil`、不上传 OSS、也不修改服务器状态。同版本允许用于本地试构建，但正式发布仍要求项目版本高于线上稳定版本。
 
 正式 OSS 发布按以下顺序执行：
 
 1. 本地测试、构建、签名并校验交付包。
 2. 通过已配置 RAM 凭证的 `ossutil` 将在线更新包、客户完整包和校验文件上传为私有 Object。
 3. 使用 `stat` 核对 Object 的 `Content-Length` 和发布时写入的 SHA-256 元数据；一致时可跳过重复上传。
-4. 从 CDN 公网地址执行 HEAD 和完整更新冒烟测试。
+4. 从 CDN 公网地址对每个对象执行 HEAD、完整下载，并核对字节数和 SHA-256。
 5. 最后才原子切换服务器上的 `stable.json` 与 `download.json`。
 
 OSS Object 始终使用私有 ACL。CDN 应开启“OSS 私有 Bucket 回源”；发布脚本不会关闭 Bucket 的“阻止公共访问”。上传使用 ossutil 自带的 CRC64 校验和大文件断点续传能力。
 
-客户下载包与内部更新包用途不同：客户包是外层 ZIP，完整解压后包含 `WeChatReBot.exe`、`payload.wrb`、安装说明和分发清单；内部更新包仅供已安装管理器验证并事务更新，不能把 `releases/` 中的 ZIP 当作客户安装包发送。客户下载文件名带 SHA-256 前缀，避免同版本重试发布时命中旧的不可变缓存。
+客户下载包与内部更新包用途不同：客户包是外层 ZIP，解压后包含原生 Windows 在线安装器；安装器下载并校验单独托管的 `payload.wrb`。内部更新包仅供已安装管理器验证并事务更新，不能把 `releases/` 中的 ZIP 当作客户安装包发送。客户下载文件名带 SHA-256 前缀，避免同版本重试发布时命中旧的不可变缓存。
 
 发布脚本会在包内载荷清单保留 `source_manifest_status: ready` 兼容标记。该字段仅用于让 0.8.3 及更早版本通过旧版更新入口升级；新版本不再用它判断载荷是否完整或可信，仍以签名、SHA-256、路径边界和逐文件清单为准。不要手工删除该字段，否则旧版会在下载完成后拒绝更新包。这个标记只解决旧版的载荷准入，不解决上述单文件 EXE 占用问题；从 0.8.2/0.8.3 升级到 0.8.7 仍应发布完整载荷。
 

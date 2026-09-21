@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -350,6 +351,27 @@ def _public_head(url: str, *, expected_size: int, timeout: int) -> None:
         length = response.headers.get("Content-Length")
         if response.geturl() != url or response.status != 200 or int(length or 0) != expected_size:
             raise ValueError("公网客户安装包状态或大小与发布信息不一致")
+
+
+def _verify_public_download(
+    url: str, *, expected_size: int, expected_sha256: str, timeout: int
+) -> None:
+    """Read the CDN object end to end before switching the stable release."""
+    _public_head(url, expected_size=expected_size, timeout=timeout)
+    request = urllib.request.Request(
+        url,
+        headers={"Cache-Control": "no-cache", "User-Agent": "WeChatReBot-Publisher/1"},
+    )
+    digest = hashlib.sha256()
+    size = 0
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        if response.geturl() != url or response.status != 200:
+            raise ValueError(f"CDN 公网下载不可访问：{url}")
+        while chunk := response.read(4 * 1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+    if size != expected_size or digest.hexdigest().lower() != expected_sha256.lower():
+        raise ValueError(f"CDN 公网下载大小或 SHA-256 不一致：{url}")
 
 
 def _public_page(url: str, *, timeout: int) -> None:
@@ -893,45 +915,52 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if artifact_storage == "oss":
-        oss_storage.upload_release_objects(
-            oss_config,
-            (
-                oss_storage.OssReleaseObject(
-                    release.archive_path,
-                    "releases",
-                    release.package_sha256,
-                    "application/zip",
-                    "public,max-age=3600",
-                ),
-                oss_storage.OssReleaseObject(
-                    customer_package.archive_path,
-                    "downloads",
-                    customer_package.package_sha256,
-                    "application/zip",
-                    "public,max-age=31536000,immutable",
-                ),
-                oss_storage.OssReleaseObject(
-                    customer_package.checksum_path,
-                    "downloads",
-                    sha256_file(customer_package.checksum_path),
-                    "text/plain; charset=utf-8",
-                    "public,max-age=31536000,immutable",
-                ),
-                *(
-                    (
-                        oss_storage.OssReleaseObject(
-                            customer_package.payload_path,
-                            "releases",
-                            sha256_file(customer_package.payload_path),
-                            "application/octet-stream",
-                            "public,max-age=31536000,immutable",
-                        ),
-                    )
-                    if customer_package.payload_path is not None
-                    else ()
-                ),
+        oss_objects = (
+            oss_storage.OssReleaseObject(
+                release.archive_path,
+                "releases",
+                release.package_sha256,
+                "application/zip",
+                "public,max-age=3600",
+            ),
+            oss_storage.OssReleaseObject(
+                customer_package.archive_path,
+                "downloads",
+                customer_package.package_sha256,
+                "application/zip",
+                "public,max-age=31536000,immutable",
+            ),
+            oss_storage.OssReleaseObject(
+                customer_package.checksum_path,
+                "downloads",
+                sha256_file(customer_package.checksum_path),
+                "text/plain; charset=utf-8",
+                "public,max-age=31536000,immutable",
+            ),
+            *(
+                (
+                    oss_storage.OssReleaseObject(
+                        customer_package.payload_path,
+                        "releases",
+                        sha256_file(customer_package.payload_path),
+                        "application/octet-stream",
+                        "public,max-age=31536000,immutable",
+                    ),
+                )
+                if customer_package.payload_path is not None
+                else ()
             ),
         )
+        oss_storage.upload_release_objects(oss_config, oss_objects)
+        for obj in oss_objects:
+            url = oss_config.public_url(obj.category, obj.local_path.name)
+            _verify_public_download(
+                url,
+                expected_size=obj.local_path.stat().st_size,
+                expected_sha256=obj.sha256,
+                timeout=channel.request_timeout_seconds,
+            )
+            print(f"CDN 公网下载校验通过：{url}", flush=True)
 
     remote_root = args.remote_root.rstrip("/")
     staged_site = _stage_download_site(

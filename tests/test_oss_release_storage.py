@@ -9,10 +9,10 @@ from wechatrebot_manager.payload import sha256_file
 import scripts.oss_release_storage as oss
 
 
-def test_project_oss_config_records_private_bucket_without_enabling_upload() -> None:
+def test_project_oss_config_records_private_bucket_with_verified_upload_enabled() -> None:
     storage = oss.load_oss_release_storage()
 
-    assert storage.enabled is False
+    assert storage.enabled is True
     assert storage.bucket == "jiangxiaomei-releases-bj"
     assert storage.region == "cn-beijing"
     assert storage.endpoint == "oss-cn-beijing.aliyuncs.com"
@@ -82,5 +82,8 @@ def test_upload_uses_private_acl_and_verifies_size_and_sha_metadata(tmp_path: Pa
     cp = next(command for command in commands if command[1] == "cp")
     assert cp[3] == "oss://jiangxiaomei-releases-bj/wechatrebot-updates/downloads/release.zip"
     assert cp[cp.index("--acl") + 1] == "private"
-    assert f"x-oss-meta-sha256:{digest}" in cp[cp.index("--meta") + 1]
+    assert cp[cp.index("--region") + 1] == "cn-beijing"
+    assert cp[cp.index("--content-type") + 1] == "application/zip"
+    assert cp[cp.index("--cache-control") + 1] == "public,max-age=31536000,immutable"
+    assert cp[cp.index("--metadata") + 1] == f"sha256={digest}"
     assert stat_calls == 2

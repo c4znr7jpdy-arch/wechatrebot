@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -20,6 +21,46 @@ def _publisher():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_public_cdn_download_checks_head_size_and_get_sha256(monkeypatch) -> None:
+    module = _publisher()
+    url = "https://download.example.test/releases/update.zip"
+    body = b"published archive"
+    methods: list[str] = []
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __init__(self, content: bytes) -> None:
+            super().__init__(content)
+            self.headers = {"Content-Length": str(len(body))}
+
+        def geturl(self) -> str:
+            return url
+
+    def urlopen(request, *, timeout):
+        assert timeout == 20
+        methods.append(request.get_method())
+        return Response(body if request.get_method() == "GET" else b"")
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", urlopen)
+    module._verify_public_download(
+        url,
+        expected_size=len(body),
+        expected_sha256=hashlib.sha256(body).hexdigest(),
+        timeout=20,
+    )
+    assert methods == ["HEAD", "GET"]
+
+    try:
+        module._verify_public_download(
+            url, expected_size=len(body), expected_sha256="0" * 64, timeout=20
+        )
+    except ValueError as exc:
+        assert "SHA-256" in str(exc)
+    else:
+        raise AssertionError("CDN 内容不匹配时发布必须停止")
 
 
 def test_full_update_entry_runs_complete_build_and_publish_pipeline(
@@ -112,6 +153,8 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
             str(key),
             "--base-url",
             "https://updates.example.test",
+            "--artifact-storage",
+            "server",
             "--title",
             "升级修复",
             "--note",

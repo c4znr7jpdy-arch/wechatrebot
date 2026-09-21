@@ -186,13 +186,6 @@ def upload_release_objects(
             pass
 
         object_key = storage.object_key(item.category, local_path.name)
-        metadata = "#".join(
-            (
-                f"Content-Type:{item.content_type}",
-                f"Cache-Control:{item.cache_control}",
-                f"x-oss-meta-sha256:{normalized_sha}",
-            )
-        )
         command = [
             tool,
             "cp",
@@ -200,8 +193,14 @@ def upload_release_objects(
             storage.object_uri(object_key),
             "-e",
             storage.endpoint,
-            "--meta",
-            metadata,
+            "--region",
+            storage.region,
+            "--content-type",
+            item.content_type,
+            "--cache-control",
+            item.cache_control,
+            "--metadata",
+            f"sha256={normalized_sha}",
             "--acl",
             "private",
             "--force",
