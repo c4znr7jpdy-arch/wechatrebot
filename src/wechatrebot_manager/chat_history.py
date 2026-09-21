@@ -523,6 +523,7 @@ class ChatHistoryService:
         start_time: float | None = None,
         end_time: float | None = None,
         account_id: str = "",
+        include_unassigned: bool = False,
         limit: int = 200,
     ) -> dict[str, Any]:
         self.sync()
@@ -532,6 +533,18 @@ class ChatHistoryService:
         if normalized_account:
             clauses.append("account_id = ?")
             params.append(normalized_account)
+        elif include_unassigned:
+            clauses.append("account_id = ''")
+        else:
+            return {
+                "items": [],
+                "summary": {
+                    "messages": 0,
+                    "conversations": 0,
+                    "private_messages": 0,
+                    "group_messages": 0,
+                },
+            }
         if kind in {"private", "group"}:
             clauses.append("conversation_type = ?")
             params.append(kind)
@@ -616,6 +629,7 @@ class ChatHistoryService:
         start_time: float | None = None,
         end_time: float | None = None,
         account_id: str = "",
+        include_unassigned: bool = False,
         limit: int = 200,
     ) -> tuple[dict[str, Any], ...]:
         self.sync()
@@ -625,6 +639,10 @@ class ChatHistoryService:
         if normalized_account:
             clauses.append("account_id = ?")
             params.append(normalized_account)
+        elif include_unassigned:
+            clauses.append("account_id = ''")
+        else:
+            return ()
         if before is not None:
             if before_id is None:
                 clauses.append("timestamp < ?")
@@ -695,26 +713,46 @@ class ChatHistoryService:
             })
         return tuple(messages)
 
-    def delete_conversation(self, conversation_id: str, *, account_id: str = "") -> int:
+    def delete_conversation(
+        self,
+        conversation_id: str,
+        *,
+        account_id: str = "",
+        include_unassigned: bool = False,
+    ) -> int:
         clauses = ["conversation_id = ?"]
         params: list[object] = [conversation_id]
         normalized_account = str(account_id or "").strip()
         if normalized_account:
             clauses.append("account_id = ?")
             params.append(normalized_account)
+        elif include_unassigned:
+            clauses.append("account_id = ''")
+        else:
+            return 0
         with self._connect() as connection:
             cursor = connection.execute(
                 f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
             )
             return max(0, cursor.rowcount)
 
-    def delete_before(self, timestamp: float, *, account_id: str = "") -> int:
+    def delete_before(
+        self,
+        timestamp: float,
+        *,
+        account_id: str = "",
+        include_unassigned: bool = False,
+    ) -> int:
         clauses = ["timestamp < ?"]
         params: list[object] = [float(timestamp)]
         normalized_account = str(account_id or "").strip()
         if normalized_account:
             clauses.append("account_id = ?")
             params.append(normalized_account)
+        elif include_unassigned:
+            clauses.append("account_id = ''")
+        else:
+            return 0
         with self._connect() as connection:
             cursor = connection.execute(
                 f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
@@ -727,12 +765,19 @@ class ChatHistoryService:
         *,
         format: str = "csv",
         account_id: str = "",
+        include_unassigned: bool = False,
     ) -> Path:
+        normalized_account = str(account_id or "").strip()
+        if normalized_account:
+            where = "WHERE account_id = ?"
+            params = (normalized_account,)
+        elif include_unassigned:
+            where = "WHERE account_id = ''"
+            params = ()
+        else:
+            raise ValueError("导出聊天记录必须指定机器人微信账号。")
         output = Path(target).expanduser().resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        normalized_account = str(account_id or "").strip()
-        where = "WHERE account_id = ?" if normalized_account else ""
-        params = (normalized_account,) if normalized_account else ()
         with self._connect() as connection:
             rows = connection.execute(
                 f"""

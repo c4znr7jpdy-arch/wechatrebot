@@ -525,6 +525,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
     tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [
@@ -542,6 +543,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
     )
     api._groups = SimpleNamespace(
         list=lambda _refresh: {
+            "account_id": "wxid_bot",
             "items": [
                 {
                     "group_id": "active@chatroom",
@@ -576,6 +578,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
 
 def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [{
@@ -606,11 +609,13 @@ def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path)
 
 def test_conversation_search_matches_group_without_local_messages(tmp_path: Path) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {"items": [], "summary": {"messages": 0}}
     )
     api._groups = SimpleNamespace(
         list=lambda _refresh: {
+            "account_id": "wxid_bot",
             "items": [
                 {"group_id": "family@chatroom", "name": "爱人们"},
                 {"group_id": "work@chatroom", "name": "工作群"},
@@ -626,10 +631,109 @@ def test_conversation_search_matches_group_without_local_messages(tmp_path: Path
     ]
 
 
+def test_history_api_returns_no_data_without_a_logged_in_robot(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: ""
+    api._groups = SimpleNamespace(
+        list=lambda *_args: calls.append(("groups", "wxid_previous"))
+    )
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(("conversations", filters)),
+        messages=lambda *args, **filters: calls.append(("messages", args, filters)),
+        delete_conversation=lambda *args, **filters: calls.append(("delete", args, filters)),
+        delete_before=lambda *args, **filters: calls.append(("clean", args, filters)),
+    )
+
+    conversations = api.get_conversations({"kind": "all"})
+    messages = api.get_messages("old@chatroom", {"paged": True})
+    deleted = api.delete_conversation("old@chatroom")
+    cleaned = api.delete_history_before("2026-09-01")
+    exported = api.export_history("csv")
+
+    assert conversations["data"]["items"] == []
+    assert conversations["data"]["requires_login"] is True
+    assert messages["data"] == {
+        "items": [],
+        "has_more": False,
+        "account_id": "",
+        "requires_login": True,
+    }
+    assert deleted["data"] == {"deleted": 0, "requires_login": True}
+    assert cleaned["data"] == {"deleted": 0, "requires_login": True}
+    assert exported["data"] == {"cancelled": True, "requires_login": True}
+    assert calls == []
+
+
+def test_history_account_uses_a_fresh_runtime_identity(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._lifecycle = SimpleNamespace(
+        view=lambda: SimpleNamespace(
+            runtime=SimpleNamespace(wechat_identity="wxid_cached")
+        ),
+        refresh=lambda: SimpleNamespace(
+            runtime=SimpleNamespace(wechat_identity="wxid_current")
+        ),
+    )
+
+    assert api._history_account_id() == "wxid_current"
+
+
+def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: "wxid_current"
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(filters)
+    )
+    api._groups = SimpleNamespace(list=lambda _refresh: {
+        "account_id": "wxid_previous",
+        "items": [{"group_id": "old@chatroom", "name": "旧账号群"}],
+    })
+
+    result = api.get_conversations({"kind": "group"})
+
+    assert result["ok"] is True
+    assert result["data"]["items"] == []
+    assert result["data"]["account_id"] == "wxid_current"
+    assert result["data"]["account_changed"] is True
+    assert calls == []
+
+
+def test_history_api_rejects_actions_from_a_stale_account_page(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: "wxid_current"
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(("conversations", filters)),
+        messages=lambda *args, **filters: calls.append(("messages", args, filters)),
+        delete_conversation=lambda *args, **filters: calls.append(("delete", args, filters)),
+        delete_before=lambda *args, **filters: calls.append(("clean", args, filters)),
+    )
+
+    conversations = api.get_conversations({
+        "kind": "private", "account_id": "wxid_previous"
+    })
+    messages = api.get_messages("same@chatroom", {
+        "paged": True, "account_id": "wxid_previous"
+    })
+    deleted = api.delete_conversation("same@chatroom", "wxid_previous")
+    cleaned = api.delete_history_before("2026-09-01", "wxid_previous")
+    exported = api.export_history("csv", "wxid_previous")
+
+    assert conversations["data"]["account_changed"] is True
+    assert messages["data"]["account_changed"] is True
+    assert deleted["data"] == {"deleted": 0, "account_changed": True}
+    assert cleaned["data"] == {"deleted": 0, "account_changed": True}
+    assert exported["data"] == {"cancelled": True, "account_changed": True}
+    assert calls == []
+
+
 def test_dated_group_history_still_uses_directory_avatar_without_adding_empty_groups(
     tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [{
@@ -1054,6 +1158,25 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
     assert 'presentation.messageKind === "revoke"' in script
     assert ".message-bubble-quote blockquote" in styles
     assert ".message-bubble-notice" in styles
+
+
+def test_message_center_clears_data_when_the_robot_account_changes() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+
+    assert 'historyAccount: ""' in script
+    assert 'historyReadyAccount: ""' in script
+    assert "historyAccount !== state.historyAccount" in script
+    assert "invalidateHistoryState();" in script
+    assert "requestAccount !== state.historyAccount" in script
+    assert "data.account_id !== requestAccount" in script
+    assert "page.account_id !== requestAccount" in script
+    assert 'account_id: state.historyAccount' in script
+    assert 'api("delete_conversation", item.conversation_id, accountId)' in script
+    assert 'api("delete_history_before", value, accountId)' in script
+    assert 'api("export_history", "csv", accountId)' in script
+    assert "聊天记录只展示当前机器人微信账号的内容" in script
+    assert 'setHistoryActionsEnabled(false);' in script
 
 
 def test_091_history_and_group_layout_regressions_are_covered() -> None:

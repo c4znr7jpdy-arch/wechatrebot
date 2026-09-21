@@ -46,6 +46,8 @@
     privatePolicies: {},
     contactLoad: 0,
     historyKind: "all",
+    historyAccount: "",
+    historyReadyAccount: "",
     conversations: [],
     selectedConversation: null,
     selectedMessages: [],
@@ -280,6 +282,19 @@
     const active = !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const wechatLoggedIn = Boolean(runtime.wechat_identity);
+    const historyAccount = String(runtime.wechat_identity || "").trim();
+
+    if (historyAccount !== state.historyAccount) {
+      state.historyAccount = historyAccount;
+      invalidateHistoryState();
+      if (state.activePage === "history") {
+        renderHistoryAccountGate(historyAccount);
+        if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
+      }
+    }
+    setHistoryActionsEnabled(
+      wechatLoggedIn && state.historyReadyAccount === historyAccount
+    );
 
     // Details prefetched while the engine is starting can carry a stale
     // offline flag. Once the run center confirms the robot is online, force
@@ -1842,17 +1857,31 @@
 
   async function loadConversations(options = {}) {
     const silent = options?.silent === true;
+    const requestAccount = state.historyAccount;
+    if (!requestAccount) {
+      invalidateHistoryState();
+      renderHistoryAccountGate("");
+      return;
+    }
     const load = ++state.historyLoad;
     try {
       const data = await api("get_conversations", {
+        account_id: requestAccount,
         kind: state.historyKind,
         search: $("#historySearch").value,
         start: $("#historyStart").value,
         end: $("#historyEnd").value,
         refresh_groups: options?.refreshGroups === true,
       });
-      if (load !== state.historyLoad) return;
+      if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
+      if (data.requires_login || data.account_changed || data.account_id !== requestAccount) {
+        invalidateHistoryState();
+        renderHistoryAccountGate(data.requires_login ? "" : state.historyAccount);
+        return;
+      }
       state.conversations = data.items || [];
+      state.historyReadyAccount = requestAccount;
+      setHistoryActionsEnabled(true);
       if (state.selectedConversation) {
         const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
         state.selectedConversation = refreshed || null;
@@ -1883,6 +1912,44 @@
     } catch (error) { if (!silent) reportError(error); }
   }
 
+  function setHistoryActionsEnabled(enabled) {
+    const exportButton = $("#exportHistory");
+    const cleanButton = $("#cleanHistory");
+    if (exportButton) exportButton.disabled = !enabled;
+    if (cleanButton) cleanButton.disabled = !enabled;
+  }
+
+  function invalidateHistoryState() {
+    state.historyLoad += 1;
+    state.messageLoad += 1;
+    state.historyOlderLoad += 1;
+    state.conversations = [];
+    state.selectedConversation = null;
+    state.selectedMessages = [];
+    state.selectedSenderKey = "";
+    state.historyHasMore = false;
+    state.historyLoadingOlder = false;
+    state.historyMessageQuery = "";
+    state.historyReadyAccount = "";
+  }
+
+  function renderHistoryAccountGate(accountId) {
+    const pending = Boolean(String(accountId || "").trim());
+    const title = pending ? "正在确认当前微信账号" : "登录后查看聊天记录";
+    const message = pending
+      ? "账号切换完成后，将只显示这个机器人微信号的聊天记录。"
+      : "聊天记录只展示当前机器人微信账号的内容。";
+    $("#historySummary").textContent = pending ? "正在读取当前账号的聊天记录…" : "请先登录机器人微信账号";
+    $("#conversationList").innerHTML = `<div class="empty-state compact"><div class="empty-symbol">空</div><h2>${title}</h2><p>${message}</p></div>`;
+    $("#conversationHeader").textContent = pending ? "正在读取聊天记录…" : "尚未登录微信";
+    $("#messageList").removeAttribute("aria-busy");
+    $("#messageList").innerHTML = `<div class="empty-state compact"><h2>${title}</h2><p>${message}</p></div>`;
+    $("#olderMessagesStatus").hidden = true;
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><p class="subtle">${message}</p>`;
+    $("#newMessageButton").hidden = true;
+    setHistoryActionsEnabled(false);
+  }
+
   function historyFilters() {
     return {
       search: $("#historySearch").value,
@@ -1893,6 +1960,7 @@
 
   function pagedHistoryFilters(before = null) {
     return {
+      account_id: state.historyAccount,
       ...historyFilters(),
       paged: true,
       page_size: HISTORY_PAGE_SIZE,
@@ -1902,11 +1970,14 @@
 
   function normalizeMessagePage(value) {
     if (Array.isArray(value)) {
-      return {items: value.slice(-HISTORY_PAGE_SIZE), has_more: value.length > HISTORY_PAGE_SIZE};
+      return {items: value.slice(-HISTORY_PAGE_SIZE), has_more: value.length > HISTORY_PAGE_SIZE, account_id: ""};
     }
     return {
       items: Array.isArray(value?.items) ? value.items : [],
       has_more: Boolean(value?.has_more),
+      account_id: String(value?.account_id || "").trim(),
+      requires_login: Boolean(value?.requires_login),
+      account_changed: Boolean(value?.account_changed),
     };
   }
 
@@ -2156,9 +2227,15 @@
     renderConversationHeader(item);
     if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     const load = ++state.messageLoad;
+    const requestAccount = state.historyAccount;
     try {
       const page = normalizeMessagePage(await api("get_messages", conversationId, pagedHistoryFilters()));
-      if (load !== state.messageLoad || state.selectedConversation?.conversation_id !== conversationId) return;
+      if (load !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== conversationId) return;
+      if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
+        invalidateHistoryState();
+        renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
+        return;
+      }
       const messages = changed ? page.items : mergeMessages(state.selectedMessages, page.items);
       if (changed) state.historyHasMore = page.has_more;
       if (changed || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
@@ -2176,6 +2253,7 @@
     state.historyLoadingOlder = true;
     const request = ++state.historyOlderLoad;
     const messageGeneration = state.messageLoad;
+    const requestAccount = state.historyAccount;
     const status = $("#olderMessagesStatus");
     list.setAttribute("aria-busy", "true");
     const feedbackTimer = window.setTimeout(() => {
@@ -2183,7 +2261,12 @@
     }, 300);
     try {
       const page = normalizeMessagePage(await api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest)));
-      if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
+      if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
+      if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
+        invalidateHistoryState();
+        renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
+        return;
+      }
       state.historyHasMore = page.has_more;
       prependOlderMessages(page.items);
     } catch (error) {
@@ -2240,17 +2323,25 @@
     $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
-    $("#deleteConversation")?.addEventListener("click", () => confirmAction({
-      title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
-      onConfirm: async () => {
-        await api("delete_conversation", item.conversation_id);
-        state.selectedConversation = null;
-        state.selectedSenderKey = "";
-        $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
-        $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><h2>尚未选择</h2>';
-        await loadConversations(); toast("聊天记录副本已删除。 ");
-      },
-    }));
+    $("#deleteConversation")?.addEventListener("click", () => {
+      const accountId = state.historyAccount;
+      confirmAction({
+        title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
+        onConfirm: async () => {
+          const result = await api("delete_conversation", item.conversation_id, accountId);
+          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
+            invalidateHistoryState();
+            renderHistoryAccountGate(state.historyAccount);
+            return;
+          }
+          state.selectedConversation = null;
+          state.selectedSenderKey = "";
+          $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
+          $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><h2>尚未选择</h2>';
+          await loadConversations(); toast("聊天记录副本已删除。 ");
+        },
+      });
+    });
   }
 
   async function loadSchedules() {
@@ -3841,7 +3932,18 @@
       if (list.scrollTop <= HISTORY_PRELOAD_THRESHOLD) void loadOlderMessages();
       if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
-    $("#exportHistory").addEventListener("click", async () => { try { const result = await api("export_history", "csv"); if (!result?.cancelled) toast(`已导出到 ${result.path}`); } catch (error) { reportError(error); } });
+    $("#exportHistory").addEventListener("click", async () => {
+      const accountId = state.historyAccount;
+      try {
+        const result = await api("export_history", "csv", accountId);
+        if (result?.requires_login || result?.account_changed || accountId !== state.historyAccount) {
+          invalidateHistoryState();
+          renderHistoryAccountGate(state.historyAccount);
+          return;
+        }
+        if (!result?.cancelled) toast(`已导出到 ${result.path}`);
+      } catch (error) { reportError(error); }
+    });
     $("#refreshSchedules").addEventListener("click", loadSchedules);
     $("#newScheduledTask").addEventListener("click", () => openScheduledEditor());
     ["#scheduledActionFilter", "#scheduledTargetFilter", "#scheduledStatusFilter"].forEach((selector) => $(selector).addEventListener("change", renderScheduledTasks));
@@ -3937,7 +4039,25 @@
     $("#restoreBackup").addEventListener("click", chooseRestoreBackup);
     $("#exportDiagnostics").addEventListener("click", exportDiagnostics);
     $("#openOnboarding").addEventListener("click", () => navigate("help"));
-    $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
+    $("#cleanHistory").addEventListener("click", () => {
+      const accountId = state.historyAccount;
+      confirmAction({
+        title: "按日期清理聊天记录",
+        message: "将删除所选日期以前的本机记录副本，此操作无法撤销。",
+        confirmText: "开始清理",
+        field: {label: "保留此日期及之后的记录", type: "date", value: ""},
+        onConfirm: async (value) => {
+          const result = await api("delete_history_before", value, accountId);
+          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
+            invalidateHistoryState();
+            renderHistoryAccountGate(state.historyAccount);
+            return;
+          }
+          toast(`已清理 ${result.deleted} 条记录。 `);
+          if (state.activePage === "history") await loadConversations();
+        },
+      });
+    });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
     window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy) { event.preventDefault(); event.returnValue = ""; } });
@@ -4267,7 +4387,7 @@
         const latest = own.at(-1);
         return {...item, message_count: own.length, last_content: latest?.content || "", last_timestamp: latest?.timestamp || 0};
       });
-      return {items: structuredClone(viewItems), summary: {messages: messages.filter((message) => items.some((item) => item.conversation_id === message.conversation_id)).length, conversations: items.length, visible_conversations: items.length, directory_groups: 6, private_messages: messages.filter((message) => items.some((item) => item.type === "private" && item.conversation_id === message.conversation_id)).length, group_messages: messages.filter((message) => items.some((item) => item.type === "group" && item.conversation_id === message.conversation_id)).length}};
+      return {account_id: "wxid_demo_account", items: structuredClone(viewItems), summary: {messages: messages.filter((message) => items.some((item) => item.conversation_id === message.conversation_id)).length, conversations: items.length, visible_conversations: items.length, directory_groups: 6, private_messages: messages.filter((message) => items.some((item) => item.type === "private" && item.conversation_id === message.conversation_id)).length, group_messages: messages.filter((message) => items.some((item) => item.type === "group" && item.conversation_id === message.conversation_id)).length}};
     };
     const previewTaskGroups = [{id: "51632940287@chatroom", name: "旅行交流群"}, {id: "81263495012@chatroom", name: "短剧分享群"}, {id: "22001983641@chatroom", name: "业主交流群"}, {id: "34902765188@chatroom", name: "周末羽毛球"}];
     const previewTasks = new Map();
@@ -4352,7 +4472,7 @@
           || (Number(message.timestamp) === Number(before.timestamp) && Number(message.id) < Number(before.id))
         )) : matching;
         const pageSize = Math.max(1, Math.min(Number(filters.page_size) || HISTORY_PAGE_SIZE, HISTORY_PAGE_SIZE));
-        return ok({items: structuredClone(older.slice(-pageSize)), has_more: older.length > pageSize});
+        return ok({account_id: "wxid_demo_account", items: structuredClone(older.slice(-pageSize)), has_more: older.length > pageSize});
       },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),

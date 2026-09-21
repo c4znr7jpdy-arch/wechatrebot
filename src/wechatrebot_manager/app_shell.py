@@ -609,9 +609,9 @@ class ApplicationApi:
         return parsed.astimezone().timestamp()
 
     def _history_account_id(self) -> str:
-        """Return the last verified bot account without starting a new probe."""
+        """Return the bot account verified by a fresh runtime probe."""
         try:
-            view = self._lifecycle.view()
+            view = self._lifecycle.refresh()
             runtime = getattr(view, "runtime", None)
             return str(getattr(runtime, "wechat_identity", "") or "").strip()
         except (AttributeError, OSError, ValueError):
@@ -633,14 +633,47 @@ class ApplicationApi:
             values = filters or {}
             kind = str(values.get("kind") or "all")
             search = str(values.get("search") or "").strip()
+            expected_account = str(values.get("account_id") or "").strip()
             start_time = self._date_timestamp(values.get("start"))
             end_time = self._date_timestamp(values.get("end"), end=True)
+            runtime_account = self._history_account_id()
+            empty = {
+                "messages": 0,
+                "conversations": 0,
+                "private_messages": 0,
+                "group_messages": 0,
+                "visible_conversations": 0,
+                "directory_groups": 0,
+            }
+            if not runtime_account:
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": "",
+                    "requires_login": True,
+                })
+            if expected_account and expected_account != runtime_account:
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": runtime_account,
+                    "account_changed": True,
+                })
             directory = {"items": []}
             if kind in {"all", "group"}:
                 directory = self._groups.list(values.get("refresh_groups") is True)
-            account_id = str(
-                directory.get("account_id") or self._history_account_id()
-            ).strip()
+            directory_account = str(directory.get("account_id") or "").strip()
+            if (
+                kind in {"all", "group"}
+                and directory_account != runtime_account
+            ):
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": runtime_account,
+                    "account_changed": True,
+                })
+            account_id = runtime_account
             history = self._history.conversations(
                 kind=kind,
                 search=search,
@@ -712,7 +745,11 @@ class ApplicationApi:
             summary = dict(history.get("summary") or {})
             summary["visible_conversations"] = len(items)
             summary["directory_groups"] = len(directory.get("items") or [])
-            return self._ok({"items": items, "summary": summary})
+            return self._ok({
+                "items": items,
+                "summary": summary,
+                "account_id": account_id,
+            })
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
@@ -800,7 +837,26 @@ class ApplicationApi:
         try:
             values = filters or {}
             account_id = self._history_account_id()
+            expected_account = str(values.get("account_id") or "").strip()
             paged = values.get("paged") is True
+            if not account_id:
+                if paged:
+                    return self._ok({
+                        "items": [],
+                        "has_more": False,
+                        "account_id": "",
+                        "requires_login": True,
+                    })
+                return self._ok([])
+            if expected_account and expected_account != account_id:
+                if paged:
+                    return self._ok({
+                        "items": [],
+                        "has_more": False,
+                        "account_id": account_id,
+                        "account_changed": True,
+                    })
+                return self._ok([])
             page_size = 20
             before_timestamp: float | None = None
             before_id: int | None = None
@@ -902,36 +958,61 @@ class ApplicationApi:
                             contact.get("alias") or message.get("sender_id") or ""
                         )
             if paged:
-                return self._ok({"items": messages, "has_more": has_more})
+                return self._ok({
+                    "items": messages,
+                    "has_more": has_more,
+                    "account_id": account_id,
+                })
             return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def delete_conversation(self, conversation_id: str) -> dict[str, object]:
+    def delete_conversation(
+        self, conversation_id: str, expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"deleted": 0, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"deleted": 0, "account_changed": True})
             count = self._history.delete_conversation(
                 conversation_id,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def delete_history_before(self, value: str) -> dict[str, object]:
+    def delete_history_before(
+        self, value: str, expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"deleted": 0, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"deleted": 0, "account_changed": True})
             timestamp = self._date_timestamp(value)
             if timestamp is None:
                 raise ValueError("请选择清理日期。")
             count = self._history.delete_before(
                 timestamp,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def export_history(self, format: str = "csv") -> dict[str, object]:
+    def export_history(
+        self, format: str = "csv", expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"cancelled": True, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"cancelled": True, "account_changed": True})
             if self._window is None:
                 raise ValueError("导出窗口尚未就绪。")
             import webview
@@ -949,11 +1030,13 @@ class ApplicationApi:
             )
             if not result:
                 return self._ok({"cancelled": True})
+            if self._history_account_id() != account_id:
+                return self._ok({"cancelled": True, "account_changed": True})
             selected = result[0] if isinstance(result, (list, tuple)) else result
             target = self._history.export(
                 selected,
                 format=suffix,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"path": str(target)})
         except (OSError, ValueError) as exc:

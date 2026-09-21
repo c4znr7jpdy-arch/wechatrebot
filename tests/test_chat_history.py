@@ -2,6 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from wechatrebot_manager.chat_history import (
     ChatHistoryService,
     _display_content,
@@ -100,8 +102,8 @@ def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:
     _source(tmp_path)
     service = ChatHistoryService(tmp_path)
 
-    result = service.conversations()
-    private = service.conversations(kind="private", search="张三")
+    result = service.conversations(include_unassigned=True)
+    private = service.conversations(kind="private", search="张三", include_unassigned=True)
 
     assert result["summary"]["messages"] == 3
     assert len(result["items"]) == 2
@@ -109,17 +111,17 @@ def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:
     assert private["items"][0]["avatar"] == "https://example.test/zhangsan.jpg"
     group = next(item for item in result["items"] if item["type"] == "group")
     assert group["display_name"] == "客户交流群"
-    group_message = service.messages("123@chatroom")[0]
+    group_message = service.messages("123@chatroom", include_unassigned=True)[0]
     assert group_message["group_name"] == "客户交流群"
     assert group_message["group_nickname"] == "客服小李"
     assert group_message["wechat_name"] == "李四"
     assert group_message["wechat_id"] == "lisi_work"
-    assert service.messages("wxid_a")[0]["avatar"] == (
+    assert service.messages("wxid_a", include_unassigned=True)[0]["avatar"] == (
         "https://example.test/zhangsan.jpg"
     )
-    assert service.messages("wxid_a")[1]["sender_name"] == "机器人"
-    assert service.delete_conversation("wxid_a") == 2
-    assert service.conversations()["summary"]["messages"] == 1
+    assert service.messages("wxid_a", include_unassigned=True)[1]["sender_name"] == "机器人"
+    assert service.delete_conversation("wxid_a", include_unassigned=True) == 2
+    assert service.conversations(include_unassigned=True)["summary"]["messages"] == 1
 
 
 def test_history_export_csv(tmp_path: Path) -> None:
@@ -127,7 +129,7 @@ def test_history_export_csv(tmp_path: Path) -> None:
     service = ChatHistoryService(tmp_path)
     service.sync()
 
-    target = service.export(tmp_path / "history.csv")
+    target = service.export(tmp_path / "history.csv", include_unassigned=True)
 
     text = target.read_text(encoding="utf-8-sig")
     assert "聊天类型" in text
@@ -138,12 +140,74 @@ def test_history_prefers_bridge_journal_without_memory_plugin(tmp_path: Path) ->
     _bridge_source(tmp_path)
     service = ChatHistoryService(tmp_path)
 
-    result = service.conversations(kind="group")
+    result = service.conversations(kind="group", account_id="wxid_bot")
 
     assert result["summary"]["messages"] == 1
     assert result["items"][0]["conversation_id"] == "456@chatroom"
     assert result["items"][0]["display_name"] == "测试群"
-    assert service.messages("456@chatroom")[0]["content"] == "点歌 发如雪"
+    assert service.messages("456@chatroom", account_id="wxid_bot")[0]["content"] == "点歌 发如雪"
+
+
+def test_empty_account_never_reads_or_mutates_all_history(tmp_path: Path) -> None:
+    _bridge_source(tmp_path)
+    service = ChatHistoryService(tmp_path)
+
+    assert service.conversations()["summary"]["messages"] == 0
+    assert service.messages("456@chatroom") == ()
+    assert service.delete_conversation("456@chatroom") == 0
+    assert service.delete_before(999.0) == 0
+    with pytest.raises(ValueError, match="必须指定机器人微信账号"):
+        service.export(tmp_path / "unsafe.csv")
+    assert not (tmp_path / "unsafe.csv").exists()
+    assert service.conversations(account_id="wxid_bot")["summary"]["messages"] == 1
+
+
+def test_same_conversation_id_stays_isolated_between_robot_accounts(
+    tmp_path: Path,
+) -> None:
+    path = _bridge_source(tmp_path)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                2,
+                "wxid_other_bot",
+                "hook_bridge:GroupMessage:456@chatroom",
+                "user",
+                "另一个机器人账号的消息",
+                "wxid_other_member",
+                "赵六",
+                "456@chatroom",
+                "hook_bridge",
+                104.0,
+                '{"group_name":"另一个账号的同标识群","wechat_name":"赵六"}',
+                "in:other-account-message",
+            ),
+        )
+    service = ChatHistoryService(tmp_path)
+
+    first = service.messages("456@chatroom", account_id="wxid_bot")
+    second = service.messages("456@chatroom", account_id="wxid_other_bot")
+
+    assert [item["content"] for item in first] == ["点歌 发如雪"]
+    assert [item["content"] for item in second] == ["另一个机器人账号的消息"]
+    assert service.delete_conversation(
+        "456@chatroom", account_id="wxid_bot"
+    ) == 1
+    assert service.messages("456@chatroom", account_id="wxid_bot") == ()
+    assert [
+        item["content"]
+        for item in service.messages(
+            "456@chatroom", account_id="wxid_other_bot"
+        )
+    ] == ["另一个机器人账号的消息"]
+
+    target = service.export(
+        tmp_path / "other-account.csv", account_id="wxid_other_bot"
+    )
+    exported = target.read_text(encoding="utf-8-sig")
+    assert "另一个机器人账号的消息" in exported
+    assert "点歌 发如雪" not in exported
 
 
 def test_history_migrates_legacy_database_to_stable_local_data(
@@ -160,7 +224,7 @@ def test_history_migrates_legacy_database_to_stable_local_data(
     stable_service = ChatHistoryService(tmp_path, local_app_data=stable_app_data)
 
     assert stable_service.path == stable_path
-    assert stable_service.conversations()["summary"]["messages"] == 3
+    assert stable_service.conversations(include_unassigned=True)["summary"]["messages"] == 3
     assert stable_path.is_file()
 
 
@@ -188,17 +252,19 @@ def test_history_messages_use_stable_twenty_item_cursor_pages(tmp_path: Path) ->
         )
     service = ChatHistoryService(tmp_path)
 
-    latest = service.messages("wxid_page", limit=20)
+    latest = service.messages("wxid_page", include_unassigned=True, limit=20)
     middle = service.messages(
         "wxid_page",
         before=latest[0]["timestamp"],
         before_id=latest[0]["id"],
+        include_unassigned=True,
         limit=20,
     )
     oldest = service.messages(
         "wxid_page",
         before=middle[0]["timestamp"],
         before_id=middle[0]["id"],
+        include_unassigned=True,
         limit=20,
     )
 
@@ -284,10 +350,10 @@ def test_group_message_search_filters_members_not_only_conversation(tmp_path: Pa
         )
     service = ChatHistoryService(tmp_path)
 
-    messages = service.messages("123@chatroom", search="wxid_b")
+    messages = service.messages("123@chatroom", search="wxid_b", include_unassigned=True)
 
     assert [message["sender_id"] for message in messages] == ["wxid_b"]
-    assert service.conversations(search="wxid_b")["summary"]["messages"] == 1
+    assert service.conversations(search="wxid_b", include_unassigned=True)["summary"]["messages"] == 1
 
 
 def test_quote_and_revoke_presentations_expose_structured_fields() -> None:
@@ -370,7 +436,7 @@ def test_history_hides_structured_xml_in_views_and_exports(tmp_path: Path) -> No
         )
     service = ChatHistoryService(tmp_path)
 
-    messages = service.messages("456@chatroom")
+    messages = service.messages("456@chatroom", account_id="wxid_bot")
     contents = [item["content"] for item in messages]
     for _content, expected, _exported in structured_messages:
         assert expected in contents
@@ -382,8 +448,10 @@ def test_history_hides_structured_xml_in_views_and_exports(tmp_path: Path) -> No
         "content"
     ] == "赵六撤回了一条消息"
 
-    csv_path = service.export(tmp_path / "structured-history.csv")
-    json_path = service.export(tmp_path / "structured-history.json", format="json")
+    csv_path = service.export(tmp_path / "structured-history.csv", account_id="wxid_bot")
+    json_path = service.export(
+        tmp_path / "structured-history.json", format="json", account_id="wxid_bot"
+    )
     csv_text = csv_path.read_text(encoding="utf-8-sig")
     json_text = json_path.read_text(encoding="utf-8")
     json_contents = [item["content"] for item in json.loads(json_text)]
