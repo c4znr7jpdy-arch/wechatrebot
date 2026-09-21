@@ -843,7 +843,7 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
         )
     ]
 
-    assert "if (!force) return;" in feature_loader
+    assert "if (!force && !cacheNeedsRefresh) return;" in feature_loader
     assert 'await api("get_feature", featureId)' in feature_loader
     assert "form.elements.model.value = items[0]" not in model_discovery
 
@@ -909,6 +909,48 @@ def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> 
     assert 'window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });' in script
     assert "const preserveTab = state.selectedFeature === featureId;" in script
     assert "useFeatureDetail(detail, afterSave, preserveTab);" in script
+
+
+def test_feature_center_reloads_offline_cache_after_robot_becomes_online() -> None:
+    script = (
+        Path(app_shell.__file__).with_name("app_webui") / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const wasOnline = Boolean(state.status?.online);" in script
+    assert "state.featureDetails = {};" in script
+    assert "!wasOnline" in script and "void openFeature(state.selectedFeature, false, true);" in script
+    assert "const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);" in script
+    assert "if (!force && !cacheNeedsRefresh) return;" in script
+    assert "if (!detail.engine_online && !state.status?.online)" in script
+
+
+def test_feature_page_uses_lifecycle_online_state_for_transient_engine_probe() -> None:
+    source = Path(app_shell.__file__).read_text(encoding="utf-8")
+
+    assert "def _runtime_online(self) -> bool:" in source
+    assert "if not detail.get(\"engine_online\") and not self._runtime_online():" in source
+
+
+def test_feature_page_opens_when_lifecycle_is_online_but_engine_probe_lags(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._features = SimpleNamespace(
+        detail=lambda _feature_id: {
+            "engine_online": False,
+            "enabled": True,
+            "pages": ("subscriptions",),
+        },
+        page_entry=lambda _feature_id, _page: {"content_path": "/page.html"},
+    )
+    api._lifecycle.refresh = lambda: SimpleNamespace(online=True)
+    api._ensure_feature_page_server = lambda: SimpleNamespace(server_port=4321)
+
+    result = api.get_feature_page("feature-twitter")
+
+    assert result["ok"] is True
+    assert result["data"] == {
+        "url": "http://127.0.0.1:4321/page.html",
+        "origin": "http://127.0.0.1:4321",
+    }
 
 
 def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
