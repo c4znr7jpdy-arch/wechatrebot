@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import urllib.error
 import zipfile
 
 from wechatrebot_manager.payload import sha256_file
@@ -61,6 +62,36 @@ def test_public_cdn_download_checks_head_size_and_get_sha256(monkeypatch) -> Non
         assert "SHA-256" in str(exc)
     else:
         raise AssertionError("CDN 内容不匹配时发布必须停止")
+
+
+def test_public_download_page_must_return_not_found(monkeypatch) -> None:
+    module = _publisher()
+    url = "https://updates.example.test/product/"
+
+    def hidden(request, *, timeout):
+        assert timeout == 20
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", hidden)
+    module._public_page_is_hidden(url, timeout=20)
+
+    class VisibleResponse(io.BytesIO):
+        status = 200
+
+        def geturl(self) -> str:
+            return url
+
+    monkeypatch.setattr(
+        module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: VisibleResponse(b"download page"),
+    )
+    try:
+        module._public_page_is_hidden(url, timeout=20)
+    except ValueError as exc:
+        assert "仍可访问" in str(exc)
+    else:
+        raise AssertionError("下载页仍公开时发布必须停止")
 
 
 def test_full_update_entry_runs_complete_build_and_publish_pipeline(
@@ -355,7 +386,7 @@ def test_oss_download_site_stage_does_not_copy_large_package_to_server(
     monkeypatch.setattr(
         module.publisher, "_scp", lambda local, *_args: copied.append(local)
     )
-    monkeypatch.setattr(module, "_public_page", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "_public_page_is_hidden", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(module, "_public_head", lambda *_args, **_kwargs: None)
 
     work = tmp_path / "work"
