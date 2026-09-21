@@ -66,20 +66,29 @@ def test_public_cdn_download_checks_head_size_and_get_sha256(monkeypatch) -> Non
 
 def test_public_download_page_must_return_not_found(monkeypatch) -> None:
     module = _publisher()
-    url = "https://updates.example.test/product/"
+    base_url = "https://updates.example.test/product"
+    checked: list[str] = []
 
     def hidden(request, *, timeout):
         assert timeout == 20
+        checked.append(request.full_url)
         raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
 
     monkeypatch.setattr(module.urllib.request, "urlopen", hidden)
-    module._public_page_is_hidden(url, timeout=20)
+    module._public_download_page_is_hidden(base_url, timeout=20)
+    assert checked == [
+        f"{base_url}/",
+        f"{base_url}/index.html",
+        f"{base_url}/site",
+        f"{base_url}/site/",
+        f"{base_url}/site/index.html",
+    ]
 
     class VisibleResponse(io.BytesIO):
         status = 200
 
         def geturl(self) -> str:
-            return url
+            return f"{base_url}/"
 
     monkeypatch.setattr(
         module.urllib.request,
@@ -87,7 +96,7 @@ def test_public_download_page_must_return_not_found(monkeypatch) -> None:
         lambda *_args, **_kwargs: VisibleResponse(b"download page"),
     )
     try:
-        module._public_page_is_hidden(url, timeout=20)
+        module._public_download_page_is_hidden(base_url, timeout=20)
     except ValueError as exc:
         assert "仍可访问" in str(exc)
     else:
@@ -386,7 +395,9 @@ def test_oss_download_site_stage_does_not_copy_large_package_to_server(
     monkeypatch.setattr(
         module.publisher, "_scp", lambda local, *_args: copied.append(local)
     )
-    monkeypatch.setattr(module, "_public_page_is_hidden", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "_public_download_page_is_hidden", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(module, "_public_head", lambda *_args, **_kwargs: None)
 
     work = tmp_path / "work"

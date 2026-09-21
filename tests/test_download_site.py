@@ -37,11 +37,13 @@ def test_nginx_hides_page_but_exposes_update_metadata_and_archives() -> None:
     )
 
     assert "location = /wechatrebot-updates {" in config
-    assert config.count("return 404;") == 3
+    assert config.count("return 404;") == 5
     assert "return 301 /wechatrebot-updates/;" not in config
     assert "alias /srv/wechatrebot-updates/site/;" not in config
     assert "location = /wechatrebot-updates/index.html {" in config
     assert "alias /srv/wechatrebot-updates/site/index.html;" not in config
+    assert "location = /wechatrebot-updates/site {" in config
+    assert "location ^~ /wechatrebot-updates/site/ {" in config
     assert "location = /wechatrebot-updates/download.json {" in config
     assert "alias /srv/wechatrebot-updates/download.json;" in config
     assert "location ^~ /wechatrebot-updates/downloads/ {" in config

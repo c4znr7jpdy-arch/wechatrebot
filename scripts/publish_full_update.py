@@ -375,19 +375,31 @@ def _verify_public_download(
         raise ValueError(f"CDN 公网下载大小或 SHA-256 不一致：{url}")
 
 
-def _public_page_is_hidden(url: str, *, timeout: int) -> None:
-    request = urllib.request.Request(
-        url,
-        headers={"Cache-Control": "no-cache", "User-Agent": "WeChatReBot-Publisher/1"},
+def _public_download_page_is_hidden(base_url: str, *, timeout: int) -> None:
+    root = f"{base_url.rstrip('/')}/"
+    urls = (
+        root,
+        f"{root}index.html",
+        f"{root}site",
+        f"{root}site/",
+        f"{root}site/index.html",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout):
-            pass
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404 and exc.geturl() == url:
-            return
-        raise ValueError("公网下载页面未正确隐藏") from exc
-    raise ValueError("公网下载页面仍可访问")
+    for url in urls:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Cache-Control": "no-cache",
+                "User-Agent": "WeChatReBot-Publisher/1",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 and exc.geturl() == url:
+                continue
+            raise ValueError(f"公网下载页面未正确隐藏：{url}") from exc
+        raise ValueError(f"公网下载页面仍可访问：{url}")
 
 
 def _stage_download_site(
@@ -524,7 +536,7 @@ def _stage_download_site(
         "nginx -t; systemctl reload nginx; "
         f"rm -f -- {shlex.quote(nginx_backup)}; exit 1; fi",
     )
-    _public_page_is_hidden(f"{base_url.rstrip('/')}/", timeout=timeout)
+    _public_download_page_is_hidden(base_url, timeout=timeout)
     _public_head(package.package_url, expected_size=package.package_size, timeout=timeout)
     if package.payload_path is not None and package.payload_url:
         _public_head(
