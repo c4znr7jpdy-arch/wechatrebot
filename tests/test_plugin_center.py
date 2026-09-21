@@ -674,14 +674,10 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert catalog_item["schedule_provider"] is True
     assert detail["scheduled_action"] == "group_analysis"
     assert detail["schedule_provider"] is True
-    assert catalog_item["field_count"] == 9
+    assert catalog_item["field_count"] == 7
     assert catalog_item["model_field_count"] == 1
     assert catalog_item["simplified"] is True
-    assert list(detail["basic_schema"]) == [
-        "basic",
-        "auto_analysis",
-        "analysis_features",
-    ]
+    assert list(detail["basic_schema"]) == ["basic", "analysis_features"]
     assert list(detail["model_schema"]) == ["llm"]
     assert list(detail["basic_schema"]["basic"]["items"]) == [
         "report_template",
@@ -691,25 +687,10 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert detail["basic_schema"]["basic"]["items"]["report_template"][
         "labels"
     ] == ["手账风（示例样式）", "简洁风"]
-    assert (
-        detail["basic_schema"]["auto_analysis"]["items"]["scheduled_group_list"][
-            "_ui_control"
-        ]
-        == "line-list"
-    )
-    assert (
-        detail["basic_schema"]["auto_analysis"]["items"]["scheduled_group_list"][
-            "_group_selector"
-        ]
-        is True
-    )
+    assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_ui_control"] == "line-list"
+    assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_group_selector"] is True
     assert "/sid" not in detail["setup_steps"][0]
-    assert (
-        detail["basic_schema"]["auto_analysis"]["items"]["auto_analysis_time"][
-            "_ui_control"
-        ]
-        == "time-list"
-    )
+    assert detail["schedule_schema"]["auto_analysis"]["items"]["auto_analysis_time"]["_ui_control"] == "time-list"
     assert "prompts" not in detail["schema"]
     assert "专业参数" in detail["configuration_note"]
     assert len(detail["setup_steps"]) == 3
@@ -804,8 +785,8 @@ def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Pat
         assert items["admin_ids"]["_ui_tint"] is True
         assert items["bot_self_ids"]["_ui_tint"] is True
         assert items["group_list"]["_group_selector"] is True
-    for section, key in (("auto_analysis", "scheduled_group_list"), ("incremental", "incremental_group_list")):
-        assert detail["advanced_schema"][section]["items"][key]["_group_selector"] is True
+    assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_group_selector"] is True
+    assert detail["advanced_schema"]["incremental"]["items"]["incremental_group_list"]["_group_selector"] is True
     detail["advanced_config"]["basic"].update({
         "admin_ids": ["wxid_analysis_admin"], "bot_self_ids": ["wxid_excluded"],
         "group_list_mode": "whitelist", "group_list": ["123456@chatroom"],

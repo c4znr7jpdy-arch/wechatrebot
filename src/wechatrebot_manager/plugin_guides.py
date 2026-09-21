@@ -22,6 +22,7 @@ _GUIDES = {
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
     "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；具体指令见下方列表。安排天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
+    "jiang_commands.setu": ("发送一张随机图片", "在聊天中发送“图来”；需要自动撤回时打开开关并填写等待秒数。", "沿用“常用指令”的聊天使用范围；自动撤回依赖微信返回可撤回的消息标识。", ("setu_recall_enabled", "setu_recall_seconds")),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先填写一个主生图模型即可；确有需要时点击“添加备用模型”再填写第二个。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
@@ -38,6 +39,12 @@ _GUIDES = {
 # Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
 # even when the plugin source contains internal or administrator-only helpers.
 _COMMANDS = {
+    "jiang_commands.setu": (
+        {
+            "title": "随机图片",
+            "items": (("图来", "发送一张随机图片，并按设置决定是否自动撤回"),),
+        },
+    ),
     "jiang_commands": (
         {
             "title": "常用查询",
@@ -77,6 +84,90 @@ _COMMANDS = {
             ),
         },
     ),
+    "jiang_mystool": (
+        {
+            "title": "登录与任务",
+            "items": (
+                ("/米游社帮助", "查看完整命令说明"),
+                ("/登录", "私聊扫码绑定米游社账号"),
+                ("/登录状态", "查看扫码处理进度"),
+                ("/签到", "执行游戏签到"),
+                ("/任务", "执行米游币任务"),
+            ),
+        },
+        {
+            "title": "账户与游戏数据",
+            "items": (
+                ("/地址 [账户ID]", "查看收货地址"),
+                ("/商品 [游戏]", "查看米游社商品"),
+                ("/兑换 +/- 商品ID", "管理兑换计划"),
+                ("/原神便签", "查看原神便签"),
+                ("/星穹铁道便签", "查看星铁便签"),
+            ),
+        },
+        {
+            "title": "账号设置",
+            "items": (
+                ("/设置", "查看米游社设置用法"),
+                ("/账号设置 [账户ID] …", "设置平台、签到和米游币任务"),
+                ("/通知设置 开启/关闭", "开关任务通知"),
+                ("/导出Cookies", "仅私聊导出账号凭据"),
+            ),
+        },
+    ),
+    "jiang_rocom": (
+        {
+            "title": "登录与绑定",
+            "items": (
+                ("/洛克", "查看完整命令说明"),
+                ("/洛克QQ登录", "扫码绑定 QQ 账号"),
+                ("/洛克微信登录", "扫码绑定微信账号"),
+                ("/洛克导入 <ID> <Ticket>", "通过凭证导入账号"),
+                ("/洛克绑定列表", "查看已绑定账号"),
+                ("/洛克切换 <序号>", "切换主账号"),
+                ("/洛克解绑 <序号>", "解绑账号"),
+                ("/洛克刷新", "刷新当前凭证"),
+                ("/洛克刷新所有凭证", "管理员刷新全部凭证"),
+                ("/洛克删除无效绑定", "管理员清理无效绑定"),
+            ),
+        },
+        {
+            "title": "角色与查询",
+            "items": (
+                ("/洛克档案", "查看角色档案"),
+                ("/洛克战绩 [页码]", "查看战绩"),
+                ("/洛克背包 [页码]", "查看精灵收集"),
+                ("/洛克阵容", "查看当前阵容"),
+                ("/查看阵容 <序号>", "查看阵容详情"),
+                ("/洛克交换大厅 [页码]", "查看交换信息"),
+                ("/远行商人", "查看远行商人"),
+                ("/洛克玩家 <UID>", "查询玩家"),
+                ("/洛克家园 [UID]", "查询家园"),
+                ("/洛克商店 [商店ID]", "查询游戏商店"),
+                ("/洛克好友关系 <id1,id2>", "查询好友关系"),
+                ("/洛克学生", "查询学生信息"),
+            ),
+        },
+        {
+            "title": "宠物与百科",
+            "items": (
+                ("/洛克查蛋 [关键词]", "查询宠物蛋"),
+                ("/洛克配种 <精灵A> <精灵B>", "查询配种结果"),
+                ("/洛克wiki [名称]", "查询精灵 Wiki"),
+                ("/洛克技能 [名称]", "查询技能 Wiki"),
+            ),
+        },
+        {
+            "title": "订阅通知",
+            "items": (
+                ("/订阅远行商人", "订阅远行商人通知"),
+                ("/取消订阅远行商人", "取消远行商人通知"),
+                ("/订阅家园菜园 [UID]", "订阅家园菜园通知"),
+                ("/订阅家园灵感 [UID]", "订阅家园灵感通知"),
+                ("/取消订阅家园", "取消家园订阅"),
+            ),
+        },
+    ),
 }
 
 
@@ -98,6 +189,7 @@ _ASSESSMENTS = {
     "astrbot_plugin_self_learning": ("人格与情感基础", "默认隐私模式", "保留好感度、每日情绪和精简上下文；原始消息抓取、自动学习和人格覆盖默认关闭。"),
     "jiang_capability_router": ("底层支持", "无需用户配置", "建议保留并弱化展示；它负责把自然语言请求交给合适功能。"),
     "jiang_commands": ("群聊常用", "已封装，可直接使用", "建议保留。普通用户直接使用常用查询，不再配置内部服务编号和密钥。"),
+    "jiang_commands.setu": ("群聊常用", "可配置撤回", "按需使用；默认 20 秒后撤回，也可以关闭自动撤回。"),
     "jiang_group_notice": ("群管理常用", "收到成员事件即可用", "建议保留，但名称必须说明是成员变动通知，不是群公告发布。"),
     "jiang_image": ("场景选配", "需要生图服务", "群里确有生图需求时保留；Grok 4.6 聊天配置不能自动替代生图模型。"),
     "jiang_mimo_emoji_voice": ("进阶选配", "依赖语音克隆和表情管理", "仅在两个依赖都可用时开启，避免失败链路和额外费用。"),

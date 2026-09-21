@@ -1,0 +1,25 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -20,7 +20,21 @@
+   "random_image_proxy": {
+     "description": "随机图片网络代理",
+     "hint": "可选，例如 http://127.0.0.1:7890。",
+     "type": "string",
+     "default": ""
++  },
++  "setu_recall_enabled": {
++    "description": "发送后自动撤回",
++    "hint": "开启后，图片会在设定秒数后自动撤回；关闭后保留图片。",
++    "type": "bool",
++    "default": true
++  },
++  "setu_recall_seconds": {
++    "description": "撤回等待时间（秒）",
++    "hint": "建议 20 秒，可填写 1–120 秒。",
++    "type": "int",
++    "default": 20,
++    "min": 1,
++    "max": 120
+   }
+ }

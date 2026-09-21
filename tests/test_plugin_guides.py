@@ -14,7 +14,9 @@ from wechatrebot_manager.plugin_center import _customer_config, _customer_schema
 def test_all_delivered_features_have_actionable_guides():
     root = Path(__file__).parents[1]
     features = json.loads((root / "release/feature-set.json").read_text("utf-8"))["features"]
-    assert set(_GUIDES) == {row["module"] for row in features}
+    delivered_modules = {row["module"] for row in features}
+    virtual_features = {"jiang_commands.setu"}
+    assert set(_GUIDES) == delivered_modules | virtual_features
     assert set(_ASSESSMENTS) == set(_GUIDES)
     for row in features:
         guide = get_plugin_guide(row["module"])

@@ -1,0 +1,38 @@
+diff --git a/main.py b/main.py
+index 783f8ac..d22e31a 100644
+--- a/main.py
++++ b/main.py
+@@ -981,9 +981,17 @@ class Main(star.Star):
+                     tmp.write(resp.content)
+                     tmp_path = tmp.name
+ 
+-                sent = await self._send_random_image_with_recall(event, tmp_path, 20)
++                recall_enabled = bool(self.config.get("setu_recall_enabled", True))
++                recall_seconds = max(
++                    1, min(120, int(self.config.get("setu_recall_seconds", 20) or 20))
++                )
++                sent = False
++                if recall_enabled:
++                    sent = await self._send_random_image_with_recall(
++                        event, tmp_path, recall_seconds
++                    )
+                 if not sent:
+-                    logger.info("[图来撤回] direct send failed; fallback to image_result without auto recall")
++                    logger.info("[图来] send through the normal reply path; recall=%s", recall_enabled)
+                     yield event.image_result(tmp_path)
+             elif resp is not None and resp.status_code == 404:
+                 yield event.plain_result("图库空了，等会儿再来~")
+@@ -1000,7 +1008,12 @@ class Main(star.Star):
+         """Send through the OneBot adapter so the WeChat layer can bind a trace before recall."""
+         try:
+             message = [{"type": "image", "data": {"file": image_path}}]
+-            payload = {"message": message, "auto_recall_delay": delay}
++            payload = {
++                "message": message,
++                "auto_recall_delay": delay,
++                "_wechatrebot_delivery": "reply",
++                "_wechatrebot_wake": True,
++            }
+             if event.get_group_id():
+                 payload["group_id"] = event.get_group_id()
+                 result = await event.bot.call_action("send_group_msg", **payload)

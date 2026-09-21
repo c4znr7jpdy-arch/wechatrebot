@@ -53,7 +53,6 @@
     historyLoad: 0,
     messageLoad: 0,
     historyPolling: false,
-    historyAutoDate: "",
     historyHasMore: false,
     historyLoadingOlder: false,
     historyOlderLoad: 0,
@@ -68,6 +67,8 @@
     scheduledChatFilter: null,
     scheduledTargetTab: "group",
     scheduledReturnDraft: false,
+    groupAnalysisSchedule: null,
+    groupAnalysisScheduleSaving: false,
     experience: null,
     maintenance: null,
     responseTraces: [],
@@ -226,26 +227,6 @@
     const month = String(value.getMonth() + 1).padStart(2, "0");
     const day = String(value.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-  }
-
-  function initializeHistoryDates() {
-    const today = localDateInputValue();
-    if (!$("#historyStart").value) $("#historyStart").value = today;
-    if (!$("#historyEnd").value) $("#historyEnd").value = today;
-    state.historyAutoDate = today;
-  }
-
-  function rollHistoryDatesForward() {
-    const today = localDateInputValue();
-    const previous = state.historyAutoDate;
-    if (!previous || previous === today) return false;
-    state.historyAutoDate = today;
-    const start = $("#historyStart");
-    const end = $("#historyEnd");
-    if (start.value !== previous || end.value !== previous) return false;
-    start.value = today;
-    end.value = today;
-    return true;
   }
 
   function setStage(element, mode, label) {
@@ -767,7 +748,7 @@
       const optionNames = Array.isArray(field.labels) ? field.labels : (Array.isArray(field.options_label) ? field.options_label : field.options);
       const current = String(value ?? "");
       const unlisted = !field.options.some((option) => String(option) === current);
-      control = `<select class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(type)}">${unlisted ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current || "未设置")}（当前值）</option>` : ""}${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${current === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
+      control = `<select class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-required="${field._required === true}" data-type="${escapeHtml(type)}">${unlisted ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current || "未设置")}（当前值）</option>` : ""}${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${current === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
     } else if (["list", "template_list"].includes(type)) {
       control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="json" rows="5">${escapeHtml(JSON.stringify(value ?? [], null, 2))}</textarea>`;
     } else if (type === "text" || field.editor_mode || field.editor_language === "json") {
@@ -1087,6 +1068,9 @@
         }
       }
       else value = input.value;
+      if (input.dataset.required === "true" && !String(value ?? "").trim()) {
+        throw new Error(`${input.dataset.label || "此配置"}不能为空，请先选择可用模型。`);
+      }
       if (["int", "float"].includes(input.dataset.type) && value !== null && !Number.isFinite(value)) throw new Error(`${input.dataset.label || "数字配置"}必须填写有效数字。`);
       setAtPath(config, path, value);
       if (["int", "float"].includes(input.dataset.type) && value !== null) {
@@ -1829,7 +1813,6 @@
 
   async function loadConversations(options = {}) {
     const silent = options?.silent === true;
-    rollHistoryDatesForward();
     const load = ++state.historyLoad;
     try {
       const data = await api("get_conversations", {
@@ -2246,23 +2229,86 @@
     const button = $("#refreshSchedules");
     button.disabled = true;
     try {
-      const [context, legacy] = await Promise.allSettled([api("get_scheduled_task_context"), api("get_schedules")]);
+      const [context, legacy, groupAnalysis] = await Promise.allSettled([
+        api("get_scheduled_task_context"),
+        api("get_schedules"),
+        loadGroupAnalysisScheduleDetail(),
+      ]);
       if (generation !== state.scheduledLoad) return;
       if (context.status === "rejected") throw context.reason;
       state.scheduledContext = context.value;
       state.schedules = legacy.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action) : [];
+      state.groupAnalysisSchedule = groupAnalysis.status === "fulfilled" ? groupAnalysis.value : null;
       const message = $("#scheduleContextMessage");
       message.textContent = context.value.message || (!context.value.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
       if (legacy.status === "rejected") message.textContent += " 已有功能任务暂时无法读取，请刷新重试。";
       message.hidden = !message.textContent;
       renderSchedules();
       renderScheduledTasks();
+      renderGroupAnalysisSchedule();
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
     } catch (error) {
       $("#scheduleContextMessage").hidden = false;
       $("#scheduleContextMessage").textContent = error.message || "任务暂时无法读取，请刷新重试。";
       reportError(error);
     } finally { if (generation === state.scheduledLoad) button.disabled = false; }
+  }
+
+  async function loadGroupAnalysisScheduleDetail() {
+    const catalog = state.features.length
+      ? state.features
+      : (await api("get_features")).plugins || [];
+    const feature = catalog.find((item) => item.scheduled_action === "group_analysis");
+    if (!feature) return null;
+    const detail = await api("get_feature", feature.id);
+    return Object.keys(detail.schedule_schema || {}).length ? detail : null;
+  }
+
+  function renderGroupAnalysisSchedule() {
+    const root = $("#groupAnalysisSchedulePanel");
+    const detail = state.groupAnalysisSchedule;
+    if (!root) return;
+    root.hidden = !detail;
+    if (!detail) { root.innerHTML = ""; return; }
+    root.innerHTML = `<div class="group-analysis-schedule-head"><div><span class="eyebrow">群聊分析</span><h2 id="groupAnalysisScheduleTitle">群聊分析自动日报</h2><p>在这里统一选择每天生成报告的群聊和时间；清空群聊列表即可停用自动日报。</p></div><span class="status-badge ${detail.engine_online ? "online" : "checking"}">${detail.engine_online ? "可立即应用" : "启动后应用"}</span></div>
+      <form id="groupAnalysisScheduleForm" class="feature-form" novalidate>${schemaMarkup(detail.schedule_schema, detail.schedule_config, [], "group-schedule-")}</form>
+      <div class="feature-savebar"><span class="form-note" id="groupAnalysisScheduleNote" role="status">${detail.engine_online ? "保存后自动重新载入群聊分析设置。" : "保存到本机，机器人启动后加载。"}</span><button class="button primary" id="saveGroupAnalysisSchedule" type="button">保存自动日报</button></div>`;
+    const form = $("#groupAnalysisScheduleForm");
+    $$(".group-field-button", form).forEach((button) => button.addEventListener("click", () => addGroupToField(button.dataset.target)));
+    $$("textarea", form).forEach(growTextarea);
+    $("#saveGroupAnalysisSchedule").addEventListener("click", saveGroupAnalysisSchedule);
+  }
+
+  async function saveGroupAnalysisSchedule() {
+    if (state.groupAnalysisScheduleSaving || !state.groupAnalysisSchedule) return;
+    const detail = state.groupAnalysisSchedule;
+    const form = $("#groupAnalysisScheduleForm");
+    const button = $("#saveGroupAnalysisSchedule");
+    try {
+      const config = configFromForm(form, detail.schedule_config || {});
+      config.auto_analysis ||= {};
+      config.auto_analysis.scheduled_group_list_mode = "whitelist";
+      state.groupAnalysisScheduleSaving = true;
+      state.featureSaving = true;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      $("#groupAnalysisScheduleNote").textContent = "正在保存并确认生效，请稍候…";
+      const result = await api("save_feature", detail.id, config, detail.revision || "");
+      toast(result.message || "自动日报设置已保存。");
+      await loadSchedules();
+    } catch (error) {
+      reportError(error);
+      const note = $("#groupAnalysisScheduleNote");
+      if (note) note.textContent = error.message || "自动日报设置保存失败。";
+      if (error.input) {
+        error.input.setAttribute("aria-invalid", "true");
+        error.input.focus();
+      }
+    } finally {
+      state.groupAnalysisScheduleSaving = false;
+      state.featureSaving = false;
+      if (button?.isConnected) { button.disabled = false; button.removeAttribute("aria-busy"); }
+    }
   }
 
   const SCHEDULED_ACTIONS = {weather: "天气预报", news: "热点资讯", oilprice: "油价提醒", kfc: "星期四文案", short_drama: "影视推荐", text: "文字提醒"};
@@ -2628,13 +2674,11 @@
     if (state.featureDirty) { discardFeatureChanges(openScheduledFromFeature); return; }
     const action = state.featureDetail?.scheduled_action || "weather";
     if (action === "group_analysis") {
-      state.featureTab = "basic";
-      renderFeatureDetail();
-      const section = $("#featureForm .config-section[data-config-section='auto_analysis']");
-      section?.scrollIntoView({behavior: "smooth", block: "start"});
-      const target = section?.querySelector("textarea, input, select");
-      target?.focus({preventScroll: true});
-      toast("已定位到自动日报设置；选择群聊和时间后保存即可。 ");
+      await navigate("schedules");
+      const panel = $("#groupAnalysisSchedulePanel");
+      panel?.scrollIntoView({behavior: "smooth", block: "start"});
+      panel?.querySelector("textarea, input, select")?.focus({preventScroll: true});
+      toast("已打开群聊分析自动日报设置。 ");
       return;
     }
     await navigate("schedules");
@@ -3626,6 +3670,13 @@
   }
 
   function bindEvents() {
+    // Keep the browser-native calendar/clock as the single source of truth,
+    // while making the whole field open it on a direct click.
+    document.addEventListener("click", (event) => {
+      const input = event.target.closest?.("input[type=date], input[type=time]");
+      if (!input || input.disabled || typeof input.showPicker !== "function") return;
+      try { input.showPicker(); } catch (_error) { /* browser may already have opened it */ }
+    });
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
     $("#primaryAction").addEventListener("click", runPrimaryAction);
@@ -3801,7 +3852,6 @@
 
   async function initialize() {
     bindEvents();
-    initializeHistoryDates();
     setSettingsSection("model");
     try {
       state.bootstrap = await api("bootstrap");

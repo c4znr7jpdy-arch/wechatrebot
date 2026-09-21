@@ -1012,9 +1012,10 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
-    assert "function initializeHistoryDates()" in script
-    assert '$("#historyStart").value = today' in script
-    assert '$("#historyEnd").value = today' in script
+    assert "function initializeHistoryDates()" not in script
+    assert '$("#historyStart").value = today' not in script
+    assert '$("#historyEnd").value = today' not in script
+    assert "input.showPicker()" in script
     assert 'class="group-inspector panel empty"' in markup
     assert 'class="group-inspector-empty"' in markup
     assert 'avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)' in script
@@ -1051,16 +1052,14 @@ def test_history_message_avatars_select_sender_in_inspector() -> None:
     assert ".message-avatar-button.selected" in styles
 
 
-def test_history_default_date_rolls_forward_across_midnight() -> None:
+def test_history_date_filters_remain_user_selected() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
     ).read_text(encoding="utf-8")
 
-    assert 'historyAutoDate: ""' in script
-    assert "function rollHistoryDatesForward()" in script
-    assert "if (!previous || previous === today) return false;" in script
-    assert "if (start.value !== previous || end.value !== previous) return false;" in script
-    assert "rollHistoryDatesForward();\n    const load = ++state.historyLoad;" in script
+    assert "historyAutoDate" not in script
+    assert "rollHistoryDatesForward" not in script
+    assert 'start: $("#historyStart").value' in script
 
 
 def test_history_messages_load_in_invisible_twenty_item_pages(tmp_path: Path) -> None:
@@ -1359,7 +1358,7 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert '配置自动日报' in script
     assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
     assert 'if (action === "group_analysis")' in script
-    assert '已定位到自动日报设置' in script
+    assert '已打开群聊分析自动日报设置' in script
     assert 'feature-command-list' in script
     assert 'guide.commands' in script
     assert '_ui_control: "line-list"' in script
