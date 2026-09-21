@@ -25,6 +25,8 @@ from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
 from .plugin_guides import advanced_schema, common_schema, get_plugin_guide
 from .provider import (
+    DEFAULT_PROVIDER_MODEL,
+    DEFAULT_PROVIDER_SOURCE_ID,
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     provider_display_name,
@@ -625,6 +627,12 @@ def _model_field_kind(key: str, field: dict[str, Any]) -> str | None:
         or "embedding" in normalized
     ):
         return "embedding"
+    if (
+        provider_type in {"image", "image_generation"}
+        or "image_provider" in normalized
+        or "image_model" in normalized
+    ):
+        return "image"
     if provider_type == "rerank" or "rerank" in normalized:
         return "rerank"
     if special == "select_provider" or normalized.endswith(
@@ -754,6 +762,18 @@ def _white_label_schema(value: Any) -> Any:
         result = result.replace("QQ群", "微信群").replace("QQ号", "微信账号")
         result = re.sub(r"(?i)qq", "微信", result)
         return re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", result).strip()
+    return value
+
+
+def _clear_factory_provider_values(value: Any) -> Any:
+    """Do not expose AstrBot's factory-only model as a selectable value."""
+    factory_id = f"{DEFAULT_PROVIDER_SOURCE_ID}/{DEFAULT_PROVIDER_MODEL}"
+    if isinstance(value, dict):
+        return {key: _clear_factory_provider_values(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_clear_factory_provider_values(child) for child in value]
+    if value == factory_id:
+        return ""
     return value
 
 
@@ -990,6 +1010,7 @@ def _with_runtime_choices(
     providers: list[dict[str, str]],
     embedding_providers: list[dict[str, str]],
     rerank_providers: list[dict[str, str]],
+    image_providers: list[dict[str, str]],
     personas: list[str],
 ) -> dict[str, Any]:
     result = copy.deepcopy(schema)
@@ -1002,6 +1023,7 @@ def _with_runtime_choices(
                 providers=providers,
                 embedding_providers=embedding_providers,
                 rerank_providers=rerank_providers,
+                image_providers=image_providers,
                 personas=personas,
             )
             continue
@@ -1013,11 +1035,110 @@ def _with_runtime_choices(
             choices = embedding_providers
         elif kind == "rerank":
             choices = rerank_providers
+        elif kind == "image":
+            choices = image_providers
         elif kind == "persona":
             choices = [{"value": value, "label": value} for value in personas]
         if kind:
             field["options"] = [""] + [item["value"] for item in choices]
             field["labels"] = ["使用系统默认"] + [item["label"] for item in choices]
+    return result
+
+
+def _configured_provider_service_kind(provider: dict[str, Any]) -> str:
+    """Classify provider purpose without mistaking vision input for generation."""
+    declared = str(provider.get("service_kind") or "").strip().casefold()
+    if declared in {"chat", "embedding", "image", "rerank"}:
+        return declared
+    legacy_type = " ".join(
+        str(provider.get(key) or "")
+        for key in ("type", "provider_type", "provider")
+    ).casefold()
+    if "embedding" in legacy_type:
+        return "embedding"
+    if "rerank" in legacy_type:
+        return "rerank"
+    if "image_generation" in legacy_type or "openai_image" in legacy_type:
+        return "image"
+    modalities = {
+        str(value).strip().casefold()
+        for value in provider.get("modalities", [])
+        if str(value).strip()
+    } if isinstance(provider.get("modalities"), list) else set()
+    if modalities == {"image"}:
+        return "image"
+    return "chat"
+
+
+def _image_provider_bindings(
+    sources: list[dict[str, Any]], providers: list[dict[str, Any]],
+) -> dict[str, dict[str, str]]:
+    """Return the private connection details behind image-provider choices."""
+    sources_by_id = {
+        str(source.get("id") or ""): source
+        for source in sources
+        if isinstance(source, dict) and str(source.get("id") or "").strip()
+    }
+    bindings: dict[str, dict[str, str]] = {}
+    for provider in providers:
+        if not isinstance(provider, dict) or provider.get("enable") is False:
+            continue
+        provider_id = str(provider.get("id") or "").strip()
+        model = str(provider.get("model") or "").strip()
+        source_id = str(provider.get("provider_source_id") or "").strip()
+        source = sources_by_id.get(source_id)
+        if not provider_id or not model or not isinstance(source, dict):
+            continue
+        if _configured_provider_service_kind(provider) != "image":
+            continue
+        keys = source.get("key")
+        api_key = str(keys[0]) if isinstance(keys, list) and keys else ""
+        bindings[provider_id] = {
+            "provider_id": provider_id,
+            "api_base": str(source.get("api_base") or "").strip().rstrip("/"),
+            "model": model,
+            "api_key": api_key,
+        }
+    return bindings
+
+
+def _resolve_image_provider_config(
+    config: dict[str, Any], bindings: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    """Translate selected provider IDs into the image plugin's flat config."""
+    result = copy.deepcopy(config)
+    for prefix in ("primary", "secondary"):
+        model_key = f"{prefix}_model"
+        binding = bindings.get(str(result.get(model_key) or "").strip())
+        if not binding:
+            continue
+        result[model_key] = binding["model"]
+        result[f"{prefix}_base_url"] = binding["api_base"]
+        if binding["api_key"]:
+            result[f"{prefix}_api_key"] = binding["api_key"]
+    return result
+
+
+def _expose_image_provider_config(
+    config: dict[str, Any], bindings: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    """Show the provider ID in the manager while retaining plugin config on disk."""
+    result = copy.deepcopy(config)
+    for prefix in ("primary", "secondary"):
+        model_key = f"{prefix}_model"
+        model = str(result.get(model_key) or "").strip()
+        api_base = str(result.get(f"{prefix}_base_url") or "").strip().rstrip("/")
+        match = next(
+            (
+                provider_id
+                for provider_id, binding in bindings.items()
+                if binding["model"] == model
+                and binding["api_base"].rstrip("/") == api_base
+            ),
+            None,
+        )
+        if match:
+            result[model_key] = match
     return result
 
 
@@ -1373,6 +1494,7 @@ class EngineApiClient:
                 "provider",
                 "type",
                 "provider_type",
+                "service_kind",
             ):
                 current_model.pop(inherited_field, None)
             model_payload = {**model_payload, **current_model}
@@ -1381,6 +1503,7 @@ class EngineApiClient:
                     "id": normalized.model_id,
                     "provider_source_id": normalized.source_id,
                     "model": normalized.model,
+                    "service_kind": normalized.service_kind,
                     "enable": True,
                 }
             )
@@ -1420,6 +1543,7 @@ class EngineApiClient:
             or str(source.get("api_base") or "").rstrip("/") != normalized.api_base
             or not isinstance(provider, dict)
             or str(provider.get("model") or "") != normalized.model
+            or str(provider.get("service_kind") or "chat") != normalized.service_kind
             or (
                 normalized.thinking_enabled is not None
                 and not thinking_mode_matches(
@@ -1729,14 +1853,16 @@ class PluginCenterService:
         providers: list[dict[str, str]] = []
         embedding_providers: list[dict[str, str]] = []
         rerank_providers: list[dict[str, str]] = []
+        image_providers: list[dict[str, str]] = []
         configured_providers = engine_config.get("provider", [])
         configured_sources = engine_config.get("provider_sources", [])
         if not isinstance(configured_providers, list):
             configured_providers = []
+        source_records = configured_sources if isinstance(configured_sources, list) else []
         source_ids = {
             str(source.get("id") or "")
             for source in (
-                configured_sources if isinstance(configured_sources, list) else []
+                source_records
             )
             if isinstance(source, dict)
         }
@@ -1748,24 +1874,33 @@ class PluginCenterService:
                 continue
             model_name = str(provider.get("model") or "").strip()
             source_id = str(provider.get("provider_source_id") or "").strip()
+            # The factory Grok entry is supplied by AstrBot itself. It is not a
+            # customer-added service and must not appear in model pickers.
+            if source_id == DEFAULT_PROVIDER_SOURCE_ID and model_name.casefold() == DEFAULT_PROVIDER_MODEL.casefold():
+                continue
             label = provider_display_name(
                 source_id if source_id in source_ids else "",
                 model_name or provider_id,
             )
-            choice = {"value": provider_id, "label": str(_white_label_schema(label))}
-            provider_kind = " ".join(
-                (
-                    str(provider.get("type") or ""),
-                    provider_id,
-                    model_name,
-                )
-            ).casefold()
-            if "embedding" in provider_kind:
+            provider_modalities = provider.get("modalities")
+            modality_label = ""
+            if isinstance(provider_modalities, list):
+                normalized_modalities = {str(value).casefold() for value in provider_modalities}
+                if "image" in normalized_modalities and "audio" in normalized_modalities:
+                    modality_label = " · 多模态"
+                elif "image" in normalized_modalities:
+                    modality_label = " · 支持图片"
+            choice = {"value": provider_id, "label": str(_white_label_schema(label + modality_label))}
+            provider_kind = _configured_provider_service_kind(provider)
+            if provider_kind == "embedding":
                 embedding_providers.append(choice)
-            elif "rerank" in provider_kind:
+            elif provider_kind == "image":
+                image_providers.append({**choice, "label": f"{choice['label']} · 图片模型"})
+            elif provider_kind == "rerank":
                 rerank_providers.append(choice)
             else:
                 providers.append(choice)
+        image_bindings = _image_provider_bindings(source_records, configured_providers)
         configured_personas = engine_config.get("persona", [])
         if not isinstance(configured_personas, list):
             configured_personas = []
@@ -1779,14 +1914,32 @@ class PluginCenterService:
             providers=providers,
             embedding_providers=embedding_providers,
             rerank_providers=rerank_providers,
+            image_providers=image_providers,
             personas=personas,
         )
         runtime_schema = _hide_customer_internal_schema(module_name, runtime_schema)
+        if module_name == "jiang_image":
+            for model_key in ("primary_model", "secondary_model"):
+                field = runtime_schema.get(model_key)
+                if isinstance(field, dict):
+                    field["_provider_type"] = "image"
+            runtime_schema = _with_runtime_choices(
+                runtime_schema,
+                providers=providers,
+                embedding_providers=embedding_providers,
+                rerank_providers=rerank_providers,
+                image_providers=image_providers,
+                personas=personas,
+            )
         if module_name == _GROUP_ANALYSIS_MODULE:
             runtime_schema = _group_analysis_ui_schema(runtime_schema)
         customer_schema, profile = _project_customer_schema(module_name, runtime_schema)
         clean_schema = _customer_schema(customer_schema, config)
-        customer_config = _customer_config(customer_schema, config)
+        customer_config = _clear_factory_provider_values(
+            _customer_config(customer_schema, config)
+        )
+        if module_name == "jiang_image":
+            customer_config = _expose_image_provider_config(customer_config, image_bindings)
         guide = get_plugin_guide(module_name)
         clean_basic_schema, clean_model_schema = _split_schema(clean_schema)
         return {
@@ -1806,8 +1959,17 @@ class PluginCenterService:
             "advanced_schema": _customer_schema(
                 advanced_schema(module_name, runtime_schema), config
             ),
-            "advanced_config": _customer_config(
-                advanced_schema(module_name, runtime_schema), config
+            "advanced_config": (
+                _expose_image_provider_config(
+                    _clear_factory_provider_values(
+                        _customer_config(advanced_schema(module_name, runtime_schema), config)
+                    ),
+                    image_bindings,
+                )
+                if module_name == "jiang_image"
+                else _clear_factory_provider_values(
+                    _customer_config(advanced_schema(module_name, runtime_schema), config)
+                )
             ),
             "schema": clean_schema,
             "basic_schema": clean_basic_schema,
@@ -1817,6 +1979,7 @@ class PluginCenterService:
             "providers": providers,
             "embedding_providers": embedding_providers,
             "rerank_providers": rerank_providers,
+            "image_providers": image_providers,
             "personas": personas,
             "engine_online": engine_online,
             "scheduled_action": _scheduled_action(module_name),
@@ -1840,6 +2003,15 @@ class PluginCenterService:
             _plugin_root(self.install_root) / module_name / "_conf_schema.json"
         )
         merged = _merge_customer_config(schema, config, stored)
+        if module_name == "jiang_image":
+            engine_config = _read_object(_dashboard_path(self.install_root))
+            configured_sources = engine_config.get("provider_sources", [])
+            configured_providers = engine_config.get("provider", [])
+            image_bindings = _image_provider_bindings(
+                configured_sources if isinstance(configured_sources, list) else [],
+                configured_providers if isinstance(configured_providers, list) else [],
+            )
+            merged = _resolve_image_provider_config(merged, image_bindings)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)
         if module_name == "jiang_image" and "local_proxy_port" in schema:

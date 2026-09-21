@@ -68,6 +68,11 @@ def test_web_search_settings_round_trip_and_key_redaction(tmp_path: Path) -> Non
     assert initial["enabled"] is False
     assert initial["provider"] == "tavily"
     assert initial["providers"]["bocha"]["configured"] is False
+    assert all(
+        item["website_url"].startswith("https://")
+        for item in initial["providers"].values()
+    )
+    assert "1,000 API credits" in initial["providers"]["tavily"]["description"]
 
     saved = save_web_search_settings(
         install,

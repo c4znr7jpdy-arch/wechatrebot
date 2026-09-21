@@ -108,6 +108,8 @@
   const coreSettings = window.createRobotCoreSettings({
     read: () => api("get_robot_core"),
     request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
+    getGroups: (refresh = false) => api("get_groups", refresh),
+    getContacts: (refresh = false) => api("get_contacts", refresh),
     save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
     applyBrand: (brand) => {
       state.bootstrap.brand = brand;
@@ -849,6 +851,8 @@
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
+    $("#featureDetail").dataset.featureId = detail.id || "";
+    $("#featureDetail").dataset.featureName = detail.display_name || "";
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
@@ -2863,7 +2867,15 @@
     $("#providerNote").textContent = "正在更新统一模型配置…";
     try {
       const values = Object.fromEntries(new FormData(form));
-      values.thinking_enabled = form.elements.thinking_enabled.checked;
+      if (values.service_kind === "chat") {
+        values.thinking_enabled = form.elements.thinking_enabled.checked;
+      } else {
+        delete values.thinking_enabled;
+      }
+      const preset = (state.bootstrap?.provider_presets || []).find(
+        (item) => item.id === form.elements.preset.value,
+      );
+      if (Array.isArray(preset?.modalities)) values.modalities = preset.modalities.join(",");
       const data = await api("save_provider", values);
       state.bootstrap.providers = await api("get_providers");
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
@@ -2884,16 +2896,27 @@
   }
 
   function providerPresetFor(service) {
-    if (!service) return "free_grok";
-    if (service.is_recommended) return "free_grok";
-    if (String(service.model || "").toLowerCase().startsWith("deepseek")) return "deepseek";
+    if (!service) return "deepseek";
+    if (service.service_kind === "embedding") return "embedding_custom";
+    if (service.service_kind === "image") return "image_custom";
+    const model = String(service.model || "").toLowerCase();
+    if (model.startsWith("deepseek")) return "deepseek";
+    if (model.startsWith("glm-")) return "glm";
+    if (model.startsWith("mimo-")) return "xiaomi_mimo";
+    if (model.startsWith("qwen")) return "qwen";
+    if (model.startsWith("doubao-")) return "volcengine";
+    if (model.startsWith("hunyuan-")) return "hunyuan";
+    if (model.startsWith("gemini-")) return "gemini_proxy";
     return "custom";
   }
 
   function providerCardIdentity(service) {
     const preset = providerPresetFor(service);
-    if (preset === "free_grok") return {mark: "X", label: "xAI · Grok", className: "grok"};
+    if (service.service_kind === "embedding") return {mark: "V", label: "文本向量", className: "custom"};
+    if (service.service_kind === "image") return {mark: "IMG", label: "图片模型", className: "custom"};
     if (preset === "deepseek") return {mark: "D", label: "DeepSeek", className: "deepseek"};
+    if (preset === "glm") return {mark: "G", label: "GLM", className: "custom"};
+    if (preset === "xiaomi_mimo") return {mark: "M", label: "MiMo", className: "custom"};
     return {mark: "AI", label: "兼容服务", className: "custom"};
   }
 
@@ -2918,14 +2941,14 @@
         || (on("bigmodel.cn", "z.ai") && glm)
         || (on("siliconflow.cn", "siliconflow.com") && (qwen || deepseek || glm || /^hunyuan-a13b/.test(leaf)))
         || (on("moonshot.cn", "moonshot.ai") && kimi)
-        || (on("openrouter.ai") && (qwen || deepseek || glm || kimi || openai || /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(leaf) || claude))
+        || (on("openrouter.ai") && (qwen || deepseek || glm || kimi || openai || /^gemini-(?:2\.5|3\.8)-flash(?:-lite)?/.test(leaf) || claude))
         || (on("together.xyz", "together.ai") && /^(qwen3\.5|qwen-3\.5|deepseek-v4)/.test(leaf))
         || (on("fireworks.ai") && (qwen || deepseek || glm))
         || (on("groq.com") && /^(qwen3\.6-27b|qwen3\.8-27b)/.test(leaf))
         || (on("cerebras.ai") && leaf === "zai-glm-4.7")
         || (ollama && !leaf.includes("gpt-oss") && /^(qwen3|qwen-3|deepseek-v3\.1|deepseek-r1|glm-4\.7)/.test(leaf))
         || (on("x.ai", "xiuxianjyj.xin") && /^(grok-4\.5|grok-4\.6)/.test(leaf))
-        || (on("googleapis.com") && /^(gemini-2\.5-flash|gemini-2\.5-flash-lite)/.test(leaf))
+        || (on("googleapis.com") && /^gemini-(?:2\.5|3\.8)-flash(?:-lite)?/.test(leaf))
         || (on("openai.com", "openai.azure.com", "services.ai.azure.com", "models.inference.ai.azure.com") && openai);
     } catch (_) { return false; }
   }
@@ -2945,13 +2968,49 @@
     if (!preset) return;
     form.elements.api_base.value = preset.api_base || "";
     form.elements.model.value = preset.model || "";
+    form.elements.service_kind.value = preset.service_kind || "chat";
+    form.elements.service_kind.disabled = false;
+    $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
-    $("#providerPresetHint").textContent = preset.description || "填写模型服务信息";
+    const modalityHint = preset.service_kind === "embedding" ? "向量模型" : preset.service_kind === "image" ? "图片模型" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态模型" : "文本模型";
+    $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · ${modalityHint}`;
     syncProviderThinkingControl();
+    renderProviderSaveIntent(
+      providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
+      preset.service_kind || "chat",
+    );
   }
 
-  function renderProviderSaveIntent(makeDefault) {
+  function isFactoryProvider(service) {
+    return Boolean(
+      service?.is_recommended
+      && String(service.model || "").toLowerCase() === "grok-4.6"
+    );
+  }
+
+  function visibleProviderServices() {
+    return (state.bootstrap?.providers || []).filter((item) => !isFactoryProvider(item));
+  }
+
+  function providerWillBeDefault(serviceKind, providerId = "") {
+    if (serviceKind !== "chat") return false;
+    const services = visibleProviderServices();
+    const selected = services.find((item) => item.id === providerId);
+    return !services.some((item) => (item.service_kind || "chat") === "chat")
+      || Boolean(selected?.is_default);
+  }
+
+  function renderProviderSaveIntent(makeDefault, serviceKind = "chat") {
+    if (serviceKind !== "chat") {
+      const label = serviceKind === "image" ? "图片模型" : "向量模型";
+      $("#providerSaveIntentTitle").textContent = `保存为${label}`;
+      $("#providerSaveIntentDetail").textContent = serviceKind === "image"
+        ? "不会更改聊天回复模型；保存后可在图片生成功能中选择。"
+        : "不会更改聊天回复模型；保存后可在需要向量检索的功能中选择。";
+      $("#saveProvider").textContent = `保存${label}`;
+      return;
+    }
     $("#providerSaveIntentTitle").textContent = makeDefault ? "保存后直接设为回复模型" : "保存为备用模型服务";
     $("#providerSaveIntentDetail").textContent = makeDefault
       ? "首个模型服务会自动用于机器人回复。"
@@ -2959,7 +3018,7 @@
     $("#saveProvider").textContent = makeDefault ? "保存并设为回复模型" : "保存模型服务";
   }
 
-  function beginNewProvider(presetId = "free_grok") {
+  function beginNewProvider(presetId = "deepseek") {
     const form = $("#providerForm");
     form.reset();
     form.elements.provider_id.value = "";
@@ -2972,7 +3031,10 @@
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
     $("#providerNote").textContent = "";
-    renderProviderSaveIntent(!(state.bootstrap?.providers || []).length);
+    renderProviderSaveIntent(
+      providerWillBeDefault(form.elements.service_kind.value, ""),
+      form.elements.service_kind.value,
+    );
     markProviderClean("尚未保存");
     showProviderEditor();
   }
@@ -2983,6 +3045,8 @@
     const form = $("#providerForm");
     form.elements.provider_id.value = service.id;
     form.elements.preset.value = providerPresetFor(service);
+    form.elements.service_kind.value = service.service_kind || "chat";
+    $("#providerThinkingRow").hidden = (service.service_kind || "chat") !== "chat";
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
@@ -2991,24 +3055,28 @@
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
     $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
-    $("#providerEditorSubtitle").textContent = service.is_default ? "当前回复模型" : "已配置，可切换为回复模型";
-    $("#providerPresetHint").textContent = service.is_recommended ? "面向普通用户的默认回复服务" : "此服务仅保存在当前设备";
+    $("#providerEditorSubtitle").textContent = service.is_default
+      ? "当前回复模型"
+      : service.service_kind === "chat"
+        ? "已配置，可切换为回复模型"
+        : "已配置，供相关功能选择";
+    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : "此服务仅保存在当前设备";
     $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置服务密钥";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
     $("#providerNote").textContent = "";
-    renderProviderSaveIntent(Boolean(service.is_default));
+    renderProviderSaveIntent(Boolean(service.is_default), service.service_kind || "chat");
     markProviderClean("已保存");
     showProviderEditor();
   }
 
   function renderProviderServices() {
-    const items = state.bootstrap?.providers || [];
+    const items = visibleProviderServices();
     const displayItems = [...items].sort((left, right) => Number(right.is_default) - Number(left.is_default));
     const status = $("#providerStatus");
     const defaultProvider = items.find((item) => item.is_default);
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
-    status.textContent = defaultProvider ? `${items.length} 项服务` : "0 项服务";
+    status.textContent = `${items.length} 项服务`;
     $("#providerServiceList").innerHTML = items.length ? `
       <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，服务密钥仅保存在当前设备。</span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
@@ -3028,7 +3096,7 @@
                 <summary aria-label="打开 ${escapeHtml(item.name)} 操作菜单" title="更多操作">${icon("i-more")}</summary>
                 <div class="provider-card-menu-popover" role="menu">
                   <button type="button" role="menuitem" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑服务</button>
-                  ${item.is_default ? "" : `<button type="button" role="menuitem" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
+                  ${item.is_default || item.service_kind !== "chat" ? "" : `<button type="button" role="menuitem" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
                   <button class="danger" type="button" role="menuitem" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除服务</button>
                 </div>
               </details>
@@ -3036,18 +3104,18 @@
           </header>
           <div class="provider-service-body">
             <div class="provider-card-tags">
-              ${item.is_recommended ? '<span>免费</span>' : '<span>自定义</span>'}
+              <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : "文本"))}</span>
               <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
-            <div class="provider-thinking-control">
+            ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
               <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_enabled ? "已开启 · 模型支持时生效" : "已关闭 · 模型支持时生效"}</small></span>
               <button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>
-            </div>
+            </div>` : `<div class="provider-thinking-control"><span><strong>${item.service_kind === "image" ? "图片能力" : "向量能力"}</strong><small>${item.service_kind === "image" ? "供功能中心图片生成选择" : "供长期记忆等检索功能选择"}</small></span></div>`}
           </div>
           <footer class="provider-service-actions">
             <button class="provider-card-action" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
-            ${item.is_default ? '<span class="provider-card-current">正在用于回复</span>' : `<button class="provider-card-action primary" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">切换使用</button>`}
+            ${item.is_default ? '<span class="provider-card-current">正在用于回复</span>' : item.service_kind === "chat" ? `<button class="provider-card-action primary" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">切换使用</button>` : `<span class="provider-card-current">供相关功能选择</span>`}
             <button class="provider-card-action danger" type="button" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除</button>
           </footer>
         </article>`;
@@ -3062,7 +3130,7 @@
         <div class="provider-empty-visual" aria-hidden="true"><span></span><i></i><span></span></div>
         <span class="eyebrow">从这里开始</span>
         <h3>还没有模型服务</h3>
-        <p>新建一个服务后，机器人才能生成回复。第一次使用建议选择免费 Grok 4.6。</p>
+        <p>新建聊天、向量或图片模型后，可在对应功能设置中直接选择。</p>
         <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
         <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
       </div>`;
@@ -3236,7 +3304,8 @@
   function deleteProvider(providerId) {
     const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
     if (!service) return;
-    const alternatives = (state.bootstrap?.providers || []).filter((item) => item.id !== providerId && item.configured);
+    const replacementKind = service.is_default ? "chat" : (service.service_kind || "chat");
+    const alternatives = (state.bootstrap?.providers || []).filter((item) => item.id !== providerId && item.configured && (item.service_kind || "chat") === replacementKind);
     const references = Array.isArray(service.references) ? service.references : [];
     const needsReplacement = service.is_default || references.length > 0;
     if (needsReplacement && !alternatives.length) {
@@ -3366,7 +3435,8 @@
     $("#webSearchKeyHint").textContent = item.configured
       ? `当前服务商已保存 ${item.key_count || 1} 个密钥；输入新密钥会替换当前服务商密钥。`
       : "当前服务商尚未配置密钥；密钥仅保存在本机。";
-    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${escapeHtml(item.description || "请先选择一个搜索服务商。")}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
+    const website = safeImageUrl(item.website_url) || (String(item.website_url || "").startsWith("https://") ? item.website_url : "");
+    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${escapeHtml(item.description || "请先选择一个搜索服务商。")}${website ? ` <a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">注册 / 获取密钥</a>` : ""}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
   }
 
   async function loadWebSearchSettings() {
@@ -3521,6 +3591,13 @@
   function fillSettings(data) {
     applyBrand(data.brand);
     fillExperience(data.experience);
+    const presetSelect = $("#providerPreset");
+    if (presetSelect && Array.isArray(data.provider_presets)) {
+      presetSelect.innerHTML = data.provider_presets.map((preset) => {
+        const kind = preset.service_kind === "embedding" ? "向量" : preset.service_kind === "image" ? "图片" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态" : "文本";
+        return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)} · ${kind}</option>`;
+      }).join("");
+    }
     renderProviderServices();
     showProviderOverview();
     $("#versionText").textContent = `v${data.version}`;
@@ -3732,6 +3809,22 @@
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
+    $("#providerServiceKind").addEventListener("change", (event) => {
+      const preset = $("#providerPreset").value;
+      const kind = event.currentTarget.value;
+      if (kind === "chat" && ["embedding_custom", "image_custom"].includes(preset)) {
+        $("#providerPreset").value = "custom";
+        applyProviderPreset("custom");
+        updateProviderDirty();
+        return;
+      }
+      if (kind !== "chat") {
+        const matching = kind === "embedding" ? "embedding_custom" : "image_custom";
+        $("#providerPreset").value = matching;
+        applyProviderPreset(matching);
+      }
+      updateProviderDirty();
+    });
     $("#closeProviderEditor").addEventListener("click", requestProviderOverview);
     $("#cancelProviderEdit").addEventListener("click", requestProviderOverview);
     $("#testProvider").addEventListener("click", testSelectedProvider);
@@ -3747,7 +3840,7 @@
     });
     $("#providerServiceList").addEventListener("click", (event) => {
       const create = event.target.closest("[data-provider-create]");
-      if (create) { beginNewProvider("free_grok"); return; }
+      if (create) { beginNewProvider("deepseek"); return; }
       const edit = event.target.closest("[data-provider-edit]");
       if (edit) { editProvider(edit.dataset.providerEdit); return; }
       const makeDefault = event.target.closest("[data-provider-default]");
@@ -3873,7 +3966,7 @@
       previewFeature("feature-rocom", "洛克王国助手", "none", "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"),
       previewFeature("feature-schedule", "定时任务", "page-and-global-schedule-center", "集中管理新闻、天气、内容推送和多站点签到计划。", {page: "schedule-center", scheduledAction: "weather"}),
       previewFeature("feature-drama", "短剧", "none", "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。", {scheduledAction: "short_drama", scheduleProvider: true}),
-      previewFeature("feature-video", "视频理解", "schema", "从微信短视频提取关键帧和音轨，并由 Grok 4.6 生成时间线摘要。", {modelFieldCount: 3}),
+      previewFeature("feature-video", "视频理解", "schema", "从微信短视频提取关键帧和音轨，并由已配置的视觉模型生成时间线摘要。", {modelFieldCount: 3}),
       previewFeature("feature-meme", "表情管理", "schema-and-page", "管理多套表情包、会话绑定、资源目录和同步设置。", {page: "meme-management"}),
     ];
     const groupAnalysisBasicSchema = {
@@ -3898,13 +3991,13 @@
       }},
     };
     const groupAnalysisModelSchema = {llm: {description: "分析模型", type: "object", items: {
-      llm_provider_id: {description: "用于分析的模型", type: "string", options: ["", "jyjapi/grok-4.6"], labels: ["使用系统默认", "免费 Grok 4.6"], hint: "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。"},
+      llm_provider_id: {description: "用于分析的模型", type: "string", options: [""], labels: ["使用系统默认"], hint: "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。"},
     }}};
     const groupAnalysisConfig = {
       basic: {admin_ids: [], group_list_mode: "none", group_list: [], bot_self_ids: [], report_template: "scrapbook", analysis_days: 1, min_messages_threshold: 200},
       auto_analysis: {scheduled_group_list: ["18310516375@chatroom"], auto_analysis_time: ["23:00"]},
       analysis_features: {topic_analysis_enabled: true, user_title_analysis_enabled: true, golden_quote_analysis_enabled: true, chat_quality_analysis_enabled: true},
-      llm: {llm_provider_id: "jyjapi/grok-4.6"},
+      llm: {llm_provider_id: ""},
       performance: {max_concurrent: 1},
     };
     const imageBasicSchema = {
@@ -3926,6 +4019,20 @@
       secondary_enabled: false, secondary_api_key: "", secondary_base_url: "https://api.gemai.cc/v1", secondary_model: "gpt-image-2-2K",
       use_system_proxy: true, local_proxy_port: "",
     };
+    const previewImageSchema = () => {
+      const schema = structuredClone(imageBasicSchema);
+      const choices = previewProviders
+        .filter((item) => item.service_kind === "image")
+        .map((item) => ({value: item.id, label: `${item.name || item.model} · ${item.model}`}));
+      ["primary_model", "secondary_model"].forEach((key) => {
+        schema[key].options = ["", ...choices.map((item) => item.value)];
+        schema[key].labels = ["手动填写模型名称", ...choices.map((item) => item.label)];
+        schema[key].hint = choices.length
+          ? "可选择已配置的图片模型，也可以保留或手动填写模型名称。"
+          : "先在常用设置中新增图片模型，之后可在这里直接选择。";
+      });
+      return {schema, choices};
+    };
     const previewGuides = {};
     const previewGuideOverrides = {
       "群聊上下文": {summary: "协调群聊接话和多人上下文", setup_steps: ["设置回复节奏和允许接管的会话。"], prerequisites: ["它不是长期记忆库。"], audience: "群聊常用", readiness: "可用但已纠正名称", recommendation: "保留。适合多人群聊的接话与上下文协调，但不应宣传为长期记忆。"},
@@ -3938,7 +4045,7 @@
     };
     const previewSavedConfigs = new Map();
     const corePreviewSchema = {
-      analyzer_model: {type: "string", description: "群聊分析模型", options: ["", "jyjapi/grok-4.6"], labels: ["请选择模型（完整使用所必需）", "免费 Grok 4.6"], default: "jyjapi/grok-4.6"},
+      analyzer_model: {type: "string", description: "群聊分析模型", options: [""], labels: ["请选择模型（完整使用所必需）"], default: ""},
       personality: {type: "object", description: "身份与接话原则", items: {ai_self_identity: {type: "text", description: "群聊身份", default: "你是小妹，是群聊里的熟人型机器人。说话自然、直接。"}, reply_strategy_guide: {type: "text", description: "接话原则", default: "围绕当前话题提供帮助，不连续插话。"}}},
       wake_interaction: {type: "object", description: "点名与唤醒", items: {alias: {type: "string", description: "可识别的昵称", default: "小妹"}, enter_on_mention_only: {type: "bool", description: "仅在被点名后参与", default: true}, direct_wake_fast_path: {type: "bool", description: "点名时快速回应", default: true}}},
       timing: {type: "object", description: "回复节奏", items: {assistant_debounce_time: {type: "float", description: "点名后等待补充（秒）", default: 1, min: 0}, waiting_time: {type: "float", description: "回复后休息（秒）", default: 30, min: 0}}},
@@ -3970,11 +4077,13 @@
     function previewFeatureDetail(id) {
       const found = features.find((value) => value.id === id);
       const item = {...found, guide: previewGuideOverrides[found?.display_name] || previewGuides[found?.display_name] || {}};
-      if (id === "feature-image") return {
+      if (id === "feature-image") {
+        const image = previewImageSchema();
+        return {
         ...item,
-        basic_schema: imageBasicSchema,
+        basic_schema: image.schema,
         model_schema: {},
-        schema: imageBasicSchema,
+        schema: image.schema,
         advanced_schema: {},
         config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
         advanced_config: {},
@@ -3982,9 +4091,11 @@
         setup_steps: item.guide.setup_steps,
         revision: "preview",
         providers: [],
+        image_providers: image.choices,
         personas: [],
         engine_online: true,
-      };
+        };
+      }
       if (id !== "feature-group-analysis") return {...item, basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true};
       return {
         ...item,
@@ -3999,7 +4110,7 @@
         configuration_note: "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数继续使用推荐值，保存时不会被重置。",
         setup_steps: ["在“自动日报群”旁点击“从群聊列表添加”，无需在群里发送命令", "选择需要生成日报的群；多个群可以继续添加", "确认生成时间和分析模型后保存"],
         revision: "preview",
-        providers: [{value: "jyjapi/grok-4.6", label: "免费 Grok 4.6"}],
+        providers: [],
         personas: [],
         engine_online: true,
       };
@@ -4009,9 +4120,17 @@
       previewProviders = [{id: "custom_mimo/mimo-v2.5", name: "mimo-v2.5", api_base: "https://token-plan-cn.xiaomimimo.com/v1", model: "mimo-v2.5", configured: true, api_key_configured: true, is_default: true, is_recommended: false, thinking_supported: true, thinking_enabled: true}];
     }
     const previewPresets = [
-      {id: "free_grok", name: "免费 Grok 4.6（推荐）", api_base: "https://api.xiuxianjyj.xin/v1", model: "grok-4.6", description: "面向普通用户的默认回复服务。"},
-      {id: "deepseek", name: "DeepSeek（自用）", api_base: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", description: "适合在你自己的设备上使用。"},
-      {id: "custom", name: "其他兼容服务", api_base: "", model: "", description: "填写兼容接口地址、模型名称和密钥。"},
+      {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image"], description: "DeepSeek 官方兼容接口；DeepSeek Flash 支持图片输入。"},
+      {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image"], description: "智谱 GLM 兼容接口；GLM-4.6V 支持图片输入。"},
+      {id: "xiaomi_mimo", name: "小米 MiMo", api_base: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5", service_kind: "chat", modalities: ["text", "image"], description: "小米 MiMo 兼容接口；MiMo-V2.5 支持原生多模态输入。"},
+      {id: "qwen", name: "通义千问 Qwen", api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", service_kind: "chat", modalities: ["text"], description: "阿里云百炼兼容接口。"},
+      {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image"], description: "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。"},
+      {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text"], description: "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。"},
+      {id: "gemini_proxy", name: "Gemini / 中转站", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。"},
+      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写你的 Sub2 兼容接口地址和模型名称。"},
+      {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
+      {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
+      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写兼容接口地址、模型名称和密钥。"},
     ];
     const previewExperience = {
       onboarding_complete: true,
@@ -4028,9 +4147,9 @@
       provider: "bocha",
       link_enabled: false,
       providers: Object.fromEntries([
-        ["tavily", "Tavily"], ["bocha", "博查 Bocha"], ["brave", "Brave Search"],
-        ["baidu_app_builder", "百度 AI Search"], ["firecrawl", "Firecrawl"], ["exa", "Exa"],
-      ].map(([id, name]) => [id, {id, name, description: "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
+        ["tavily", "Tavily", "https://app.tavily.com/"], ["bocha", "博查 Bocha", "https://open.bocha.cn/"], ["brave", "Brave Search", "https://brave.com/search/api/"],
+        ["baidu_app_builder", "百度 AI Search", "https://cloud.baidu.com/product/ai_search"], ["firecrawl", "Firecrawl", "https://www.firecrawl.dev/"], ["exa", "Exa", "https://exa.ai/"],
+      ].map(([id, name, website_url]) => [id, {id, name, website_url, description: id === "tavily" ? "适合通用英文与国际资讯搜索。免费方案每月含 1,000 API credits，实际消耗按请求类型计算。" : "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
     };
     let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
     const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
@@ -4195,20 +4314,26 @@
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },
       get_providers: () => ok(structuredClone(previewProviders)),
       save_provider: (values) => {
-        const id = `${values.preset === "deepseek" ? "deepseek" : values.preset === "free_grok" ? "jyjapi" : "custom"}/${values.model}`;
+        const preset = previewPresets.find((item) => item.id === values.preset) || previewPresets.at(-1);
+        const source = values.preset === "deepseek" ? "deepseek" : values.preset === "custom" ? "custom" : String(values.preset || "custom");
+        const id = `${source}/${values.model}`;
         const original = previewProviders.find((item) => item.id === values.provider_id);
-        const makeDefault = !previewProviders.length || Boolean(original?.is_default);
+        const serviceKind = values.service_kind || preset?.service_kind || "chat";
+        const makeDefault = serviceKind === "chat" && (
+          !previewProviders.some((item) => item.service_kind === "chat")
+          || Boolean(original?.is_default)
+        );
         previewProviders = previewProviders
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
-        const saved = {id, name: values.preset === "free_grok" ? "免费 Grok 4.6" : values.preset === "deepseek" ? `DeepSeek · ${String(values.model).replace("deepseek-", "")}` : values.model, api_base: values.api_base, model: values.model, configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: values.preset === "free_grok", thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
+        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities: preset?.modalities || ["text"], modality_label: serviceKind === "image" ? "图片" : serviceKind === "embedding" ? "向量" : preset?.modalities?.length > 1 ? "多模态" : "文本", configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },
       set_default_provider: (id) => { previewProviders = previewProviders.map((item) => ({...item, is_default: item.id === id})); return ok({id, apply_state: "applied"}, "默认回复模型已切换并立即生效。"); },
       set_provider_thinking: (id, enabled) => { previewProviders = previewProviders.map((item) => item.id === id ? {...item, thinking_enabled: Boolean(enabled)} : item); return ok({id, thinking_enabled: Boolean(enabled), apply_state: "applied"}, "思考模式已热更新，下一条消息立即生效。"); },
       test_provider: () => ok({ok: true}, "模型服务连接正常。"),
-      discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}, "已读取 6 个可用模型。"),
+      discover_provider_models: () => ok({items: ["deepseek-flash", "glm-4.6v", "gemini-3.8-flash", "qwen-plus", "doubao-seed-2-0-lite-260215"], total: 5}, "已读取 5 个可用模型。"),
       delete_provider: (id) => { previewProviders = previewProviders.filter((item) => item.id !== id); return ok({id}, "模型服务已删除并立即生效。"); },
       get_maintenance: () => ok({preview: {file_count: 18, uncompressed_size: 39636172, can_create: true}, backups: [{id: "robot-backup-preview.zip", file_name: "robot-backup-preview.zip", size: 12740121, modified_at: new Date(Date.now() - 86400000).toISOString()}], diagnostics: {summary: {error_count: 0, warning_count: 1, check_count: 14}}}),
       create_backup: () => ok({id: "robot-backup-new.zip"}, "设置、人格和长期记忆已备份。"),

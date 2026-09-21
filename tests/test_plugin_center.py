@@ -772,6 +772,70 @@ def test_image_service_round_trip_keeps_visible_model_and_validates_proxy_port(t
     assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == "stored-secret"
 
 
+def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    plugin = install / "app/astrbot/data/plugins/jiang_image"
+    plugin.mkdir(parents=True)
+    schema = {
+        "primary_base_url": {"type": "string", "default": "https://old.example/v1"},
+        "primary_model": {"type": "string", "default": "old-image"},
+        "primary_api_key": {"type": "string", "default": ""},
+    }
+    (plugin / "_conf_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    config_path = install / "app/astrbot/data/config/jiang_image_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({
+        "primary_base_url": "https://old.example/v1",
+        "primary_model": "old-image",
+        "primary_api_key": "old-secret",
+    }), encoding="utf-8")
+    engine_path = install / "app/astrbot/data/cmd_config.json"
+    engine = json.loads(engine_path.read_text(encoding="utf-8"))
+    engine["provider_sources"].append({
+        "id": "image_vendor", "api_base": "https://images.example/v1",
+        "key": ["image-secret"], "enable": True,
+    })
+    engine["provider_sources"].append({
+        "id": "vision_vendor", "api_base": "https://vision.example/v1",
+        "key": ["vision-secret"], "enable": True,
+    })
+    engine["provider"].append({
+        "id": "image_vendor/image-v2", "provider_source_id": "image_vendor",
+        "model": "image-v2", "service_kind": "image", "modalities": ["image"],
+        "enable": True,
+    })
+    engine["provider"].append({
+        "id": "vision_vendor/vision-chat", "provider_source_id": "vision_vendor",
+        "model": "vision-chat", "service_kind": "chat",
+        "modalities": ["text", "image"], "enable": True,
+    })
+    engine_path.write_text(json.dumps(engine), encoding="utf-8")
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False
+    public_id = service.catalog()["plugins"][0]["id"]
+
+    detail = service.detail(public_id)
+    assert detail["image_providers"] == [
+        {"value": "image_vendor/image-v2", "label": "image-v2 · 支持图片 · 图片模型"}
+    ]
+    assert {item["value"] for item in detail["providers"]} == {
+        "vision_vendor/vision-chat"
+    }
+    assert detail["model_schema"]["primary_model"]["_provider_type"] == "image"
+
+    detail["config"]["primary_model"] = "image_vendor/image-v2"
+    service.save(public_id, detail["config"], detail["revision"])
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["primary_base_url"] == "https://images.example/v1"
+    assert saved["primary_model"] == "image-v2"
+    assert saved["primary_api_key"] == "image-secret"
+    assert service.detail(public_id)["config"]["primary_model"] == "image_vendor/image-v2"
+
+
 def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Path) -> None:
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"

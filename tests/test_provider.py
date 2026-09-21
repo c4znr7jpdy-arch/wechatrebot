@@ -212,6 +212,31 @@ def test_grok_46_defaults_expose_multimodal_capabilities() -> None:
     ]
 
 
+def test_image_provider_keeps_transport_compatible_and_is_not_a_chat_model() -> None:
+    profile = OpenAIProviderProfile(
+        api_key="image-secret",
+        api_base="https://images.example.com/v1",
+        model="image-v2",
+        service_kind="image",
+        modalities=("image",),
+    )
+
+    assert profile.astrbot_source()["provider_type"] == "chat_completion"
+    assert profile.astrbot_model()["service_kind"] == "image"
+    assert profile.astrbot_model()["modalities"] == ["image"]
+
+
+def test_invalid_model_service_kind_returns_customer_validation_error() -> None:
+    profile = OpenAIProviderProfile(
+        api_key="secret",
+        api_base="https://models.example.com/v1",
+        model="model-v1",
+        service_kind="unsupported",
+    )
+
+    assert profile.validate() == ("模型服务类型不受支持，请重新选择。",)
+
+
 def test_provider_presets_have_stable_hidden_ids_and_customer_labels() -> None:
     assert provider_source_id(DEFAULT_PROVIDER_API_BASE, DEFAULT_PROVIDER_MODEL) == "jyjapi"
     assert provider_source_id(DEEPSEEK_PROVIDER_API_BASE, DEEPSEEK_PROVIDER_MODEL) == "deepseek"
@@ -219,7 +244,7 @@ def test_provider_presets_have_stable_hidden_ids_and_customer_labels() -> None:
         "https://models.example.com/v1/", "another-chat"
     )
     assert provider_display_name("jyjapi", "grok-4.6") == "免费 Grok 4.6"
-    assert provider_display_name("deepseek", "deepseek-v4-flash") == "DeepSeek · v4-flash"
+    assert provider_display_name("deepseek", "deepseek-flash") == "DeepSeek · flash"
 
 
 def test_model_directory_reads_openai_compatible_models(monkeypatch) -> None:

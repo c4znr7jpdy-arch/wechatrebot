@@ -19,13 +19,118 @@ DEFAULT_PROVIDER_MODEL_ID = (
     f"{DEFAULT_PROVIDER_SOURCE_ID}/{DEFAULT_PROVIDER_MODEL}"
 )
 DEEPSEEK_PROVIDER_SOURCE_ID = "deepseek"
-DEEPSEEK_PROVIDER_API_BASE = "https://api.deepseek.com/v1"
-DEEPSEEK_PROVIDER_MODEL = "deepseek-v4-flash"
+DEEPSEEK_PROVIDER_API_BASE = "https://api.deepseek.com"
+DEEPSEEK_PROVIDER_MODEL = "deepseek-flash"
 PROVIDER_REQUEST_TIMEOUT_SECONDS = 35
 # AstrBot's provider layer retries connection errors on top of the OpenAI SDK.
 # Keep one product-level attempt so a failed endpoint cannot hold a group reply
 # for several minutes. The SDK retry is disabled by the bundled runtime patch.
 PROVIDER_REQUEST_MAX_ATTEMPTS = 1
+
+# OpenAI-compatible entry points that are useful when adding a service from
+# the manager. Values are intentionally editable and are only starting points;
+# the provider's current documentation remains authoritative.
+MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
+    {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "api_base": DEEPSEEK_PROVIDER_API_BASE,
+        "model": DEEPSEEK_PROVIDER_MODEL,
+        "service_kind": "chat",
+        "modalities": ("text", "image"),
+        "description": "DeepSeek 官方兼容接口；DeepSeek Flash 支持图片输入。",
+    },
+    {
+        "id": "glm",
+        "name": "智谱 GLM",
+        "api_base": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4.6v",
+        "service_kind": "chat",
+        "modalities": ("text", "image"),
+        "description": "智谱 GLM 兼容接口；GLM-4.6V 支持图片输入。",
+    },
+    {
+        "id": "xiaomi_mimo",
+        "name": "小米 MiMo",
+        "api_base": "https://api.xiaomimimo.com/v1",
+        "model": "mimo-v2.5",
+        "service_kind": "chat",
+        "modalities": ("text", "image"),
+        "description": "小米 MiMo 兼容接口；MiMo-V2.5 支持原生多模态输入。",
+    },
+    {
+        "id": "qwen",
+        "name": "通义千问 Qwen",
+        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+        "service_kind": "chat",
+        "modalities": ("text",),
+        "description": "阿里云百炼兼容接口。",
+    },
+    {
+        "id": "volcengine",
+        "name": "火山引擎豆包",
+        "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-seed-2-0-lite-260215",
+        "service_kind": "chat",
+        "modalities": ("text", "image"),
+        "description": "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。",
+    },
+    {
+        "id": "hunyuan",
+        "name": "腾讯混元",
+        "api_base": "https://tokenhub.tencentmaas.com/v1",
+        "model": "hy3-preview",
+        "service_kind": "chat",
+        "modalities": ("text",),
+        "description": "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。",
+    },
+    {
+        "id": "gemini_proxy",
+        "name": "Gemini / 中转站",
+        "api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-3.8-flash",
+        "service_kind": "chat",
+        "modalities": ("text", "image", "audio"),
+        "description": "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。",
+    },
+    {
+        "id": "sub2",
+        "name": "Sub2 兼容服务",
+        "api_base": "",
+        "model": "",
+        "service_kind": "chat",
+        "modalities": ("text",),
+        "description": "填写你的 Sub2 兼容接口地址和模型名称。",
+    },
+    {
+        "id": "embedding_custom",
+        "name": "向量模型（兼容接口）",
+        "api_base": "",
+        "model": "",
+        "service_kind": "embedding",
+        "modalities": ("embedding",),
+        "description": "新增 Embedding 文本向量模型，供长期记忆等功能选择。",
+    },
+    {
+        "id": "image_custom",
+        "name": "图片模型（兼容接口）",
+        "api_base": "",
+        "model": "",
+        "service_kind": "image",
+        "modalities": ("image",),
+        "description": "新增图片生成模型，供功能中心图片生成选择。",
+    },
+    {
+        "id": "custom",
+        "name": "其他兼容服务",
+        "api_base": "",
+        "model": "",
+        "service_kind": "chat",
+        "modalities": ("text",),
+        "description": "填写兼容接口地址、模型名称和密钥。",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -138,8 +243,17 @@ def _openrouter_hybrid_model(model: str) -> bool:
         or _glm_hybrid_model(model)
         or _kimi_hybrid_model(model)
         or _openai_hybrid_model(model)
-        or name.startswith(("gemini-2.5-flash", "gemini-2.5-flash-lite"))
+        or _gemini_hybrid_model(model)
         or claude_optional
+    )
+
+
+def _gemini_hybrid_model(model: str) -> bool:
+    return _starts_with(
+        model,
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.8-flash",
     )
 
 
@@ -223,9 +337,7 @@ _THINKING_MODE_RULES = (
     _ThinkingModeRule(
         "reasoning_effort_none",
         _domain_endpoint("googleapis.com"),
-        lambda model: _starts_with(
-            model, "gemini-2.5-flash", "gemini-2.5-flash-lite"
-        ),
+        _gemini_hybrid_model,
     ),
     _ThinkingModeRule(
         "reasoning_effort_none",
@@ -412,15 +524,59 @@ def provider_display_name(source_id: str, model: str) -> str:
     return clean_model or "自定义模型"
 
 
+def normalize_service_kind(value: str | None) -> str:
+    kind = str(value or "chat").strip().casefold()
+    aliases = {
+        "chat_completion": "chat",
+        "openai_chat_completion": "chat",
+        "conversation": "chat",
+        "vector": "embedding",
+        "openai_embedding": "embedding",
+        "image_generation": "image",
+        "openai_image": "image",
+        "vision": "image",
+    }
+    kind = aliases.get(kind, kind)
+    if kind not in {"chat", "embedding", "image"}:
+        raise ValueError("模型服务类型不受支持，请重新选择。")
+    return kind
+
+
+def infer_provider_modalities(
+    service_kind: str, model: str, declared: object = None,
+) -> tuple[str, ...]:
+    kind = normalize_service_kind(service_kind)
+    if kind == "embedding":
+        return ("embedding",)
+    if kind == "image":
+        return ("image",)
+    if model.casefold() == DEFAULT_PROVIDER_MODEL.casefold():
+        return ("text", "image", "audio")
+    if isinstance(declared, (list, tuple, set)):
+        values = tuple(
+            str(item).strip().casefold()
+            for item in declared
+            if str(item).strip()
+        )
+        if values:
+            return tuple(dict.fromkeys(values))
+    leaf = _model_leaf(model).casefold()
+    if any(marker in leaf for marker in ("-v", "vision", "vl", "gemini", "doubao-seed")):
+        return ("text", "image", "audio") if "gemini" in leaf or "doubao" in leaf else ("text", "image")
+    return ("text",)
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAIProviderProfile:
-    """Customer-supplied OpenAI-compatible chat provider settings."""
+    """Customer-supplied OpenAI-compatible model service settings."""
 
     api_key: str
     api_base: str
     model: str
     source_id: str = "commercial_openai"
     thinking_enabled: bool | None = None
+    service_kind: str = "chat"
+    modalities: tuple[str, ...] = ()
 
     def normalized(self) -> "OpenAIProviderProfile":
         return OpenAIProviderProfile(
@@ -429,11 +585,27 @@ class OpenAIProviderProfile:
             model=self.model.strip(),
             source_id=self.source_id.strip().casefold(),
             thinking_enabled=self.thinking_enabled,
+            service_kind=normalize_service_kind(self.service_kind),
+            modalities=infer_provider_modalities(
+                self.service_kind, self.model, self.modalities
+            ),
         )
 
     def validate(self) -> tuple[str, ...]:
-        profile = self.normalized()
         errors: list[str] = []
+        try:
+            profile = self.normalized()
+        except ValueError as exc:
+            errors.append(str(exc))
+            profile = OpenAIProviderProfile(
+                api_key=self.api_key,
+                api_base=self.api_base,
+                model=self.model,
+                source_id=self.source_id,
+                thinking_enabled=self.thinking_enabled,
+                service_kind="chat",
+                modalities=self.modalities,
+            ).normalized()
         if not profile.api_key:
             errors.append("模型 API Key 不能为空。")
         elif len(profile.api_key) > 4096 or any(
@@ -447,7 +619,6 @@ class OpenAIProviderProfile:
         if profile.thinking_enabled is not None:
             if not isinstance(profile.thinking_enabled, bool):
                 errors.append("思考模式只能选择开启或关闭。")
-
         parsed = urlsplit(profile.api_base)
         loopback = (parsed.hostname or "").casefold() in {
             "127.0.0.1",
@@ -475,6 +646,8 @@ class OpenAIProviderProfile:
         return {
             "provider": "openai_chat_completion",
             "type": "openai_chat_completion",
+            # AstrBot's provider source remains the OpenAI-compatible transport.
+            # The individual model record carries its actual product purpose.
             "provider_type": "chat_completion",
             "key": [profile.api_key],
             "api_base": profile.api_base,
@@ -490,17 +663,17 @@ class OpenAIProviderProfile:
         errors = profile.validate()
         if errors:
             raise ValueError("；".join(errors))
-        modalities = ["text", "tool_use"]
-        if (
-            profile.source_id == DEFAULT_PROVIDER_SOURCE_ID
-            and profile.model == DEFAULT_PROVIDER_MODEL
-        ):
-            modalities = ["text", "image", "audio", "tool_use"]
+        modalities = list(infer_provider_modalities(
+            profile.service_kind, profile.model, profile.modalities
+        ))
+        if profile.service_kind == "chat" and "tool_use" not in modalities:
+            modalities.append("tool_use")
         return {
             "id": profile.model_id,
             "enable": True,
             "provider_source_id": profile.source_id,
             "model": profile.model,
+            "service_kind": profile.service_kind,
             "modalities": modalities,
             "custom_extra_body": (
                 with_thinking_mode(
@@ -576,6 +749,7 @@ __all__ = [
     "DEEPSEEK_PROVIDER_API_BASE",
     "DEEPSEEK_PROVIDER_MODEL",
     "DEEPSEEK_PROVIDER_SOURCE_ID",
+    "MODEL_PROVIDER_PRESETS",
     "DEFAULT_PROVIDER_API_BASE",
     "DEFAULT_PROVIDER_MODEL",
     "DEFAULT_PROVIDER_MODEL_ID",
@@ -584,6 +758,8 @@ __all__ = [
     "PROVIDER_REQUEST_TIMEOUT_SECONDS",
     "discover_openai_models",
     "provider_display_name",
+    "normalize_service_kind",
+    "infer_provider_modalities",
     "provider_source_id",
     "infer_thinking_mode",
     "supports_thinking_toggle",
