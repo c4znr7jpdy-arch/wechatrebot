@@ -699,9 +699,19 @@
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
-    // Prefetched details may predate robot startup, when plugins create or
-    // normalize their config files. Never expose a cached revision for edit.
-    $("#featureDetail").innerHTML = `<div class="loading-row">${cached ? "正在重新读取最新设置…" : "正在读取功能设置…"}</div>`;
+    const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);
+    if (cached) {
+      useFeatureDetail(cached, afterSave, preserveTab);
+      renderFeatureDetail();
+      const note = $("#featureNote");
+      if (note && (force || cacheNeedsRefresh)) note.textContent = "正在重新读取最新设置…";
+      // Never expose a cached revision for edit when a fresh read is required.
+      // Saving and the explicit refresh button pass force=true. An offline
+      // cache is also stale once the run center reports that the robot is online.
+      if (!force && !cacheNeedsRefresh) return;
+    } else {
+      $("#featureDetail").innerHTML = '<div class="loading-row">正在读取功能设置…</div>';
+    }
     try {
       const detail = await api("get_feature", featureId);
       if (load !== state.featureLoad) return;
