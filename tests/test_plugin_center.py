@@ -288,6 +288,7 @@ class _ProviderHotApplyClient(EngineApiClient):
                 "provider_source_id": "jyjapi",
                 "model": "grok-4.6",
                 "enable": True,
+                "modalities": ["text", "tool_use"],
                 "custom_extra_body": {"thinking": True},
                 "key": ["merged-source-key"],
                 "api_base": "https://old.example.test/v1",
@@ -344,6 +345,9 @@ def test_provider_hot_apply_preserves_extended_fields_and_verifies_default(
     assert client.sources[0]["key"] == ["new-key"]
     assert client.sources[0]["custom_headers"] == {"X-Route": "keep"}
     assert client.providers[0]["custom_extra_body"] == {"thinking": True}
+    assert client.providers[0]["modalities"] == [
+        "text", "image", "audio", "tool_use",
+    ]
     assert "key" not in client.providers[0]
     assert "api_base" not in client.providers[0]
     assert client.config["provider_settings"]["default_provider_id"] == (
@@ -352,6 +356,31 @@ def test_provider_hot_apply_preserves_extended_fields_and_verifies_default(
     assert client.config["provider_settings"]["request_max_retries"] == 1
     assert client.config["provider_settings"]["fallback_chat_models"] == []
     assert client.config["unrelated"] == {"keep": True}
+
+
+def test_provider_hot_apply_handles_null_modalities_as_unverified(
+    tmp_path: Path,
+) -> None:
+    client = _ProviderHotApplyClient(tmp_path)
+    original_request = client.request
+
+    def request_without_modalities(method: str, path: str, payload=None):
+        result = original_request(method, path, payload)
+        if method == "PUT" and path == "/api/v1/providers/by-id":
+            client.providers[0]["modalities"] = None
+        return result
+
+    client.request = request_without_modalities  # type: ignore[method-assign]
+
+    with pytest.raises(PluginCenterError, match="没有收到生效确认"):
+        client.save_provider(
+            OpenAIProviderProfile(
+                api_key="new-key",
+                api_base="https://api.xiuxianjyj.xin/v1",
+                model="grok-4.6",
+                source_id="jyjapi",
+            )
+        )
 
 
 def test_mimo_thinking_hot_switch_preserves_model_and_reads_back(tmp_path: Path) -> None:

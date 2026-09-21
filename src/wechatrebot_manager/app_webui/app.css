@@ -269,7 +269,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .feature-command-item code { min-width: 0; color: #174b88; font: 600 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .feature-command-item span { min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .toggle { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; }
-.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle input, .settings-card .toggle input { position: absolute; width: 1px; height: 1px; min-height: 1px; margin: 0; padding: 0; opacity: 0; pointer-events: none; }
 .toggle-track { position: relative; width: 42px; height: 24px; flex: 0 0 42px; border-radius: 20px; background: #b8c3cf; transition: background .15s; cursor: pointer; }
 .toggle-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); transition: transform .15s; }
 .toggle input:checked + .toggle-track { background: var(--green-600); }

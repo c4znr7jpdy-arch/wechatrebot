@@ -2944,7 +2944,9 @@
       const preset = (state.bootstrap?.provider_presets || []).find(
         (item) => item.id === form.elements.preset.value,
       );
-      if (Array.isArray(preset?.modalities)) values.modalities = preset.modalities.join(",");
+      if (values.service_kind !== "chat" && Array.isArray(preset?.modalities)) {
+        values.modalities = preset.modalities.join(",");
+      }
       const data = await api("save_provider", values);
       state.bootstrap.providers = await api("get_providers");
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
@@ -2987,6 +2989,55 @@
     if (preset === "glm") return {mark: "G", label: "GLM", className: "custom"};
     if (preset === "xiaomi_mimo") return {mark: "M", label: "MiMo", className: "custom"};
     return {mark: "AI", label: "兼容服务", className: "custom"};
+  }
+
+  function providerChatModalityValue(modalities) {
+    const source = Array.isArray(modalities) ? modalities : String(modalities || "").split(",");
+    const values = new Set(source.map((item) => String(item).trim().toLowerCase()));
+    return ["text", "image", "audio"].filter((item) => values.has(item)).join(",");
+  }
+
+  function providerCapabilityLabel(serviceKind, modalities) {
+    if (serviceKind === "embedding") return "向量";
+    if (serviceKind === "image") return "图片";
+    const value = providerChatModalityValue(modalities);
+    if (!value) return "能力可选";
+    return value.includes("image") || value.includes("audio") ? "多模态" : "文本";
+  }
+
+  function inferProviderModalities(serviceKind, model, declared) {
+    if (serviceKind === "embedding") return ["embedding"];
+    if (serviceKind === "image") return ["image"];
+    const name = String(model || "").trim().toLowerCase();
+    const declaredValue = providerChatModalityValue(declared);
+    if (declaredValue) return declaredValue.split(",");
+    if (name === "grok-4.6") return ["text", "image", "audio"];
+    const leaf = name.split("/").pop() || "";
+    if (["-v", "vision", "vl", "gemini", "doubao-seed"].some((marker) => leaf.includes(marker))) {
+      return leaf.includes("gemini") || leaf.includes("doubao")
+        ? ["text", "image", "audio"]
+        : ["text", "image"];
+    }
+    return ["text"];
+  }
+
+  function updateProviderModalitiesHint() {
+    const input = $("#providerModalities");
+    if (!input) return;
+    $("#providerModalitiesHint").textContent = input.value
+      ? "按模型实际支持能力选择；错误声明可能导致媒体消息调用失败。"
+      : "自动识别常见视觉模型名称；名称无法识别时按纯文本处理，也可以在这里明确选择多模态能力。";
+  }
+
+  function syncProviderModalities(serviceKind, modalities) {
+    const field = $("#providerModalitiesField");
+    const input = $("#providerModalities");
+    if (!field || !input) return;
+    const isChat = serviceKind === "chat";
+    field.hidden = !isChat;
+    input.disabled = !isChat;
+    input.value = isChat ? providerChatModalityValue(modalities) : "";
+    updateProviderModalitiesHint();
   }
 
   function providerThinkingSupported(apiBase, model) {
@@ -3040,9 +3091,11 @@
     form.elements.service_kind.value = preset.service_kind || "chat";
     form.elements.service_kind.disabled = false;
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
+    syncProviderModalities(preset.service_kind || "chat", preset.modalities || []);
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
-    const modalityHint = preset.service_kind === "embedding" ? "向量模型" : preset.service_kind === "image" ? "图片模型" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态模型" : "文本模型";
+    const capability = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
+    const modalityHint = capability === "能力可选" ? "输入能力可选" : `${capability}模型`;
     $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · ${modalityHint}`;
     syncProviderThinkingControl();
     renderProviderSaveIntent(
@@ -3116,6 +3169,7 @@
     form.elements.preset.value = providerPresetFor(service);
     form.elements.service_kind.value = service.service_kind || "chat";
     $("#providerThinkingRow").hidden = (service.service_kind || "chat") !== "chat";
+    syncProviderModalities(service.service_kind || "chat", service.modalities || []);
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
@@ -3663,7 +3717,7 @@
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
       presetSelect.innerHTML = data.provider_presets.map((preset) => {
-        const kind = preset.service_kind === "embedding" ? "向量" : preset.service_kind === "image" ? "图片" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态" : "文本";
+        const kind = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
         return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)} · ${kind}</option>`;
       }).join("");
     }
@@ -3883,6 +3937,7 @@
     });
     $("#providerForm").addEventListener("change", (event) => {
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
+      if (event.target.name === "modalities") updateProviderModalitiesHint();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
     $("#providerServiceKind").addEventListener("change", (event) => {
@@ -4202,10 +4257,10 @@
       {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image"], description: "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。"},
       {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text"], description: "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。"},
       {id: "gemini_proxy", name: "Gemini / 中转站", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。"},
-      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写你的 Sub2 兼容接口地址和模型名称。"},
+      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写你的 Sub2 兼容接口地址和模型名称，并确认输入能力。"},
       {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
       {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
-      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写兼容接口地址、模型名称和密钥。"},
+      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写兼容接口地址、模型名称和密钥，并确认输入能力。"},
     ];
     const previewExperience = {
       onboarding_complete: true,
@@ -4401,7 +4456,8 @@
         previewProviders = previewProviders
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
-        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities: preset?.modalities || ["text"], modality_label: serviceKind === "image" ? "图片" : serviceKind === "embedding" ? "向量" : preset?.modalities?.length > 1 ? "多模态" : "文本", configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
+        const modalities = inferProviderModalities(serviceKind, values.model, values.modalities);
+        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities, modality_label: providerCapabilityLabel(serviceKind, modalities), configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },

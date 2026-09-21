@@ -1622,6 +1622,7 @@ class EngineApiClient:
         if target not in known_ids:
             target = normalized.model_id if normalized.model_id in known_ids else ""
         model_payload = normalized.astrbot_model()
+        expected_modalities = list(model_payload["modalities"])
         if target:
             current_model = dict(
                 next(item for item in providers if item.get("id") == target)
@@ -1652,6 +1653,7 @@ class EngineApiClient:
                     "provider_source_id": normalized.source_id,
                     "model": normalized.model,
                     "service_kind": normalized.service_kind,
+                    "modalities": expected_modalities,
                     "enable": True,
                 }
             )
@@ -1686,12 +1688,23 @@ class EngineApiClient:
             (item for item in verified_providers if item.get("id") == normalized.model_id),
             None,
         )
+        raw_modalities = provider.get("modalities") if isinstance(provider, dict) else None
+        verified_modalities = (
+            {
+                str(item).strip().casefold()
+                for item in raw_modalities
+                if str(item).strip()
+            }
+            if isinstance(raw_modalities, list)
+            else set()
+        )
         if (
             not isinstance(source, dict)
             or str(source.get("api_base") or "").rstrip("/") != normalized.api_base
             or not isinstance(provider, dict)
             or str(provider.get("model") or "") != normalized.model
             or str(provider.get("service_kind") or "chat") != normalized.service_kind
+            or verified_modalities != set(expected_modalities)
             or (
                 normalized.thinking_enabled is not None
                 and not thinking_mode_matches(

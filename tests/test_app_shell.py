@@ -180,6 +180,39 @@ def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_
     assert captured["profile"].thinking_enabled is False
 
 
+def test_custom_chat_service_save_preserves_declared_multimodal_input(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(
+        app_shell,
+        "EngineApiClient",
+        lambda _root: SimpleNamespace(is_available=lambda: False),
+    )
+
+    def fake_save(_root, profile, *, make_default=True):
+        captured["profile"] = profile.normalized()
+        return captured["profile"]
+
+    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+
+    result = api.save_provider({
+        "api_key": "multimodal-secret",
+        "api_base": "https://models.example.com/v1",
+        "model": "vendor-model",
+        "service_kind": "chat",
+        "modalities": "text,image,audio",
+    })
+
+    assert result["ok"] is True
+    assert captured["profile"].modalities == ("text", "image", "audio")
+    assert result["data"]["modalities"] == ["text", "image", "audio"]
+    assert result["data"]["modality_label"] == "多模态"
+
+
 def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     config = {
@@ -1340,6 +1373,21 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
     assert 'if (serviceKind !== "chat") return false;' in script
     assert 'renderProviderSaveIntent(Boolean(service.is_default), service.service_kind || "chat");' in script
     assert '"模型服务已保存，当前回复模型保持不变。"' in script
+
+
+def test_model_editor_allows_compatible_chat_services_to_declare_multimodal_input() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="providerModalities"' in markup
+    assert '<option value="text,image">文本和图片</option>' in markup
+    assert '<option value="text,image,audio">文本、图片和音频</option>' in markup
+    assert 'if (values.service_kind !== "chat"' in script
+    assert 'syncProviderModalities(service.service_kind || "chat", service.modalities || []);' in script
+    assert 'inferProviderModalities(serviceKind, values.model, values.modalities)' in script
+    assert '["-v", "vision", "vl", "gemini", "doubao-seed"]' in script
+    assert '{id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: []' in script
 
 
 def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> None:
