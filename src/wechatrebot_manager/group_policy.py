@@ -31,6 +31,8 @@ DEFAULT_GROUP_FEATURES = (
     "jiang_commands",
     "jiang_group_notice",
     "jiang_image",
+    "jiang_mystool",
+    "jiang_rocom",
 )
 _POLICY_FIELDS = frozenset(
     {

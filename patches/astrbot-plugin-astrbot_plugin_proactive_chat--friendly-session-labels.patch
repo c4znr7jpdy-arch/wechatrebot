@@ -1,0 +1,26 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+index 0794ff2..6223cfc 100644
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -10,8 +10,8 @@
+                 "hint": "只有在会话列表中明确配置的私聊才会获得主动消息服务，避免给未配置的会话提供服务"
+             },
+             "session_list": {
+-                "description": "📋 私聊会话 UMO 列表",
++                "description": "📋 私聊对象列表",
+                 "type": "list",
+                 "default": [],
+-                "hint": "请输入完整的 UMO，可通过 /sid 指令快捷获取。格式: {platform_name}:{message_type}:{session_id}。{platform_name} 就是你在 WebUI 中的 机器人 一栏自定义的机器人名称。{message_type} 参数为 “FriendMessage”。例如 default:FriendMessage:123456789"
++                "hint": "填写需要主动联系的私聊对象标识。建议在对应聊天发送 /sid 后完整复制结果；每行一个，不要手动修改格式。"
+             },
+@@ -276,8 +276,8 @@
+                 "hint": "只有在会话列表中明确配置的群聊才会获得主动消息服务，避免给未配置的会话提供服务"
+             },
+             "session_list": {
+-                "description": "📋 群聊会话 UMO 列表",
++                "description": "📋 群聊对象列表",
+                 "type": "list",
+                 "default": [],
+-                "hint": "请输入完整的 UMO，可通过 /sid 指令快捷获取。格式: {platform_name}:{message_type}:{session_id}。{platform_name} 就是你在 WebUI 中的 机器人 一栏自定义的机器人名称。{message_type} 参数为“GroupMessage”。例如 default:GroupMessage:123456789"
++                "hint": "填写需要主动联系的群聊标识。建议在对应群聊发送 /sid 后完整复制结果；每行一个，不要手动修改格式。"
+             },

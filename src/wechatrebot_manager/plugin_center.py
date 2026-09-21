@@ -83,6 +83,11 @@ class PluginCatalogItem:
     configuration: str = "schema-and-page"
     description: str = ""
     simplified: bool = False
+    feature_key: str = ""
+
+    @property
+    def catalog_key(self) -> str:
+        return self.feature_key or self.module_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +101,8 @@ class CustomerSchemaProfile:
 
 
 _GROUP_ANALYSIS_MODULE = "astrbot_plugin_qq_group_daily_analysis"
+_SETU_FEATURE_KEY = "jiang_commands.setu"
+_SETU_BACKING_MODULE = "jiang_commands"
 _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
     sections=(
         (
@@ -145,31 +152,6 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
             ),
         ),
         (
-            "auto_analysis",
-            "自动日报",
-            (
-                (
-                    "scheduled_group_list",
-                    {
-                        "description": "自动日报群",
-                        "hint": "点击“从群聊列表添加”选择群；多个群一行一个。留空时不自动发送。",
-                        "_ui_control": "line-list",
-                        "_group_selector": True,
-                        "placeholder": "例如：123456@chatroom",
-                    },
-                ),
-                (
-                    "auto_analysis_time",
-                    {
-                        "description": "每天生成时间",
-                        "hint": "使用 24 小时制；需要多个时间时一行一个。",
-                        "_ui_control": "time-list",
-                        "placeholder": "23:00",
-                    },
-                ),
-            ),
-        ),
-        (
             "analysis_features",
             "报告内容",
             (
@@ -211,7 +193,9 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
                     "llm_provider_id",
                     {
                         "description": "用于分析的模型",
-                        "hint": "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。",
+                        "hint": "必须选择可用模型；没有模型时只能生成消息数、活跃时段等基础统计，热门话题、群友画像、金句和聊天质量不会出现。",
+                        "_blank_label": "请选择模型（完整分析所必需）",
+                        "_required": True,
                     },
                 ),
             ),
@@ -222,11 +206,95 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
         "继续使用推荐值，保存时不会被重置。"
     ),
     setup_steps=(
-        "在“自动日报群”旁点击“从群聊列表添加”，无需在群里发送命令",
-        "选择需要生成日报的群；多个群可以继续添加",
-        "确认生成时间和分析模型后保存",
+        "先在模型设置中选择用于分析的模型并保存",
+        "到定时任务中的“群聊分析自动日报”选择群聊和生成时间",
+        "先积累足够消息，再从测试群验证一次完整报告",
     ),
 )
+
+
+def _with_setu_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(schema)
+    result.setdefault(
+        "setu_recall_enabled",
+        {
+            "description": "发送后自动撤回",
+            "type": "bool",
+            "default": True,
+            "hint": "开启后，图片会在设定秒数后自动撤回；关闭后保留图片。",
+            "_ui_group": "撤回设置",
+            "_ui_full": True,
+        },
+    )
+    result.setdefault(
+        "setu_recall_seconds",
+        {
+            "description": "撤回等待时间（秒）",
+            "type": "int",
+            "default": 20,
+            "min": 1,
+            "max": 120,
+            "hint": "建议 20 秒，可填写 1–120 秒。",
+            "_ui_group": "撤回设置",
+            "_ui_depends_on": "setu_recall_enabled",
+        },
+    )
+    return result
+
+
+def _setu_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    complete = _with_setu_schema(schema)
+    return {
+        key: copy.deepcopy(complete[key])
+        for key in ("setu_recall_enabled", "setu_recall_seconds")
+    }
+
+
+def _group_analysis_schedule_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    section = schema.get("auto_analysis")
+    if not isinstance(section, dict) or not isinstance(section.get("items"), dict):
+        return {}
+    items = section["items"]
+    selected: dict[str, Any] = {}
+    for key, overrides in (
+        (
+            "scheduled_group_list",
+            {
+                "description": "自动日报群",
+                "hint": "点击“从群聊列表添加”选择群；多个群一行一个。清空后停止自动生成。",
+                "_ui_control": "line-list",
+                "_group_selector": True,
+                "placeholder": "例如：123456@chatroom",
+            },
+        ),
+        (
+            "auto_analysis_time",
+            {
+                "description": "每天生成时间",
+                "hint": "使用 24 小时制；需要多个时间时一行一个。",
+                "_ui_control": "time-list",
+                "placeholder": "23:00",
+            },
+        ),
+    ):
+        field = items.get(key)
+        if isinstance(field, dict):
+            selected[key] = {**copy.deepcopy(field), **overrides}
+    if not selected:
+        return {}
+    return {
+        "auto_analysis": {
+            **copy.deepcopy(section),
+            "description": "自动日报",
+            "items": selected,
+        }
+    }
+
+
+def _without_group_analysis_schedule(schema: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(schema)
+    result.pop("auto_analysis", None)
+    return result
 
 _ANGEL_HEART_MODULE = "astrbot_plugin_angel_heart"
 _ANGEL_HEART_PROFILE = CustomerSchemaProfile(
@@ -1017,7 +1085,9 @@ def _with_runtime_choices(
             choices = [{"value": value, "label": value} for value in personas]
         if kind:
             field["options"] = [""] + [item["value"] for item in choices]
-            field["labels"] = ["使用系统默认"] + [item["label"] for item in choices]
+            field["labels"] = [
+                str(field.get("_blank_label") or "使用系统默认")
+            ] + [item["label"] for item in choices]
     return result
 
 
@@ -1669,6 +1739,27 @@ class PluginCenterService:
                     simplified=profile is not None,
                 )
             )
+            if module_name == _SETU_BACKING_MODULE:
+                setu_schema = _setu_schema(raw_schema)
+                result.append(
+                    PluginCatalogItem(
+                        module_name=module_name,
+                        display_name="涩图",
+                        enabled=(
+                            enabled_overrides.get(module_name, False)
+                            if enabled_overrides is not None
+                            else bool(raw_plugin.enabled)
+                        ),
+                        configurable=True,
+                        field_count=_field_count(setu_schema),
+                        model_field_count=0,
+                        pages=(),
+                        configuration="schema",
+                        description="发送随机图片，并可设置发送后自动撤回的等待时间。",
+                        simplified=True,
+                        feature_key=_SETU_FEATURE_KEY,
+                    )
+                )
         return tuple(result)
 
     def catalog(self) -> dict[str, Any]:
@@ -1677,10 +1768,10 @@ class PluginCenterService:
         for plugin in self._catalog_items(live_states if engine_online else None):
             if plugin.module_name == _ANGEL_HEART_MODULE:
                 continue
-            guide = get_plugin_guide(plugin.module_name)
+            guide = get_plugin_guide(plugin.catalog_key)
             entries.append(
                 {
-                    "id": _public_plugin_id(plugin.module_name),
+                    "id": _public_plugin_id(plugin.catalog_key),
                     "display_name": plugin.display_name,
                     "enabled": plugin.enabled,
                     "configurable": plugin.configurable,
@@ -1693,8 +1784,8 @@ class PluginCenterService:
                     "audience": guide.get("audience", "按需使用"),
                     "readiness": guide.get("readiness", "请按说明准备"),
                     "guide": guide,
-                    "scheduled_action": _scheduled_action(plugin.module_name),
-                    "schedule_provider": plugin.module_name in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
+                    "scheduled_action": _scheduled_action(plugin.catalog_key),
+                    "schedule_provider": plugin.catalog_key in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
                 }
             )
         return {
@@ -1711,7 +1802,7 @@ class PluginCenterService:
         if not _PUBLIC_PLUGIN_ID.fullmatch(public_id):
             raise PluginCenterError("功能标识无效。")
         for plugin in self._catalog_items(enabled_overrides):
-            if _public_plugin_id(plugin.module_name) == public_id:
+            if _public_plugin_id(plugin.catalog_key) == public_id:
                 return plugin
         raise PluginCenterError("所选功能不存在或尚未交付。")
 
@@ -1722,9 +1813,20 @@ class PluginCenterService:
         raw_schema = _read_object(
             _plugin_root(self.install_root) / module_name / "_conf_schema.json"
         )
-        schema = raw_schema if item.configurable else {}
+        storage_schema = (
+            _with_setu_schema(raw_schema)
+            if item.catalog_key == _SETU_FEATURE_KEY
+            else raw_schema
+        )
+        schema = (
+            _setu_schema(storage_schema)
+            if item.catalog_key == _SETU_FEATURE_KEY
+            else (raw_schema if item.configurable else {})
+        )
         stored = _read_object(_config_path(self.install_root, module_name))
-        config = _normalize_config(schema, _merge_defaults(schema, stored))
+        config = _normalize_config(
+            storage_schema, _merge_defaults(storage_schema, stored)
+        )
         engine_config = _read_object(_dashboard_path(self.install_root))
         providers: list[dict[str, str]] = []
         embedding_providers: list[dict[str, str]] = []
@@ -1784,11 +1886,22 @@ class PluginCenterService:
         runtime_schema = _hide_customer_internal_schema(module_name, runtime_schema)
         if module_name == _GROUP_ANALYSIS_MODULE:
             runtime_schema = _group_analysis_ui_schema(runtime_schema)
-        customer_schema, profile = _project_customer_schema(module_name, runtime_schema)
+        schema_key = item.catalog_key
+        customer_schema, profile = _project_customer_schema(schema_key, runtime_schema)
         clean_schema = _customer_schema(customer_schema, config)
         customer_config = _customer_config(customer_schema, config)
-        guide = get_plugin_guide(module_name)
+        guide = get_plugin_guide(schema_key)
         clean_basic_schema, clean_model_schema = _split_schema(clean_schema)
+        group_schedule_schema = (
+            _group_analysis_schedule_schema(runtime_schema)
+            if module_name == _GROUP_ANALYSIS_MODULE
+            else {}
+        )
+        visible_advanced_schema = advanced_schema(schema_key, runtime_schema)
+        if module_name == _GROUP_ANALYSIS_MODULE:
+            visible_advanced_schema = _without_group_analysis_schedule(
+                visible_advanced_schema
+            )
         return {
             "id": public_id,
             "display_name": item.display_name,
@@ -1804,11 +1917,13 @@ class PluginCenterService:
             "setup_steps": profile.setup_steps if profile else (),
             "guide": guide,
             "advanced_schema": _customer_schema(
-                advanced_schema(module_name, runtime_schema), config
+                visible_advanced_schema, config
             ),
             "advanced_config": _customer_config(
-                advanced_schema(module_name, runtime_schema), config
+                visible_advanced_schema, config
             ),
+            "schedule_schema": _customer_schema(group_schedule_schema, config),
+            "schedule_config": _customer_config(group_schedule_schema, config),
             "schema": clean_schema,
             "basic_schema": clean_basic_schema,
             "model_schema": clean_model_schema,
@@ -1819,8 +1934,8 @@ class PluginCenterService:
             "rerank_providers": rerank_providers,
             "personas": personas,
             "engine_online": engine_online,
-            "scheduled_action": _scheduled_action(module_name),
-            "schedule_provider": module_name in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
+            "scheduled_action": _scheduled_action(schema_key),
+            "schedule_provider": schema_key in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
         }
 
     def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
@@ -1839,6 +1954,8 @@ class PluginCenterService:
         schema = _read_object(
             _plugin_root(self.install_root) / module_name / "_conf_schema.json"
         )
+        if item.catalog_key == _SETU_FEATURE_KEY:
+            schema = _with_setu_schema(schema)
         merged = _merge_customer_config(schema, config, stored)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)

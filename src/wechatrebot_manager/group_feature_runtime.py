@@ -16,6 +16,8 @@ DEFAULT_GROUP_FEATURES = (
     "jiang_commands",
     "jiang_group_notice",
     "jiang_image",
+    "jiang_mystool",
+    "jiang_rocom",
 )
 _INFRASTRUCTURE = {"astrbot_plugin_patch_at_wxid", "jiang_capability_router", "astrbot_plugin_angel_heart"}
 
