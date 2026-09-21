@@ -1472,6 +1472,8 @@ def test_run_application_uses_explicit_webview_api_allowlist(
             return None
 
     api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._ensure_feature_page_server = lambda: SimpleNamespace(server_port=4321)
+    api._close_feature_page_server = lambda: None
     monkeypatch.setattr(app_shell, "ApplicationApi", lambda _root: api)
     monkeypatch.setattr(
         app_shell,

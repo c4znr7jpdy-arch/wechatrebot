@@ -1808,6 +1808,45 @@ def test_local_web_handler_hosts_plugin_page_bridge_and_preserves_content_type()
         thread.join(timeout=2)
 
 
+def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> None:
+    assets = tmp_path / "app_webui"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<script src='app.js'></script>", encoding="utf-8")
+    (assets / "app.css").write_text("body{}", encoding="utf-8")
+    (assets / "app.js").write_text("window.loaded = true;", encoding="utf-8")
+    (assets / "core-settings.js").write_text("window.core = true;", encoding="utf-8")
+    (assets / "assets" / "app-icon.png").write_bytes(b"PNG")
+
+    class FakeService:
+        def catalog(self):
+            return {"plugins": [], "engine_online": False, "product_name": "测试机器人"}
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), _handler(FakeService(), manager_assets=assets)  # type: ignore[arg-type]
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(f"{base}/", timeout=2) as response:
+            assert response.status == 200
+            assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+            assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+        for path, expected in (
+            ("/app.css", b"body{}"),
+            ("/app.js", b"window.loaded = true;"),
+            ("/core-settings.js", b"window.core = true;"),
+            ("/assets/app-icon.png", b"PNG"),
+        ):
+            with urlopen(f"{base}{path}", timeout=2) as response:
+                assert response.status == 200
+                assert response.read() == expected
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_plugin_page_upload_forwards_large_audio_to_the_selected_feature() -> None:
     calls: list[tuple[str, str, int, str]] = []
 

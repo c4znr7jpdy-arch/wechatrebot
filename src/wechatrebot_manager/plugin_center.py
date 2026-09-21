@@ -2373,8 +2373,9 @@ def _asset_root() -> Path:
     raise FileNotFoundError("功能配置中心资源缺失，请重新安装管理器。")
 
 
-def _handler(service: PluginCenterService):
-    assets = _asset_root()
+def _handler(service: PluginCenterService, *, manager_assets: Path | None = None):
+    assets = manager_assets if manager_assets is not None else _asset_root()
+    manager_mode = manager_assets is not None
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "WeChatReBot"
@@ -2520,12 +2521,29 @@ def _handler(service: PluginCenterService):
                 if split.path in {"/", "/index.html"}:
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
-                if split.path == "/assets/app.css":
+                if manager_mode and split.path in {"/app.css", "/app.js", "/core-settings.js"}:
+                    content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
+                    self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
+                    return
+                if not manager_mode and split.path == "/assets/app.css":
                     self._serve_asset("app.css", "text/css; charset=utf-8")
                     return
-                if split.path == "/assets/app.js":
+                if not manager_mode and split.path == "/assets/app.js":
                     self._serve_asset("app.js", "text/javascript; charset=utf-8")
                     return
+                if manager_mode and split.path.startswith("/assets/"):
+                    asset_name = split.path.removeprefix("/assets/")
+                    if _PAGE_ID.fullmatch(asset_name):
+                        asset_types = {
+                            ".png": "image/png",
+                            ".webp": "image/webp",
+                            ".ico": "image/x-icon",
+                            ".woff2": "font/woff2",
+                        }
+                        content_type = asset_types.get(Path(asset_name).suffix.lower())
+                        if content_type:
+                            self._serve_asset(f"assets/{asset_name}", content_type)
+                            return
                 if split.path in {
                     "/assets/AlibabaPuHuiTi2-Regular.woff2",
                     "/assets/AlibabaPuHuiTi2-Bold.woff2",

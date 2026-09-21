@@ -261,7 +261,10 @@ class ApplicationApi:
         server = getattr(self, "_feature_page_server", None)
         if server is not None:
             return server
-        server = ThreadingHTTPServer(("127.0.0.1", 0), plugin_center_handler(self._features))
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            plugin_center_handler(self._features, manager_assets=_asset_root()),
+        )
         server.daemon_threads = True
         thread = threading.Thread(
             target=server.serve_forever,
@@ -1820,24 +1823,25 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
         title = f"{brand.display_name} · 机器人管理"
         if development:
             title += " [源码验证]"
-        window = webview.create_window(
-            title,
-            (_asset_root() / "index.html").resolve().as_uri(),
-            width=1380,
-            height=860,
-            min_size=(1080, 680),
-            background_color="#F3F6FA",
-            text_select=True,
-        )
-        tray = None
-        if not development:
-            tray = WindowsTrayController(window, brand.display_name)
-            window.events.shown += tray.start
-            window.events.closing += tray.handle_window_closing
-            window.events.closed += tray.stop
-        api._attach_window(window, tray)
-        window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
+        server = api._ensure_feature_page_server()
         try:
+            window = webview.create_window(
+                title,
+                f"http://127.0.0.1:{server.server_port}/",
+                width=1380,
+                height=860,
+                min_size=(1080, 680),
+                background_color="#F3F6FA",
+                text_select=True,
+            )
+            tray = None
+            if not development:
+                tray = WindowsTrayController(window, brand.display_name)
+                window.events.shown += tray.start
+                window.events.closing += tray.handle_window_closing
+                window.events.closed += tray.stop
+            api._attach_window(window, tray)
+            window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
             webview.start(gui="edgechromium", debug=False, private_mode=True)
             return 0
         finally:
