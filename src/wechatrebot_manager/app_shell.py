@@ -47,6 +47,7 @@ from .lifecycle import LifecycleController
 from .payload import PayloadError
 from .private_policy import PrivateChatPolicyService, PrivatePolicyError
 from .plugin_center import (
+    ConfigConflictError,
     EngineApiClient,
     EngineUnavailableError,
     PluginCenterError,
@@ -359,7 +360,7 @@ class ApplicationApi:
         error = definition.to_dict()
         # Policy validation errors are written for users. Never expose raw
         # filesystem/transport errors, which can contain paths or credentials.
-        if isinstance(exc, (GroupPolicyError, PrivatePolicyError)):
+        if isinstance(exc, (GroupPolicyError, PrivatePolicyError, ConfigConflictError)):
             error["detail"] = str(exc)
         self._lifecycle.events.emit(
             "APP_ERROR",
@@ -583,10 +584,13 @@ class ApplicationApi:
         feature_id: str,
         config: dict[str, Any],
         revision: str = "",
+        baseline: dict[str, Any] | None = None,
     ) -> dict[str, object]:
         try:
             return self._ok(
-                self._features.save(feature_id, config, revision or None)
+                self._features.save(
+                    feature_id, config, revision or None, baseline
+                )
             )
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")

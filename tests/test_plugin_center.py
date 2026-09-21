@@ -1139,6 +1139,63 @@ def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Pa
         service.save(public_id, updated, detail["revision"])
 
 
+def test_stale_form_rebases_visible_change_over_unrelated_runtime_write(
+    tmp_path: Path,
+) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    baseline = json.loads(json.dumps(detail["config"], ensure_ascii=False))
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "sample_configurable_feature_config.json"
+    )
+    external = json.loads(config_path.read_text(encoding="utf-8"))
+    external["unknown"]["runtime_default"] = "created-after-prefetch"
+    config_path.write_text(
+        json.dumps(external, ensure_ascii=False), encoding="utf-8"
+    )
+    edited = json.loads(json.dumps(baseline, ensure_ascii=False))
+    edited["model_group"]["provider_id"] = "vendor/reasoning-model"
+
+    service.save(public_id, edited, detail["revision"], baseline)
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["unknown"]["runtime_default"] == "created-after-prefetch"
+    assert saved["model_group"]["provider_id"] == "vendor/reasoning-model"
+
+
+def test_stale_form_still_rejects_same_visible_field_conflict(tmp_path: Path) -> None:
+    install, public_id = _install(tmp_path)
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False  # type: ignore[method-assign]
+    detail = service.detail(public_id)
+    baseline = json.loads(json.dumps(detail["config"], ensure_ascii=False))
+    config_path = (
+        install
+        / "app"
+        / "astrbot"
+        / "data"
+        / "config"
+        / "sample_configurable_feature_config.json"
+    )
+    external = json.loads(config_path.read_text(encoding="utf-8"))
+    external.setdefault("model_group", {})["provider_id"] = "external/model"
+    config_path.write_text(
+        json.dumps(external, ensure_ascii=False), encoding="utf-8"
+    )
+    edited = json.loads(json.dumps(baseline, ensure_ascii=False))
+    edited["model_group"]["provider_id"] = "vendor/reasoning-model"
+
+    with pytest.raises(ConfigConflictError, match="同一项设置"):
+        service.save(public_id, edited, detail["revision"], baseline)
+
+
 def test_offline_save_validates_field_types(tmp_path: Path) -> None:
     _, public_id = _install(tmp_path)
     service = PluginCenterService(tmp_path / "install")
