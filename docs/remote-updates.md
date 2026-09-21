@@ -10,7 +10,7 @@
 
 `https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json`
 
-服务器发布目录为 `/srv/wechatrebot-updates`，内部在线更新 ZIP 放在 `releases/`，稳定清单为根目录的 `stable.json`。客户手动下载页为 `https://ss.xiuxianjyj.xin/wechatrebot-updates/`，面向客户的完整安装 ZIP 放在 `downloads/`，页面读取根目录的 `download.json` 展示版本、实际文件大小、更新说明和 SHA-256。
+服务器发布目录为 `/srv/wechatrebot-updates`，内部在线更新 ZIP 放在 `releases/`，稳定清单为根目录的 `stable.json`。客户手动下载页默认返回 404；面向客户的完整安装 ZIP 仍放在 `downloads/`，根目录的 `download.json` 继续保存版本、实际文件大小、更新说明和 SHA-256，供发布流程核对版本但不展示网页。
 
 正式首发前还必须完成：
 
@@ -55,7 +55,7 @@ python scripts\build_update_status.py `
 
 ### 完整载荷发布
 
-运行时、AstrBot 插件、桥接程序、hook，或旧单文件管理器的引导修复必须使用完整载荷一键入口。该入口内部依次完成全量测试、发布元数据校验、管理器冻结、便携运行时构建、staging 组装、面向客户的完整安装 ZIP 与校验文件生成、在线更新载荷扫描、Ed25519 签名、上传、Nginx 配置校验、稳定清单与下载页元数据原子切换，以及公网下载/解压冒烟；下载页元数据验收失败时会同时恢复上一份下载信息和稳定清单。
+运行时、AstrBot 插件、桥接程序、hook，或旧单文件管理器的引导修复必须使用完整载荷一键入口。该入口内部依次完成全量测试、发布元数据校验、管理器冻结、便携运行时构建、staging 组装、面向客户的完整安装 ZIP 与校验文件生成、在线更新载荷扫描、Ed25519 签名、上传、Nginx 配置校验、稳定清单与客户下载元数据原子切换，以及公网下载/解压冒烟；客户下载元数据验收失败时会同时恢复上一份下载信息和稳定清单，下载页入口始终保持 404。
 
 ```powershell
 .\scripts\publish-full-update.ps1 `

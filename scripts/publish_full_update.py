@@ -491,7 +491,7 @@ def _stage_download_site(
                 payload_move = ""
                 print("服务器已存在摘要一致的在线安装载荷，跳过重复上传。", flush=True)
     else:
-        print("客户安装包使用 OSS/CDN，服务器仅发布下载页和元数据。", flush=True)
+        print("客户安装包使用 OSS/CDN，服务器仅发布元数据并保持下载页隐藏。", flush=True)
     publisher._scp(index_source, host, index_upload)
     publisher._scp(metadata_path, host, metadata_upload)
     publisher._scp(rendered_nginx, host, nginx_upload)

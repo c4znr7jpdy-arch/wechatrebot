@@ -264,7 +264,12 @@ def main(argv=None) -> int:
                      ("downloads", files["checksum"], "text/plain")],
            args.ossutil or oss.find_ossutil(), args.credential_config)
     deploy_page(files["metadata"], args)
-    print(json.dumps({"published": True, "page": args.base_url + "/", "download": expected_url}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"published": True, "page_hidden": True, "download": expected_url},
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
