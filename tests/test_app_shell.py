@@ -1323,7 +1323,8 @@ def test_model_combobox_opens_the_complete_discovered_list_before_filtering() ->
     assert "if (event.isComposing) return;" in script
     assert 'combobox.classList.toggle("open-above"' in script
     assert ".model-combobox.open-above .model-options" in styles
-    assert 'discover_provider_models: () => ok({items: ["grok-4.6", "deepseek-chat", "gpt-5.4", "claude-sonnet-4.5", "gemini-2.5-pro", "qwen3-max"], total: 6}' in script
+    assert 'discover_provider_models: () => ok({items: ["deepseek-flash", "glm-4.6v", "gemini-3.8-flash", "qwen-plus", "doubao-seed-2-0-lite-260215"], total: 5}' in script
+    assert '"grok-4.6"' not in script[script.index("discover_provider_models: () => ok("):]
 
 
 def test_model_editor_keeps_natural_height_and_explains_default_selection() -> None:
@@ -1335,8 +1336,9 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
     assert "#page-settings .provider-editor-layout { flex: none; min-height: auto; align-items: start; }" in styles
     assert 'id="providerSaveIntentTitle"' in markup
     assert 'id="saveProvider"' in markup
-    assert 'renderProviderSaveIntent(!(state.bootstrap?.providers || []).length);' in script
-    assert 'renderProviderSaveIntent(Boolean(service.is_default));' in script
+    assert 'providerWillBeDefault(form.elements.service_kind.value, "")' in script
+    assert 'if (serviceKind !== "chat") return false;' in script
+    assert 'renderProviderSaveIntent(Boolean(service.is_default), service.service_kind || "chat");' in script
     assert '"模型服务已保存，当前回复模型保持不变。"' in script
 
 

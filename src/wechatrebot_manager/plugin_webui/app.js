@@ -246,6 +246,7 @@ function fieldRole(key, schema) {
   const normalized = String(key || "").toLowerCase();
   if (special === "select_persona") return "persona";
   if (special === "select_embedding_provider" || providerType === "embedding" || normalized.includes("embedding_provider")) return "embedding";
+  if (providerType === "image" || providerType === "image_generation" || normalized.includes("image_provider") || normalized.includes("image_model")) return "image";
   if (providerType === "rerank" || normalized.includes("rerank_provider")) return "rerank";
   if (special === "select_provider" || normalized.endsWith("provider_id")) return "chat";
   if (normalized.includes("persona") && (normalized.endsWith("_id") || normalized.endsWith("_name"))) return "persona";
@@ -264,6 +265,7 @@ function choicesFor(key, schema, current) {
   if (role === "chat") choices = clone(state.detail.providers || []);
   if (role === "embedding") choices = clone(state.detail.embedding_providers || []);
   if (role === "rerank") choices = clone(state.detail.rerank_providers || []);
+  if (role === "image") choices = clone(state.detail.image_providers || []);
   if (role === "persona") choices = (state.detail.personas || []).map((value) => ({ value, label: value }));
   if (choices && current !== null && current !== undefined && current !== "" && !choices.some((item) => item.value === current)) {
     choices.unshift({ value: current, label: `当前值（模型列表中已不可用） · ${current}`, unavailable: true });
@@ -275,6 +277,7 @@ function blankChoiceLabel(role, schema = {}) {
   if (schema._blank_label) return customerText(schema._blank_label);
   if (role === "persona") return "跟随默认人格";
   if (["chat", "embedding", "rerank"].includes(role)) return "跟随机器人默认模型";
+  if (role === "image") return "选择已配置的图片模型";
   return "请选择";
 }
 

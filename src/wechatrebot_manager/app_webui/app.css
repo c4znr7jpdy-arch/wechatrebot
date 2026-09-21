@@ -279,6 +279,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .config-tabs button { padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; cursor: pointer; font-weight: 700; }
 .config-tabs button.active { color: var(--blue-700); border-bottom-color: var(--blue-600); }
 .feature-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 18px; padding: 8px 0 80px; }
+#featureDetail[data-feature-name="视频理解"] .feature-form > .form-field:nth-child(3) { grid-column: 1 / -1; }
 .config-section { grid-column: 1 / -1; padding: 14px; background: #f8fafc; border: 1px solid var(--line); border-radius: 9px; }
 .config-section > h3 { margin: 0 0 12px; font-size: 14px; }
 .config-section.grouped { padding: 18px 20px; background: var(--surface); border-left: 3px solid var(--blue-600); }
@@ -1366,6 +1367,8 @@ tbody tr:hover { background: #fbfdff; }
 .web-search-provider-summary-copy .eyebrow { color: var(--blue-700); }
 .web-search-provider-summary-copy strong { overflow-wrap: anywhere; font-size: 14px; }
 .web-search-provider-summary-copy small { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.web-search-provider-summary-copy a { color: var(--blue-700); font-weight: 700; text-decoration: none; }
+.web-search-provider-summary-copy a:hover { text-decoration: underline; }
 .core-form { padding-bottom: 22px; }
 .core-identity-card { grid-column: 1 / -1; margin: 16px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
 .core-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }

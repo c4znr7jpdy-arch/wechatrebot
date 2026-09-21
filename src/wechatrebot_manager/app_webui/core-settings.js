@@ -3,10 +3,10 @@
   "use strict";
 
   window.createRobotCoreSettings = function (helpers) {
-    const {read, request, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
+    const {read, request, getGroups, getContacts, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-    const state = {detail: null, stale: false, view: "global", tab: "basic", templateId: null, templates: [], bindings: {}, chats: [], statuses: [], config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", monitorBusy: false, feedback: "", kind: "all"};
+    const state = {detail: null, stale: false, view: "global", tab: "basic", templateId: null, templates: [], bindings: {}, chats: [], statuses: [], groups: [], contacts: [], config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", monitorBusy: false, feedback: "", kind: "all"};
     const root = () => $("#coreDetail");
     const visible = () => $("#page-settings").classList.contains("active") && !$("#coreWorkspace").hidden;
     const clone = (value) => structuredClone(value || {});
@@ -61,8 +61,20 @@
         if (strict) throw error;
         return;
       }
-      try { state.chats = await request("GET", "chats") || []; }
-      catch (error) { state.capabilityWarning = `联系人列表读取失败：${error.message}。模板与全局配置仍可编辑。`; }
+      try {
+        const results = await Promise.allSettled([
+          request("GET", "chats"),
+          typeof getGroups === "function" ? getGroups(false) : Promise.resolve({items: []}),
+          typeof getContacts === "function" ? getContacts(false) : Promise.resolve({items: []}),
+        ]);
+        state.chats = results[0].status === "fulfilled" && Array.isArray(results[0].value) ? results[0].value : [];
+        state.groups = results[1].status === "fulfilled" ? (results[1].value?.items || []) : [];
+        state.contacts = results[2].status === "fulfilled" ? (results[2].value?.items || []) : [];
+        if (results.slice(1).some((item) => item.status === "rejected")) {
+          state.capabilityWarning = "联系人目录暂未同步，已保留绑定关系；连接微信后刷新即可补齐名称。";
+        }
+      }
+      catch (error) { state.capabilityWarning = `聊天目录读取失败：${error.message}。模板与全局配置仍可编辑。`; }
     }
 
     function renderNavigation() {
@@ -131,7 +143,7 @@
       const identityMarkup = state.view === "global" && state.tab === "basic" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><span class="eyebrow">常用设置</span><h3 id="coreIdentityTitle">机器人名称与管理员</h3><p>机器人名称同时用于窗口、导航、自我介绍和首个点名昵称。</p></div><span class="status-badge">统一身份</span></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" required value="${esc(state.identity.robot_name || "小妹")}"><small>默认名称为“小妹”；保存后不再保留旧名称。</small><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><small>留空表示暂不设置管理员；管理员权限在机器人重启后生效。</small><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
       root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "全局配置")}</h2><p>${state.view === "template" ? "身份、唤醒、离场应答、回复长度、能量与节奏；其余参数跟随全局。" : "完整对话核心配置，机器人名称、管理员和群聊身份都从这里统一管理。"}</p></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : '<span class="status-badge online">统一加载</span>'}</div>
         ${state.view === "global" ? `<div class="config-tabs" aria-label="核心配置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key, label]) => `<button type="button" data-core-tab="${key}" aria-pressed="${state.tab === key}" class="${state.tab === key ? "active" : ""}">${label}</button>`).join("")}</div>${state.tab === "models" ? '<p class="feature-prerequisite">群聊分析模型是完整使用所必需的；这里的绑定不会改变日常回复模型。</p>' : ''}` : ''}
-        <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<label class="form-field full">模板说明<textarea name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>` : ''}${identityMarkup}${schemaMarkup(schema(), state.config, [], "core-")}</form>
+        <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<label class="form-field full">模板说明<textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>` : ''}${identityMarkup}${schemaMarkup(schema(), state.config, [], "core-")}</form>
         <div class="core-savebar"><span class="form-note" id="coreNote" role="status">${esc(note())}</span><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
       if (state.view === "template") attachOverrides();
       else attachResets();
@@ -250,28 +262,48 @@
       return Object.keys(state.bindings).find((key) => !privateOrigin(key) && key.split(':').at(-1) === suffix) || id;
     }
 
+    function directoryChat(item) {
+      const rawId = String(item.chat_id || "");
+      const canonical = rawId.split(":").at(-1) || rawId;
+      const isPrivate = /:FriendMessage:|:PrivateMessage:/.test(rawId) || !canonical.endsWith("@chatroom") && item.kind === "private";
+      const directory = isPrivate
+        ? state.contacts.find((entry) => entry.user_id === canonical)
+        : state.groups.find((entry) => entry.group_id === canonical);
+      const technical = /^(?:N\/A|unknown|未命名联系人)$/i.test(String(item.display_name || "")) || /aiocqhttp|GroupMessage|FriendMessage|PrivateMessage/i.test(String(item.display_name || ""));
+      const name = directory?.name || directory?.nickname || (!technical ? item.display_name : "") || (isPrivate ? "私聊联系人（待同步）" : "群聊（待同步）");
+      return {...item, kind: isPrivate ? "private" : "group", display_name: name, directory_name: directory?.name || "", directory_ready: Boolean(directory)};
+    }
+
     function renderMonitor() {
       const byId = new Map(state.chats.map((item) => [item.chat_id, {...item, status: {current_status: 'Unknown'}}]));
       state.statuses.forEach((item) => byId.set(item.chat_id, item));
       Object.keys(state.bindings).forEach((id) => { if (![...byId.keys()].some((key) => bindingKey(key) === id)) byId.set(id, {chat_id: id, status: {current_status: 'Unknown'}}); });
-      const items = [...byId.values()].filter((item) => { const kind = item.kind || (/:FriendMessage:|:PrivateMessage:/.test(item.chat_id) ? 'private' : 'group'); return state.kind === 'all' || state.kind === kind; });
-      root().innerHTML = `<div class="core-detail-heading"><div><h2>联系人监控与绑定</h2><p>每 3 秒读取一次在场状态、能量与最近决策，不向聊天发送消息。</p></div><button class="button secondary small" id="refreshCoreMonitor" type="button">刷新状态</button></div><div class="config-tabs" aria-label="联系人类型">${[['all', '全部'], ['group', '群聊'], ['private', '私聊']].map(([kind, label]) => `<button type="button" data-core-kind="${kind}" aria-pressed="${state.kind === kind}" class="${state.kind === kind ? 'active' : ''}">${label}</button>`).join('')}</div><div class="core-monitor-grid">${items.map((item) => {
+      const items = [...byId.values()].map(directoryChat).filter((item) => state.kind === 'all' || state.kind === item.kind);
+      root().innerHTML = `<div class="core-detail-heading"><div><h2>聊天状态与配置</h2><p>每 3 秒读取一次聊天状态、能量与最近决策，不向聊天发送消息。</p></div><button class="button secondary small" id="refreshCoreMonitor" type="button" data-action-bound disabled>刷新状态</button></div><div class="config-tabs" aria-label="聊天类型">${[['all', '全部'], ['group', '群聊'], ['private', '私聊']].map(([kind, label]) => `<button type="button" data-action-bound disabled data-core-kind="${kind}" aria-pressed="${state.kind === kind}" class="${state.kind === kind ? 'active' : ''}">${label}</button>`).join('')}</div><div class="core-monitor-grid">${items.map((item) => {
         const status = item.status?.current_status;
         const patrol = item.patrol || {};
-        return `<article class="core-chat-card"><div class="core-chat-heading"><strong>${esc(item.display_name || '未命名联系人')}</strong><span class="status-badge ${status === 'OBSERVATION' ? 'online' : ''}">${status === 'OBSERVATION' ? '在场' : status === 'NOT_PRESENT' ? '离场' : '状态待确认'}</span></div><small class="core-chat-id">${esc(item.chat_id)}</small><p>能量 ${item.energy == null ? '—' : Math.round(item.energy)} · ${esc({secretary: '巡检中', assistant: '点名等待', rest: '休息中'}[patrol.waiting] || '空闲')}${patrol.waiting ? ` ${Math.round(patrol.remaining || 0)}/${Math.round(patrol.total || 0)} 秒` : ''}</p><p>最近决策：${item.last_decision ? `${item.last_decision.should_reply ? '回复' : '不回复'} · ${esc(item.last_decision.summary || '无说明')}` : '暂无'}</p><label>绑定配置模板<select data-core-binding="${esc(item.chat_id)}"><option value="">全局配置（默认）</option>${state.templates.map((tpl) => `<option value="${esc(tpl.id)}" ${state.bindings[bindingKey(item.chat_id)] === tpl.id ? 'selected' : ''}>${esc(tpl.name)}</option>`).join('')}</select></label></article>`;
+        return `<article class="core-chat-card"><div class="core-chat-heading"><strong>${esc(item.display_name)}</strong><span class="status-badge ${status === 'OBSERVATION' ? 'online' : ''}">${status === 'OBSERVATION' ? '在场' : status === 'NOT_PRESENT' ? '离场' : '状态待确认'}</span></div><small class="core-chat-id">${item.directory_ready ? (item.kind === 'group' ? '群聊目录已同步' : '联系人目录已同步') : '等待微信目录同步'}</small><p>能量 ${item.energy == null ? '—' : Math.round(item.energy)} · ${esc({secretary: '巡检中', assistant: '点名等待', rest: '休息中'}[patrol.waiting] || '空闲')}${patrol.waiting ? ` ${Math.round(patrol.remaining || 0)}/${Math.round(patrol.total || 0)} 秒` : ''}</p><p>最近决策：${item.last_decision ? `${item.last_decision.should_reply ? '回复' : '不回复'} · ${esc(item.last_decision.summary || '无说明')}` : '暂无'}</p><label>绑定配置模板<select data-core-binding="${esc(item.chat_id)}"><option value="">全局配置（默认）</option>${state.templates.map((tpl) => `<option value="${esc(tpl.id)}" ${state.bindings[bindingKey(item.chat_id)] === tpl.id ? 'selected' : ''}>${esc(tpl.name)}</option>`).join('')}</select></label></article>`;
       }).join('') || '<div class="empty-state compact"><p>暂无联系人；产生聊天消息后会显示，也会保留已有绑定关系。</p></div>'}</div><p class="form-note" id="coreMonitorNote" role="status">${esc(state.feedback)}</p>`;
       $$('[data-core-kind]', root()).forEach((button) => button.addEventListener('click', () => { state.kind = button.dataset.coreKind; renderMonitor(); }));
       $("#refreshCoreMonitor").addEventListener('click', () => refreshMonitor(true));
       $$('[data-core-binding]', root()).forEach((select) => select.addEventListener('change', () => busy(async () => { await request('POST', 'bindings/set', {chat_id: bindingKey(select.dataset.coreBinding), template_id: select.value}); await loadProfiles(true); state.feedback = '绑定已生效，未向联系人发送消息。'; await refreshMonitor(true); renderMonitor(); })));
+      $$('[data-action-bound]', root()).forEach((button) => { button.disabled = false; });
     }
 
     async function refreshMonitor(force = false) {
       if (!visible() || state.view !== 'monitor' || state.monitorBusy || !state.profilesAvailable || !force && (state.busy || root().contains(document.activeElement) && document.activeElement.tagName === 'SELECT')) return;
       state.monitorBusy = true;
       try {
-        const [profiles, statuses] = await Promise.all([request('GET', 'profiles'), request('GET', 'chat_status')]);
+        const [profiles, statuses, groups, contacts] = await Promise.all([
+          request('GET', 'profiles'),
+          request('GET', 'chat_status'),
+          force && typeof getGroups === 'function' ? getGroups(true) : Promise.resolve(null),
+          force && typeof getContacts === 'function' ? getContacts(true) : Promise.resolve(null),
+        ]);
         if (state.busy && !force) return;
         state.templates = profiles.templates || []; state.bindings = profiles.bindings || {}; state.statuses = statuses || [];
+        if (groups) state.groups = groups.items || [];
+        if (contacts) state.contacts = contacts.items || [];
         if (visible() && state.view === 'monitor') { renderNavigation(); renderMonitor(); }
       }
       catch (error) { state.feedback = `状态读取失败：${error.message}；当前显示上次读取的数据。`; if (state.view === 'monitor' && $("#coreMonitorNote")) $("#coreMonitorNote").textContent = state.feedback; }
@@ -279,6 +311,8 @@
     }
 
     function init() {
+      const monitorNav = $('[data-core-view="monitor"]');
+      if (monitorNav) monitorNav.innerHTML = '聊天状态与配置<span>状态、能量与最近决策</span>';
       $$('[data-core-view]').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.coreView)));
       $("#refreshCore").addEventListener('click', () => load(true));
       $("#newCoreTemplate").addEventListener('click', createTemplate);

@@ -61,6 +61,7 @@ from .provider import (
     DEFAULT_PROVIDER_API_BASE,
     DEFAULT_PROVIDER_MODEL,
     DEFAULT_PROVIDER_SOURCE_ID,
+    MODEL_PROVIDER_PRESETS,
     OpenAIProviderProfile,
     discover_openai_models,
     provider_source_id,
@@ -410,29 +411,7 @@ class ApplicationApi:
                     },
                     "providers": [item.to_public_dict() for item in providers],
                     "experience": self._experience_service().snapshot(),
-                    "provider_presets": [
-                        {
-                            "id": "free_grok",
-                            "name": "免费 Grok 4.6（推荐）",
-                            "api_base": DEFAULT_PROVIDER_API_BASE,
-                            "model": DEFAULT_PROVIDER_MODEL,
-                            "description": "面向普通用户的默认回复服务。",
-                        },
-                        {
-                            "id": "deepseek",
-                            "name": "DeepSeek（自用）",
-                            "api_base": DEEPSEEK_PROVIDER_API_BASE,
-                            "model": DEEPSEEK_PROVIDER_MODEL,
-                            "description": "适合在你自己的设备上使用。",
-                        },
-                        {
-                            "id": "custom",
-                            "name": "其他兼容服务",
-                            "api_base": "",
-                            "model": "",
-                            "description": "填写兼容接口地址、模型名称和密钥。",
-                        },
-                    ],
+                    "provider_presets": [dict(item) for item in MODEL_PROVIDER_PRESETS],
                     "update": {
                         "enabled": bool(channel and channel.enabled),
                         "channel": channel.channel if channel else "stable",
@@ -1149,8 +1128,20 @@ class ApplicationApi:
                 (item for item in services if item.provider_id == original_id),
                 None,
             )
-            make_default = not services or bool(
-                selected is not None and selected.is_default
+            service_kind = str(
+                values.get("service_kind")
+                or (getattr(selected, "service_kind", "chat") if selected is not None else "chat")
+            ).strip().casefold()
+            chat_services = [
+                item for item in services
+                if getattr(item, "service_kind", "chat") == "chat"
+                and not (
+                    getattr(item, "is_recommended", False)
+                    and str(getattr(item, "model", "")).casefold() == DEFAULT_PROVIDER_MODEL.casefold()
+                )
+            ]
+            make_default = service_kind == "chat" and (
+                not chat_services or bool(selected is not None and selected.is_default)
             )
             current = load_provider_profile(self._install_root)
             api_key = str(values.get("api_key") or "").strip()
@@ -1175,6 +1166,12 @@ class ApplicationApi:
                 thinking_enabled=(
                     self._requested_thinking(values["thinking_enabled"])
                     if "thinking_enabled" in values else None
+                ),
+                service_kind=service_kind,
+                modalities=tuple(
+                    item.strip()
+                    for item in str(values.get("modalities") or "").split(",")
+                    if item.strip()
                 ),
             )
             errors = profile.validate()
@@ -1222,6 +1219,14 @@ class ApplicationApi:
                     "is_recommended": (
                         saved.source_id == DEFAULT_PROVIDER_SOURCE_ID
                         and saved.model == DEFAULT_PROVIDER_MODEL
+                    ),
+                    "service_kind": saved.service_kind,
+                    "modalities": list(saved.modalities),
+                    "modality_label": (
+                        "向量" if saved.service_kind == "embedding"
+                        else "图片" if saved.service_kind == "image"
+                        else "多模态" if set(saved.modalities) & {"image", "audio"}
+                        else "文本"
                     ),
                     "thinking_supported": supports_thinking_toggle(saved.api_base, saved.model),
                     "thinking_enabled": profile.thinking_enabled,
@@ -1313,6 +1318,8 @@ class ApplicationApi:
             )
             if selected is None or not selected.configured:
                 raise ValueError("所选模型服务不存在或尚未完成配置。")
+            if getattr(selected, "service_kind", "chat") != "chat":
+                raise ValueError("只有聊天模型可以设为默认回复模型。")
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
             if hot_applied:
@@ -1439,6 +1446,7 @@ class ApplicationApi:
                         if item.provider_id == replacement_provider_id
                         and item.provider_id != provider_id
                         and item.configured
+                        and getattr(item, "service_kind", "chat") == "chat"
                     ),
                     None,
                 )

@@ -210,6 +210,12 @@ def test_core_ui_replaces_persona_and_keeps_templates_and_monitor():
     assert 'coreTemplateSource' in html and 'template_description' in core
     assert 'bindingKey(select.dataset.coreBinding)' in core
     assert 'coreSettings.guard' in app and 'coreSettings.busy' in app
+    assert '聊天状态与配置' in html + core
+    assert '联系人监控与绑定' not in html + core
+    assert 'state.groups.find((entry) => entry.group_id === canonical)' in core
+    assert 'state.contacts.find((entry) => entry.user_id === canonical)' in core
+    assert '等待微信目录同步' in core
+    assert 'getGroups: (refresh = false) => api("get_groups", refresh)' in app
     assert '天使之心' not in html + core and 'AngelHeart' not in html + core
 
 

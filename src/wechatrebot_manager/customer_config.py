@@ -15,6 +15,8 @@ from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
     infer_thinking_mode,
+    infer_provider_modalities,
+    normalize_service_kind,
     provider_display_name,
     supports_thinking_toggle,
     thinking_mode_matches,
@@ -23,13 +25,13 @@ from .provider import (
 from .runtime_config import normalize_admin_id, write_runtime_configs
 
 
-WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str], ...] = (
-    ("tavily", "Tavily", "适合通用英文与国际资讯搜索。"),
-    ("bocha", "博查 Bocha", "中文资讯与网页搜索，国内访问更友好。"),
-    ("brave", "Brave Search", "隐私优先的通用网页搜索。"),
-    ("baidu_app_builder", "百度 AI Search", "百度生态的中文搜索服务。"),
-    ("firecrawl", "Firecrawl", "适合网页抓取与深度内容提取。"),
-    ("exa", "Exa", "适合语义检索与研究型搜索。"),
+WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
+    ("tavily", "Tavily", "适合通用英文与国际资讯搜索。免费方案每月含 1,000 API credits，实际消耗按请求类型计算。", "https://app.tavily.com/"),
+    ("bocha", "博查 Bocha", "中文资讯与网页搜索，国内访问更友好。", "https://open.bocha.cn/"),
+    ("brave", "Brave Search", "隐私优先的通用网页搜索。", "https://brave.com/search/api/"),
+    ("baidu_app_builder", "百度 AI Search", "百度生态的中文搜索服务。", "https://cloud.baidu.com/product/ai_search"),
+    ("firecrawl", "Firecrawl", "适合网页抓取与深度内容提取。", "https://www.firecrawl.dev/"),
+    ("exa", "Exa", "适合语义检索与研究型搜索。", "https://exa.ai/"),
 )
 _WEB_SEARCH_PROVIDER_KEYS = {item[0] for item in WEB_SEARCH_PROVIDERS}
 _WEB_SEARCH_KEY_FIELDS = {
@@ -44,7 +46,7 @@ _WEB_SEARCH_KEY_FIELDS = {
 
 def _web_search_provider_items(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
-    for provider_id, name, description in WEB_SEARCH_PROVIDERS:
+    for provider_id, name, description, website_url in WEB_SEARCH_PROVIDERS:
         raw = settings.get(_WEB_SEARCH_KEY_FIELDS[provider_id])
         if provider_id == "baidu_app_builder":
             configured = bool(str(raw or "").strip())
@@ -58,6 +60,7 @@ def _web_search_provider_items(settings: dict[str, Any]) -> dict[str, dict[str, 
             "id": provider_id,
             "name": name,
             "description": description,
+            "website_url": website_url,
             "configured": configured,
             "key_count": key_count,
         }
@@ -204,6 +207,8 @@ class ProviderService:
     is_recommended: bool
     reference_modules: tuple[str, ...] = ()
     thinking_enabled: bool = True
+    service_kind: str = "chat"
+    modalities: tuple[str, ...] = ("text",)
 
     @property
     def thinking_supported(self) -> bool:
@@ -230,6 +235,17 @@ class ProviderService:
             "is_recommended": self.is_recommended,
             "thinking_supported": self.thinking_supported,
             "thinking_enabled": self.thinking_enabled,
+            "service_kind": self.service_kind,
+            "modalities": list(self.modalities),
+            "modality_label": (
+                "向量"
+                if self.service_kind == "embedding"
+                else "图片"
+                if self.service_kind == "image"
+                else "多模态"
+                if len(set(self.modalities) & {"image", "audio"})
+                else "文本"
+            ),
             "references": [
                 _plugin_display_name(module_name)
                 for module_name in self.reference_modules
@@ -429,7 +445,13 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
             or source.get("provider_type")
             or "chat_completion"
         ).casefold()
-        if provider_type not in {"", "chat", "chat_completion"}:
+        try:
+            service_kind = normalize_service_kind(
+                provider.get("service_kind")
+                or provider.get("type")
+                or provider_type
+            )
+        except ValueError:
             continue
         keys = source.get("key")
         api_key = str(keys[0]) if isinstance(keys, list) and keys else ""
@@ -455,6 +477,10 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
                         extra_body, api_base=api_base, model=model
                     )
                 ),
+                service_kind=service_kind,
+                modalities=infer_provider_modalities(
+                    service_kind, model, provider.get("modalities")
+                ),
             )
         )
     services = [
@@ -471,6 +497,8 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
                 install, item.provider_id
             ),
             thinking_enabled=item.thinking_enabled,
+            service_kind=item.service_kind,
+            modalities=item.modalities,
         )
         for item in services
     ]

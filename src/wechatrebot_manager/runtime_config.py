@@ -298,7 +298,14 @@ def _apply_provider_to_astrbot(
         updated_fields=("id", "key", "api_base", "enable", "timeout"),
     )
     model_payload = normalized.astrbot_model()
-    updated_model_fields = ("id", "provider_source_id", "model", "enable")
+    updated_model_fields = (
+        "id",
+        "provider_source_id",
+        "model",
+        "service_kind",
+        "modalities",
+        "enable",
+    )
     if normalized.thinking_enabled is not None:
         existing_models = payload.get("provider")
         existing_model = next(

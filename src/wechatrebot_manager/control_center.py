@@ -24,10 +24,9 @@ from .customer_logs import log_sources, sanitize_log_text, tail_log
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
 from .launcher import ProcessSupervisor, ServiceLaunchError, ServiceSpec, build_service_specs
 from .provider import (
-    DEFAULT_PROVIDER_API_BASE,
-    DEFAULT_PROVIDER_MODEL,
-    DEFAULT_PROVIDER_SOURCE_ID,
+    MODEL_PROVIDER_PRESETS,
     OpenAIProviderProfile,
+    provider_source_id,
 )
 from .plugin_center import launch_plugin_center
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
@@ -669,23 +668,35 @@ class ControlCenter:
         surface = self._surface(page, padding=24)
         surface.pack(fill="x")
         profile = load_provider_profile(self.install_root)
+        self.model_presets = {
+            str(item["name"]): item
+            for item in MODEL_PROVIDER_PRESETS
+            if item.get("service_kind") == "chat"
+        }
+        default_preset = next(
+            item for item in MODEL_PROVIDER_PRESETS if item.get("id") == "deepseek"
+        )
+        selected_preset = next(
+            (
+                str(item["name"])
+                for item in self.model_presets.values()
+                if profile is not None
+                and str(item.get("api_base") or "").rstrip("/") == profile.api_base.rstrip("/")
+                and str(item.get("model") or "") == profile.model
+            ),
+            "其他兼容服务" if profile is not None else str(default_preset["name"]),
+        )
         self.model_notice_var = self.tk.StringVar()
         self.ttk.Label(surface, textvariable=self.model_notice_var, style="SurfaceMuted.TLabel", wraplength=760).pack(anchor="w", pady=(0, 12))
         self.model_vars = {
             "preset": self.tk.StringVar(
-                value=(
-                    "Grok 4.6"
-                    if profile
-                    and profile.source_id == DEFAULT_PROVIDER_SOURCE_ID
-                    and profile.model == DEFAULT_PROVIDER_MODEL
-                    else "自定义"
-                )
+                value=selected_preset
             ),
             "api_base": self.tk.StringVar(
-                value=profile.api_base if profile else DEFAULT_PROVIDER_API_BASE
+                value=profile.api_base if profile else str(default_preset["api_base"])
             ),
             "model": self.tk.StringVar(
-                value=profile.model if profile else DEFAULT_PROVIDER_MODEL
+                value=profile.model if profile else str(default_preset["model"])
             ),
             "api_key": self.tk.StringVar(value=profile.api_key if profile else ""),
             "show_key": self.tk.BooleanVar(value=False),
@@ -693,7 +704,12 @@ class ControlCenter:
         preset_row = self.ttk.Frame(surface, style="Surface.TFrame")
         preset_row.pack(fill="x", pady=7)
         self.ttk.Label(preset_row, text="模型类型", style="Surface.TLabel", width=15).pack(side="left")
-        combo = self.ttk.Combobox(preset_row, textvariable=self.model_vars["preset"], values=("Grok 4.6", "自定义"), state="readonly")
+        combo = self.ttk.Combobox(
+            preset_row,
+            textvariable=self.model_vars["preset"],
+            values=tuple(self.model_presets),
+            state="readonly",
+        )
         combo.pack(side="left", fill="x", expand=True)
         combo.bind("<<ComboboxSelected>>", self._model_preset_changed)
         self._form_row(surface, "API 地址", self.model_vars["api_base"])
@@ -1206,9 +1222,10 @@ class ControlCenter:
             self.robot_notice_var.set(f"保存失败：{exc}")
 
     def _model_preset_changed(self, _event=None) -> None:
-        if self.model_vars["preset"].get() == "Grok 4.6":
-            self.model_vars["api_base"].set(DEFAULT_PROVIDER_API_BASE)
-            self.model_vars["model"].set(DEFAULT_PROVIDER_MODEL)
+        preset = self.model_presets.get(self.model_vars["preset"].get())
+        if preset is not None:
+            self.model_vars["api_base"].set(str(preset.get("api_base") or ""))
+            self.model_vars["model"].set(str(preset.get("model") or ""))
 
     def _toggle_api_key(self) -> None:
         self.api_key_entry.configure(show="" if self.model_vars["show_key"].get() else "●")
@@ -1223,7 +1240,12 @@ class ControlCenter:
                 source_id=(
                     current.source_id
                     if current is not None
-                    else DEFAULT_PROVIDER_SOURCE_ID
+                    and current.api_base.rstrip("/")
+                    == self.model_vars["api_base"].get().strip().rstrip("/")
+                    else provider_source_id(
+                        self.model_vars["api_base"].get(),
+                        self.model_vars["model"].get(),
+                    )
                 ),
             )
             save_provider_profile(self.install_root, profile)
