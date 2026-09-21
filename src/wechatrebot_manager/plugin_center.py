@@ -1052,6 +1052,84 @@ def _merge_customer_config(
     return result
 
 
+_MISSING_CUSTOMER_VALUE = object()
+
+
+def _changed_customer_config(
+    schema: dict[str, Any],
+    submitted: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    """Return only customer-visible values changed since the form was read."""
+    result: dict[str, Any] = {}
+    for key, field in schema.items():
+        if (
+            not isinstance(field, dict)
+            or field.get("invisible") is True
+            or key not in submitted
+        ):
+            continue
+        submitted_value = submitted[key]
+        baseline_value = baseline.get(key, _MISSING_CUSTOMER_VALUE)
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            if not isinstance(submitted_value, dict):
+                if submitted_value != baseline_value:
+                    result[key] = copy.deepcopy(submitted_value)
+                continue
+            changed = _changed_customer_config(
+                field["items"],
+                submitted_value,
+                baseline_value if isinstance(baseline_value, dict) else {},
+            )
+            if changed:
+                result[key] = changed
+            continue
+        if (
+            baseline_value is _MISSING_CUSTOMER_VALUE
+            or submitted_value != baseline_value
+        ):
+            result[key] = copy.deepcopy(submitted_value)
+    return result
+
+
+def _customer_change_conflicts(
+    schema: dict[str, Any],
+    changed: dict[str, Any],
+    baseline: dict[str, Any],
+    current: dict[str, Any],
+) -> bool:
+    """Detect whether a changed visible field was also changed externally."""
+    for key, submitted_value in changed.items():
+        field = schema.get(key)
+        if not isinstance(field, dict):
+            return True
+        if _is_secret_field(str(key), field):
+            # Redacted baselines cannot prove whether the stored secret changed.
+            return True
+        baseline_value = baseline.get(key, _MISSING_CUSTOMER_VALUE)
+        current_value = current.get(key, _MISSING_CUSTOMER_VALUE)
+        if field.get("type") == "object" and isinstance(field.get("items"), dict):
+            if not isinstance(submitted_value, dict):
+                if current_value != baseline_value:
+                    return True
+                continue
+            if _customer_change_conflicts(
+                field["items"],
+                submitted_value,
+                baseline_value if isinstance(baseline_value, dict) else {},
+                current_value if isinstance(current_value, dict) else {},
+            ):
+                return True
+            continue
+        if (
+            baseline_value is _MISSING_CUSTOMER_VALUE
+            or current_value is _MISSING_CUSTOMER_VALUE
+            or current_value != baseline_value
+        ):
+            return True
+    return False
+
+
 def _with_runtime_choices(
     schema: dict[str, Any],
     *,
@@ -1950,19 +2028,36 @@ class PluginCenterService:
             "schedule_provider": schema_key in {"jiang_commands", "jiang_short_drama", _GROUP_ANALYSIS_MODULE},
         }
 
-    def save(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
+    def save(
+        self,
+        public_id: str,
+        config: dict[str, Any],
+        base_revision: str | None,
+        baseline: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         with _CONFIG_WRITE_LOCK:
-            return self._save_locked(public_id, config, base_revision)
+            return self._save_locked(public_id, config, base_revision, baseline)
 
-    def _save_locked(self, public_id: str, config: dict[str, Any], base_revision: str | None) -> dict[str, Any]:
+    def _save_locked(
+        self,
+        public_id: str,
+        config: dict[str, Any],
+        base_revision: str | None,
+        baseline: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         item = self._plugin(public_id)
         module_name = item.module_name
         if not item.configurable:
             raise PluginCenterError("这项功能没有可编辑的基础配置。")
         path = _config_path(self.install_root, module_name)
         stored = _read_object(path)
-        live_revision = ""
+        schema = _read_object(
+            _plugin_root(self.install_root) / module_name / "_conf_schema.json"
+        )
+        if item.catalog_key == _SETU_FEATURE_KEY:
+            schema = _with_setu_schema(schema)
         online = self.engine.is_available()
+        live_revision = ""
         if online:
             # Compare against the live engine snapshot, not a stale file that
             # may predate startup normalization or a previous hot reload.
@@ -1972,14 +2067,21 @@ class PluginCenterService:
             stored = live["config"]
             live_revision = str(live.get("revision") or "")
         current_revision = live_revision or _json_revision(stored)
+        submitted = config
         if base_revision and base_revision != current_revision:
-            raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
-        schema = _read_object(
-            _plugin_root(self.install_root) / module_name / "_conf_schema.json"
-        )
-        if item.catalog_key == _SETU_FEATURE_KEY:
-            schema = _with_setu_schema(schema)
-        merged = _merge_customer_config(schema, config, stored)
+            if not isinstance(baseline, dict):
+                raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
+            changed = _changed_customer_config(schema, config, baseline)
+            current = _customer_config(
+                schema,
+                _normalize_config(schema, _merge_defaults(schema, stored)),
+            )
+            if _customer_change_conflicts(schema, changed, baseline, current):
+                raise ConfigConflictError(
+                    "同一项设置已在其他窗口修改，请重新读取后确认再保存。"
+                )
+            submitted = changed
+        merged = _merge_customer_config(schema, submitted, stored)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)
         if module_name == "jiang_image" and "local_proxy_port" in schema:

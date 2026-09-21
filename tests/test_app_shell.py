@@ -88,6 +88,7 @@ def test_policy_errors_expose_user_validation_but_not_raw_io_failures(tmp_path):
     for error, code in [
         (app_shell.GroupPolicyError('安静时段的时区不可用。'), '15001'),
         (app_shell.PrivatePolicyError('联系人规则已在其他窗口修改，请刷新后重试。'), '15002'),
+        (app_shell.ConfigConflictError('同一项设置已在其他窗口修改。'), '15001'),
     ]:
         result = api._failed(error, code)
         assert result['error']['code'] == code
@@ -828,7 +829,7 @@ def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
     assert ".provider-thinking-switch:focus-visible" in styles
 
 
-def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() -> None:
+def test_cached_feature_switch_revalidates_and_model_discovery_keeps_selection() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
     ).read_text(encoding="utf-8")
@@ -843,7 +844,8 @@ def test_cached_feature_switch_is_instant_and_model_discovery_keeps_selection() 
         )
     ]
 
-    assert "if (!force && !cacheNeedsRefresh) return;" in feature_loader
+    assert "if (!force) return;" not in feature_loader
+    assert "正在重新读取最新设置" in feature_loader
     assert 'await api("get_feature", featureId)' in feature_loader
     assert "form.elements.model.value = items[0]" not in model_discovery
 
@@ -864,7 +866,7 @@ def test_feature_detail_guards_optional_model_bindings_without_a_form() -> None:
     assert "$$('[data-optional-group-toggle]', $(\"#featureForm\"))" not in feature_renderer
 
 
-def test_feature_details_are_warmed_in_the_background() -> None:
+def test_feature_details_are_warmed_but_revalidated_before_editing() -> None:
     script = (
         Path(app_shell.__file__).with_name("app_webui") / "app.js"
     ).read_text(encoding="utf-8")
@@ -872,6 +874,12 @@ def test_feature_details_are_warmed_in_the_background() -> None:
     assert "async function prefetchFeatureDetails(generation)" in script
     assert "void prefetchFeatureDetails(++state.featurePrefetch);" in script
     assert "Math.min(3, pending.length)" in script
+    open_feature = script.split("async function openFeature", 1)[1].split(
+        "\n  function getAtPath", 1
+    )[0]
+    assert "if (!force) return;" not in open_feature
+    assert "Never expose a cached revision for edit" in open_feature
+    assert "当前仅显示上次内容，请重新读取后再修改" in open_feature
 
 
 def test_feature_filters_show_all_then_common_and_default_to_all() -> None:

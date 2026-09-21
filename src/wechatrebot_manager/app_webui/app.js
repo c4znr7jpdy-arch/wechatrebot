@@ -697,20 +697,9 @@
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
-    const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);
-    if (cached) {
-      useFeatureDetail(cached, afterSave, preserveTab);
-      renderFeatureDetail();
-      const note = $("#featureNote");
-      if (note && (force || cacheNeedsRefresh)) note.textContent = "正在重新读取最新设置…";
-      // Switching back to a detail already read in this window is instant.
-      // Saving and the explicit refresh button pass force=true and still read
-      // the engine back for hot-apply verification. An offline cache is also
-      // stale once the run center reports that the robot is online.
-      if (!force && !cacheNeedsRefresh) return;
-    } else {
-      $("#featureDetail").innerHTML = '<div class="loading-row">正在读取功能设置…</div>';
-    }
+    // Prefetched details may predate robot startup, when plugins create or
+    // normalize their config files. Never expose a cached revision for edit.
+    $("#featureDetail").innerHTML = `<div class="loading-row">${cached ? "正在重新读取最新设置…" : "正在读取功能设置…"}</div>`;
     try {
       const detail = await api("get_feature", featureId);
       if (load !== state.featureLoad) return;
@@ -722,8 +711,13 @@
       if (load !== state.featureLoad) return;
       if (!cached) $("#featureDetail").innerHTML = '<div class="empty-state"><h2>设置暂时无法读取</h2><p>机器人未启动时仍可修改大部分基础设置，请稍后重试。</p></div>';
       else {
+        useFeatureDetail(cached, afterSave, preserveTab);
+        renderFeatureDetail();
+        $$("#featureForm input, #featureForm select, #featureForm textarea, #featureForm button").forEach((input) => { input.disabled = true; });
+        const save = $("#saveFeature");
+        if (save) save.disabled = true;
         const note = $("#featureNote");
-        if (note) note.textContent = "暂时无法刷新，仍显示上次读取的设置。";
+        if (note) note.textContent = "最新设置读取失败；当前仅显示上次内容，请重新读取后再修改。";
       }
       reportError(error);
     }
@@ -1037,7 +1031,8 @@
   function showFeatureError(error) {
     reportError(error);
     const note = $("#featureNote");
-    if (note) note.textContent = error.message;
+    const detail = typeof error?.product?.detail === "string" ? error.product.detail.trim() : "";
+    if (note) note.textContent = detail || error.message;
     if (error.input) {
       error.input.setAttribute("aria-invalid", "true");
       const message = error.input.closest(".form-field").querySelector(".field-error");
@@ -1114,7 +1109,7 @@
       button.setAttribute("aria-busy", "true");
       $("#featureNote").textContent = "正在保存并确认生效，请稍候…";
       $$("#featureDetail input, #featureDetail select, #featureDetail textarea, #featureDetail button").forEach((input) => { input.dataset.wasDisabled = String(input.disabled); input.disabled = true; });
-      const data = await api("save_feature", state.selectedFeature, config, state.featureDetail.revision || "");
+      const data = await api("save_feature", state.selectedFeature, config, state.featureDetail.revision || "", state.featureBaseline || {});
       state.featureFeedback = data.message || "保存操作已结束，请确认生效状态。";
       state.featureDirty = false;
       const savedDetail = structuredClone(state.featureDetail);
