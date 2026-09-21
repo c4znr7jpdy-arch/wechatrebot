@@ -28,6 +28,7 @@ for search_root in (SCRIPTS_ROOT, SOURCE_ROOT):
 
 import publish_manager_update as publisher
 import oss_release_storage as oss_storage
+import build_native_installer
 from wechatrebot_manager.payload import sha256_file
 from wechatrebot_manager.updates import (
     UpdateChannel,
@@ -55,6 +56,9 @@ class BuiltCustomerPackage:
     checksum_url: str
     package_size: int
     package_sha256: str
+    installer: dict[str, object] | None = None
+    payload_path: Path | None = None
+    payload_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +116,22 @@ def _customer_package_from_output(
     *,
     version: str,
     base_url: str,
+    native: bool = False,
+    manager_exe: Path | None = None,
+    output_root: Path | None = None,
+    build_installer: bool = True,
 ) -> BuiltCustomerPackage:
+    if native:
+        if manager_exe is None or output_root is None:
+            raise ValueError("标准安装器构建缺少管理器或输出目录")
+        return _native_customer_package_from_output(
+            package_root,
+            version=version,
+            base_url=base_url,
+            manager_exe=manager_exe,
+            output_root=output_root,
+            build_installer=build_installer,
+        )
     original_archive = package_root.parent / f"{package_root.name}.zip"
     if not original_archive.is_file():
         candidates = tuple(
@@ -163,6 +182,125 @@ def _customer_package_from_output(
     )
 
 
+def _copy_or_link(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        if sha256_file(target) != sha256_file(source):
+            raise ValueError(f"标准安装器载荷已存在但摘要不一致：{target}")
+        return
+    try:
+        target.hardlink_to(source)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def _wrap_native_installer(
+    setup: Path,
+    output_root: Path,
+    version: str,
+    payload: Path,
+) -> tuple[Path, Path]:
+    archive_root = output_root / "distribution"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_root / f"WeChatReBot-{version}-Windows-x64-online.zip"
+    instructions = (
+        f"小妹 {version} Windows 在线安装包\n\n"
+        f"1. 完整解压本 ZIP。\n2. 双击 {setup.name}，按安装向导操作。\n"
+        f"3. 安装时保持联网，将另外下载约 {payload.stat().st_size / 1024**2:.1f} MB 运行组件。\n"
+        "已有安装可升级或修复，无需先卸载。修改安装目录前请备份原有数据。\n"
+        "支持 Windows 10/11 x64；微信版本 4.1.8.27；需要 Edge WebView2。\n"
+        "本安装程序未做 Windows 代码签名；文件完整性由公开 SHA-256 校验。\n"
+    )
+    with zipfile.ZipFile(
+        archive_path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=1,
+    ) as archive:
+        archive.write(setup, setup.name)
+        archive.writestr("安装说明.txt", instructions.encode("utf-8-sig"))
+    digest = sha256_file(archive_path)
+    named = archive_path.with_name(f"{archive_path.stem}-{digest[:12].lower()}.zip")
+    if named.exists() and sha256_file(named) != digest:
+        raise ValueError(f"标准安装器压缩包已存在但摘要不一致：{named}")
+    if named != archive_path:
+        archive_path.replace(named)
+    checksum = named.with_suffix(named.suffix + ".sha256")
+    checksum.write_text(f"{digest}  {named.name}\n", encoding="ascii")
+    return named, checksum
+
+
+def _native_customer_package_from_output(
+    package_root: Path,
+    *,
+    version: str,
+    base_url: str,
+    manager_exe: Path,
+    output_root: Path,
+    build_installer: bool,
+) -> BuiltCustomerPackage:
+    manager = manager_exe.expanduser().resolve()
+    payload = package_root / "payload.wrb"
+    if not manager.is_file() or not payload.is_file():
+        raise ValueError("标准安装器缺少管理器或完整载荷")
+    if not build_native_installer._offline_manager_matches(payload, manager):
+        raise ValueError("标准安装器引导管理器与在线载荷中的管理器不一致")
+    with zipfile.ZipFile(payload) as archive:
+        manifest = json.loads(archive.read("release-manifest.json"))
+    if manifest.get("release_version") != version:
+        raise ValueError("标准安装器载荷版本与项目版本不一致")
+
+    digest = sha256_file(payload)
+    named_payload = output_root / "payloads" / f"WeChatReBot-{version}-payload-{digest[:12].lower()}.wrb"
+    _copy_or_link(payload, named_payload)
+    payload_url = f"{base_url.rstrip('/')}/releases/{named_payload.name}"
+    setup_root = output_root / "native-installer"
+    setup = setup_root / f"WeChatReBot-Setup-{version}.exe"
+    if build_installer or not setup.is_file():
+        _run(
+            [
+                sys.executable,
+                str(SCRIPTS_ROOT / "build_native_installer.py"),
+                "--manager-exe",
+                str(manager),
+                "--payload-url",
+                payload_url,
+                "--payload-sha256",
+                digest,
+                "--output",
+                str(setup_root),
+            ]
+        )
+    if not setup.is_file():
+        raise ValueError(f"标准安装器未生成：{setup}")
+    archive, checksum = _wrap_native_installer(
+        setup,
+        output_root,
+        version,
+        named_payload,
+    )
+    package_digest = sha256_file(archive)
+    return BuiltCustomerPackage(
+        version=version,
+        archive_path=archive,
+        checksum_path=checksum,
+        package_url=f"{base_url.rstrip('/')}/downloads/{archive.name}",
+        checksum_url=f"{base_url.rstrip('/')}/downloads/{checksum.name}",
+        package_size=archive.stat().st_size,
+        package_sha256=package_digest,
+        installer={
+            "kind": "inno-online",
+            "entrypoint": setup.name,
+            "payload_url": payload_url,
+            "payload_size": named_payload.stat().st_size,
+            "payload_sha256": digest,
+            "windows_code_signed": False,
+        },
+        payload_path=named_payload,
+        payload_url=payload_url,
+    )
+
+
 def _write_download_metadata(
     target: Path,
     *,
@@ -192,6 +330,8 @@ def _write_download_metadata(
             "webview": "Microsoft Edge WebView2",
         },
     }
+    if package.installer is not None:
+        payload["installer"] = package.installer
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -239,12 +379,19 @@ def _stage_download_site(
     publisher._safe_remote_inputs(host, remote_root)
     nonce = uuid.uuid4().hex
     downloads_root = f"{remote_root}/downloads"
+    releases_root = f"{remote_root}/releases"
     site_root = f"{remote_root}/site"
     manifests_root = f"{remote_root}/manifests"
     remote_archive = f"{downloads_root}/{package.archive_path.name}"
     remote_checksum = f"{downloads_root}/{package.checksum_path.name}"
+    remote_payload = (
+        f"{releases_root}/{package.payload_path.name}"
+        if package.payload_path is not None
+        else None
+    )
     archive_upload = f"{remote_archive}.upload-{nonce}"
     checksum_upload = f"{remote_checksum}.upload-{nonce}"
+    payload_upload = f"{remote_payload}.upload-{nonce}" if remote_payload else None
     index_upload = f"{site_root}/index.html.upload-{nonce}"
     metadata_upload = f"{remote_root}/download.json.upload-{nonce}"
     rollback_metadata = f"{manifests_root}/.download-previous-{nonce}.json"
@@ -264,12 +411,18 @@ def _stage_download_site(
     publisher._ssh(
         host,
         "set -eu; "
-        f"mkdir -p {shlex.quote(downloads_root)} {shlex.quote(site_root)} {shlex.quote(manifests_root)}; "
+        f"mkdir -p {shlex.quote(downloads_root)} {shlex.quote(releases_root)} {shlex.quote(site_root)} {shlex.quote(manifests_root)}; "
         f"test \"$(readlink -f {shlex.quote(remote_root)})\" = {shlex.quote(remote_root)}",
     )
     archive_candidate = archive_upload
     archive_move = (
         f"mv -f -- {shlex.quote(archive_upload)} {shlex.quote(remote_archive)}; "
+    )
+    payload_candidate = payload_upload
+    payload_move = (
+        f"mv -f -- {shlex.quote(payload_upload)} {shlex.quote(remote_payload)}; "
+        if payload_upload and remote_payload
+        else ""
     )
     if upload_package_to_server:
         try:
@@ -286,6 +439,20 @@ def _stage_download_site(
             archive_move = ""
             print("服务器已存在摘要一致的客户安装包，跳过重复上传。", flush=True)
         publisher._scp(package.checksum_path, host, checksum_upload)
+        if package.payload_path is not None and remote_payload and payload_upload:
+            try:
+                publisher._ssh(
+                    host,
+                    "set -eu; "
+                    f"test \"$(stat -c%s {shlex.quote(remote_payload)})\" -eq {package.payload_path.stat().st_size}; "
+                    f"printf '%s  %s\\n' {sha256_file(package.payload_path)} {shlex.quote(remote_payload)} | sha256sum -c -",
+                )
+            except subprocess.CalledProcessError:
+                publisher._scp(package.payload_path, host, payload_upload)
+            else:
+                payload_candidate = remote_payload
+                payload_move = ""
+                print("服务器已存在摘要一致的在线安装载荷，跳过重复上传。", flush=True)
     else:
         print("客户安装包使用 OSS/CDN，服务器仅发布下载页和元数据。", flush=True)
     publisher._scp(index_source, host, index_upload)
@@ -305,6 +472,12 @@ def _stage_download_site(
             f"{archive_move}"
             f"mv -f -- {shlex.quote(checksum_upload)} {shlex.quote(remote_checksum)}; "
         )
+        if package.payload_path is not None and remote_payload and payload_candidate:
+            verification += (
+                f"test \"$(stat -c%s {shlex.quote(payload_candidate)})\" -eq {package.payload_path.stat().st_size}; "
+                f"printf '%s  %s\\n' {sha256_file(package.payload_path)} {shlex.quote(payload_candidate)} | sha256sum -c -; "
+                f"{payload_move}"
+            )
     verification += (
         f"printf '%s  %s\\n' {index_hash} {shlex.quote(index_upload)} | sha256sum -c -; "
         f"printf '%s  %s\\n' {metadata_hash} {shlex.quote(metadata_upload)} | sha256sum -c -; "
@@ -328,6 +501,12 @@ def _stage_download_site(
     )
     _public_page(f"{base_url.rstrip('/')}/", timeout=timeout)
     _public_head(package.package_url, expected_size=package.package_size, timeout=timeout)
+    if package.payload_path is not None and package.payload_url:
+        _public_head(
+            package.payload_url,
+            expected_size=package.payload_path.stat().st_size,
+            timeout=timeout,
+        )
     return StagedDownloadSite(
         metadata_upload=metadata_upload,
         rollback_metadata=rollback_metadata,
@@ -369,7 +548,15 @@ def _activate_download_metadata(
             or str(download.get("sha256") or "").upper() != package.package_sha256
         ):
             raise ValueError("公网下载信息与客户安装包不一致")
+        if package.installer is not None and live.get("installer") != package.installer:
+            raise ValueError("公网下载信息与标准安装器不一致")
         _public_head(package.package_url, expected_size=package.package_size, timeout=timeout)
+        if package.payload_path is not None and package.payload_url:
+            _public_head(
+                package.payload_url,
+                expected_size=package.payload_path.stat().st_size,
+                timeout=timeout,
+            )
     except Exception:
         publisher._ssh(
             host,
@@ -455,9 +642,14 @@ def main(argv: list[str] | None = None) -> int:
     channel = load_update_channel()
     publisher._signing_key(private_key, channel)
     oss_config = oss_storage.load_oss_release_storage(args.oss_config)
+    oss_required = Version(version) >= Version("0.9.8")
     artifact_storage = args.artifact_storage or (
-        "oss" if oss_config.enabled else "server"
+        "oss" if oss_required or oss_config.enabled else "server"
     )
+    if oss_required and artifact_storage != "oss":
+        parser.error("0.9.8 及以后版本必须使用 OSS/CDN，禁止回退为服务器直链")
+    if oss_required and not oss_config.enabled and not args.dry_run:
+        parser.error("0.9.8 及以后版本发布前必须启用 OSS 配置并完成凭证校验")
     asset_base_url = (
         args.asset_base_url
         or (oss_config.public_base_url if artifact_storage == "oss" else args.base_url)
@@ -624,7 +816,6 @@ def main(argv: list[str] | None = None) -> int:
                 str(staging),
                 "--output",
                 str(customer_root),
-                "--archive",
             ]
         )
     else:
@@ -647,6 +838,10 @@ def main(argv: list[str] | None = None) -> int:
         customer_root,
         version=version,
         base_url=asset_base_url,
+        native=True,
+        manager_exe=manager_build / "dist" / "WeChatReBot.exe",
+        output_root=output,
+        build_installer=(not args.resume or args.refresh_manager),
     )
     release_manifest = json.loads(
         release.manifest_path.read_text(encoding="utf-8-sig")
@@ -673,6 +868,17 @@ def main(argv: list[str] | None = None) -> int:
             "size": customer_package.package_size,
             "sha256": customer_package.package_sha256,
             "metadata": str(download_metadata),
+            "installer": customer_package.installer,
+            "payload": (
+                {
+                    "path": str(customer_package.payload_path),
+                    "url": customer_package.payload_url,
+                    "size": customer_package.payload_path.stat().st_size,
+                    "sha256": sha256_file(customer_package.payload_path),
+                }
+                if customer_package.payload_path is not None
+                else None
+            ),
         },
         "artifact_storage": artifact_storage,
         "oss_upload_enabled": artifact_storage == "oss" and not args.dry_run,
@@ -710,6 +916,19 @@ def main(argv: list[str] | None = None) -> int:
                     sha256_file(customer_package.checksum_path),
                     "text/plain; charset=utf-8",
                     "public,max-age=31536000,immutable",
+                ),
+                *(
+                    (
+                        oss_storage.OssReleaseObject(
+                            customer_package.payload_path,
+                            "releases",
+                            sha256_file(customer_package.payload_path),
+                            "application/octet-stream",
+                            "public,max-age=31536000,immutable",
+                        ),
+                    )
+                    if customer_package.payload_path is not None
+                    else ()
                 ),
             ),
         )

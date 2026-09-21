@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -139,7 +140,7 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
     inventory = next(command for command in commands if "build_legal_inventory.py" in command[1])
     assert inventory[inventory.index("--notices") + 1] == "legal/THIRD-PARTY-NOTICES.md"
     assert inventory[inventory.index("--licenses") + 1] == "legal/THIRD-PARTY-LICENSES.txt"
-    assert "--archive" in commands[-1]
+    assert "--archive" not in commands[-1]
     assert published == [release]
 
 
@@ -197,6 +198,77 @@ def test_customer_package_is_content_addressed_and_metadata_matches(
         base_url="https://updates.example.test/product",
     )
     assert resumed == package
+
+
+def test_native_customer_package_uses_standard_setup_and_pinned_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _publisher()
+    package_root = tmp_path / "distribution" / "WeChatReBot-0.9.8-Windows-x64"
+    package_root.mkdir(parents=True)
+    manager = package_root / "WeChatReBot.exe"
+    manager.write_bytes(b"MZmanager")
+    payload = package_root / "payload.wrb"
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("manager/WeChatReBot.exe", manager.read_bytes())
+        archive.writestr(
+            "release-manifest.json",
+            json.dumps(
+                {
+                    "release_version": "0.9.8",
+                    "files": [
+                        {
+                            "path": "manager/WeChatReBot.exe",
+                            "sha256": hashlib.sha256(manager.read_bytes()).hexdigest(),
+                        }
+                    ]
+                }
+            ),
+        )
+    output = tmp_path / "artifacts" / "publish"
+
+    commands: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        commands.append(argv)
+        setup_root = Path(argv[argv.index("--output") + 1])
+        setup_root.mkdir(parents=True, exist_ok=True)
+        (setup_root / "WeChatReBot-Setup-0.9.8.exe").write_bytes(b"MZsetup")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+    package = module._customer_package_from_output(
+        package_root,
+        version="0.9.8",
+        base_url="https://download.example.test/wechatrebot-updates",
+        native=True,
+        manager_exe=manager,
+        output_root=output,
+    )
+
+    assert package.installer is not None
+    assert package.installer["kind"] == "inno-online"
+    assert package.installer["entrypoint"] == "WeChatReBot-Setup-0.9.8.exe"
+    assert package.installer["payload_url"] == package.payload_url
+    assert package.payload_path is not None
+    assert package.payload_path.name.startswith("WeChatReBot-0.9.8-payload-")
+    assert package.payload_url in package.installer["payload_url"]
+    assert Path(commands[0][1]).name == "build_native_installer.py"
+    assert commands[0][commands[0].index("--payload-sha256") + 1] == package.installer["payload_sha256"]
+    with zipfile.ZipFile(package.archive_path) as archive:
+        assert set(archive.namelist()) == {
+            "WeChatReBot-Setup-0.9.8.exe",
+            "安装说明.txt",
+        }
+
+    metadata_path = module._write_download_metadata(
+        tmp_path / "download.json",
+        package=package,
+        published_at="2026-09-20T06:00:00+00:00",
+        title="标准安装器",
+        notes=(),
+    )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["installer"] == package.installer
 
 
 def test_full_update_powershell_entry_forwards_all_arguments() -> None:
