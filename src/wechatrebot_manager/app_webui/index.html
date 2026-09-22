@@ -7,6 +7,7 @@
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css?v=0.9.3-thinking-mode">
+  <link rel="stylesheet" href="design-overrides.css?v=20260922">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -27,6 +28,7 @@
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -69,7 +71,7 @@
       <div class="content-scroll">
         <section class="page active" id="page-home" aria-labelledby="homeHeading">
           <div class="page-heading">
-            <div><span class="eyebrow">今日运行</span><h1 id="homeHeading">机器人控制台</h1><p>先看结果，再按步骤处理；不需要接触命令或后台组件。</p></div>
+            <div><span class="eyebrow">日常管理</span><h1 id="homeHeading">运行中心</h1><p>查看运行状态，继续日常管理。</p></div>
             <div class="account-chip"><span>当前账号</span><strong id="accountText">尚未连接</strong></div>
           </div>
 
@@ -87,6 +89,7 @@
             <section class="runtime-control panel">
               <div class="panel-heading"><div><span class="eyebrow">实时状态</span><h2>启动与停止</h2></div><span class="microcopy" id="lastCheckText">刚刚检查</span></div>
               <div class="control-body">
+                <span class="home-status-icon" id="homeStatusIcon" aria-hidden="true">✓</span>
                 <div class="status-orbit" id="statusOrbit" data-state="stopped">
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
                   <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
@@ -110,6 +113,22 @@
             <div><span class="error-label">需要处理</span><h2 id="errorTitle"></h2><p id="errorMessage"></p></div>
             <div class="error-code">错误码 <strong id="errorCode"></strong></div>
             <ol id="errorSolutions"></ol>
+          </section>
+
+          <section class="home-lower-section" aria-labelledby="homeEntryHeading">
+            <div class="section-heading"><h2 id="homeEntryHeading">常用入口</h2><p>直接继续最常见的管理任务。</p></div>
+            <div class="home-entry-grid">
+              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-chat"/></svg>
+                <span><strong>管理聊天回复</strong><small>设置群聊和私聊的回复方式与功能范围</small></span>
+                <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="home-entry" type="button" data-home-page="schedules" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-clock"/></svg>
+                <span><strong>查看定时任务</strong><small>管理定时发送、执行时间和逐对象结果</small></span>
+                <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+            </div>
           </section>
 
           <div class="signal-strip">

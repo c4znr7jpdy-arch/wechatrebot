@@ -312,6 +312,11 @@
 
     const orbit = $("#statusOrbit");
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting ? "waiting" : status.busy || active ? "starting" : "stopped";
+    const homeStatusIcon = $("#homeStatusIcon");
+    if (homeStatusIcon) {
+      homeStatusIcon.className = `home-status-icon ${problem ? "problem" : waiting ? "waiting" : online ? "online" : "checking"}`;
+      homeStatusIcon.textContent = online ? "✓" : problem ? "!" : waiting ? "!" : "…";
+    }
     const primary = $("#primaryAction");
     const stopMode = status.can_stop || online;
     const primaryLabel = starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止运行") : "启动";
@@ -3900,6 +3905,7 @@
       try { input.showPicker(); } catch (_error) { /* browser may already have opened it */ }
     });
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
+    $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
     $("#primaryAction").addEventListener("click", runPrimaryAction);
     $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
