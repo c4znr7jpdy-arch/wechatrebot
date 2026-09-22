@@ -334,6 +334,8 @@ def test_manual_weather_patch_reuses_the_scheduled_card_renderer(tmp_path: Path)
     patched = (checkout / "main.py").read_text(encoding="utf-8")
     compile(patched, str(checkout / "main.py"), "exec")
     assert "generate_weather" in patched
+    assert "render_weather_target_image = getattr(" in patched
+    assert '"render_weather_target_image", render_weather_image' in patched
 
 
 def test_short_drama_patch_exposes_unified_content_adapter(tmp_path: Path) -> None:

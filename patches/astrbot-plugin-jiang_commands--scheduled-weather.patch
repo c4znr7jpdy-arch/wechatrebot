@@ -9,6 +9,14 @@ diff --git a/main.py b/main.py
 +from ai_plugin.scheduled_weather import generate_weather
  import ai_plugin.epic as _epic_mod
  import ai_plugin.kfc as _kfc_mod
+@@ -550,4 +550,6 @@
+ build_weather_card_data = _weather_image_mod.build_weather_card_data
+ render_weather_image = _weather_image_mod.render_weather_image
+-render_weather_target_image = _weather_image_mod.render_weather_target_image
++render_weather_target_image = getattr(
++    _weather_image_mod, "render_weather_target_image", render_weather_image
++)
+ warm_weather_renderer = _weather_image_mod.warm_weather_renderer
 @@ -706,57 +707,12 @@
                  yield event.plain_result(date_error)
                  return
