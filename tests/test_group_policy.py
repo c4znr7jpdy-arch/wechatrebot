@@ -21,6 +21,19 @@ ACCOUNT_B = "wxid_robot_b"
 GROUP = "51632940287@chatroom"
 
 
+def test_setu_has_independent_group_checkbox_and_persists(tmp_path):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    features = service.overview(ACCOUNT_A, GROUP)["features"]
+    assert any(item["id"] == "jiang_commands.setu" and item["name"] == "图来" for item in features)
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": ["jiang_commands.setu"]})
+    policy = GroupPolicyService(tmp_path).get(ACCOUNT_A, GROUP)
+    assert "jiang_commands.setu" in policy["allowed_features"]
+    assert "jiang_commands" not in policy["allowed_features"]
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": ["jiang_commands"]})
+    assert "jiang_commands.setu" not in service.get(ACCOUNT_A, GROUP)["allowed_features"]
+
+
 def _feature_set(root: Path) -> None:
     path = root / "legal" / "feature-set.json"
     path.parent.mkdir(parents=True)
