@@ -2534,7 +2534,12 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                 if split.path in {"/", "/index.html"}:
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
-                if manager_mode and split.path in {"/app.css", "/app.js", "/core-settings.js"}:
+                if manager_mode and split.path in {
+                    "/app.css",
+                    "/app.js",
+                    "/core-settings.js",
+                    "/design-overrides.css",
+                }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
                     return

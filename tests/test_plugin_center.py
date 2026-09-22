@@ -1842,6 +1842,7 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
     (assets / "assets").mkdir(parents=True)
     (assets / "index.html").write_text("<script src='app.js'></script>", encoding="utf-8")
     (assets / "app.css").write_text("body{}", encoding="utf-8")
+    (assets / "design-overrides.css").write_text(".design-ready{}", encoding="utf-8")
     (assets / "app.js").write_text("window.loaded = true;", encoding="utf-8")
     (assets / "core-settings.js").write_text("window.core = true;", encoding="utf-8")
     (assets / "assets" / "app-icon.png").write_bytes(b"PNG")
@@ -1863,6 +1864,7 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
             assert "default-src 'self'" in response.headers["Content-Security-Policy"]
         for path, expected in (
             ("/app.css", b"body{}"),
+            ("/design-overrides.css", b".design-ready{}"),
             ("/app.js", b"window.loaded = true;"),
             ("/core-settings.js", b"window.core = true;"),
             ("/assets/app-icon.png", b"PNG"),
