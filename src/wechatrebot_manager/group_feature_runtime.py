@@ -14,6 +14,7 @@ DEFAULT_GROUP_FEATURES = (
     "astrbot_plugin_twitter",
     "astrbot_plugin_qq_group_daily_analysis",
     "jiang_commands",
+    "jiang_commands.setu",
     "jiang_group_notice",
     "jiang_image",
     "jiang_mystool",
@@ -28,6 +29,8 @@ def group_plugins(
     group_id: str,
     globally_enabled: list[str] | None,
     stars: Iterable[Any],
+    *,
+    command_handler: str | None = None,
 ) -> list[str] | None:
     """Return engine names intersected with group grants; None denies the event.
 
@@ -62,7 +65,13 @@ def group_plugins(
     for star in stars:
         root = str(getattr(star, "root_dir_name", "") or "")
         name = str(getattr(star, "name", "") or "")
-        if root not in permitted:
+        granted = root in permitted
+        if root == "jiang_commands":
+            if command_handler is None:
+                granted = granted or "jiang_commands.setu" in permitted
+            elif command_handler == "random_image":
+                granted = "jiang_commands.setu" in permitted
+        if not granted:
             continue
         if enabled is not None and root not in enabled and name not in enabled:
             continue
