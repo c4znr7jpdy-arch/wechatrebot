@@ -404,19 +404,12 @@
     setStage($("#stageConnection"), connectionMode, online ? "已连接" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     const canForceStop = current !== "STOPPED" && current !== "ERROR" && !status.busy;
-    const coreStop = $("#stageCoreStop");
-    const connectionStop = $("#stageConnectionStop");
-    if (coreStop) {
-      coreStop.hidden = !(canForceStop && (coreStarted || active));
-      coreStop.disabled = !canForceStop;
-      coreStop.setAttribute("aria-label", "强制停止机器人功能");
-    }
-    if (connectionStop) {
-      const connectionActive = online || wechatLoggedIn || runtime.connection_ready
-        || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "RUNNING", "STOP_WAIT_WECHAT"].includes(current);
-      connectionStop.hidden = !(canForceStop && connectionActive);
-      connectionStop.disabled = !canForceStop;
-      connectionStop.setAttribute("aria-label", "强制停止消息连接");
+    const forceStop = $("#forceStopAction");
+    if (forceStop) {
+      forceStop.hidden = !canForceStop;
+      forceStop.disabled = !canForceStop;
+      forceStop.setAttribute("aria-label", "强制停止机器人，跳过正常关闭等待");
+      forceStop.title = canForceStop ? "立即结束机器人功能和消息连接" : "当前没有可停止的运行任务";
     }
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
@@ -4059,7 +4052,7 @@
       applyTheme(state.theme === "dark" ? "light" : "dark", true);
     });
     $("#primaryAction").addEventListener("click", runPrimaryAction);
-    $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
+    $("#forceStopAction").addEventListener("click", runForceStop);
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
     $("#settingsCheckWechat").addEventListener("click", checkEnvironment);
     $("#chooseWechat").addEventListener("click", chooseWechat);

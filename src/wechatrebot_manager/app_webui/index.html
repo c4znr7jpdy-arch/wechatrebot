@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="app.css?v=0.9.3-thinking-mode">
-  <link rel="stylesheet" href="design-overrides.css?v=20260922-dark-mode">
+  <link rel="stylesheet" href="app.css?v=20260922-force-stop-layout">
+  <link rel="stylesheet" href="design-overrides.css?v=20260922-force-stop-layout">
   <script>
     (() => {
       try {
@@ -111,7 +111,10 @@
                 <span class="home-status-icon" id="homeStatusIcon" aria-hidden="true">✓</span>
                 <div class="status-orbit" id="statusOrbit" data-state="stopped">
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
-                  <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
+                  <div class="control-actions">
+                    <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
+                    <button class="force-stop-action" id="forceStopAction" type="button" data-force-stop data-action-bound disabled hidden aria-label="强制停止机器人" title="立即结束机器人功能和消息连接"><svg><use href="#i-stop"/></svg><span>强制停止</span></button>
+                  </div>
                 </div>
                 <div class="control-copy" role="status" aria-live="polite" aria-atomic="true"><span class="state-kicker" id="stateKicker">机器人状态</span><h2 id="stateTitle">正在检查环境</h2><p id="stateMessage">请稍候。</p></div>
               </div>
@@ -121,8 +124,8 @@
               <div class="panel-heading"><div><span class="eyebrow">启动进度</span><h2>连接台账</h2></div></div>
               <ol class="stage-list">
                 <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong><small>安装路径与兼容版本</small></div><em>待检查</em></li>
-                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em><button class="stage-stop-button" id="stageCoreStop" data-stage-stop data-action-bound disabled hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
-                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em><button class="stage-stop-button" id="stageConnectionStop" data-stage-stop data-action-bound disabled hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
+                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em></li>
+                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em></li>
               </ol>
               <div class="ready-rule"><strong>可用判定</strong><p>只有以上三项全部通过，软件才会显示“机器人可用”。</p></div>
             </section>
@@ -427,6 +430,6 @@
     </section>
   </div>
   <script src="core-settings.js?v=0.9.3-robot-core"></script>
-  <script src="app.js?v=20260922-dark-mode"></script>
+  <script src="app.js?v=20260922-force-stop-layout"></script>
 </body>
 </html>
