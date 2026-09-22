@@ -3,6 +3,7 @@
 
   const state = {
     bootstrap: null,
+    theme: "light",
     status: null,
     activePage: "home",
     featuresLoaded: false,
@@ -96,6 +97,8 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const THEME_STORAGE_KEY = "wechatrebot-theme";
+  const THEME_CHANNEL = "wechatrebot-theme";
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
@@ -108,6 +111,52 @@
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+
+  function normalizeTheme(value) {
+    return value === "dark" ? "dark" : "light";
+  }
+
+  function storedTheme() {
+    try {
+      return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+    } catch (_error) {
+      return normalizeTheme(document.documentElement.dataset.theme);
+    }
+  }
+
+  function syncEmbeddedTheme(frame = $("#featurePageFrame")) {
+    if (!frame?.contentWindow) return;
+    frame.contentWindow.postMessage({channel: THEME_CHANNEL, theme: state.theme}, "*");
+  }
+
+  function applyTheme(value, persist = false) {
+    const theme = normalizeTheme(value);
+    state.theme = theme;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+    const colorScheme = document.querySelector('meta[name="color-scheme"]');
+    if (colorScheme) colorScheme.content = theme === "dark" ? "dark light" : "light dark";
+    if (persist) {
+      try { window.localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (_error) { /* storage is optional in WebView2 */ }
+    }
+    const button = $("#themeToggle");
+    const iconNode = $("#themeToggleIcon");
+    const textNode = $("#themeToggleText");
+    const nextLabel = theme === "dark" ? "切换到浅色模式" : "切换到深色模式";
+    if (button) {
+      button.setAttribute("aria-pressed", String(theme === "dark"));
+      button.setAttribute("aria-label", nextLabel);
+      button.title = nextLabel;
+      button.classList.toggle("is-dark", theme === "dark");
+    }
+    if (iconNode) iconNode.setAttribute("href", theme === "dark" ? "#i-sun" : "#i-moon");
+    if (textNode) textNode.textContent = theme === "dark" ? "浅色模式" : "深色模式";
+    syncEmbeddedTheme();
+  }
+
+  function initializeTheme() {
+    applyTheme(storedTheme());
+  }
 
   const coreSettings = window.createRobotCoreSettings({
     read: () => api("get_robot_core"),
@@ -370,19 +419,12 @@
     setStage($("#stageConnection"), connectionMode, online ? "已连接" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     const canForceStop = current !== "STOPPED" && current !== "ERROR" && !status.busy;
-    const coreStop = $("#stageCoreStop");
-    const connectionStop = $("#stageConnectionStop");
-    if (coreStop) {
-      coreStop.hidden = !(canForceStop && (coreStarted || active));
-      coreStop.disabled = !canForceStop;
-      coreStop.setAttribute("aria-label", "强制停止机器人功能");
-    }
-    if (connectionStop) {
-      const connectionActive = online || wechatLoggedIn || runtime.connection_ready
-        || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "RUNNING", "STOP_WAIT_WECHAT"].includes(current);
-      connectionStop.hidden = !(canForceStop && connectionActive);
-      connectionStop.disabled = !canForceStop;
-      connectionStop.setAttribute("aria-label", "强制停止消息连接");
+    const forceStop = $("#forceStopAction");
+    if (forceStop) {
+      forceStop.hidden = !canForceStop;
+      forceStop.disabled = !canForceStop;
+      forceStop.setAttribute("aria-label", "强制停止机器人，跳过正常关闭等待");
+      forceStop.title = canForceStop ? "立即结束机器人功能和消息连接" : "当前没有可停止的运行任务";
     }
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
@@ -994,8 +1036,10 @@
       const page = await api("get_feature_page", detail.id);
       if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
       frame.src = page.url;
+      frame.onload = () => syncEmbeddedTheme(frame);
       frame.hidden = false;
       status.hidden = true;
+      syncEmbeddedTheme(frame);
     } catch (error) {
       if (loadId !== state.featurePageLoad) return;
       status.textContent = error?.message || "专属配置页暂时无法打开，请稍后重试。";
@@ -3279,6 +3323,7 @@
   function providerCapabilityLabel(serviceKind, modalities) {
     if (serviceKind === "embedding") return "向量";
     if (serviceKind === "image") return "图片";
+    if (serviceKind === "voice") return "语音";
     const value = providerChatModalityValue(modalities);
     if (!value) return "能力可选";
     return value.includes("image") || value.includes("audio") ? "多模态" : "文本";
@@ -3287,6 +3332,7 @@
   function inferProviderModalities(serviceKind, model, declared) {
     if (serviceKind === "embedding") return ["embedding"];
     if (serviceKind === "image") return ["image"];
+    if (serviceKind === "voice") return ["audio"];
     const name = String(model || "").trim().toLowerCase();
     const declaredValue = providerChatModalityValue(declared);
     if (declaredValue) return declaredValue.split(",");
@@ -4150,6 +4196,7 @@
   }
 
   function bindEvents() {
+    initializeTheme();
     // Keep the browser-native calendar/clock as the single source of truth,
     // while making the whole field open it on a direct click.
     document.addEventListener("click", (event) => {
@@ -4160,8 +4207,11 @@
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
+    $("#themeToggle").addEventListener("click", () => {
+      applyTheme(state.theme === "dark" ? "light" : "dark", true);
+    });
     $("#primaryAction").addEventListener("click", runPrimaryAction);
-    $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
+    $("#forceStopAction").addEventListener("click", runForceStop);
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
     $("#settingsCheckWechat").addEventListener("click", checkEnvironment);
     $("#chooseWechat").addEventListener("click", chooseWechat);

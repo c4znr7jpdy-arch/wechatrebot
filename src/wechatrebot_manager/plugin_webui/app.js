@@ -14,6 +14,19 @@ const state = {
 const requestedFeatureId = new URLSearchParams(window.location.search).get("feature") || "";
 const memeManagerFeatureId = "feature-222a5d37d93c5449";
 const maxLocalMemeZipBytes = 119 * 1024 * 1024;
+const themeChannel = "wechatrebot-theme";
+
+function applyTheme(theme) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = normalized;
+  document.documentElement.style.colorScheme = normalized === "dark" ? "dark" : "light";
+  const colorScheme = document.querySelector('meta[name="color-scheme"]');
+  if (colorScheme) colorScheme.content = normalized === "dark" ? "dark light" : "light dark";
+}
+
+window.addEventListener("message", (event) => {
+  if (event.data?.channel === themeChannel) applyTheme(event.data.theme);
+});
 
 const el = (id) => document.getElementById(id);
 const list = el("plugin-list");

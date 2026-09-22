@@ -3,11 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
-  <link rel="stylesheet" href="app.css?v=0.9.3-thinking-mode">
-  <link rel="stylesheet" href="design-overrides.css?v=20260922">
+  <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
+  <link rel="stylesheet" href="design-overrides.css?v=20260922-dark-complete">
+  <script>
+    (() => {
+      try {
+        if (window.localStorage.getItem("wechatrebot-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch (_error) {
+        // WebView2 can deny storage access for a fresh local document.
+      }
+    })();
+  </script>
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -29,6 +40,8 @@
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -50,7 +63,13 @@
       </nav>
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
-        <span id="versionText">v0.0.0</span>
+        <div class="sidebar-meta">
+          <span class="sidebar-version" id="versionText">v0.0.0</span>
+          <button class="theme-toggle" id="themeToggle" type="button" data-action-bound disabled aria-pressed="false" aria-label="切换到深色模式" title="切换到深色模式">
+            <svg aria-hidden="true"><use id="themeToggleIcon" href="#i-moon"/></svg>
+            <span id="themeToggleText">深色模式</span>
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -92,7 +111,10 @@
                 <span class="home-status-icon" id="homeStatusIcon" aria-hidden="true">✓</span>
                 <div class="status-orbit" id="statusOrbit" data-state="stopped">
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
-                  <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
+                  <div class="control-actions">
+                    <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
+                    <button class="force-stop-action" id="forceStopAction" type="button" data-force-stop data-action-bound disabled hidden aria-label="强制停止机器人" title="立即结束机器人功能和消息连接"><svg><use href="#i-stop"/></svg><span>强制停止</span></button>
+                  </div>
                 </div>
                 <div class="control-copy" role="status" aria-live="polite" aria-atomic="true"><span class="state-kicker" id="stateKicker">机器人状态</span><h2 id="stateTitle">正在检查环境</h2><p id="stateMessage">请稍候。</p></div>
               </div>
@@ -102,8 +124,8 @@
               <div class="panel-heading"><div><span class="eyebrow">启动进度</span><h2>连接台账</h2></div></div>
               <ol class="stage-list">
                 <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong><small>安装路径与兼容版本</small></div><em>待检查</em></li>
-                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em><button class="stage-stop-button" id="stageCoreStop" data-stage-stop data-action-bound disabled hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
-                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em><button class="stage-stop-button" id="stageConnectionStop" data-stage-stop data-action-bound disabled hidden><svg><use href="#i-stop"/></svg><span>强制停止</span></button></li>
+                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em></li>
+                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em></li>
               </ol>
               <div class="ready-rule"><strong>可用判定</strong><p>只有以上三项全部通过，软件才会显示“机器人可用”。</p></div>
             </section>
@@ -409,6 +431,6 @@
     </section>
   </div>
   <script src="core-settings.js?v=0.9.3-robot-core"></script>
-  <script src="app.js?v=0.9.3-thinking-mode"></script>
+  <script src="app.js?v=20260922-force-stop-layout"></script>
 </body>
 </html>
