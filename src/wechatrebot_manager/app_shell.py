@@ -261,7 +261,10 @@ class ApplicationApi:
         server = getattr(self, "_feature_page_server", None)
         if server is not None:
             return server
-        server = ThreadingHTTPServer(("127.0.0.1", 0), plugin_center_handler(self._features))
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            plugin_center_handler(self._features, manager_assets=_asset_root()),
+        )
         server.daemon_threads = True
         thread = threading.Thread(
             target=server.serve_forever,
@@ -609,9 +612,9 @@ class ApplicationApi:
         return parsed.astimezone().timestamp()
 
     def _history_account_id(self) -> str:
-        """Return the last verified bot account without starting a new probe."""
+        """Return the bot account verified by a fresh runtime probe."""
         try:
-            view = self._lifecycle.view()
+            view = self._lifecycle.refresh()
             runtime = getattr(view, "runtime", None)
             return str(getattr(runtime, "wechat_identity", "") or "").strip()
         except (AttributeError, OSError, ValueError):
@@ -633,14 +636,47 @@ class ApplicationApi:
             values = filters or {}
             kind = str(values.get("kind") or "all")
             search = str(values.get("search") or "").strip()
+            expected_account = str(values.get("account_id") or "").strip()
             start_time = self._date_timestamp(values.get("start"))
             end_time = self._date_timestamp(values.get("end"), end=True)
+            runtime_account = self._history_account_id()
+            empty = {
+                "messages": 0,
+                "conversations": 0,
+                "private_messages": 0,
+                "group_messages": 0,
+                "visible_conversations": 0,
+                "directory_groups": 0,
+            }
+            if not runtime_account:
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": "",
+                    "requires_login": True,
+                })
+            if expected_account and expected_account != runtime_account:
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": runtime_account,
+                    "account_changed": True,
+                })
             directory = {"items": []}
             if kind in {"all", "group"}:
                 directory = self._groups.list(values.get("refresh_groups") is True)
-            account_id = str(
-                directory.get("account_id") or self._history_account_id()
-            ).strip()
+            directory_account = str(directory.get("account_id") or "").strip()
+            if (
+                kind in {"all", "group"}
+                and directory_account != runtime_account
+            ):
+                return self._ok({
+                    "items": [],
+                    "summary": empty,
+                    "account_id": runtime_account,
+                    "account_changed": True,
+                })
+            account_id = runtime_account
             history = self._history.conversations(
                 kind=kind,
                 search=search,
@@ -712,7 +748,11 @@ class ApplicationApi:
             summary = dict(history.get("summary") or {})
             summary["visible_conversations"] = len(items)
             summary["directory_groups"] = len(directory.get("items") or [])
-            return self._ok({"items": items, "summary": summary})
+            return self._ok({
+                "items": items,
+                "summary": summary,
+                "account_id": account_id,
+            })
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
@@ -800,7 +840,26 @@ class ApplicationApi:
         try:
             values = filters or {}
             account_id = self._history_account_id()
+            expected_account = str(values.get("account_id") or "").strip()
             paged = values.get("paged") is True
+            if not account_id:
+                if paged:
+                    return self._ok({
+                        "items": [],
+                        "has_more": False,
+                        "account_id": "",
+                        "requires_login": True,
+                    })
+                return self._ok([])
+            if expected_account and expected_account != account_id:
+                if paged:
+                    return self._ok({
+                        "items": [],
+                        "has_more": False,
+                        "account_id": account_id,
+                        "account_changed": True,
+                    })
+                return self._ok([])
             page_size = 20
             before_timestamp: float | None = None
             before_id: int | None = None
@@ -902,36 +961,61 @@ class ApplicationApi:
                             contact.get("alias") or message.get("sender_id") or ""
                         )
             if paged:
-                return self._ok({"items": messages, "has_more": has_more})
+                return self._ok({
+                    "items": messages,
+                    "has_more": has_more,
+                    "account_id": account_id,
+                })
             return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def delete_conversation(self, conversation_id: str) -> dict[str, object]:
+    def delete_conversation(
+        self, conversation_id: str, expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"deleted": 0, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"deleted": 0, "account_changed": True})
             count = self._history.delete_conversation(
                 conversation_id,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def delete_history_before(self, value: str) -> dict[str, object]:
+    def delete_history_before(
+        self, value: str, expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"deleted": 0, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"deleted": 0, "account_changed": True})
             timestamp = self._date_timestamp(value)
             if timestamp is None:
                 raise ValueError("请选择清理日期。")
             count = self._history.delete_before(
                 timestamp,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"deleted": count})
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def export_history(self, format: str = "csv") -> dict[str, object]:
+    def export_history(
+        self, format: str = "csv", expected_account_id: str = ""
+    ) -> dict[str, object]:
         try:
+            account_id = self._history_account_id()
+            if not account_id:
+                return self._ok({"cancelled": True, "requires_login": True})
+            if expected_account_id and expected_account_id != account_id:
+                return self._ok({"cancelled": True, "account_changed": True})
             if self._window is None:
                 raise ValueError("导出窗口尚未就绪。")
             import webview
@@ -949,11 +1033,13 @@ class ApplicationApi:
             )
             if not result:
                 return self._ok({"cancelled": True})
+            if self._history_account_id() != account_id:
+                return self._ok({"cancelled": True, "account_changed": True})
             selected = result[0] if isinstance(result, (list, tuple)) else result
             target = self._history.export(
                 selected,
                 format=suffix,
-                account_id=self._history_account_id(),
+                account_id=account_id,
             )
             return self._ok({"path": str(target)})
         except (OSError, ValueError) as exc:
@@ -1820,24 +1906,25 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
         title = f"{brand.display_name} · 机器人管理"
         if development:
             title += " [源码验证]"
-        window = webview.create_window(
-            title,
-            (_asset_root() / "index.html").resolve().as_uri(),
-            width=1380,
-            height=860,
-            min_size=(1080, 680),
-            background_color="#F3F6FA",
-            text_select=True,
-        )
-        tray = None
-        if not development:
-            tray = WindowsTrayController(window, brand.display_name)
-            window.events.shown += tray.start
-            window.events.closing += tray.handle_window_closing
-            window.events.closed += tray.stop
-        api._attach_window(window, tray)
-        window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
+        server = api._ensure_feature_page_server()
         try:
+            window = webview.create_window(
+                title,
+                f"http://127.0.0.1:{server.server_port}/",
+                width=1380,
+                height=860,
+                min_size=(1080, 680),
+                background_color="#F3F6FA",
+                text_select=True,
+            )
+            tray = None
+            if not development:
+                tray = WindowsTrayController(window, brand.display_name)
+                window.events.shown += tray.start
+                window.events.closing += tray.handle_window_closing
+                window.events.closed += tray.stop
+            api._attach_window(window, tray)
+            window.expose(*(getattr(api, name) for name in PUBLIC_API_METHODS))
             webview.start(gui="edgechromium", debug=False, private_mode=True)
             return 0
         finally:

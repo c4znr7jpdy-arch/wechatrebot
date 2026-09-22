@@ -8,9 +8,11 @@ from wechatrebot_manager.provider import (
     DEFAULT_PROVIDER_MODEL,
     DEFAULT_PROVIDER_MODEL_ID,
     DEFAULT_PROVIDER_SOURCE_ID,
+    MODEL_PROVIDER_PRESETS,
     OpenAIProviderProfile,
     PROVIDER_REQUEST_TIMEOUT_SECONDS,
     discover_openai_models,
+    infer_provider_modalities,
     provider_display_name,
     provider_source_id,
     supports_thinking_toggle,
@@ -224,6 +226,31 @@ def test_image_provider_keeps_transport_compatible_and_is_not_a_chat_model() -> 
     assert profile.astrbot_source()["provider_type"] == "chat_completion"
     assert profile.astrbot_model()["service_kind"] == "image"
     assert profile.astrbot_model()["modalities"] == ["image"]
+
+
+def test_custom_chat_service_can_declare_multimodal_input() -> None:
+    custom = next(item for item in MODEL_PROVIDER_PRESETS if item["id"] == "custom")
+    sub2 = next(item for item in MODEL_PROVIDER_PRESETS if item["id"] == "sub2")
+    assert custom["modalities"] == ()
+    assert sub2["modalities"] == ()
+
+    profile = OpenAIProviderProfile(
+        api_key="multimodal-secret",
+        api_base="https://models.example.com/v1",
+        model="vendor-model",
+        service_kind="chat",
+        modalities=("text", "image", "audio"),
+    )
+
+    assert profile.astrbot_model()["modalities"] == [
+        "text", "image", "audio", "tool_use",
+    ]
+    assert infer_provider_modalities(
+        "chat", "vendor-model", ("text", "image", "unsupported")
+    ) == ("text", "image")
+    assert infer_provider_modalities(
+        "chat", DEFAULT_PROVIDER_MODEL, ("text",)
+    ) == ("text",)
 
 
 def test_invalid_model_service_kind_returns_customer_validation_error() -> None:

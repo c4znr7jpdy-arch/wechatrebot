@@ -100,8 +100,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "",
         "model": "",
         "service_kind": "chat",
-        "modalities": ("text",),
-        "description": "填写你的 Sub2 兼容接口地址和模型名称。",
+        "modalities": (),
+        "description": "填写你的 Sub2 兼容接口地址和模型名称，并确认输入能力。",
     },
     {
         "id": "embedding_custom",
@@ -127,8 +127,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "",
         "model": "",
         "service_kind": "chat",
-        "modalities": ("text",),
-        "description": "填写兼容接口地址、模型名称和密钥。",
+        "modalities": (),
+        "description": "填写兼容接口地址、模型名称和密钥，并确认输入能力。",
     },
 )
 
@@ -550,16 +550,20 @@ def infer_provider_modalities(
         return ("embedding",)
     if kind == "image":
         return ("image",)
-    if model.casefold() == DEFAULT_PROVIDER_MODEL.casefold():
-        return ("text", "image", "audio")
     if isinstance(declared, (list, tuple, set)):
+        allowed = {"text", "image", "audio"}
         values = tuple(
-            str(item).strip().casefold()
-            for item in declared
-            if str(item).strip()
+            value
+            for value in dict.fromkeys(
+                str(item).strip().casefold()
+                for item in declared
+                if str(item).strip().casefold() in allowed
+            )
         )
         if values:
-            return tuple(dict.fromkeys(values))
+            return values
+    if model.casefold() == DEFAULT_PROVIDER_MODEL.casefold():
+        return ("text", "image", "audio")
     leaf = _model_leaf(model).casefold()
     if any(marker in leaf for marker in ("-v", "vision", "vl", "gemini", "doubao-seed")):
         return ("text", "image", "audio") if "gemini" in leaf or "doubao" in leaf else ("text", "image")

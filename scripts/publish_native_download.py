@@ -212,7 +212,7 @@ def deploy_page(metadata: Path, args) -> None:
             temporary = f"{remote}/{target}.upload-{nonce}"
             publisher._scp(path, args.host, temporary)
             publisher._ssh(args.host, f"set -eu; printf '%s  %s\\n' {sha256_file(path)} {shlex.quote(temporary)} | sha256sum -c -; mv -f {shlex.quote(temporary)} {shlex.quote(remote + '/' + target)}")
-        full._public_page(args.base_url.rstrip("/") + "/", timeout=30)
+        full._public_download_page_is_hidden(args.base_url, timeout=30)
         public_verify(args.base_url.rstrip("/") + "/download.json", metadata)
     except Exception:
         publisher._ssh(args.host, f"set -eu; cp {shlex.quote(previous + '/index.html')} {shlex.quote(remote + '/site/index.html')}; cp {shlex.quote(previous + '/download.json')} {shlex.quote(remote + '/download.json')}")
@@ -264,7 +264,12 @@ def main(argv=None) -> int:
                      ("downloads", files["checksum"], "text/plain")],
            args.ossutil or oss.find_ossutil(), args.credential_config)
     deploy_page(files["metadata"], args)
-    print(json.dumps({"published": True, "page": args.base_url + "/", "download": expected_url}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"published": True, "page_hidden": True, "download": expected_url},
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

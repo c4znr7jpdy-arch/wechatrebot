@@ -31,20 +31,22 @@ def test_download_page_has_safe_progressive_download_ui() -> None:
     assert "安装时需联网" in page
 
 
-def test_nginx_exposes_page_metadata_and_customer_archives() -> None:
+def test_nginx_hides_page_but_exposes_update_metadata_and_archives() -> None:
     config = (ROOT / "deploy" / "nginx" / "wechatrebot-updates.conf").read_text(
         encoding="utf-8"
     )
 
     assert "location = /wechatrebot-updates {" in config
-    assert "return 301 /wechatrebot-updates/;" in config
-    assert "alias /srv/wechatrebot-updates/site/;" in config
-    assert "index index.html;" in config
+    assert config.count("return 404;") == 5
+    assert "return 301 /wechatrebot-updates/;" not in config
+    assert "alias /srv/wechatrebot-updates/site/;" not in config
     assert "location = /wechatrebot-updates/index.html {" in config
-    assert "alias /srv/wechatrebot-updates/site/index.html;" in config
-    assert "internal;" in config
+    assert "alias /srv/wechatrebot-updates/site/index.html;" not in config
+    assert "location = /wechatrebot-updates/site {" in config
+    assert "location ^~ /wechatrebot-updates/site/ {" in config
     assert "location = /wechatrebot-updates/download.json {" in config
     assert "alias /srv/wechatrebot-updates/download.json;" in config
     assert "location ^~ /wechatrebot-updates/downloads/ {" in config
     assert "alias /srv/wechatrebot-updates/downloads/;" in config
-    assert "return 404" not in config
+    assert "location = /wechatrebot-updates/stable.json {" in config
+    assert "alias /srv/wechatrebot-updates/stable.json;" in config
