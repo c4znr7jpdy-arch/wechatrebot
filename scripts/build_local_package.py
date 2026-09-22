@@ -1,0 +1,117 @@
+"""Build a complete local offline installer without publishing or starting services."""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tomllib
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def build_steps(source: Path, output: Path) -> list[tuple[str, list[str]]]:
+    manager = output / "manager-build" / "dist" / "WeChatReBot.exe"
+    def command(script: str, *args: object) -> list[str]:
+        return [sys.executable, str(ROOT / "scripts" / script), *map(str, args)]
+    return [
+        ("1-manager", command("build_manager.py", "--output", output / "manager-build")),
+        ("2-runtime", command("build_runtime.py", "--output", output / "runtime-build")),
+        ("3-staging", command("build_staging.py", "--source-root", source,
+                              "--runtime-root", output / "runtime-build",
+                              "--manager-exe", manager, "--output", output / "staging")),
+        ("4-payload", command("build_distribution.py", "--payload", output / "staging",
+                              "--output", output / "payload-build")),
+        ("5-installer", command("build_native_installer.py", "--manager-exe", manager,
+                                "--payload", output / "payload-build" / "payload.wrb",
+                                "--output", output / "installer")),
+    ]
+
+
+def run_step(name: str, command: list[str], output: Path) -> None:
+    print(f"\n===== {name} =====", flush=True)
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+    log_path = output / f"{name}.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        with subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True,
+                              encoding="utf-8", errors="replace") as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                print(line, end="", flush=True)
+            code = process.wait()
+    if code:
+        raise RuntimeError(f"{name} failed (exit {code}). Log: {log_path}")
+
+
+def finish_package(output: Path, version: str) -> Path:
+    setup = output / "installer" / f"WeChatReBot-Setup-{version}.exe"
+    if not setup.is_file():
+        raise RuntimeError(f"Installer missing: {setup}")
+    archive = output / f"WeChatReBot-{version}-local.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as package:
+        package.write(setup, setup.name)
+        package.writestr("安装说明.txt", (
+            f"WeChat ReBot {version} 本地完整测试包\n"
+            "解压后双击安装器。完整载荷已内置，无需下载线上载荷。\n"
+            "覆盖安装前请先退出机器人和管理器，再选择原安装目录。\n"
+            "本流程未上传线上，也未启动机器人。\n"
+        ).encode("utf-8-sig"))
+    with zipfile.ZipFile(archive) as package:
+        if package.testzip() is not None:
+            raise RuntimeError("ZIP integrity check failed")
+    with archive.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest().upper()
+    archive.with_suffix(".zip.sha256").write_text(
+        f"{digest}  {archive.name}\n", encoding="ascii")
+    (output / "result.json").write_text(json.dumps({
+        "version": version, "archive": str(archive), "bytes": archive.stat().st_size,
+        "sha256": digest, "uploaded": False, "services_started": False,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return archive
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-root", type=Path, default=Path("E:/Project"))
+    parser.add_argument("--plan", action="store_true", help="Show steps without building")
+    parser.add_argument("--open-output", action="store_true")
+    args = parser.parse_args(argv)
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    output = ROOT / "artifacts" / f"local-full-{version}-{datetime.now():%Y%m%d-%H%M%S-%f}"
+    source = args.source_root.expanduser().resolve()
+    steps = build_steps(source, output)
+    if args.plan:
+        print(json.dumps({"output": str(output), "steps": steps}, ensure_ascii=False, indent=2))
+        return 0
+    if sys.version_info[:2] != (3, 13) or sys.maxsize <= 2**32:
+        parser.error("Python 3.13 x64 is required")
+    if not source.is_dir():
+        parser.error(f"Source directory missing: {source}")
+    # Fail before costly work when the installer compiler is unavailable.
+    from build_native_installer import _iscc
+    _iscc(None)
+    output.mkdir(parents=True)
+    try:
+        for name, command in steps:
+            run_step(name, command, output)
+        archive = finish_package(output, version)
+    except Exception as exc:
+        (output / "failure.txt").write_text(str(exc), encoding="utf-8")
+        print(f"\nBUILD FAILED: {exc}\nOutput: {output}", file=sys.stderr)
+        return 1
+    print(f"\nBUILD COMPLETE: {archive}", flush=True)
+    if args.open_output:
+        os.startfile(str(output))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
