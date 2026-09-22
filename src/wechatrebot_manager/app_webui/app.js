@@ -3342,6 +3342,11 @@
         const identity = providerCardIdentity(item);
         const statusText = item.is_default ? "使用中" : item.configured ? "备用" : "待完善";
         const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充服务密钥后即可使用";
+        const capability = item.service_kind === "image"
+          ? {title: "图片能力", detail: "供功能中心图片生成选择"}
+          : item.service_kind === "voice"
+            ? {title: "语音能力", detail: "供语音功能选择"}
+            : {title: "向量能力", detail: "供长期记忆等检索功能选择"};
         return `
         <article class="provider-service ${item.is_default ? "active" : ""}">
           <header class="provider-card-header">
@@ -3363,14 +3368,14 @@
           </header>
           <div class="provider-service-body">
             <div class="provider-card-tags">
-              <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : "文本"))}</span>
+              <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : item.service_kind === "voice" ? "语音" : "文本"))}</span>
               <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
               <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_enabled ? "已开启 · 模型支持时生效" : "已关闭 · 模型支持时生效"}</small></span>
               <button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>
-            </div>` : `<div class="provider-thinking-control"><span><strong>${item.service_kind === "image" ? "图片能力" : "向量能力"}</strong><small>${item.service_kind === "image" ? "供功能中心图片生成选择" : "供长期记忆等检索功能选择"}</small></span></div>`}
+            </div>` : `<div class="provider-thinking-control"><span><strong>${capability.title}</strong><small>${capability.detail}</small></span></div>`}
           </div>
           <footer class="provider-service-actions">
             <button class="provider-card-action" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
@@ -3389,7 +3394,7 @@
         <div class="provider-empty-visual" aria-hidden="true"><span></span><i></i><span></span></div>
         <span class="eyebrow">从这里开始</span>
         <h3>还没有模型服务</h3>
-        <p>新建聊天、向量或图片模型后，可在对应功能设置中直接选择。</p>
+        <p>新建聊天、向量、图片或语音模型后，可在对应功能设置中直接选择。</p>
         <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
         <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
       </div>`;
@@ -3852,8 +3857,15 @@
     } catch (error) { reportError(error); }
   }
 
-  function showOnboarding(force = false) {
+  async function showOnboarding(force = false) {
     if (!force && state.bootstrap?.experience?.onboarding_complete) return;
+    try {
+      state.bootstrap.readiness = await api("get_onboarding_readiness");
+    } catch (error) {
+      // The bootstrap snapshot remains useful when a transient bridge probe
+      // fails; show it and let the user retry by reopening the checklist.
+      reportError(error);
+    }
     const backdrop = $("#onboardingBackdrop");
     renderOnboardingReadiness(state.bootstrap?.readiness);
     backdrop.hidden = false;
@@ -3884,7 +3896,7 @@
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
       presetSelect.innerHTML = data.provider_presets.map((preset) => {
-        const kind = preset.service_kind === "embedding" ? "向量" : preset.service_kind === "image" ? "图片" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态" : "文本";
+        const kind = preset.service_kind === "embedding" ? "向量" : preset.service_kind === "image" ? "图片" : preset.service_kind === "voice" ? "语音" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态" : "文本";
         return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)} · ${kind}</option>`;
       }).join("");
     }
@@ -4159,7 +4171,7 @@
     $("#createBackup").addEventListener("click", createBackup);
     $("#restoreBackup").addEventListener("click", chooseRestoreBackup);
     $("#exportDiagnostics").addEventListener("click", exportDiagnostics);
-    $("#openOnboarding").addEventListener("click", () => navigate("help"));
+    $("#openOnboarding").addEventListener("click", () => { showOnboarding(true); });
     $("#cleanHistory").addEventListener("click", () => confirmAction({ title: "按日期清理聊天记录", message: "将删除所选日期以前的本机记录副本，此操作无法撤销。", confirmText: "开始清理", field: {label: "保留此日期及之后的记录", type: "date", value: ""}, onConfirm: async (value) => { const result = await api("delete_history_before", value); toast(`已清理 ${result.deleted} 条记录。 `); if (state.activePage === "history") await loadConversations(); } }));
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
@@ -4202,6 +4214,8 @@
       if (previewParams.has("preview") && (previewParams.get("demo") === "model-services" || previewParams.get("demo") === "thinking-mode")) {
         state.bootstrap.experience.onboarding_complete = true;
         await navigate("settings");
+      } else {
+        await showOnboarding();
       }
       window.setInterval(refreshStatus, 1500);
       window.setInterval(pollHistory, 1500);
@@ -4428,6 +4442,7 @@
       {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写你的 Sub2 兼容接口地址和模型名称。"},
       {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
       {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
+      {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
       {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text"], description: "填写兼容接口地址、模型名称和密钥。"},
     ];
     const previewExperience = {
@@ -4440,6 +4455,20 @@
       memory: {enabled: true, recall_mode: "smart", casual_query_max_chars: 24, top_k: 3, summary_trigger_rounds: 10},
       emotion: {enabled: true, daily_mood: true, include_affection: true, include_mood: true},
     };
+    const previewOnboardingReadiness = () => ({
+      schema_version: 1,
+      readonly: true,
+      complete: true,
+      items: [
+        {id: "wechat", label: "微信环境", status: "ready", detail: "预览环境正常", next_step: "继续检查"},
+        {id: "account", label: "机器人账号", status: "ready", detail: "预览账号已登录", next_step: "已确认"},
+        {id: "provider", label: "回复模型", status: "ready", detail: "预览回复模型已准备好", next_step: "继续检查"},
+        {id: "groups", label: "目标群聊", status: "ready", detail: "已读取预览群聊目录", next_step: "进入群聊管理选择目标群"},
+        {id: "core", label: "核心功能", status: "ready", detail: "机器人核心和功能目录已可检查", next_step: "继续检查"},
+      ],
+      test_hint: "准备完成后，可在选定群里点名机器人测试。",
+      message: "预览数据不会启动机器人或发送消息。",
+    });
     let previewWebSearch = {
       enabled: false,
       provider: "bocha",
@@ -4530,7 +4559,7 @@
       status.environment = {...status.environment, process_running: running};
     };
     return {
-      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: {schema_version: 1, readonly: true, complete: true, items: [{id: "wechat", label: "微信环境", status: "ready", detail: "预览环境正常", next_step: "继续检查"}], test_hint: "准备完成后，可在选定群里点名机器人测试。", message: "预览数据不会启动机器人或发送消息。"}, update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
+      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: previewOnboardingReadiness(), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => { setPreviewRuntime(true); return ok({accepted: true}); }, stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, force_stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
@@ -4610,6 +4639,7 @@
       get_activity: () => ok([{time: new Date().toISOString(), title: "全部功能加载完成", event: "FUNCTION_LOADED", status: "success", code: ""}, {time: new Date(Date.now() - 1500).toISOString(), title: "微信连接成功", event: "CONNECTION_CONNECTED", status: "success", code: ""}, {time: new Date(Date.now() - 4000).toISOString(), title: "机器人功能已就绪", event: "CORE_READY", status: "success", code: ""}, {time: new Date(Date.now() - 7000).toISOString(), title: "微信环境检查通过", event: "WECHAT_READY", status: "success", code: ""}]),
       get_response_traces: () => ok([{time: new Date(Date.now() - 18000).toISOString(), title: "群聊点名", duration_text: "3.4 秒", stages: [{label: "点名快路径", status: "success", detail: "已跳过额外判断", duration_text: "0.4 秒"}, {label: "长期记忆", status: "skipped", detail: "普通寒暄无需回忆", duration_text: "<0.1 秒"}, {label: "精简情感", status: "success", detail: "已加入好感度与心情", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "2.6 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}, {time: new Date(Date.now() - 82000).toISOString(), title: "询问上次内容", duration_text: "5.1 秒", stages: [{label: "点名快路径", status: "success", duration_text: "0.4 秒"}, {label: "长期记忆 3 条", status: "success", detail: "命中明确回忆说法", duration_text: "0.8 秒"}, {label: "精简情感", status: "success", duration_text: "0.1 秒"}, {label: "生成回复", status: "success", duration_text: "3.5 秒"}, {label: "文字发送", status: "success", duration_text: "0.3 秒"}]}]),
       get_experience: () => ok(structuredClone(previewExperience)),
+      get_onboarding_readiness: () => ok(previewOnboardingReadiness()),
       get_web_search_settings: () => ok(structuredClone(previewWebSearch)),
       save_web_search_settings: (values) => {
         const selected = previewWebSearch.providers[values.provider];
@@ -4637,7 +4667,7 @@
         previewProviders = previewProviders
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
-        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities: preset?.modalities || ["text"], modality_label: serviceKind === "image" ? "图片" : serviceKind === "embedding" ? "向量" : preset?.modalities?.length > 1 ? "多模态" : "文本", configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
+        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities: preset?.modalities || ["text"], modality_label: serviceKind === "image" ? "图片" : serviceKind === "embedding" ? "向量" : serviceKind === "voice" ? "语音" : preset?.modalities?.length > 1 ? "多模态" : "文本", configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },

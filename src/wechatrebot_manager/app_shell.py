@@ -139,6 +139,7 @@ PUBLIC_API_METHODS = (
     "preview_scheduled_times",
     "get_activity",
     "get_response_traces",
+    "get_onboarding_readiness",
     "preview_experience",
     "save_memory_settings",
     "save_emotion_settings",
@@ -1157,6 +1158,12 @@ class ApplicationApi:
             "test_hint": "准备完成后，可在选定群里点名机器人测试。",
             "message": "检查只读取当前环境、账号、模型和目录，不会启动机器人、发送消息或修改群策略。",
         }
+
+    def get_onboarding_readiness(self) -> dict[str, object]:
+        try:
+            return self._ok(self._onboarding_readiness())
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
 
     def get_experience(self) -> dict[str, object]:
         try:
