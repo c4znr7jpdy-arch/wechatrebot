@@ -13,15 +13,17 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
-def build_steps(source: Path, output: Path) -> list[tuple[str, list[str]]]:
+def build_steps(source: Path, output: Path, wheelhouse: Path | None = None) -> list[tuple[str, list[str]]]:
     manager = output / "manager-build" / "dist" / "WeChatReBot.exe"
     def command(script: str, *args: object) -> list[str]:
         return [sys.executable, str(ROOT / "scripts" / script), *map(str, args)]
     return [
         ("1-manager", command("build_manager.py", "--output", output / "manager-build")),
-        ("2-runtime", command("build_runtime.py", "--output", output / "runtime-build")),
+        ("2-runtime", command("build_runtime.py", "--output", output / "runtime-build",
+                              *(["--wheelhouse", wheelhouse] if wheelhouse else []))),
         ("3-staging", command("build_staging.py", "--source-root", source,
                               "--runtime-root", output / "runtime-build",
                               "--manager-exe", manager, "--output", output / "staging")),
@@ -31,6 +33,30 @@ def build_steps(source: Path, output: Path) -> list[tuple[str, list[str]]]:
                                 "--payload", output / "payload-build" / "payload.wrb",
                                 "--output", output / "installer")),
     ]
+
+
+def select_wheelhouse(root: Path) -> Path:
+    """Use only a cache matching this checkout's lock, including linked worktrees."""
+    from build_runtime import _verify_wheelhouse
+    roots = [root]
+    result = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=root,
+                            capture_output=True, text=True, encoding="utf-8")
+    if result.returncode == 0:
+        roots.extend(Path(line.removeprefix("worktree ")) for line in result.stdout.splitlines()
+                     if line.startswith("worktree "))
+    for candidate_root in dict.fromkeys(roots):
+        candidate = candidate_root / "artifacts/runtime-cache/wheels-py313-win-amd64"
+        if not candidate.is_dir():
+            continue
+        try:
+            _verify_wheelhouse(root, candidate)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        print(f"Verified dependency cache: {candidate}", flush=True)
+        return candidate
+    raise RuntimeError("No dependency cache matches release/runtime-wheelhouse.json. "
+                       "Restore the approved wheelhouse under artifacts/runtime-cache/wheels-py313-win-amd64. "
+                       "Recompiling wheels cannot reproduce their locked hashes.")
 
 
 def run_step(name: str, command: list[str], output: Path) -> None:
@@ -100,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     _iscc(None)
     output.mkdir(parents=True)
     try:
+        wheelhouse = select_wheelhouse(ROOT)
+        steps = build_steps(source, output, wheelhouse)
         for name, command in steps:
             run_step(name, command, output)
         archive = finish_package(output, version)

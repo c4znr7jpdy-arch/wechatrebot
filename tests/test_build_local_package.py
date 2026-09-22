@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,3 +48,31 @@ def test_customer_zip_contains_native_installer_and_checksum(tmp_path):
     assert result["uploaded"] is False
     assert result["services_started"] is False
     assert result["sha256"] in archive.with_suffix(".zip.sha256").read_text()
+
+
+def test_uses_verified_linked_worktree_cache_and_passes_it_to_runtime(tmp_path, monkeypatch):
+    module = builder()
+    from build_runtime import _wheel_manifest, _wheelhouse_summary
+    linked = tmp_path / "linked tree"
+    suffix = "artifacts/runtime-cache/wheels-py313-win-amd64"
+    good = linked / suffix
+    good.mkdir(parents=True)
+    (good / "dependency.whl").write_bytes(b"approved wheel")
+    current = tmp_path / "current"
+    bad = current / suffix
+    bad.mkdir(parents=True)
+    (bad / "dependency.whl").write_bytes(b"recompiled wheel")
+    (current / "release").mkdir()
+    (current / "release/runtime-wheelhouse.json").write_text(json.dumps(_wheelhouse_summary(_wheel_manifest(good))))
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=f"worktree {linked}\n"))
+    assert module.select_wheelhouse(current) == good
+    runtime = module.build_steps(tmp_path, tmp_path / "out", good)[1][1]
+    assert runtime[runtime.index("--wheelhouse") + 1] == str(good)
+    assert (bad / "dependency.whl").read_bytes() == b"recompiled wheel"
+
+
+def test_missing_approved_cache_fails_before_building(tmp_path, monkeypatch):
+    module = builder()
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=""))
+    with pytest.raises(RuntimeError, match="No dependency cache matches"):
+        module.select_wheelhouse(tmp_path)
