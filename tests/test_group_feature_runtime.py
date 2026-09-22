@@ -84,3 +84,21 @@ def test_pinned_engine_patch_applies_and_contains_identical_group_policy(tmp_pat
     stage = (tmp_path / relative).read_text(encoding="utf-8")
     assert "event.plugins_name = allowed" in stage
     assert stage.index("event.plugins_name = allowed") < stage.index("for handler in star_handlers_registry")
+
+
+def test_packaged_group_filter_handles_commands_without_wheel_cache(tmp_path):
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
+    relative = "astrbot/core/platform/wechat_group_policy.py"
+    subprocess.run(["git", "apply", "-p2", "--include=" + relative,
+                    str(ROOT / "patches/astrbot-4.26.6-outbound-policy.patch")],
+                   cwd=tmp_path, check=True, capture_output=True)
+    helper = (tmp_path / relative).read_text(encoding="utf-8")
+    assert helper == (ROOT / "src/wechatrebot_manager/group_feature_runtime.py").read_text(encoding="utf-8")
+    namespace = {}
+    exec(compile(helper, relative, "exec"), namespace)
+    policy = tmp_path / "policy.json"
+    permitted = namespace["group_plugins"](policy, "wxid_bot", "room@chatroom", None, STARS)
+    assert "jiang_commands" in permitted
+    assert "astrbot_plugin_music" in permitted
+    _save(policy, bot_enabled=False)
+    assert namespace["group_plugins"](policy, "wxid_bot", "room@chatroom", None, STARS) is None

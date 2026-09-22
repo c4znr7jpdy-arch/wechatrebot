@@ -90,7 +90,11 @@ def test_supervisor_restarts_only_its_child_on_source_save(monkeypatch, tmp_path
 
 def test_source_window_skips_install_integration_and_tray(monkeypatch, tmp_path: Path):
     calls = {}
-    api = SimpleNamespace(_attach_window=lambda window, tray: calls.update(tray=tray))
+    api = SimpleNamespace(
+        _attach_window=lambda window, tray: calls.update(tray=tray),
+        _ensure_feature_page_server=lambda: SimpleNamespace(server_port=4321),
+        _close_feature_page_server=lambda: None,
+    )
     for name in app_shell.PUBLIC_API_METHODS:
         setattr(api, name, lambda: None)
 
@@ -112,7 +116,7 @@ def test_source_window_skips_install_integration_and_tray(monkeypatch, tmp_path:
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(create_window=create_window, start=lambda **kwargs: None))
     assert app_shell.run_application(tmp_path, development=True) == 0
     assert "源码验证" in calls["title"]
-    assert calls["url"].startswith("file:")
+    assert calls["url"].startswith("http://127.0.0.1:")
     assert calls["tray"] is None
     assert len(calls["methods"]) == len(app_shell.PUBLIC_API_METHODS)
 

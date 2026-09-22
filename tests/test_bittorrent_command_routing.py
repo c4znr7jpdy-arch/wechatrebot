@@ -201,3 +201,24 @@ def test_manager_allows_bt_for_groups_using_defaults(tmp_path):
     policy = GroupPolicyService(tmp_path).get("wxid_bot", GROUP)
     assert policy["configured"] is False
     assert MODULE in policy["allowed_features"]
+
+
+@pytest.mark.parametrize("allowed", [[], ["jiang_commands"], ["jiang_commands.setu"], ["jiang_commands", "jiang_commands.setu"]])
+@pytest.mark.parametrize("handler_name", ["random_image", "weather", "news"])
+def test_patched_waking_stage_obeys_independent_setu_checkbox(command_runtime, tmp_path, monkeypatch, allowed, handler_name):
+    process, stage, metadata, _, _ = command_runtime
+    star = process.__globals__["star_map"][metadata.handler_module_path]
+    star.root_dir_name = star.name = "jiang_commands"
+    metadata.handler_name = handler_name
+    metadata.event_filters = [SimpleNamespace(filter=lambda *_: True)]
+    stage.ctx.astrbot_config["plugin_set"] = ["jiang_commands"]
+    policy = tmp_path / "data/manager/group-policies.json"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(json.dumps({"schema_version": 1, "accounts": {"wxid_bot": {"groups": {GROUP: {"allowed_features": allowed}}}}}), encoding="utf-8")
+    cwd = tmp_path / "app/astrbot"
+    cwd.mkdir(parents=True)
+    monkeypatch.chdir(cwd)
+    event = Event("图来" if handler_name == "random_image" else "/新闻")
+    asyncio.run(process(stage, event))
+    key = "jiang_commands.setu" if handler_name == "random_image" else "jiang_commands"
+    assert (metadata in event.get_extra("activated_handlers", [])) == (key in allowed)

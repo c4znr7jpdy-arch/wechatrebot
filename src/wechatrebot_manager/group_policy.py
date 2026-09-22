@@ -29,6 +29,7 @@ DEFAULT_GROUP_FEATURES = (
     "astrbot_plugin_twitter",
     "astrbot_plugin_qq_group_daily_analysis",
     "jiang_commands",
+    "jiang_commands.setu",
     "jiang_group_notice",
     "jiang_image",
     "jiang_mystool",
@@ -284,7 +285,10 @@ class GroupPolicyService:
 
     def _features(self) -> tuple[DeliveryFeature, ...]:
         features = load_delivery_features(self.install_root)
-        return features or ()
+        features = features or ()
+        if any(item.module == "jiang_commands" and item.visible for item in features) and not any(item.module == "jiang_commands.setu" for item in features):
+            features += (DeliveryFeature("jiang_commands.setu", "图来", "none"),)
+        return features
 
     def _normalize(
         self,

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import urllib.error
 import urllib.request
 import uuid
 import zipfile
@@ -374,17 +375,31 @@ def _verify_public_download(
         raise ValueError(f"CDN 公网下载大小或 SHA-256 不一致：{url}")
 
 
-def _public_page(url: str, *, timeout: int) -> None:
-    request = urllib.request.Request(
-        url,
-        headers={"Cache-Control": "no-cache", "User-Agent": "WeChatReBot-Publisher/1"},
+def _public_download_page_is_hidden(base_url: str, *, timeout: int) -> None:
+    root = f"{base_url.rstrip('/')}/"
+    urls = (
+        root,
+        f"{root}index.html",
+        f"{root}site",
+        f"{root}site/",
+        f"{root}site/index.html",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        content = response.read(2 * 1024 * 1024).decode("utf-8")
-        if response.geturl() != url or response.status != 200:
-            raise ValueError("公网下载页面不可访问")
-    if 'id="downloadLink"' not in content or "./download.json" not in content:
-        raise ValueError("公网下载页面内容不完整")
+    for url in urls:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Cache-Control": "no-cache",
+                "User-Agent": "WeChatReBot-Publisher/1",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 and exc.geturl() == url:
+                continue
+            raise ValueError(f"公网下载页面未正确隐藏：{url}") from exc
+        raise ValueError(f"公网下载页面仍可访问：{url}")
 
 
 def _stage_download_site(
@@ -476,7 +491,7 @@ def _stage_download_site(
                 payload_move = ""
                 print("服务器已存在摘要一致的在线安装载荷，跳过重复上传。", flush=True)
     else:
-        print("客户安装包使用 OSS/CDN，服务器仅发布下载页和元数据。", flush=True)
+        print("客户安装包使用 OSS/CDN，服务器仅发布元数据并保持下载页隐藏。", flush=True)
     publisher._scp(index_source, host, index_upload)
     publisher._scp(metadata_path, host, metadata_upload)
     publisher._scp(rendered_nginx, host, nginx_upload)
@@ -521,7 +536,7 @@ def _stage_download_site(
         "nginx -t; systemctl reload nginx; "
         f"rm -f -- {shlex.quote(nginx_backup)}; exit 1; fi",
     )
-    _public_page(f"{base_url.rstrip('/')}/", timeout=timeout)
+    _public_download_page_is_hidden(base_url, timeout=timeout)
     _public_head(package.package_url, expected_size=package.package_size, timeout=timeout)
     if package.payload_path is not None and package.payload_url:
         _public_head(

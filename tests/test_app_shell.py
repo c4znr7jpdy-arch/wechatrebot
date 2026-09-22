@@ -180,6 +180,39 @@ def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_
     assert captured["profile"].thinking_enabled is False
 
 
+def test_custom_chat_service_save_preserves_declared_multimodal_input(
+    monkeypatch, tmp_path: Path
+) -> None:
+    api = _api(tmp_path)
+    captured = {}
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(
+        app_shell,
+        "EngineApiClient",
+        lambda _root: SimpleNamespace(is_available=lambda: False),
+    )
+
+    def fake_save(_root, profile, *, make_default=True):
+        captured["profile"] = profile.normalized()
+        return captured["profile"]
+
+    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+
+    result = api.save_provider({
+        "api_key": "multimodal-secret",
+        "api_base": "https://models.example.com/v1",
+        "model": "vendor-model",
+        "service_kind": "chat",
+        "modalities": "text,image,audio",
+    })
+
+    assert result["ok"] is True
+    assert captured["profile"].modalities == ("text", "image", "audio")
+    assert result["data"]["modalities"] == ["text", "image", "audio"]
+    assert result["data"]["modality_label"] == "多模态"
+
+
 def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     config = {
@@ -525,6 +558,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
     tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [
@@ -542,6 +576,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
     )
     api._groups = SimpleNamespace(
         list=lambda _refresh: {
+            "account_id": "wxid_bot",
             "items": [
                 {
                     "group_id": "active@chatroom",
@@ -576,6 +611,7 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
 
 def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [{
@@ -606,11 +642,13 @@ def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path)
 
 def test_conversation_search_matches_group_without_local_messages(tmp_path: Path) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {"items": [], "summary": {"messages": 0}}
     )
     api._groups = SimpleNamespace(
         list=lambda _refresh: {
+            "account_id": "wxid_bot",
             "items": [
                 {"group_id": "family@chatroom", "name": "爱人们"},
                 {"group_id": "work@chatroom", "name": "工作群"},
@@ -626,10 +664,109 @@ def test_conversation_search_matches_group_without_local_messages(tmp_path: Path
     ]
 
 
+def test_history_api_returns_no_data_without_a_logged_in_robot(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: ""
+    api._groups = SimpleNamespace(
+        list=lambda *_args: calls.append(("groups", "wxid_previous"))
+    )
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(("conversations", filters)),
+        messages=lambda *args, **filters: calls.append(("messages", args, filters)),
+        delete_conversation=lambda *args, **filters: calls.append(("delete", args, filters)),
+        delete_before=lambda *args, **filters: calls.append(("clean", args, filters)),
+    )
+
+    conversations = api.get_conversations({"kind": "all"})
+    messages = api.get_messages("old@chatroom", {"paged": True})
+    deleted = api.delete_conversation("old@chatroom")
+    cleaned = api.delete_history_before("2026-09-01")
+    exported = api.export_history("csv")
+
+    assert conversations["data"]["items"] == []
+    assert conversations["data"]["requires_login"] is True
+    assert messages["data"] == {
+        "items": [],
+        "has_more": False,
+        "account_id": "",
+        "requires_login": True,
+    }
+    assert deleted["data"] == {"deleted": 0, "requires_login": True}
+    assert cleaned["data"] == {"deleted": 0, "requires_login": True}
+    assert exported["data"] == {"cancelled": True, "requires_login": True}
+    assert calls == []
+
+
+def test_history_account_uses_a_fresh_runtime_identity(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._lifecycle = SimpleNamespace(
+        view=lambda: SimpleNamespace(
+            runtime=SimpleNamespace(wechat_identity="wxid_cached")
+        ),
+        refresh=lambda: SimpleNamespace(
+            runtime=SimpleNamespace(wechat_identity="wxid_current")
+        ),
+    )
+
+    assert api._history_account_id() == "wxid_current"
+
+
+def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: "wxid_current"
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(filters)
+    )
+    api._groups = SimpleNamespace(list=lambda _refresh: {
+        "account_id": "wxid_previous",
+        "items": [{"group_id": "old@chatroom", "name": "旧账号群"}],
+    })
+
+    result = api.get_conversations({"kind": "group"})
+
+    assert result["ok"] is True
+    assert result["data"]["items"] == []
+    assert result["data"]["account_id"] == "wxid_current"
+    assert result["data"]["account_changed"] is True
+    assert calls == []
+
+
+def test_history_api_rejects_actions_from_a_stale_account_page(tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    calls = []
+    api._history_account_id = lambda: "wxid_current"
+    api._history = SimpleNamespace(
+        conversations=lambda **filters: calls.append(("conversations", filters)),
+        messages=lambda *args, **filters: calls.append(("messages", args, filters)),
+        delete_conversation=lambda *args, **filters: calls.append(("delete", args, filters)),
+        delete_before=lambda *args, **filters: calls.append(("clean", args, filters)),
+    )
+
+    conversations = api.get_conversations({
+        "kind": "private", "account_id": "wxid_previous"
+    })
+    messages = api.get_messages("same@chatroom", {
+        "paged": True, "account_id": "wxid_previous"
+    })
+    deleted = api.delete_conversation("same@chatroom", "wxid_previous")
+    cleaned = api.delete_history_before("2026-09-01", "wxid_previous")
+    exported = api.export_history("csv", "wxid_previous")
+
+    assert conversations["data"]["account_changed"] is True
+    assert messages["data"]["account_changed"] is True
+    assert deleted["data"] == {"deleted": 0, "account_changed": True}
+    assert cleaned["data"] == {"deleted": 0, "account_changed": True}
+    assert exported["data"] == {"cancelled": True, "account_changed": True}
+    assert calls == []
+
+
 def test_dated_group_history_still_uses_directory_avatar_without_adding_empty_groups(
     tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
             "items": [{
@@ -1056,6 +1193,25 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
     assert ".message-bubble-notice" in styles
 
 
+def test_message_center_clears_data_when_the_robot_account_changes() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+
+    assert 'historyAccount: ""' in script
+    assert 'historyReadyAccount: ""' in script
+    assert "historyAccount !== state.historyAccount" in script
+    assert "invalidateHistoryState();" in script
+    assert "requestAccount !== state.historyAccount" in script
+    assert "data.account_id !== requestAccount" in script
+    assert "page.account_id !== requestAccount" in script
+    assert 'account_id: state.historyAccount' in script
+    assert 'api("delete_conversation", item.conversation_id, accountId)' in script
+    assert 'api("delete_history_before", value, accountId)' in script
+    assert 'api("export_history", "csv", accountId)' in script
+    assert "聊天记录只展示当前机器人微信账号的内容" in script
+    assert 'setHistoryActionsEnabled(false);' in script
+
+
 def test_091_history_and_group_layout_regressions_are_covered() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
@@ -1342,6 +1498,21 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
     assert '"模型服务已保存，当前回复模型保持不变。"' in script
 
 
+def test_model_editor_allows_compatible_chat_services_to_declare_multimodal_input() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="providerModalities"' in markup
+    assert '<option value="text,image">文本和图片</option>' in markup
+    assert '<option value="text,image,audio">文本、图片和音频</option>' in markup
+    assert 'if (values.service_kind !== "chat"' in script
+    assert 'syncProviderModalities(service.service_kind || "chat", service.modalities || []);' in script
+    assert 'inferProviderModalities(serviceKind, values.model, values.modalities)' in script
+    assert '["-v", "vision", "vl", "gemini", "doubao-seed"]' in script
+    assert '{id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: []' in script
+
+
 def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = (webui / "app.js").read_text(encoding="utf-8")
@@ -1399,15 +1570,20 @@ def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
 
 
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert 'previewFeature("feature-group-analysis", "群聊分析"' in script
     assert 'fieldCount: 10, modelFieldCount: 1' in script
     assert 'simplified: true' in script
     assert 'scheduledAction: "group_analysis"' in script
     assert '配置自动日报' in script
+    assert 'id="groupAnalysisSchedulePanel"' not in markup
+    assert '<option value="group_analysis">群聊分析</option>' in markup
+    assert 'groupAnalysisConfigFromEditor(state.scheduledEditor)' in script
+    assert 'data-remove-analysis-time' in script
+    assert '停用群分析自动日报？' in script
     assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
     assert 'if (action === "group_analysis")' in script
     assert '已打开群聊分析自动日报设置' in script
@@ -1472,6 +1648,8 @@ def test_run_application_uses_explicit_webview_api_allowlist(
             return None
 
     api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._ensure_feature_page_server = lambda: SimpleNamespace(server_port=4321)
+    api._close_feature_page_server = lambda: None
     monkeypatch.setattr(app_shell, "ApplicationApi", lambda _root: api)
     monkeypatch.setattr(
         app_shell,
