@@ -76,3 +76,43 @@ def test_missing_approved_cache_fails_before_building(tmp_path, monkeypatch):
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=""))
     with pytest.raises(RuntimeError, match="No dependency cache matches"):
         module.select_wheelhouse(tmp_path)
+
+
+def test_cached_plan_rebuilds_manager_and_plugins_but_skips_runtime(tmp_path):
+    module = builder()
+    runtime = tmp_path / "cached runtime"
+    python = tmp_path / "cached build/python.exe"
+    steps = module.build_steps(tmp_path / "source", tmp_path / "out", runtime=runtime, build_python=python)
+    assert [name for name, _ in steps] == ["1-manager", "3-staging", "4-payload", "5-installer"]
+    manager = steps[0][1]
+    assert manager[manager.index("--build-python") + 1] == str(python)
+    staging = steps[1][1]
+    assert staging[staging.index("--runtime-root") + 1] == str(runtime)
+
+
+def test_runtime_cache_invalidated_by_command_patch_change(tmp_path, monkeypatch):
+    module = builder()
+    import build_staging
+    from build_runtime import sha256_file
+    inputs = {
+        "requirements_sha256": "release/runtime-requirements.lock",
+        "astrbot_patch_sha256": "patches/astrbot-4.26.6-wechat.patch",
+        "astrbot_outbound_policy_patch_sha256": "patches/astrbot-4.26.6-outbound-policy.patch",
+    }
+    manifest = {}
+    for key, relative in inputs.items():
+        path = tmp_path / relative
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(relative)
+        manifest[key] = sha256_file(path)
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "runtime-manifest.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(build_staging, "_validate_runtime_root", lambda *_: {})
+    assert module.runtime_matches(tmp_path, runtime)
+    (tmp_path / inputs["astrbot_outbound_policy_patch_sha256"]).write_text("new command permission fix")
+    assert not module.runtime_matches(tmp_path, runtime)
+
+
+def test_partial_runtime_is_never_reused(tmp_path):
+    assert not builder().runtime_matches(tmp_path, tmp_path / "unfinished")
