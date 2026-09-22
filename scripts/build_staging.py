@@ -123,7 +123,10 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
             f"--directory={plugin_relative}",
             str(patch),
         ]
-        check_command = [*command[:2], "--check", *command[2:]]
+        # A source checkout may already include the reviewed change.  Keep
+        # the expected failed forward check quiet; the reverse check below
+        # decides whether this is an idempotent no-op or a real mismatch.
+        check_command = [*command[:2], "--quiet", "--check", *command[2:]]
         try:
             subprocess.run(
                 check_command,
@@ -135,12 +138,23 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
             # the patch in corresponding-source without applying it twice.
             try:
                 subprocess.run(
-                    [*command[:2], "--reverse", "--check", *command[2:]],
+                    [
+                        *command[:2],
+                        "--quiet",
+                        "--reverse",
+                        "--check",
+                        *command[2:],
+                    ],
                     cwd=commercial_root,
                     check=True,
                 )
             except subprocess.CalledProcessError:
                 raise exc
+            else:
+                print(
+                    f"Plugin patch already present; skipped: {patch.name}",
+                    flush=True,
+                )
         else:
             subprocess.run(command, cwd=commercial_root, check=True)
         patch_target = output / "legal" / "corresponding-source" / patch.name
