@@ -3,6 +3,7 @@
 
   const state = {
     bootstrap: null,
+    theme: "light",
     status: null,
     activePage: "home",
     featuresLoaded: false,
@@ -94,6 +95,8 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const THEME_STORAGE_KEY = "wechatrebot-theme";
+  const THEME_CHANNEL = "wechatrebot-theme";
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
@@ -106,6 +109,52 @@
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+
+  function normalizeTheme(value) {
+    return value === "dark" ? "dark" : "light";
+  }
+
+  function storedTheme() {
+    try {
+      return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+    } catch (_error) {
+      return normalizeTheme(document.documentElement.dataset.theme);
+    }
+  }
+
+  function syncEmbeddedTheme(frame = $("#featurePageFrame")) {
+    if (!frame?.contentWindow) return;
+    frame.contentWindow.postMessage({channel: THEME_CHANNEL, theme: state.theme}, "*");
+  }
+
+  function applyTheme(value, persist = false) {
+    const theme = normalizeTheme(value);
+    state.theme = theme;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+    const colorScheme = document.querySelector('meta[name="color-scheme"]');
+    if (colorScheme) colorScheme.content = theme === "dark" ? "dark light" : "light dark";
+    if (persist) {
+      try { window.localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (_error) { /* storage is optional in WebView2 */ }
+    }
+    const button = $("#themeToggle");
+    const iconNode = $("#themeToggleIcon");
+    const textNode = $("#themeToggleText");
+    const nextLabel = theme === "dark" ? "切换到浅色模式" : "切换到深色模式";
+    if (button) {
+      button.setAttribute("aria-pressed", String(theme === "dark"));
+      button.setAttribute("aria-label", nextLabel);
+      button.title = nextLabel;
+      button.classList.toggle("is-dark", theme === "dark");
+    }
+    if (iconNode) iconNode.setAttribute("href", theme === "dark" ? "#i-sun" : "#i-moon");
+    if (textNode) textNode.textContent = theme === "dark" ? "浅色模式" : "深色模式";
+    syncEmbeddedTheme();
+  }
+
+  function initializeTheme() {
+    applyTheme(storedTheme());
+  }
 
   const coreSettings = window.createRobotCoreSettings({
     read: () => api("get_robot_core"),
@@ -979,8 +1028,10 @@
       const page = await api("get_feature_page", detail.id);
       if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
       frame.src = page.url;
+      frame.onload = () => syncEmbeddedTheme(frame);
       frame.hidden = false;
       status.hidden = true;
+      syncEmbeddedTheme(frame);
     } catch (error) {
       if (loadId !== state.featurePageLoad) return;
       status.textContent = error?.message || "专属配置页暂时无法打开，请稍后重试。";
@@ -3993,6 +4044,7 @@
   }
 
   function bindEvents() {
+    initializeTheme();
     // Keep the browser-native calendar/clock as the single source of truth,
     // while making the whole field open it on a direct click.
     document.addEventListener("click", (event) => {
@@ -4003,6 +4055,9 @@
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
+    $("#themeToggle").addEventListener("click", () => {
+      applyTheme(state.theme === "dark" ? "light" : "dark", true);
+    });
     $("#primaryAction").addEventListener("click", runPrimaryAction);
     $$('[data-stage-stop]').forEach((button) => button.addEventListener("click", runForceStop));
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
