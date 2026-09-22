@@ -121,7 +121,7 @@ diff --git a/official/astrbot/core/platform/wechat_group_policy.py b/expected/as
 new file mode 100644
 --- /dev/null
 +++ b/expected/astrbot/core/platform/wechat_group_policy.py
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,70 @@
 +"""Pure runtime group-feature policy, copied into the pinned engine patch."""
 +from __future__ import annotations
 +

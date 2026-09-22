@@ -402,6 +402,10 @@ def _release_manifest(
 
 
 def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[str, object]:
+    helper = runtime_root / "python/Lib/site-packages/astrbot/core/platform/wechat_group_policy.py"
+    expected_helper = commercial_root / "src/wechatrebot_manager/group_feature_runtime.py"
+    if not helper.is_file() or helper.read_text(encoding="utf-8") != expected_helper.read_text(encoding="utf-8"):
+        raise RuntimeError("Runtime group command filter is incomplete or stale; rebuild the runtime")
     python_exe = runtime_root / "python" / "python.exe"
     runtime_manifest_path = runtime_root / "runtime-manifest.json"
     if not python_exe.is_file():

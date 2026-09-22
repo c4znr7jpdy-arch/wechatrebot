@@ -71,12 +71,25 @@ def _runtime_manifest(commercial: Path, runtime: Path) -> dict[str, object]:
 
 def _write_runtime_fixture(runtime: Path, commercial: Path) -> dict[str, object]:
     (runtime / "python").mkdir(parents=True)
+    helper = runtime / "python/Lib/site-packages/astrbot/core/platform/wechat_group_policy.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text((commercial / "src/wechatrebot_manager/group_feature_runtime.py").read_text(encoding="utf-8"), encoding="utf-8")
     (runtime / "python" / "python.exe").write_bytes(b"placeholder")
     manifest = _runtime_manifest(commercial, runtime)
     (runtime / "runtime-manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
     return manifest
+
+
+def test_runtime_root_rejects_truncated_group_command_filter(tmp_path):
+    commercial = Path(__file__).parents[1]
+    runtime = tmp_path / "runtime"
+    _write_runtime_fixture(runtime, commercial)
+    helper = runtime / "python/Lib/site-packages/astrbot/core/platform/wechat_group_policy.py"
+    helper.write_text("\n".join(helper.read_text(encoding="utf-8").splitlines()[:-2]) + "\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="group command filter"):
+        _builder()._validate_runtime_root(runtime, commercial)
 
 
 def test_runtime_root_validation_accepts_matching_fingerprint(tmp_path: Path) -> None:
