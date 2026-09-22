@@ -262,6 +262,10 @@ def test_music_command_accepts_wechat_whitespace_and_marks_card_as_reply(
     sender = (tmp_path / "core/sender.py").read_text(encoding="utf-8")
     assert '"_wechatrebot_delivery": "reply"' in sender
     assert '"_wechatrebot_wake": True' in sender
+    platform = (tmp_path / "core/platform/__init__.py").read_text(encoding="utf-8")
+    assert "except ModuleNotFoundError as exc" in platform
+    assert "class MetingMusic" in platform
+    compile(platform, "music-platform-init", "exec")
 
 
 def test_shared_tool_sources_are_part_of_payload() -> None:
