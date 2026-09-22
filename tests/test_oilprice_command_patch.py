@@ -38,7 +38,15 @@ def patched_tree(tmp_path_factory):
     output = commercial / 'artifacts/staging'
     plugin = output / 'app/astrbot/data/plugins/jiang_commands'
     plugin.mkdir(parents=True)
-    shutil.copy2(SOURCE, plugin / 'main.py')
+    # The staging patch set covers the whole plugin, not just main.py.  Copy
+    # the source tree so schema and asset patches are exercised together with
+    # the oil-price handler.
+    shutil.copytree(
+        SOURCE.parent,
+        plugin,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'),
+    )
     patches = commercial / 'patches'
     patches.mkdir()
     for patch in ROOT.glob('patches/astrbot-plugin-jiang_commands*.patch'):
