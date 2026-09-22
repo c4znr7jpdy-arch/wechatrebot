@@ -72,6 +72,30 @@ def _task():
     }
 
 
+def test_runtime_health_exposes_command_scheduling_contract(tmp_path: Path) -> None:
+    module = _copy_runtime_package(tmp_path)
+    client = FakeClient()
+
+    async def connection():
+        return "wxid_robot", client
+
+    runtime = module.UnifiedRuntime(
+        object(), install_root=tmp_path, content=FakeContent(),
+        connection=connection,
+    )
+    runtime._active = True
+
+    health = asyncio.run(runtime.health())
+
+    assert health["runtime_ready"] is True
+    assert health["command_definition_version"] == 1
+    catalog = health["command_catalog"]
+    assert any(item["id"] == "weather" and item["status"] == "supported" for item in catalog)
+    checkin = next(item for item in catalog if item["id"] == "checkin")
+    assert checkin["status"] == "needs_condition"
+    assert checkin["external_write"] is True
+
+
 def test_runtime_generates_once_and_submits_only_live_recipient(tmp_path: Path) -> None:
     module = _copy_runtime_package(tmp_path)
     now = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)

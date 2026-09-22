@@ -59,6 +59,7 @@
     historyMessageQuery: "",
     schedules: [],
     scheduledContext: null,
+    scheduledCommandCatalog: [],
     scheduledEditor: null,
     scheduledDirty: false,
     scheduledBusy: false,
@@ -858,6 +859,17 @@
     });
   }
 
+  function featureCommandScheduleHint(command) {
+    const text = String(command || "").replace(/^[/\\]/, "").trim();
+    if (/(天气|新闻|资讯|热点|油价|kfc|疯狂星期四|星期四文案|短剧推荐|影视推荐|提醒)/i.test(text)) {
+      return {label: "支持定时", status: "supported"};
+    }
+    if (/(签到|订阅动态|b站动态|epic|喜加一|免费游戏)/i.test(text)) {
+      return {label: "需要补充条件", status: "needs-condition"};
+    }
+    return {label: "不支持定时", status: "unsupported"};
+  }
+
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
@@ -867,7 +879,7 @@
     const currentSchema = schemas[state.featureTab] || schemas.basic;
     const guide = detail.guide || {};
     const commandGroups = Array.isArray(guide.commands) ? guide.commands : [];
-    const commandMarkup = commandGroups.length ? `<section class="feature-command-list" aria-labelledby="feature-command-title"><div class="feature-command-heading"><div><span class="eyebrow">快速参考</span><h3 id="feature-command-title">常用指令</h3></div><span>复制到聊天即可使用</span></div><div class="feature-command-groups">${commandGroups.map((group) => `<div class="feature-command-group"><strong>${escapeHtml(group.title || "指令")}</strong><div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map((item) => `<div class="feature-command-item"><code>${escapeHtml(item[0] || "")}</code><span>${escapeHtml(item[1] || "")}</span></div>`).join("")}</div></div>`).join("")}</div></section>` : "";
+    const commandMarkup = commandGroups.length ? `<section class="feature-command-list" aria-labelledby="feature-command-title"><div class="feature-command-heading"><div><span class="eyebrow">快速参考</span><h3 id="feature-command-title">常用指令</h3></div><span>复制到聊天即可使用</span></div><div class="feature-command-groups">${commandGroups.map((group) => `<div class="feature-command-group"><strong>${escapeHtml(group.title || "指令")}</strong><div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map((item) => { const hint = featureCommandScheduleHint(item[0]); return `<div class="feature-command-item"><code>${escapeHtml(item[0] || "")}</code><span>${escapeHtml(item[1] || "")}<small class="command-schedule-status ${hint.status}">${hint.label}</small></span></div>`; }).join("")}</div></div>`).join("")}</div></section>` : "";
     const scheduleAction = detail.scheduled_action || "";
     const scheduleCopy = scheduleAction === "short_drama"
       ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。"
@@ -2270,6 +2282,7 @@
       if (generation !== state.scheduledLoad) return;
       if (context.status === "rejected") throw context.reason;
       state.scheduledContext = context.value;
+      state.scheduledCommandCatalog = Array.isArray(context.value.command_catalog) ? context.value.command_catalog : [];
       state.schedules = legacy.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action) : [];
       state.groupAnalysisSchedule = groupAnalysis.status === "fulfilled" ? groupAnalysis.value : null;
       const message = $("#scheduleContextMessage");
@@ -2302,6 +2315,29 @@
   const SCHEDULED_DAYS = ["一", "二", "三", "四", "五", "六", "日"];
   const SCHEDULED_WEEK_PRESETS = {thursday: [3], weekdays: [0, 1, 2, 3, 4], weekends: [5, 6]};
   const SCHEDULED_RESULTS = {submitted: "已提交微信", failed: "发送失败", unknown: "结果待确认", skipped: "已跳过", pending: "等待发送", running: "正在执行", completed: "执行完成", partial: "部分失败"};
+
+  function scheduledCommandDefinition(action) {
+    return state.scheduledCommandCatalog.find((entry) => entry.action === action) || null;
+  }
+
+  function scheduledCommandStatusText(definition) {
+    if (!definition) return "暂未声明可定时化信息";
+    if (definition.status === "supported") return "支持定时";
+    if (definition.status === "needs_condition") return "需要补充条件";
+    return "不支持定时";
+  }
+
+  function scheduledCommandCatalogText() {
+    const catalog = state.scheduledCommandCatalog;
+    if (!catalog.length) return "命令定时化信息将在读取任务能力后显示。";
+    const supported = catalog.filter((entry) => entry.status === "supported").map((entry) => entry.display_name);
+    const conditional = catalog.filter((entry) => entry.status === "needs_condition").map((entry) => entry.display_name);
+    return [
+      supported.length ? `支持定时：${supported.join("、")}` : "",
+      conditional.length ? `需要补充条件：${conditional.join("、")}` : "",
+      "不支持定时的交互命令会显示原因和替代入口。",
+    ].filter(Boolean).join("；");
+  }
 
   function groupAnalysisScheduleValues() {
     const auto = state.groupAnalysisSchedule?.schedule_config?.auto_analysis || {};
@@ -2439,7 +2475,7 @@
 
   function scheduledStatus(item) {
     if (item.draft || item.status === "draft") return "草稿";
-    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", blocked: "待处理", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
+    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", blocked: "待处理", needs_review: "需要检查", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
   }
 
   function scheduledResultText(value) {
@@ -2467,14 +2503,14 @@
     const items = all.filter((item) => (action === "all" || action === item.action)
       && (target === "all" || (item.targets || []).some((entry) => entry.type === target))
       && (!chat || (item.targets || []).some((entry) => entry.id === chat.id && entry.type === chat.type))
-      && (status === "all" || (status === "enabled" && item.enabled) || (status === "draft" && item.draft) || (status === "paused" && !item.enabled && !item.draft && item.status !== "completed") || (status === "attention" && ["blocked", "failed", "waiting_account", "waiting_runtime"].includes(item.status))));
+      && (status === "all" || (status === "enabled" && item.enabled) || (status === "draft" && item.draft) || (status === "paused" && !item.enabled && !item.draft && item.status !== "completed") || (status === "attention" && ["blocked", "failed", "needs_review", "waiting_account", "waiting_runtime"].includes(item.status))));
     $("#scheduledTaskHead").hidden = items.length === 0;
     $("#scheduledTaskTable").classList.toggle("is-empty", items.length === 0);
     $("#scheduledTaskRows").innerHTML = items.length ? items.map((item) => `<tr>
       <td><button class="row-action scheduled-name" data-task-action="edit" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name || scheduledName(item))}</button><small>${escapeHtml(SCHEDULED_ACTIONS[item.action] || "定时任务")}</small></td>
       <td><span>${escapeHtml(item.group_analysis_legacy_blacklist && !(item.targets || []).length ? "按旧版排除名单运行" : scheduledTargetText(item.targets))}</span><small class="schedule-target-names">${escapeHtml((item.targets || []).map((entry) => entry.name || "待确认对象").join("、"))}</small></td>
       <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(item.group_analysis_task && !item.next_run_time ? "按每日时间执行" : scheduledTime(item.next_run_time))}</small></td>
-      <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
+      <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "needs_review", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
       <td><div class="row-actions">${item.group_analysis_task ? `<button class="row-action" data-task-action="edit" data-id="${GROUP_ANALYSIS_TASK_ID}">编辑</button><button class="row-action delete" data-task-action="disable" data-id="${GROUP_ANALYSIS_TASK_ID}">停用</button>` : `<button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="5" class="schedule-empty-cell"><div class="schedule-empty-state"><div class="schedule-empty-icon" aria-hidden="true">${icon("i-clock")}</div><h2>${all.length ? "没有符合条件的任务" : "暂无定时任务"}</h2><p>${all.length ? "调整内容、发送对象或状态筛选，查看其他任务。" : "可创建群聊分析日报、每日天气预报、定时资讯或一句提醒，选择发送对象后自动触发。"}</p><button class="button secondary schedule-empty-cta" id="emptyNewScheduledTask">${all.length ? "+ 新建任务" : "+ 创建第一个定时任务"}</button></div></td></tr>`;
     $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id)));
     $("#emptyNewScheduledTask")?.addEventListener("click", () => openScheduledEditor());
@@ -2539,7 +2575,7 @@
         <section class="panel scheduled-form-section"><h3><span>1</span>做什么</h3><div class="form-field"><label for="scheduledName">任务名称</label><input id="scheduledName" value="${escapeHtml(editor.name || "")}" placeholder="自动使用内容名称，也可以自己命名" maxlength="80" ${analysisTask ? 'readonly aria-describedby="scheduledNameHint"' : ""}>${analysisTask ? '<small id="scheduledNameHint">群聊分析日报使用固定名称。</small>' : ""}</div>
         <div class="form-field"><label for="scheduledAction">发送内容</label><select id="scheduledAction">${Object.entries(SCHEDULED_ACTIONS).map(([value, name]) => `<option value="${value}" ${value === editor.action ? "selected" : ""}>${name}</option>`).join("")}</select></div><div id="scheduledArguments" class="scheduled-arguments">${scheduledArgumentsMarkup(editor)}</div>
         <div id="scheduledReadiness" class="schedule-notice"></div><button class="row-action" id="scheduledPrepareFeature" type="button" hidden>去准备功能，保留当前草稿</button>
-        ${analysisTask ? "" : '<details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>只识别已支持的内容；不会执行命令或发送消息。</small></details>'}</section>
+        ${analysisTask ? "" : `<details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>命令会先检查参数、依赖、收件人类型和执行语义，不会执行命令或发送消息。</small><p class="schedule-command-catalog">${escapeHtml(scheduledCommandCatalogText())}</p></details>`}</section>
         <section class="panel scheduled-form-section"><h3><span>2</span>发给谁</h3><p class="subtle">${targetIntro}</p><div class="scheduled-selected" id="scheduledSelected"></div>${targetTabs}<div class="form-field"><label for="scheduledTargetSearch">搜索聊天</label><label class="search-box wide" id="scheduledTargetSearchBox"><svg><use href="#i-search"/></svg><input id="scheduledTargetSearch" type="search" placeholder="搜索群名、昵称或备注" autocomplete="off"><button type="button" class="clear-search" aria-label="清空聊天搜索">×</button></label></div><div id="scheduledTargetChoices" class="scheduled-target-choices"></div></section>
         <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3>${scheduledTimingMarkup(editor.schedule, editor.action, editor.arguments)}</section>
       </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">${analysisTask ? "群聊分析沿用当前功能的群聊权限。保存后按所选群和时间生成日报。" : "启用只授权本任务向所选聊天定时发送，不会允许 AI 主动聊天。聊天总开关、安静时段及每日上限仍然有效。"}</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions">${analysisTask ? "" : '<button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button>'}<button class="button primary" id="scheduledSaveEnabled" type="button">${analysisTask ? editor.group_analysis_persisted ? "保存并启用" : "创建并启用" : editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>${analysisTask ? "群聊分析暂不支持在这里预览或测试发送；可保存后在测试群查看报告。" : "预览只在这里显示；测试发送必须再明确选择一个聊天。"}</small></aside></div>`;
@@ -2717,6 +2753,7 @@
     payload.enabled = !draft;
     payload.schedule.timezone = "Asia/Shanghai";
     if (payload.action === "weather") payload.arguments.output = "image";
+    payload.definition_version = Number(state.scheduledContext?.command_definition_version || 1);
     if (!draft && !payload.targets.length) throw new Error("请至少选择一个群聊或联系人。 ");
     return payload;
   }
@@ -2793,7 +2830,10 @@
       const command = $("#scheduledCommand").value.trim();
       if (!command) throw new Error("请先输入需要识别的命令。 ");
       const parsed = await api("parse_scheduled_command", command);
-      if (!SCHEDULED_ACTIONS[parsed.action]) throw new Error("这个命令暂不支持定时发送。 ");
+      if (parsed.status !== "supported" || !SCHEDULED_ACTIONS[parsed.action]) {
+        const reason = parsed.reason || "这个命令暂不支持定时发送。";
+        throw new Error(`${reason}${parsed.alternative ? ` ${parsed.alternative}` : ""}`);
+      }
       state.scheduledEditor.action = parsed.action; state.scheduledEditor.arguments = parsed.arguments || {}; state.scheduledDirty = true;
       renderScheduledEditor();
       toast("已填写内容参数，请确认发送对象和时间。 ");
@@ -4482,12 +4522,12 @@
       },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),
-      get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: ""}),
+      get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), command_catalog: Object.entries(SCHEDULED_ACTIONS).map(([id, display_name]) => ({id, display_name, action: id, status: "supported", parameters: [], dependencies: [], recipient_types: ["group", "private"], external_write: false, result: "预览内容", failure_policy: "按对象记录失败", reason: "", alternative: ""})).concat([{id: "checkin", display_name: "账号签到", action: null, status: "needs_condition", reason: "签到需要单独授权和重复执行保护。", alternative: "请先在对应功能页完成账号授权，再创建任务。"}]), command_definition_version: 1, groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: ""}),
       save_scheduled_task: (payload) => ok(previewTaskSave(payload)),
       delete_scheduled_task: (_account, id) => { previewTasks.delete(id); return ok({deleted: true}); },
       set_scheduled_task_enabled: (_account, id, enabled) => ok(previewTaskSave({...previewTasks.get(id), enabled, draft: false})),
       preview_scheduled_times: (schedule) => ok({items: previewTaskTimes(schedule), text: "请补齐有效的未来日期、星期和时间。"}),
-      parse_scheduled_command: (command) => { const normalized = command.replace(/^\//, ""); const match = normalized.match(/^(.+?)(明天|今日|今天)?天气$/); if (match) return ok({action: "weather", arguments: {city: match[1], day: match[2] === "明天" ? "tomorrow" : "today", output: "image"}}); if (/^(新闻|资讯|热点)$/.test(normalized)) return ok({action: "news", arguments: {count: 10}}); if (normalized === "短剧推荐") return ok({action: "short_drama", arguments: {media_type: "短剧", limit: 12}}); return Promise.resolve({ok: false, error: {message: "这个命令暂不支持，请直接选择发送内容。"}}); },
+      parse_scheduled_command: (command) => { const normalized = command.replace(/^\//, "").trim(); const match = normalized.match(/^(.+?)(明天|今日|今天)?天气$/); if (match) return ok({action: "weather", arguments: {city: match[1], day: match[2] === "明天" ? "tomorrow" : "today", output: "image"}, recognized: true, status: "supported", reason: "", alternative: ""}); if (/^(新闻|资讯|热点)$/.test(normalized)) return ok({action: "news", arguments: {count: 10}, recognized: true, status: "supported", reason: "", alternative: ""}); if (normalized === "短剧推荐") return ok({action: "short_drama", arguments: {media_type: "短剧", limit: 12}, recognized: true, status: "supported", reason: "", alternative: ""}); if (/^(签到|每日签到)$/.test(normalized)) return ok({recognized: true, status: "needs_condition", reason: "签到需要单独授权和重复执行保护。", alternative: "请先在对应功能页完成账号授权，再创建任务。"}); return ok({recognized: false, status: "unsupported", reason: "没有识别出可定时化的命令。", alternative: "请直接选择定时任务中的内容，或改为固定文字提醒。"}); },
       preview_scheduled_task: (payload) => {
         if (payload.action === "short_drama") return ok({kind: "link_card", title: `最新${payload.arguments.media_type || "短剧"}推荐｜${payload.arguments.limit || 12}部`, description: "定时推荐 · 点击查看封面并选择播放", url: "https://player.example/recommendations/preview", image_url: "https://player.example/cover.jpg"});
         if (payload.action !== "weather") return ok({kind: "text", text: payload.action === "text" ? payload.arguments.text : `预览示意：${SCHEDULED_ACTIONS[payload.action]}，正式执行时获取最新内容。`});

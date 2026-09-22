@@ -71,7 +71,7 @@ from .response_trace import ResponseTraceService
 from .retired_plugins import purge_retired_plugins
 from .schedules import ScheduleService
 from .scheduled_task_service import ScheduledTaskService
-from .task_store import next_occurrences, parse_command, schedule_text
+from .task_store import inspect_scheduled_command, next_occurrences, parse_command, schedule_text
 from .updates import (
     UpdateChannel,
     UpdateError,
@@ -1006,7 +1006,7 @@ class ApplicationApi:
         return self._scheduled_call(self._scheduled_task_service().runs, account_id, task_id)
 
     def parse_scheduled_command(self, command: str) -> dict[str, object]:
-        return self._scheduled_call(parse_command, command)
+        return self._scheduled_call(inspect_scheduled_command, command)
 
     def preview_scheduled_times(self, schedule: dict[str, Any]) -> dict[str, object]:
         return self._scheduled_call(lambda: {"items": next_occurrences(schedule), "text": schedule_text(schedule)})
