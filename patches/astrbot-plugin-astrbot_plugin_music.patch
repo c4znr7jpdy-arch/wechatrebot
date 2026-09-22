@@ -121,3 +121,24 @@ index 25e44dd..0b04812 100644
              return
  
          # 单曲模式
+diff --git a/core/platform/__init__.py b/core/platform/__init__.py
+--- a/core/platform/__init__.py
++++ b/core/platform/__init__.py
+@@ -1,7 +1,16 @@
+ from .base import BaseMusicPlayer
+ from .ncm import NetEaseMusic
+ from .ncm_nodejs import NetEaseMusicNodeJS
+-from .meting import MetingMusic
++try:
++    from .meting import MetingMusic
++except ModuleNotFoundError as exc:
++    # Meting is an optional legacy backend. Older incremental payloads may
++    # omit the module; keep the remaining music backends loadable.
++    if exc.name != f"{__package__}.meting":
++        raise
++
++    class MetingMusic:  # type: ignore[no-redef]
++        pass
+ from .qishui import QishuiMusic
+ from .txqq import TXQQMusic
+ from .xingzhige import XingzhigeKuwoMusic
