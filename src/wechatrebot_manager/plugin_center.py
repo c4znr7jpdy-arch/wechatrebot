@@ -48,6 +48,14 @@ _PROXY_PREFIXES = (
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 _MAX_MEME_PACK_UPLOAD_BYTES = 120 * 1024 * 1024
+_LOCAL_UI_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "
+    "script-src 'self'; connect-src 'self'; frame-src 'self'"
+)
+_MANAGER_UI_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; img-src 'self' data: blob: https://wx.qlogo.cn; "
+    "style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'"
+)
 _LONG_MEME_REQUEST_PATHS = frozenset({
     "/api/plug/meme_manager/community/install",
     "/api/plug/meme_manager/community/install_official_first",
@@ -2456,7 +2464,12 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
             raw = target.read_bytes()
             self.send_response(HTTPStatus.OK)
             self._security_headers()
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'")
+            self.send_header(
+                "Content-Security-Policy",
+                _MANAGER_UI_CONTENT_SECURITY_POLICY
+                if manager_mode
+                else _LOCAL_UI_CONTENT_SECURITY_POLICY,
+            )
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()

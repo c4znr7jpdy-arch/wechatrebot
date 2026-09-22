@@ -1861,7 +1861,12 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
         with urlopen(f"{base}/", timeout=2) as response:
             assert response.status == 200
             assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
-            assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+            content_security_policy = response.headers["Content-Security-Policy"]
+            assert "default-src 'self'" in content_security_policy
+            assert (
+                "img-src 'self' data: blob: https://wx.qlogo.cn"
+                in content_security_policy
+            )
         for path, expected in (
             ("/app.css", b"body{}"),
             ("/design-overrides.css", b".design-ready{}"),
