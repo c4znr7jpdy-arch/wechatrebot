@@ -70,6 +70,7 @@
     scheduledReturnDraft: false,
     groupAnalysisSchedule: null,
     experience: null,
+    readiness: null,
     maintenance: null,
     responseTraces: [],
     polling: false,
@@ -1503,7 +1504,7 @@
     const button = $('button[form="groupPolicyForm"]');
     if (!button) return;
     button.disabled = true;
-    button.textContent = "正在保存…";
+    button.textContent = "正在检查影响…";
     try {
       const values = {
         bot_enabled: form.elements.bot_enabled.checked,
@@ -1518,10 +1519,24 @@
         },
         daily_limit: Number(form.elements.daily_limit.value),
       };
-      await api("save_group_policy", state.groupAccount, state.selectedGroup, values, form.dataset.revision || "");
-      await loadGroupPolicy(state.selectedGroup);
+      const preview = await api("preview_group_policy", state.groupAccount, state.selectedGroup, values, form.dataset.revision || "");
+      const impact = Array.isArray(preview.impact) ? preview.impact : ["本次修改只影响当前群的机器人规则。"];
+      button.disabled = false;
+      button.textContent = "保存群聊规则";
+      confirmAction({
+        title: "确认应用本群规则？",
+        message: impact.join(" ") + " 保存只更新本机配置，不会向群内发送消息。",
+        confirmText: "保存并回读",
+        intent: "primary",
+        onConfirm: async () => {
+          await api("save_group_policy", state.groupAccount, state.selectedGroup, values, form.dataset.revision || "");
+          await loadGroupPolicy(state.selectedGroup);
+          toast("群聊规则已保存并回读确认。");
+        },
+      });
+      return;
     } catch (error) { reportError(error); }
-    finally { button.disabled = false; button.textContent = "保存本群规则"; }
+    finally { button.disabled = false; button.textContent = "保存群聊规则"; }
   }
 
   async function hydrateGroupMemberCounts(groupIds, generation) {
@@ -2527,6 +2542,8 @@
     $("#scheduledTaskEditor").hidden = true;
     $("#scheduledTaskRuns").hidden = true;
     $("#newScheduledTask").hidden = false;
+    $("#scheduleHeading").textContent = "定时任务";
+    $("#scheduleHeadingDescription").textContent = "管理定时发送、执行时间和逐对象结果。";
     state.scheduledTimeLoad += 1;
   }
 
@@ -2567,6 +2584,8 @@
     $("#newScheduledTask").hidden = true;
     const root = $("#scheduledTaskEditor");
     root.hidden = false;
+    $("#scheduleHeading").textContent = "安排定时消息";
+    $("#scheduleHeadingDescription").textContent = "填写内容、接收对象和执行时间，保存前检查实际安排。";
     const analysisTask = editor.action === "group_analysis";
     const targetIntro = analysisTask ? "选择需要生成日报的群聊。" : "固定选择当前账号的聊天，可同时选择群聊和私聊。";
     const targetTabs = analysisTask ? `<div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button></div>` : `<div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button><button type="button" data-scheduled-target-tab="private" aria-pressed="false">私聊</button></div>`;
@@ -2902,6 +2921,8 @@
   async function showScheduledRuns(item) {
     const root = $("#scheduledTaskRuns");
     $("#scheduleListView").hidden = true; $("#scheduledTaskEditor").hidden = true; root.hidden = false;
+    $("#scheduleHeading").textContent = "执行记录";
+    $("#scheduleHeadingDescription").textContent = "按对象查看本次任务的发送结果和原因。";
     root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · 执行记录</h2><p>已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
     $("#scheduledRunsBack").addEventListener("click", showScheduledList);
     try {
@@ -3133,6 +3154,7 @@
     if (!service) return "deepseek";
     if (service.service_kind === "embedding") return "embedding_custom";
     if (service.service_kind === "image") return "image_custom";
+    if (service.service_kind === "voice") return "voice_custom";
     const model = String(service.model || "").toLowerCase();
     if (model.startsWith("deepseek")) return "deepseek";
     if (model.startsWith("glm-")) return "glm";
@@ -3148,6 +3170,7 @@
     const preset = providerPresetFor(service);
     if (service.service_kind === "embedding") return {mark: "V", label: "文本向量", className: "custom"};
     if (service.service_kind === "image") return {mark: "IMG", label: "图片模型", className: "custom"};
+    if (service.service_kind === "voice") return {mark: "AUD", label: "语音模型", className: "custom"};
     if (preset === "deepseek") return {mark: "D", label: "DeepSeek", className: "deepseek"};
     if (preset === "glm") return {mark: "G", label: "GLM", className: "custom"};
     if (preset === "xiaomi_mimo") return {mark: "M", label: "MiMo", className: "custom"};
@@ -3207,7 +3230,7 @@
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
     clearProviderModels();
     $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
-    const modalityHint = preset.service_kind === "embedding" ? "向量模型" : preset.service_kind === "image" ? "图片模型" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态模型" : "文本模型";
+    const modalityHint = preset.service_kind === "embedding" ? "向量模型" : preset.service_kind === "image" ? "图片模型" : preset.service_kind === "voice" ? "语音模型" : Array.isArray(preset.modalities) && preset.modalities.length > 1 ? "多模态模型" : "文本模型";
     $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · ${modalityHint}`;
     syncProviderThinkingControl();
     renderProviderSaveIntent(
@@ -3237,11 +3260,13 @@
 
   function renderProviderSaveIntent(makeDefault, serviceKind = "chat") {
     if (serviceKind !== "chat") {
-      const label = serviceKind === "image" ? "图片模型" : "向量模型";
+      const label = serviceKind === "image" ? "图片模型" : serviceKind === "voice" ? "语音模型" : "向量模型";
       $("#providerSaveIntentTitle").textContent = `保存为${label}`;
       $("#providerSaveIntentDetail").textContent = serviceKind === "image"
         ? "不会更改聊天回复模型；保存后可在图片生成功能中选择。"
-        : "不会更改聊天回复模型；保存后可在需要向量检索的功能中选择。";
+        : serviceKind === "voice"
+          ? "不会更改聊天回复模型；保存后可在语音功能中选择。"
+          : "不会更改聊天回复模型；保存后可在需要向量检索的功能中选择。";
       $("#saveProvider").textContent = `保存${label}`;
       return;
     }
@@ -3294,7 +3319,7 @@
       : service.service_kind === "chat"
         ? "已配置，可切换为回复模型"
         : "已配置，供相关功能选择";
-    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : "此服务仅保存在当前设备";
+    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备";
     $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置服务密钥";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
@@ -3738,6 +3763,19 @@
   const saveMemoryExperience = (event) => saveExperience(event, (values) => api("save_memory_settings", values), "memory", "#memoryNote");
   const saveEmotionExperience = (event) => saveExperience(event, (values) => api("save_emotion_settings", values), "emotion", "#emotionNote");
 
+  async function previewExperience() {
+    try {
+      const preview = await api("preview_experience", {uses_recent_context: true});
+      confirmAction({
+        title: "本机回复预览",
+        message: (preview.text || "暂无预览内容") + " " + (preview.message || "") + " 使用长期记忆：" + (preview.uses_long_term_memory ? "是" : "否") + "；使用情感：" + (preview.uses_emotion ? "是" : "否") + "。",
+        confirmText: "关闭",
+        intent: "secondary",
+        onConfirm: async () => {},
+      });
+    } catch (error) { reportError(error); }
+  }
+
   async function openMemoryManager() {
     try {
       if (!state.featuresLoaded) await loadFeatures();
@@ -3817,14 +3855,32 @@
   function showOnboarding(force = false) {
     if (!force && state.bootstrap?.experience?.onboarding_complete) return;
     const backdrop = $("#onboardingBackdrop");
+    renderOnboardingReadiness(state.bootstrap?.readiness);
     backdrop.hidden = false;
     $(".app-shell").inert = true;
     $("#onboardingRecommended").focus();
   }
 
+  function renderOnboardingReadiness(readiness) {
+    state.readiness = readiness || null;
+    const list = $("#onboardingChecklist");
+    if (!list) return;
+    const labels = {ready: "可直接使用", needs_config: "还需配置", offline: "外部服务离线", group_disabled: "当前群未启用", risk: "存在风险"};
+    const items = Array.isArray(readiness?.items) ? readiness.items : [];
+    list.innerHTML = items.length ? items.map((item) => `
+      <li class="readiness-${escapeHtml(item.status || "needs_config")}">
+        <span class="readiness-dot" aria-hidden="true"></span>
+        <div><strong>${escapeHtml(item.label || "检查项")}</strong><small>${escapeHtml(labels[item.status] || "还需配置")} · ${escapeHtml(item.detail || "")}</small></div>
+        <em>${escapeHtml(item.next_step || "")}</em>
+      </li>`).join("") : "<li>准备状态暂时无法读取，请稍后重试。</li>";
+    const hint = $(".onboarding-note");
+    if (hint && readiness?.test_hint) hint.textContent = readiness.test_hint + " " + (readiness.message || "");
+  }
+
   function fillSettings(data) {
     applyBrand(data.brand);
     fillExperience(data.experience);
+    renderOnboardingReadiness(data.readiness);
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
       presetSelect.innerHTML = data.provider_presets.map((preset) => {
@@ -4040,6 +4096,7 @@
     });
     $("#memoryForm").addEventListener("submit", saveMemoryExperience);
     $("#emotionForm").addEventListener("submit", saveEmotionExperience);
+    $("#previewExperience").addEventListener("click", previewExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
     $("#providerForm").addEventListener("input", updateProviderDirty);
@@ -4061,7 +4118,7 @@
         return;
       }
       if (kind !== "chat") {
-        const matching = kind === "embedding" ? "embedding_custom" : "image_custom";
+        const matching = kind === "embedding" ? "embedding_custom" : kind === "image" ? "image_custom" : "voice_custom";
         $("#providerPreset").value = matching;
         applyProviderPreset(matching);
       }
@@ -4461,9 +4518,20 @@
       return {item: structuredClone(item), message: item.draft ? "预览：任务草稿已保存。" : "预览：任务已保存，不会实际发送。"};
     };
     const ok = (data, message = "") => Promise.resolve({ok: true, data, message});
+    const setPreviewRuntime = (running) => {
+      Object.assign(status, running ? {
+        state: "RUNNING", title: "机器人可用", message: "微信连接和全部功能运行正常。", busy: false,
+        online: true, can_start: false, can_stop: true, error: null,
+      } : {
+        state: "STOPPED", title: "机器人尚未启动", message: "微信环境已准备好，可以启动机器人。", busy: false,
+        online: false, can_start: true, can_stop: false, error: null,
+      });
+      status.runtime = {...status.runtime, engine_ready: running, connection_ready: running, upstream_connected: running, heartbeat_fresh: running};
+      status.environment = {...status.environment, process_running: running};
+    };
     return {
-      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
-      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => ok({accepted: true}), stop_robot: () => ok({accepted: true}), force_stop_robot: () => ok({accepted: true}), select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
+      bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: {schema_version: 1, readonly: true, complete: true, items: [{id: "wechat", label: "微信环境", status: "ready", detail: "预览环境正常", next_step: "继续检查"}], test_hint: "准备完成后，可在选定群里点名机器人测试。", message: "预览数据不会启动机器人或发送消息。"}, update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
+      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => { setPreviewRuntime(true); return ok({accepted: true}); }, stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, force_stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
       save_robot_core: (config, _revision, identity) => {
@@ -4495,6 +4563,7 @@
         {user_id: "wxid_demo_03", name: "王五", group_nickname: ""},
       ]}),
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
+      preview_group_policy: (_accountId, groupId, values) => ok({group_id: groupId, changed_fields: Object.keys(values || {}), impact: ["预览模式只影响当前群的机器人规则。"], will_send_messages: false}),
       save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok(previewPolicyOverview(groupId).policy, "群聊策略已保存；未向群内发送消息。"); },
       get_contacts: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: previewContacts.length, truncated: false, items: structuredClone(previewContacts), message: "预览数据：正式版本从当前登录微信通讯录读取，刷新不会发送消息。"}),
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
@@ -4552,6 +4621,7 @@
       },
       save_memory_settings: (values) => ok({...values, apply_state: "applied"}, "长期记忆设置已热更新，下一条消息立即使用。"),
       save_emotion_settings: (values) => ok({...values, apply_state: "applied"}, "情感设置已热更新，下一条消息立即使用。"),
+      preview_experience: () => ok({text: "小妹：这是本机预览回复。", uses_recent_context: true, uses_long_term_memory: true, uses_emotion: true, uses_expression: false, uses_voice: false, will_send: false, message: "预览只在管理器中显示，不会发送到微信。"}),
       complete_onboarding: () => { previewExperience.onboarding_complete = true; return ok({onboarding_complete: true}, "基础设置已完成。"); },
       get_providers: () => ok(structuredClone(previewProviders)),
       save_provider: (values) => {

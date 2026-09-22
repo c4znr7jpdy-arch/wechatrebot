@@ -729,6 +729,15 @@ tbody tr:hover { background: #fbfdff; }
 .onboarding-steps strong, .onboarding-steps small { display: block; }
 .onboarding-steps small { margin-top: 3px; color: var(--muted); }
 .onboarding-note { margin-top: 14px; padding: 12px 14px; color: #0b4f87; background: var(--blue-100); border-radius: 8px; }
+.readiness-checklist { display: grid; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.readiness-checklist li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.readiness-checklist li > div { min-width: 0; flex: 1; }
+.readiness-checklist strong, .readiness-checklist small { display: block; }
+.readiness-checklist small { margin-top: 2px; color: var(--muted); }
+.readiness-checklist em { color: var(--muted); font-size: 12px; font-style: normal; }
+.readiness-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #f59e0b; }
+.readiness-ready .readiness-dot { background: #16a34a; }
+.readiness-offline .readiness-dot { background: #64748b; }
 
 @media (max-width: 1220px) {
   .runtime-grid { grid-template-columns: 1fr; }

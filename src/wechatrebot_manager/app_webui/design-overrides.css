@@ -125,3 +125,187 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   #page-home .stage-list li + li { border-top: 1px solid var(--line); border-left: 0; }
   .home-entry-grid { grid-template-columns: 1fr; }
 }
+
+/* Shared page surfaces. Keep the information architecture, change the visual hierarchy. */
+.search-box,
+.history-toolbar,
+.settings-tabs,
+.management-tabs,
+.schedule-table-topbar,
+.schedule-stat-pills article,
+.directory-status,
+.help-toolbar,
+.help-start,
+.trace-panel,
+.activity-panel,
+.provider-overview-card,
+.settings-card,
+.core-heading,
+.core-subtabs,
+.provider-editor-guide,
+.provider-settings-card,
+.table-panel,
+.history-layout { border-color: var(--line); background: var(--surface); box-shadow: none; }
+
+.search-box { min-height: 40px; border-radius: 6px; background: var(--surface); }
+.search-box:focus-within { border-color: var(--blue-600); box-shadow: 0 0 0 3px rgba(54,86,71,.12); }
+.search-box input { color: var(--ink); }
+.segmented { padding: 3px; border-radius: 6px; background: #efeee9; }
+.segmented button { min-height: 34px; border-radius: 4px; color: var(--muted); }
+.segmented button.active { color: var(--blue-700); background: var(--surface); box-shadow: none; }
+
+#page-features.active,
+#page-groups.active,
+#page-history.active,
+#page-schedules.active,
+#page-activity.active,
+#page-help.active,
+#page-settings.active { display: block; min-height: 0; }
+
+/* Feature center */
+#page-features .feature-layout { grid-template-columns: 300px minmax(0,1fr); gap: 18px; min-height: 620px; }
+#page-features .feature-catalog { padding: 16px; background: var(--surface); }
+#page-features .feature-summary { padding: 14px 2px 10px; color: var(--muted); }
+#page-features .feature-item { min-height: 64px; border-bottom-color: var(--line); background: transparent; }
+#page-features .feature-item:hover { background: #f5f6f1; }
+#page-features .feature-item.active { color: var(--blue-700); background: var(--blue-100); box-shadow: inset 3px 0 var(--blue-600); }
+#page-features .feature-detail { padding: 22px; background: var(--surface); }
+#page-features .feature-title,
+#page-features .feature-detail .panel-heading { border-bottom-color: var(--line); }
+#page-features .feature-tabs { border-color: var(--line); }
+#page-features .feature-tabs button.active { color: var(--blue-700); border-bottom-color: var(--blue-600); }
+#page-features .form-card,
+#page-features .config-section,
+#page-features .feature-guide,
+#page-features .assessment,
+#page-features .guide { border-color: var(--line); background: var(--surface-2, #f6f5f1); }
+#page-features .guide { border-left-color: var(--blue-600); }
+
+/* Chat directory */
+#page-groups .management-tabs { margin-bottom: 14px; }
+#page-groups .directory-status { min-height: 54px; border-radius: 6px; background: #f5f6f1; }
+#page-groups .group-layout,
+#page-groups .contact-layout { grid-template-columns: minmax(0,1.2fr) minmax(340px,.8fr); gap: 18px; }
+#page-groups .group-table-panel,
+#page-groups .contact-table-panel,
+#page-groups .group-inspector,
+#page-groups .contact-inspector { border-radius: 8px; box-shadow: none; }
+#page-groups .group-toolbar { padding: 16px; border-bottom-color: var(--line); background: var(--surface); }
+#page-groups .group-table,
+#page-groups .contact-table { background: var(--surface); }
+#page-groups .group-table th,
+#page-groups .contact-table th { color: var(--muted); background: #f1f0eb; border-color: var(--line); font-size: 12px; }
+#page-groups .group-table td,
+#page-groups .contact-table td { border-color: var(--line); }
+#page-groups .group-row:hover,
+#page-groups .contact-row:hover { background: #f5f6f1; }
+#page-groups .group-row.selected,
+#page-groups .contact-row.selected { background: #edf1eb; box-shadow: inset 3px 0 var(--blue-600); }
+#page-groups .group-inspector,
+#page-groups .contact-inspector { background: var(--surface); }
+#page-groups .inspector-tabs { border-bottom-color: var(--line); }
+#page-groups .inspector-tabs button.active { color: var(--blue-700); border-bottom-color: var(--blue-600); }
+#page-groups .inspector-footer,
+#page-groups .contact-pagination { border-color: var(--line); background: #f7f7f3; }
+#page-groups .group-avatar,
+#page-groups .contact-avatar { background: var(--blue-600); }
+#page-groups .group-avatar.tone-1,
+#page-groups .group-avatar.tone-2,
+#page-groups .group-avatar.tone-3,
+#page-groups .group-avatar.tone-4,
+#page-groups .group-avatar.tone-5 { background: #6b796c; }
+
+/* Message center */
+#page-history .history-toolbar { display: grid; grid-template-columns: auto minmax(240px,1fr) 150px 150px auto; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 8px; }
+#page-history .history-summary { color: var(--muted); }
+#page-history .history-layout { grid-template-columns: 260px minmax(0,1fr) 230px; border-radius: 8px; overflow: hidden; }
+#page-history .conversation-list { border-right-color: var(--line); background: var(--surface); }
+#page-history .conversation-list article,
+#page-history .conversation-list button { border-bottom-color: var(--line); }
+#page-history .conversation-list .selected,
+#page-history .conversation-list article:hover { background: #edf1eb; }
+#page-history .message-pane { background: #f7f7f3; }
+#page-history #conversationHeader { border-bottom-color: var(--line); background: var(--surface); }
+#page-history .message-bubble { border-color: var(--line); background: var(--surface); }
+#page-history .message.mine .message-bubble { color: #23372d; border-color: #afc2b1; background: #dfe8df; }
+#page-history .conversation-inspector { border-left-color: var(--line); background: var(--surface); }
+
+/* Scheduled tasks */
+#page-schedules .schedule-page-heading { margin-bottom: 16px; }
+#page-schedules .schedule-page-heading p { max-width: 720px; }
+#page-schedules .schedule-stat-pills { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+#page-schedules .schedule-stat-pills article { min-height: 76px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 8px; }
+#page-schedules .schedule-stat-pills span { color: var(--muted); font-size: 12px; }
+#page-schedules .schedule-stat-pills strong { display: block; margin-top: 4px; color: var(--ink); font-size: 24px; }
+#page-schedules .schedule-table-topbar { padding: 14px 16px; border-bottom-color: var(--line); }
+#page-schedules .schedule-filters select { min-height: 36px; color: var(--ink); border-color: var(--line-strong); border-radius: 6px; background: var(--surface); }
+#page-schedules table th { color: var(--muted); background: #f1f0eb; border-color: var(--line); }
+#page-schedules table td { border-color: var(--line); }
+#page-schedules .schedule-notice { color: var(--ink-2); border-color: #c8d7c8; background: #edf1eb; }
+#page-schedules .schedule-policy-note { margin-top: 14px; color: var(--muted); }
+#page-schedules .schedule-editor-layout { gap: 18px; }
+#page-schedules .scheduled-form-section,
+#page-schedules .schedule-summary { border-color: var(--line); border-radius: 8px; background: var(--surface); box-shadow: none; }
+#page-schedules .scheduled-form-section h3 > span { color: var(--blue-700); background: var(--blue-100); }
+#page-schedules .scheduled-selected,
+#page-schedules .scheduled-preview,
+#page-schedules .schedule-next-times { border-color: var(--line); background: #f6f6f1; }
+#page-schedules .scheduled-target-option:has(input:checked) { background: var(--blue-100); }
+
+/* Activity and help */
+#page-activity .trace-panel,
+#page-activity .activity-panel { border-radius: 8px; }
+#page-activity .trace-panel .panel-heading { padding: 18px 20px; border-bottom-color: var(--line); }
+#page-activity .trace-stage,
+#page-activity .activity-item { border-color: var(--line); background: var(--surface); }
+#page-activity .trace-gantt-card { box-shadow: none; }
+#page-activity .activity-item + .activity-item { border-top-color: var(--line); }
+#page-help .help-start { padding: 22px; border-radius: 8px; }
+#page-help .help-shot-grid figure { border-color: var(--line); border-radius: 6px; background: #f6f6f1; }
+#page-help .help-toolbar { margin-top: 18px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+#page-help .help-feature-card { border-color: var(--line); border-radius: 8px; background: var(--surface); box-shadow: none; }
+#page-help .help-feature-card:hover { border-color: #aebbad; }
+#page-help .help-audience-chip { color: var(--blue-700); background: var(--blue-100); }
+#page-help .help-prerequisite { border-color: #dfc69d; background: var(--amber-100); }
+
+/* Settings and model services */
+#page-settings .settings-tabs { display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 8px; }
+#page-settings .settings-tabs button { min-height: 38px; border-radius: 5px; color: var(--muted); }
+#page-settings .settings-tabs button.active { color: var(--blue-700); background: var(--blue-100); }
+#page-settings .settings-tabs > span { margin-left: auto; padding-right: 10px; color: var(--muted); font-size: 12px; }
+#page-settings .provider-overview-heading,
+#page-settings .panel-heading { border-color: var(--line); }
+#page-settings .provider-service,
+#page-settings .provider-add-card,
+#page-settings .provider-editor-guide,
+#page-settings .provider-form-note,
+#page-settings .web-search-provider-summary { border-color: var(--line); background: #f7f7f3; box-shadow: none; }
+#page-settings .provider-service.active { border-color: #9cab9d; background: #edf1eb; box-shadow: inset 3px 0 var(--blue-600); }
+#page-settings .provider-logo { background: var(--blue-600); }
+#page-settings .provider-logo.custom { color: var(--blue-700); background: var(--blue-100); }
+#page-settings .provider-card-tags span { color: var(--ink-2); background: #edede7; }
+#page-settings .provider-service-actions { border-top-color: var(--line); }
+#page-settings .provider-form-note { color: var(--blue-700); }
+#page-settings .core-heading,
+#page-settings .core-subtabs,
+#page-settings .core-sidebar,
+#page-settings .core-detail { border-color: var(--line); background: var(--surface); box-shadow: none; }
+#page-settings .core-subtabs button.active,
+#page-settings .core-nav.active { color: var(--blue-700); background: var(--blue-100); }
+#page-settings .settings-card input,
+#page-settings .settings-card select,
+#page-settings .settings-card textarea { border-color: var(--line-strong); border-radius: 6px; background: var(--surface); }
+
+@media (max-width: 1220px) {
+  #page-history .history-layout { grid-template-columns: 250px minmax(0,1fr); }
+  #page-history .conversation-inspector { display: none; }
+  #page-schedules .schedule-editor-layout { grid-template-columns: minmax(0,1fr) 280px; }
+}
+@media (max-width: 900px) {
+  #page-history .history-toolbar { grid-template-columns: 1fr 1fr; }
+  #page-history .history-toolbar .search-box { grid-column: 1 / -1; }
+  #page-schedules .schedule-stat-pills { grid-template-columns: 1fr; }
+  #page-schedules .schedule-editor-layout { grid-template-columns: 1fr; }
+  #page-settings .settings-tabs { overflow-x: auto; }
+  #page-settings .settings-tabs > span { display: none; }
+}

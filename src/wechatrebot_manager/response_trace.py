@@ -7,6 +7,7 @@ from typing import Any
 
 from .customer_config import load_provider_profile
 from .customer_logs import tail_log
+from .diagnostics import white_label_terms
 from .provider import provider_display_name
 
 
@@ -64,7 +65,7 @@ class ResponseTraceService:
         if profile is None:
             return "回复模型"
         normalized = profile.normalized()
-        return provider_display_name(normalized.source_id, normalized.model)
+        return str(white_label_terms(provider_display_name(normalized.source_id, normalized.model)))
 
     def _trace(self, lines: list[str], model_label: str) -> dict[str, Any] | None:
         if not lines or not any("Prepare to send" in line for line in lines):
@@ -98,6 +99,24 @@ class ResponseTraceService:
 
         def offset(moment: datetime | None) -> float | None:
             return elapsed(start, moment)
+
+        received_time = first_time(
+            lambda line: "core.event_bus" in line
+            or "tag:GroupMessage:" in line
+            or "tag:FriendMessage:" in line
+            or "收到消息" in line
+            or "message received" in line.casefold()
+        )
+        if received_time is not None:
+            stages.append(
+                _stage(
+                    "received",
+                    "收到消息",
+                    detail="已进入回复处理",
+                    duration=0.0,
+                    offset=offset(received_time),
+                )
+            )
 
         direct = any("direct_wake" in line or "命中快路径" in line for line in lines)
         decision_time = first_time(

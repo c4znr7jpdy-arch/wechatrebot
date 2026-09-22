@@ -114,6 +114,7 @@ PUBLIC_API_METHODS = (
     "get_groups",
     "get_group_members",
     "get_group_policy",
+    "preview_group_policy",
     "save_group_policy",
     "get_contacts",
     "get_contact_detail",
@@ -138,6 +139,7 @@ PUBLIC_API_METHODS = (
     "preview_scheduled_times",
     "get_activity",
     "get_response_traces",
+    "preview_experience",
     "save_memory_settings",
     "save_emotion_settings",
     "complete_onboarding",
@@ -411,6 +413,7 @@ class ApplicationApi:
                     },
                     "providers": [item.to_public_dict() for item in providers],
                     "experience": self._experience_service().snapshot(),
+                    "readiness": self._onboarding_readiness(),
                     "provider_presets": [dict(item) for item in MODEL_PROVIDER_PRESETS],
                     "update": {
                         "enabled": bool(channel and channel.enabled),
@@ -751,6 +754,25 @@ class ApplicationApi:
         except (OSError, ValueError, GroupPolicyError) as exc:
             return self._failed(exc, "15001")
 
+    def preview_group_policy(
+        self,
+        account_id: str,
+        group_id: str,
+        values: dict[str, Any],
+        revision: str = "",
+    ) -> dict[str, object]:
+        try:
+            return self._ok(
+                self._group_policy_service().preview(
+                    account_id,
+                    group_id,
+                    values,
+                    expected_revision=revision or None,
+                )
+            )
+        except (OSError, ValueError, GroupPolicyError) as exc:
+            return self._failed(exc, "15001")
+
     def get_contacts(self, refresh: bool = False) -> dict[str, object]:
         return self._ok(self._contacts.list(bool(refresh)))
 
@@ -1066,9 +1088,85 @@ class ApplicationApi:
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
+    def _onboarding_readiness(self) -> dict[str, object]:
+        """Build a read-only first-use checklist from current local state."""
+        view = self._lifecycle.refresh().to_dict()
+        environment = view.get("environment") if isinstance(view, dict) else {}
+        runtime = view.get("runtime") if isinstance(view, dict) else {}
+        environment = environment if isinstance(environment, dict) else {}
+        runtime = runtime if isinstance(runtime, dict) else {}
+        provider = load_provider_profile(self._install_root)
+        account_id = str(runtime.get("wechat_identity") or "").strip()
+        directory_service = getattr(self, "_groups", None)
+        groups = directory_service.list(False) if directory_service is not None else {
+            "items": [], "stale": True, "account_id": ""
+        }
+        group_items = groups.get("items") if isinstance(groups, dict) else []
+        group_items = group_items if isinstance(group_items, list) else []
+        group_stale = bool(groups.get("stale")) if isinstance(groups, dict) else True
+        try:
+            catalog = self._features.catalog() if getattr(self, "_features", None) is not None else {}
+            feature_items = catalog.get("plugins") if isinstance(catalog, dict) else []
+        except (OSError, ValueError, PluginCenterError):
+            feature_items = []
+        feature_items = feature_items if isinstance(feature_items, list) else []
+        online = bool(view.get("online"))
+        items = [
+            {
+                "id": "wechat",
+                "label": "微信环境",
+                "status": "ready" if environment.get("ready") else "needs_config",
+                "detail": "已找到兼容的微信客户端。" if environment.get("ready") else str(environment.get("message") or "请选择兼容的微信客户端。"),
+                "next_step": "继续检查" if environment.get("ready") else "选择微信客户端",
+            },
+            {
+                "id": "account",
+                "label": "机器人账号",
+                "status": "ready" if account_id else "offline" if not online else "needs_config",
+                "detail": account_id or "启动机器人并登录微信后才能确认账号。",
+                "next_step": "已确认" if account_id else "启动机器人并登录微信",
+            },
+            {
+                "id": "provider",
+                "label": "回复模型",
+                "status": "ready" if provider is not None else "needs_config",
+                "detail": provider.model if provider is not None else "还没有配置可用的聊天模型。",
+                "next_step": "继续检查" if provider is not None else "配置聊天模型",
+            },
+            {
+                "id": "groups",
+                "label": "目标群聊",
+                "status": "offline" if group_stale and not group_items else "ready" if group_items else "needs_config",
+                "detail": "群目录暂时未更新，请连接微信后刷新。" if group_stale and not group_items else f"已读取 {len(group_items)} 个群聊。" if group_items else "读取当前账号群目录后选择至少一个目标群。",
+                "next_step": "刷新群聊目录" if group_stale else "进入群聊管理选择目标群",
+            },
+            {
+                "id": "core",
+                "label": "核心功能",
+                "status": "ready" if online and feature_items else "offline" if not online else "needs_config",
+                "detail": "机器人核心和功能目录已可检查。" if online and feature_items else "启动机器人后检查核心功能是否可用。",
+                "next_step": "继续检查" if online and feature_items else "启动机器人并检查功能",
+            },
+        ]
+        complete = all(item["status"] == "ready" for item in items)
+        return {
+            "schema_version": 1,
+            "readonly": True,
+            "complete": complete,
+            "items": items,
+            "test_hint": "准备完成后，可在选定群里点名机器人测试。",
+            "message": "检查只读取当前环境、账号、模型和目录，不会启动机器人、发送消息或修改群策略。",
+        }
+
     def get_experience(self) -> dict[str, object]:
         try:
             return self._ok(self._experience_service().snapshot())
+        except (OSError, ExperienceError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
+    def preview_experience(self, values: dict[str, Any] | None = None) -> dict[str, object]:
+        try:
+            return self._ok(self._experience_service().preview(values))
         except (OSError, ExperienceError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
@@ -1225,6 +1323,7 @@ class ApplicationApi:
                     "modality_label": (
                         "向量" if saved.service_kind == "embedding"
                         else "图片" if saved.service_kind == "image"
+                        else "语音" if saved.service_kind == "voice"
                         else "多模态" if set(saved.modalities) & {"image", "audio"}
                         else "文本"
                     ),
@@ -1446,7 +1545,7 @@ class ApplicationApi:
                         if item.provider_id == replacement_provider_id
                         and item.provider_id != provider_id
                         and item.configured
-                        and getattr(item, "service_kind", "chat") == "chat"
+                        and getattr(item, "service_kind", "chat") == getattr(selected, "service_kind", "chat")
                     ),
                     None,
                 )

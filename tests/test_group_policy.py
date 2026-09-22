@@ -157,6 +157,33 @@ def test_revision_conflict_and_invalid_values_leave_original_unchanged(tmp_path:
     assert service.path.read_bytes() == before
 
 
+def test_preview_describes_impact_without_writing_and_save_rereads(tmp_path: Path) -> None:
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    revision = service.get(ACCOUNT_A, GROUP)["revision"]
+    before = service.path.read_bytes() if service.path.exists() else b""
+
+    preview = service.preview(
+        ACCOUNT_A,
+        GROUP,
+        {"reply_mode": "natural", "scheduled_enabled": False},
+        expected_revision=revision,
+    )
+
+    assert preview["will_send_messages"] is False
+    assert "reply_mode" in preview["changed_fields"]
+    assert "定时任务" in " ".join(preview["impact"])
+    assert (service.path.read_bytes() if service.path.exists() else b"") == before
+
+    saved = service.save(
+        ACCOUNT_A,
+        GROUP,
+        {"reply_mode": "natural", "scheduled_enabled": False},
+        expected_revision=revision,
+    )
+    assert saved["apply_state"] == "applied"
+    assert service.get(ACCOUNT_A, GROUP)["reply_mode"] == "natural"
+
 @pytest.mark.parametrize("quiet_enabled", [False, True])
 def test_feature_save_uses_packaged_timezone_without_system_database(
     monkeypatch, tmp_path: Path, quiet_enabled: bool,

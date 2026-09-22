@@ -226,6 +226,17 @@ def test_image_provider_keeps_transport_compatible_and_is_not_a_chat_model() -> 
     assert profile.astrbot_model()["modalities"] == ["image"]
 
 
+def test_voice_provider_is_classified_separately_from_chat_and_image() -> None:
+    profile = OpenAIProviderProfile(
+        api_key="voice-secret",
+        api_base="https://voice.example.com/v1",
+        model="speech-1",
+        service_kind="voice",
+    )
+    assert profile.astrbot_model()["service_kind"] == "voice"
+    assert profile.astrbot_model()["modalities"] == ["audio"]
+
+
 def test_invalid_model_service_kind_returns_customer_validation_error() -> None:
     profile = OpenAIProviderProfile(
         api_key="secret",
