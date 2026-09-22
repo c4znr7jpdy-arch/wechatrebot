@@ -27,6 +27,7 @@ def test_reply_trace_is_white_labelled_and_never_returns_message_content(tmp_pat
     assert "51632940287" not in serialized
     assert "AstrBot" not in serialized
     assert [stage["label"] for stage in result[0]["stages"]] == [
+        "收到消息",
         "点名快路径",
         "长期记忆",
         "精简情感",

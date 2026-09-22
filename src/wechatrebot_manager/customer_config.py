@@ -242,6 +242,8 @@ class ProviderService:
                 if self.service_kind == "embedding"
                 else "图片"
                 if self.service_kind == "image"
+                else "语音"
+                if self.service_kind == "voice"
                 else "多模态"
                 if len(set(self.modalities) & {"image", "audio"})
                 else "文本"

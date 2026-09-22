@@ -11,7 +11,16 @@ from .group_directory import GroupDirectoryService
 from .group_policy import GroupPolicyService
 from .private_policy import PrivateChatPolicyService
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
-from .task_store import ACTION_FEATURES, ACTION_NAMES, TaskStore, normalize_arguments, normalize_task, validate_account
+from .task_store import (
+    ACTION_FEATURES,
+    ACTION_NAMES,
+    SCHEDULED_COMMAND_VERSION,
+    TaskStore,
+    normalize_arguments,
+    normalize_task,
+    scheduled_command_catalog,
+    validate_account,
+)
 
 
 _API = "/api/plug/jiang_schedule/page/unified/"
@@ -95,7 +104,10 @@ class ScheduledTaskService:
         if not health["online"] and not account and not fresh_accounts:
             account = str(self.account_hint() or "")
         if len(fresh_accounts) > 1 or (account and fresh_accounts and fresh_accounts != {account}):
-            return {"account_id": "", "items": [], "groups": [], "contacts": [], "capabilities": [], "online": health["online"], "runtime_ready": False, "message": "微信账号正在变化，请刷新后重新选择发送对象。"}
+            return {"account_id": "", "items": [], "groups": [], "contacts": [], "capabilities": [],
+                    "command_catalog": scheduled_command_catalog(), "online": health["online"],
+                    "command_definition_version": SCHEDULED_COMMAND_VERSION,
+                    "runtime_ready": False, "message": "微信账号正在变化，请刷新后重新选择发送对象。"}
         groups = self._directory(group, "group", account)
         contacts = self._directory(contact, "private", account)
         names = {(target["type"], target["id"]): target["name"] for target in groups + contacts}
@@ -105,7 +117,12 @@ class ScheduledTaskService:
                         for action, name in ACTION_NAMES.items()]
         items = [self._names(item, names) for item in self.store.list(account)] if account else []
         for item in items:
+            if item.get("definition_version", 0) != SCHEDULED_COMMAND_VERSION:
+                item["status"] = "needs_review"
+                item["status_message"] = "命令定义已更新，请检查参数和依赖后再启用。"
             if item["enabled"] and item["status"] != "completed":
+                if item.get("definition_version", 0) != SCHEDULED_COMMAND_VERSION:
+                    continue
                 if not health["runtime_ready"]:
                     item["status"] = "waiting_runtime"
                     item["status_message"] = health.get("message") or "定时发送能力尚未就绪。"
@@ -128,10 +145,14 @@ class ScheduledTaskService:
         messages = [health.get("message", "")]
         if group.get("stale") or contact.get("stale"):
             messages.append("部分聊天目录尚未更新；启用前会重新核验所选对象。")
-        return {"account_id": account, "items": items, "capabilities": capabilities, "groups": groups, "contacts": contacts,
+        return {"account_id": account, "items": items, "capabilities": capabilities,
+                "command_catalog": scheduled_command_catalog(), "groups": groups, "contacts": contacts,
+                "command_definition_version": SCHEDULED_COMMAND_VERSION,
                 "online": health["online"], "runtime_ready": health["runtime_ready"], "message": " ".join(filter(None, messages))}
 
     def _verify_live(self, task: dict, *, check_scheduled_time: bool = True) -> None:
+        if task.get("definition_version", SCHEDULED_COMMAND_VERSION) != SCHEDULED_COMMAND_VERSION:
+            raise ValueError("命令定义已更新，请重新检查任务参数和依赖后再启用。")
         group, contact, health = self._snapshot(refresh=True)
         if not health["runtime_ready"]:
             raise ValueError(health.get("message") or "请先启用定时任务功能。")

@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import sqlite3
 
 import pytest
 
@@ -62,6 +64,8 @@ def test_context_resolves_names_without_seeding(tmp_path: Path) -> None:
 
     assert context["account_id"] == ACCOUNT
     assert context["items"] == []
+    assert context["command_definition_version"] == 1
+    assert any(item["id"] == "checkin" for item in context["command_catalog"])
     assert context["groups"] == [{"id": GROUP, "name": "家人群", "type": "group"}]
 
 
@@ -121,3 +125,18 @@ def test_active_task_rechecks_content_capability(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="天气服务尚未配置"):
         value.save(weather)
+
+
+def test_legacy_task_is_marked_for_command_review(tmp_path: Path) -> None:
+    value = service(tmp_path)
+    saved = value.store.save(payload())
+    path = value.store.path
+    with sqlite3.connect(path) as connection:
+        row = connection.execute("SELECT payload FROM scheduled_tasks WHERE id=?", (saved["id"],)).fetchone()
+        legacy = json.loads(row[0])
+        legacy.pop("definition_version", None)
+        connection.execute("UPDATE scheduled_tasks SET payload=? WHERE id=?", (json.dumps(legacy), saved["id"]))
+
+    item = value.context()["items"][0]
+    assert item["status"] == "needs_review"
+    assert "命令定义已更新" in item["status_message"]

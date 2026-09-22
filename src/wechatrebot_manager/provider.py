@@ -122,6 +122,15 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "description": "新增图片生成模型，供功能中心图片生成选择。",
     },
     {
+        "id": "voice_custom",
+        "name": "语音模型（兼容接口）",
+        "api_base": "",
+        "model": "",
+        "service_kind": "voice",
+        "modalities": ("audio",),
+        "description": "新增语音模型，供语音回复或转写功能选择。",
+    },
+    {
         "id": "custom",
         "name": "其他兼容服务",
         "api_base": "",
@@ -535,9 +544,13 @@ def normalize_service_kind(value: str | None) -> str:
         "image_generation": "image",
         "openai_image": "image",
         "vision": "image",
+        "audio": "voice",
+        "speech": "voice",
+        "tts": "voice",
+        "asr": "voice",
     }
     kind = aliases.get(kind, kind)
-    if kind not in {"chat", "embedding", "image"}:
+    if kind not in {"chat", "embedding", "image", "voice"}:
         raise ValueError("模型服务类型不受支持，请重新选择。")
     return kind
 
@@ -550,6 +563,8 @@ def infer_provider_modalities(
         return ("embedding",)
     if kind == "image":
         return ("image",)
+    if kind == "voice":
+        return ("audio",)
     if isinstance(declared, (list, tuple, set)):
         allowed = {"text", "image", "audio"}
         values = tuple(

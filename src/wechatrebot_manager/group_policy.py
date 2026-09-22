@@ -422,11 +422,64 @@ class GroupPolicyService:
             )
             payload["audit"] = audit[-500:]
             write_json_atomic(self.path, payload)
+        # Read the persisted value back before reporting success.  The manager
+        # uses this receipt as the source of truth for the saved/effective
+        # distinction, so a successful file write alone is not enough.
+        verified = self.get(account, group)
         return {
-            **self._public(account, group, normalized, configured=True),
+            **verified,
             "saved": True,
-            "apply_state": "saved",
+            "apply_state": "applied",
             "message": "群聊策略已安全保存；未向群内发送消息。",
+        }
+
+    def preview(
+        self,
+        account_id: str,
+        group_id: str,
+        values: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+    ) -> dict[str, object]:
+        """Validate a draft and describe its customer-visible impact.
+
+        Preview is deliberately read-only.  It shares the same normalization
+        path as ``save`` so the confirmation shown by the manager cannot drift
+        from the values that will eventually be persisted.
+        """
+        account, group = self._validate_scope(account_id, group_id)
+        with _STORE_LOCK:
+            payload = self._read()
+            raw = self._raw_policy(payload, account, group)
+            current = self._policy(raw)
+            if expected_revision and expected_revision != self._revision(current):
+                raise GroupPolicyError("群聊策略已在其他窗口修改，请刷新后重试。")
+            proposed = self._normalize(values, current, actor_id="preview")
+        changed = sorted(
+            key for key in _POLICY_FIELDS
+            if current.to_dict().get(key) != proposed.to_dict().get(key)
+        )
+        impact: list[str] = []
+        if "bot_enabled" in changed:
+            impact.append("关闭后本群不再回复消息；开启后恢复当前回复方式。" if not proposed.bot_enabled else "本群重新允许机器人回复。")
+        if "reply_mode" in changed:
+            impact.append({"mention": "仅在被点名或引用时回复。", "natural": "按群聊上下文自然接话。", "off": "不在本群回复。"}[proposed.reply_mode])
+        if "allowed_features" in changed:
+            impact.append("允许功能清单会改变本群可调用的功能。")
+        if "scheduled_enabled" in changed or "quiet_hours" in changed or "daily_limit" in changed:
+            impact.append("定时任务会按新的主动消息开关、安静时段和每日上限重新检查。")
+        if not impact:
+            impact.append("没有检测到行为变化，保存后仍会回读确认当前规则。")
+        return {
+            "account_id": account,
+            "group_id": group,
+            "current": self._public(account, group, current, configured=bool(raw)),
+            "proposed": self._public(account, group, proposed, configured=True),
+            "changed_fields": changed,
+            "impact": impact,
+            "will_send_messages": False,
+            "requires_group_admin": False,
+            "message": "保存只更新本机群聊规则，不会向群内发送消息。",
         }
 
     @staticmethod

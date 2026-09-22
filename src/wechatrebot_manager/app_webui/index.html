@@ -7,6 +7,7 @@
   <title>机器人管理</title>
   <link rel="icon" type="image/png" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css?v=0.9.3-thinking-mode">
+  <link rel="stylesheet" href="design-overrides.css?v=20260922">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -27,6 +28,7 @@
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -69,7 +71,7 @@
       <div class="content-scroll">
         <section class="page active" id="page-home" aria-labelledby="homeHeading">
           <div class="page-heading">
-            <div><span class="eyebrow">今日运行</span><h1 id="homeHeading">机器人控制台</h1><p>先看结果，再按步骤处理；不需要接触命令或后台组件。</p></div>
+            <div><span class="eyebrow">日常管理</span><h1 id="homeHeading">运行中心</h1><p>查看运行状态，继续日常管理。</p></div>
             <div class="account-chip"><span>当前账号</span><strong id="accountText">尚未连接</strong></div>
           </div>
 
@@ -87,6 +89,7 @@
             <section class="runtime-control panel">
               <div class="panel-heading"><div><span class="eyebrow">实时状态</span><h2>启动与停止</h2></div><span class="microcopy" id="lastCheckText">刚刚检查</span></div>
               <div class="control-body">
+                <span class="home-status-icon" id="homeStatusIcon" aria-hidden="true">✓</span>
                 <div class="status-orbit" id="statusOrbit" data-state="stopped">
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
                   <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
@@ -110,6 +113,22 @@
             <div><span class="error-label">需要处理</span><h2 id="errorTitle"></h2><p id="errorMessage"></p></div>
             <div class="error-code">错误码 <strong id="errorCode"></strong></div>
             <ol id="errorSolutions"></ol>
+          </section>
+
+          <section class="home-lower-section" aria-labelledby="homeEntryHeading">
+            <div class="section-heading"><h2 id="homeEntryHeading">常用入口</h2><p>直接继续最常见的管理任务。</p></div>
+            <div class="home-entry-grid">
+              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-chat"/></svg>
+                <span><strong>管理聊天回复</strong><small>设置群聊和私聊的回复方式与功能范围</small></span>
+                <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="home-entry" type="button" data-home-page="schedules" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-clock"/></svg>
+                <span><strong>查看定时任务</strong><small>管理定时发送、执行时间和逐对象结果</small></span>
+                <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+            </div>
           </section>
 
           <div class="signal-strip">
@@ -221,6 +240,9 @@
         </section>
 
         <section class="page" id="page-schedules" aria-label="定时任务">
+          <div class="page-heading compact schedule-page-heading">
+            <div><span class="eyebrow">安排与追踪</span><h1 id="scheduleHeading">定时任务</h1><p id="scheduleHeadingDescription">管理定时发送、执行时间和逐对象结果。</p></div>
+          </div>
           <div id="scheduleContextMessage" class="schedule-notice" role="status" hidden></div>
           <div id="scheduleListView">
             <div class="schedule-stat-pills" aria-label="任务统计"><article><span>全部</span><strong id="scheduleTotal">0</strong></article><article><span>已启用</span><strong id="scheduleRunning">0</strong></article><article><span>已暂停</span><strong id="schedulePaused">0</strong></article></div>
@@ -284,7 +306,7 @@
                   <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
                     <div class="panel-heading"><div><span class="eyebrow" id="providerEditorEyebrow">新建服务</span><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2><p id="providerEditorSubtitle">选择一种服务，然后确认连接信息。</p></div></div>
                     <input name="provider_id" type="hidden">
-                    <div class="field-pair"><label><span>服务类型</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini / 中转站</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">选择渠道后可继续修改接口地址和模型名称</small></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option></select><small>图片和向量模型不会替代当前聊天回复模型。</small></label></div>
+                    <div class="field-pair"><label><span>服务类型</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini / 中转站</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">选择渠道后可继续修改接口地址和模型名称</small></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select><small>图片、向量和语音模型不会替代当前聊天回复模型。</small></label></div>
                     <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
                     <label id="providerModalitiesField"><span>输入能力</span><select name="modalities" id="providerModalities" aria-describedby="providerModalitiesHint"><option value="">自动识别</option><option value="text">仅文本</option><option value="text,image">文本和图片</option><option value="text,audio">文本和音频</option><option value="text,image,audio">文本、图片和音频</option></select><small id="providerModalitiesHint">按模型实际支持能力选择；多模态聊天模型能理解媒体，但不等于图片生成模型。</small></label>
                     <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">所有模型均可设置；模型不支持时会自动忽略，不影响正常调用。</small></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
@@ -331,7 +353,7 @@
               <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select><small>“在吗、你好”等短寒暄会直接回复，不等待记忆检索。</small></label>
               <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
               <input name="casual_query_max_chars" type="hidden" value="24">
-              <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
+              <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="previewExperience" type="button" data-action-bound disabled>预览回复</button><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
             </form>
 
             <form class="settings-card panel" id="emotionForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
@@ -381,7 +403,8 @@
     <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
       <span class="eyebrow">第一次使用</span><h2 id="onboardingTitle">先用推荐设置跑起来</h2><p>不用理解插件或命令。连接微信、确认回复模型，再按群设置机器人是否主动说话。</p>
       <div class="onboarding-steps"><article><span>1</span><div><strong>连接微信</strong><small>软件会自动检查兼容版本</small></div></article><article><span>2</span><div><strong>选择回复模型</strong><small>从常用渠道或兼容接口添加聊天模型</small></div></article><article><span>3</span><div><strong>管理群聊</strong><small>默认只在被点名时回复，不主动打扰</small></div></article></div>
-      <div class="onboarding-note">长期记忆会在明确问起往事时优先召回；普通寒暄走快速回复。</div>
+      <ol class="readiness-checklist" id="onboardingChecklist" aria-label="首次使用准备检查"><li>正在读取准备状态…</li></ol>
+      <div class="onboarding-note">长期记忆会在明确问起往事时优先召回；普通寒暄走快速回复。检查只读，不会启动机器人、发送消息或修改群策略。</div>
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
     </section>
   </div>

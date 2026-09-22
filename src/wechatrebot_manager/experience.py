@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from .json_io import write_json_atomic
@@ -42,6 +43,10 @@ _DEFAULT_STATE: dict[str, Any] = {
         "include_affection": True,
         "include_mood": True,
     },
+    # Per-conversation overrides are kept separate from the global defaults.
+    # The runtime may still use the global fallback when a chat has no
+    # override, so reading old installations remains backwards compatible.
+    "scopes": {"group": {}, "private": {}},
 }
 
 _REPLY_LENGTHS = {
@@ -123,7 +128,29 @@ class ExperienceService:
         state["memory"].pop("explicit_recall_enabled", None)
         state["memory"].pop("explicit_recall_phrases", None)
         state["onboarding_complete"] = bool(saved.get("onboarding_complete", False))
+        saved_scopes = saved.get("scopes")
+        if isinstance(saved_scopes, dict):
+            for scope in ("group", "private"):
+                values = saved_scopes.get(scope)
+                if isinstance(values, dict):
+                    state["scopes"][scope] = deepcopy(values)
         return state
+
+    @staticmethod
+    def _scope(values: dict[str, Any]) -> tuple[str, str]:
+        scope = str(values.get("scope") or "global").strip().casefold()
+        scope_id = str(values.get("scope_id") or "").strip()
+        if scope == "global":
+            return scope, ""
+        if scope not in {"group", "private"}:
+            raise ExperienceError("聊天范围只能选择群聊或私聊。")
+        if not scope_id or len(scope_id) > 128 or any(ord(char) < 32 for char in scope_id):
+            raise ExperienceError("请从当前账号目录选择有效的聊天对象。")
+        if scope == "group" and not re.fullmatch(r"[A-Za-z0-9_.-]+@chatroom", scope_id):
+            raise ExperienceError("群聊范围标识无效，请从当前群列表重新选择。")
+        if scope == "private" and scope_id.endswith("@chatroom"):
+            raise ExperienceError("私聊范围标识无效，请从当前联系人列表重新选择。")
+        return scope, scope_id
 
     def _memory_ready(self) -> bool:
         try:
@@ -185,10 +212,17 @@ class ExperienceService:
         state["memory_explanation"] = (
             "聊天摘要和相关往事由长期记忆保存与召回；明确问起上次内容时优先回忆，普通寒暄不查询。"
         )
+        state["data_controls"] = {
+            "chat_copy": {"label": "聊天记录副本", "action": "消息中心按聊天或日期清理", "reversible": False},
+            "recent_context": {"label": "近期上下文", "action": "关闭对应聊天状态与配置中的上下文", "reversible": True},
+            "long_term_memory": {"label": "长期记忆", "action": "在长期记忆管理页逐条查看或删除", "reversible": False},
+            "external_accounts": {"label": "外部账号数据", "action": "在对应功能页解除绑定或清理", "reversible": False},
+        }
         return state
 
     def save_persona(self, values: dict[str, Any]) -> dict[str, Any]:
         state = self._state()
+        scope, scope_id = self._scope(values)
         tone = str(values.get("tone") or "natural").strip()
         if tone not in {"natural", "warm", "professional", "lively"}:
             raise ExperienceError("请选择有效的说话风格。")
@@ -231,12 +265,16 @@ class ExperienceService:
             lengths["focus_reply_max_chars"] = max(focus, normal)
 
         apply_state = self._apply_plugin(ANGEL_HEART_MODULE, update)
-        state["persona"] = persona
+        if scope == "global":
+            state["persona"] = persona
+        else:
+            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["persona"] = persona
         self._write_state(state)
-        return {**persona, "apply_state": apply_state}
+        return {**persona, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
 
     def save_memory(self, values: dict[str, Any]) -> dict[str, Any]:
         state = self._state()
+        scope, scope_id = self._scope(values)
         enabled = bool(values.get("enabled", True))
         recall_mode = str(values.get("recall_mode") or "smart").strip()
         if recall_mode not in {"smart", "always", "manual"}:
@@ -269,12 +307,16 @@ class ExperienceService:
             reflection["summary_trigger_rounds"] = memory["summary_trigger_rounds"]
 
         apply_state = self._apply_plugin(LIVING_MEMORY_MODULE, update)
-        state["memory"] = memory
+        if scope == "global":
+            state["memory"] = memory
+        else:
+            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["memory"] = memory
         self._write_state(state)
-        return {**memory, "apply_state": apply_state}
+        return {**memory, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
 
     def save_emotion(self, values: dict[str, Any]) -> dict[str, Any]:
         state = self._state()
+        scope, scope_id = self._scope(values)
         emotion = {
             "enabled": bool(values.get("enabled", True)),
             "daily_mood": bool(values.get("daily_mood", True)),
@@ -310,9 +352,40 @@ class ExperienceService:
             runtime["llm_hook_profile"] = "compact"
 
         apply_state = self._apply_plugin(EMOTION_MODULE, update)
-        state["emotion"] = emotion
+        if scope == "global":
+            state["emotion"] = emotion
+        else:
+            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["emotion"] = emotion
         self._write_state(state)
-        return {**emotion, "apply_state": apply_state}
+        return {**emotion, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
+
+    def preview(self, values: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return a local-only reply preview; this method never calls WeChat."""
+        state = self._state()
+        values = values if isinstance(values, dict) else {}
+        scope, scope_id = self._scope(values)
+        effective = deepcopy(state)
+        scoped = state.get("scopes", {}).get(scope, {}).get(scope_id, {}) if scope != "global" else {}
+        if isinstance(scoped, dict):
+            for key in ("persona", "memory", "emotion"):
+                if isinstance(scoped.get(key), dict):
+                    effective[key].update(scoped[key])
+        persona = effective["persona"]
+        memory = effective["memory"]
+        emotion = effective["emotion"]
+        sample = f"{persona.get('alias', '助手').split('|')[0]}：这是本机预览回复。"
+        return {
+            "scope": scope,
+            "scope_id": scope_id,
+            "text": sample,
+            "uses_recent_context": bool(values.get("uses_recent_context", True)),
+            "uses_long_term_memory": bool(memory.get("enabled")),
+            "uses_emotion": bool(emotion.get("enabled")),
+            "uses_expression": bool(values.get("uses_expression", False)),
+            "uses_voice": bool(values.get("uses_voice", False)),
+            "will_send": False,
+            "message": "预览只在管理器中显示，不会发送到微信。",
+        }
 
     def finish_onboarding(self) -> dict[str, Any]:
         state = self._state()

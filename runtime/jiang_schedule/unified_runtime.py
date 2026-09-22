@@ -10,7 +10,14 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 import uuid
 
 from .content import ACTION_NAMES, ContentService
-from .task_store import TaskStore, normalize_arguments, normalize_task, schedule_text
+from .task_store import (
+    TaskStore,
+    SCHEDULED_COMMAND_VERSION,
+    normalize_arguments,
+    normalize_task,
+    schedule_text,
+    scheduled_command_catalog,
+)
 
 
 logger = logging.getLogger("jiang_schedule.unified")
@@ -149,6 +156,8 @@ class UnifiedRuntime:
                 "ready": ready, "runtime_ready": ready, "account_id": account,
                 "message": "" if ready else "定时任务服务正在等待微信连接。",
                 "actions": actions,
+                "command_catalog": scheduled_command_catalog(),
+                "command_definition_version": SCHEDULED_COMMAND_VERSION,
                 "capabilities": [{"id": action, "name": name, **actions[action]}
                                  for action, name in ACTION_NAMES.items()]}
 
@@ -156,6 +165,8 @@ class UnifiedRuntime:
         if not self._active:
             raise ValueError("定时任务服务尚未就绪，请稍后重试。")
         task = normalize_task(payload, now=self.clock())
+        if task.get("definition_version") != SCHEDULED_COMMAND_VERSION:
+            raise ValueError("命令定义已更新，请重新检查任务参数和依赖后再启用。")
         await self._require_account(task["account_id"])
         if not task["draft"]:
             self._require_content(task)

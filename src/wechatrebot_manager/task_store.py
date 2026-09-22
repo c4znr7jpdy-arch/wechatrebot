@@ -33,6 +33,125 @@ ACTION_FEATURES = {
     "short_drama": "jiang_short_drama",
     "text": "",
 }
+
+# User-facing command declarations are kept separate from ``ACTION_NAMES``.
+# ``ACTION_NAMES`` describes the actions the unified executor can run today;
+# this catalog also describes commands that are visible in the product but
+# still need an account, interaction, or a dedicated adapter before they can
+# safely become a task.  Keeping those entries here lets every entry point
+# explain the same decision without exposing plugin or implementation names.
+SCHEDULED_COMMANDS = (
+    {
+        "id": "weather", "display_name": "天气预报", "action": "weather",
+        "status": "supported", "aliases": ("天气", "城市天气"),
+        "parameters": ("城市", "执行日（今天/明天）"),
+        "dependencies": ("常用查询功能", "天气服务"),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "天气图片卡片", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "news", "display_name": "热点资讯", "action": "news",
+        "status": "supported", "aliases": ("新闻", "资讯", "热点"),
+        "parameters": ("资讯条数",), "dependencies": ("常用查询功能",),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "资讯文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "oilprice", "display_name": "油价提醒", "action": "oilprice",
+        "status": "supported", "aliases": ("油价",),
+        "parameters": ("省份",), "dependencies": ("常用查询功能", "油价服务"),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "油价文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "kfc", "display_name": "星期四文案", "action": "kfc",
+        "status": "supported", "aliases": ("kfc", "疯狂星期四", "星期四文案"),
+        "parameters": (), "dependencies": ("常用查询功能",),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "文案文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "short_drama", "display_name": "影视推荐", "action": "short_drama",
+        "status": "supported", "aliases": ("短剧推荐", "影视推荐"),
+        "parameters": ("推荐分类", "数量"), "dependencies": ("影视内容服务", "托管播放页"),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "影视链接卡片或安全文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "text", "display_name": "文字提醒", "action": "text",
+        "status": "supported", "aliases": ("提醒", "文字提醒"),
+        "parameters": ("提醒文字",), "dependencies": (),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "保存的文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "epic", "display_name": "免费游戏查询", "action": None,
+        "status": "needs_condition", "aliases": ("epic", "喜加一", "免费游戏"),
+        "parameters": (), "dependencies": ("免费游戏查询适配",),
+        "recipient_types": ("group", "private"), "external_write": False,
+        "result": "查询文字", "failure_policy": "生成失败时跳过本次执行",
+        "reason": "该命令尚未接入统一任务执行器。", "alternative": "先在聊天中手动查询。",
+    },
+    {
+        "id": "bili_dynamic", "display_name": "动态订阅", "action": None,
+        "status": "needs_condition", "aliases": ("订阅动态", "b站动态"),
+        "parameters": ("账号", "检查频率", "首次基线"),
+        "dependencies": ("动态订阅服务",), "recipient_types": ("group", "private"),
+        "external_write": False, "result": "仅发送新动态", "failure_policy": "按订阅和对象分别记录失败",
+        "reason": "动态订阅需要检查频率和去重基线，不能当作固定内容直接执行。",
+        "alternative": "请先在订阅管理中创建订阅。",
+    },
+    {
+        "id": "checkin", "display_name": "账号签到", "action": None,
+        "status": "needs_condition", "aliases": ("签到", "每日签到"),
+        "parameters": ("执行账号", "授权范围", "结果收件人"),
+        "dependencies": ("已授权的个人账号", "签到适配"),
+        "recipient_types": ("private",), "external_write": True,
+        "result": "签到结果文字", "failure_policy": "账号授权失效时跳过并提示",
+        "reason": "签到会修改外部账号状态，需要单独授权、频率限制和重复执行保护。",
+        "alternative": "请先在对应功能页完成账号授权，再创建任务。",
+    },
+    {
+        "id": "contextual", "display_name": "上下文查询", "action": None,
+        "status": "unsupported", "aliases": (), "parameters": ("当前对话上下文",),
+        "dependencies": ("当前消息上下文",), "recipient_types": ("group", "private"),
+        "external_write": False, "result": "依赖上下文的回复", "failure_policy": "不创建计划",
+        "reason": "该命令依赖临时对话上下文，定时执行时无法确认引用内容。",
+        "alternative": "请在聊天中手动发送，或改为固定文字提醒。",
+    },
+    {
+        "id": "interactive", "display_name": "交互式命令", "action": None,
+        "status": "unsupported", "aliases": (), "parameters": ("临时确认或验证码",),
+        "dependencies": ("实时人工操作",), "recipient_types": (),
+        "external_write": True, "result": "交互结果", "failure_policy": "不创建计划",
+        "reason": "该命令需要扫码、验证码或实时人工确认，不能无人值守执行。",
+        "alternative": "请在聊天中手动执行。",
+    },
+)
+SCHEDULED_COMMAND_VERSION = 1
+
+
+def scheduled_command_catalog() -> list[dict[str, Any]]:
+    """Return a JSON-safe copy for manager and runtime capability responses."""
+    return [
+        {key: list(value) if isinstance(value, tuple) else value for key, value in item.items()}
+        for item in SCHEDULED_COMMANDS
+    ]
+
+
+def _command_definition(action: str | None = None, command_id: str | None = None) -> dict[str, Any] | None:
+    for item in SCHEDULED_COMMANDS:
+        if action is not None and item.get("action") == action:
+            return item
+        if command_id is not None and item.get("id") == command_id:
+            return item
+    return None
 SHORT_DRAMA_MEDIA_TYPES = ("短剧", "电视剧", "电影", "动漫", "综艺", "体育", "全部")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _TARGET = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
@@ -225,9 +344,12 @@ def normalize_task(raw: Any, *, now: datetime | None = None, _allow_test: bool =
     schedule = normalize_schedule(raw.get("schedule"), draft=draft)
     if enabled and not next_occurrences(schedule, now):
         raise ValueError("执行时间已过去，请选择未来的时间。")
+    definition_version = raw.get("definition_version", SCHEDULED_COMMAND_VERSION)
+    if type(definition_version) is not int or definition_version < 1:
+        raise ValueError("任务命令定义版本无效，请重新读取后保存。")
     return {"id": task_id, "account_id": account, "name": name, "action": action,
             "arguments": arguments, "targets": normalized_targets, "schedule": schedule,
-            "enabled": enabled, "draft": draft}
+            "enabled": enabled, "draft": draft, "definition_version": definition_version}
 
 
 def parse_command(command: str) -> dict[str, Any]:
@@ -249,6 +371,71 @@ def parse_command(command: str) -> dict[str, Any]:
     if match := re.fullmatch(r"(?:提醒|文字提醒)\s+(.+)", text, re.DOTALL):
         return {"action": "text", "arguments": normalize_arguments("text", {"text": match[1]})}
     raise ValueError("当前支持天气、新闻、油价、星期四文案和短剧推荐命令；也可以直接选择内容。")
+
+
+def inspect_scheduled_command(command: str) -> dict[str, Any]:
+    """Classify a user-visible command before it enters the task editor.
+
+    Parsing a supported command remains backwards compatible with
+    :func:`parse_command`; this wrapper adds the product decision and the
+    explanation required for commands that need interaction or another
+    adapter.  Unknown text is deliberately returned as an actionable result
+    instead of being treated as an executable task.
+    """
+    if not isinstance(command, str) or len(command) > 500:
+        raise ValueError("请输入一个支持的查询命令。")
+    text = command.strip().lstrip("/\\").strip()
+    if not text:
+        raise ValueError("请输入一个支持的查询命令。")
+    try:
+        parsed = parse_command(command)
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        definition = _command_definition(action=parsed.get("action"))
+        if definition is None:
+            return {
+                "recognized": True, "status": "unsupported", "command": text,
+                "reason": "该命令尚未声明可定时化参数和结果。",
+                "alternative": "请直接选择定时任务中的固定内容。",
+            }
+        return {
+            **parsed, "recognized": True, "status": definition["status"],
+            "command": text,
+            "definition": scheduled_command_catalog()[next(
+                index for index, item in enumerate(SCHEDULED_COMMANDS)
+                if item["id"] == definition["id"]
+            )],
+            "reason": definition["reason"], "alternative": definition["alternative"],
+        }
+
+    lowered = text.casefold()
+    command_id = None
+    if lowered in {"epic", "喜加一", "免费游戏"}:
+        command_id = "epic"
+    elif lowered.startswith(("订阅动态", "b站动态")):
+        command_id = "bili_dynamic"
+    elif lowered in {"签到", "每日签到"}:
+        command_id = "checkin"
+    elif lowered.startswith(("查询", "查一下", "介绍一下", "科普")):
+        command_id = "contextual"
+    elif lowered in {"理想", "图来", "占卜", "塔罗牌", "登录", "扫码"}:
+        command_id = "interactive"
+    definition = _command_definition(command_id=command_id)
+    if definition is None:
+        return {
+            "recognized": False, "status": "unsupported", "command": text,
+            "reason": "没有识别出可定时化的命令。",
+            "alternative": "请直接选择定时任务中的内容，或改为固定文字提醒。",
+        }
+    return {
+        "recognized": True, "status": definition["status"], "command": text,
+        "definition": scheduled_command_catalog()[next(
+            index for index, item in enumerate(SCHEDULED_COMMANDS)
+            if item["id"] == definition["id"]
+        )],
+        "reason": definition["reason"], "alternative": definition["alternative"],
+    }
 
 
 class TaskStore:
@@ -290,6 +477,9 @@ class TaskStore:
     @staticmethod
     def _public(row: sqlite3.Row) -> dict[str, Any]:
         task = json.loads(row["payload"])
+        # Tasks written before command metadata existed are deliberately marked
+        # for review instead of being silently treated as current.
+        task.setdefault("definition_version", 0)
         try:
             text = schedule_text(task["schedule"])
         except ValueError:
@@ -527,4 +717,8 @@ class TaskStore:
             return False
 
 
-__all__ = ["TaskStore", "ACTION_NAMES", "BEIJING", "normalize_task", "normalize_arguments", "normalize_schedule", "next_occurrences", "schedule_text", "parse_command", "validate_account"]
+__all__ = [
+    "TaskStore", "ACTION_NAMES", "SCHEDULED_COMMANDS", "SCHEDULED_COMMAND_VERSION", "BEIJING", "normalize_task",
+    "normalize_arguments", "normalize_schedule", "next_occurrences", "schedule_text",
+    "parse_command", "inspect_scheduled_command", "scheduled_command_catalog", "validate_account",
+]

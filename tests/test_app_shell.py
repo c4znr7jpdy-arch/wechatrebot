@@ -81,6 +81,22 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
     }
     parsed = api.parse_scheduled_command("青岛天气 明天")
     assert parsed["data"]["arguments"]["output"] == "image"
+    assert parsed["data"]["status"] == "supported"
+    blocked = api.parse_scheduled_command("签到")
+    assert blocked["data"]["status"] == "needs_condition"
+    assert "授权" in blocked["data"]["reason"]
+
+
+def test_feature_command_reference_shows_scheduleability_status() -> None:
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    styles = (webui / "app.css").read_text(encoding="utf-8")
+
+    assert "function featureCommandScheduleHint" in script
+    assert "支持定时" in script
+    assert "需要补充条件" in script
+    assert "不支持定时" in script
+    assert "command-schedule-status" in styles
 
 
 def test_policy_errors_expose_user_validation_but_not_raw_io_failures(tmp_path):

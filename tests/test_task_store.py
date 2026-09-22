@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from wechatrebot_manager.task_store import TaskStore, parse_command
+from wechatrebot_manager.task_store import (
+    TaskStore,
+    inspect_scheduled_command,
+    parse_command,
+    scheduled_command_catalog,
+)
 
 
 ACCOUNT = "wxid_robot"
@@ -44,6 +49,47 @@ def test_commands_are_parsed_to_typed_arguments() -> None:
         "action": "short_drama",
         "arguments": {"media_type": "短剧", "limit": 12},
     }
+
+
+def test_scheduled_command_inspection_explains_supported_and_blocked_commands() -> None:
+    supported = inspect_scheduled_command("/青岛天气 明天")
+    assert supported["status"] == "supported"
+    assert supported["action"] == "weather"
+    assert supported["definition"]["recipient_types"] == ["group", "private"]
+    assert supported["definition"]["external_write"] is False
+
+    checkin = inspect_scheduled_command("/签到")
+    assert checkin["status"] == "needs_condition"
+    assert "授权" in checkin["reason"]
+    assert checkin["alternative"]
+
+    contextual = inspect_scheduled_command("查询上次会议")
+    assert contextual["status"] == "unsupported"
+    assert "上下文" in contextual["reason"]
+    assert contextual["alternative"]
+
+
+def test_scheduled_command_catalog_is_json_safe_and_does_not_expose_internal_modules() -> None:
+    catalog = scheduled_command_catalog()
+    assert {entry["status"] for entry in catalog} == {"supported", "needs_condition", "unsupported"}
+    assert all(isinstance(entry["parameters"], list) for entry in catalog)
+    serialized = str(catalog)
+    assert "jiang_" not in serialized
+    catalog[0]["parameters"].append("测试")
+    assert "测试" not in scheduled_command_catalog()[0]["parameters"]
+
+
+def test_task_snapshot_keeps_command_definition_version(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "scheduled-tasks.db")
+    saved = store.save(task())
+
+    assert saved["definition_version"] == 1
+
+    legacy = store.get(ACCOUNT, saved["id"])
+    legacy["definition_version"] = 0
+    legacy["revision"] = saved["revision"]
+    with pytest.raises(ValueError, match="命令定义版本"):
+        store.save(legacy)
 
 
 def test_delete_is_a_persistent_tombstone_and_cannot_be_resurrected(tmp_path: Path) -> None:

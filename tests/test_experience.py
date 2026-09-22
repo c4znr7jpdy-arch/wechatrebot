@@ -135,3 +135,26 @@ def test_invalid_memory_limits_do_not_write(tmp_path: Path) -> None:
         service.save_memory({"top_k": 99})
 
     assert json.loads(path.read_text(encoding="utf-8")) == {}
+
+
+def test_scoped_experience_and_preview_are_account_local_and_non_sending(tmp_path: Path) -> None:
+    _plugin(tmp_path, "astrbot_plugin_angel_heart", {})
+    _plugin(tmp_path, "astrbot_plugin_livingmemory", {})
+    service = ExperienceService(tmp_path)
+    service.engine.is_available = lambda: False
+
+    saved = service.save_memory({
+        "scope": "group",
+        "scope_id": "51632940287@chatroom",
+        "enabled": False,
+        "top_k": 2,
+        "summary_trigger_rounds": 8,
+        "casual_query_max_chars": 24,
+    })
+    assert saved["scope"] == "group"
+    snapshot = service.snapshot()
+    assert snapshot["scopes"]["group"]["51632940287@chatroom"]["memory"]["enabled"] is False
+    preview = service.preview({"scope": "group", "scope_id": "51632940287@chatroom"})
+    assert preview["will_send"] is False
+    assert preview["uses_long_term_memory"] is False
+    assert snapshot["data_controls"]["chat_copy"]["reversible"] is False
