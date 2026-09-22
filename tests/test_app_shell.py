@@ -1399,15 +1399,20 @@ def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
 
 
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = (webui / "app.js").read_text(encoding="utf-8")
+    markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert 'previewFeature("feature-group-analysis", "群聊分析"' in script
     assert 'fieldCount: 10, modelFieldCount: 1' in script
     assert 'simplified: true' in script
     assert 'scheduledAction: "group_analysis"' in script
     assert '配置自动日报' in script
+    assert 'id="groupAnalysisSchedulePanel"' not in markup
+    assert '<option value="group_analysis">群聊分析</option>' in markup
+    assert 'groupAnalysisConfigFromEditor(state.scheduledEditor)' in script
+    assert 'data-remove-analysis-time' in script
+    assert '停用群分析自动日报？' in script
     assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
     assert 'if (action === "group_analysis")' in script
     assert '已打开群聊分析自动日报设置' in script
