@@ -63,6 +63,9 @@
     historyLoadingOlder: false,
     historyOlderLoad: 0,
     historyMessageQuery: "",
+    historyMessageCache: new Map(),
+    historyMessageRequests: new Map(),
+    historyMessageCacheEpoch: 0,
     schedules: [],
     scheduledContext: null,
     scheduledCommandCatalog: [],
@@ -108,6 +111,7 @@
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
+  const HISTORY_MESSAGE_CACHE_LIMIT = 32;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
   const GROUP_MEMBER_REQUEST_CONCURRENCY = 4;
@@ -2071,6 +2075,7 @@
         renderHistoryAccountGate(data.requires_login ? "" : state.historyAccount);
         return;
       }
+      saveSelectedHistoryMessages();
       state.conversations = data.items || [];
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(true);
@@ -2116,6 +2121,7 @@
   }
 
   function invalidateHistoryState() {
+    clearHistoryMessageCache();
     state.historyLoad += 1;
     state.historyConversationsLoading = false;
     state.messageLoad += 1;
@@ -2186,6 +2192,71 @@
       Number(left.timestamp || 0) - Number(right.timestamp || 0)
       || Number(left.id || 0) - Number(right.id || 0)
     ));
+  }
+
+  function historyMessageCacheKey(accountId, conversationId, query) {
+    return JSON.stringify([String(accountId || ""), String(conversationId || ""), String(query || "")]);
+  }
+
+  function getHistoryMessageCacheEntry(key) {
+    const entry = state.historyMessageCache.get(key);
+    if (!entry) return null;
+    state.historyMessageCache.delete(key);
+    state.historyMessageCache.set(key, entry);
+    return entry;
+  }
+
+  function setHistoryMessageCacheEntry(key, entry) {
+    state.historyMessageCache.delete(key);
+    state.historyMessageCache.set(key, entry);
+    while (state.historyMessageCache.size > HISTORY_MESSAGE_CACHE_LIMIT) {
+      const oldest = state.historyMessageCache.keys().next().value;
+      state.historyMessageCache.delete(oldest);
+    }
+  }
+
+  function saveSelectedHistoryMessages() {
+    const selected = state.selectedConversation;
+    if (!selected || !state.historyAccount || !state.historyMessageQuery) return;
+    const key = historyMessageCacheKey(state.historyAccount, selected.conversation_id, state.historyMessageQuery);
+    const previous = state.historyMessageCache.get(key);
+    if (!previous && !state.selectedMessages.length) return;
+    setHistoryMessageCacheEntry(key, {
+      accountId: state.historyAccount,
+      conversationId: selected.conversation_id,
+      query: state.historyMessageQuery,
+      messages: state.selectedMessages.slice(),
+      hasMore: state.historyHasMore,
+      scrollTop: $("#messageList").scrollTop,
+      senderKey: state.selectedSenderKey,
+      updatedAt: Date.now(),
+    });
+  }
+
+  function updateHistoryMessageScrollPosition() {
+    const selected = state.selectedConversation;
+    if (!selected || !state.historyAccount || !state.historyMessageQuery) return;
+    const key = historyMessageCacheKey(state.historyAccount, selected.conversation_id, state.historyMessageQuery);
+    const entry = state.historyMessageCache.get(key);
+    if (entry) entry.scrollTop = $("#messageList").scrollTop;
+  }
+
+  function clearHistoryMessageCache() {
+    state.historyMessageCacheEpoch += 1;
+    state.historyMessageCache.clear();
+    state.historyMessageRequests.clear();
+  }
+
+  function requestHistoryMessagePage(key, conversationId, filters) {
+    const pending = state.historyMessageRequests.get(key);
+    if (pending) return pending;
+    const request = api("get_messages", conversationId, filters).then(normalizeMessagePage);
+    state.historyMessageRequests.set(key, request);
+    request.then(
+      () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
+      () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
+    );
+    return request;
   }
 
   function renderConversations() {
@@ -2352,6 +2423,7 @@
     const sender = [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === senderKey);
     if (!sender) return;
     state.selectedSenderKey = senderKey;
+    saveSelectedHistoryMessages();
     updateSelectedSenderButtons();
     if (state.selectedConversation) renderConversationInspector(state.selectedConversation);
   }
@@ -2364,7 +2436,7 @@
     });
   }
 
-  function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
+  function renderMessages(messages, {forceBottom = false, nearBottom = true, restoreScrollTop = null} = {}) {
     const list = $("#messageList");
     const previousIds = new Set(state.selectedMessages.map((message) => message.id));
     const added = messages.filter((message) => !previousIds.has(message.id)).length;
@@ -2375,7 +2447,10 @@
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
     const newButton = $("#newMessageButton");
-    if (forceBottom || nearBottom) {
+    if (restoreScrollTop !== null && restoreScrollTop !== undefined) {
+      list.scrollTop = Math.max(0, Math.min(Number(restoreScrollTop) || 0, list.scrollHeight - list.clientHeight));
+      newButton.hidden = true;
+    } else if (forceBottom || nearBottom) {
       list.scrollTop = list.scrollHeight;
       newButton.hidden = true;
     } else {
@@ -2400,6 +2475,7 @@
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
     list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
+    saveSelectedHistoryMessages();
   }
 
   async function selectConversation(conversationId, options = {}) {
@@ -2409,12 +2485,15 @@
     const query = JSON.stringify(historyFilters());
     const changed = state.selectedConversation?.conversation_id !== conversationId || state.historyMessageQuery !== query;
     const list = $("#messageList");
-    const nearBottom = changed || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    if (changed) saveSelectedHistoryMessages();
     state.selectedConversation = item;
+    const requestAccount = state.historyAccount;
+    const key = historyMessageCacheKey(requestAccount, conversationId, query);
+    const cacheEntry = changed ? getHistoryMessageCacheEntry(key) : null;
     if (changed) {
-      state.selectedMessages = [];
-      state.selectedSenderKey = "";
-      state.historyHasMore = false;
+      state.selectedMessages = cacheEntry?.messages.slice() || [];
+      state.selectedSenderKey = cacheEntry?.senderKey || "";
+      state.historyHasMore = cacheEntry?.hasMore || false;
       state.historyLoadingOlder = false;
       state.historyMessageQuery = query;
       state.historyOlderLoad += 1;
@@ -2423,31 +2502,59 @@
     }
     renderConversations();
     renderConversationHeader(item);
-    if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
+    $("#newMessageButton").hidden = true;
+    if (changed && cacheEntry) {
+      renderMessages(state.selectedMessages, {restoreScrollTop: cacheEntry.scrollTop});
+      renderConversationInspector(item);
+    } else if (changed) {
+      list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
+    }
     const load = ++state.messageLoad;
     state.historyMessagesLoading = true;
-    const requestAccount = state.historyAccount;
+    const cacheEpoch = state.historyMessageCacheEpoch;
+    const filters = pagedHistoryFilters();
     try {
-      const page = normalizeMessagePage(await api("get_messages", conversationId, pagedHistoryFilters()));
-      if (load !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== conversationId) return;
+      const page = await requestHistoryMessagePage(key, conversationId, filters);
+      if (requestAccount !== state.historyAccount || cacheEpoch !== state.historyMessageCacheEpoch) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
         renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
         return;
       }
-      const messages = changed ? page.items : mergeMessages(state.selectedMessages, page.items);
-      if (changed) state.historyHasMore = page.has_more;
-      if (changed || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
-        renderMessages(messages, {forceBottom: changed, nearBottom});
+      const previous = getHistoryMessageCacheEntry(key);
+      const current = load === state.messageLoad
+        && state.selectedConversation?.conversation_id === conversationId
+        && state.historyMessageQuery === query;
+      const priorMessages = previous?.messages || (current ? state.selectedMessages : []);
+      const messages = mergeMessages(priorMessages, page.items);
+      const hasMore = previous?.messages.length > page.items.length ? previous.hasMore : page.has_more;
+      const scrollTop = current ? list.scrollTop : (previous?.scrollTop || cacheEntry?.scrollTop || 0);
+      const senderKey = current ? state.selectedSenderKey : (previous?.senderKey || cacheEntry?.senderKey || "");
+      setHistoryMessageCacheEntry(key, {
+        accountId: requestAccount,
+        conversationId,
+        query,
+        messages,
+        hasMore,
+        scrollTop,
+        senderKey,
+        updatedAt: Date.now(),
+      });
+      if (current) {
+        state.historyHasMore = hasMore;
+        const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        if ((changed && !cacheEntry) || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
+          renderMessages(messages, {nearBottom});
+        }
+        renderConversationInspector(item);
       }
-      renderConversationInspector(item);
     } catch (error) {
-      if (changed && load === state.messageLoad && requestAccount === state.historyAccount
+      if (changed && !cacheEntry && load === state.messageLoad && requestAccount === state.historyAccount
           && state.selectedConversation?.conversation_id === conversationId) {
         list.removeAttribute("aria-busy");
         list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>后台会自动重试，请稍后查看。</p></div>';
       }
-      if (!silent) reportError(error);
+      if (!silent && !cacheEntry && load === state.messageLoad) reportError(error);
     } finally {
       if (load === state.messageLoad) state.historyMessagesLoading = false;
     }
@@ -2544,6 +2651,14 @@
             renderHistoryAccountGate(state.historyAccount);
             return;
           }
+          clearHistoryMessageCache();
+          state.messageLoad += 1;
+          state.historyMessagesLoading = false;
+          state.historyOlderLoad += 1;
+          state.historyHasMore = false;
+          state.historyLoadingOlder = false;
+          state.historyMessageQuery = "";
+          state.selectedMessages = [];
           state.selectedConversation = null;
           state.selectedSenderKey = "";
           $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
@@ -4480,6 +4595,7 @@
     });
     $("#messageList").addEventListener("scroll", () => {
       const list = $("#messageList");
+      updateHistoryMessageScrollPosition();
       if (list.scrollTop <= HISTORY_PRELOAD_THRESHOLD) void loadOlderMessages();
       if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
@@ -4607,7 +4723,19 @@
             return;
           }
           toast(`已清理 ${result.deleted} 条记录。 `);
-          if (state.activePage === "history") await loadConversations();
+          clearHistoryMessageCache();
+          state.messageLoad += 1;
+          state.historyMessagesLoading = false;
+          state.historyOlderLoad += 1;
+          state.historyHasMore = false;
+          state.historyLoadingOlder = false;
+          state.historyMessageQuery = "";
+          state.selectedMessages = [];
+          state.selectedSenderKey = "";
+          if (state.activePage === "history") {
+            $("#messageList").innerHTML = '<div class="loading-row">正在读取消息…</div>';
+            await loadConversations();
+          }
         },
       });
     });
