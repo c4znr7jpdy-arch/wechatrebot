@@ -1,0 +1,1076 @@
+diff --git a/main.py b/main.py
+index 707c271..2dd26b9 100644
+--- a/main.py
++++ b/main.py
+@@ -8,6 +8,7 @@ AstrBot Twitter 推文转发插件
+ import asyncio
+ import copy
+ import re
++from dataclasses import replace
+ from typing import Any
+ 
+ from astrbot.api import AstrBotConfig, logger
+@@ -335,6 +336,8 @@ class TwitterPlugin(Star):
+         self._running = False
+         self._poll_baseline_ready = False
+         self._poll_wakeup = asyncio.Event()
++        self._provider_checking = False
++        self._provider_settings_generation = 0
+         self._poll_config_check_seconds = 1.0
+         self._poll_minute_seconds = 60.0
+         self._config_lock = asyncio.Lock()
+@@ -414,16 +417,42 @@ class TwitterPlugin(Star):
+         """延迟调用 AstrBot HTML 渲染接口。"""
+         return await self.html_render(*args, **kwargs)
+ 
+-    async def _refresh_fxtwitter_availability(self) -> bool:
+-        """刷新 FxTwitter 健康状态，避免检查异常终止轮询任务。"""
++    async def _refresh_provider_availability(self) -> bool:
++        """检查当前数据源，并忽略配置切换前已经开始的旧检查结果。"""
++        generation = self._provider_settings_generation
++        provider = self.data_provider
++        self._provider_checking = True
+         try:
+-            ready = await self.twitter_api.check_fxtwitter_available()
++            if provider == DATA_PROVIDER_FXTWITTER:
++                ready = await self.twitter_api.check_fxtwitter_available()
++            else:
++                ready = bool(
++                    await self.twitter_api.check_website_available(
++                        self.website_list
++                    )
++                )
++        except asyncio.CancelledError:
++            if generation == self._provider_settings_generation:
++                self._provider_checking = False
++            raise
+         except Exception as exc:
+-            logger.warning(f"FxTwitter API 健康检查异常: {exc}")
++            logger.warning(
++                f"{provider} 数据源健康检查异常: {type(exc).__name__}"
++            )
+             ready = False
++
++        if generation != self._provider_settings_generation:
++            return False
+         self._provider_ready = bool(ready)
++        self._provider_checking = False
+         return self._provider_ready
+ 
++    async def _refresh_fxtwitter_availability(self) -> bool:
++        """兼容旧调用方，仅在当前源为 FxTwitter 时刷新状态。"""
++        if self.data_provider != DATA_PROVIDER_FXTWITTER:
++            return False
++        return await self._refresh_provider_availability()
++
+     async def initialize(self):
+         """初始化数据源并启动轮询任务。"""
+         logger.info("Twitter 推文转发插件初始化中...")
+@@ -434,36 +463,22 @@ class TwitterPlugin(Star):
+                 "请同时开启「使用合并转发消息」配置项。"
+             )
+ 
+-        if self.data_provider == DATA_PROVIDER_FXTWITTER:
+-            logger.info("当前使用 Twitter 数据源: FxTwitter API")
+-            await self._refresh_fxtwitter_availability()
+-            if not self._provider_ready:
+-                logger.warning("FxTwitter API 健康检查失败，推文轮询功能暂不可用")
+-        else:
+-            logger.info("当前使用 Twitter 数据源: Nitter")
+-            available = await self.twitter_api.check_website_available(
+-                self.website_list
++        provider_label = (
++            "FxTwitter API"
++            if self.data_provider == DATA_PROVIDER_FXTWITTER
++            else "Nitter"
++        )
++        logger.info(f"当前使用 Twitter 数据源: {provider_label}")
++        await self._refresh_provider_availability()
++        if not self._provider_ready:
++            logger.warning(
++                f"{provider_label} 当前不可用，推文订阅会在后台继续检查"
+             )
+-            self._provider_ready = bool(available)
+-            if available:
+-                logger.info(f"当前使用 Nitter 镜像站: {available}")
+-            else:
+-                logger.warning("未找到可用 Nitter 镜像站，推文轮询功能暂不可用")
+-
+-        should_start_polling = (
+-            self._provider_ready
+-            or self.data_provider == DATA_PROVIDER_FXTWITTER
++        self._running = True
++        self._poll_task = asyncio.create_task(self._poll_tweets())
++        logger.info(
++            f"Twitter 数据源检查与轮询任务已启动，间隔 {self.poll_interval} 分钟"
+         )
+-        if should_start_polling:
+-            self._running = True
+-            self._poll_task = asyncio.create_task(self._poll_tweets())
+-            if self._provider_ready:
+-                logger.info(f"推文轮询已启动，间隔 {self.poll_interval} 分钟")
+-            else:
+-                logger.warning(
+-                    "FxTwitter API 暂不可用，已启动后台恢复检查，"
+-                    f"间隔 {self.poll_interval} 分钟"
+-                )
+ 
+         logger.info("Twitter 推文转发插件初始化完成")
+ 
+@@ -596,6 +611,89 @@ class TwitterPlugin(Star):
+             self.poll_interval = minutes
+             self._poll_wakeup.set()
+ 
++    async def _set_data_source_settings(
++        self,
++        data_provider: str,
++        nitter_url: str,
++        proxy: str,
++    ) -> None:
++        """保存数据源和代理，并热更新当前插件实例。"""
++        if data_provider not in DATA_PROVIDER_OPTIONS:
++            raise ValueError("不支持的数据源")
++
++        nitter_url = nitter_url.strip().rstrip("/")
++        proxy = proxy.strip()
++        config_lock = getattr(self, "_config_lock", None)
++        if config_lock is None:
++            config_lock = asyncio.Lock()
++            self._config_lock = config_lock
++
++        async with config_lock:
++            had_basic = "basic" in self.config
++            previous_basic = copy.deepcopy(self.config.get("basic"))
++            basic = self.config.get("basic")
++            if not isinstance(basic, dict):
++                basic = {}
++                self.config["basic"] = basic
++            basic["twitter_data_provider"] = data_provider
++            basic["twitter_nitter_url"] = nitter_url
++            basic["twitter_proxy"] = proxy
++
++            try:
++                save_config = getattr(self.config, "save_config", None)
++                if not callable(save_config):
++                    raise RuntimeError("当前配置对象不支持持久化")
++                save_result = save_config()
++                if asyncio.iscoroutine(save_result):
++                    await save_result
++            except Exception:
++                if had_basic:
++                    self.config["basic"] = previous_basic
++                else:
++                    self.config.pop("basic", None)
++                raise
++
++            try:
++                await self.twitter_api.close()
++            except Exception as exc:
++                logger.warning(
++                    f"重建 Twitter 网络连接时关闭旧连接失败: {type(exc).__name__}"
++                )
++
++            self.data_provider = data_provider
++            self.custom_nitter_url = nitter_url
++            self.proxy = proxy or None
++            self.website_list = []
++            if self.data_provider == DATA_PROVIDER_NITTER:
++                if self.custom_nitter_url:
++                    self.website_list.append(self.custom_nitter_url)
++                self.website_list.extend(WEBSITE_LIST)
++
++            self.twitter_api.proxy = self.proxy
++            self.twitter_api.provider = self.data_provider
++            self.twitter_api.nitter_url = ""
++            self.twitter_api.provider_ready = False
++            self.twitter_api._status_cache.clear()
++            self.message_service.settings = replace(
++                self.message_service.settings,
++                proxy=self.proxy,
++            )
++            self.polling_service.settings = replace(
++                self.polling_service.settings,
++                data_provider=self.data_provider,
++                custom_nitter_url=self.custom_nitter_url,
++                website_list=tuple(self.website_list),
++            )
++
++            self._provider_settings_generation += 1
++            self._provider_ready = False
++            self._provider_checking = True
++            self._poll_baseline_ready = False
++            if self._running:
++                if self._poll_task is None or self._poll_task.done():
++                    self._poll_task = asyncio.create_task(self._poll_tweets())
++                self._poll_wakeup.set()
++
+     async def _wait_for_next_poll(
+         self,
+         round_started_at: float | None = None,
+@@ -671,21 +769,24 @@ class TwitterPlugin(Star):
+         """按全局间隔执行轮询。"""
+         loop = asyncio.get_running_loop()
+         while self._running:
+-            if (
+-                self.data_provider == DATA_PROVIDER_FXTWITTER
+-                and not self._provider_ready
+-            ):
++            settings_generation = self._provider_settings_generation
++            if not self._provider_ready:
+                 self._poll_baseline_ready = False
+-                await self._wait_for_next_poll()
+-                if not self._running:
+-                    break
+-                if not await self._refresh_fxtwitter_availability():
++                if not await self._refresh_provider_availability():
++                    if self._provider_checking:
++                        # 设置在旧检查期间发生变化，立即检查新配置。
++                        continue
++                    await self._wait_for_next_poll()
+                     continue
+-                logger.info("FxTwitter API 已恢复，立即执行订阅轮询")
++                logger.info(f"{self.data_provider} 数据源已恢复，立即执行订阅轮询")
+ 
+             if not await self._prime_polling_cursors():
++                if settings_generation != self._provider_settings_generation:
++                    continue
+                 await self._wait_for_next_poll()
+                 continue
++            if settings_generation != self._provider_settings_generation:
++                continue
+ 
+             round_started_at = loop.time()
+             try:
+@@ -697,16 +798,17 @@ class TwitterPlugin(Star):
+                     self._provider_ready = bool(self.twitter_api.is_ready)
+ 
+             elapsed = loop.time() - round_started_at
++            if settings_generation != self._provider_settings_generation:
++                # 配置保存会使旧轮询失效，直接检查新数据源，不等待旧周期。
++                continue
+             logger.debug(
+                 f"推文轮询本轮完成: 耗时={elapsed:.2f} 秒, "
+                 f"计划间隔={self.poll_interval} 分钟"
+             )
+-            if (
+-                self.data_provider == DATA_PROVIDER_FXTWITTER
+-                and not self._provider_ready
+-            ):
++            if not self._provider_ready:
+                 self._poll_baseline_ready = False
+-                # 当前轮已发现数据源不可用；下一轮按既有间隔执行恢复检查。
++                # 当前轮发现数据源不可用；按既有间隔执行恢复检查。
++                await self._wait_for_next_poll()
+                 continue
+             if elapsed >= self.poll_interval * self._poll_minute_seconds:
+                 logger.info(
+diff --git a/pages/subscriptions/app.js b/pages/subscriptions/app.js
+index 0ff8eb4..b49eead 100644
+--- a/pages/subscriptions/app.js
++++ b/pages/subscriptions/app.js
+@@ -22,6 +22,15 @@ const elements = {
+   detailView: document.getElementById("detail-view"),
+   intervalForm: document.getElementById("interval-form"),
+   pollInterval: document.getElementById("poll-interval"),
++  providerSettingsForm: document.getElementById("provider-settings-form"),
++  providerSettingsStatus: document.getElementById("provider-settings-status"),
++  dataProvider: document.getElementById("data-provider"),
++  nitterUrlField: document.getElementById("nitter-url-field"),
++  nitterUrl: document.getElementById("nitter-url"),
++  nitterUrlError: document.getElementById("nitter-url-error"),
++  dataProxy: document.getElementById("data-proxy"),
++  proxyError: document.getElementById("proxy-error"),
++  proxyVisibility: document.getElementById("proxy-visibility"),
+   removeDialog: document.getElementById("remove-dialog"),
+   removeDialogText: document.getElementById("remove-dialog-text"),
+   confirmRemove: document.getElementById("confirm-remove"),
+@@ -36,6 +45,7 @@ const elements = {
+ 
+ const state = {
+   overview: null,
++  providerSettings: null,
+   view: "groups",
+   selectedUmo: null,
+   search: "",
+@@ -44,6 +54,8 @@ const state = {
+   removeTarget: null,
+   toastTimer: null,
+   manualTargets: [],
++  providerStatusTimer: null,
++  providerStatusPolling: false,
+ };
+ 
+ function escapeHtml(value) {
+@@ -65,6 +77,12 @@ function showToast(message, isError = false) {
+   }, 3200);
+ }
+ 
++function setFieldError(input, messageElement, message = "") {
++  input.setAttribute("aria-invalid", String(Boolean(message)));
++  messageElement.textContent = message;
++  messageElement.hidden = !message;
++}
++
+ function setError(message = "") {
+   elements.errorNotice.textContent = message;
+   elements.errorNotice.classList.toggle("is-hidden", !message);
+@@ -156,11 +174,16 @@ function renderRuntime() {
+   if (!state.overview) return;
+   const { provider, polling, totals } = state.overview;
+   elements.runtimeStatus.classList.toggle("is-ready", provider.ready && polling.running);
+-  elements.runtimeStatus.classList.toggle("is-error", !provider.ready);
++  elements.runtimeStatus.classList.toggle(
++    "is-error",
++    !provider.ready && !provider.checking,
++  );
+   const providerLabel = provider.name === "fxtwitter" ? "FxTwitter" : "Nitter";
+   elements.runtimeStatus.lastElementChild.textContent = provider.ready
+     ? `${providerLabel} · ${polling.running ? "轮询中" : "已就绪"}`
+-    : `${providerLabel} · 不可用`;
++    : provider.checking
++      ? `${providerLabel} · 检查中`
++      : `${providerLabel} · 不可用`;
+ 
+   for (const [key, target] of Object.entries(elements.metrics)) {
+     target.textContent = totals[key] ?? 0;
+@@ -189,6 +212,75 @@ function renderRuntime() {
+   }
+ }
+ 
++function renderProviderSettings() {
++  const settings = state.providerSettings;
++  if (!settings) return;
++  if (elements.providerSettingsForm.dataset.dirty !== "true"
++      && document.activeElement !== elements.dataProvider) {
++    elements.dataProvider.value = settings.data_provider;
++  }
++  if (elements.providerSettingsForm.dataset.dirty !== "true"
++      && document.activeElement !== elements.nitterUrl) {
++    elements.nitterUrl.value = settings.nitter_url;
++  }
++  if (elements.providerSettingsForm.dataset.dirty !== "true"
++      && document.activeElement !== elements.dataProxy) {
++    elements.dataProxy.value = settings.proxy;
++  }
++  elements.nitterUrlField.hidden = elements.dataProvider.value !== "nitter";
++}
++
++function applyProviderStatus(status) {
++  if (!status?.provider) return;
++  if (state.overview) {
++    state.overview.provider = { ...state.overview.provider, ...status.provider };
++    state.overview.polling = { ...state.overview.polling, ...status.polling };
++    renderRuntime();
++  }
++
++  const providerLabel = status.provider.name === "fxtwitter" ? "FxTwitter" : "Nitter";
++  const ready = Boolean(status.provider.ready);
++  const checking = Boolean(status.provider.checking);
++  elements.providerSettingsStatus.dataset.state = ready
++    ? "ready"
++    : checking
++      ? "checking"
++      : "error";
++  elements.providerSettingsStatus.textContent = ready
++    ? `${providerLabel} 已连接`
++    : checking
++      ? `正在检查 ${providerLabel}`
++      : `${providerLabel} 不可用，请检查代理或更换数据源`;
++}
++
++async function refreshProviderStatus() {
++  const status = await bridge.apiGet("settings/data-source/status");
++  applyProviderStatus(status);
++  return status;
++}
++
++function watchProviderStatus() {
++  window.clearTimeout(state.providerStatusTimer);
++  if (state.providerStatusPolling || !bridge) return;
++  state.providerStatusPolling = true;
++
++  const poll = async () => {
++    try {
++      const status = await refreshProviderStatus();
++      if (status.provider?.checking) {
++        state.providerStatusTimer = window.setTimeout(poll, 1000);
++        return;
++      }
++    } catch (error) {
++      elements.providerSettingsStatus.dataset.state = "error";
++      elements.providerSettingsStatus.textContent = error?.message || "读取数据源状态失败";
++    }
++    state.providerStatusPolling = false;
++  };
++
++  poll();
++}
++
+ function renderSessionList() {
+   const sessions = filteredSessions();
+   elements.sessionSearch.placeholder = state.view === "groups"
+@@ -412,11 +504,19 @@ async function loadOverview({ announce = false } = {}) {
+   state.loading = true;
+   elements.refreshButton.classList.add("is-loading");
+   try {
+-    state.overview = await bridge.apiGet("overview");
++    const [overview, settings] = await Promise.all([
++      bridge.apiGet("overview"),
++      bridge.apiGet("settings/data-source"),
++    ]);
++    state.overview = overview;
++    state.providerSettings = settings.settings;
+     state.overview.groups = mergeManualTargets(
+       state.overview.groups,
+       state.manualTargets,
+     );
++    applyProviderStatus(settings);
++    renderProviderSettings();
++    if (settings.provider?.checking) watchProviderStatus();
+     setManualTargetEnabled(renderManualPlatformOptions());
+     render();
+     if (announce) showToast("订阅数据已刷新");
+@@ -429,6 +529,89 @@ async function loadOverview({ announce = false } = {}) {
+   }
+ }
+ 
++async function saveProviderSettings(event) {
++  event.preventDefault();
++  const dataProvider = elements.dataProvider.value;
++  const nitterUrl = elements.nitterUrl.value.trim();
++  const proxy = elements.dataProxy.value.trim();
++  setFieldError(elements.nitterUrl, elements.nitterUrlError);
++  setFieldError(elements.dataProxy, elements.proxyError);
++  if (dataProvider === "nitter" && nitterUrl) {
++    try {
++      const parsed = new URL(nitterUrl);
++      if (!(["http:", "https:"].includes(parsed.protocol) && parsed.hostname
++          && !parsed.username && !parsed.password && !parsed.search && !parsed.hash)) {
++        throw new Error("invalid");
++      }
++    } catch {
++      const message = "请输入 http:// 或 https:// 地址，且不要填写用户名、密码、查询参数或片段";
++      setFieldError(elements.nitterUrl, elements.nitterUrlError, message);
++      showToast(message, true);
++      elements.nitterUrl.focus();
++      return;
++    }
++  }
++  if (proxy) {
++    try {
++      const parsed = new URL(proxy);
++      const authority = proxy.slice(proxy.indexOf("://") + 3).split(/[/?#]/, 1)[0];
++      const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
++      const portMatch = hostPort.match(
++        hostPort.startsWith("[") ? /^\[[^\]]+\]:(\d+)$/ : /:(\d+)$/,
++      );
++      const port = Number(portMatch?.[1]);
++      const hasPort = Number.isInteger(port) && port >= 1 && port <= 65535;
++      if (!["http:", "https:", "socks5:"].includes(parsed.protocol)
++          || !parsed.hostname || !hasPort || parsed.pathname !== "/"
++          || parsed.search || parsed.hash) {
++        throw new Error("invalid");
++      }
++    } catch {
++      const message = "代理请填写 http://、https:// 或 socks5:// 地址，并包含有效端口";
++      setFieldError(elements.dataProxy, elements.proxyError, message);
++      showToast(message, true);
++      elements.dataProxy.focus();
++      return;
++    }
++  }
++
++  setSaving(true);
++  elements.providerSettingsStatus.dataset.state = "checking";
++  elements.providerSettingsStatus.textContent = "正在保存并检查数据源";
++  try {
++    const result = await bridge.apiPost("settings/data-source/save", {
++      data_provider: dataProvider,
++      nitter_url: nitterUrl,
++      proxy,
++    });
++    if (!result.saved) {
++      showToast(result.message || "保存失败", true);
++      if (result.field === "nitter_url") {
++        setFieldError(elements.nitterUrl, elements.nitterUrlError, result.message);
++        elements.nitterUrl.focus();
++      } else if (result.field === "proxy") {
++        setFieldError(elements.dataProxy, elements.proxyError, result.message);
++        elements.dataProxy.focus();
++      }
++      elements.providerSettingsStatus.dataset.state = "error";
++      elements.providerSettingsStatus.textContent = result.message || "设置无效";
++      return;
++    }
++    state.providerSettings = { data_provider: dataProvider, nitter_url: nitterUrl, proxy };
++    elements.providerSettingsForm.dataset.dirty = "false";
++    applyProviderStatus(result);
++    showToast("网络设置已保存，正在检查数据源");
++    watchProviderStatus();
++    await loadOverview();
++  } catch (error) {
++    elements.providerSettingsStatus.dataset.state = "error";
++    elements.providerSettingsStatus.textContent = "保存失败，设置未生效";
++    showToast(error?.message || "网络设置保存失败", true);
++  } finally {
++    setSaving(false);
++  }
++}
++
+ async function saveAndReload(endpoint, payload, successMessage) {
+   setSaving(true);
+   try {
+@@ -526,6 +709,34 @@ elements.intervalForm.addEventListener("submit", async (event) => {
+   );
+ });
+ 
++elements.providerSettingsForm.addEventListener("input", () => {
++  elements.providerSettingsForm.dataset.dirty = "true";
++  if (document.activeElement === elements.nitterUrl) {
++    setFieldError(elements.nitterUrl, elements.nitterUrlError);
++  }
++  if (document.activeElement === elements.dataProxy) {
++    setFieldError(elements.dataProxy, elements.proxyError);
++  }
++});
++
++elements.providerSettingsForm.addEventListener("change", () => {
++  elements.providerSettingsForm.dataset.dirty = "true";
++  elements.nitterUrlField.hidden = elements.dataProvider.value !== "nitter";
++});
++
++elements.providerSettingsForm.addEventListener("submit", saveProviderSettings);
++
++elements.proxyVisibility.addEventListener("click", () => {
++  const shouldReveal = elements.dataProxy.type === "password";
++  elements.dataProxy.type = shouldReveal ? "text" : "password";
++  elements.proxyVisibility.textContent = shouldReveal ? "隐藏" : "显示";
++  elements.proxyVisibility.setAttribute("aria-pressed", String(shouldReveal));
++  elements.proxyVisibility.setAttribute(
++    "aria-label",
++    shouldReveal ? "隐藏代理地址" : "显示代理地址",
++  );
++});
++
+ elements.detailView.addEventListener("submit", async (event) => {
+   if (event.target.id !== "add-form") return;
+   event.preventDefault();
+diff --git a/pages/subscriptions/index.html b/pages/subscriptions/index.html
+index 3d568f2..60fc671 100644
+--- a/pages/subscriptions/index.html
++++ b/pages/subscriptions/index.html
+@@ -62,6 +62,86 @@
+         </form>
+       </section>
+ 
++      <section class="provider-panel" aria-labelledby="provider-settings-title">
++        <div class="provider-panel-heading">
++          <div>
++            <h2 id="provider-settings-title">数据源与代理</h2>
++            <p>为 X/Twitter 选择可用数据源，并设置插件访问外网时使用的代理。</p>
++          </div>
++          <div
++            class="provider-status"
++            id="provider-settings-status"
++            role="status"
++            aria-live="polite"
++          >
++            正在读取配置
++          </div>
++        </div>
++        <form class="provider-settings-form" id="provider-settings-form" novalidate>
++          <div class="provider-settings-grid">
++            <div class="provider-field">
++              <label for="data-provider">数据源</label>
++              <select id="data-provider" name="data_provider" required>
++                <option value="nitter">Nitter 镜像</option>
++                <option value="fxtwitter">FxTwitter API</option>
++              </select>
++              <span class="field-hint">切换后会立即检查所选数据源。</span>
++            </div>
++            <div class="provider-field" id="nitter-url-field">
++              <label for="nitter-url">Nitter 镜像地址</label>
++              <input
++                id="nitter-url"
++                name="nitter_url"
++                type="url"
++                inputmode="url"
++                autocomplete="url"
++                placeholder="留空使用内置镜像列表"
++                aria-describedby="nitter-url-hint nitter-url-error"
++                aria-invalid="false"
++              />
++              <span class="field-hint" id="nitter-url-hint">
++                可填写自建镜像，例如 https://nitter.example.com
++              </span>
++              <span class="field-error" id="nitter-url-error" aria-live="polite" hidden></span>
++            </div>
++            <div class="provider-field provider-proxy-field">
++              <label for="data-proxy">网络代理</label>
++              <div class="secret-input">
++                <input
++                  id="data-proxy"
++                  name="proxy"
++                  type="password"
++                  autocomplete="off"
++                  spellcheck="false"
++                  placeholder="留空则直连"
++                  aria-describedby="proxy-hint proxy-error"
++                  aria-invalid="false"
++                />
++                <button
++                  class="secondary-button reveal-button"
++                  id="proxy-visibility"
++                  type="button"
++                  aria-pressed="false"
++                  aria-label="显示代理地址"
++                >
++                  显示
++                </button>
++              </div>
++              <span class="field-hint" id="proxy-hint">
++                支持 http://、https://、socks5://；媒体也可在开启预下载后使用代理。
++              </span>
++              <span class="field-error" id="proxy-error" aria-live="polite" hidden></span>
++            </div>
++          </div>
++          <div class="provider-settings-footer">
++            <span class="field-hint">保存后立即生效，不需要重启机器人。</span>
++            <button class="primary-button" id="save-provider-settings" type="submit">
++              保存设置
++            </button>
++          </div>
++        </form>
++      </section>
++
+       <div class="notice error-notice is-hidden" id="error-notice" role="alert"></div>
+ 
+       <main class="workspace" aria-busy="true">
+diff --git a/pages/subscriptions/style.css b/pages/subscriptions/style.css
+index 4abec47..ff6b6f5 100644
+--- a/pages/subscriptions/style.css
++++ b/pages/subscriptions/style.css
+@@ -56,7 +56,8 @@ body {
+ }
+ 
+ button,
+-input {
++input,
++select {
+   font: inherit;
+   letter-spacing: 0;
+ }
+@@ -72,11 +73,16 @@ input:disabled {
+ }
+ 
+ button:focus-visible,
+-input:focus-visible {
++input:focus-visible,
++select:focus-visible {
+   outline: 2px solid var(--focus);
+   outline-offset: 2px;
+ }
+ 
++[hidden] {
++  display: none !important;
++}
++
+ .page-shell {
+   width: min(1440px, 100%);
+   min-width: 0;
+@@ -216,6 +222,160 @@ h2 {
+   white-space: nowrap;
+ }
+ 
++.provider-panel {
++  min-width: 0;
++  margin-top: 12px;
++  border: 1px solid var(--border);
++  border-radius: 6px;
++  padding: 16px;
++  background: var(--surface);
++}
++
++.provider-panel-heading,
++.provider-settings-footer {
++  display: flex;
++  min-width: 0;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++}
++
++.provider-panel-heading h2 {
++  font-size: 16px;
++}
++
++.provider-panel-heading p {
++  margin-top: 4px;
++  color: var(--text-muted);
++  line-height: 1.45;
++}
++
++.provider-status {
++  display: inline-flex;
++  min-width: 0;
++  flex: 0 0 auto;
++  align-items: center;
++  gap: 7px;
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  padding: 5px 10px;
++  background: var(--surface-subtle);
++  color: var(--text-muted);
++  font-size: 12px;
++}
++
++.provider-status::before {
++  width: 8px;
++  height: 8px;
++  flex: 0 0 auto;
++  border-radius: 50%;
++  background: var(--warning);
++  content: "";
++}
++
++.provider-status[data-state="ready"]::before {
++  background: var(--positive);
++}
++
++.provider-status[data-state="error"]::before {
++  background: var(--danger);
++}
++
++.provider-status[data-state="checking"]::before {
++  animation: status-pulse 1s ease-in-out infinite alternate;
++}
++
++@keyframes status-pulse {
++  to {
++    opacity: 0.35;
++  }
++}
++
++.provider-settings-form {
++  margin-top: 14px;
++  border-top: 1px solid var(--border);
++  padding-top: 14px;
++}
++
++.provider-settings-grid {
++  display: grid;
++  grid-template-columns: minmax(170px, 0.8fr) minmax(220px, 1.1fr) minmax(250px, 1.4fr);
++  min-width: 0;
++  gap: 12px;
++}
++
++.provider-field {
++  display: flex;
++  min-width: 0;
++  flex-direction: column;
++  gap: 6px;
++}
++
++.provider-field > label {
++  color: var(--text);
++  font-size: 12px;
++  font-weight: 650;
++}
++
++.provider-field > input,
++.provider-field select,
++.secret-input input {
++  width: 100%;
++  min-width: 0;
++  height: 36px;
++  border: 1px solid var(--border);
++  border-radius: 5px;
++  padding: 0 10px;
++  background: var(--surface-subtle);
++  color: var(--text);
++}
++
++.provider-field > input::placeholder,
++.secret-input input::placeholder {
++  color: var(--text-muted);
++}
++
++.field-hint {
++  color: var(--text-muted);
++  font-size: 11px;
++  line-height: 1.45;
++  overflow-wrap: anywhere;
++}
++
++.field-error {
++  color: var(--danger);
++  font-size: 11px;
++  line-height: 1.4;
++  overflow-wrap: anywhere;
++}
++
++.secret-input {
++  display: flex;
++  min-width: 0;
++  gap: 6px;
++}
++
++.secret-input input {
++  flex: 1 1 auto;
++}
++
++.reveal-button {
++  min-width: 56px;
++  min-height: 36px;
++  padding: 0 9px;
++  font-size: 12px;
++}
++
++.provider-settings-footer {
++  margin-top: 14px;
++  border-top: 1px solid var(--border);
++  padding-top: 12px;
++}
++
++.provider-settings-footer .primary-button {
++  flex: 0 0 auto;
++}
++
+ .number-field {
+   display: flex;
+   min-width: 0;
+@@ -842,6 +1002,10 @@ h2 {
+     padding: 14px;
+   }
+ 
++  .provider-settings-grid {
++    grid-template-columns: minmax(0, 1fr);
++  }
++
+   .title-block {
+     align-items: flex-start;
+     flex-direction: column;
+@@ -910,6 +1074,21 @@ h2 {
+     padding: 10px;
+   }
+ 
++  .provider-panel {
++    padding: 12px;
++  }
++
++  .provider-panel-heading {
++    align-items: flex-start;
++    flex-direction: column;
++    gap: 10px;
++  }
++
++  .provider-settings-footer {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
+   .metric {
+     min-height: 62px;
+     padding: 10px 12px;
+diff --git a/twitter_webui.py b/twitter_webui.py
+index c6d678b..465f99d 100644
+--- a/twitter_webui.py
++++ b/twitter_webui.py
+@@ -3,10 +3,13 @@
+ import asyncio
+ import re
+ from typing import Any
++from urllib.parse import urlsplit
+ 
+ from astrbot.api import logger
+ from astrbot.api.web import error_response, json_response, request
+ 
++from .twitter_api import DATA_PROVIDER_OPTIONS
++
+ 
+ PLUGIN_NAME = "astrbot_plugin_twitter"
+ USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+@@ -37,6 +40,24 @@ class TwitterWebUIController:
+                 ["POST"],
+                 "修改 Twitter 轮询间隔",
+             ),
++            (
++                "settings/data-source",
++                self.get_data_source_settings,
++                ["GET"],
++                "读取 Twitter 数据源和代理设置",
++            ),
++            (
++                "settings/data-source/save",
++                self.save_data_source_settings,
++                ["POST"],
++                "修改 Twitter 数据源和代理设置",
++            ),
++            (
++                "settings/data-source/status",
++                self.data_source_status,
++                ["GET"],
++                "读取 Twitter 数据源状态",
++            ),
+             (
+                 "subscriptions/add",
+                 self.add_subscription,
+@@ -468,6 +489,158 @@ class TwitterWebUIController:
+         payload = await request.json(default={})
+         return payload if isinstance(payload, dict) else None
+ 
++    @staticmethod
++    def _is_network_url(
++        value: str,
++        schemes: set[str],
++        *,
++        allow_credentials: bool = False,
++        require_port: bool = False,
++    ) -> bool:
++        if not value or any(char.isspace() for char in value):
++            return False
++        try:
++            parsed = urlsplit(value)
++            hostname = parsed.hostname
++            port = parsed.port
++        except ValueError:
++            return False
++        if (
++            parsed.scheme.lower() not in schemes
++            or not hostname
++            or parsed.query
++            or parsed.fragment
++            or _contains_control_characters(value)
++        ):
++            return False
++        if not allow_credentials and (
++            parsed.username is not None or parsed.password is not None
++        ):
++            return False
++        if require_port and (port is None or not 1 <= port <= 65535):
++            return False
++        if require_port and parsed.path not in {"", "/"}:
++            return False
++        return True
++
++    def _data_source_status(self) -> dict:
++        return {
++            "provider": {
++                "name": str(getattr(self.plugin, "data_provider", "nitter")),
++                "ready": bool(getattr(self.plugin, "_provider_ready", False)),
++                "checking": bool(
++                    getattr(self.plugin, "_provider_checking", False)
++                ),
++            },
++            "polling": {
++                "running": bool(getattr(self.plugin, "_running", False)),
++            },
++        }
++
++    async def get_data_source_settings(self):
++        proxy = str(getattr(self.plugin, "proxy", None) or "")
++        return json_response(
++            {
++                "settings": {
++                    "data_provider": str(
++                        getattr(self.plugin, "data_provider", "nitter")
++                    ),
++                    "nitter_url": str(
++                        getattr(self.plugin, "custom_nitter_url", "") or ""
++                    ),
++                    "proxy": proxy,
++                },
++                **self._data_source_status(),
++            }
++        )
++
++    async def data_source_status(self):
++        return json_response(self._data_source_status())
++
++    async def save_data_source_settings(self):
++        payload = await self._payload()
++        if payload is None:
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "form",
++                    "message": "设置内容无效，请重新提交",
++                }
++            )
++
++        data_provider = payload.get("data_provider")
++        nitter_url = payload.get("nitter_url", "")
++        proxy = payload.get("proxy", "")
++        if data_provider not in DATA_PROVIDER_OPTIONS:
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "data_provider",
++                    "message": "请选择 Nitter 镜像或 FxTwitter API",
++                }
++            )
++        if not isinstance(nitter_url, str) or not isinstance(proxy, str):
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "form",
++                    "message": "镜像地址和代理地址必须是文本",
++                }
++            )
++
++        nitter_url = nitter_url.strip().rstrip("/")
++        proxy = proxy.strip()
++        if data_provider == "nitter" and nitter_url and not self._is_network_url(
++            nitter_url,
++            {"http", "https"},
++        ):
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "nitter_url",
++                    "message": "Nitter 地址需使用 http:// 或 https://，并填写有效主机名",
++                }
++            )
++        if proxy and not self._is_network_url(
++            proxy,
++            {"http", "https", "socks5"},
++            allow_credentials=True,
++            require_port=True,
++        ):
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "proxy",
++                    "message": "代理需使用 http://、https:// 或 socks5://，并填写有效主机名和端口",
++                }
++            )
++
++        try:
++            await self.plugin._set_data_source_settings(
++                data_provider,
++                nitter_url,
++                proxy,
++            )
++        except Exception as exc:
++            logger.error(
++                f"保存 Twitter 数据源设置失败: {type(exc).__name__}"
++            )
++            return json_response(
++                {
++                    "saved": False,
++                    "field": "form",
++                    "message": "保存失败，原配置已保留",
++                }
++            )
++
++        return json_response(
++            {
++                "saved": True,
++                "message": "设置已保存，正在检查数据源",
++                **self._data_source_status(),
++            }
++        )
++
+     async def _validate_live_group(
+         self,
+         parsed_umo: tuple[str, str, str],
