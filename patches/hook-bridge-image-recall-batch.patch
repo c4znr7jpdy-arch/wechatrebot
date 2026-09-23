@@ -1,0 +1,37 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -933,6 +933,19 @@
+     def _observe_outgoing_image_receipt(self, payload: Mapping[str, Any], event) -> None:
+         observer = getattr(self.router, "observe_outgoing_image", None)
+         if not callable(observer):
+             return
++        receipt_items = payload.get("list")
++        if isinstance(receipt_items, Mapping):
++            receipt_items = [receipt_items]
++        if isinstance(receipt_items, (list, tuple)):
++            for receipt in receipt_items:
++                if not isinstance(receipt, Mapping):
++                    continue
++                receipt_payload = {
++                    key: value for key, value in payload.items() if key != "list"
++                }
++                receipt_payload.update(receipt)
++                self._observe_outgoing_image_receipt(receipt_payload, event)
++            return
+         embedded = payload.get("data")
+         embedded_is_envelope = isinstance(embedded, Mapping) and any(
+@@ -951,4 +964,11 @@
+-        message_name = scalar(payload.get("messageType")).strip()
++        message_name = scalar(
++            payload.get("messageType")
++            or payload.get("event_desc")
++            or payload.get("event_type")
++        ).strip()
+         message_desc = scalar(
+-            payload.get("messageDesc") or data.get("messageDesc")
++            payload.get("messageDesc")
++            or payload.get("event_desc")
++            or payload.get("eventDesc")
++            or data.get("messageDesc")
+         ).strip()
