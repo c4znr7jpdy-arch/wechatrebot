@@ -28,7 +28,6 @@ def test_batched_outgoing_image_callback_binds_recall_receipt(
     command = [
         "git",
         "apply",
-        "--ignore-space-change",
         "--whitespace=error-all",
         "-p2",
         "--directory=app/bridge",
