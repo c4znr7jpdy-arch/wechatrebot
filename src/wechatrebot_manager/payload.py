@@ -80,6 +80,24 @@ def _is_user_managed(relative_path: Path) -> bool:
     return normalized in USER_MANAGED_PATHS or first in USER_MANAGED_ROOTS
 
 
+def _is_user_config(relative_path: Path) -> bool:
+    """Return whether an existing configuration file belongs to the user."""
+    parts = tuple(part.casefold() for part in relative_path.parts)
+    if not parts:
+        return False
+    if parts[0] == "config":
+        return len(parts) > 1 and parts[1] not in {
+            "installed-payload.json",
+            "templates",
+        }
+    return len(parts) >= 4 and parts[:4] == (
+        "app",
+        "astrbot",
+        "data",
+        "config",
+    )
+
+
 def _manifest_file_specs(
     manifest: object,
 ) -> tuple[tuple[Path, str], ...]:
@@ -324,6 +342,7 @@ def install_payload(
     install_root: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
+    preserve_existing_user_config: bool = False,
 ) -> VerifiedPayload:
     payload_root_path, manifest, planned = _plan_payload(payload_root)
     root = Path(install_root).expanduser().resolve()
@@ -373,6 +392,7 @@ def install_payload(
             if archive is not None:
                 archive.close()
 
+        installed_files: list[VerifiedPayloadFile] = []
         for index, item in enumerate(verified_files, start=1):
             target = (root / item.relative_path).resolve()
             try:
@@ -381,6 +401,18 @@ def install_payload(
                 raise PayloadError(
                     f"安装目标越过根目录：{item.relative_path.as_posix()}"
                 ) from exc
+            if (
+                preserve_existing_user_config
+                and _is_user_config(item.relative_path)
+                and target.is_file()
+                and not target.is_symlink()
+            ):
+                installed_files.append(
+                    VerifiedPayloadFile(item.relative_path, target, sha256_file(target))
+                )
+                if progress_callback is not None:
+                    progress_callback("install", index, file_count)
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             backup: Path | None = None
             if target.exists():
@@ -390,18 +422,26 @@ def install_payload(
                 shutil.copy2(target, backup)
             _replace_file(_transaction_file(stage_root, index), target)
             replaced.append((target, backup))
+            installed_files.append(item)
             if progress_callback is not None:
                 progress_callback("install", index, file_count)
 
+        installed_manifest: dict[str, object] = {
+            "schema_version": 1,
+            "files": [
+                {"path": item.relative_path.as_posix(), "sha256": item.sha256}
+                for item in installed_files
+            ],
+        }
+        release_version = manifest.get("release_version")
+        if isinstance(release_version, str) and release_version.strip():
+            installed_manifest["release_version"] = release_version.strip()
+        release_build = manifest.get("release_build")
+        if isinstance(release_build, int) and not isinstance(release_build, bool) and release_build >= 0:
+            installed_manifest["release_build"] = release_build
         write_json_atomic(
             root / "config" / "installed-payload.json",
-            {
-                "schema_version": 1,
-                "files": [
-                    {"path": item.relative_path.as_posix(), "sha256": item.sha256}
-                    for item in verified_files
-                ],
-            },
+            installed_manifest,
         )
     except Exception:
         for target, backup in reversed(replaced):
@@ -416,4 +456,4 @@ def install_payload(
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
         shutil.rmtree(backup_root, ignore_errors=True)
-    return VerifiedPayload(payload_root_path, manifest, tuple(verified_files))
+    return VerifiedPayload(payload_root_path, manifest, tuple(installed_files))

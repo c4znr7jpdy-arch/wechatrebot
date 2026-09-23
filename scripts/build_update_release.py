@@ -72,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
         help="include only this manifest-listed payload path (repeatable)",
     )
     parser.add_argument("--minimum-supported-version", default="0.7.0")
+    parser.add_argument("--build", type=int)
+    parser.add_argument(
+        "--mandatory",
+        action="store_true",
+        help="mark this release as required for all older client versions",
+    )
     args = parser.parse_args(argv)
 
     artifacts = (COMMERCIAL_ROOT / "artifacts").resolve()
@@ -128,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
                 "source_manifest_status": LEGACY_READY_MANIFEST_STATUS,
                 "release_version": version,
             }
+        if args.build is not None:
+            if args.build < 0:
+                parser.error("build must be a non-negative integer")
+            package_manifest["release_build"] = args.build
         package.writestr(
             "payload/release-manifest.json",
             json.dumps(package_manifest, ensure_ascii=False, indent=2) + "\n",
@@ -137,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
                 item.source_path,
                 f"payload/{item.relative_path.as_posix()}",
             )
+    with zipfile.ZipFile(archive, "r") as package:
+        uncompressed_size = sum(item.file_size for item in package.infolist())
 
     private_key = _signing_key(args.private_key.expanduser().resolve())
     public_bytes = private_key.public_key().public_bytes(
@@ -153,14 +165,18 @@ def main(argv: list[str] | None = None) -> int:
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "title": args.title.strip()[:100] or f"版本 {version}",
         "notes": [item.strip()[:500] for item in args.note if item.strip()][:20],
+        "mandatory": args.mandatory,
         "package": {
             "url": package_url,
             "format": "zip",
             "size": archive.stat().st_size,
             "sha256": sha256_file(archive),
             "payload_file_count": len(selected),
+            "uncompressed_size": uncompressed_size,
         },
     }
+    if args.build is not None:
+        manifest["build"] = args.build
     signature = private_key.sign(canonical_manifest_bytes(manifest))
     manifest["signature"] = {
         "algorithm": "ed25519",

@@ -7,6 +7,7 @@ import hashlib
 from importlib import resources
 import json
 import os
+import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 import stat
@@ -24,14 +25,24 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from packaging.version import InvalidVersion, Version
 
-from .customer_logs import sanitize_log_text
 from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
-from .payload import PayloadError, install_payload, sha256_file, verify_payload
+from .payload import (
+    PayloadError,
+    install_payload,
+    payload_relative_paths,
+    sha256_file,
+    verify_payload,
+)
+from .single_instance import SingleInstanceLock
+from .update_errors import UpdateFailure
+from .update_logger import UpdateLogger
 
 
 PRODUCT_ID = "wechatrebot-desktop"
 UPDATE_RESULT_FILE = "update-result.json"
+UPDATE_JOURNAL_FILE = "update-journal.json"
+UPDATE_STARTUP_TIMEOUT_SECONDS = 90
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ARCHIVE_FILES = 200_000
 MAX_UNCOMPRESSED_BYTES = 8 * 1024**3
@@ -40,6 +51,10 @@ ProgressCallback = Callable[[str, int, int], None]
 
 class UpdateError(RuntimeError):
     """Raised when remote update metadata or package data cannot be trusted."""
+
+
+class MandatoryUpdateUnavailable(UpdateError):
+    """Raised when the signed policy blocks this client but offers no newer build."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +82,9 @@ class UpdateRelease:
     package_size: int
     package_sha256: str
     mandatory: bool
+    build: int | None = None
+    minimum_supported_version: str = ""
+    uncompressed_size: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +235,7 @@ def parse_update_manifest(
     channel: UpdateChannel,
     *,
     current_version: str,
+    current_build: int = 0,
 ) -> UpdateRelease | None:
     _verify_manifest_signature(payload, channel)
     if (
@@ -232,12 +251,24 @@ def parse_update_manifest(
         latest_text = str(payload["version"]).strip()
         current = Version(current_version)
         latest = Version(latest_text)
-        minimum = Version(str(payload.get("minimum_supported_version") or "0.0.0"))
+        minimum_text = str(payload.get("minimum_supported_version") or "0.0.0")
+        minimum = Version(minimum_text)
     except (KeyError, TypeError, ValueError, InvalidVersion) as exc:
         raise UpdateError("更新版本格式错误。") from exc
     if not latest_text or str(latest) != latest_text:
         raise UpdateError("更新版本必须使用规范版本号。")
-    if latest <= current:
+    try:
+        build_value = payload.get("build")
+        build = int(build_value) if build_value is not None else None
+    except (TypeError, ValueError) as exc:
+        raise UpdateError("更新构建号格式错误。") from exc
+    if build is not None and build < 0:
+        raise UpdateError("更新构建号无效。")
+    if current < minimum and latest <= current:
+        raise MandatoryUpdateUnavailable("当前版本低于最低支持版本，但更新清单未提供可用的新版本。")
+    if latest < current or (
+        latest == current and (build is None or build <= current_build)
+    ):
         return None
 
     package = payload.get("package")
@@ -248,6 +279,7 @@ def parse_update_manifest(
     try:
         package_size = int(package["size"])
         package_sha256 = str(package["sha256"]).upper()
+        uncompressed_size = int(package.get("uncompressed_size", 0) or 0)
     except (KeyError, TypeError, ValueError) as exc:
         raise UpdateError("更新安装包摘要格式错误。") from exc
     if not (0 < package_size <= channel.max_package_bytes):
@@ -256,6 +288,12 @@ def parse_update_manifest(
         character not in "0123456789ABCDEF" for character in package_sha256
     ):
         raise UpdateError("更新包 SHA-256 格式错误。")
+    if not (0 <= uncompressed_size <= MAX_UNCOMPRESSED_BYTES):
+        raise UpdateError("更新包展开体积无效。")
+    if build is not None and build < 0:
+        raise UpdateError("更新构建号无效。")
+    if not isinstance(payload.get("mandatory", False), bool):
+        raise UpdateError("强制更新标记格式错误。")
     notes: list[str] = []
     for item in notes_value[:20]:
         if not isinstance(item, str):
@@ -273,7 +311,10 @@ def parse_update_manifest(
         package_url=_safe_https_url(package.get("url")),
         package_size=package_size,
         package_sha256=package_sha256,
-        mandatory=current < minimum,
+        mandatory=payload.get("mandatory") is True or current < minimum,
+        build=build,
+        minimum_supported_version=str(minimum),
+        uncompressed_size=uncompressed_size,
     )
 
 
@@ -295,6 +336,7 @@ def check_for_update(
     channel: UpdateChannel,
     *,
     current_version: str,
+    current_build: int = 0,
 ) -> UpdateRelease | None:
     if not channel.enabled:
         return None
@@ -320,7 +362,12 @@ def check_for_update(
         raise UpdateError("更新清单不是有效 JSON。") from exc
     if not isinstance(payload, dict):
         raise UpdateError("更新清单根节点格式错误。")
-    return parse_update_manifest(payload, channel, current_version=current_version)
+    return parse_update_manifest(
+        payload,
+        channel,
+        current_version=current_version,
+        current_build=current_build,
+    )
 
 
 def _safe_archive_path(value: str) -> Path:
@@ -419,6 +466,96 @@ def extract_update_archive(
     return payload_root
 
 
+def _is_preserved_user_config(relative: Path) -> bool:
+    parts = tuple(part.casefold() for part in relative.parts)
+    if not parts:
+        return False
+    if parts[0] == "config":
+        return len(parts) > 1 and parts[1] not in {
+            "installed-payload.json",
+            "templates",
+        }
+    return len(parts) >= 4 and parts[:4] == (
+        "app",
+        "astrbot",
+        "data",
+        "config",
+    )
+
+
+def _estimated_rollback_bytes(install_root: Path) -> int:
+    """Estimate the files the helper must retain to make rollback possible."""
+    manifest_path = install_root / "config" / "installed-payload.json"
+    try:
+        manifest = _read_json_object(manifest_path)
+    except UpdateError:
+        manifest = {}
+    entries = manifest.get("files", [])
+    total = 0
+    seen: set[str] = set()
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
+                key = relative.as_posix().casefold()
+                candidate = (install_root / relative).resolve()
+                candidate.relative_to(install_root)
+            except (OSError, ValueError):
+                continue
+            if key in seen or _is_preserved_user_config(relative):
+                continue
+            seen.add(key)
+            try:
+                if candidate.is_file() and not candidate.is_symlink():
+                    total += candidate.stat().st_size
+            except OSError:
+                continue
+    for relative in (
+        Path("config/installed-payload.json"),
+        Path(INSTALL_MARKER),
+        Path("卸载机器人.exe"),
+    ):
+        try:
+            candidate = install_root / relative
+            if candidate.is_file() and not candidate.is_symlink():
+                total += candidate.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _ensure_update_disk_space(
+    install_root: Path,
+    release: UpdateRelease,
+    *,
+    uncompressed_size: int | None = None,
+    staged: bool = False,
+) -> None:
+    expanded = uncompressed_size or release.uncompressed_size
+    if not expanded:
+        expanded = max(release.package_size * 4, 64 * 1024**2)
+    rollback = _estimated_rollback_bytes(install_root)
+    # Before downloading, both the extracted payload and install transaction
+    # staging must fit. Once downloaded/extracted, only install staging remains
+    # to be allocated. Keep two old-file snapshots: the crash-safe outer journal
+    # and install_payload's own in-process transaction rollback.
+    required = (0 if staged else release.package_size) + expanded * (1 if staged else 2)
+    required += rollback * 2 + 64 * 1024**2
+    try:
+        free = shutil.disk_usage(install_root).free
+    except OSError as exc:
+        raise UpdateFailure("UPD-1015", "无法检查更新目录所在磁盘空间。") from exc
+    if free < required:
+        missing_mb = max(1, math.ceil((required - free) / (1024 * 1024)))
+        raise UpdateFailure(
+            "UPD-1004",
+            f"预计需要 {required} 字节，可用 {free} 字节。",
+            public_message=f"磁盘空间不足，请至少释放 {missing_mb} MB 空间后重试。",
+        )
+
+
 def prepare_update(
     release: UpdateRelease,
     channel: UpdateChannel,
@@ -428,19 +565,28 @@ def prepare_update(
 ) -> PreparedUpdate:
     root = Path(install_root).expanduser().resolve()
     updates_root = (root / "updates").resolve()
-    updates_root.mkdir(parents=True, exist_ok=True)
+    try:
+        updates_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise UpdateFailure("UPD-1015", str(exc)) from exc
     try:
         updates_root.relative_to(root)
     except ValueError as exc:
-        raise UpdateError("更新暂存目录无效。") from exc
+        raise UpdateFailure("UPD-1015", "更新暂存目录越过安装根目录。") from exc
     working = updates_root / f".pending-{release.version}-{uuid.uuid4().hex}"
-    working.mkdir()
+    logger = UpdateLogger(root)
+    _ensure_update_disk_space(root, release)
+    try:
+        working.mkdir()
+    except OSError as exc:
+        raise UpdateFailure("UPD-1015", str(exc)) from exc
     archive = working / "update.zip.download"
     request = urllib.request.Request(
         release.package_url,
         headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
     )
     try:
+        logger.write("download_started", state="downloading", version=release.version)
         digest = hashlib.sha256()
         received = 0
         with urllib.request.urlopen(
@@ -464,13 +610,29 @@ def prepare_update(
         if received != release.package_size:
             raise UpdateError("更新包下载不完整。")
         if digest.hexdigest().upper() != release.package_sha256:
-            raise UpdateError("更新包 SHA-256 校验失败。")
+            raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
         final_archive = working / "update.zip"
         os.replace(archive, final_archive)
-        payload_root = extract_update_archive(
-            final_archive,
-            working / "extracted",
-            progress_callback=progress_callback,
+        try:
+            payload_root = extract_update_archive(
+                final_archive,
+                working / "extracted",
+                progress_callback=progress_callback,
+            )
+        except UpdateError as exc:
+            raise UpdateFailure("UPD-1012", str(exc)) from exc
+        actual_uncompressed = sum(
+            item.stat().st_size
+            for item in payload_root.rglob("*")
+            if item.is_file()
+        )
+        if release.uncompressed_size and actual_uncompressed != release.uncompressed_size:
+            raise UpdateFailure("UPD-1003", "更新包展开体积和签名清单不一致。")
+        _ensure_update_disk_space(
+            root,
+            release,
+            uncompressed_size=actual_uncompressed,
+            staged=True,
         )
         verify_payload(
             payload_root,
@@ -479,9 +641,44 @@ def prepare_update(
         manager = payload_root / "manager" / "WeChatReBot.exe"
         if not manager.is_file():
             raise UpdateError("更新包缺少桌面管理器。")
+        logger.write("package_verified", state="verified", version=release.version)
         return PreparedUpdate(release, working, payload_root, final_archive)
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, UpdateFailure):
+            logger.write(
+                "prepare_failed",
+                state="failed",
+                version=release.version,
+                error_code=exc.definition.code,
+                message=exc.detail,
+            )
+        elif isinstance(exc, PayloadError):
+            logger.write(
+                "package_verification_failed",
+                state="failed",
+                version=release.version,
+                error_code="UPD-1003",
+                message=str(exc),
+            )
+        else:
+            logger.write(
+                "download_failed",
+                state="failed",
+                version=release.version,
+                error_code="UPD-1002",
+                message=str(exc),
+            )
         shutil.rmtree(_extended_windows_path(working), ignore_errors=True)
+        if isinstance(exc, UpdateFailure):
+            raise
+        if isinstance(exc, PayloadError):
+            raise UpdateFailure("UPD-1003", str(exc)) from exc
+        if isinstance(exc, PermissionError):
+            raise UpdateFailure("UPD-1015", str(exc)) from exc
+        if isinstance(exc, (OSError, urllib.error.URLError)):
+            raise UpdateFailure("UPD-1002", str(exc)) from exc
+        if isinstance(exc, UpdateError):
+            raise UpdateFailure("UPD-1003", str(exc)) from exc
         raise
 
 
@@ -491,6 +688,7 @@ def create_update_plan(
     *,
     executable: str | Path | None = None,
     parent_pid: int | None = None,
+    current_version: str = "",
 ) -> UpdatePlan:
     root = Path(install_root).expanduser().resolve()
     updates_root = (root / "updates").resolve()
@@ -505,14 +703,20 @@ def create_update_plan(
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
     helper = working / "WeChatReBot-Updater.exe"
-    shutil.copy2(source_executable, helper)
+    helper_source = prepared.payload_root / "manager" / "WeChatReBot.exe"
+    if not helper_source.is_file():
+        raise UpdateError("更新包缺少可运行的独立更新程序。")
+    shutil.copy2(helper_source, helper)
     application_pid = int(parent_pid if parent_pid is not None else os.getpid())
+    update_id = uuid.uuid4().hex
     plan_path = working / "update-plan.json"
     write_json_atomic(
         plan_path,
         {
             "schema_version": 1,
+            "update_id": update_id,
             "version": prepared.release.version,
+            "current_version": current_version,
             "install_root": str(root),
             "payload_root": str(prepared.payload_root.resolve()),
             "target_executable": str(root / "manager" / "WeChatReBot.exe"),
@@ -663,6 +867,7 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Pat
         payload_root = Path(str(payload["payload_root"])).expanduser().resolve()
         target = Path(str(payload["target_executable"])).expanduser().resolve()
         parent_pid = int(payload["parent_pid"])
+        update_id = str(payload["update_id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise UpdateError("更新计划缺少必要字段。") from exc
     updates_root = (root / "updates").resolve()
@@ -675,6 +880,8 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Pat
         raise UpdateError("更新计划路径越过安装目录。")
     if (
         payload.get("schema_version") != 1
+        or len(update_id) != 32
+        or any(character not in "0123456789abcdef" for character in update_id)
         or target != expected_target
         or parent_pid < 0
         or not (root / INSTALL_MARKER).is_file()
@@ -684,13 +891,29 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path, Pat
     return payload, root, payload_root, target
 
 
-def _restart_manager(target: Path, install_root: Path) -> None:
+def _restart_manager(
+    target: Path,
+    install_root: Path,
+    *,
+    update_id: str = "",
+    current_version: str = "",
+    version: str = "",
+) -> subprocess.Popen | None:
     if not target.is_file():
-        return
+        return None
+    environment = os.environ.copy()
+    for name, value in (
+        ("WECHATREBOT_UPDATE_ID", update_id),
+        ("WECHATREBOT_UPDATE_FROM", current_version),
+        ("WECHATREBOT_UPDATE_TO", version),
+    ):
+        if value:
+            environment[name] = value
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.Popen(
+    return subprocess.Popen(
         [str(target)],
         cwd=install_root,
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -699,20 +922,211 @@ def _restart_manager(target: Path, install_root: Path) -> None:
     )
 
 
+def _snapshot_update_targets(
+    payload_root: Path,
+    install_root: Path,
+    rollback_root: Path,
+    *,
+    update_id: str,
+    version: str,
+) -> dict[str, object]:
+    paths = set(payload_relative_paths(payload_root))
+    paths.update(
+        {
+            Path(INSTALL_MARKER),
+            Path("config/installed-payload.json"),
+            Path("卸载机器人.exe"),
+        }
+    )
+    files_root = rollback_root / "files"
+    files_root.mkdir(parents=True, exist_ok=True)
+    snapshots: list[dict[str, object]] = []
+    for index, relative in enumerate(sorted(paths, key=lambda item: item.as_posix().casefold())):
+        target = (install_root / relative).resolve()
+        try:
+            target.relative_to(install_root)
+        except ValueError as exc:
+            raise UpdateError("更新文件路径越过安装目录。") from exc
+        if (
+            _is_preserved_user_config(relative)
+            and target.is_file()
+            and not target.is_symlink()
+        ):
+            continue
+        if target.exists() and (not target.is_file() or target.is_symlink()):
+            raise UpdateError(f"更新目标不是普通文件：{relative.as_posix()}")
+        exists = target.is_file()
+        backup_relative = f"files/{index:08X}" if exists else ""
+        if exists:
+            shutil.copy2(target, rollback_root / backup_relative)
+        snapshots.append(
+            {
+                "path": relative.as_posix(),
+                "existed": exists,
+                "backup": backup_relative,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "update_id": update_id,
+        "version": version,
+        "state": "backed_up",
+        "rollback_root": rollback_root.relative_to(install_root).as_posix(),
+        "files": snapshots,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+def _restore_update_targets(
+    journal: dict[str, object], install_root: Path
+) -> None:
+    rollback_relative = Path(*PurePosixPath(str(journal.get("rollback_root") or "")).parts)
+    rollback_root = (install_root / rollback_relative).resolve()
+    try:
+        rollback_root.relative_to(install_root)
+    except ValueError as exc:
+        raise UpdateFailure("UPD-1010", "回滚目录越过安装根目录。") from exc
+    files = journal.get("files")
+    if not isinstance(files, list):
+        raise UpdateFailure("UPD-1010", "回滚清单格式无效。")
+    failures: list[str] = []
+    for entry in reversed(files):
+        try:
+            if not isinstance(entry, dict):
+                raise OSError("回滚文件条目无效")
+            relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
+            target = (install_root / relative).resolve()
+            target.relative_to(install_root)
+            if entry.get("existed") is True:
+                backup = (rollback_root / str(entry.get("backup") or "")).resolve()
+                backup.relative_to(rollback_root)
+                if not backup.is_file():
+                    raise OSError(f"回滚备份缺失：{relative.as_posix()}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                staged = target.with_name(f".{target.name}.restore-{uuid.uuid4().hex}")
+                shutil.copy2(backup, staged)
+                os.replace(staged, target)
+            else:
+                target.unlink(missing_ok=True)
+        except (OSError, ValueError) as exc:
+            failures.append(str(exc))
+    if failures:
+        raise UpdateFailure("UPD-1010", "；".join(failures[:5]))
+
+
+def _startup_confirmed(flag_path: Path, update_id: str) -> bool:
+    try:
+        payload = _read_json_object(flag_path)
+    except UpdateError:
+        return False
+    return payload.get("update_id") == update_id and payload.get("ok") is True
+
+
+def _wait_for_startup_confirmation(
+    flag_path: Path,
+    update_id: str,
+    process: subprocess.Popen | None,
+    *,
+    timeout_seconds: int = UPDATE_STARTUP_TIMEOUT_SECONDS,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _startup_confirmed(flag_path, update_id):
+            return
+        if process is not None and process.poll() is not None:
+            # PyInstaller's one-file parent stays alive until the application
+            # child exits. Keep polling briefly for OS process hand-off.
+            time.sleep(0.5)
+        else:
+            time.sleep(0.25)
+    raise UpdateFailure("UPD-1009", "新版本未在规定时间内完成启动确认。")
+
+
+def _stop_restarted_manager(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            return
+
+
 def apply_update_plan(
     plan_path: str | Path,
     *,
     restart: bool = True,
 ) -> int:
+    try:
+        plan_probe = _read_json_object(Path(plan_path).expanduser().resolve())
+    except UpdateError:
+        plan_probe = {}
+    if plan_probe.get("action") == "recover-interrupted-update":
+        return recover_update_plan(plan_path)
     root: Path | None = None
     target: Path | None = None
     version = ""
+    current_version = ""
+    update_id = ""
+    logger: UpdateLogger | None = None
+    rollback_root: Path | None = None
+    journal_path: Path | None = None
+    journal: dict[str, object] | None = None
+    restarted: subprocess.Popen | None = None
+    lock: SingleInstanceLock | None = None
+    failure: BaseException | None = None
+    result = 1
     try:
         plan, root, payload_root, target = _validated_plan(plan_path)
         version = str(plan.get("version") or "")
+        current_version = str(plan.get("current_version") or "")
+        update_id = str(plan["update_id"])
+        logger = UpdateLogger(root)
+        lock = SingleInstanceLock(f"update-helper:{root}")
+        if not lock.acquire():
+            logger.write("duplicate_helper", state="rejected", version=version)
+            return 2
+        logger.write("apply_started", state="waiting", version=version)
         for pid in _plan_wait_pids(plan, int(plan["parent_pid"])):
-            _wait_for_process_exit(pid)
-        install_payload(payload_root, root)
+            try:
+                _wait_for_process_exit(pid)
+            except UpdateError as exc:
+                raise UpdateFailure("UPD-1005", str(exc)) from exc
+        rollback_root = root / "updates" / f".rollback-{update_id}"
+        rollback_root.mkdir(parents=True, exist_ok=False)
+        journal = _snapshot_update_targets(
+            payload_root,
+            root,
+            rollback_root,
+            update_id=update_id,
+            version=version,
+        )
+        journal_path = root / "updates" / UPDATE_JOURNAL_FILE
+        write_json_atomic(journal_path, journal)
+        logger.write("backup_created", state="backed_up", version=version)
+
+        def log_install_progress(phase: str, completed: int, total: int) -> None:
+            percent = min(100, max(0, round(completed * 100 / total))) if total else 0
+            if completed == 1 or completed == total or percent in {
+                10, 20, 30, 40, 50, 60, 70, 80, 90
+            }:
+                logger.write(
+                    "install_progress",
+                    state=phase,
+                    version=version,
+                    details={"percent": percent, "completed": completed, "total": total},
+                )
+
+        install_payload(
+            payload_root,
+            root,
+            progress_callback=log_install_progress,
+            preserve_existing_user_config=True,
+        )
         # Manager-only updates must also refresh the standalone uninstall
         # entrypoint.  Otherwise a customer who double-clicks the old copy
         # could still run pre-update deletion rules.
@@ -724,37 +1138,388 @@ def apply_update_plan(
             root / INSTALL_MARKER,
             {"schema_version": 1, "state": "ready"},
         )
+        journal["state"] = "awaiting_startup"
+        write_json_atomic(journal_path, journal)
+        flag_path = root / "updates" / f"startup-success-{update_id}.json"
+        flag_path.unlink(missing_ok=True)
+        logger.write("files_applied", state="awaiting_startup", version=version)
+        if restart:
+            restarted = _restart_manager(
+                target,
+                root,
+                update_id=update_id,
+                current_version=current_version,
+                version=version,
+            )
+            if restarted is None:
+                raise UpdateFailure("UPD-1009", "更新后的管理器程序不存在。")
+            _wait_for_startup_confirmation(flag_path, update_id, restarted)
         write_json_atomic(
             root / "updates" / UPDATE_RESULT_FILE,
             {
                 "schema_version": 1,
                 "ok": True,
                 "version": version,
+                **({"status": "success", "from_version": current_version} if restart else {}),
                 "message": "更新已完成。",
             },
         )
+        if journal_path is not None:
+            journal_path.unlink(missing_ok=True)
+        if rollback_root is not None:
+            shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+        flag_path.unlink(missing_ok=True)
+        logger.write("apply_succeeded", state="success", version=version)
         result = 0
     except Exception as exc:
-        result = 1
+        failure = exc
+        if logger is not None:
+            if isinstance(exc, UpdateFailure):
+                code = exc.definition.code
+                detail = exc.detail
+            elif isinstance(exc, PermissionError):
+                code = "UPD-1008"
+                detail = str(exc)
+            else:
+                code = "UPD-1007"
+                detail = str(exc)
+            logger.write(
+                "apply_failed",
+                state="rolling_back" if journal is not None else "failed",
+                version=version,
+                error_code=code,
+                message=detail or str(exc),
+            )
+        if journal is not None and root is not None:
+            _stop_restarted_manager(restarted)
+            try:
+                journal["state"] = "rolling_back"
+                if journal_path is not None:
+                    write_json_atomic(journal_path, journal)
+                _restore_update_targets(journal, root)
+                if journal_path is not None:
+                    journal_path.unlink(missing_ok=True)
+                if rollback_root is not None:
+                    shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+                result = 1
+            except UpdateFailure as rollback_error:
+                failure = rollback_error
+                code = rollback_error.definition.code
+                if logger is not None:
+                    logger.write(
+                        "rollback_failed",
+                        state="failed",
+                        version=version,
+                        error_code=code,
+                        message=rollback_error.detail,
+                    )
+                result = 1
+        elif rollback_root is not None:
+            shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
         if root is not None:
             try:
+                if isinstance(failure, UpdateFailure):
+                    error = failure.to_public_dict()
+                elif isinstance(failure, PermissionError):
+                    error = UpdateFailure("UPD-1008").to_public_dict()
+                else:
+                    error = UpdateFailure("UPD-1007").to_public_dict()
                 write_json_atomic(
                     root / "updates" / UPDATE_RESULT_FILE,
                     {
                         "schema_version": 1,
                         "ok": False,
+                        "status": "failed",
                         "version": version,
-                        "message": sanitize_log_text(str(exc))[:1000],
+                        "from_version": current_version,
+                        "error_code": error["code"],
+                        "title": error["title"],
+                        "message": error["message"],
                     },
                 )
             except OSError:
                 pass
-    if restart and root is not None and target is not None:
-        try:
-            _restart_manager(target, root)
-        except OSError:
-            result = 1
+        if restart and root is not None and target is not None:
+            try:
+                _restart_manager(target, root)
+            except OSError:
+                result = 1
+    finally:
+        if lock is not None:
+            lock.release()
     return result
+
+
+def recover_update_plan(plan_path: str | Path) -> int:
+    plan_path = Path(plan_path).expanduser().resolve()
+    root: Path | None = None
+    logger: UpdateLogger | None = None
+    lock: SingleInstanceLock | None = None
+    target: Path | None = None
+    try:
+        plan = _read_json_object(plan_path)
+        root = Path(str(plan.get("install_root") or "")).expanduser().resolve()
+        updates_root = (root / "updates").resolve()
+        plan_path.relative_to(updates_root)
+        target = (root / "manager" / "WeChatReBot.exe").resolve()
+        update_id = str(plan.get("update_id") or "")
+        if (
+            plan.get("schema_version") != 1
+            or plan.get("action") != "recover-interrupted-update"
+            or len(update_id) != 32
+            or any(character not in "0123456789abcdef" for character in update_id)
+            or Path(str(plan.get("target_executable") or "")).resolve() != target
+            or not (root / INSTALL_MARKER).is_file()
+        ):
+            raise UpdateError("自动恢复计划与当前安装不匹配。")
+        wait_pids = _plan_wait_pids(plan, int(plan.get("parent_pid") or 0))
+        logger = UpdateLogger(root)
+        lock = SingleInstanceLock(f"update-helper:{root}")
+        for pid in wait_pids:
+            _wait_for_process_exit(pid)
+        if not lock.acquire():
+            logger.write("recovery_skipped", state="another_helper_active")
+            return 2
+        journal_path = updates_root / UPDATE_JOURNAL_FILE
+        journal = _read_json_object(journal_path)
+        if journal.get("update_id") != update_id:
+            raise UpdateError("自动恢复记录与更新目录不匹配。")
+        rollback_relative = Path(
+            *PurePosixPath(str(journal.get("rollback_root") or "")).parts
+        )
+        rollback_root = (root / rollback_relative).resolve()
+        rollback_root.relative_to(updates_root)
+        flag_path = updates_root / f"startup-success-{update_id}.json"
+        if _startup_confirmed(flag_path, update_id):
+            write_json_atomic(
+                updates_root / UPDATE_RESULT_FILE,
+                {
+                    "schema_version": 1,
+                    "ok": True,
+                    "status": "success",
+                    "version": journal.get("version", ""),
+                    "message": "更新已完成。",
+                },
+            )
+            logger.write(
+                "recovery_confirmed_success",
+                state="success",
+                version=str(journal.get("version") or ""),
+            )
+        else:
+            try:
+                _restore_update_targets(journal, root)
+            except UpdateFailure as exc:
+                write_json_atomic(
+                    updates_root / UPDATE_RESULT_FILE,
+                    {
+                        "schema_version": 1,
+                        "ok": False,
+                        "status": "failed",
+                        "version": journal.get("version", ""),
+                        "error_code": "UPD-1010",
+                        "title": UpdateFailure("UPD-1010").definition.title,
+                        "message": UpdateFailure("UPD-1010").definition.message,
+                    },
+                )
+                logger.write(
+                    "recovery_failed",
+                    state="failed",
+                    version=str(journal.get("version") or ""),
+                    error_code="UPD-1010",
+                    message=exc.detail,
+                )
+                return 1
+            failure_code = (
+                "UPD-1009"
+                if journal.get("state") == "awaiting_startup"
+                else "UPD-1007"
+            )
+            failure = UpdateFailure(failure_code)
+            write_json_atomic(
+                updates_root / UPDATE_RESULT_FILE,
+                {
+                    "schema_version": 1,
+                    "ok": False,
+                    "status": "failed",
+                    "version": journal.get("version", ""),
+                    "error_code": failure.definition.code,
+                    "title": failure.definition.title,
+                    "message": failure.definition.message,
+                },
+            )
+            logger.write(
+                "recovery_rolled_back",
+                state="success",
+                version=str(journal.get("version") or ""),
+                error_code=failure.definition.code,
+            )
+        journal_path.unlink(missing_ok=True)
+        shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+        flag_path.unlink(missing_ok=True)
+        if target is not None:
+            _restart_manager(target, root)
+        return 0
+    except (OSError, ValueError, UpdateError, UpdateFailure) as exc:
+        if root is not None:
+            try:
+                failure = UpdateFailure("UPD-1010")
+                write_json_atomic(
+                    root / "updates" / UPDATE_RESULT_FILE,
+                    {
+                        "schema_version": 1,
+                        "ok": False,
+                        "status": "failed",
+                        "error_code": failure.definition.code,
+                        "title": failure.definition.title,
+                        "message": failure.definition.message,
+                    },
+                )
+            except OSError:
+                pass
+        if logger is not None:
+            logger.write(
+                "recovery_failed",
+                state="failed",
+                error_code=(
+                    exc.definition.code if isinstance(exc, UpdateFailure) else "UPD-1010"
+                ),
+                message=exc.detail if isinstance(exc, UpdateFailure) else str(exc),
+            )
+        if root is not None and target is not None:
+            try:
+                _restart_manager(target, root)
+            except OSError:
+                pass
+        return 1
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def recover_interrupted_update(
+    install_root: str | Path,
+    *,
+    executable: str | Path | None = None,
+    parent_pid: int | None = None,
+) -> bool:
+    """Schedule rollback recovery before opening the normal manager window."""
+    root = Path(install_root).expanduser().resolve()
+    updates_root = (root / "updates").resolve()
+    journal_path = updates_root / UPDATE_JOURNAL_FILE
+    if not journal_path.is_file():
+        return False
+    logger = UpdateLogger(root)
+    try:
+        journal = _read_json_object(journal_path)
+        update_id = str(journal.get("update_id") or "")
+        if len(update_id) != 32 or any(
+            character not in "0123456789abcdef" for character in update_id
+        ):
+            raise UpdateError("自动恢复记录中的更新编号无效。")
+        flag_path = updates_root / f"startup-success-{update_id}.json"
+        if _startup_confirmed(flag_path, update_id):
+            rollback_relative = Path(
+                *PurePosixPath(str(journal.get("rollback_root") or "")).parts
+            )
+            rollback_root = (root / rollback_relative).resolve()
+            rollback_root.relative_to(updates_root)
+            write_json_atomic(
+                updates_root / UPDATE_RESULT_FILE,
+                {
+                    "schema_version": 1,
+                    "ok": True,
+                    "status": "success",
+                    "version": journal.get("version", ""),
+                    "message": "更新已完成。",
+                },
+            )
+            shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+            journal_path.unlink(missing_ok=True)
+            flag_path.unlink(missing_ok=True)
+            logger.write(
+                "startup_recovery_cleanup",
+                state="success",
+                version=str(journal.get("version") or ""),
+            )
+            return False
+        lock = SingleInstanceLock(f"update-helper:{root}")
+        if not lock.acquire():
+            # An active updater is waiting for this manager to acknowledge its
+            # startup. Let the normal window open and emit that handshake.
+            return False
+        try:
+            source = Path(executable or sys.executable).expanduser().resolve()
+            if not source.is_file() or source.suffix.casefold() != ".exe":
+                raise UpdateError("无法创建独立恢复程序。")
+            helper = updates_root / f".recovery-helper-{update_id}.exe"
+            shutil.copy2(source, helper)
+            pid = int(parent_pid if parent_pid is not None else os.getpid())
+            plan_path = updates_root / f".recovery-plan-{update_id}.json"
+            write_json_atomic(
+                plan_path,
+                {
+                    "schema_version": 1,
+                    "action": "recover-interrupted-update",
+                    "update_id": update_id,
+                    "install_root": str(root),
+                    "target_executable": str(root / "manager" / "WeChatReBot.exe"),
+                    "parent_pid": pid,
+                    "wait_pids": list(
+                        _update_wait_pids(
+                            source,
+                            pid,
+                            include_bootloader=parent_pid is None,
+                        )
+                    ),
+                },
+            )
+            environment = os.environ.copy()
+            environment["WECHATREBOT_UPDATE_HELPER"] = "1"
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
+            subprocess.Popen(
+                [str(helper), "apply-update", "--plan", str(plan_path)],
+                cwd=root,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=flags,
+            )
+            logger.write(
+                "recovery_helper_started",
+                state="interrupted_update",
+                version=str(journal.get("version") or ""),
+            )
+            return True
+        finally:
+            lock.release()
+    except (OSError, ValueError, UpdateError) as exc:
+        logger.write(
+            "recovery_helper_start_failed",
+            state="failed",
+            error_code="UPD-1010",
+            message=str(exc),
+        )
+        try:
+            write_json_atomic(
+                updates_root / UPDATE_RESULT_FILE,
+                {
+                    "schema_version": 1,
+                    "ok": False,
+                    "status": "failed",
+                    "version": journal.get("version", "") if "journal" in locals() else "",
+                    "error_code": "UPD-1010",
+                    "title": UpdateFailure("UPD-1010").definition.title,
+                    "message": UpdateFailure("UPD-1010").definition.message,
+                },
+            )
+        except OSError:
+            pass
+        return False
 
 
 def cleanup_stale_update_workdirs(
@@ -808,6 +1573,7 @@ __all__ = [
     "PRODUCT_ID",
     "UpdateChannel",
     "UpdateError",
+    "MandatoryUpdateUnavailable",
     "UpdatePlan",
     "UpdateRelease",
     "apply_update_plan",
@@ -821,4 +1587,6 @@ __all__ = [
     "load_update_channel",
     "parse_update_manifest",
     "prepare_update",
+    "recover_interrupted_update",
+    "recover_update_plan",
 ]

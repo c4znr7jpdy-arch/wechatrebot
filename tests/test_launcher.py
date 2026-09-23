@@ -12,6 +12,7 @@ from wechatrebot_manager.launcher import (
     ProcessIdentity,
     ProcessSupervisor,
     ServiceLaunchError,
+    ServiceStopError,
     _normalized_executable,
     build_service_specs,
 )
@@ -156,6 +157,51 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
         "ready:new-hook-bridge",
     ]
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
+
+
+def test_supervisor_reports_a_service_that_survives_all_stop_retries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    events: list[str] = []
+
+    class StubbornProcess(_FakeProcess):
+        def send_signal(self, _sig: int) -> None:
+            events.append("signal:new-hook-bridge")
+
+        def terminate(self) -> None:
+            events.append("stop:new-hook-bridge")
+
+        def kill(self) -> None:
+            events.append("kill:new-hook-bridge")
+
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired("bridge", timeout or 1)
+
+    def popen(argv: list[str], **kwargs: Any) -> _FakeProcess:
+        if "astrbot.cli.__main__" in argv:
+            return _FakeProcess("astrbot", events)
+        return StubbornProcess("new-hook-bridge", events)
+
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *args: False)
+    supervisor = ProcessSupervisor(
+        specs,
+        popen_factory=popen,
+        readiness_waiter=lambda _spec, _process: True,
+    )
+    supervisor.start()
+
+    with pytest.raises(ServiceStopError) as error:
+        supervisor.stop(timeout_seconds=0)
+
+    assert error.value.service_name == "new-hook-bridge"
+    assert [item.spec.name for item in supervisor.running] == ["new-hook-bridge"]
+    assert events[:3] == [
+        "signal:new-hook-bridge",
+        "stop:new-hook-bridge",
+        "kill:new-hook-bridge",
+    ]
 
 
 def test_supervisor_force_stop_kills_services_in_reverse_order(

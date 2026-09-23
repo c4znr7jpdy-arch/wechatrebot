@@ -718,6 +718,9 @@ tbody tr:hover { background: #fbfdff; }
 .modal p { margin: 0; color: var(--muted); }
 .modal-progress { height: 8px; margin-top: 18px; overflow: hidden; background: var(--blue-100); border-radius: 999px; }
 .modal-progress span { display: block; width: 0; height: 100%; background: var(--blue-600); border-radius: inherit; transition: width .2s ease; }
+.modal-progress span.is-indeterminate { animation: update-progress-sweep 1.3s ease-in-out infinite alternate; }
+@keyframes update-progress-sweep { from { transform: translateX(0); } to { transform: translateX(175%); } }
+@media (prefers-reduced-motion: reduce) { .modal-progress span.is-indeterminate { animation: none; } }
 .modal-error { margin-top: 16px; padding: 10px 12px; color: var(--red-700); background: var(--red-100); border-radius: 8px; font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .modal-field { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
