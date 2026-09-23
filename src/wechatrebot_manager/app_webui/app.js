@@ -25,6 +25,7 @@
     groupsBusy: false,
     groups: [],
     groupAccount: "",
+    groupMemberCounts: {},
     groupUpdatedAt: "",
     groupStale: false,
     selectedGroup: null,
@@ -101,6 +102,7 @@
   const THEME_STORAGE_KEY = "wechatrebot-theme";
   const THEME_CHANNEL = "wechatrebot-theme";
   const HOME_SETUP_DISMISSALS_STORAGE_KEY = "wechatrebot-home-setup-dismissals";
+  const GROUP_MEMBER_COUNTS_STORAGE_PREFIX = "wechatrebot-group-member-counts:";
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
@@ -113,6 +115,43 @@
   const groupMemberLoadsInFlight = new Set();
   const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
+  function hasGroupMemberCount(value) {
+    return Number.isSafeInteger(value) && value > 0;
+  }
+
+  function readGroupMemberCounts(accountId) {
+    if (!accountId) return {};
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(
+        `${GROUP_MEMBER_COUNTS_STORAGE_PREFIX}${encodeURIComponent(accountId)}`,
+      ) || "{}");
+      if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+      return Object.fromEntries(Object.entries(saved).filter(([groupId, count]) =>
+        groupId.endsWith("@chatroom") && hasGroupMemberCount(count)));
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function persistGroupMemberCounts() {
+    if (!state.groupAccount) return;
+    try {
+      window.localStorage.setItem(
+        `${GROUP_MEMBER_COUNTS_STORAGE_PREFIX}${encodeURIComponent(state.groupAccount)}`,
+        JSON.stringify(state.groupMemberCounts),
+      );
+    } catch (_error) { /* The live page cache still works when storage is unavailable. */ }
+  }
+
+  function rememberGroupMemberCount(groupId, count) {
+    if (!groupId || !hasGroupMemberCount(count)) return false;
+    state.groupMemberCounts[groupId] = count;
+    const group = state.groups.find((item) => item.group_id === groupId);
+    if (group) group.member_count = count;
+    persistGroupMemberCounts();
+    return true;
+  }
+
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -1384,23 +1423,39 @@
       const previousGroups = JSON.stringify(state.groups);
       const previousStale = state.groupStale;
       const nextGroups = Array.isArray(data.items) ? data.items : [];
-      state.groups = nextGroups;
       state.groupAccount = data.account_id || "";
-      if (previousAccount && previousAccount !== state.groupAccount) {
+      if (previousAccount !== state.groupAccount) {
         state.selectedGroup = null;
         state.groupMembers = {};
         state.groupPolicies = {};
+        state.groupMemberCounts = readGroupMemberCounts(state.groupAccount);
       }
-      if (!refresh || retryAttempt > 0) state.groups.forEach((item) => {
-        const cachedCount = state.groupMembers[item.group_id]?.total;
-        if (!Number.isInteger(item.member_count) && Number.isInteger(cachedCount)) item.member_count = cachedCount;
+      let countsChanged = false;
+      state.groups = nextGroups.map((item) => {
+        const serverCount = item.member_count;
+        const memberDataCount = state.groupMembers[item.group_id]?.total;
+        const cachedCount = state.groupMemberCounts[item.group_id]
+          ?? (hasGroupMemberCount(memberDataCount) ? memberDataCount : null);
+        if (hasGroupMemberCount(serverCount)) {
+          if (state.groupMemberCounts[item.group_id] !== serverCount) countsChanged = true;
+          state.groupMemberCounts[item.group_id] = serverCount;
+          return {...item, member_count: serverCount};
+        }
+        return {...item, member_count: hasGroupMemberCount(cachedCount) ? cachedCount : null};
       });
+      const currentGroupIds = new Set(state.groups.map((item) => item.group_id));
+      Object.keys(state.groupMemberCounts).forEach((groupId) => {
+        if (!currentGroupIds.has(groupId)) {
+          delete state.groupMemberCounts[groupId];
+          countsChanged = true;
+        }
+      });
+      if (countsChanged) persistGroupMemberCounts();
       state.groupUpdatedAt = data.updated_at || "";
       state.groupStale = Boolean(data.stale);
       if (state.groupStale) scheduleGroupRefreshRetry(retryAttempt);
       else clearGroupRefreshRetry();
       state.groupsLoaded = true;
-      const currentGroupIds = new Set(state.groups.map((item) => item.group_id));
       state.groupMembers = Object.fromEntries(
         Object.entries(state.groupMembers).filter(([groupId]) => currentGroupIds.has(groupId)),
       );
@@ -1473,8 +1528,8 @@
     $("#groupRows").innerHTML = items.length ? items.map((item) => {
       const selected = item.group_id === state.selectedGroup;
       const memberData = state.groupMembers[item.group_id];
-      const cachedCount = Number.isInteger(item.member_count) ? item.member_count : memberData?.total;
-      const memberCount = Number.isInteger(cachedCount)
+      const cachedCount = hasGroupMemberCount(item.member_count) ? item.member_count : memberData?.total;
+      const memberCount = hasGroupMemberCount(cachedCount)
         ? escapeHtml(cachedCount)
         : memberData?.error
           ? '<span class="member-count-state error">读取失败</span>'
@@ -1530,8 +1585,8 @@
     }
     const memberData = state.groupMembers[group.group_id];
     const policyData = state.groupPolicies[group.group_id];
-    const cachedCount = Number.isInteger(group.member_count) ? group.member_count : memberData?.total;
-    const memberCount = Number.isInteger(cachedCount) ? `${cachedCount} 人`
+    const cachedCount = hasGroupMemberCount(group.member_count) ? group.member_count : memberData?.total;
+    const memberCount = hasGroupMemberCount(cachedCount) ? `${cachedCount} 人`
       : memberData?.error ? "读取失败" : "读取中";
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
@@ -1696,15 +1751,19 @@
           if (!data) return;
           if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
           const items = Array.isArray(data.items) ? data.items : [];
-          const total = Number.isInteger(data.total) ? data.total : items.length;
+          const total = Number.isSafeInteger(data.total) ? data.total : items.length;
+          const cachedCount = state.groupMemberCounts[groupId];
+          const resolvedCount = hasGroupMemberCount(total) ? total : cachedCount;
+          if (!hasGroupMemberCount(resolvedCount)) {
+            throw new Error("群成员接口没有返回有效人数，未覆盖已有记录。");
+          }
           state.groupMembers[groupId] = {
             loading: false,
             items,
-            total,
+            total: resolvedCount,
             truncated: Boolean(data.truncated),
           };
-          const group = state.groups.find((item) => item.group_id === groupId);
-          if (group) group.member_count = total;
+          rememberGroupMemberCount(groupId, resolvedCount);
           lastError = null;
           break;
         } catch (error) {
