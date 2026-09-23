@@ -174,6 +174,8 @@ def build_manager_update(
     title: str,
     notes: tuple[str, ...],
     minimum_supported_version: str,
+    build: int | None = None,
+    mandatory: bool = False,
 ) -> BuiltManagerUpdate:
     executable = _validated_manager(manager_build.resolve(), version)
     output = output.resolve()
@@ -192,6 +194,10 @@ def build_manager_update(
             }
         ],
     }
+    if build is not None:
+        if build < 0:
+            raise ValueError("构建号不能小于零")
+        payload_manifest["release_build"] = build
     temporary_archive = output / "manager-update.zip"
     with zipfile.ZipFile(
         temporary_archive,
@@ -213,6 +219,8 @@ def build_manager_update(
     archive_path = output / archive_name
     temporary_archive.replace(archive_path)
     package_url = f"{base_url.rstrip('/')}/releases/{archive_name}"
+    with zipfile.ZipFile(archive_path, "r") as package:
+        uncompressed_size = sum(item.file_size for item in package.infolist())
     key = _signing_key(private_key_path.resolve(), channel)
     manifest: dict[str, object] = {
         "schema_version": 1,
@@ -223,14 +231,18 @@ def build_manager_update(
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "title": title.strip()[:100] or f"版本 {version}",
         "notes": [item.strip()[:500] for item in notes if item.strip()][:20],
+        "mandatory": mandatory,
         "package": {
             "url": package_url,
             "format": "zip",
             "size": archive_path.stat().st_size,
             "sha256": package_sha256,
             "payload_file_count": 1,
+            "uncompressed_size": uncompressed_size,
         },
     }
+    if build is not None:
+        manifest["build"] = build
     signature = key.sign(canonical_manifest_bytes(manifest))
     manifest["signature"] = {
         "algorithm": "ed25519",
@@ -447,6 +459,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title", default="插件与管理器更新")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--minimum-supported-version", default="0.7.0")
+    parser.add_argument("--build", type=int)
+    parser.add_argument("--mandatory", action="store_true")
     parser.add_argument(
         "--private-key",
         type=Path,
@@ -543,6 +557,8 @@ def main(argv: list[str] | None = None) -> int:
         title=args.title,
         notes=tuple(args.note),
         minimum_supported_version=args.minimum_supported_version,
+        build=args.build,
+        mandatory=args.mandatory,
     )
     summary = {
         "version": release.version,

@@ -73,6 +73,9 @@ def test_update_release_builder_creates_signed_archive_and_manifest(
                 "https://updates.example.test/wechatrebot-0.8.0-update.zip",
                 "--note",
                 "安全更新",
+                "--build",
+                "5",
+                "--mandatory",
             ]
         )
         == 0
@@ -80,6 +83,9 @@ def test_update_release_builder_creates_signed_archive_and_manifest(
     manifest = json.loads((output / "stable.json").read_text(encoding="utf-8"))
     assert manifest["version"] == "0.8.0"
     assert manifest["notes"] == ["安全更新"]
+    assert manifest["build"] == 5
+    assert manifest["mandatory"] is True
+    assert manifest["package"]["uncompressed_size"] > 0
     assert manifest["signature"]["algorithm"] == "ed25519"
     archive_path = output / "wechatrebot-0.8.0-update.zip"
     assert archive_path.is_file()
@@ -88,6 +94,7 @@ def test_update_release_builder_creates_signed_archive_and_manifest(
             archive.read("payload/release-manifest.json").decode("utf-8")
         )
     assert payload_manifest["source_manifest_status"] == "ready"
+    assert payload_manifest["release_build"] == 5
 
 
 def test_update_release_builder_can_create_selected_payload_archive(

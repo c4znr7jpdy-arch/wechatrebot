@@ -25,6 +25,7 @@
     groupsBusy: false,
     groups: [],
     groupAccount: "",
+    groupMemberCounts: {},
     groupUpdatedAt: "",
     groupStale: false,
     selectedGroup: null,
@@ -54,12 +55,17 @@
     selectedMessages: [],
     selectedSenderKey: "",
     historyLoad: 0,
+    historyConversationsLoading: false,
     messageLoad: 0,
+    historyMessagesLoading: false,
     historyPolling: false,
     historyHasMore: false,
     historyLoadingOlder: false,
     historyOlderLoad: 0,
     historyMessageQuery: "",
+    historyMessageCache: new Map(),
+    historyMessageRequests: new Map(),
+    historyMessageCacheEpoch: 0,
     schedules: [],
     scheduledContext: null,
     scheduledCommandCatalog: [],
@@ -80,6 +86,8 @@
     startPending: false,
     composing: false,
     availableUpdate: null,
+    mandatoryUpdate: false,
+    mandatoryPromptVersion: "",
     updateChecking: false,
     updateCheckTimer: 0,
     settingsSection: "model",
@@ -93,21 +101,65 @@
     providerModels: [],
     providerModelFiltering: false,
     providerModelFocus: -1,
+    dismissedHomeSetupAlerts: new Set(),
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const THEME_STORAGE_KEY = "wechatrebot-theme";
   const THEME_CHANNEL = "wechatrebot-theme";
+  const HOME_SETUP_DISMISSALS_STORAGE_KEY = "wechatrebot-home-setup-dismissals";
+  const GROUP_MEMBER_COUNTS_STORAGE_PREFIX = "wechatrebot-group-member-counts:";
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
+  const HISTORY_MESSAGE_CACHE_LIMIT = 32;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
+  const GROUP_MEMBER_REQUEST_CONCURRENCY = 4;
   const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
-  let groupMemberRequestQueue = Promise.resolve();
+  let groupMemberRequestsActive = 0;
+  const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
   const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
+  state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
+  function hasGroupMemberCount(value) {
+    return Number.isSafeInteger(value) && value > 0;
+  }
+
+  function readGroupMemberCounts(accountId) {
+    if (!accountId) return {};
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(
+        `${GROUP_MEMBER_COUNTS_STORAGE_PREFIX}${encodeURIComponent(accountId)}`,
+      ) || "{}");
+      if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+      return Object.fromEntries(Object.entries(saved).filter(([groupId, count]) =>
+        groupId.endsWith("@chatroom") && hasGroupMemberCount(count)));
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function persistGroupMemberCounts() {
+    if (!state.groupAccount) return;
+    try {
+      window.localStorage.setItem(
+        `${GROUP_MEMBER_COUNTS_STORAGE_PREFIX}${encodeURIComponent(state.groupAccount)}`,
+        JSON.stringify(state.groupMemberCounts),
+      );
+    } catch (_error) { /* The live page cache still works when storage is unavailable. */ }
+  }
+
+  function rememberGroupMemberCount(groupId, count) {
+    if (!groupId || !hasGroupMemberCount(count)) return false;
+    state.groupMemberCounts[groupId] = count;
+    const group = state.groups.find((item) => item.group_id === groupId);
+    if (group) group.member_count = count;
+    persistGroupMemberCounts();
+    return true;
+  }
+
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -429,7 +481,10 @@
     const primaryLabel = starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止运行") : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = current === "STOP_WAIT_WECHAT" || Boolean(status.busy) || (!status.can_start && !status.can_stop);
+    primary.disabled = current === "STOP_WAIT_WECHAT"
+      || Boolean(status.busy)
+      || (!status.can_start && !status.can_stop)
+      || (state.mandatoryUpdate && !stopMode);
     primary.setAttribute("aria-busy", String(Boolean(status.busy)));
     primary.setAttribute("aria-label", primaryLabel);
     primary.title = online ? "安全停止机器人" : primaryLabel;
@@ -590,7 +645,7 @@
     if (!state.providerDirty || state.providerScreen !== "editor") return false;
     confirmAction({
       title: "放弃模型配置？",
-      message: "接口地址、模型名称或密钥还没有保存。返回后这些修改会被清空。",
+      message: "Base URL、模型名称或 API Key / Token Plan 还没有保存。返回后这些修改会被清空。",
       confirmText: "放弃修改",
       onConfirm: async () => {
         showProviderOverview();
@@ -670,6 +725,7 @@
       window.clearTimeout(state.groupRefreshRetryTimer);
       state.groupRefreshRetryTimer = 0;
       state.groupMemberLoad += 1;
+      clearPendingGroupMemberLoading();
     }
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
@@ -685,12 +741,21 @@
     }
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
     if (page === "groups") {
-      if (state.chatManagementTab === "groups") await loadGroups(true, {background: state.groupsLoaded});
+      if (state.chatManagementTab === "groups") {
+        await loadGroups(true, {background: state.groupsLoaded});
+        if (state.groupInspectorView === "members" && state.selectedGroup
+            && !state.groupMembers[state.selectedGroup]) renderGroupInspector();
+      }
       if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
     }
     if (page === "history") {
-      await loadConversations({refreshGroups: true});
-      if (state.selectedConversation) await selectConversation(state.selectedConversation.conversation_id, {silent: true});
+      // Keep the current account's conversation and message DOM when returning
+      // to this page. The normal background poll refreshes it without showing
+      // the initial-load state or issuing two consecutive message requests.
+      if ((!state.historyAccount || state.historyReadyAccount !== state.historyAccount)
+          && !state.historyConversationsLoading) {
+        await loadConversations({refreshGroups: true});
+      }
     }
     if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
     if (page === "activity") await loadActivity();
@@ -1394,6 +1459,12 @@
     }, GROUP_DIRECTORY_RETRY_DELAYS_MS[retryAttempt]);
   }
 
+  function clearPendingGroupMemberLoading() {
+    Object.entries(state.groupMembers).forEach(([groupId, memberData]) => {
+      if (memberData?.loading) delete state.groupMembers[groupId];
+    });
+  }
+
   async function loadGroups(refresh = false, options = {}) {
     if (state.groupsBusy) return;
     const background = options.background === true;
@@ -1413,35 +1484,55 @@
       const previousGroups = JSON.stringify(state.groups);
       const previousStale = state.groupStale;
       const nextGroups = Array.isArray(data.items) ? data.items : [];
-      state.groups = nextGroups;
       state.groupAccount = data.account_id || "";
-      if (previousAccount && previousAccount !== state.groupAccount) {
+      if (previousAccount !== state.groupAccount) {
         state.selectedGroup = null;
         state.groupMembers = {};
         state.groupPolicies = {};
+        state.groupMemberCounts = readGroupMemberCounts(state.groupAccount);
       }
-      if (background) state.groups.forEach((item) => {
-        const cachedCount = state.groupMembers[item.group_id]?.total;
-        if (!Number.isInteger(item.member_count) && Number.isInteger(cachedCount)) item.member_count = cachedCount;
+      let countsChanged = false;
+      state.groups = nextGroups.map((item) => {
+        const serverCount = item.member_count;
+        const memberDataCount = state.groupMembers[item.group_id]?.total;
+        const cachedCount = state.groupMemberCounts[item.group_id]
+          ?? (hasGroupMemberCount(memberDataCount) ? memberDataCount : null);
+        if (hasGroupMemberCount(serverCount)) {
+          if (state.groupMemberCounts[item.group_id] !== serverCount) countsChanged = true;
+          state.groupMemberCounts[item.group_id] = serverCount;
+          return {...item, member_count: serverCount};
+        }
+        return {...item, member_count: hasGroupMemberCount(cachedCount) ? cachedCount : null};
       });
+      const currentGroupIds = new Set(state.groups.map((item) => item.group_id));
+      Object.keys(state.groupMemberCounts).forEach((groupId) => {
+        if (!currentGroupIds.has(groupId)) {
+          delete state.groupMemberCounts[groupId];
+          countsChanged = true;
+        }
+      });
+      if (countsChanged) persistGroupMemberCounts();
       state.groupUpdatedAt = data.updated_at || "";
       state.groupStale = Boolean(data.stale);
       if (state.groupStale) scheduleGroupRefreshRetry(retryAttempt);
       else clearGroupRefreshRetry();
       state.groupsLoaded = true;
-      const currentGroupIds = new Set(state.groups.map((item) => item.group_id));
       state.groupMembers = Object.fromEntries(
         Object.entries(state.groupMembers).filter(([groupId]) => currentGroupIds.has(groupId)),
       );
       if (state.selectedGroup && !state.groups.some((item) => item.group_id === state.selectedGroup)) {
         state.selectedGroup = null;
       }
+      const previousMemberLoad = state.groupMemberLoad;
       const memberLoad = background && previousGroups === JSON.stringify(state.groups)
         && previousAccount === state.groupAccount
         ? state.groupMemberLoad : ++state.groupMemberLoad;
+      if (memberLoad !== previousMemberLoad) clearPendingGroupMemberLoading();
+      const retryMemberCounts = refresh && retryAttempt === 0;
       const groupsNeedingCounts = state.groups.filter((item) =>
         !Number.isInteger(item.member_count)
-        && (!background || !state.groupMembers[item.group_id]));
+        && !state.groupMembers[item.group_id]?.loading
+        && (!state.groupMembers[item.group_id]?.error || retryMemberCounts));
       groupsNeedingCounts.forEach((item) => {
         const previous = state.groupMembers[item.group_id] || {};
         state.groupMembers[item.group_id] = {
@@ -1453,13 +1544,16 @@
       });
       groupDirectoryStatus(data);
       if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
-          || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
+          || previousAccount !== state.groupAccount || previousStale !== state.groupStale
+          || groupsNeedingCounts.length) {
         renderGroups({preserveInspector: background});
       } else {
         $("#groupUpdated").textContent = state.groupUpdatedAt
           ? `${state.groupStale ? "上次成功" : "更新于"} ${fullTime(state.groupUpdatedAt)}` : "尚无可用结果";
       }
-      void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad);
+      if (groupsNeedingCounts.length) {
+        void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad, {preMarked: true});
+      }
     } catch (error) {
       state.groupStale = true;
       scheduleGroupRefreshRetry(retryAttempt);
@@ -1495,13 +1589,12 @@
     $("#groupRows").innerHTML = items.length ? items.map((item) => {
       const selected = item.group_id === state.selectedGroup;
       const memberData = state.groupMembers[item.group_id];
-      const memberCount = memberData?.loading
-        ? '<span class="member-count-state loading">读取中</span>'
-        : Number.isInteger(item.member_count)
-          ? escapeHtml(item.member_count)
-          : memberData?.error
-            ? '<span class="member-count-state error">读取失败</span>'
-            : '<span class="member-count-state loading">读取中</span>';
+      const cachedCount = hasGroupMemberCount(item.member_count) ? item.member_count : memberData?.total;
+      const memberCount = hasGroupMemberCount(cachedCount)
+        ? escapeHtml(cachedCount)
+        : memberData?.error
+          ? '<span class="member-count-state error">读取失败</span>'
+          : '<span class="member-count-state loading">读取中</span>';
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
         <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
@@ -1553,9 +1646,9 @@
     }
     const memberData = state.groupMembers[group.group_id];
     const policyData = state.groupPolicies[group.group_id];
-    const memberCount = memberData?.loading ? "读取中"
-      : Number.isInteger(group.member_count) ? `${group.member_count} 人`
-      : memberData?.error ? "读取失败" : "待读取";
+    const cachedCount = hasGroupMemberCount(group.member_count) ? group.member_count : memberData?.total;
+    const memberCount = hasGroupMemberCount(cachedCount) ? `${cachedCount} 人`
+      : memberData?.error ? "读取失败" : "读取中";
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
@@ -1570,7 +1663,9 @@
     $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
       state.groupInspectorView = button.dataset.inspectorView;
       renderGroupInspector();
-      if (state.groupInspectorView === "members" && !state.groupMembers[group.group_id]) loadGroupMembers(group.group_id);
+      if (state.groupInspectorView === "members" && !state.groupMembers[group.group_id]) {
+        void hydrateGroupMemberCounts([group.group_id], state.groupMemberLoad);
+      }
     }));
     $("#loadGroupMembers")?.addEventListener("click", () => loadGroupMembers(group.group_id));
     bindAvatarFallbacks(panel);
@@ -1643,23 +1738,49 @@
     finally { button.disabled = false; button.textContent = "保存群聊规则"; }
   }
 
-  async function hydrateGroupMemberCounts(groupIds, generation) {
+  async function hydrateGroupMemberCounts(groupIds, generation, options = {}) {
     const pending = [...new Set(groupIds)];
-    for (const groupId of pending) {
-      if (generation !== state.groupMemberLoad) return;
-      await loadGroupMembers(groupId, {background: true, generation});
+    let nextIndex = 0;
+    const workerCount = Math.min(GROUP_MEMBER_REQUEST_CONCURRENCY, pending.length);
+    const workers = Array.from({length: workerCount}, async () => {
+      while (generation === state.groupMemberLoad) {
+        const index = nextIndex++;
+        if (index >= pending.length) return;
+        await loadGroupMembers(pending[index], {
+          generation,
+          suppressInitialRender: options.preMarked === true,
+          silentErrors: options.preMarked === true,
+        });
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  function pumpGroupMemberRequestQueue() {
+    while (groupMemberRequestsActive < GROUP_MEMBER_REQUEST_CONCURRENCY && groupMemberRequestQueue.length) {
+      const request = groupMemberRequestQueue.shift();
+      if (request.generation !== state.groupMemberLoad
+          || !state.groups.some((item) => item.group_id === request.groupId)
+          || (request.background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) {
+        request.resolve(null);
+        continue;
+      }
+      groupMemberRequestsActive += 1;
+      Promise.resolve()
+        .then(() => api("get_group_members", request.groupId))
+        .then(request.resolve, request.reject)
+        .finally(() => {
+          groupMemberRequestsActive -= 1;
+          pumpGroupMemberRequestQueue();
+        });
     }
   }
 
   function queueGroupMemberRequest(groupId, generation, background) {
-    const request = groupMemberRequestQueue.then(() => {
-      if (generation !== state.groupMemberLoad
-          || !state.groups.some((item) => item.group_id === groupId)
-          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return null;
-      return api("get_group_members", groupId);
+    return new Promise((resolve, reject) => {
+      groupMemberRequestQueue.push({groupId, generation, background, resolve, reject});
+      pumpGroupMemberRequestQueue();
     });
-    groupMemberRequestQueue = request.catch(() => undefined);
-    return request;
   }
 
   async function loadGroupMembers(groupId, options = {}) {
@@ -1677,7 +1798,7 @@
         error: "",
         items: Array.isArray(previous.items) ? previous.items : [],
       };
-      if (!background) renderGroups();
+      if (!background && !options.suppressInitialRender) renderGroups();
       let lastError = null;
       for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
         if (attempt) {
@@ -1691,15 +1812,19 @@
           if (!data) return;
           if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
           const items = Array.isArray(data.items) ? data.items : [];
-          const total = Number.isInteger(data.total) ? data.total : items.length;
+          const total = Number.isSafeInteger(data.total) ? data.total : items.length;
+          const cachedCount = state.groupMemberCounts[groupId];
+          const resolvedCount = hasGroupMemberCount(total) ? total : cachedCount;
+          if (!hasGroupMemberCount(resolvedCount)) {
+            throw new Error("群成员接口没有返回有效人数，未覆盖已有记录。");
+          }
           state.groupMembers[groupId] = {
             loading: false,
             items,
-            total,
+            total: resolvedCount,
             truncated: Boolean(data.truncated),
           };
-          const group = state.groups.find((item) => item.group_id === groupId);
-          if (group) group.member_count = total;
+          rememberGroupMemberCount(groupId, resolvedCount);
           lastError = null;
           break;
         } catch (error) {
@@ -1709,7 +1834,7 @@
       if (lastError) {
         if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
         state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
-        if (!background) reportError(lastError);
+        if (!background && !options.silentErrors) reportError(lastError);
       }
       renderGroups({preserveInspector: background});
     } finally {
@@ -1984,6 +2109,7 @@
       return;
     }
     const load = ++state.historyLoad;
+    state.historyConversationsLoading = true;
     try {
       const data = await api("get_conversations", {
         account_id: requestAccount,
@@ -1999,6 +2125,7 @@
         renderHistoryAccountGate(data.requires_login ? "" : state.historyAccount);
         return;
       }
+      saveSelectedHistoryMessages();
       state.conversations = data.items || [];
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(true);
@@ -2016,6 +2143,7 @@
         await selectConversation(state.conversations[0].conversation_id, {silent: true});
       } else {
         ++state.messageLoad;
+        state.historyMessagesLoading = false;
         state.historyOlderLoad += 1;
         state.historyHasMore = false;
         state.historyLoadingOlder = false;
@@ -2030,6 +2158,9 @@
         $("#newMessageButton").hidden = true;
       }
     } catch (error) { if (!silent) reportError(error); }
+    finally {
+      if (load === state.historyLoad) state.historyConversationsLoading = false;
+    }
   }
 
   function setHistoryActionsEnabled(enabled) {
@@ -2040,8 +2171,11 @@
   }
 
   function invalidateHistoryState() {
+    clearHistoryMessageCache();
     state.historyLoad += 1;
+    state.historyConversationsLoading = false;
     state.messageLoad += 1;
+    state.historyMessagesLoading = false;
     state.historyOlderLoad += 1;
     state.conversations = [];
     state.selectedConversation = null;
@@ -2108,6 +2242,71 @@
       Number(left.timestamp || 0) - Number(right.timestamp || 0)
       || Number(left.id || 0) - Number(right.id || 0)
     ));
+  }
+
+  function historyMessageCacheKey(accountId, conversationId, query) {
+    return JSON.stringify([String(accountId || ""), String(conversationId || ""), String(query || "")]);
+  }
+
+  function getHistoryMessageCacheEntry(key) {
+    const entry = state.historyMessageCache.get(key);
+    if (!entry) return null;
+    state.historyMessageCache.delete(key);
+    state.historyMessageCache.set(key, entry);
+    return entry;
+  }
+
+  function setHistoryMessageCacheEntry(key, entry) {
+    state.historyMessageCache.delete(key);
+    state.historyMessageCache.set(key, entry);
+    while (state.historyMessageCache.size > HISTORY_MESSAGE_CACHE_LIMIT) {
+      const oldest = state.historyMessageCache.keys().next().value;
+      state.historyMessageCache.delete(oldest);
+    }
+  }
+
+  function saveSelectedHistoryMessages() {
+    const selected = state.selectedConversation;
+    if (!selected || !state.historyAccount || !state.historyMessageQuery) return;
+    const key = historyMessageCacheKey(state.historyAccount, selected.conversation_id, state.historyMessageQuery);
+    const previous = state.historyMessageCache.get(key);
+    if (!previous && !state.selectedMessages.length) return;
+    setHistoryMessageCacheEntry(key, {
+      accountId: state.historyAccount,
+      conversationId: selected.conversation_id,
+      query: state.historyMessageQuery,
+      messages: state.selectedMessages.slice(),
+      hasMore: state.historyHasMore,
+      scrollTop: $("#messageList").scrollTop,
+      senderKey: state.selectedSenderKey,
+      updatedAt: Date.now(),
+    });
+  }
+
+  function updateHistoryMessageScrollPosition() {
+    const selected = state.selectedConversation;
+    if (!selected || !state.historyAccount || !state.historyMessageQuery) return;
+    const key = historyMessageCacheKey(state.historyAccount, selected.conversation_id, state.historyMessageQuery);
+    const entry = state.historyMessageCache.get(key);
+    if (entry) entry.scrollTop = $("#messageList").scrollTop;
+  }
+
+  function clearHistoryMessageCache() {
+    state.historyMessageCacheEpoch += 1;
+    state.historyMessageCache.clear();
+    state.historyMessageRequests.clear();
+  }
+
+  function requestHistoryMessagePage(key, conversationId, filters) {
+    const pending = state.historyMessageRequests.get(key);
+    if (pending) return pending;
+    const request = api("get_messages", conversationId, filters).then(normalizeMessagePage);
+    state.historyMessageRequests.set(key, request);
+    request.then(
+      () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
+      () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
+    );
+    return request;
   }
 
   function renderConversations() {
@@ -2274,6 +2473,7 @@
     const sender = [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === senderKey);
     if (!sender) return;
     state.selectedSenderKey = senderKey;
+    saveSelectedHistoryMessages();
     updateSelectedSenderButtons();
     if (state.selectedConversation) renderConversationInspector(state.selectedConversation);
   }
@@ -2286,7 +2486,7 @@
     });
   }
 
-  function renderMessages(messages, {forceBottom = false, nearBottom = true} = {}) {
+  function renderMessages(messages, {forceBottom = false, nearBottom = true, restoreScrollTop = null} = {}) {
     const list = $("#messageList");
     const previousIds = new Set(state.selectedMessages.map((message) => message.id));
     const added = messages.filter((message) => !previousIds.has(message.id)).length;
@@ -2297,7 +2497,10 @@
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
     const newButton = $("#newMessageButton");
-    if (forceBottom || nearBottom) {
+    if (restoreScrollTop !== null && restoreScrollTop !== undefined) {
+      list.scrollTop = Math.max(0, Math.min(Number(restoreScrollTop) || 0, list.scrollHeight - list.clientHeight));
+      newButton.hidden = true;
+    } else if (forceBottom || nearBottom) {
       list.scrollTop = list.scrollHeight;
       newButton.hidden = true;
     } else {
@@ -2322,6 +2525,7 @@
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
     list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
+    saveSelectedHistoryMessages();
   }
 
   async function selectConversation(conversationId, options = {}) {
@@ -2331,12 +2535,15 @@
     const query = JSON.stringify(historyFilters());
     const changed = state.selectedConversation?.conversation_id !== conversationId || state.historyMessageQuery !== query;
     const list = $("#messageList");
-    const nearBottom = changed || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    if (changed) saveSelectedHistoryMessages();
     state.selectedConversation = item;
+    const requestAccount = state.historyAccount;
+    const key = historyMessageCacheKey(requestAccount, conversationId, query);
+    const cacheEntry = changed ? getHistoryMessageCacheEntry(key) : null;
     if (changed) {
-      state.selectedMessages = [];
-      state.selectedSenderKey = "";
-      state.historyHasMore = false;
+      state.selectedMessages = cacheEntry?.messages.slice() || [];
+      state.selectedSenderKey = cacheEntry?.senderKey || "";
+      state.historyHasMore = cacheEntry?.hasMore || false;
       state.historyLoadingOlder = false;
       state.historyMessageQuery = query;
       state.historyOlderLoad += 1;
@@ -2345,24 +2552,62 @@
     }
     renderConversations();
     renderConversationHeader(item);
-    if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
+    $("#newMessageButton").hidden = true;
+    if (changed && cacheEntry) {
+      renderMessages(state.selectedMessages, {restoreScrollTop: cacheEntry.scrollTop});
+      renderConversationInspector(item);
+    } else if (changed) {
+      list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
+    }
     const load = ++state.messageLoad;
-    const requestAccount = state.historyAccount;
+    state.historyMessagesLoading = true;
+    const cacheEpoch = state.historyMessageCacheEpoch;
+    const filters = pagedHistoryFilters();
     try {
-      const page = normalizeMessagePage(await api("get_messages", conversationId, pagedHistoryFilters()));
-      if (load !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== conversationId) return;
+      const page = await requestHistoryMessagePage(key, conversationId, filters);
+      if (requestAccount !== state.historyAccount || cacheEpoch !== state.historyMessageCacheEpoch) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
         renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
         return;
       }
-      const messages = changed ? page.items : mergeMessages(state.selectedMessages, page.items);
-      if (changed) state.historyHasMore = page.has_more;
-      if (changed || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
-        renderMessages(messages, {forceBottom: changed, nearBottom});
+      const previous = getHistoryMessageCacheEntry(key);
+      const current = load === state.messageLoad
+        && state.selectedConversation?.conversation_id === conversationId
+        && state.historyMessageQuery === query;
+      const priorMessages = previous?.messages || (current ? state.selectedMessages : []);
+      const messages = mergeMessages(priorMessages, page.items);
+      const hasMore = previous?.messages.length > page.items.length ? previous.hasMore : page.has_more;
+      const scrollTop = current ? list.scrollTop : (previous?.scrollTop || cacheEntry?.scrollTop || 0);
+      const senderKey = current ? state.selectedSenderKey : (previous?.senderKey || cacheEntry?.senderKey || "");
+      setHistoryMessageCacheEntry(key, {
+        accountId: requestAccount,
+        conversationId,
+        query,
+        messages,
+        hasMore,
+        scrollTop,
+        senderKey,
+        updatedAt: Date.now(),
+      });
+      if (current) {
+        state.historyHasMore = hasMore;
+        const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        if ((changed && !cacheEntry) || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
+          renderMessages(messages, {nearBottom});
+        }
+        renderConversationInspector(item);
       }
-      renderConversationInspector(item);
-    } catch (error) { if (!silent) reportError(error); }
+    } catch (error) {
+      if (changed && !cacheEntry && load === state.messageLoad && requestAccount === state.historyAccount
+          && state.selectedConversation?.conversation_id === conversationId) {
+        list.removeAttribute("aria-busy");
+        list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>后台会自动重试，请稍后查看。</p></div>';
+      }
+      if (!silent && !cacheEntry && load === state.messageLoad) reportError(error);
+    } finally {
+      if (load === state.messageLoad) state.historyMessagesLoading = false;
+    }
   }
 
   async function loadOlderMessages() {
@@ -2402,7 +2647,8 @@
   }
 
   async function pollHistory() {
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+        || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true});
@@ -2420,7 +2666,8 @@
       await loadGroups(true, {background: true});
       return;
     }
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+        || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true, refreshGroups: true});
@@ -2454,6 +2701,14 @@
             renderHistoryAccountGate(state.historyAccount);
             return;
           }
+          clearHistoryMessageCache();
+          state.messageLoad += 1;
+          state.historyMessagesLoading = false;
+          state.historyOlderLoad += 1;
+          state.historyHasMore = false;
+          state.historyLoadingOlder = false;
+          state.historyMessageQuery = "";
+          state.selectedMessages = [];
           state.selectedConversation = null;
           state.selectedSenderKey = "";
           $("#messageList").innerHTML = '<div class="empty-state compact"><p>请选择聊天记录</p></div>';
@@ -3242,6 +3497,7 @@
     $("#modalField").innerHTML = field ? `<label class="modal-field"><span>${escapeHtml(field.label)}</span>${fieldControl}</label>` : "";
     $("#modalProgress").hidden = true;
     $("#modalProgressBar").style.width = "0%";
+    $("#modalProgressBar").classList.remove("is-indeterminate");
     $("#modalError").hidden = true;
     $("#modalError").textContent = "";
     backdrop.dataset.busy = "false";
@@ -3310,7 +3566,9 @@
       const preset = (state.bootstrap?.provider_presets || []).find(
         (item) => item.id === form.elements.preset.value,
       );
-      if (values.service_kind !== "chat" && Array.isArray(preset?.modalities)) {
+      if (values.service_kind === "chat") {
+        values.modalities = "text,image,audio";
+      } else if (Array.isArray(preset?.modalities)) {
         values.modalities = preset.modalities.join(",");
       }
       const data = await api("save_provider", values);
@@ -3388,26 +3646,7 @@
         ? ["text", "image", "audio"]
         : ["text", "image"];
     }
-    return ["text"];
-  }
-
-  function updateProviderModalitiesHint() {
-    const input = $("#providerModalities");
-    if (!input) return;
-    $("#providerModalitiesHint").textContent = input.value
-      ? "按模型实际支持能力选择；错误声明可能导致媒体消息调用失败。"
-      : "自动识别常见视觉模型名称；名称无法识别时按纯文本处理，也可以在这里明确选择多模态能力。";
-  }
-
-  function syncProviderModalities(serviceKind, modalities) {
-    const field = $("#providerModalitiesField");
-    const input = $("#providerModalities");
-    if (!field || !input) return;
-    const isChat = serviceKind === "chat";
-    field.hidden = !isChat;
-    input.disabled = !isChat;
-    input.value = isChat ? providerChatModalityValue(modalities) : "";
-    updateProviderModalitiesHint();
+    return ["text", "image", "audio"];
   }
 
   function providerThinkingSupported(apiBase, model) {
@@ -3461,12 +3700,13 @@
     form.elements.service_kind.value = preset.service_kind || "chat";
     form.elements.service_kind.disabled = false;
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
-    syncProviderModalities(preset.service_kind || "chat", preset.modalities || []);
     clearProviderModels();
-    $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
-    const capability = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
-    const modalityHint = capability === "能力可选" ? "输入能力可选" : `${capability}模型`;
-    $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · ${modalityHint}`;
+    $("#providerModelHint").textContent = preset.model
+      ? `默认模型：${preset.model}；可手动修改或从服务端读取后选择`
+      : "请填写具体模型名称，也可从服务端读取后选择";
+    $("#providerPresetHint").textContent = preset.service_kind === "chat"
+      ? `${preset.description || "填写模型服务信息"} · 默认按多模态请求，不支持图片时显示接口错误`
+      : (preset.description || "填写模型服务信息");
     syncProviderThinkingControl();
     renderProviderSaveIntent(
       providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
@@ -3520,8 +3760,8 @@
     applyProviderPreset(presetId);
     $("#providerEditorEyebrow").textContent = "新建服务";
     $("#providerEditorTitle").textContent = "新建模型服务";
-    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一种服务，然后确认连接信息。";
-    $("#apiKeyHint").textContent = "密钥只保存在本机，不会回显";
+    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一个模型供应商，然后确认连接信息。";
+    $("#apiKeyHint").textContent = "API Key / Token Plan 只保存在本机，不会回显";
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
     $("#providerNote").textContent = "";
@@ -3541,13 +3781,14 @@
     form.elements.preset.value = providerPresetFor(service);
     form.elements.service_kind.value = service.service_kind || "chat";
     $("#providerThinkingRow").hidden = (service.service_kind || "chat") !== "chat";
-    syncProviderModalities(service.service_kind || "chat", service.modalities || []);
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
     syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
-    $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
+    $("#providerModelHint").textContent = service.model
+      ? `当前模型：${service.model}；可手动填写，也可从服务端读取后选择`
+      : "可手动填写，也可从服务端读取后选择";
     $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
     $("#providerEditorSubtitle").textContent = service.is_default
@@ -3555,8 +3796,8 @@
       : service.service_kind === "chat"
         ? "已配置，可切换为回复模型"
         : "已配置，供相关功能选择";
-    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备";
-    $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置服务密钥";
+    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；聊天模型默认按多模态请求";
+    $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置 API Key / Token Plan";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
     $("#providerNote").textContent = "";
@@ -3573,11 +3814,11 @@
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
     status.textContent = `${items.length} 项服务`;
     $("#providerServiceList").innerHTML = items.length ? `
-      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，服务密钥仅保存在当前设备。</span></div></div>
+      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，API Key / Token Plan 仅保存在当前设备。</span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
         const identity = providerCardIdentity(item);
         const statusText = item.is_default ? "使用中" : item.configured ? "备用" : "待完善";
-        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充服务密钥后即可使用";
+        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充 API Key / Token Plan 后即可使用";
         const capability = item.service_kind === "image"
           ? {title: "图片能力", detail: "供功能中心图片生成选择"}
           : item.service_kind === "voice"
@@ -3605,7 +3846,7 @@
           <div class="provider-service-body">
             <div class="provider-card-tags">
               <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : item.service_kind === "voice" ? "语音" : "文本"))}</span>
-              <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
+              <span>${item.configured ? "配置已统一共享" : "缺少 API Key / Token Plan"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
@@ -3632,9 +3873,87 @@
         <h3>还没有模型服务</h3>
         <p>新建聊天、向量、图片或语音模型后，可在对应功能设置中直接选择。</p>
         <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
-        <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
+        <div class="provider-empty-assurances"><span>API Key / Token Plan 仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
+    renderHomeSetupAlerts();
+  }
+
+  function readHomeSetupAlertDismissals() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(HOME_SETUP_DISMISSALS_STORAGE_KEY) || "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : []);
+    } catch (_error) {
+      return new Set();
+    }
+  }
+
+  function renderHomeSetupAlerts() {
+    const container = $("#homeSetupAlerts");
+    if (!container) return;
+    const services = state.bootstrap?.providers;
+    if (!Array.isArray(services)) {
+      container.replaceChildren();
+      container.hidden = true;
+      return;
+    }
+    const configured = services.filter((service) => service?.configured);
+    const chatServices = configured.filter((service) => (service.service_kind || "chat") === "chat");
+    const hasReplyModel = chatServices.some((service) => service.is_default);
+    const hasImageUnderstanding = chatServices.some((service) =>
+      Array.isArray(service.modalities) && service.modalities.includes("image"));
+    const hasImageModel = configured.some((service) => service.service_kind === "image");
+    const hasVectorModel = configured.some((service) => service.service_kind === "embedding");
+    const reminders = [
+      !hasReplyModel && {
+        id: "reply-model",
+        priority: 1,
+        title: "未配置回复模型",
+        message: "配置一个可用的回复模型后，机器人才能回答消息。",
+      },
+      hasReplyModel && !hasImageUnderstanding && {
+        id: "image-understanding",
+        priority: 2,
+        title: "未配置图片理解（多模态）模型",
+        message: "当前没有支持图片输入的聊天模型，机器人无法理解收到的图片。",
+      },
+      !hasImageModel && {
+        id: "image-generation",
+        priority: 3,
+        title: "未配置生图模型",
+        message: "需要图片生成时，请在模型服务中添加图片模型。",
+      },
+      !hasVectorModel && {
+        id: "vector-model",
+        priority: 4,
+        title: "未配置向量模型",
+        message: "向量检索相关功能需要单独配置向量模型。",
+      },
+    ].filter((item) => item && !state.dismissedHomeSetupAlerts.has(item.id));
+    container.innerHTML = reminders.map((item) => `
+      <article class="home-setup-alert" data-priority="${item.priority}">
+        <span class="home-setup-alert-icon" aria-hidden="true">!</span>
+        <div class="home-setup-alert-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p></div>
+        <div class="home-setup-alert-actions">
+          <button class="button secondary small" type="button" data-home-setup-configure>去配置</button>
+          <button class="button ghost small" type="button" data-home-setup-dismiss="${escapeHtml(item.id)}">不再提示</button>
+        </div>
+      </article>`).join("");
+    container.hidden = reminders.length === 0;
+    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", async () => {
+      await navigate("settings");
+      if (state.activePage === "settings") selectSettingsSection("model");
+    }));
+    $$('[data-home-setup-dismiss]', container).forEach((button) => button.addEventListener("click", () => {
+      state.dismissedHomeSetupAlerts.add(button.dataset.homeSetupDismiss);
+      try {
+        window.localStorage.setItem(
+          HOME_SETUP_DISMISSALS_STORAGE_KEY,
+          JSON.stringify([...state.dismissedHomeSetupAlerts]),
+        );
+      } catch (_error) { /* Keep the dismissal for this window if storage is unavailable. */ }
+      renderHomeSetupAlerts();
+    }));
   }
 
   async function setProviderDefault(providerId, button) {
@@ -4132,8 +4451,7 @@
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
       presetSelect.innerHTML = data.provider_presets.map((preset) => {
-        const kind = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
-        return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)} · ${kind}</option>`;
+        return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`;
       }).join("");
     }
     renderProviderServices();
@@ -4158,6 +4476,44 @@
     }
   }
 
+  async function beginUpdateInstall(release) {
+    const accepted = await api("install_update", release.version);
+    if (!accepted?.accepted) throw new Error("更新任务已经在处理中。 ");
+    $("#modalProgress").hidden = false;
+    while (true) {
+      const progress = await api("get_update_status");
+      const percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
+      const bar = $("#modalProgressBar");
+      const indeterminate = ["stopping_services", "waiting_wechat", "launching"].includes(progress.phase);
+      bar.classList.toggle("is-indeterminate", indeterminate);
+      bar.style.width = indeterminate ? "36%" : `${Math.min(100, Math.max(0, percent))}%`;
+      const percentPhases = ["download", "extract", "verify", "prepare", "install"];
+      const phaseSuffix = percentPhases.includes(progress.phase) ? ` · ${percent}%` : "";
+      $("#modalMessage").textContent = `${progress.message || "正在准备更新"}${phaseSuffix}。请保持管理器打开。`;
+      if (progress.state === "failed") {
+        const error = new Error(progress.error?.message || progress.message || "更新未能完成。 ");
+        error.product = progress.error || null;
+        throw error;
+      }
+      if (progress.state === "restarting") return;
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+    }
+  }
+
+  function showUpdatePrompt(release) {
+    const mandatory = Boolean(release.mandatory);
+    confirmAction({
+      title: mandatory ? `必须更新到 v${release.version}` : `发现新版本 v${release.version}`,
+      message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${formatBytes(release.package_size)}。更新期间会等待机器人微信安全退出，再停止后台服务；失败时会自动恢复原版本。`,
+      confirmText: mandatory ? "立即更新" : "下载并安装",
+      cancelText: mandatory ? "稍后更新" : "稍后提醒",
+      intent: "primary",
+      pendingText: "正在下载…",
+      pendingMessage: `正在下载并校验 v${release.version}；校验通过后会安全停止机器人并安装。请保持管理器打开。`,
+      onConfirm: () => beginUpdateInstall(release),
+    });
+  }
+
   async function refreshUpdate(manual = true) {
     if (state.updateChecking) return;
     state.updateChecking = true;
@@ -4168,45 +4524,39 @@
       const data = await api("check_update");
       if (data.busy) return;
       state.availableUpdate = data.release || null;
+      state.mandatoryUpdate = Boolean(data.release?.mandatory);
+      if (state.status) renderStatus(state.status);
       if (!data.enabled) {
         $("#updateStatus").textContent = "在线更新未启用";
       } else if (!data.release) {
         $("#updateStatus").textContent = "已是最新版本";
+        state.mandatoryPromptVersion = "";
         if (manual) toast("当前已经是最新版本。 ");
       } else {
         const release = data.release;
-        $("#updateStatus").textContent = `发现 v${release.version}`;
-        const packageSize = formatBytes(release.package_size);
-        confirmAction({
-          title: `发现新版本 v${release.version}`,
-          message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${packageSize}，安装前请先停止机器人；更新失败会自动恢复原版本。`,
-          confirmText: "下载并安装",
-          cancelText: "稍后提醒",
-          intent: "primary",
-          pendingText: "正在下载…",
-          pendingMessage: `正在下载并校验 v${release.version}，完成后软件会自动重启。请勿关闭软件。`,
-          onConfirm: async () => {
-            const accepted = await api("install_update", release.version);
-            if (!accepted?.accepted) toast("更新任务已经在处理中。 ");
-            $("#modalProgress").hidden = false;
-            while (true) {
-              const progress = await api("get_update_status");
-              const percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
-              $("#modalProgressBar").style.width = `${Math.min(100, Math.max(0, percent))}%`;
-              $("#modalMessage").textContent = `${progress.message || "正在准备更新"}${["download", "extract", "verify"].includes(progress.phase) ? ` · ${percent}%` : ""}。请勿关闭软件。`;
-              if (progress.state === "failed") {
-                const error = new Error(progress.error?.message || progress.message || "更新未能完成。 ");
-                error.product = progress.error || null;
-                throw error;
-              }
-              if (progress.state === "restarting") return;
-              await new Promise((resolve) => window.setTimeout(resolve, 400));
-            }
-          },
+        api("download_update", release.version).catch((error) => {
+          if (manual) reportError(error);
         });
+        $("#updateStatus").textContent = release.mandatory
+          ? `必须更新至 v${release.version}`
+          : `发现 v${release.version}`;
+        if (release.mandatory && state.mandatoryPromptVersion !== release.version) {
+          state.mandatoryPromptVersion = release.version;
+          showUpdatePrompt(release);
+        } else if (manual) {
+          showUpdatePrompt(release);
+        }
       }
     } catch (error) {
-      $("#updateStatus").textContent = "检查失败";
+      const mandatoryUnavailable = error?.product?.code === "UPD-1016";
+      if (mandatoryUnavailable) {
+        state.availableUpdate = null;
+        state.mandatoryUpdate = true;
+        if (state.status) renderStatus(state.status);
+      }
+      $("#updateStatus").textContent = mandatoryUnavailable
+        ? "当前版本已停止支持，暂未获取到可安装更新"
+        : "检查失败";
       if (manual) reportError(error);
     } finally {
       state.updateChecking = false;
@@ -4227,6 +4577,29 @@
       await refreshUpdate(false);
       scheduleAutomaticUpdateCheck(automaticUpdateIntervalMs());
     }, delayMs);
+  }
+
+  async function pollUpdateStatus() {
+    if (!state.bootstrap?.update?.enabled) return;
+    try {
+      const status = await api("get_update_status");
+      const label = $("#updateStatus");
+      const button = $("#checkUpdate");
+      if (status.state === "running" && state.availableUpdate) {
+        label.textContent = `${state.mandatoryUpdate ? "必须更新" : "后台下载"} v${state.availableUpdate.version} · ${Math.max(0, Number(status.percent) || 0)}%`;
+        button.textContent = "查看更新";
+      } else if (status.state === "ready" && state.availableUpdate) {
+        label.textContent = `v${state.availableUpdate.version} 已下载，等待安装`;
+        button.textContent = state.mandatoryUpdate ? "立即更新" : "安装更新";
+      } else if (status.state === "failed" && status.error) {
+        label.textContent = `更新准备失败 · ${status.error.code || "UPD-1002"}`;
+        button.textContent = "重试更新";
+      } else if (status.state === "restarting") {
+        label.textContent = "正在重新启动管理器";
+      }
+    } catch (_error) {
+      // Update status is optional background work; it must not disturb normal use.
+    }
   }
 
   function bindSearch(boxSelector, inputSelector, callback) {
@@ -4312,6 +4685,7 @@
     });
     $("#messageList").addEventListener("scroll", () => {
       const list = $("#messageList");
+      updateHistoryMessageScrollPosition();
       if (list.scrollTop <= HISTORY_PRELOAD_THRESHOLD) void loadOlderMessages();
       if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
@@ -4369,7 +4743,6 @@
     });
     $("#providerForm").addEventListener("change", (event) => {
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
-      if (event.target.name === "modalities") updateProviderModalitiesHint();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
     $("#providerServiceKind").addEventListener("change", (event) => {
@@ -4439,7 +4812,19 @@
             return;
           }
           toast(`已清理 ${result.deleted} 条记录。 `);
-          if (state.activePage === "history") await loadConversations();
+          clearHistoryMessageCache();
+          state.messageLoad += 1;
+          state.historyMessagesLoading = false;
+          state.historyOlderLoad += 1;
+          state.historyHasMore = false;
+          state.historyLoadingOlder = false;
+          state.historyMessageQuery = "";
+          state.selectedMessages = [];
+          state.selectedSenderKey = "";
+          if (state.activePage === "history") {
+            $("#messageList").innerHTML = '<div class="loading-row">正在读取消息…</div>';
+            await loadConversations();
+          }
         },
       });
     });
@@ -4488,6 +4873,7 @@
         await showOnboarding();
       }
       window.setInterval(refreshStatus, 1500);
+      window.setInterval(pollUpdateStatus, 1200);
       window.setInterval(pollHistory, 1500);
       window.setInterval(pollGroups, 15000);
       if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
@@ -4702,18 +5088,18 @@
       previewProviders = [{id: "custom_mimo/mimo-v2.5", name: "mimo-v2.5", api_base: "https://token-plan-cn.xiaomimimo.com/v1", model: "mimo-v2.5", configured: true, api_key_configured: true, is_default: true, is_recommended: false, thinking_supported: true, thinking_enabled: true}];
     }
     const previewPresets = [
-      {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image"], description: "DeepSeek 官方兼容接口；DeepSeek Flash 支持图片输入。"},
-      {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image"], description: "智谱 GLM 兼容接口；GLM-4.6V 支持图片输入。"},
-      {id: "xiaomi_mimo", name: "小米 MiMo", api_base: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5", service_kind: "chat", modalities: ["text", "image"], description: "小米 MiMo 兼容接口；MiMo-V2.5 支持原生多模态输入。"},
-      {id: "qwen", name: "通义千问 Qwen", api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", service_kind: "chat", modalities: ["text"], description: "阿里云百炼兼容接口。"},
-      {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image"], description: "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。"},
-      {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text"], description: "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。"},
-      {id: "gemini_proxy", name: "Gemini / 中转站", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。"},
-      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写你的 Sub2 兼容接口地址和模型名称，并确认输入能力。"},
+      {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "DeepSeek 官方兼容接口；默认填入 DeepSeek Flash。"},
+      {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image", "audio"], description: "智谱 GLM 兼容接口；默认填入 GLM-4.6V。"},
+      {id: "xiaomi_mimo", name: "小米 MiMo", api_base: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5", service_kind: "chat", modalities: ["text", "image", "audio"], description: "小米 MiMo 兼容接口；默认填入 MiMo-V2.5。"},
+      {id: "qwen", name: "通义千问 Qwen", api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", service_kind: "chat", modalities: ["text", "image", "audio"], description: "阿里云百炼兼容接口；默认填入 qwen-plus。"},
+      {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image", "audio"], description: "火山方舟兼容接口；默认填入豆包 Seed 2.0。"},
+      {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text", "image", "audio"], description: "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。"},
+      {id: "gemini_proxy", name: "Gemini", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。"},
+      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；聊天模型默认按多模态请求。"},
       {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
       {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
       {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
-      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写兼容接口地址、模型名称和密钥，并确认输入能力。"},
+      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写中转站或其他兼容接口地址、模型名称和凭据。"},
     ];
     const previewExperience = {
       onboarding_complete: true,

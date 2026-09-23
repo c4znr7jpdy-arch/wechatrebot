@@ -618,6 +618,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title", default="完整载荷更新")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--minimum-supported-version", default="0.7.0")
+    parser.add_argument("--build", type=int)
+    parser.add_argument("--mandatory", action="store_true")
     parser.add_argument(
         "--private-key",
         type=Path,
@@ -841,6 +843,10 @@ def main(argv: list[str] | None = None) -> int:
         "--minimum-supported-version",
         args.minimum_supported_version,
     ]
+    if args.mandatory:
+        release_command.append("--mandatory")
+    if args.build is not None:
+        release_command.extend(["--build", str(args.build)])
     if not args.resume or args.refresh_manager:
         for note in args.note:
             release_command.extend(["--note", note])

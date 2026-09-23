@@ -140,17 +140,18 @@
           <section class="home-lower-section" aria-labelledby="homeEntryHeading">
             <div class="section-heading"><h2 id="homeEntryHeading">常用入口</h2><p>直接继续最常见的管理任务。</p></div>
             <div class="home-entry-grid">
-              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
-                <svg aria-hidden="true"><use href="#i-chat"/></svg>
-                <span><strong>管理聊天回复</strong><small>设置群聊和私聊的回复方式与功能范围</small></span>
+              <button class="home-entry" type="button" data-home-page="settings" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-settings"/></svg>
+                <span><strong>配置模型与核心</strong><small>设置回复模型、图片能力和机器人基础信息</small></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
-              <button class="home-entry" type="button" data-home-page="schedules" data-action-bound disabled>
-                <svg aria-hidden="true"><use href="#i-clock"/></svg>
-                <span><strong>查看定时任务</strong><small>管理定时发送、执行时间和逐对象结果</small></span>
+              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-users"/></svg>
+                <span><strong>管理群聊与私聊</strong><small>设置每个聊天的回复方式与可用功能</small></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
             </div>
+            <div class="home-setup-alerts" id="homeSetupAlerts" role="region" aria-label="配置提醒" aria-live="polite" hidden></div>
           </section>
 
           <div class="signal-strip">
@@ -294,7 +295,7 @@
             <label class="search-box help-search" id="helpSearchBox"><svg><use href="#i-search"/></svg><input id="helpSearch" type="search" placeholder="搜索功能或用法" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空帮助搜索">×</button></label>
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
-            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
+            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button secondary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
             <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在群聊&amp;私聊管理中按聊天设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心填写必要参数，是否使用由每个群聊的勾选决定。</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
@@ -326,13 +327,12 @@
                 </div>
                 <div class="provider-editor-layout">
                   <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
-                    <div class="panel-heading"><div><span class="eyebrow" id="providerEditorEyebrow">新建服务</span><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2><p id="providerEditorSubtitle">选择一种服务，然后确认连接信息。</p></div></div>
+                    <div class="panel-heading"><div><span class="eyebrow" id="providerEditorEyebrow">新建服务</span><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2><p id="providerEditorSubtitle">选择一个模型供应商，然后确认连接信息。</p></div></div>
                     <input name="provider_id" type="hidden">
-                    <div class="field-pair"><label><span>服务类型</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini / 中转站</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">选择渠道后可继续修改接口地址和模型名称</small></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select><small>图片、向量和语音模型不会替代当前聊天回复模型。</small></label></div>
-                    <div class="field-pair"><label><span>接口地址</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
-                    <label id="providerModalitiesField"><span>输入能力</span><select name="modalities" id="providerModalities" aria-describedby="providerModalitiesHint"><option value="">自动识别</option><option value="text">仅文本</option><option value="text,image">文本和图片</option><option value="text,audio">文本和音频</option><option value="text,image,audio">文本、图片和音频</option></select><small id="providerModalitiesHint">按模型实际支持能力选择；多模态聊天模型能理解媒体，但不等于图片生成模型。</small></label>
+                    <div class="field-pair"><label><span>模型供应商</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">仅选择接口供应商；具体模型在下方填写</small></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select><small>图片、向量和语音模型不会替代当前聊天回复模型。</small></label></div>
+                    <div class="field-pair"><label><span>Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
+                    <label><span>API Key / Token Plan</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="填写 API Key 或 Token Plan；已保存内容不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">API Key / Token Plan 只保存在本机</small></label>
                     <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">所有模型均可设置；模型不支持时会自动忽略，不影响正常调用。</small></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
-                    <label><span>服务密钥</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="粘贴服务密钥；已保存的密钥不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">密钥只保存在本机</small></label>
                     <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong><small id="providerSaveIntentDetail">首个模型服务会自动用于机器人回复。</small></p></div>
                     <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
                   </form>
@@ -340,11 +340,11 @@
                   <aside class="provider-editor-guide panel" aria-label="填写说明">
                     <span class="eyebrow">填写说明</span><h2>只需要三步</h2>
                     <ol>
-                      <li><span>1</span><div><strong>选择服务</strong><small>从常用渠道或兼容接口中选择模型用途。</small></div></li>
-                      <li><span>2</span><div><strong>确认连接信息</strong><small>推荐服务会自动带出接口地址和模型名称。</small></div></li>
+                      <li><span>1</span><div><strong>选择模型供应商</strong><small>从常用供应商或兼容接口中选择入口，再填写具体模型用途。</small></div></li>
+                      <li><span>2</span><div><strong>确认连接信息</strong><small>推荐供应商会预填 Base URL 和模型，请核对模型名称。</small></div></li>
                       <li><span>3</span><div><strong>保存服务</strong><small>首个服务自动用于回复；后续服务可在列表中手动切换。</small></div></li>
                     </ol>
-                    <div class="provider-local-note"><strong>密钥仅存本机</strong><span>界面、诊断和导出内容都不会回显完整密钥。</span></div>
+                    <div class="provider-local-note"><strong>API Key / Token Plan 仅存本机</strong><span>界面、诊断和导出内容都不会回显完整凭据。</span></div>
                   </aside>
                 </div>
               </section>

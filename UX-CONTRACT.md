@@ -28,7 +28,7 @@
 
 | 页面 | 用户可见能力 | 数据/动作所有者 |
 |---|---|---|
-| 运行中心 | 环境、状态、启动、停止、错误恢复 | `LifecycleController` |
+| 运行中心 | 环境、状态、启动、停止、错误恢复、模型配置提醒与常用入口 | `LifecycleController` + `ApplicationApi` 模型服务目录 |
 | 功能中心 | 搜索、选择、按交付策略显示动态配置或专属页；功能统一加载，不提供全局停用 | `PluginCenterService` |
 | 群聊&私聊管理 | 群聊/私聊标签；群聊搜索、复制、刷新和成员；联系人搜索、分页、详情与可用功能 | `GroupDirectoryService` + `GroupPolicyService` + `ContactDirectoryService` + `PrivateChatPolicyService` |
 | 消息中心 | 分类、搜索、筛选、消息、导出、清理 | `ChatHistoryService` |
@@ -41,9 +41,17 @@ UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作�
 
 2026-09-18 用户确认彻底删除外部向量记忆；旧安装升级时必须删除插件代码、专属配置、本机插件数据和对应源码补丁，并从运行列表移除，后续完整载荷不得继续交付。一级导航命名为运行中心、功能中心、群聊&私聊管理、消息中心、定时任务、运行记录、设置、帮助；群聊&私聊管理保留“群聊管理 / 私聊管理”。设置一级标签为“模型服务 / 机器人核心 / 记忆与情感 / 系统信息”。机器人名称与管理员只在“机器人核心 → 全局配置 → 常用设置”靠前展示，群聊身份紧随其后；默认名称和初始身份是“小妹”。新群允许功能默认是群聊上下文、点歌、链接解析、群聊分析、常用指令、群成员变动通知、图片生成。定时接收独立于允许功能；天气任务仍须允许“常用指令”，保存后运行端在最终发送边界重新核验。隐藏的自动改代码保持关闭。
 
-2026-09-20 用户确认 AstrBot 工厂条目 `jyjapi/grok-4.6` 不是用户新增模型，客户界面不再展示。统一模型目录支持聊天、向量和图片三种用途，并对聊天模型显式标注文本或多模态；只有聊天模型可作为默认回复。图片生成必须从已配置图片模型中选择，向量模型不等于已删除的外部向量记忆产品。
+2026-09-20 用户确认 AstrBot 工厂条目 `jyjapi/grok-4.6` 不是用户新增模型，客户界面不再展示。统一模型目录支持聊天、向量和图片三种用途；聊天模型默认按多模态请求，不再在模型服务编辑器中让用户声明输入能力，具体模型不支持图片时保留接口错误；只有聊天模型可作为默认回复。图片生成必须从已配置图片模型中选择，向量模型不等于已删除的外部向量记忆产品。
 
-群聊&私聊管理长表单、设置人格表单使用工作区外层滚动条；消息中心三栏原有独立消息滚动不改变。帮助集中上手说明，首次进入不自动弹出新手提示；帮助实况图只取隔离预览，不使用客户聊天记录。消息中心输入精确 wxid 时消息列表按发送者筛选，微信号可用时优先展示微信号；群昵称和群头像来自当前账号只读群目录及消息成员资料，资料缺失时仍保持 wxid/文字占位，不猜测。
+群聊&私聊管理长表单、设置人格表单使用工作区外层滚动条；消息中心外层工作区可滚动，聊天列表、消息内容和聊天信息保留各自滚动区域。帮助集中上手说明，首次进入不自动弹出新手提示；帮助实况图只取隔离预览，不使用客户聊天记录。消息中心输入精确 wxid 时消息列表按发送者筛选，微信号可用时优先展示微信号；群昵称和群头像来自当前账号只读群目录及消息成员资料，资料缺失时仍保持 wxid/文字占位，不猜测。
+
+### 运行中心配置提醒
+
+常用入口显示“配置模型与核心”和“管理群聊与私聊”。其下根据已配置模型服务，按“回复模型、图片理解（多模态）、生图模型、向量模型”的优先级显示提醒；每条提醒都能进入模型服务配置或使用“不再提示”单独永久关闭。提醒按优先级使用不同颜色，向量模型提醒采用更暖的色调。帮助页的“检查运行状态、配置模型与核心、管理群聊与私聊”三个快捷操作使用相同浅色样式，并在快捷区域内各占一行。
+
+### 群成员读取
+
+群目录首次未直接提供人数时，管理器并发读取缺失群的成员列表以补齐实际人数，最多同时运行 4 个请求。已读取人数按微信账号持久保存；后续刷新遇到空人数保留旧值，接口返回新人数时更新缓存和显示。群目录每 15 秒刷新一次，以同步入群或退群后的有效人数；不得在普通列表刷新时重复读取所有群成员。成员页最多展示当前群前 500 名成员。群主、管理员、头像等接口未提供的数据仍显示“未知”，不得推断。
 
 全部交付功能提供用途、准备条件和操作指引；复杂功能由管理器提供“常用设置”投影，完整参数在“专业设置（全部）”中保留。保存时必须用完整原始 Schema 合并，保留未展示字段、未知兼容值和已保存密钥；不得因为界面精简而重置专业参数。切换分类保留内存草稿，离开当前功能通过应用确认层询问是否丢弃，不将密钥草稿写入浏览器存储。
 
@@ -63,7 +71,7 @@ UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作�
 | 刷新群聊 | 保留同账号旧列表，按钮显示正在刷新 | 当前登录账号的群缓存重新查询完成；明确不会发送群消息 | 失败保留同账号旧结果并标记未更新；账号变化或身份未知时清空旧账号数据 |
 | 刷新联系人 | 保留同账号旧列表，按钮显示正在刷新 | 当前机器人账号的微信通讯录缓存完成更新；明确不会发送消息 | 失败保留同账号旧结果并标记未更新；账号变化或身份未知时清空旧账号数据 |
 | 保存联系人功能范围 | 锁定当前联系人表单并保留选择 | 以机器人账号和稳定联系人标识原子保存；未单独配置时继承当前交付默认功能 | 版本冲突要求刷新；失败保留草稿且不持久化联系人资料 |
-| 查询聊天 | 加载保留旧列表 | 显示会话摘要和消息 | 空态或 toast，可修改筛选重试 |
+| 查询聊天 | 首次访问会话时读取消息；切换到已访问会话立即恢复该微信账号和筛选条件下的消息及滚动位置，再后台刷新；切回消息中心继续复用会话缓存；账号变化或筛选变化时隔离缓存 | 显示会话摘要和消息；后台刷新更新缓存与当前会话，历史分页状态与消息列表同步 | 空态或 toast，可修改筛选重试；消息读取失败不清除已有缓存，也不保留无限加载状态 |
 | 删除聊天 | 自有确认弹窗 | 只删产品本机副本 | 不改微信原记录和记忆源 |
 | 新建/编辑统一任务 | 表单保留输入并锁定重复提交；计算未来三次北京时间 | 运行端确认账号、内容能力、真实目录与聊天策略后原子保存同一任务 | 校验错误关联当前表单；连接失败不伪装成功；修订冲突要求刷新，原输入保留 |
 | 测试定时内容 | 自有确认层必须明确选择一个聊天；计入推送上限 | 建立一次性受控运行，逐层核验后只提交给该聊天，结束后不留下业务任务 | 失败/跳过/结果未知均明确记录；结果未知不自动重试 |
@@ -123,6 +131,16 @@ UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作�
 - 桌面功能列表和详情各自滚动，保存操作保持可见；900px 以下恢复单列与自然高度。标签、帮助说明和字段错误关联到真实输入控件。
 - 自动状态轮询 1.5 秒，不造成布局跳动。
 - 更新清单只接受 HTTPS 与 Ed25519 签名；包体限制大小、SHA-256、解压路径和逐文件清单；替换失败自动回滚。
+
+## Remote update flow
+
+- Startup and recurring update checks run asynchronously from the UI. Optional releases never open a modal automatically; a verified ZIP downloads in the background while the client remains usable, and Settings reports progress and the ready-to-install state.
+- Manual “检查更新” opens the existing product modal. “稍后提醒” leaves the client usable; “下载并安装” reuses a verified background download when available.
+- A signed mandatory release or minimum-version cutoff blocks starting the robot, but still allows stopping an already-running session and opening Settings to update. Network/check errors remain visible as a support code and never blank or freeze the main UI.
+- Installation first waits for the owned WeChat session to exit using lifecycle signals. It never kills a user WeChat process. Only then does the existing lifecycle stop the bridge and AstrBot, in reverse startup order, and verify both have exited.
+- The detached helper comes from the verified new payload, waits for the old one-file manager processes, snapshots every file it will change, applies the payload, and retains the snapshot until the new manager window acknowledges startup. A failed startup rolls back and launches the old manager.
+- Existing user configuration under `config/` and `app/astrbot/data/config/` is preserved; `data/`, `logs/`, `cache/`, `backups/`, and `updates/` remain user-managed. Update details are written to `logs/update.log` with sensitive URL query data redacted.
+- The Settings update row shows background download progress, readiness, and the final error code. Update work is single-instance and recoverable errors never expose stack traces in the UI.
 
 ## Verification matrix
 
