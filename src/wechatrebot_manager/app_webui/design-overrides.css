@@ -39,6 +39,8 @@
 }
 
 body { color: var(--ink); background: var(--canvas); }
+.toast { color: var(--green-700); background: var(--green-100); }
+.toast.error { color: #fff; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: rgba(54, 86, 71, .34); }
 .app-shell { grid-template-columns: 292px minmax(0, 1fr); background: var(--canvas); }
 .sidebar { color: var(--ink); background: var(--navy-950); border-right: 1px solid var(--line); }
