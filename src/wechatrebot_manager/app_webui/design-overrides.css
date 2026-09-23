@@ -121,6 +121,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .home-entry strong { font-size: 16px; }
 .home-entry small { margin-top: 3px; color: var(--muted); font-size: 13px; }
 
+.home-setup-alerts { display: grid; gap: 8px; margin-top: 12px; }
+.home-setup-alert { --setup-accent: var(--amber-700); --setup-surface: var(--amber-100); --setup-border: #dfc69d; display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 11px 13px; color: var(--ink); border: 1px solid var(--setup-border); border-left: 4px solid var(--setup-accent); border-radius: 7px; background: var(--setup-surface); }
+.home-setup-alert[data-priority="1"] { --setup-accent: var(--red-700); --setup-surface: var(--red-100); --setup-border: #dfbdb8; }
+.home-setup-alert[data-priority="2"] { --setup-accent: var(--amber-700); --setup-surface: var(--amber-100); --setup-border: #dfc69d; }
+.home-setup-alert[data-priority="3"] { --setup-accent: #796528; --setup-surface: #f6f1de; --setup-border: #e1d6af; }
+.home-setup-alert[data-priority="4"] { --setup-accent: #95552f; --setup-surface: #f7eee4; --setup-border: #e5cbb3; }
+.home-setup-alert-icon { display: grid; place-items: center; width: 27px; height: 27px; color: var(--setup-accent); border: 1px solid var(--setup-border); border-radius: 50%; background: var(--surface); font-size: 15px; font-weight: 800; }
+.home-setup-alert-copy { min-width: 0; }
+.home-setup-alert-copy strong { display: block; color: var(--setup-accent); font-size: 13px; }
+.home-setup-alert-copy p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.home-setup-alert-actions { display: flex; align-items: center; gap: 7px; }
+.help-start-copy .button-row { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.help-start-copy .button-row .button { width: 100%; justify-content: flex-start; }
+
 @media (max-width: 1220px) {
   .app-shell { grid-template-columns: 74px minmax(0,1fr); }
   .brand-block { min-height: 78px; align-items: center; padding: 20px 8px; }
@@ -141,6 +155,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   #page-home .stage-list { grid-template-columns: 1fr; }
   #page-home .stage-list li + li { border-top: 1px solid var(--line); border-left: 0; }
   .home-entry-grid { grid-template-columns: 1fr; }
+  .home-setup-alert { grid-template-columns: 30px minmax(0,1fr); }
+  .home-setup-alert-actions { grid-column: 2; justify-content: flex-start; }
 }
 
 /* Shared page surfaces. Keep the information architecture, change the visual hierarchy. */
@@ -563,6 +579,10 @@ html[data-theme="dark"] .contact-row:hover,
 html[data-theme="dark"] .conversation-list article:hover,
 html[data-theme="dark"] .conversation-list button:hover,
 html[data-theme="dark"] .help-feature-card:hover { background: #1d2c3e; border-color: #49627f; }
+html[data-theme="dark"] .home-setup-alert[data-priority="1"] { --setup-accent: #ff9fa9; --setup-surface: #302329; --setup-border: #68434a; }
+html[data-theme="dark"] .home-setup-alert[data-priority="2"] { --setup-accent: #f3c27a; --setup-surface: #302a22; --setup-border: #65513a; }
+html[data-theme="dark"] .home-setup-alert[data-priority="3"] { --setup-accent: #e5cf81; --setup-surface: #302e24; --setup-border: #615936; }
+html[data-theme="dark"] .home-setup-alert[data-priority="4"] { --setup-accent: #e6ac80; --setup-surface: #332920; --setup-border: #69503c; }
 html[data-theme="dark"] .feature-item { color: var(--ink); border-bottom-color: var(--line); background: transparent; }
 html[data-theme="dark"] .feature-item.active,
 html[data-theme="dark"] .group-row.selected,
@@ -724,4 +744,12 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 @media (max-width: 900px) {
   .sidebar-foot { justify-content: flex-end; }
   .sidebar-meta { gap: 7px; }
+}
+
+/* Keep the history columns scrollable while allowing a shorter window to scroll the whole page. */
+#page-history.active { display: flex; flex-direction: column; height: auto; min-height: 100%; }
+#page-history .history-layout { flex: 1 0 540px; min-height: 540px; }
+@media (max-width: 880px) {
+  #page-history .history-layout { flex: 0 0 auto; min-height: 0; overflow: visible; }
+  #page-history .message-pane { min-height: 520px; }
 }

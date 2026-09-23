@@ -140,17 +140,18 @@
           <section class="home-lower-section" aria-labelledby="homeEntryHeading">
             <div class="section-heading"><h2 id="homeEntryHeading">常用入口</h2><p>直接继续最常见的管理任务。</p></div>
             <div class="home-entry-grid">
-              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
-                <svg aria-hidden="true"><use href="#i-chat"/></svg>
-                <span><strong>管理聊天回复</strong><small>设置群聊和私聊的回复方式与功能范围</small></span>
+              <button class="home-entry" type="button" data-home-page="settings" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-settings"/></svg>
+                <span><strong>配置模型与核心</strong><small>设置回复模型、图片能力和机器人基础信息</small></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
-              <button class="home-entry" type="button" data-home-page="schedules" data-action-bound disabled>
-                <svg aria-hidden="true"><use href="#i-clock"/></svg>
-                <span><strong>查看定时任务</strong><small>管理定时发送、执行时间和逐对象结果</small></span>
+              <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
+                <svg aria-hidden="true"><use href="#i-users"/></svg>
+                <span><strong>管理群聊与私聊</strong><small>设置每个聊天的回复方式与可用功能</small></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
             </div>
+            <div class="home-setup-alerts" id="homeSetupAlerts" role="region" aria-label="配置提醒" aria-live="polite" hidden></div>
           </section>
 
           <div class="signal-strip">
@@ -294,7 +295,7 @@
             <label class="search-box help-search" id="helpSearchBox"><svg><use href="#i-search"/></svg><input id="helpSearch" type="search" placeholder="搜索功能或用法" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空帮助搜索">×</button></label>
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
-            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button primary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
+            <div class="help-start-copy"><span class="eyebrow">快速开始</span><h2 id="helpStartTitle">三步完成常用配置</h2><p>在设置中配置模型和机器人核心，再到群聊&amp;私聊管理为每个聊天设置回复方式和可用功能。功能中心管理其余选配功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button secondary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
             <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>在群聊&amp;私聊管理中按聊天设置回复方式、功能范围和定时接收。</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>在功能中心填写必要参数，是否使用由每个群聊的勾选决定。</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
