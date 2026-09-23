@@ -99,10 +99,19 @@ diff --git a/official/astrbot/core/pipeline/waking_check/stage.py b/expected/ast
  
  from astrbot import logger
  from astrbot.core.message.components import At, AtAll, Reply
-@@ -160,10 +163,31 @@
+@@ -160,10 +163,40 @@
              event.plugins_name = enabled_plugins_name
          logger.debug(f"enabled_plugins_name: {enabled_plugins_name}")
  
++        # Ignore WeChat Team replies to the send-path probe before any bot stages.
++        if (
++            event.get_platform_name() == "aiocqhttp"
++            and event.is_private_chat()
++            and str(event.get_sender_id() or "").strip().casefold() == "weixin"
++        ):
++            event.stop_event()
++            return
++
 +        if event.get_platform_name() == "aiocqhttp" and str(event.get_group_id()).endswith("@chatroom"):
 +            allowed = group_plugins(
 +                Path.cwd().parent.parent / "data/manager/group-policies.json",

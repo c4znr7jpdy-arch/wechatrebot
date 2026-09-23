@@ -951,6 +951,7 @@ tbody tr:hover { background: #fbfdff; }
 .trace-panel .panel-heading { align-items: flex-start; }
 .trace-panel .panel-heading h2 { margin-top: 3px; }
 .trace-panel .panel-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.trace-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .trace-list { margin-top: 14px; }
 .trace-gantt-card { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .trace-summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 15px; border-bottom: 1px solid var(--line); background: #f8fafc; }

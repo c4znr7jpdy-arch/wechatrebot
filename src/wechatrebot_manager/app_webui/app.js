@@ -2047,9 +2047,11 @@
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
+    const isWechatTeam = String(policy.contact_id || "").trim().toLowerCase() === "weixin";
     const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div class="toggle-line"><span><strong>在此私聊使用机器人</strong><small>关闭后不在这段私聊中回复或发送定时任务</small></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
+      ${isWechatTeam ? '<div class="toggle-line"><span><strong>微信团队私聊的模型回复</strong><small>固定关闭；微信团队返回的消息不会进入模型或机器人回复流程。</small></span><span class="toggle"><input id="privateModelReplyDisabled" type="checkbox" disabled><label class="toggle-track" for="privateModelReplyDisabled" aria-label="微信团队私聊模型回复已关闭"></label><span>已关闭</span></span></div>' : ""}
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停该联系人的全部定时推送</small></span><span class="toggle"><input id="privateScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateScheduledEnabled" aria-label="切换此私聊定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
       <div class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="privateQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="privateQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
@@ -3426,14 +3428,83 @@
 
   async function loadActivity() {
     try {
-      const [items, traces] = await Promise.all([
-        api("get_activity"),
-        api("get_response_traces").catch(() => []),
-      ]);
-      state.responseTraces = Array.isArray(traces) ? traces : (traces?.items || []);
-      renderResponseTraces();
+      const items = await api("get_activity");
       $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
     } catch (error) { reportError(error); }
+  }
+
+  async function generateResponseTrace() {
+    const button = $("#generateResponseTrace");
+    if (button.disabled) return;
+    let sendStartedAt = null;
+    const makeTrace = (status, detail) => {
+      const duration = Math.max(0, (performance.now() - sendStartedAt) / 1000);
+      const durationText = duration < 0.1
+        ? `${Math.max(1, Math.round(duration * 1000))} 毫秒`
+        : `${duration.toFixed(duration < 10 ? 1 : 0)} 秒`;
+      return {
+        time: new Date().toISOString(),
+        title: "微信团队私聊测试",
+        duration_seconds: Number(duration.toFixed(3)),
+        duration_text: durationText,
+        stages: [{
+          code: "wechat_test_send",
+          label: "发送测试消息",
+          status,
+          detail: `私聊微信团队（wxid=weixin） · ${detail}`,
+          duration_seconds: Number(duration.toFixed(3)),
+          duration_text: durationText,
+          offset_seconds: 0,
+        }],
+      };
+    };
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "正在发送测试消息…";
+    const badge = $("#traceStatus");
+    badge.className = "status-badge checking";
+    badge.innerHTML = "<span></span>正在发送";
+    state.responseTraces = [];
+    $("#responseTraceList").innerHTML = '<div class="loading-row">正在向微信团队发送测试消息…</div>';
+    try {
+      const context = await api("get_scheduled_task_context");
+      if (!context?.runtime_ready || !context.account_id) {
+        throw new Error(context?.message || "请先连接微信并启动机器人，再发送测试消息。");
+      }
+      sendStartedAt = performance.now();
+      const result = await api("test_scheduled_task", {
+        account_id: context.account_id,
+        name: "甘特图发送测试",
+        action: "text",
+        arguments: {text: "发送路径测试"},
+        targets: [{type: "private", id: "weixin"}],
+        schedule: {kind: "daily", time: "23:59", timezone: "Asia/Shanghai"},
+        enabled: true,
+        draft: false,
+        test_target: {type: "private", id: "weixin"},
+      });
+      const status = {submitted: "success", unknown: "pending", failed: "failed", skipped: "skipped"}[result?.status] || "failed";
+      state.responseTraces = [makeTrace(status, result?.message || "发送结果已返回")];
+      renderResponseTraces();
+    } catch (error) {
+      if (sendStartedAt !== null) {
+        const uncertain = /等待超时|可能仍在处理|结果待确认/i.test(String(error?.message || ""));
+        state.responseTraces = [makeTrace(
+          uncertain ? "pending" : "failed",
+          uncertain ? "结果暂未确认；请先检查微信团队私聊，避免重复发送" : "本次发送未成功",
+        )];
+        renderResponseTraces();
+      } else {
+        badge.className = "status-badge error";
+        badge.innerHTML = "<span></span>测试未完成";
+      }
+      reportError(error);
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      const needsReview = state.responseTraces?.[0]?.stages?.some((stage) => stage.status === "pending");
+      button.textContent = needsReview ? "先核对聊天再重试" : "再次发送并生成";
+    }
   }
 
   function renderResponseTraces() {
@@ -3443,11 +3514,12 @@
     const rawStages = Array.isArray(latest?.stages) ? latest.stages : [];
     const hasFailure = rawStages.some((stage) => stage.status === "failed");
     const hasPending = rawStages.some((stage) => stage.status === "pending");
+    const hasSkipped = rawStages.some((stage) => stage.status === "skipped");
     const badge = $("#traceStatus");
-    badge.className = `status-badge ${hasFailure ? "error" : hasPending ? "warning" : traces.length ? "online" : "checking"}`;
-    badge.innerHTML = `<span></span>${hasFailure ? "发送失败" : hasPending ? "正在发送" : traces.length ? "发送完成" : "等待消息"}`;
+    badge.className = `status-badge ${hasFailure ? "error" : hasPending || hasSkipped ? "warning" : traces.length ? "online" : "checking"}`;
+    badge.innerHTML = `<span></span>${hasFailure ? "发送失败" : hasPending ? "结果待确认" : hasSkipped ? "未发送" : traces.length ? "发送完成" : "等待生成"}`;
     if (!latest) {
-      list.innerHTML = '<div class="empty-state compact"><p>收到下一条消息后，这里会按时间显示回复经过的步骤，不展示聊天正文和原始群标识。</p></div>';
+      list.innerHTML = '<div class="empty-state compact"><p>点击“发送测试并生成”后，会向微信团队发送一条测试消息。</p></div>';
       return;
     }
 
@@ -3497,10 +3569,10 @@
         <strong class="gantt-duration">${escapeHtml(durationText)}</strong>
       </div>`;
     }).join("");
-    const resultLabel = hasFailure ? "未完成" : hasPending ? "发送处理中" : "已发送到微信";
+    const resultLabel = hasFailure ? "发送失败" : hasPending ? "结果待确认" : hasSkipped ? "未发送" : "已发送到微信";
     list.innerHTML = `<article class="trace-gantt-card">
       <header class="trace-summary">
-        <div><span>最近一次发送</span><strong>${escapeHtml(latest.title || "机器人回复")}</strong><time>${escapeHtml(fullTime(latest.time))}</time></div>
+        <div><span>本次测试发送</span><strong>${escapeHtml(latest.title || "微信团队私聊测试")}</strong><time>${escapeHtml(fullTime(latest.time))}</time></div>
         <dl><div><dt>总耗时</dt><dd>${escapeHtml(latest.duration_text || conciseDuration(total))}</dd></div><div><dt>结果</dt><dd>${escapeHtml(resultLabel)}</dd></div></dl>
       </header>
       <div class="gantt-legend" aria-label="阶段状态说明"><span class="success">完成</span><span class="skipped">已跳过</span><span class="pending">发送中</span><span class="failed">失败</span></div>
@@ -3508,7 +3580,7 @@
         <div class="gantt-axis"><span>处理阶段</span><div>${ticks}</div><span>耗时</span></div>
         ${rows || '<div class="empty-state compact">等待处理详情</div>'}
       </div>
-      <footer>横条位置表示阶段发生时间，长度表示耗时；仅展示脱敏后的处理步骤。</footer>
+      <footer>本图显示从测试发送请求到微信返回结果的耗时；每次点击只发送一条固定测试文本。</footer>
     </article>`;
   }
 
@@ -4755,6 +4827,7 @@
     $("#clearScheduledChatFilter").addEventListener("click", () => { state.scheduledChatFilter = null; renderScheduledTasks(); });
     $("#manageGroupPolicies").addEventListener("click", async () => { await selectChatManagementTab("groups"); await navigate("groups"); });
     $("#refreshActivity").addEventListener("click", loadActivity);
+    $("#generateResponseTrace").addEventListener("click", generateResponseTrace);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     coreSettings.init();
     $$('[data-core-settings-tab]').forEach((button) => button.addEventListener("click", () => setCoreSettingsTab(button.dataset.coreSettingsTab, true)));

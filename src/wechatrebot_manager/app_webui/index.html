@@ -284,8 +284,8 @@
         </section>
 
         <section class="page" id="page-activity" aria-labelledby="activityHeading">
-          <div class="page-heading compact"><div><span class="eyebrow">清晰可追溯</span><h1 id="activityHeading">运行记录</h1><p>可以看到一次回复是否经过点名快路径、长期记忆、情感上下文和语音处理。</p></div><button class="button ghost" id="refreshActivity" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
-          <section class="trace-panel panel"><div class="panel-heading"><div><span class="eyebrow">发送追踪</span><h2>机器人消息发送甘特图</h2><p>按时间查看最近一次回复的处理阶段和耗时。</p></div><span class="status-badge" id="traceStatus"><span></span>等待消息</span></div><div class="trace-list" id="responseTraceList"><div class="loading-row">正在整理最近一次发送…</div></div></section>
+          <div class="page-heading compact"><div><span class="eyebrow">清晰可追溯</span><h1 id="activityHeading">运行记录</h1><p>查看机器人启动和微信连接记录；发送耗时由你手动发起一次测试。</p></div><button class="button ghost" id="refreshActivity" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
+          <section class="trace-panel panel"><div class="panel-heading"><div><span class="eyebrow">发送追踪</span><h2>机器人消息发送甘特图</h2><p>点击后会向私聊微信团队（wxid=weixin）发送固定文本“发送路径测试”，并显示本次耗时；此操作不调用回复模型。微信团队的自动回复会被后端拦截。</p></div><div class="trace-actions"><button class="button secondary small" id="generateResponseTrace" data-action-bound disabled type="button">发送测试并生成</button><span class="status-badge" id="traceStatus" aria-live="polite"><span></span>等待生成</span></div></div><div class="trace-list" id="responseTraceList"><div class="empty-state compact"><p>点击按钮后会实际发送一条“发送路径测试”给微信团队，并显示本次发送结果；其自动回复不会进入机器人回复链路。</p></div></div></section>
           <section class="activity-panel panel"><div class="activity-list" id="activityList"><div class="loading-row">正在读取运行记录…</div></div></section>
         </section>
 

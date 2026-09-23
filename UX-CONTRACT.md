@@ -33,7 +33,7 @@
 | 群聊&私聊管理 | 群聊/私聊标签；群聊搜索、复制、刷新和成员；联系人搜索、分页、详情与可用功能 | `GroupDirectoryService` + `GroupPolicyService` + `ContactDirectoryService` + `PrivateChatPolicyService` |
 | 消息中心 | 分类、搜索、筛选、消息、导出、清理 | `ChatHistoryService` |
 | 定时任务 | 新建、编辑、混合多选群聊/私聊、预览、单对象测试、草稿、启停、复制、永久删除、逐对象记录；旧任务折叠兼容 | `ScheduledTaskService` + `TaskStore`；旧任务由 `ScheduleService` 只读兼容 |
-| 运行记录 | 脱敏的结构化生命周期事件与最近回复阶段 | `EventStore` + `ResponseTraceService` |
+| 运行记录 | 生命周期事件；用户点击后向微信团队私聊发送固定测试文本并显示本次发送耗时；该私聊的入站消息会被运行时拦截，不进入模型回复 | `EventStore` + `ScheduledTaskService.test` + runtime private-chat guard |
 | 设置 | 机器人统一身份、人格、长期记忆、情感、统一模型服务、微信路径、备份恢复与维护 | `ApplicationApi` |
 | 帮助 | 快速开始、管理界面实况图和各功能的操作步骤 | 功能中心的只读用途与准备条件 |
 

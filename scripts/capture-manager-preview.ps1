@@ -113,7 +113,7 @@ try {
     Invoke-PreviewBrowser run-code "async page => { await page.locator('[data-settings-tab=memory]').click(); await page.locator('#memoryForm').scrollIntoViewIfNeeded(); await page.waitForTimeout(250); }"
     Invoke-PreviewBrowser screenshot '--filename' (Join-Path $OutputDirectory 'manager-persona-memory.png') '--full-page'
 
-    Invoke-PreviewBrowser run-code "async page => { await page.locator('[data-page=activity]').click(); await page.locator('#responseTraceList .trace-gantt-card').first().waitFor(); const bars=await page.locator('.gantt-bar').count(); if(bars<5) throw new Error('Response Gantt stages missing'); }"
+    Invoke-PreviewBrowser run-code "async page => { await page.locator('[data-page=activity]').click(); await page.locator('#generateResponseTrace').click(); await page.locator('#responseTraceList .trace-gantt-card').first().waitFor(); const bars=await page.locator('.gantt-bar').count(); if(bars!==1) throw new Error('Expected one manual test-send duration bar'); }"
     Invoke-PreviewBrowser screenshot '--filename' (Join-Path $OutputDirectory 'manager-response-trace.png') '--full-page'
 
     Invoke-PreviewBrowser resize 430 932
