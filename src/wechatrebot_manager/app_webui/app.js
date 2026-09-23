@@ -55,7 +55,9 @@
     selectedMessages: [],
     selectedSenderKey: "",
     historyLoad: 0,
+    historyConversationsLoading: false,
     messageLoad: 0,
+    historyMessagesLoading: false,
     historyPolling: false,
     historyHasMore: false,
     historyLoadingOlder: false,
@@ -697,8 +699,13 @@
       if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
     }
     if (page === "history") {
-      await loadConversations({refreshGroups: true});
-      if (state.selectedConversation) await selectConversation(state.selectedConversation.conversation_id, {silent: true});
+      // Keep the current account's conversation and message DOM when returning
+      // to this page. The normal background poll refreshes it without showing
+      // the initial-load state or issuing two consecutive message requests.
+      if ((!state.historyAccount || state.historyReadyAccount !== state.historyAccount)
+          && !state.historyConversationsLoading) {
+        await loadConversations({refreshGroups: true});
+      }
     }
     if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
     if (page === "activity") await loadActivity();
@@ -2048,6 +2055,7 @@
       return;
     }
     const load = ++state.historyLoad;
+    state.historyConversationsLoading = true;
     try {
       const data = await api("get_conversations", {
         account_id: requestAccount,
@@ -2080,6 +2088,7 @@
         await selectConversation(state.conversations[0].conversation_id, {silent: true});
       } else {
         ++state.messageLoad;
+        state.historyMessagesLoading = false;
         state.historyOlderLoad += 1;
         state.historyHasMore = false;
         state.historyLoadingOlder = false;
@@ -2094,6 +2103,9 @@
         $("#newMessageButton").hidden = true;
       }
     } catch (error) { if (!silent) reportError(error); }
+    finally {
+      if (load === state.historyLoad) state.historyConversationsLoading = false;
+    }
   }
 
   function setHistoryActionsEnabled(enabled) {
@@ -2105,7 +2117,9 @@
 
   function invalidateHistoryState() {
     state.historyLoad += 1;
+    state.historyConversationsLoading = false;
     state.messageLoad += 1;
+    state.historyMessagesLoading = false;
     state.historyOlderLoad += 1;
     state.conversations = [];
     state.selectedConversation = null;
@@ -2411,6 +2425,7 @@
     renderConversationHeader(item);
     if (changed) list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     const load = ++state.messageLoad;
+    state.historyMessagesLoading = true;
     const requestAccount = state.historyAccount;
     try {
       const page = normalizeMessagePage(await api("get_messages", conversationId, pagedHistoryFilters()));
@@ -2426,7 +2441,16 @@
         renderMessages(messages, {forceBottom: changed, nearBottom});
       }
       renderConversationInspector(item);
-    } catch (error) { if (!silent) reportError(error); }
+    } catch (error) {
+      if (changed && load === state.messageLoad && requestAccount === state.historyAccount
+          && state.selectedConversation?.conversation_id === conversationId) {
+        list.removeAttribute("aria-busy");
+        list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>后台会自动重试，请稍后查看。</p></div>';
+      }
+      if (!silent) reportError(error);
+    } finally {
+      if (load === state.messageLoad) state.historyMessagesLoading = false;
+    }
   }
 
   async function loadOlderMessages() {
@@ -2466,7 +2490,8 @@
   }
 
   async function pollHistory() {
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+        || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true});
@@ -2484,7 +2509,8 @@
       await loadGroups(true, {background: true});
       return;
     }
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder) return;
+    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+        || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true, refreshGroups: true});
