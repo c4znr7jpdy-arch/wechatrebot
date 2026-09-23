@@ -98,6 +98,53 @@ def _is_user_config(relative_path: Path) -> bool:
     )
 
 
+def _read_installed_manifest_for_merge(root: Path) -> dict[str, object]:
+    manifest_path = root / "config" / "installed-payload.json"
+    if manifest_path.is_symlink() or (
+        hasattr(manifest_path, "is_junction") and manifest_path.is_junction()
+    ):
+        raise PayloadError("现有安装清单不能是符号链接或目录联接。")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return {"files": []}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PayloadError("现有安装清单无法安全保留。") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise PayloadError("现有安装清单格式无效，已取消增量更新。")
+    entries = manifest.get("files")
+    if not isinstance(entries, list):
+        raise PayloadError("现有安装文件清单格式无效，已取消增量更新。")
+    files: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise PayloadError("现有安装文件条目格式无效，已取消增量更新。")
+        relative = _safe_relative_path(entry.get("path"))
+        if _is_user_managed(relative) or relative.as_posix().casefold() == (
+            "config/installed-payload.json"
+        ):
+            continue
+        digest = entry.get("sha256")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in digest)
+        ):
+            raise PayloadError("现有安装文件摘要无效，已取消增量更新。")
+        key = relative.as_posix().casefold()
+        if key in files:
+            raise PayloadError("现有安装清单包含重复路径，已取消增量更新。")
+        files[key] = {"path": relative.as_posix(), "sha256": digest.upper()}
+    result: dict[str, object] = {"files": list(files.values())}
+    release_version = manifest.get("release_version")
+    if isinstance(release_version, str) and release_version.strip():
+        result["release_version"] = release_version.strip()
+    release_build = manifest.get("release_build")
+    if isinstance(release_build, int) and not isinstance(release_build, bool) and release_build >= 0:
+        result["release_build"] = release_build
+    return result
+
+
 def _manifest_file_specs(
     manifest: object,
 ) -> tuple[tuple[Path, str], ...]:
@@ -356,6 +403,11 @@ def install_payload(
     length_errors = tuple(error for error in path_validation.errors if "过长" in error)
     if length_errors:
         raise PayloadError("；".join(length_errors))
+    previous_manifest = (
+        _read_installed_manifest_for_merge(root)
+        if preserve_existing_user_config
+        else {"files": []}
+    )
     updates_root = (root / "updates").resolve()
     updates_root.mkdir(parents=True, exist_ok=True)
     try:
@@ -426,19 +478,37 @@ def install_payload(
             if progress_callback is not None:
                 progress_callback("install", index, file_count)
 
+        installed_by_path = {
+            str(entry["path"]).casefold(): dict(entry)
+            for entry in previous_manifest.get("files", [])
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        }
+        for item in installed_files:
+            installed_by_path[item.relative_path.as_posix().casefold()] = {
+                "path": item.relative_path.as_posix(),
+                "sha256": item.sha256,
+            }
         installed_manifest: dict[str, object] = {
             "schema_version": 1,
-            "files": [
-                {"path": item.relative_path.as_posix(), "sha256": item.sha256}
-                for item in installed_files
-            ],
+            "files": sorted(
+                installed_by_path.values(),
+                key=lambda entry: str(entry["path"]).casefold(),
+            ),
         }
         release_version = manifest.get("release_version")
         if isinstance(release_version, str) and release_version.strip():
             installed_manifest["release_version"] = release_version.strip()
+        elif previous_manifest.get("release_version"):
+            installed_manifest["release_version"] = previous_manifest["release_version"]
         release_build = manifest.get("release_build")
         if isinstance(release_build, int) and not isinstance(release_build, bool) and release_build >= 0:
             installed_manifest["release_build"] = release_build
+        elif (
+            isinstance(previous_manifest.get("release_build"), int)
+            and not isinstance(previous_manifest.get("release_build"), bool)
+            and previous_manifest["release_build"] >= 0
+        ):
+            installed_manifest["release_build"] = previous_manifest["release_build"]
         write_json_atomic(
             root / "config" / "installed-payload.json",
             installed_manifest,
