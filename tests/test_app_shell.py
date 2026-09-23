@@ -1520,6 +1520,10 @@ def test_model_editor_allows_compatible_chat_services_to_declare_multimodal_inpu
     script = (webui / "app.js").read_text(encoding="utf-8")
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
+    assert '<span>供应商</span>' in markup
+    assert '<span>模型输入能力</span>' in markup
+    assert 'escapeHtml(preset.name)}</option>' in script
+    assert ' · ${kind}</option>' not in script
     assert 'id="providerModalities"' in markup
     assert '<option value="text,image">文本和图片</option>' in markup
     assert '<option value="text,image,audio">文本、图片和音频</option>' in markup
