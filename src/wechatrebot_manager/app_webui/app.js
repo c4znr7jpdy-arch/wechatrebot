@@ -3350,8 +3350,8 @@
     const input = $("#providerModalities");
     if (!input) return;
     $("#providerModalitiesHint").textContent = input.value
-      ? "按模型实际支持能力选择；错误声明可能导致媒体消息调用失败。"
-      : "自动识别常见视觉模型名称；名称无法识别时按纯文本处理，也可以在这里明确选择多模态能力。";
+      ? "这是当前模型的能力声明，请以模型官方文档为准；错误声明可能导致媒体消息调用失败。"
+      : "根据模型名称尝试识别；无法确认时按纯文本处理，请以当前模型官方文档为准。";
   }
 
   function syncProviderModalities(serviceKind, modalities) {
@@ -3418,10 +3418,10 @@
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
     syncProviderModalities(preset.service_kind || "chat", preset.modalities || []);
     clearProviderModels();
-    $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
-    const capability = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
-    const modalityHint = capability === "能力可选" ? "输入能力可选" : `${capability}模型`;
-    $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · ${modalityHint}`;
+    $("#providerModelHint").textContent = preset.model
+      ? `默认模型：${preset.model}；可手动修改或从服务端读取后选择`
+      : "请填写具体模型名称，也可从服务端读取后选择";
+    $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · 输入能力以当前模型为准`;
     syncProviderThinkingControl();
     renderProviderSaveIntent(
       providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
@@ -3502,7 +3502,9 @@
     form.elements.api_key.value = "";
     syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
-    $("#providerModelHint").textContent = "可手动填写，也可从服务端读取后选择";
+    $("#providerModelHint").textContent = service.model
+      ? `当前模型：${service.model}；可手动填写，也可从服务端读取后选择`
+      : "可手动填写，也可从服务端读取后选择";
     $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
     $("#providerEditorSubtitle").textContent = service.is_default
@@ -3510,7 +3512,7 @@
       : service.service_kind === "chat"
         ? "已配置，可切换为回复模型"
         : "已配置，供相关功能选择";
-    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备";
+    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；输入能力按当前模型配置";
     $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置服务密钥";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
@@ -4087,8 +4089,7 @@
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
       presetSelect.innerHTML = data.provider_presets.map((preset) => {
-        const kind = providerCapabilityLabel(preset.service_kind || "chat", preset.modalities || []);
-        return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)} · ${kind}</option>`;
+        return `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`;
       }).join("");
     }
     renderProviderServices();
