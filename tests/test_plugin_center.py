@@ -737,7 +737,7 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert saved["future_setting"] == {"keep": True}
 
 
-def test_image_service_round_trip_keeps_visible_model_and_validates_proxy_port(tmp_path: Path) -> None:
+def test_image_service_preserves_legacy_config_without_exposing_credentials(tmp_path: Path) -> None:
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"
     wechat.write_bytes(b"placeholder")
@@ -762,13 +762,17 @@ def test_image_service_round_trip_keeps_visible_model_and_validates_proxy_port(t
     service.engine.is_available = lambda: False
     public_id = service.catalog()["plugins"][0]["id"]
     detail = service.detail(public_id)
-    assert detail["config"]["primary_base_url"] == "https://saved.example/v1"
-    assert detail["config"]["primary_model"] == "image-saved"
-    assert detail["config"]["primary_api_key"] == ""
+    assert detail["configuration_profile"] == "image-service-selection"
+    assert detail["has_legacy_image_model"] is True
+    assert detail["pages"] == ()
+    assert detail["configuration"] == "schema"
+    assert detail["model_schema"] == {}
+    assert detail["config"]["primary_model"] == "__legacy_image_primary__"
+    assert "primary_base_url" not in detail["config"]
+    assert "primary_api_key" not in detail["config"]
     assert detail["advanced_config"] == {}
 
-    edited = {**detail["config"], "primary_base_url": "https://new.example/v1",
-              "primary_model": "image-new", "local_proxy_port": "70000"}
+    edited = {**detail["config"], "local_proxy_port": "70000"}
     with pytest.raises(PluginCenterError, match="本地代理端口"):
         service.save(public_id, edited, detail["revision"])
     assert json.loads(config_path.read_text("utf-8"))["primary_model"] == "image-saved"
@@ -776,9 +780,10 @@ def test_image_service_round_trip_keeps_visible_model_and_validates_proxy_port(t
     edited["local_proxy_port"] = "7890"
     service.save(public_id, edited, detail["revision"])
     reread = service.detail(public_id)
-    assert reread["config"]["primary_base_url"] == "https://new.example/v1"
-    assert reread["config"]["primary_model"] == "image-new"
+    assert reread["config"]["primary_model"] == "__legacy_image_primary__"
+    assert reread["has_legacy_image_model"] is True
     assert reread["config"]["local_proxy_port"] == "7890"
+    assert json.loads(config_path.read_text("utf-8"))["primary_base_url"] == "https://saved.example/v1"
     assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == "stored-secret"
 
 
@@ -834,7 +839,8 @@ def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) ->
     assert {item["value"] for item in detail["providers"]} == {
         "vision_vendor/vision-chat"
     }
-    assert detail["model_schema"]["primary_model"]["_provider_type"] == "image"
+    assert detail["model_schema"] == {}
+    assert detail["basic_schema"]["primary_model"]["_provider_type"] == "image"
 
     detail["config"]["primary_model"] = "image_vendor/image-v2"
     service.save(public_id, detail["config"], detail["revision"])
@@ -843,7 +849,15 @@ def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) ->
     assert saved["primary_base_url"] == "https://images.example/v1"
     assert saved["primary_model"] == "image-v2"
     assert saved["primary_api_key"] == "image-secret"
-    assert service.detail(public_id)["config"]["primary_model"] == "image_vendor/image-v2"
+    reread_detail = service.detail(public_id)
+    assert reread_detail["config"]["primary_model"] == "image_vendor/image-v2"
+    assert service.detail(public_id)["has_legacy_image_model"] is False
+
+    engine["provider_sources"][0]["key"] = []
+    engine_path.write_text(json.dumps(engine), encoding="utf-8")
+    detail_without_key = service.detail(public_id)
+    service.save(public_id, detail_without_key["config"], detail_without_key["revision"])
+    assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == ""
 
 
 def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Path) -> None:

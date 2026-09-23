@@ -131,16 +131,24 @@ def test_link_parser_uses_defaults_and_only_exposes_the_feature_switch():
     assert advanced_schema("astrbot_plugin_parser", schema) == {}
 
 
-def test_image_generation_moves_all_service_fields_to_common_settings():
-    fields = (
+def test_image_generation_uses_unified_model_services_and_keeps_proxy_settings():
+    raw_fields = (
         "primary_base_url", "primary_model", "primary_api_key",
         "secondary_enabled", "secondary_base_url", "secondary_model",
         "secondary_api_key", "use_system_proxy", "local_proxy_port",
     )
-    schema = {key: {"type": "string", "default": ""} for key in fields}
+    visible_fields = (
+        "primary_model", "secondary_enabled", "secondary_model",
+        "use_system_proxy", "local_proxy_port",
+    )
+    schema = {key: {"type": "string", "default": ""} for key in raw_fields}
 
     projected = common_schema("jiang_image", schema)
-    assert tuple(projected) == fields
+    assert tuple(projected) == visible_fields
+    hidden_credentials = {
+        "primary_base_url", "primary_api_key", "secondary_base_url", "secondary_api_key"
+    }
+    assert not hidden_credentials & set(projected)
     assert projected["primary_model"]["_ui_group"] == "主生图模型"
     assert projected["secondary_enabled"]["_ui_disclosure"] == "添加备用模型"
     assert projected["secondary_model"]["_ui_depends_on"] == "secondary_enabled"

@@ -24,7 +24,7 @@ _GUIDES = {
     "jiang_commands": ("查询天气、新闻等信息", "群里可以询问天气、新闻、油价或 Epic 免费游戏；具体指令见下方列表。安排天气推送时，再到定时任务创建天气内容并选择群聊。", "所选群聊须在群聊&私聊管理允许“常用指令”和“接收已配置的定时任务”；两个开关不能互相替代。", ()),
     "jiang_commands.setu": ("发送一张随机图片", "在聊天中发送“图来”；需要自动撤回时打开开关并填写等待秒数。", "在群聊管理中独立勾选“图来”；“常用指令”不会代替此开关。自动撤回依赖微信返回可撤回的消息标识。", ("setu_recall_enabled", "setu_recall_seconds")),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
-    "jiang_image": ("用文字或参考图生成图片", "先填写一个主生图模型即可；确有需要时点击“添加备用模型”再填写第二个。连接失败时可启用本地代理，端口留空会沿用系统已有代理设置。", "需要支持生图的服务；Grok 聊天模型不是所有生图接口的替代品。", ("primary_api_key", "primary_base_url", "primary_model", "secondary_enabled", "secondary_api_key", "secondary_base_url", "secondary_model", "use_system_proxy", "local_proxy_port")),
+    "jiang_image": ("用文字或参考图生成图片", "先到“设置 → 模型服务”添加图片模型，再在这里选择主模型；确有需要时可启用一个备用模型。服务地址、模型名称和密钥只在模型服务中管理。", "需要支持生图的图片模型服务；聊天模型不能自动替代生图模型。", ("primary_model", "secondary_enabled", "secondary_model", "use_system_proxy", "local_proxy_port")),
     "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
@@ -260,8 +260,8 @@ def common_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
     projected = select(schema) or schema
     if module_name == "jiang_image":
         groups = (
-            ("主生图模型", ("primary_base_url", "primary_model", "primary_api_key")),
-            ("备用生图模型", ("secondary_enabled", "secondary_base_url", "secondary_model", "secondary_api_key")),
+            ("主生图模型", ("primary_model",)),
+            ("备用生图模型", ("secondary_enabled", "secondary_model")),
             ("本地代理", ("use_system_proxy", "local_proxy_port")),
         )
         ordered = {}
@@ -275,8 +275,14 @@ def common_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
                     field["_ui_full"] = True
                 if key == "secondary_enabled":
                     field["description"] = "使用备用生图模型"
-                    field["hint"] = "主模型失败时才会使用；不需要时无需填写备用配置。"
+                    field["hint"] = "主模型不可用时才会尝试；备用服务从已配置的图片模型中选择。"
                     field["_ui_disclosure"] = "添加备用模型"
+                if key == "primary_model":
+                    field["_blank_label"] = "请选择已配置的图片模型"
+                    field["hint"] = "接口地址、模型名称和密钥统一在“设置 → 模型服务”管理。"
+                if key == "secondary_model":
+                    field["_blank_label"] = "请选择备用图片模型"
+                    field["hint"] = "备用模型需先在“设置 → 模型服务”中添加。"
                 if key.startswith("secondary_") and key != "secondary_enabled":
                     field["_ui_depends_on"] = "secondary_enabled"
                 if key == "use_system_proxy":

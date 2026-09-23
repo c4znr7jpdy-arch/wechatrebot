@@ -1356,6 +1356,9 @@ tbody tr:hover { background: #fbfdff; }
 .help-toolbar h2 { font-family: var(--font-display); }
 
 .feature-help-entry { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 16px 0; padding: 12px 14px; border: 1px solid #c9ddfb; border-radius: 9px; color: var(--muted); background: #f5f8ff; font-size: 12px; }
+.feature-model-service-entry { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 14px 0 18px; padding: 15px 16px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: var(--blue-100); }
+.feature-model-service-entry strong { display: block; font-size: 13px; }
+.feature-model-service-entry p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 
 /* Settings sections now grow naturally instead of nesting scroll containers. */
 #page-settings .settings-grid { display: grid; flex: none; min-height: 0; align-items: start; }
@@ -1480,6 +1483,7 @@ tbody tr:hover { background: #fbfdff; }
   .help-shot-grid,
   .help-feature-grid { grid-template-columns: 1fr; }
   .feature-help-entry,
+  .feature-model-service-entry,
   .help-toolbar { align-items: flex-start; flex-direction: column; }
 }
 

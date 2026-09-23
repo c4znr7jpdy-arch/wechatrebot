@@ -19,6 +19,7 @@
     featureLoad: 0,
     featurePrefetch: 0,
     featureDetails: {},
+    imageServiceChoicesStale: false,
     featureFeedback: "",
     featurePageLoad: 0,
     groupsLoaded: false,
@@ -740,6 +741,10 @@
       content.scrollTop = 0;
     }
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
+    if (page === "features" && state.imageServiceChoicesStale) {
+      state.imageServiceChoicesStale = false;
+      if (state.selectedFeature) await openFeature(state.selectedFeature, false, true);
+    }
     if (page === "groups") {
       if (state.chatManagementTab === "groups") {
         await loadGroups(true, {background: state.groupsLoaded});
@@ -845,6 +850,25 @@
       renderFeatureDetail();
       await next();
     }});
+  }
+
+  function openImageModelServices() {
+    if (state.featureSaving || state.scheduledBusy) return;
+    if (state.featureDirty) {
+      discardFeatureChanges(openImageModelServices);
+      return;
+    }
+    if (guardProviderDraft(() => {
+      showProviderOverview();
+      openImageModelServices();
+    })) return;
+    if (coreSettings.guard(openImageModelServices)) return;
+    state.imageServiceChoicesStale = true;
+    state.settingsSection = "model";
+    if (state.providerScreen === "editor") showProviderOverview();
+    void navigate("settings").then(() => {
+      if (state.activePage === "settings") setSettingsSection("model", true);
+    });
   }
 
   function useFeatureDetail(source, afterSave = false, preserveTab = false) {
@@ -1053,6 +1077,7 @@
     const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
     const pageOnly = TWITTER_FEATURE_IDS.has(detail.id) && detail.configuration === "page" && detail.pages?.length;
+    const imageServiceSelection = detail.configuration_profile === "image-service-selection";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
         <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
@@ -1060,6 +1085,7 @@
       </div>
       ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
       <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
+      ${imageServiceSelection ? `<section class="feature-model-service-entry" aria-label="图片模型服务配置"><div><strong>图片模型统一在模型服务管理</strong><p>${escapeHtml(detail.configuration_note || "在模型服务中添加图片模型后，在此选择主模型和备用模型。")}</p></div><button class="button secondary small" id="manageImageModels" type="button" data-action-bound disabled>管理图片模型服务</button></section>` : ""}
       ${commandMarkup}
       ${pageOnly ? `
         <section class="feature-page-panel" aria-label="${escapeHtml(detail.display_name)}专属配置">
@@ -1075,6 +1101,11 @@
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online ? "保存并应用" : "保存设置"}</button></div></div>` :
         `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
+    const manageImageModels = $("#manageImageModels");
+    if (manageImageModels) {
+      manageImageModels.addEventListener("click", openImageModelServices);
+      manageImageModels.disabled = state.featureSaving;
+    }
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
       try {
@@ -3817,8 +3848,17 @@
       <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，API Key / Token Plan 仅保存在当前设备。</span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
         const identity = providerCardIdentity(item);
-        const statusText = item.is_default ? "使用中" : item.configured ? "备用" : "待完善";
-        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充 API Key / Token Plan 后即可使用";
+        const functionalService = item.service_kind !== "chat";
+        const statusText = item.is_default
+          ? "使用中"
+          : !item.configured
+            ? "待完善"
+            : functionalService ? "功能可选" : "备用";
+        const description = item.is_default
+          ? "当前回复模型"
+          : !item.configured
+            ? "补充 API Key / Token Plan 后即可使用"
+            : functionalService ? "供对应功能选择" : "可切换为回复模型";
         const capability = item.service_kind === "image"
           ? {title: "图片能力", detail: "供功能中心图片生成选择"}
           : item.service_kind === "voice"
@@ -4969,13 +5009,9 @@
       performance: {max_concurrent: 1},
     };
     const imageBasicSchema = {
-      primary_base_url: {description: "主生图 API Base URL", type: "string", hint: "例如 https://api.hostcentral.cc/。", _ui_group: "主生图模型"},
-      primary_model: {description: "主生图模型", type: "string", hint: "例如 gpt-image-2。", _ui_group: "主生图模型"},
-      primary_api_key: {description: "主生图 API Key", type: "string", secret: true, hint: "密钥仅保存在本机；已保存时留空不会覆盖。", _ui_group: "主生图模型"},
-      secondary_enabled: {description: "使用备用生图模型", type: "bool", hint: "主模型失败时才会使用；不需要时无需填写备用配置。", _ui_group: "备用生图模型", _ui_full: true, _ui_disclosure: "添加备用模型"},
-      secondary_base_url: {description: "备用生图 API Base URL", type: "string", _ui_group: "备用生图模型"},
-      secondary_model: {description: "备用生图模型", type: "string", _ui_group: "备用生图模型"},
-      secondary_api_key: {description: "备用生图 API Key", type: "string", secret: true, hint: "密钥仅保存在本机；已保存时留空不会覆盖。", _ui_group: "备用生图模型"},
+      primary_model: {description: "主生图模型", type: "string", hint: "接口地址、模型名称和密钥统一在“设置 → 模型服务”管理。", _ui_group: "主生图模型"},
+      secondary_enabled: {description: "使用备用生图模型", type: "bool", hint: "主模型不可用时才会尝试；备用服务从已配置的图片模型中选择。", _ui_group: "备用生图模型", _ui_full: true, _ui_disclosure: "添加备用模型"},
+      secondary_model: {description: "备用生图模型", type: "string", hint: "备用模型需先在“设置 → 模型服务”中添加。", _ui_group: "备用生图模型"},
       use_system_proxy: {description: "使用本地代理", type: "bool", hint: "关闭时直连；端口留空时使用系统已有代理设置。", _ui_group: "本地代理", _ui_full: true},
       local_proxy_port: {description: "本地代理端口（可留空）", type: "string", hint: "例如 7890。仅连接本机 127.0.0.1；留空时使用系统已有代理设置。", _ui_group: "本地代理", _ui_control: "proxy-port", _ui_depends_on: "use_system_proxy", min: 1, max: 65535},
     };
@@ -4983,8 +5019,8 @@
       if (key.startsWith("secondary_") && key !== "secondary_enabled") field._ui_depends_on = "secondary_enabled";
     }
     const imageConfig = {
-      primary_api_key: "", primary_base_url: "https://api.hostcentral.cc/", primary_model: "gpt-image-2",
-      secondary_enabled: false, secondary_api_key: "", secondary_base_url: "https://api.gemai.cc/v1", secondary_model: "gpt-image-2-2K",
+      primary_model: "",
+      secondary_enabled: false, secondary_model: "",
       use_system_proxy: true, local_proxy_port: "",
     };
     const previewImageSchema = () => {
@@ -4994,10 +5030,10 @@
         .map((item) => ({value: item.id, label: `${item.name || item.model} · ${item.model}`}));
       ["primary_model", "secondary_model"].forEach((key) => {
         schema[key].options = ["", ...choices.map((item) => item.value)];
-        schema[key].labels = ["手动填写模型名称", ...choices.map((item) => item.label)];
+        schema[key].labels = [key === "primary_model" ? "请选择已配置的图片模型" : "请选择备用图片模型", ...choices.map((item) => item.label)];
         schema[key].hint = choices.length
-          ? "可选择已配置的图片模型，也可以保留或手动填写模型名称。"
-          : "先在常用设置中新增图片模型，之后可在这里直接选择。";
+          ? "接口地址、模型名称和密钥统一在“设置 → 模型服务”管理。"
+          : "先到“设置 → 模型服务”添加图片模型，返回后即可选择。";
       });
       return {schema, choices};
     };
@@ -5008,7 +5044,7 @@
       "定时任务": {summary: "安排内容推送和签到", setup_steps: ["打开专属配置页创建计划，再到定时任务中心调整。"], prerequisites: ["写操作仅允许可靠管理员身份；共享账号签到仅允许机器人管理员。"], audience: "群管理常用", readiness: "权限已加固", recommendation: "建议保留；任务按当前会话隔离，微信无法确认群角色时默认拒绝修改。"},
       "自动改代码（实验）": {summary: "实验性的功能代码维护", setup_steps: ["仅由了解代码与回滚的维护人员使用。"], prerequisites: ["可读写并重新加载功能代码。"], audience: "不建议默认启用", readiness: "实验性高风险", recommendation: "不属于群主管理刚需，应从小白默认界面和新安装默认项移除。"},
       "群成员变动通知": {summary: "提示入群、退群和群昵称变化", setup_steps: ["设置提示文案后在测试群验证。"], prerequisites: ["不能发布或编辑微信群公告。"], audience: "群管理常用", readiness: "收到成员事件即可用", recommendation: "建议保留，并始终使用准确名称。"},
-      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["先填写一个主生图模型的地址、模型和密钥。", "确有需要时点击“添加备用模型”再填写第二个。", "连接失败时可开启本地代理；填写本机端口或留空使用已有代理设置。"], prerequisites: ["需要支持生图的服务；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；服务密钥只保存在本机。"},
+      "图片生成": {summary: "用文字或参考图生成图片", setup_steps: ["先到“设置 → 模型服务”添加图片模型。", "回到此处选择主模型；确有需要时再添加一个备用模型。", "需要代理时开启本地代理，并填写端口或沿用系统已有代理设置。"], prerequisites: ["需要支持生图的图片模型；聊天模型不能自动替代生图模型。"], audience: "场景选配", readiness: "需要生图服务", recommendation: "有生图需求时启用；图片模型服务统一管理。"},
       "洛克王国助手": {summary: "使用洛克王国游戏助手", setup_steps: ["通过二维码或已有凭据绑定游戏账号。"], prerequisites: ["账号凭据不要发到群里。"], audience: "兴趣选配", readiness: "需要游戏账号绑定", recommendation: "仅洛克王国用户群有必要，不是运势功能。"},
     };
     const previewSavedConfigs = new Map();
@@ -5055,7 +5091,9 @@
         advanced_schema: {},
         config: structuredClone(previewSavedConfigs.get(id) || imageConfig),
         advanced_config: {},
-        configuration_note: "生图服务配置已合并到常用设置，密钥保存后不会回显。",
+        configuration_note: "图片服务地址、模型名称和密钥统一在模型服务管理；此页只选择主/备用模型与代理。",
+        configuration_profile: "image-service-selection",
+        has_legacy_image_model: false,
         setup_steps: item.guide.setup_steps,
         revision: "preview",
         providers: [],

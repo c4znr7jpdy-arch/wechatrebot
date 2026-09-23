@@ -481,10 +481,14 @@ _CUSTOMER_SCHEMA_PROFILES = {
 # updates cannot replace legal/feature-set.json, so keep this narrow UI policy
 # override until those installations have received a newer full payload.
 _MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
-# Short-drama settings are product-managed and its schedules now live in the
-# unified task center. Hide the legacy plugin page even when an older full
-# installation still declares it in legal/feature-set.json.
-_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama"})
+# Product-managed pages stay out of the feature center even when an older full
+# installation still declares them in legal/feature-set.json.
+_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama", "jiang_image"})
+_MANAGER_NO_CONFIGURATION_MODULES = frozenset({"jiang_short_drama"})
+_LEGACY_IMAGE_MODEL_SENTINELS = {
+    "primary": "__legacy_image_primary__",
+    "secondary": "__legacy_image_secondary__",
+}
 # Page-only features must stay page-only on older installations whose signed
 # feature manifest still declares the legacy schema-and-page mode.
 _MANAGER_PAGE_ONLY_MODULES = frozenset(
@@ -1259,31 +1263,39 @@ def _image_provider_bindings(
 
 
 def _resolve_image_provider_config(
-    config: dict[str, Any], bindings: dict[str, dict[str, str]],
+    config: dict[str, Any],
+    bindings: dict[str, dict[str, str]],
+    legacy_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Translate selected provider IDs into the image plugin's flat config."""
     result = copy.deepcopy(config)
     for prefix in ("primary", "secondary"):
         model_key = f"{prefix}_model"
+        if result.get(model_key) == _LEGACY_IMAGE_MODEL_SENTINELS[prefix]:
+            if isinstance(legacy_config, dict):
+                result[model_key] = legacy_config.get(model_key, "")
+            continue
         binding = bindings.get(str(result.get(model_key) or "").strip())
         if not binding:
             continue
         result[model_key] = binding["model"]
         result[f"{prefix}_base_url"] = binding["api_base"]
-        if binding["api_key"]:
-            result[f"{prefix}_api_key"] = binding["api_key"]
+        result[f"{prefix}_api_key"] = binding["api_key"]
     return result
 
 
 def _expose_image_provider_config(
-    config: dict[str, Any], bindings: dict[str, dict[str, str]],
+    config: dict[str, Any],
+    bindings: dict[str, dict[str, str]],
+    source_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Show the provider ID in the manager while retaining plugin config on disk."""
     result = copy.deepcopy(config)
     for prefix in ("primary", "secondary"):
         model_key = f"{prefix}_model"
         model = str(result.get(model_key) or "").strip()
-        api_base = str(result.get(f"{prefix}_base_url") or "").strip().rstrip("/")
+        connection = source_config if isinstance(source_config, dict) else result
+        api_base = str(connection.get(f"{prefix}_base_url") or "").strip().rstrip("/")
         match = next(
             (
                 provider_id
@@ -1295,7 +1307,54 @@ def _expose_image_provider_config(
         )
         if match:
             result[model_key] = match
+        elif (
+            model
+            or str(result.get(f"{prefix}_base_url") or "").strip()
+            or str(result.get(f"{prefix}_api_key") or "").strip()
+        ):
+            result[model_key] = _LEGACY_IMAGE_MODEL_SENTINELS[prefix]
     return result
+
+
+def _preserve_legacy_image_model_choices(
+    schema: dict[str, Any],
+    config: dict[str, Any],
+    bindings: dict[str, dict[str, str]],
+) -> tuple[dict[str, Any], bool]:
+    """Keep existing unregistered models selectable until users migrate them."""
+    result = copy.deepcopy(schema)
+    has_legacy_model = False
+    for prefix in ("primary", "secondary"):
+        model_key = f"{prefix}_model"
+        model = str(config.get(model_key) or "").strip()
+        api_base = str(config.get(f"{prefix}_base_url") or "").strip()
+        api_key = str(config.get(f"{prefix}_api_key") or "").strip()
+        if not model and not api_base and not api_key:
+            continue
+        api_base = api_base.rstrip("/")
+        registered = any(
+            binding["model"] == model
+            and binding["api_base"].rstrip("/") == api_base
+            for binding in bindings.values()
+        )
+        if registered:
+            continue
+        has_legacy_model = True
+        field = result.get(model_key)
+        if not isinstance(field, dict):
+            continue
+        sentinel = _LEGACY_IMAGE_MODEL_SENTINELS[prefix]
+        options = list(field.get("options") or [""])
+        labels = list(
+            field.get("labels")
+            or [str(field.get("_blank_label") or "请选择图片模型")]
+        )
+        if sentinel not in options:
+            options.append(sentinel)
+            labels.append("现有独立配置（保留中）")
+        field["options"] = options
+        field["labels"] = labels
+    return result, has_legacy_model
 
 
 def _validate_image_proxy_port(config: dict[str, Any]) -> None:
@@ -1952,6 +2011,8 @@ class PluginCenterService:
                     pages=pages,
                     configuration=(
                         "none"
+                        if module_name in _MANAGER_NO_CONFIGURATION_MODULES
+                        else "schema"
                         if module_name in _MANAGER_HIDDEN_PAGE_MODULES
                         else
                         "page"
@@ -2149,13 +2210,22 @@ class PluginCenterService:
         schema_key = item.catalog_key
         customer_schema, profile = _project_customer_schema(schema_key, runtime_schema)
         clean_schema = _customer_schema(customer_schema, config)
+        has_legacy_image_model = False
         customer_config = _clear_factory_provider_values(
             _customer_config(customer_schema, config)
         )
         if module_name == "jiang_image":
-            customer_config = _expose_image_provider_config(customer_config, image_bindings)
+            clean_schema, has_legacy_image_model = _preserve_legacy_image_model_choices(
+                clean_schema, config, image_bindings
+            )
+            customer_config = _expose_image_provider_config(
+                customer_config, image_bindings, config
+            )
         guide = get_plugin_guide(schema_key)
         clean_basic_schema, clean_model_schema = _split_schema(clean_schema)
+        if module_name == "jiang_image":
+            clean_basic_schema = clean_schema
+            clean_model_schema = {}
         group_schedule_schema = (
             _group_analysis_schedule_schema(runtime_schema)
             if module_name == _GROUP_ANALYSIS_MODULE
@@ -2165,6 +2235,15 @@ class PluginCenterService:
         if module_name == _GROUP_ANALYSIS_MODULE:
             visible_advanced_schema = _without_group_analysis_schedule(
                 visible_advanced_schema
+            )
+        configuration_profile = ""
+        configuration_note = profile.note if profile else ""
+        if module_name == "jiang_image":
+            configuration_profile = "image-service-selection"
+            configuration_note = (
+                "检测到旧版独立图片配置，原配置仍保留；添加模型服务后选择对应服务即可迁移。"
+                if has_legacy_image_model
+                else "图片服务地址、模型名称和密钥统一在模型服务管理；此页只选择主/备用模型与代理。"
             )
         return {
             "id": public_id,
@@ -2177,7 +2256,9 @@ class PluginCenterService:
             "configuration": item.configuration,
             "description": item.description,
             "simplified": item.simplified,
-            "configuration_note": profile.note if profile else "",
+            "configuration_profile": configuration_profile,
+            "configuration_note": configuration_note,
+            "has_legacy_image_model": has_legacy_image_model,
             "setup_steps": profile.setup_steps if profile else (),
             "guide": guide,
             "advanced_schema": _customer_schema(
@@ -2256,10 +2337,21 @@ class PluginCenterService:
             if not isinstance(baseline, dict):
                 raise ConfigConflictError("配置已被其他窗口修改，请刷新后再保存。")
             changed = _changed_customer_config(schema, config, baseline)
-            current = _customer_config(
-                schema,
-                _normalize_config(schema, _merge_defaults(schema, stored)),
+            normalized_current = _normalize_config(
+                schema, _merge_defaults(schema, stored)
             )
+            current = _customer_config(schema, normalized_current)
+            if module_name == "jiang_image":
+                current_engine = _read_object(_dashboard_path(self.install_root))
+                current_sources = current_engine.get("provider_sources", [])
+                current_providers = current_engine.get("provider", [])
+                current_bindings = _image_provider_bindings(
+                    current_sources if isinstance(current_sources, list) else [],
+                    current_providers if isinstance(current_providers, list) else [],
+                )
+                current = _expose_image_provider_config(
+                    current, current_bindings, normalized_current
+                )
             if _customer_change_conflicts(schema, changed, baseline, current):
                 raise ConfigConflictError(
                     "同一项设置已在其他窗口修改，请重新读取后确认再保存。"
@@ -2274,7 +2366,7 @@ class PluginCenterService:
                 configured_sources if isinstance(configured_sources, list) else [],
                 configured_providers if isinstance(configured_providers, list) else [],
             )
-            merged = _resolve_image_provider_config(merged, image_bindings)
+            merged = _resolve_image_provider_config(merged, image_bindings, stored)
         normalized = _normalize_config(schema, _merge_defaults(schema, merged))
         _validate_config(schema, normalized)
         if module_name == "jiang_image" and "local_proxy_port" in schema:

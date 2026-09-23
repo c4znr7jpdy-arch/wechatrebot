@@ -1211,7 +1211,9 @@ def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
     assert 'data-audience="optional"' not in audience
     assert 'data-audience="advanced"' not in audience
     assert 'previewFeature("feature-parser", "链接解析", "none"' in script
-    assert 'primary_api_key: {description: "主生图 API Key"' in script
+    assert 'configuration_profile: "image-service-selection"' in script
+    assert "管理图片模型服务" in script
+    assert 'primary_api_key: {description: "主生图 API Key"' not in script
     assert 'advanced_schema: {}' in script
     assert '.filter(([key]) => Object.keys(schemas[key]).length)' in script
 
