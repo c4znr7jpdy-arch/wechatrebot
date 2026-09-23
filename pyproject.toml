@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "aiohttp==3.13.5",
+    "httpx==0.28.1",
     "pytest>=8,<9",
 ]
 
