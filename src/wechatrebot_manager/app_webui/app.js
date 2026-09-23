@@ -93,12 +93,14 @@
     providerModels: [],
     providerModelFiltering: false,
     providerModelFocus: -1,
+    dismissedHomeSetupAlerts: new Set(),
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const THEME_STORAGE_KEY = "wechatrebot-theme";
   const THEME_CHANNEL = "wechatrebot-theme";
+  const HOME_SETUP_DISMISSALS_STORAGE_KEY = "wechatrebot-home-setup-dismissals";
   const CONTACT_PAGE_SIZE = 100;
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
@@ -108,6 +110,7 @@
   let groupMemberRequestQueue = Promise.resolve();
   const groupMemberLoadsInFlight = new Set();
   const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
+  state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -629,6 +632,7 @@
       window.clearTimeout(state.groupRefreshRetryTimer);
       state.groupRefreshRetryTimer = 0;
       state.groupMemberLoad += 1;
+      clearPendingGroupMemberLoading();
     }
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
@@ -644,7 +648,11 @@
     }
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
     if (page === "groups") {
-      if (state.chatManagementTab === "groups") await loadGroups(true, {background: state.groupsLoaded});
+      if (state.chatManagementTab === "groups") {
+        await loadGroups(true, {background: state.groupsLoaded});
+        if (state.groupInspectorView === "members" && state.selectedGroup
+            && !state.groupMembers[state.selectedGroup]) renderGroupInspector();
+      }
       if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
     }
     if (page === "history") {
@@ -1349,6 +1357,12 @@
     }, GROUP_DIRECTORY_RETRY_DELAYS_MS[retryAttempt]);
   }
 
+  function clearPendingGroupMemberLoading() {
+    Object.entries(state.groupMembers).forEach(([groupId, memberData]) => {
+      if (memberData?.loading) delete state.groupMembers[groupId];
+    });
+  }
+
   async function loadGroups(refresh = false, options = {}) {
     if (state.groupsBusy) return;
     const background = options.background === true;
@@ -1391,21 +1405,14 @@
       if (state.selectedGroup && !state.groups.some((item) => item.group_id === state.selectedGroup)) {
         state.selectedGroup = null;
       }
+      const previousMemberLoad = state.groupMemberLoad;
       const memberLoad = background && previousGroups === JSON.stringify(state.groups)
         && previousAccount === state.groupAccount
         ? state.groupMemberLoad : ++state.groupMemberLoad;
+      if (memberLoad !== previousMemberLoad) clearPendingGroupMemberLoading();
       const groupsNeedingCounts = state.groups.filter((item) =>
         !Number.isInteger(item.member_count)
         && (!background || !state.groupMembers[item.group_id]));
-      groupsNeedingCounts.forEach((item) => {
-        const previous = state.groupMembers[item.group_id] || {};
-        state.groupMembers[item.group_id] = {
-          ...previous,
-          loading: true,
-          error: "",
-          items: Array.isArray(previous.items) ? previous.items : [],
-        };
-      });
       groupDirectoryStatus(data);
       if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
           || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
@@ -1414,7 +1421,11 @@
         $("#groupUpdated").textContent = state.groupUpdatedAt
           ? `${state.groupStale ? "上次成功" : "更新于"} ${fullTime(state.groupUpdatedAt)}` : "尚无可用结果";
       }
-      void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad);
+      if (state.groupInspectorView === "members" && state.selectedGroup
+          && groupsNeedingCounts.some((item) => item.group_id === state.selectedGroup)
+          && !state.groupMembers[state.selectedGroup]) {
+        void hydrateGroupMemberCounts([state.selectedGroup], memberLoad);
+      }
     } catch (error) {
       state.groupStale = true;
       scheduleGroupRefreshRetry(retryAttempt);
@@ -1450,13 +1461,14 @@
     $("#groupRows").innerHTML = items.length ? items.map((item) => {
       const selected = item.group_id === state.selectedGroup;
       const memberData = state.groupMembers[item.group_id];
+      const cachedCount = Number.isInteger(memberData?.total) ? memberData.total : item.member_count;
       const memberCount = memberData?.loading
         ? '<span class="member-count-state loading">读取中</span>'
-        : Number.isInteger(item.member_count)
-          ? escapeHtml(item.member_count)
+        : Number.isInteger(cachedCount)
+          ? escapeHtml(cachedCount)
           : memberData?.error
             ? '<span class="member-count-state error">读取失败</span>'
-            : '<span class="member-count-state loading">读取中</span>';
+            : '<span class="member-count-state unknown">未知</span>';
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
         <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
@@ -1508,9 +1520,10 @@
     }
     const memberData = state.groupMembers[group.group_id];
     const policyData = state.groupPolicies[group.group_id];
+    const cachedCount = Number.isInteger(memberData?.total) ? memberData.total : group.member_count;
     const memberCount = memberData?.loading ? "读取中"
-      : Number.isInteger(group.member_count) ? `${group.member_count} 人`
-      : memberData?.error ? "读取失败" : "待读取";
+      : Number.isInteger(cachedCount) ? `${cachedCount} 人`
+      : memberData?.error ? "读取失败" : "未知";
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
@@ -1525,7 +1538,9 @@
     $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
       state.groupInspectorView = button.dataset.inspectorView;
       renderGroupInspector();
-      if (state.groupInspectorView === "members" && !state.groupMembers[group.group_id]) loadGroupMembers(group.group_id);
+      if (state.groupInspectorView === "members" && !state.groupMembers[group.group_id]) {
+        void hydrateGroupMemberCounts([group.group_id], state.groupMemberLoad);
+      }
     }));
     $("#loadGroupMembers")?.addEventListener("click", () => loadGroupMembers(group.group_id));
     bindAvatarFallbacks(panel);
@@ -1602,7 +1617,7 @@
     const pending = [...new Set(groupIds)];
     for (const groupId of pending) {
       if (generation !== state.groupMemberLoad) return;
-      await loadGroupMembers(groupId, {background: true, generation});
+      await loadGroupMembers(groupId, {generation});
     }
   }
 
@@ -3590,6 +3605,84 @@
         <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
+    renderHomeSetupAlerts();
+  }
+
+  function readHomeSetupAlertDismissals() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(HOME_SETUP_DISMISSALS_STORAGE_KEY) || "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : []);
+    } catch (_error) {
+      return new Set();
+    }
+  }
+
+  function renderHomeSetupAlerts() {
+    const container = $("#homeSetupAlerts");
+    if (!container) return;
+    const services = state.bootstrap?.providers;
+    if (!Array.isArray(services)) {
+      container.replaceChildren();
+      container.hidden = true;
+      return;
+    }
+    const configured = services.filter((service) => service?.configured);
+    const chatServices = configured.filter((service) => (service.service_kind || "chat") === "chat");
+    const hasReplyModel = chatServices.some((service) => service.is_default);
+    const hasImageUnderstanding = chatServices.some((service) =>
+      Array.isArray(service.modalities) && service.modalities.includes("image"));
+    const hasImageModel = configured.some((service) => service.service_kind === "image");
+    const hasVectorModel = configured.some((service) => service.service_kind === "embedding");
+    const reminders = [
+      !hasReplyModel && {
+        id: "reply-model",
+        priority: 1,
+        title: "未配置回复模型",
+        message: "配置一个可用的回复模型后，机器人才能回答消息。",
+      },
+      hasReplyModel && !hasImageUnderstanding && {
+        id: "image-understanding",
+        priority: 2,
+        title: "未配置图片理解（多模态）模型",
+        message: "当前没有支持图片输入的聊天模型，机器人无法理解收到的图片。",
+      },
+      !hasImageModel && {
+        id: "image-generation",
+        priority: 3,
+        title: "未配置生图模型",
+        message: "需要图片生成时，请在模型服务中添加图片模型。",
+      },
+      !hasVectorModel && {
+        id: "vector-model",
+        priority: 4,
+        title: "未配置向量模型",
+        message: "向量检索相关功能需要单独配置向量模型。",
+      },
+    ].filter((item) => item && !state.dismissedHomeSetupAlerts.has(item.id));
+    container.innerHTML = reminders.map((item) => `
+      <article class="home-setup-alert" data-priority="${item.priority}">
+        <span class="home-setup-alert-icon" aria-hidden="true">!</span>
+        <div class="home-setup-alert-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p></div>
+        <div class="home-setup-alert-actions">
+          <button class="button secondary small" type="button" data-home-setup-configure>去配置</button>
+          <button class="button ghost small" type="button" data-home-setup-dismiss="${escapeHtml(item.id)}">不再提示</button>
+        </div>
+      </article>`).join("");
+    container.hidden = reminders.length === 0;
+    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", async () => {
+      await navigate("settings");
+      if (state.activePage === "settings") selectSettingsSection("model");
+    }));
+    $$('[data-home-setup-dismiss]', container).forEach((button) => button.addEventListener("click", () => {
+      state.dismissedHomeSetupAlerts.add(button.dataset.homeSetupDismiss);
+      try {
+        window.localStorage.setItem(
+          HOME_SETUP_DISMISSALS_STORAGE_KEY,
+          JSON.stringify([...state.dismissedHomeSetupAlerts]),
+        );
+      } catch (_error) { /* Keep the dismissal for this window if storage is unavailable. */ }
+      renderHomeSetupAlerts();
+    }));
   }
 
   async function setProviderDefault(providerId, button) {
