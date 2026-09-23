@@ -25,7 +25,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class GroupDirectoryService:
-    _REFRESH_INTERVAL_SECONDS = 60.0
+    _REFRESH_INTERVAL_SECONDS = 15.0
     _RETRY_INTERVAL_SECONDS = 15.0
 
     def __init__(self, install_root: str | Path):
