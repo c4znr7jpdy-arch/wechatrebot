@@ -1,0 +1,61 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -9,7 +9,7 @@ import logging
+ import types
+ from pathlib import Path
+ 
+-from astrbot.api import star
++from astrbot.api import AstrBotConfig, star
+ from astrbot.api.event import AstrMessageEvent, filter
+ 
+ logger = logging.getLogger("jiang_rocom")
+@@ -87,7 +87,7 @@ _rocom = None
+ def _get_rocom():
+     global _rocom
+     if _rocom is None:
+-        config = RocomConfig()
++        config = _get_rocom_plugin().config
+         _rocom = RocomPluginAdapter(config)
+     return _rocom
+ 
+@@ -168,13 +168,25 @@ class Main(star.Star):
+ # ── AstrBot Star 插件 ───────────────────────────────────
+ 
+ class Main(star.Star):
+-    def __init__(self, context: star.Context) -> None:
++    def __init__(
++        self,
++        context: star.Context,
++        config: AstrBotConfig | None = None,
++    ) -> None:
++        super().__init__(context)
+         self.context = context
++        self.config = config or {}
+ 
+     async def initialize(self) -> None:
+         try:
+             plugin = _get_rocom_plugin()
++            configured_api_key = str(
++                self.config.get("wegame_api_key") or ""
++            ).strip()
++            if configured_api_key:
++                plugin.config.wegame_api_key = configured_api_key
++                plugin.client.wegame_api_key = configured_api_key
+             plugin.renderer.start_cleanup()
+             logger.info("[Rocom] 洛克王国插件已加载")
+         except Exception as e:
+             logger.exception(f"[Rocom] 初始化失败: {e}")
+diff --git a/_conf_schema.json b/_conf_schema.json
+new file mode 100644
+--- /dev/null
++++ b/_conf_schema.json
+@@ -0,0 +1,8 @@
++{
++  "wegame_api_key": {
++    "type": "string",
++    "description": "WeGame API Key",
++    "hint": "用于洛克王国扫码登录和接口请求。请填写服务分配给本机器人的 API Key；留空时使用 ROCOM_API_KEY 环境变量。",
++    "default": ""
++  }
++}
