@@ -37,8 +37,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": DEEPSEEK_PROVIDER_API_BASE,
         "model": DEEPSEEK_PROVIDER_MODEL,
         "service_kind": "chat",
-        "modalities": ("text", "image"),
-        "description": "DeepSeek 官方兼容接口；DeepSeek Flash 支持图片输入。",
+        "modalities": ("text", "image", "audio"),
+        "description": "DeepSeek 官方兼容接口；默认填入 DeepSeek Flash。",
     },
     {
         "id": "glm",
@@ -46,8 +46,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "https://open.bigmodel.cn/api/paas/v4",
         "model": "glm-4.6v",
         "service_kind": "chat",
-        "modalities": ("text", "image"),
-        "description": "智谱 GLM 兼容接口；GLM-4.6V 支持图片输入。",
+        "modalities": ("text", "image", "audio"),
+        "description": "智谱 GLM 兼容接口；默认填入 GLM-4.6V。",
     },
     {
         "id": "xiaomi_mimo",
@@ -55,8 +55,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "https://api.xiaomimimo.com/v1",
         "model": "mimo-v2.5",
         "service_kind": "chat",
-        "modalities": ("text", "image"),
-        "description": "小米 MiMo 兼容接口；MiMo-V2.5 支持原生多模态输入。",
+        "modalities": ("text", "image", "audio"),
+        "description": "小米 MiMo 兼容接口；默认填入 MiMo-V2.5。",
     },
     {
         "id": "qwen",
@@ -64,8 +64,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-plus",
         "service_kind": "chat",
-        "modalities": ("text",),
-        "description": "阿里云百炼兼容接口。",
+        "modalities": ("text", "image", "audio"),
+        "description": "阿里云百炼兼容接口；默认填入 qwen-plus。",
     },
     {
         "id": "volcengine",
@@ -73,8 +73,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "https://ark.cn-beijing.volces.com/api/v3",
         "model": "doubao-seed-2-0-lite-260215",
         "service_kind": "chat",
-        "modalities": ("text", "image"),
-        "description": "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。",
+        "modalities": ("text", "image", "audio"),
+        "description": "火山方舟兼容接口；默认填入豆包 Seed 2.0。",
     },
     {
         "id": "hunyuan",
@@ -82,17 +82,17 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "https://tokenhub.tencentmaas.com/v1",
         "model": "hy3-preview",
         "service_kind": "chat",
-        "modalities": ("text",),
-        "description": "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。",
+        "modalities": ("text", "image", "audio"),
+        "description": "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。",
     },
     {
         "id": "gemini_proxy",
-        "name": "Gemini / 中转站",
+        "name": "Gemini",
         "api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
         "model": "gemini-3.8-flash",
         "service_kind": "chat",
         "modalities": ("text", "image", "audio"),
-        "description": "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。",
+        "description": "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。",
     },
     {
         "id": "sub2",
@@ -100,8 +100,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "",
         "model": "",
         "service_kind": "chat",
-        "modalities": (),
-        "description": "填写你的 Sub2 兼容接口地址和模型名称，并确认输入能力。",
+        "modalities": ("text", "image", "audio"),
+        "description": "填写 Sub2 兼容接口地址和模型名称；聊天模型默认按多模态请求。",
     },
     {
         "id": "embedding_custom",
@@ -136,8 +136,8 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "api_base": "",
         "model": "",
         "service_kind": "chat",
-        "modalities": (),
-        "description": "填写兼容接口地址、模型名称和密钥，并确认输入能力。",
+        "modalities": ("text", "image", "audio"),
+        "description": "填写中转站或其他兼容接口地址、模型名称和凭据。",
     },
 )
 
@@ -565,24 +565,9 @@ def infer_provider_modalities(
         return ("image",)
     if kind == "voice":
         return ("audio",)
-    if isinstance(declared, (list, tuple, set)):
-        allowed = {"text", "image", "audio"}
-        values = tuple(
-            value
-            for value in dict.fromkeys(
-                str(item).strip().casefold()
-                for item in declared
-                if str(item).strip().casefold() in allowed
-            )
-        )
-        if values:
-            return values
-    if model.casefold() == DEFAULT_PROVIDER_MODEL.casefold():
-        return ("text", "image", "audio")
-    leaf = _model_leaf(model).casefold()
-    if any(marker in leaf for marker in ("-v", "vision", "vl", "gemini", "doubao-seed")):
-        return ("text", "image", "audio") if "gemini" in leaf or "doubao" in leaf else ("text", "image")
-    return ("text",)
+    # Chat requests always include text, image, and audio inputs. Unsupported
+    # media is reported by the configured provider when a request is made.
+    return ("text", "image", "audio")
 
 
 @dataclass(frozen=True, slots=True)
@@ -626,11 +611,11 @@ class OpenAIProviderProfile:
                 modalities=self.modalities,
             ).normalized()
         if not profile.api_key:
-            errors.append("模型 API Key 不能为空。")
+            errors.append("模型 API Key / Token Plan 不能为空。")
         elif len(profile.api_key) > 4096 or any(
             ord(character) < 32 for character in profile.api_key
         ):
-            errors.append("模型 API Key 格式无效。")
+            errors.append("模型 API Key / Token Plan 格式无效。")
         if not profile.model or len(profile.model) > 128:
             errors.append("模型名称不能为空且不能超过 128 个字符。")
         if not _SAFE_ID.fullmatch(profile.source_id):
@@ -736,7 +721,7 @@ def discover_openai_models(
             raw = response.read(2 * 1024 * 1024 + 1)
     except HTTPError as exc:
         if exc.code in {401, 403}:
-            raise ValueError("服务密钥未通过验证，请检查后重试。") from None
+            raise ValueError("API Key / Token Plan 未通过验证，请检查后重试。") from None
         if exc.code == 404:
             raise ValueError("这个服务没有提供模型列表接口，请手动填写模型名称。") from None
         raise ValueError(f"模型列表读取失败（HTTP {exc.code}），请稍后重试。") from None

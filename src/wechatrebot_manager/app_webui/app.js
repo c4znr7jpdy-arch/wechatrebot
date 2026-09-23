@@ -599,7 +599,7 @@
     if (!state.providerDirty || state.providerScreen !== "editor") return false;
     confirmAction({
       title: "放弃模型配置？",
-      message: "接口地址、模型名称或密钥还没有保存。返回后这些修改会被清空。",
+      message: "Base URL、模型名称或 API Key / Token Plan 还没有保存。返回后这些修改会被清空。",
       confirmText: "放弃修改",
       onConfirm: async () => {
         showProviderOverview();
@@ -3515,7 +3515,9 @@
       const preset = (state.bootstrap?.provider_presets || []).find(
         (item) => item.id === form.elements.preset.value,
       );
-      if (values.service_kind !== "chat" && Array.isArray(preset?.modalities)) {
+      if (values.service_kind === "chat") {
+        values.modalities = "text,image,audio";
+      } else if (Array.isArray(preset?.modalities)) {
         values.modalities = preset.modalities.join(",");
       }
       const data = await api("save_provider", values);
@@ -3593,26 +3595,7 @@
         ? ["text", "image", "audio"]
         : ["text", "image"];
     }
-    return ["text"];
-  }
-
-  function updateProviderModalitiesHint() {
-    const input = $("#providerModalities");
-    if (!input) return;
-    $("#providerModalitiesHint").textContent = input.value
-      ? "这是当前模型的能力声明，请以模型官方文档为准；错误声明可能导致媒体消息调用失败。"
-      : "根据模型名称尝试识别；无法确认时按纯文本处理，请以当前模型官方文档为准。";
-  }
-
-  function syncProviderModalities(serviceKind, modalities) {
-    const field = $("#providerModalitiesField");
-    const input = $("#providerModalities");
-    if (!field || !input) return;
-    const isChat = serviceKind === "chat";
-    field.hidden = !isChat;
-    input.disabled = !isChat;
-    input.value = isChat ? providerChatModalityValue(modalities) : "";
-    updateProviderModalitiesHint();
+    return ["text", "image", "audio"];
   }
 
   function providerThinkingSupported(apiBase, model) {
@@ -3666,12 +3649,13 @@
     form.elements.service_kind.value = preset.service_kind || "chat";
     form.elements.service_kind.disabled = false;
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
-    syncProviderModalities(preset.service_kind || "chat", preset.modalities || []);
     clearProviderModels();
     $("#providerModelHint").textContent = preset.model
       ? `默认模型：${preset.model}；可手动修改或从服务端读取后选择`
       : "请填写具体模型名称，也可从服务端读取后选择";
-    $("#providerPresetHint").textContent = `${preset.description || "填写模型服务信息"} · 输入能力以当前模型为准`;
+    $("#providerPresetHint").textContent = preset.service_kind === "chat"
+      ? `${preset.description || "填写模型服务信息"} · 默认按多模态请求，不支持图片时显示接口错误`
+      : (preset.description || "填写模型服务信息");
     syncProviderThinkingControl();
     renderProviderSaveIntent(
       providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
@@ -3725,8 +3709,8 @@
     applyProviderPreset(presetId);
     $("#providerEditorEyebrow").textContent = "新建服务";
     $("#providerEditorTitle").textContent = "新建模型服务";
-    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一种服务，然后确认连接信息。";
-    $("#apiKeyHint").textContent = "密钥只保存在本机，不会回显";
+    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一个模型供应商，然后确认连接信息。";
+    $("#apiKeyHint").textContent = "API Key / Token Plan 只保存在本机，不会回显";
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
     $("#providerNote").textContent = "";
@@ -3746,7 +3730,6 @@
     form.elements.preset.value = providerPresetFor(service);
     form.elements.service_kind.value = service.service_kind || "chat";
     $("#providerThinkingRow").hidden = (service.service_kind || "chat") !== "chat";
-    syncProviderModalities(service.service_kind || "chat", service.modalities || []);
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
@@ -3762,8 +3745,8 @@
       : service.service_kind === "chat"
         ? "已配置，可切换为回复模型"
         : "已配置，供相关功能选择";
-    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；输入能力按当前模型配置";
-    $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置服务密钥";
+    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；聊天模型默认按多模态请求";
+    $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置 API Key / Token Plan";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;
     $("#providerNote").textContent = "";
@@ -3780,11 +3763,11 @@
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
     status.textContent = `${items.length} 项服务`;
     $("#providerServiceList").innerHTML = items.length ? `
-      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，服务密钥仅保存在当前设备。</span></div></div>
+      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，API Key / Token Plan 仅保存在当前设备。</span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
         const identity = providerCardIdentity(item);
         const statusText = item.is_default ? "使用中" : item.configured ? "备用" : "待完善";
-        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充服务密钥后即可使用";
+        const description = item.is_default ? "当前回复模型" : item.configured ? "可供相关功能选择" : "补充 API Key / Token Plan 后即可使用";
         const capability = item.service_kind === "image"
           ? {title: "图片能力", detail: "供功能中心图片生成选择"}
           : item.service_kind === "voice"
@@ -3812,7 +3795,7 @@
           <div class="provider-service-body">
             <div class="provider-card-tags">
               <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : item.service_kind === "voice" ? "语音" : "文本"))}</span>
-              <span>${item.configured ? "配置已统一共享" : "缺少服务密钥"}</span>
+              <span>${item.configured ? "配置已统一共享" : "缺少 API Key / Token Plan"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
@@ -3839,7 +3822,7 @@
         <h3>还没有模型服务</h3>
         <p>新建聊天、向量、图片或语音模型后，可在对应功能设置中直接选择。</p>
         <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
-        <div class="provider-empty-assurances"><span>密钥仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
+        <div class="provider-empty-assurances"><span>API Key / Token Plan 仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
     renderHomeSetupAlerts();
@@ -4654,7 +4637,6 @@
     });
     $("#providerForm").addEventListener("change", (event) => {
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
-      if (event.target.name === "modalities") updateProviderModalitiesHint();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
     $("#providerServiceKind").addEventListener("change", (event) => {
@@ -4999,18 +4981,18 @@
       previewProviders = [{id: "custom_mimo/mimo-v2.5", name: "mimo-v2.5", api_base: "https://token-plan-cn.xiaomimimo.com/v1", model: "mimo-v2.5", configured: true, api_key_configured: true, is_default: true, is_recommended: false, thinking_supported: true, thinking_enabled: true}];
     }
     const previewPresets = [
-      {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image"], description: "DeepSeek 官方兼容接口；DeepSeek Flash 支持图片输入。"},
-      {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image"], description: "智谱 GLM 兼容接口；GLM-4.6V 支持图片输入。"},
-      {id: "xiaomi_mimo", name: "小米 MiMo", api_base: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5", service_kind: "chat", modalities: ["text", "image"], description: "小米 MiMo 兼容接口；MiMo-V2.5 支持原生多模态输入。"},
-      {id: "qwen", name: "通义千问 Qwen", api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", service_kind: "chat", modalities: ["text"], description: "阿里云百炼兼容接口。"},
-      {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image"], description: "火山方舟兼容接口；豆包 Seed 2.0 支持多模态理解。"},
-      {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text"], description: "腾讯 TokenHub 混元兼容接口，适配原平台迁移后的新地址。"},
-      {id: "gemini_proxy", name: "Gemini / 中转站", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "默认使用 Gemini 官方兼容地址；使用中转站时可直接替换接口地址。"},
-      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写你的 Sub2 兼容接口地址和模型名称，并确认输入能力。"},
+      {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "DeepSeek 官方兼容接口；默认填入 DeepSeek Flash。"},
+      {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image", "audio"], description: "智谱 GLM 兼容接口；默认填入 GLM-4.6V。"},
+      {id: "xiaomi_mimo", name: "小米 MiMo", api_base: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5", service_kind: "chat", modalities: ["text", "image", "audio"], description: "小米 MiMo 兼容接口；默认填入 MiMo-V2.5。"},
+      {id: "qwen", name: "通义千问 Qwen", api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", service_kind: "chat", modalities: ["text", "image", "audio"], description: "阿里云百炼兼容接口；默认填入 qwen-plus。"},
+      {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image", "audio"], description: "火山方舟兼容接口；默认填入豆包 Seed 2.0。"},
+      {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text", "image", "audio"], description: "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。"},
+      {id: "gemini_proxy", name: "Gemini", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。"},
+      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；聊天模型默认按多模态请求。"},
       {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
       {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
       {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
-      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: [], description: "填写兼容接口地址、模型名称和密钥，并确认输入能力。"},
+      {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写中转站或其他兼容接口地址、模型名称和凭据。"},
     ];
     const previewExperience = {
       onboarding_complete: true,
