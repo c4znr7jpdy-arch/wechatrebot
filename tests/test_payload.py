@@ -101,6 +101,63 @@ def test_update_preserves_existing_user_configuration(
     assert result.files[0].source_path == target
 
 
+def test_incremental_update_merges_prior_installed_file_manifest(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "install"
+    runtime = install / "runtime" / "python.exe"
+    manager = install / "manager" / "WeChatReBot.exe"
+    runtime.parent.mkdir(parents=True)
+    manager.parent.mkdir(parents=True)
+    runtime.write_bytes(b"unchanged runtime")
+    manager.write_bytes(b"old manager")
+    config = install / "config"
+    config.mkdir()
+    (config / "installed-payload.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "release_version": "0.9.8",
+                "release_build": 7,
+                "files": [
+                    {
+                        "path": "runtime/python.exe",
+                        "sha256": hashlib.sha256(runtime.read_bytes()).hexdigest().upper(),
+                    },
+                    {
+                        "path": "manager/WeChatReBot.exe",
+                        "sha256": hashlib.sha256(manager.read_bytes()).hexdigest().upper(),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = tmp_path / "manager-update"
+    updated_manager = _payload(payload, path="manager/WeChatReBot.exe")
+    release_manifest = json.loads((payload / "release-manifest.json").read_text(encoding="utf-8"))
+    release_manifest["release_version"] = "0.9.9"
+    (payload / "release-manifest.json").write_text(
+        json.dumps(release_manifest), encoding="utf-8"
+    )
+
+    install_payload(payload, install, preserve_existing_user_config=True)
+
+    installed = json.loads(
+        (config / "installed-payload.json").read_text(encoding="utf-8")
+    )
+    entries = {entry["path"]: entry["sha256"] for entry in installed["files"]}
+    assert set(entries) == {"runtime/python.exe", "manager/WeChatReBot.exe"}
+    assert entries["runtime/python.exe"] == hashlib.sha256(
+        runtime.read_bytes()
+    ).hexdigest().upper()
+    assert entries["manager/WeChatReBot.exe"] == hashlib.sha256(
+        updated_manager.read_bytes()
+    ).hexdigest().upper()
+    assert installed["release_version"] == "0.9.9"
+    assert installed["release_build"] == 7
+
+
 def test_legacy_payload_status_does_not_block_verification(tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     _payload(payload)
