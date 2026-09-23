@@ -2552,6 +2552,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/app.js",
                     "/core-settings.js",
                     "/design-overrides.css",
+                    "/feature-page-overrides.css",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")

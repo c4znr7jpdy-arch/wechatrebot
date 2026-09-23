@@ -1,0 +1,360 @@
+@import url("/design-overrides.css");
+
+@font-face {
+  font-family: "Alimama ShuHei";
+  src: url("/assets/AlimamaShuHeiTi-Bold.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 700;
+}
+
+@font-face {
+  font-family: "Alibaba PuHuiTi 2";
+  src: url("/assets/AlibabaPuHuiTi2-Regular.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "Alibaba PuHuiTi 2";
+  src: url("/assets/AlibabaPuHuiTi2-Bold.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 700;
+}
+
+html[data-manager-feature-page="mimo"] {
+  --manager-font-body: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --manager-font-display: "Alimama ShuHei", "Microsoft YaHei UI", sans-serif;
+  --page-bg: var(--canvas);
+  --page-bg-2: var(--canvas);
+  --ink-strong: var(--ink);
+  --primary: var(--blue-600);
+  --primary-soft: var(--blue-100);
+  --leaf: var(--green-600);
+  --gold: var(--amber-700);
+  --rose: var(--red-700);
+  --green: var(--green-600);
+  --red: var(--red-700);
+  --amber: var(--amber-700);
+  --studio-gold: var(--amber-700);
+  --card-bg: var(--surface);
+  --card-bg-strong: var(--surface);
+  --panel-bg: var(--surface-2);
+  --control-surface: var(--surface);
+  --shadow-soft: none;
+  --shadow-hover: none;
+  --radius-xl: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-md: 6px;
+  --ease: ease-out;
+  color-scheme: light;
+}
+
+html[data-manager-feature-page="mimo"][data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-manager-feature-page="mimo"] body {
+  min-height: 100%;
+  color: var(--ink);
+  font-family: var(--manager-font-body);
+  background: var(--canvas);
+}
+
+html[data-manager-feature-page="mimo"] body::before,
+html[data-manager-feature-page="mimo"] body::after,
+html[data-manager-feature-page="mimo"] .top-gradient-highlight,
+html[data-manager-feature-page="mimo"] .studio-shell::before,
+html[data-manager-feature-page="mimo"] .studio-shell::after,
+html[data-manager-feature-page="mimo"] .studio-hero::before,
+html[data-manager-feature-page="mimo"] .studio-hero::after,
+html[data-manager-feature-page="mimo"] .studio-card::before,
+html[data-manager-feature-page="mimo"] .signal-card::after {
+  display: none !important;
+}
+
+html[data-manager-feature-page="mimo"] .studio-shell {
+  width: min(1420px, 100%);
+  margin: 0 auto;
+  padding: 20px 32px 28px;
+}
+
+html[data-manager-feature-page="mimo"] .studio-hero {
+  min-height: 0;
+  margin-bottom: 12px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-manager-feature-page="mimo"] .hero-copy { gap: 12px; }
+
+html[data-manager-feature-page="mimo"] .studio-hero h1 {
+  color: var(--ink);
+  font-family: var(--manager-font-display);
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.25;
+  letter-spacing: -.02em;
+}
+
+html[data-manager-feature-page="mimo"] .studio-hero p {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+html[data-manager-feature-page="mimo"] .eyebrow,
+html[data-manager-feature-page="mimo"] .section-kicker,
+html[data-manager-feature-page="mimo"] .soft-pill {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 8px;
+  background: var(--blue-100);
+  color: var(--blue-700);
+  box-shadow: none;
+  font-family: var(--manager-font-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
+html[data-manager-feature-page="mimo"] .pulse-dot {
+  background: var(--green-600);
+  box-shadow: 0 0 0 4px var(--green-100);
+}
+
+html[data-manager-feature-page="mimo"] .studio-card,
+html[data-manager-feature-page="mimo"] .signal-card,
+html[data-manager-feature-page="mimo"] .workflow-strip article,
+html[data-manager-feature-page="mimo"] .readiness-item,
+html[data-manager-feature-page="mimo"] .access-card,
+html[data-manager-feature-page="mimo"] .access-summary,
+html[data-manager-feature-page="mimo"] .access-summary-core,
+html[data-manager-feature-page="mimo"] .access-summary-list article,
+html[data-manager-feature-page="mimo"] .audio-frame,
+html[data-manager-feature-page="mimo"] .preview-row,
+html[data-manager-feature-page="mimo"] .drop-zone,
+html[data-manager-feature-page="mimo"] .emotion-card,
+html[data-manager-feature-page="mimo"] .runtime-diagnostics,
+html[data-manager-feature-page="mimo"] .upload-panel,
+html[data-manager-feature-page="mimo"] .voice-card,
+html[data-manager-feature-page="mimo"] .task-card,
+html[data-manager-feature-page="mimo"] .task-table-wrap,
+html[data-manager-feature-page="mimo"] .empty-state {
+  border-color: var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-manager-feature-page="mimo"] .studio-card {
+  padding: 20px;
+  animation: none;
+}
+
+html[data-manager-feature-page="mimo"] .signal-card {
+  min-height: 88px;
+  padding: 14px;
+  background: var(--surface-2);
+}
+
+html[data-manager-feature-page="mimo"] .signal-card strong,
+html[data-manager-feature-page="mimo"] .readiness-item strong {
+  color: var(--ink);
+  font-family: var(--manager-font-display);
+}
+
+html[data-manager-feature-page="mimo"] .workflow-strip { gap: 10px; }
+
+html[data-manager-feature-page="mimo"] .workflow-strip article {
+  min-height: 90px;
+  padding: 14px;
+  animation: none;
+  transition: border-color .16s ease-out, background-color .16s ease-out;
+}
+
+html[data-manager-feature-page="mimo"] .workflow-strip article:hover,
+html[data-manager-feature-page="mimo"] .studio-card:hover {
+  transform: none;
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+
+html[data-manager-feature-page="mimo"] .workflow-strip b {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  background: var(--green-600);
+  box-shadow: none;
+}
+
+html[data-manager-feature-page="mimo"] .workflow-strip span,
+html[data-manager-feature-page="mimo"] h2 {
+  color: var(--ink);
+  font-family: var(--manager-font-display);
+}
+
+html[data-manager-feature-page="mimo"] h2 {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 1.35;
+  letter-spacing: -.01em;
+}
+
+html[data-manager-feature-page="mimo"] .readiness-item {
+  background: var(--surface-2);
+}
+
+html[data-manager-feature-page="mimo"] label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-manager-feature-page="mimo"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+html[data-manager-feature-page="mimo"] textarea,
+html[data-manager-feature-page="mimo"] select {
+  border-color: var(--line-strong);
+  border-radius: 6px;
+  background: var(--control-surface);
+  color: var(--ink);
+  box-shadow: none;
+  transition: border-color .16s ease-out, box-shadow .16s ease-out;
+}
+
+html[data-manager-feature-page="mimo"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):hover,
+html[data-manager-feature-page="mimo"] textarea:hover,
+html[data-manager-feature-page="mimo"] select:hover {
+  border-color: var(--blue-600);
+  background: var(--control-surface);
+}
+
+html[data-manager-feature-page="mimo"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+html[data-manager-feature-page="mimo"] textarea:focus,
+html[data-manager-feature-page="mimo"] select:focus {
+  border-color: var(--green-600);
+  background: var(--control-surface);
+  box-shadow: 0 0 0 3px rgba(54, 86, 71, .14);
+}
+
+html[data-manager-feature-page="mimo"] button {
+  min-height: 38px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 0 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--manager-font-body);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+  transition: color .16s ease-out, border-color .16s ease-out, background-color .16s ease-out;
+}
+
+html[data-manager-feature-page="mimo"] button:hover:not(:disabled) {
+  transform: none;
+  border-color: var(--green-600);
+  background: var(--surface-hover);
+  box-shadow: none;
+  filter: none;
+}
+
+html[data-manager-feature-page="mimo"] button:active:not(:disabled) { transform: none; }
+
+html[data-manager-feature-page="mimo"] button.primary {
+  border-color: var(--green-600);
+  background: var(--green-600);
+  color: #fff;
+}
+
+html[data-manager-feature-page="mimo"] button.primary:hover:not(:disabled) {
+  border-color: var(--blue-700);
+  background: var(--blue-700);
+}
+
+html[data-manager-feature-page="mimo"] button.secondary,
+html[data-manager-feature-page="mimo"] .soft-pill {
+  border-color: var(--line-strong);
+  background: var(--blue-100);
+  color: var(--blue-700);
+}
+
+html[data-manager-feature-page="mimo"] button.danger {
+  border-color: var(--red-100);
+  background: var(--red-100);
+  color: var(--red-700);
+}
+
+html[data-manager-feature-page="mimo"] button:focus-visible,
+html[data-manager-feature-page="mimo"] input:focus-visible,
+html[data-manager-feature-page="mimo"] select:focus-visible,
+html[data-manager-feature-page="mimo"] textarea:focus-visible {
+  outline: 3px solid rgba(54, 86, 71, .28);
+  outline-offset: 2px;
+}
+
+html[data-manager-feature-page="mimo"] .ghost-link {
+  border-radius: 6px;
+  color: var(--green-700);
+  font-weight: 600;
+}
+
+html[data-manager-feature-page="mimo"] .ghost-link:hover {
+  background: var(--surface-hover);
+  transform: none;
+}
+
+html[data-manager-feature-page="mimo"] .action-state {
+  border-color: var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-manager-feature-page="mimo"] .action-state.is-dirty {
+  border-color: var(--amber-700);
+  background: var(--amber-100);
+  color: var(--amber-700);
+}
+
+html[data-manager-feature-page="mimo"] .toast {
+  border-color: var(--line);
+  border-radius: 6px;
+  background: var(--green-100);
+  color: var(--green-700);
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+}
+
+html[data-manager-feature-page="mimo"] .toast.err {
+  background: var(--red-700);
+  color: #fff;
+}
+
+html[data-manager-feature-page="mimo"] .toast.warn {
+  background: var(--amber-100);
+  color: var(--amber-700);
+}
+
+html[data-manager-feature-page="mimo"] .empty-state {
+  border-style: dashed;
+  background: var(--surface-2);
+}
+
+html[data-manager-feature-page="mimo"] .studio-shell :is(input, select, textarea, button, a) {
+  font-family: var(--manager-font-body);
+}
+
+@media (max-width: 760px) {
+  html[data-manager-feature-page="mimo"] .studio-shell { padding: 14px 14px 20px; }
+  html[data-manager-feature-page="mimo"] .studio-hero,
+  html[data-manager-feature-page="mimo"] .studio-card { padding: 16px; }
+}
