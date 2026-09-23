@@ -1703,7 +1703,7 @@
     const policyForm = $("#groupPolicyForm");
     if (policyForm) {
       policyForm.addEventListener("submit", saveGroupPolicy);
-      $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updateToggleCopy));
+      $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updatePolicyToggle));
     }
   }
 
@@ -1721,8 +1721,8 @@
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>仅在点名或引用时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select><small>点名或引用会自动快速回应；此设置只影响当前群。</small></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停本群全部定时推送，保留任务设置</small></span><span class="toggle"><input id="groupScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="groupScheduledEnabled" aria-label="切换本群定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
-      <div class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
-      <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
+      <div class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="groupQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
+      <div class="field-pair quiet-hours-fields" id="groupQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label><span>每日定时任务上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>只限制已配置的定时任务；填 0 表示暂停定时推送。</small></label>
       <div class="policy-summary">普通消息与卡片不受定时任务限额影响；主动聊天由各功能自行配置。当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
     </form>`;
@@ -2051,8 +2051,8 @@
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div class="toggle-line"><span><strong>在此私聊使用机器人</strong><small>关闭后不在这段私聊中回复或发送定时任务</small></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong><small>关闭后暂停该联系人的全部定时推送</small></span><span class="toggle"><input id="privateScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateScheduledEnabled" aria-label="切换此私聊定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
-      <div class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
-      <div class="field-pair"><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
+      <div class="toggle-line"><span><strong>安静时段</strong><small>此时段不发送定时消息</small></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="privateQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
+      <div class="field-pair quiet-hours-fields" id="privateQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
       <h3>可用功能</h3>
       <p>勾选机器人在这段私聊中可以使用的功能。未单独配置的联系人沿用新安装默认启用范围。</p>
@@ -2098,7 +2098,7 @@
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "private", id: contact.user_id, name: displayName}, state.contactAccount));
     bindAvatarFallbacks(panel);
     $("#privatePolicyForm")?.addEventListener("submit", savePrivatePolicy);
-    $$(".toggle input", panel).forEach((input) => input.addEventListener("change", updateToggleCopy));
+    $$(".toggle input", panel).forEach((input) => input.addEventListener("change", updatePolicyToggle));
   }
 
   async function savePrivatePolicy(event) {
@@ -4233,6 +4233,14 @@
     if (input.name === "scheduled_enabled") label.textContent = input.checked ? "已允许" : "已暂停";
     else if (input.name === "bot_enabled") label.textContent = input.checked ? "已启用" : "已停用";
     else label.textContent = input.checked ? "已启用" : "已关闭";
+  }
+
+  function updatePolicyToggle(event) {
+    updateToggleCopy(event);
+    const input = event.currentTarget;
+    if (input.name !== "quiet_enabled") return;
+    const fields = $(".quiet-hours-fields", input.form);
+    if (fields) fields.hidden = !input.checked;
   }
 
   function fillExperience(experience) {
