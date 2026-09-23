@@ -228,11 +228,11 @@ def test_image_provider_keeps_transport_compatible_and_is_not_a_chat_model() -> 
     assert profile.astrbot_model()["modalities"] == ["image"]
 
 
-def test_custom_chat_service_can_declare_multimodal_input() -> None:
+def test_custom_chat_service_uses_multimodal_input_by_default() -> None:
     custom = next(item for item in MODEL_PROVIDER_PRESETS if item["id"] == "custom")
     sub2 = next(item for item in MODEL_PROVIDER_PRESETS if item["id"] == "sub2")
-    assert custom["modalities"] == ()
-    assert sub2["modalities"] == ()
+    assert custom["modalities"] == ("text", "image", "audio")
+    assert sub2["modalities"] == ("text", "image", "audio")
 
     profile = OpenAIProviderProfile(
         api_key="multimodal-secret",
@@ -247,10 +247,25 @@ def test_custom_chat_service_can_declare_multimodal_input() -> None:
     ]
     assert infer_provider_modalities(
         "chat", "vendor-model", ("text", "image", "unsupported")
-    ) == ("text", "image")
+    ) == ("text", "image", "audio")
     assert infer_provider_modalities(
         "chat", DEFAULT_PROVIDER_MODEL, ("text",)
-    ) == ("text",)
+    ) == ("text", "image", "audio")
+
+
+def test_custom_chat_service_defaults_to_multimodal_input() -> None:
+    profile = OpenAIProviderProfile(
+        api_key="customer-secret",
+        api_base="https://models.example.com/v1",
+        model="vendor-model",
+    )
+
+    assert infer_provider_modalities("chat", "vendor-model") == (
+        "text", "image", "audio",
+    )
+    assert profile.astrbot_model()["modalities"] == [
+        "text", "image", "audio", "tool_use",
+    ]
 
 
 def test_voice_provider_is_classified_separately_from_chat_and_image() -> None:

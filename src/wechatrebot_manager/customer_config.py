@@ -208,7 +208,7 @@ class ProviderService:
     reference_modules: tuple[str, ...] = ()
     thinking_enabled: bool = True
     service_kind: str = "chat"
-    modalities: tuple[str, ...] = ("text",)
+    modalities: tuple[str, ...] = ("text", "image", "audio")
 
     @property
     def thinking_supported(self) -> bool:
