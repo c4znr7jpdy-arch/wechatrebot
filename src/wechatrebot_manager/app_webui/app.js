@@ -106,8 +106,10 @@
   const HISTORY_PRELOAD_THRESHOLD = 120;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
+  const GROUP_MEMBER_REQUEST_CONCURRENCY = 4;
   const AVATAR_RETRY_DELAYS_MS = [1200, 4000];
-  let groupMemberRequestQueue = Promise.resolve();
+  let groupMemberRequestsActive = 0;
+  const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
   const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
@@ -1389,7 +1391,7 @@
         state.groupMembers = {};
         state.groupPolicies = {};
       }
-      if (background) state.groups.forEach((item) => {
+      if (!refresh || retryAttempt > 0) state.groups.forEach((item) => {
         const cachedCount = state.groupMembers[item.group_id]?.total;
         if (!Number.isInteger(item.member_count) && Number.isInteger(cachedCount)) item.member_count = cachedCount;
       });
@@ -1410,21 +1412,31 @@
         && previousAccount === state.groupAccount
         ? state.groupMemberLoad : ++state.groupMemberLoad;
       if (memberLoad !== previousMemberLoad) clearPendingGroupMemberLoading();
+      const retryMemberCounts = refresh && retryAttempt === 0;
       const groupsNeedingCounts = state.groups.filter((item) =>
         !Number.isInteger(item.member_count)
-        && (!background || !state.groupMembers[item.group_id]));
+        && !state.groupMembers[item.group_id]?.loading
+        && (!state.groupMembers[item.group_id]?.error || retryMemberCounts));
+      groupsNeedingCounts.forEach((item) => {
+        const previous = state.groupMembers[item.group_id] || {};
+        state.groupMembers[item.group_id] = {
+          ...previous,
+          loading: true,
+          error: "",
+          items: Array.isArray(previous.items) ? previous.items : [],
+        };
+      });
       groupDirectoryStatus(data);
       if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
-          || previousAccount !== state.groupAccount || previousStale !== state.groupStale) {
+          || previousAccount !== state.groupAccount || previousStale !== state.groupStale
+          || groupsNeedingCounts.length) {
         renderGroups({preserveInspector: background});
       } else {
         $("#groupUpdated").textContent = state.groupUpdatedAt
           ? `${state.groupStale ? "上次成功" : "更新于"} ${fullTime(state.groupUpdatedAt)}` : "尚无可用结果";
       }
-      if (state.groupInspectorView === "members" && state.selectedGroup
-          && groupsNeedingCounts.some((item) => item.group_id === state.selectedGroup)
-          && !state.groupMembers[state.selectedGroup]) {
-        void hydrateGroupMemberCounts([state.selectedGroup], memberLoad);
+      if (groupsNeedingCounts.length) {
+        void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad, {preMarked: true});
       }
     } catch (error) {
       state.groupStale = true;
@@ -1461,14 +1473,12 @@
     $("#groupRows").innerHTML = items.length ? items.map((item) => {
       const selected = item.group_id === state.selectedGroup;
       const memberData = state.groupMembers[item.group_id];
-      const cachedCount = Number.isInteger(memberData?.total) ? memberData.total : item.member_count;
-      const memberCount = memberData?.loading
-        ? '<span class="member-count-state loading">读取中</span>'
-        : Number.isInteger(cachedCount)
-          ? escapeHtml(cachedCount)
-          : memberData?.error
-            ? '<span class="member-count-state error">读取失败</span>'
-            : '<span class="member-count-state unknown">未知</span>';
+      const cachedCount = Number.isInteger(item.member_count) ? item.member_count : memberData?.total;
+      const memberCount = Number.isInteger(cachedCount)
+        ? escapeHtml(cachedCount)
+        : memberData?.error
+          ? '<span class="member-count-state error">读取失败</span>'
+          : '<span class="member-count-state loading">读取中</span>';
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
         <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
@@ -1520,10 +1530,9 @@
     }
     const memberData = state.groupMembers[group.group_id];
     const policyData = state.groupPolicies[group.group_id];
-    const cachedCount = Number.isInteger(memberData?.total) ? memberData.total : group.member_count;
-    const memberCount = memberData?.loading ? "读取中"
-      : Number.isInteger(cachedCount) ? `${cachedCount} 人`
-      : memberData?.error ? "读取失败" : "未知";
+    const cachedCount = Number.isInteger(group.member_count) ? group.member_count : memberData?.total;
+    const memberCount = Number.isInteger(cachedCount) ? `${cachedCount} 人`
+      : memberData?.error ? "读取失败" : "读取中";
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
@@ -1613,23 +1622,49 @@
     finally { button.disabled = false; button.textContent = "保存群聊规则"; }
   }
 
-  async function hydrateGroupMemberCounts(groupIds, generation) {
+  async function hydrateGroupMemberCounts(groupIds, generation, options = {}) {
     const pending = [...new Set(groupIds)];
-    for (const groupId of pending) {
-      if (generation !== state.groupMemberLoad) return;
-      await loadGroupMembers(groupId, {generation});
+    let nextIndex = 0;
+    const workerCount = Math.min(GROUP_MEMBER_REQUEST_CONCURRENCY, pending.length);
+    const workers = Array.from({length: workerCount}, async () => {
+      while (generation === state.groupMemberLoad) {
+        const index = nextIndex++;
+        if (index >= pending.length) return;
+        await loadGroupMembers(pending[index], {
+          generation,
+          suppressInitialRender: options.preMarked === true,
+          silentErrors: options.preMarked === true,
+        });
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  function pumpGroupMemberRequestQueue() {
+    while (groupMemberRequestsActive < GROUP_MEMBER_REQUEST_CONCURRENCY && groupMemberRequestQueue.length) {
+      const request = groupMemberRequestQueue.shift();
+      if (request.generation !== state.groupMemberLoad
+          || !state.groups.some((item) => item.group_id === request.groupId)
+          || (request.background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) {
+        request.resolve(null);
+        continue;
+      }
+      groupMemberRequestsActive += 1;
+      Promise.resolve()
+        .then(() => api("get_group_members", request.groupId))
+        .then(request.resolve, request.reject)
+        .finally(() => {
+          groupMemberRequestsActive -= 1;
+          pumpGroupMemberRequestQueue();
+        });
     }
   }
 
   function queueGroupMemberRequest(groupId, generation, background) {
-    const request = groupMemberRequestQueue.then(() => {
-      if (generation !== state.groupMemberLoad
-          || !state.groups.some((item) => item.group_id === groupId)
-          || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return null;
-      return api("get_group_members", groupId);
+    return new Promise((resolve, reject) => {
+      groupMemberRequestQueue.push({groupId, generation, background, resolve, reject});
+      pumpGroupMemberRequestQueue();
     });
-    groupMemberRequestQueue = request.catch(() => undefined);
-    return request;
   }
 
   async function loadGroupMembers(groupId, options = {}) {
@@ -1647,7 +1682,7 @@
         error: "",
         items: Array.isArray(previous.items) ? previous.items : [],
       };
-      if (!background) renderGroups();
+      if (!background && !options.suppressInitialRender) renderGroups();
       let lastError = null;
       for (let attempt = 0; attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length; attempt += 1) {
         if (attempt) {
@@ -1679,7 +1714,7 @@
       if (lastError) {
         if (generation !== state.groupMemberLoad || !state.groups.some((item) => item.group_id === groupId)) return;
         state.groupMembers[groupId] = {loading: false, items: [], error: lastError?.message || "成员暂时无法读取，请稍后重试。"};
-        if (!background) reportError(lastError);
+        if (!background && !options.silentErrors) reportError(lastError);
       }
       renderGroups({preserveInspector: background});
     } finally {
