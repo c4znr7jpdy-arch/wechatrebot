@@ -92,6 +92,8 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
         title="插件配置更新",
         notes=("修复高级页面",),
         minimum_supported_version="0.7.0",
+        build=42,
+        mandatory=True,
     )
 
     assert result.package_size == result.archive_path.stat().st_size
@@ -112,12 +114,16 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
         }
     ]
     assert payload_manifest["source_manifest_status"] == "ready"
+    assert payload_manifest["release_build"] == 42
     stable = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     release = parse_update_manifest(stable, channel, current_version="0.8.7")
     assert release is not None
     assert release.version == "0.8.8"
     assert release.package_url == result.package_url
+    assert release.build == 42
+    assert release.mandatory is True
     assert stable["package"]["payload_file_count"] == 1
+    assert stable["package"]["uncompressed_size"] > 0
 
 
 def test_build_manager_update_rejects_tampered_manager(tmp_path: Path) -> None:

@@ -75,6 +75,15 @@ class ServiceLaunchError(RuntimeError):
     """Raised when the managed startup sequence cannot complete."""
 
 
+class ServiceStopError(ServiceLaunchError):
+    """Raised when a managed service remains alive after graceful stop retries."""
+
+    def __init__(self, service_name: str, label: str) -> None:
+        self.service_name = service_name
+        self.label = label
+        super().__init__(f"{label}未能安全停止，请稍后重试。")
+
+
 _RUN_MODULE_FROM_PATH = (
     "import runpy,sys;"
     "sys.path.insert(0,sys.argv.pop(1));"
@@ -533,6 +542,8 @@ class ProcessSupervisor:
         return tuple(self.running)
 
     def stop(self, timeout_seconds: float = 15) -> None:
+        remaining: list[RunningService] = []
+        failures: list[RunningService] = []
         for running in reversed(self.running):
             process = running.process
             if process.poll() is None:
@@ -544,13 +555,30 @@ class ProcessSupervisor:
                     process.wait(timeout=timeout_seconds)
                 except Exception:
                     try:
-                        process.kill()
-                        process.wait(timeout=5)
+                        if process.poll() is None:
+                            process.terminate()
+                            process.wait(timeout=5)
                     except Exception:
-                        pass
-            running.log_handle.close()
-        self.running.clear()
+                        try:
+                            if process.poll() is None:
+                                process.kill()
+                                process.wait(timeout=5)
+                        except Exception:
+                            pass
+            if process.poll() is None:
+                remaining.append(running)
+                failures.append(running)
+            else:
+                running.log_handle.close()
+        self.running = list(reversed(remaining))
         self.adoption_complete = False
+        if failures:
+            try:
+                self._persist_state()
+            except (OSError, ServiceLaunchError):
+                pass
+            first = failures[0]
+            raise ServiceStopError(first.spec.name, first.spec.label)
         self._clear_state()
 
     def force_stop(self) -> None:

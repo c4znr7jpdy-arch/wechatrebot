@@ -5,10 +5,14 @@ import sys
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from wechatrebot_manager import app_shell
 from wechatrebot_manager.error_catalog import load_error_catalog
+from wechatrebot_manager.launcher import ServiceStopError
 from wechatrebot_manager.payload import PayloadError
 from wechatrebot_manager.updates import UpdateChannel, UpdateRelease
+from wechatrebot_manager.update_logger import UpdateLogger
 
 
 class _Events:
@@ -22,6 +26,9 @@ class _Events:
 def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
     value._install_root = tmp_path
+    value._development = False
+    value._build_number = 0
+    value._update_logger = UpdateLogger(tmp_path)
     value._catalog = load_error_catalog()
     value._update_lock = threading.Lock()
     value._update_status_lock = threading.Lock()
@@ -35,6 +42,10 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
         "error": None,
     }
     value._available_update = None
+    value._prepared_update = None
+    value._install_requested = ""
+    value._mandatory_update = False
+    value._update_channel_error = ""
     value._update_result = None
     value._update_channel = UpdateChannel(
         manifest_url="https://updates.example.test/stable.json",
@@ -837,24 +848,39 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
         "published_at": "2026-09-03T00:00:00Z",
         "package_size": 1234,
         "mandatory": False,
+        "build": None,
+        "minimum_supported_version": "",
     }
     assert "package_url" not in result["data"]["release"]
     assert "package_sha256" not in result["data"]["release"]
 
 
-def test_install_update_requires_stopped_robot(monkeypatch, tmp_path: Path) -> None:
+def test_unavailable_mandatory_update_keeps_robot_start_blocked(
+    monkeypatch, tmp_path: Path
+) -> None:
     api = _api(tmp_path)
-    api._lifecycle.refresh = lambda: SimpleNamespace(
-        state=SimpleNamespace(value="RUNNING"), online=True, can_stop=True
-    )
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
 
-    result = api.install_update("0.9.0")
+    def unavailable(*_args, **_kwargs):
+        raise app_shell.MandatoryUpdateUnavailable("清单缺少可用更新。")
+
+    monkeypatch.setattr(app_shell, "check_for_update", unavailable)
+
+    result = api.check_update()
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "14004"
-    assert result["error"]["title"] == "请先停止机器人"
-    assert api._lifecycle.events.items[-1][0][:2] == ("APP_ERROR", "failed")
+    assert result["error"]["code"] == "UPD-1016"
+    assert api._mandatory_update is True
+    assert api.start_robot()["error"]["code"] == "UPD-1016"
+
+
+def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    api._mandatory_update = True
+
+    result = api.start_robot()
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "UPD-1016"
 
 
 def test_install_update_runs_in_background_and_reports_progress(
@@ -875,6 +901,7 @@ def test_install_update_runs_in_background_and_reports_progress(
     api._lifecycle.refresh = lambda: SimpleNamespace(
         state=SimpleNamespace(value="STOPPED"), online=False, can_stop=False
     )
+    api._lifecycle.request_stop = lambda: None
     monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
     launched = threading.Event()
     prepared = SimpleNamespace()
@@ -885,7 +912,7 @@ def test_install_update_runs_in_background_and_reports_progress(
         return prepared
 
     monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
-    monkeypatch.setattr(app_shell, "create_update_plan", lambda *_args: "plan")
+    monkeypatch.setattr(app_shell, "create_update_plan", lambda *_args, **_kwargs: "plan")
     monkeypatch.setattr(app_shell, "launch_update_helper", lambda _plan: launched.set())
 
     result = api.install_update("0.9.0")
@@ -899,6 +926,142 @@ def test_install_update_runs_in_background_and_reports_progress(
     assert status["ok"] is True
     assert status["data"]["state"] == "restarting"
     assert status["data"]["percent"] == 100
+
+
+def test_background_download_waits_for_owned_wechat_before_stopping_services(
+    monkeypatch, tmp_path: Path
+) -> None:
+    release = UpdateRelease(
+        version="0.9.0",
+        title="体验升级",
+        notes=(),
+        published_at="2026-09-03T00:00:00Z",
+        package_url="https://updates.example.test/0.9.0.zip",
+        package_size=100,
+        package_sha256="A" * 64,
+        mandatory=False,
+    )
+    api = _api(tmp_path)
+    api._available_update = release
+    states = iter(("STOP_WAIT_WECHAT", "STOPPED", "STOPPED"))
+    observed_states = []
+    api._lifecycle.request_stop = lambda: None
+
+    def refresh_lifecycle():
+        try:
+            state = next(states)
+        except StopIteration:
+            state = "STOPPED"
+        observed_states.append(state)
+        return SimpleNamespace(
+            state=SimpleNamespace(value=state), online=False, can_stop=False
+        )
+
+    api._lifecycle.refresh = refresh_lifecycle
+    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(app_shell.time, "sleep", lambda _seconds: None)
+    launched = threading.Event()
+    launch_states = []
+    prepared = SimpleNamespace()
+
+    def fake_prepare(*_args, progress_callback, **_kwargs):
+        progress_callback("download", 100, 100)
+        return prepared
+
+    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
+    monkeypatch.setattr(app_shell, "create_update_plan", lambda *_args, **_kwargs: "plan")
+
+    def fake_launch(_plan):
+        launch_states.append(api._lifecycle.refresh().state.value)
+        launched.set()
+
+    monkeypatch.setattr(app_shell, "launch_update_helper", fake_launch)
+    result = api.install_update("0.9.0")
+
+    assert result["data"]["accepted"] is True
+    assert launched.wait(2)
+    assert observed_states[:2] == ["STOP_WAIT_WECHAT", "STOPPED"]
+    assert launch_states == ["STOPPED"]
+    assert "waiting_wechat" in (tmp_path / "logs" / "update.log").read_text(encoding="utf-8")
+
+
+def test_optional_update_download_does_not_stop_running_robot(
+    monkeypatch, tmp_path: Path
+) -> None:
+    release = UpdateRelease(
+        version="0.9.0",
+        title="体验升级",
+        notes=(),
+        published_at="2026-09-03T00:00:00Z",
+        package_url="https://updates.example.test/0.9.0.zip",
+        package_size=100,
+        package_sha256="A" * 64,
+        mandatory=False,
+    )
+    api = _api(tmp_path)
+    api._available_update = release
+    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    prepared = SimpleNamespace(release=release)
+    started = threading.Event()
+
+    def fake_prepare(*_args, progress_callback, **_kwargs):
+        progress_callback("download", 100, 100)
+        started.set()
+        return prepared
+
+    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
+
+    result = api.download_update("0.9.0")
+
+    assert result["ok"] is True
+    assert result["data"]["accepted"] is True
+    assert started.wait(2)
+    assert api._update_lock.acquire(timeout=2)
+    api._update_lock.release()
+    status = api.get_update_status()["data"]
+    assert status["state"] == "ready"
+    assert status["phase"] == "ready_to_install"
+    assert not hasattr(api._lifecycle, "request_stop")
+
+
+@pytest.mark.parametrize(
+    ("service_name", "error_code"),
+    [("new-hook-bridge", "UPD-1006"), ("astrbot", "UPD-1011")],
+)
+def test_update_maps_managed_service_stop_failures(
+    monkeypatch, tmp_path: Path, service_name: str, error_code: str
+) -> None:
+    release = UpdateRelease(
+        version="0.9.0",
+        title="体验升级",
+        notes=(),
+        published_at="2026-09-03T00:00:00Z",
+        package_url="https://updates.example.test/0.9.0.zip",
+        package_size=100,
+        package_sha256="A" * 64,
+        mandatory=False,
+    )
+    api = _api(tmp_path)
+    api._available_update = release
+    api._lifecycle.request_stop = lambda: (_ for _ in ()).throw(
+        ServiceStopError(service_name, service_name)
+    )
+    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    prepared = SimpleNamespace(release=release)
+    monkeypatch.setattr(
+        app_shell,
+        "prepare_update",
+        lambda *_args, **_kwargs: prepared,
+    )
+
+    result = api.install_update("0.9.0")
+
+    assert result["ok"] is True
+    assert api._update_lock.acquire(timeout=2)
+    api._update_lock.release()
+    status = api.get_update_status()["data"]
+    assert status["state"] == "failed"
+    assert status["error"]["code"] == error_code
 
 
 def test_install_update_surfaces_background_verification_failure(
@@ -938,7 +1101,7 @@ def test_install_update_surfaces_background_verification_failure(
     api._update_lock.release()
     status = api.get_update_status()["data"]
     assert status["state"] == "failed"
-    assert status["error"]["code"] == "14002"
+    assert status["error"]["code"] == "UPD-1003"
 
 
 def test_public_api_allowlist_matches_frontend_calls() -> None:
@@ -1685,7 +1848,7 @@ def test_run_application_uses_explicit_webview_api_allowlist(
     assert isinstance(api._tray, FakeTray)
     assert api._tray.title == "测试机器人"
     assert handlers == {
-        "shown": [api._tray.start],
+        "shown": [api.confirm_update_startup, api._tray.start],
         "closing": [api._tray.handle_window_closing],
         "closed": [api._tray.stop],
     }

@@ -124,6 +124,16 @@ UI 只能调用 `ApplicationApi` 中 `PUBLIC_API_METHODS` 明确列出的操作�
 - 自动状态轮询 1.5 秒，不造成布局跳动。
 - 更新清单只接受 HTTPS 与 Ed25519 签名；包体限制大小、SHA-256、解压路径和逐文件清单；替换失败自动回滚。
 
+## Remote update flow
+
+- Startup and recurring update checks run asynchronously from the UI. Optional releases never open a modal automatically; a verified ZIP downloads in the background while the client remains usable, and Settings reports progress and the ready-to-install state.
+- Manual “检查更新” opens the existing product modal. “稍后提醒” leaves the client usable; “下载并安装” reuses a verified background download when available.
+- A signed mandatory release or minimum-version cutoff blocks starting the robot, but still allows stopping an already-running session and opening Settings to update. Network/check errors remain visible as a support code and never blank or freeze the main UI.
+- Installation first waits for the owned WeChat session to exit using lifecycle signals. It never kills a user WeChat process. Only then does the existing lifecycle stop the bridge and AstrBot, in reverse startup order, and verify both have exited.
+- The detached helper comes from the verified new payload, waits for the old one-file manager processes, snapshots every file it will change, applies the payload, and retains the snapshot until the new manager window acknowledges startup. A failed startup rolls back and launches the old manager.
+- Existing user configuration under `config/` and `app/astrbot/data/config/` is preserved; `data/`, `logs/`, `cache/`, `backups/`, and `updates/` remain user-managed. Update details are written to `logs/update.log` with sensitive URL query data redacted.
+- The Settings update row shows background download progress, readiness, and the final error code. Update work is single-instance and recoverable errors never expose stack traces in the UI.
+
 ## Verification matrix
 
 ### Hosted video workflow

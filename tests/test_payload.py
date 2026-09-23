@@ -70,6 +70,37 @@ def test_streaming_install_rejects_tamper_before_replacing_target(tmp_path: Path
     assert target.read_text(encoding="utf-8") == "existing installation\n"
 
 
+@pytest.mark.parametrize(
+    "relative",
+    ["config/defaults.json", "app/astrbot/data/config/cmd_config.json"],
+)
+def test_update_preserves_existing_user_configuration(
+    tmp_path: Path, relative: str
+) -> None:
+    payload = tmp_path / "payload"
+    source = _payload(payload, path=relative)
+    install = tmp_path / "install"
+    target = install / Path(*relative.split("/"))
+    target.parent.mkdir(parents=True)
+    target.write_text("customer settings\n", encoding="utf-8")
+
+    result = install_payload(
+        payload,
+        install,
+        preserve_existing_user_config=True,
+    )
+
+    assert target.read_text(encoding="utf-8") == "customer settings\n"
+    installed = json.loads(
+        (install / "config" / "installed-payload.json").read_text(encoding="utf-8")
+    )
+    assert installed["files"][0]["path"] == relative
+    assert installed["files"][0]["sha256"] == hashlib.sha256(
+        target.read_bytes()
+    ).hexdigest().upper()
+    assert result.files[0].source_path == target
+
+
 def test_legacy_payload_status_does_not_block_verification(tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     _payload(payload)
