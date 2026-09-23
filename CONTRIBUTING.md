@@ -35,7 +35,7 @@ CI 通过后，维护者再次查看完整 diff、目标分支、版本影响、
 
 2026-09-23 已将仓库默认分支从 `codex/commercial-bootstrap` 对齐到 `master`。之前的默认分支是 `master` 的祖先。仓库仍为私有，GitHub API 返回当前套餐不支持为私有仓库启用 branch protection 或 rulesets；因此下面的保护规则当前尚未生效，不能把 PR 流程描述成 GitHub 强制门禁。
 
-若以后升级到支持私有仓库保护的套餐，在 `master` 启用：
+私有仓库需要 GitHub Pro、Team 或 Enterprise 才支持这些保护；当前 API 提示需升级 Pro 或公开仓库。若以后升级套餐，在 `master` 启用：
 
 - 所有改动必须经 PR 合并；审批数为 0，不配置强制审批人。
 - 必需状态检查为 `quality` 工作流的 `test` job；要求分支与主干保持最新。
