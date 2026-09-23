@@ -145,7 +145,6 @@ PUBLIC_API_METHODS = (
     "parse_scheduled_command",
     "preview_scheduled_times",
     "get_activity",
-    "get_response_traces",
     "get_onboarding_readiness",
     "preview_experience",
     "save_memory_settings",

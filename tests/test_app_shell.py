@@ -1291,7 +1291,7 @@ def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
     assert "const numericDuration = (stage)" in script
     assert 'class="gantt-track"' in script
     assert 'class="gantt-duration"' in script
-    assert "横条位置表示阶段发生时间，长度表示耗时" in script
+    assert "本图显示从测试发送请求到微信返回结果的耗时" in script
     assert ".gantt-bar.skipped" in styles
     assert ".gantt-bar.pending" in styles
     assert ".gantt-bar.failed" in styles
@@ -1308,7 +1308,7 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert 'id="refreshGroups"' in markup
     assert "管理机器人所在群聊的回复规则、可用功能和成员信息" in markup
     assert 'api("get_groups", refresh)' in script
-    assert 'api("get_group_members", groupId)' in script
+    assert 'api("get_group_members", request.groupId)' in script
     assert '<span>微信号</span>' in script
     assert '<span>微信标识</span>' in script
     assert 'item.wechat_id || "未提供"' in script
@@ -1358,12 +1358,12 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
 
     assert "void hydrateGroupMemberCounts" in script
     assert "Promise.all" in script
-    assert "group.member_count = total" in script
+    assert "group.member_count = count" in script
     assert 'class="member-count-state loading">读取中' in script
     assert 'content.classList.toggle("history-active", page === "history")' in script
-    assert ".content-scroll.history-active { overflow: hidden; }" in styles
+    assert ".content-scroll.history-active { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }" in styles
     assert "#page-history.active" in styles
-    assert "flex: 1 1 0; min-height: 0; overflow: hidden;" in styles
+    assert "flex: 1 0 540px; min-height: 540px; overflow: hidden;" in styles
     assert 'if (/<emoji\\b/i.test(content)) return summary("[表情]");' in script
     assert 'if (appType === "6") return withTitle("[文件]");' in script
     assert 'return withTitle("[卡片消息]");' in script
