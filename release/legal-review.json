@@ -24,7 +24,7 @@
     "astrbot_plugin_livingmemory 2.3.6",
     "astrbot_plugin_self_learning 3.4.5",
     "astrbot_plugin_bittorrent 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1",
-    "astrbot_plugin_twitter 1.10.1",
+    "astrbot_plugin_twitter 1.12.0",
     "astrbot_plugin_proactive_chat 1.2.4",
     "astrbot_plugin_self_iterative_core 1.1.1"
   ],
@@ -36,19 +36,19 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "57731466E2ECE1F1FEB3F3742D95448056D6F3BB3D03E899C96293C51DE001AF"
+      "sha256": "41CC2D56BCF654142785EF5A05D376209680ED4BCF87155F2812189298D1B257"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
-      "sha256": "BFFFE754F5A986DB225166076C34E30FAF58455483860F9178709A03ABA9A01D"
+      "sha256": "D28A1C8ADF081D39FBB59F48827B95FF60D753762FD56588AFD4E0B9C234C1EF"
     },
     "license_texts": {
       "path": "legal/THIRD-PARTY-LICENSES.txt",
-      "sha256": "902FD3F2B2FFB98495143B2FD7A26C1CF6754AE74B3B82D5D72286787B1CCB3F"
+      "sha256": "F8DD3292F91AA6405519364866612EA20E4505A037F1475883A741032E2D5676"
     },
     "corresponding_source": {
       "path": "legal/CORRESPONDING-SOURCE.md",
-      "sha256": "11B662E63525C8C2E10673E4B2AC681BCCA77DD5F2E96823871ED69CFDBAD2A7"
+      "sha256": "9C1EF12EB763DFE485D9B5D122C8DDCA8BA2BCE8D7ECF3FA9ECCD811A5446628"
     }
   }
 }

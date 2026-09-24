@@ -36,6 +36,11 @@ def test_vendored_twitter_inventory_follows_delivery_manifest(tmp_path: Path) ->
     assert components[0]["version"] == "1.12.0"
     assert components[0]["licenses"] == [{"license": {"id": "AGPL-3.0-only"}}]
     assert any(path == repository / "runtime/astrbot_plugin_twitter/LICENSE" for _, path in documents)
+    sbom = json.loads((repository / "release/sbom.cdx.json").read_text(encoding="utf-8"))
+    recorded = next(item for item in sbom["components"] if item["name"] == "astrbot_plugin_twitter")
+    assert recorded == components[0]
+    notices = (repository / "legal/THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
+    assert "| astrbot_plugin_twitter | 1.12.0 | AGPL-3.0-only |" in notices
 
 
 def test_bundled_node_inventory_preserves_redistribution_license(tmp_path: Path, monkeypatch) -> None:

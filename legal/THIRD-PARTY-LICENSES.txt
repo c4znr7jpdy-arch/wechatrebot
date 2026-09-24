@@ -33887,7 +33887,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-COMPONENT: astrbot_plugin_twitter 1.10.1
+COMPONENT: astrbot_plugin_twitter 1.12.0
 SOURCE FILE: LICENSE
 TEXT SHA-256: 8EB8BFEDD4E26F4B2CF482377044560DAB15FF81F9B3FB902AA748DBB9150505
 ==============================================================================
