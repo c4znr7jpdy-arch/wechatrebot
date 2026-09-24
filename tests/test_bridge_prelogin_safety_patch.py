@@ -10,7 +10,7 @@ import sys
 from types import SimpleNamespace
 
 
-PROJECT_ROOT = Path(r"E:\Project")
+PROJECT_ROOT = Path(__file__).parent / "fixtures" / "patch_sources"
 BRIDGE_ROOT = PROJECT_ROOT / "hook_41827_astrbot_bridge"
 PATCH_PATH = (
     Path(__file__).resolve().parents[1]

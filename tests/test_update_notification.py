@@ -25,7 +25,7 @@ def test_update_popup_describes_release_and_offers_later_action() -> None:
         ROOT / "src" / "wechatrebot_manager" / "app_webui" / "app.js"
     ).read_text(encoding="utf-8")
 
-    assert 'cancelText: "稍后提醒"' in script
+    assert 'cancelText: mandatory ? "稍后更新" : "稍后提醒"' in script
     assert 'intent: "primary"' in script
     assert "formatBytes(release.package_size)" in script
     assert "release.notes.join" in script

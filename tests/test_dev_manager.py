@@ -90,10 +90,18 @@ def test_supervisor_restarts_only_its_child_on_source_save(monkeypatch, tmp_path
 
 def test_source_window_skips_install_integration_and_tray(monkeypatch, tmp_path: Path):
     calls = {}
+    shown_handlers = []
+
+    class ShownEvent:
+        def __iadd__(self, handler):
+            shown_handlers.append(handler)
+            return self
+
     api = SimpleNamespace(
         _attach_window=lambda window, tray: calls.update(tray=tray),
         _ensure_feature_page_server=lambda: SimpleNamespace(server_port=4321),
         _close_feature_page_server=lambda: None,
+        confirm_update_startup=lambda: None,
     )
     for name in app_shell.PUBLIC_API_METHODS:
         setattr(api, name, lambda: None)
@@ -104,7 +112,10 @@ def test_source_window_skips_install_integration_and_tray(monkeypatch, tmp_path:
 
     def create_window(title, url, **_kwargs):
         calls.update(title=title, url=url)
-        return SimpleNamespace(expose=lambda *methods: calls.update(methods=methods))
+        return SimpleNamespace(
+            expose=lambda *methods: calls.update(methods=methods),
+            events=SimpleNamespace(shown=ShownEvent()),
+        )
 
     def forbidden(*_args, **_kwargs):
         pytest.fail("source verification must not provision installed entries or tray")
@@ -118,6 +129,7 @@ def test_source_window_skips_install_integration_and_tray(monkeypatch, tmp_path:
     assert "源码验证" in calls["title"]
     assert calls["url"].startswith("http://127.0.0.1:")
     assert calls["tray"] is None
+    assert shown_handlers == [api.confirm_update_startup]
     assert len(calls["methods"]) == len(app_shell.PUBLIC_API_METHODS)
 
 

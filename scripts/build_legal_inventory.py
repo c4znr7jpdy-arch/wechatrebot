@@ -291,6 +291,7 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -321,7 +322,7 @@ def _write_license_bundle(path: Path, documents: list[tuple[str, Path]]) -> None
             ]
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(sections), encoding="utf-8")
+    path.write_text("\n".join(sections), encoding="utf-8", newline="\n")
 
 
 def _write_notices(path: Path, components: list[dict[str, object]]) -> None:
@@ -347,7 +348,7 @@ def _write_notices(path: Path, components: list[dict[str, object]]) -> None:
             f"{component.get('version', '')} | {license_name} |"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def _bundled_node_inventory(site_packages: Path) -> tuple[list[dict[str, object]], list[tuple[str, Path]]]:
