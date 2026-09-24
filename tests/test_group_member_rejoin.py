@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BRIDGE_SOURCE = Path(r"E:\Project\hook_41827_astrbot_bridge")
+BRIDGE_SOURCE = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge"
 PATCH = ROOT / "patches" / "hook-bridge-group-member-rejoin.patch"
 
 

@@ -48,7 +48,7 @@ def test_directory_automatically_refreshes_stale_snapshot(tmp_path, monkeypatch)
         {"group_id": "old@chatroom", "avatar": "old.jpg"},
         {"group_id": "new@chatroom", "avatar": "new.jpg"},
     ]
-    now[0] += 59
+    now[0] += 14
     assert len(obj.list()["items"]) == 1
     now[0] += 1
     assert obj.list()["items"][1]["avatar"] == "new.jpg"

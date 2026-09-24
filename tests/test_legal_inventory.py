@@ -147,6 +147,8 @@ def test_legal_inventory_includes_ffmpeg_in_all_artifacts(tmp_path: Path, monkey
     ])
 
     assert result == 0
+    for output in outputs.values():
+        assert b"\r\n" not in output.read_bytes(), output
     sbom = json.loads(outputs["sbom"].read_text(encoding="utf-8"))
     assert [item["name"] for item in sbom["components"]] == ["CPython", "FFmpeg"]
     assert {item["name"]: item["value"] for item in sbom["metadata"]["properties"]}[

@@ -89,10 +89,12 @@ def test_curated_paths_match_local_delivered_schemas():
 
 
 def test_projection_preserves_advanced_values_and_masks_secret_defaults():
-    schema = {"primary_base_url": {"type": "string", "default": "https://images.example/v1"},
+    schema = {"primary_model": {"type": "string", "default": "image-model"},
+              "primary_base_url": {"type": "string", "default": "https://images.example/v1"},
               "private_token": {"type": "string", "default": "never-show"}}
     projected = common_schema("jiang_image", schema)
-    assert list(projected) == ["primary_base_url"]
+    assert list(projected) == ["primary_model"]
+    assert projected["primary_model"]["default"] == "image-model"
     full = _customer_schema(schema, {"private_token": "stored"})
     assert full["private_token"]["default"] == ""
     assert _customer_config(schema, {"private_token": "stored"})["private_token"] == ""
