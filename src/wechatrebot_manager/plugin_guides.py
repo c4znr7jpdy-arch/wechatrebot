@@ -13,11 +13,10 @@ _GUIDES = {
     "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "打开专属配置页填写语音服务密钥，管理授权音色、使用范围和语音参数；保存后查看页面反馈并在测试聊天中验证。", "需要 MiMo 语音服务和已授权的参考音频；自动语音会产生服务用量。", ()),
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),
     "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
-    "astrbot_plugin_twitter": ("订阅 X/Twitter 推主并推送新推文", "先选择 FxTwitter 或 Nitter 数据源并配置网络访问，再在群聊或私聊中使用“/推特关注 用户名”建立订阅；需要管理群级订阅时打开专属订阅管理页。", "推送依赖可用的数据源和网络代理；这是按会话保存的订阅，不会自动把所有推主消息发送到全部聊天。", ("basic.twitter_data_provider", "basic.twitter_fxtwitter_api_base", "basic.twitter_proxy", "basic.twitter_poll_interval", "basic.twitter_poll_max_tweets_per_user", "content_filter.twitter_link_recognition_enabled")),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
     "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "只填写允许主动联系的会话，再打开对应的群聊或私聊开关。", "主动消息会发送给真实联系人；先在测试会话试用，避免打扰。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.session_list", "group_settings.group_idle_trigger_minutes")),
     "astrbot_plugin_qq_group_daily_analysis": ("把一天群聊整理成日报", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
-    "astrbot_plugin_twitter": ("订阅 X（Twitter）账号并推送新推文", "先选择 FxTwitter 数据源并确认网络可访问，再打开专属订阅页为群聊或私聊添加推主和推送开关。", "需要可访问的 Twitter/FxTwitter 数据源；开启翻译时还需要可用的模型服务。订阅按会话隔离，不会自动向所有聊天发送。", ("basic.twitter_data_provider", "basic.twitter_fxtwitter_api_base", "basic.twitter_proxy", "basic.twitter_poll_interval", "basic.twitter_poll_max_tweets_per_user", "content_filter.twitter_link_recognition_enabled", "translation.twitter_translate_enabled", "translation.twitter_translate_target_lang", "translation.twitter_translate_provider_id")),
+    "astrbot_plugin_twitter": ("订阅 X（Twitter）账号，以文字、微信卡片或截图推送", "在下方内嵌订阅页手动设置数据源、代理、推主和推送形式，也可在目标群发送 /推特关注 OpenAI 卡片；网页和命令使用同一份会话订阅。", "网络设置对本功能生效，订阅和推送形式按会话隔离；截图失败回退文字，卡片沿用微信推文卡片样式。", ()),
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
     "jiang_capability_router": ("让自然语言找到合适的功能", "一般保持当前设置即可；可调整“再来一个”这类续接请求的有效时间。", "具体能力需要对应功能已启用且完成配置。", ("recent_action_ttl_seconds", "inject_capability_prompt", "block_unknown_slash_llm")),
@@ -39,6 +38,19 @@ _GUIDES = {
 # Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
 # even when the plugin source contains internal or administrator-only helpers.
 _COMMANDS = {
+    "astrbot_plugin_twitter": (
+        {"title": "订阅与推送形式（仅当前会话）", "items": (
+            ("/推特关注 OpenAI 卡片", "订阅推主；形式可选文字、卡片、截图，可追加 r18 或 媒体"),
+            ("/推特批量关注 OpenAI elonmusk 文字", "一次订阅多个推主"),
+            ("/推特格式 OpenAI 截图", "修改该推主在当前会话中的推送形式，网页同步显示"),
+            ("/推特推送 开启", "开启当前会话推送；发送 /推特推送 关闭 可暂停"),
+            ("/推特列表", "查看当前会话订阅"),
+            ("/推特取关 OpenAI", "移除当前会话的指定订阅"),
+            ("/推特测试 OpenAI 卡片", "立即发送一条测试推文；可指定文字、卡片、截图"),
+            ("/推特解析 https://x.com/用户名/status/帖子ID", "手动解析单条推文"),
+            ("/推特帮助", "在聊天中查看命令说明；代理地址在下方网页配置"),
+        )},
+    ),
     "jiang_commands.setu": (
         {
             "title": "随机图片",

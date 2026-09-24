@@ -12,6 +12,8 @@
 - 固定依赖与复建输入：`legal/runtime-requirements.lock`、`legal/runtime-wheelhouse.json` 和 `legal/corresponding-source/build_runtime.py`；
 - 第三方许可证文本：`legal/THIRD-PARTY-LICENSES.txt`。
 
+Twitter 运行模块直接交付包含本地适配的完整源码，不再依赖旧版 Twitter 补丁。其目录内的 `UPSTREAM.md` 记录 Ars1027 上游 v1.12.0 的固定提交、导入日期及微信适配范围，`LICENSE` 保留上游许可原文；许可证清单读取与载荷相同的源码目录。
+
 ## 媒体与共享工具
 
 - FFmpeg/FFprobe 采用 `legal/ffmpeg-runtime.json` 固定的 BtbN Windows x64 LGPL shared 构建，保留原始 DLL 与 `runtime/ffmpeg/LICENSE.txt`。清单记录二进制来源、SHA-256、FFmpeg 源码提交及构建脚本来源；该清单随完整载荷提供。2026-08-31 月末构建的官方二进制、源码及构建脚本链接均已核验。

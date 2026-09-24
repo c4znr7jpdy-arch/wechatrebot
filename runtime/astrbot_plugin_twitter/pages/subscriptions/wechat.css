@@ -1,0 +1,26 @@
+.network-panel { margin: 18px 0; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.network-panel h2 { margin: 0 0 8px; font-size: 17px; }
+.network-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.network-grid > label { display: flex; flex-direction: column; gap: 8px; color: var(--text); font-size: 13px; }
+.proxy-field { display: flex; flex-direction: column; gap: 8px; color: var(--text); font-size: 13px; }
+.proxy-input { display: flex; gap: 8px; }
+.proxy-input input { flex: 1; }
+.proxy-input button { flex: 0 0 auto; }
+.network-error { color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+#network-status { min-height: 20px; }
+.network-grid :disabled { cursor: not-allowed; opacity: .6; }
+.network-grid > .option-check { flex-direction: row; align-items: center; }
+.network-grid input:not([type="checkbox"]), select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface-subtle); font: inherit; }
+select:focus-visible, .network-grid input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.network-actions { display: flex; gap: 8px; align-items: end; justify-content: flex-end; grid-column: span 2; }
+#network-status { font-size: 13px; color: var(--warning); }
+#network-status[data-state="ready"] { color: var(--positive); }
+#network-status[data-state="error"] { color: var(--danger, #c13939); }
+.command-help summary { cursor: pointer; font-weight: 600; }
+.command-help p { font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.command-help code { white-space: normal; }
+.subscription-row select { width: 108px; font-size: 12px; }
+.add-form select { width: 124px; }
+@media (max-width: 900px) { .network-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .network-actions { grid-column: auto; } }
+@media (max-width: 760px) { .subscription-row select { grid-column: 1 / -1; width: 100%; } }
+@media (max-width: 480px) { .network-grid { grid-template-columns: minmax(0, 1fr); } }

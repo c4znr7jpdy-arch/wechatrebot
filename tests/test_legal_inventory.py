@@ -26,6 +26,23 @@ def test_unknown_license_is_not_reported_as_spdx_identifier() -> None:
     assert entry == {"license": {"name": "NOASSERTION"}}
 
 
+def test_vendored_twitter_inventory_follows_delivery_manifest(tmp_path: Path) -> None:
+    repository = Path(__file__).parents[1]
+    components, documents = _builder()._plugin_components(
+        tmp_path,
+        {"features": [{"module": "astrbot_plugin_twitter", "ownership": "third-party"}]},
+        repository,
+    )
+    assert components[0]["version"] == "1.12.0"
+    assert components[0]["licenses"] == [{"license": {"id": "AGPL-3.0-only"}}]
+    assert any(path == repository / "runtime/astrbot_plugin_twitter/LICENSE" for _, path in documents)
+    sbom = json.loads((repository / "release/sbom.cdx.json").read_text(encoding="utf-8"))
+    recorded = next(item for item in sbom["components"] if item["name"] == "astrbot_plugin_twitter")
+    assert recorded == components[0]
+    notices = (repository / "legal/THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
+    assert "| astrbot_plugin_twitter | 1.12.0 | AGPL-3.0-only |" in notices
+
+
 def test_bundled_node_inventory_preserves_redistribution_license(tmp_path: Path, monkeypatch) -> None:
     builder = _builder()
     driver = tmp_path / "playwright" / "driver"

@@ -169,12 +169,23 @@ def _simple_yaml(path: Path) -> dict[str, str]:
 def _plugin_components(
     project_root: Path,
     feature_set: dict[str, object],
+    repository: Path | None = None,
 ) -> tuple[list[dict[str, object]], list[tuple[str, Path]]]:
     components: list[dict[str, object]] = []
     documents: list[tuple[str, Path]] = []
+    source_entries = {}
+    if repository is not None:
+        manifest = json.loads(
+            (repository / "release" / "source-manifest.json").read_text(encoding="utf-8")
+        )
+        source_entries = {entry["target"]: entry for entry in manifest["entries"]}
     for feature in feature_set["features"]:
         module = feature["module"]
         plugin_root = project_root / "data" / "plugins" / module
+        entry = source_entries.get(f"app/astrbot/data/plugins/{module}")
+        if entry is not None:
+            origin = repository if entry["origin"] == "commercial" else project_root
+            plugin_root = origin / entry["source"]
         metadata = _simple_yaml(plugin_root / "metadata.yaml")
         license_files = _license_documents(plugin_root)
         license_name = "Proprietary"
@@ -443,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     plugin_components, plugin_documents = _plugin_components(
         args.project_root.resolve(),
         feature_set,
+        repository,
     )
     node_components, node_documents = _bundled_node_inventory(runtime_site_packages)
     shared_components, shared_documents = _shared_components(args.project_root.resolve(), feature_set)

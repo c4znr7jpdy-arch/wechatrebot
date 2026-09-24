@@ -180,9 +180,10 @@
       ]
     },
     {
-      "origin": "project",
-      "source": "data/plugins/astrbot_plugin_twitter",
-      "target": "app/astrbot/data/plugins/astrbot_plugin_twitter"
+      "origin": "commercial",
+      "source": "runtime/astrbot_plugin_twitter",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_twitter",
+      "exclude": ["tests", "__pycache__", "*.pyc"]
     },
     {
       "origin": "project",
