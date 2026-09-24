@@ -16,16 +16,13 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BRIDGE_SOURCE = Path(r"E:\Project\hook_41827_astrbot_bridge")
+BRIDGE_SOURCE = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge"
 PATCH_PATH = ROOT / "patches" / "hook-bridge-outbound-policy.patch"
 PACKAGE_NAME = "_patched_hook_bridge_outbound_policy"
 
 
 @pytest.fixture(scope="module")
 def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    if not (BRIDGE_SOURCE / "src/hook_bridge/onebot_client.py").is_file():
-        pytest.skip("HOOK 4.1.8.27 bridge source checkout is unavailable")
-
     repository = tmp_path_factory.mktemp("hook-bridge-outbound-policy")
     # The Windows temp directory can itself be below a parent Git worktree. A
     # nested repository makes the patch target and its path stripping explicit.

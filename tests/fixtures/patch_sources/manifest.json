@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-09-24",
+  "project_revision": "3029c95619a32b84a251eb41591af4e781aecc32",
+  "notes": "Unpatched build inputs, LF normalized. Bridge and jiang_commands are tracked at project_revision; proactive_chat 1.2.4 is a local external dependency snapshot with its upstream license. The bridge __init__.py trailing blank line is normalized.",
+  "files": [
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/__init__.py",
+      "sha256": "a335c015c76fb6c7eb548aed697cc3d55f2527aaaa5259af95bc95896adcbcc3"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/app.py",
+      "sha256": "aabd22e61ff884daa55b608686f1c7352e842c78c8110a8a60dabed61e956298"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py",
+      "sha256": "49a998ec42ba3a907479ae506a5cf7f80bd17b5c8b330aa270dc7fdd719c7ad3"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/cgi_offsets.py",
+      "sha256": "9d0eaa2d722c5ff742555afeea676fca1eb6a583198ab969af16f77981b2595f"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/config.py",
+      "sha256": "bdf9047f52150479781e6b5053318329263c7a9b0fa90892c0b6a18630d21cfe"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py",
+      "sha256": "80ee9314894c5cbc5835cadc5f47ca032810d884bdd0757a1b675378e540850d"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/history_store.py",
+      "sha256": "9b2dd4f8a6b5925b6d41e0c7a4d5bea839076bad9ecbb034be164c3db6d4bc4b"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py",
+      "sha256": "6a5132368be168608c52e668ee81716d0db243a51a5d9464ab213f70d5926043"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/inbound_image.py",
+      "sha256": "59785f12ff4cfc5e6276d0bb0422e48c1639740f78a83517fd0aa9686bc33bb4"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/launcher.py",
+      "sha256": "329354e334ccb1c4683bc54923ae2718fedcf68380a447676f330a79b37f9b90"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/media.py",
+      "sha256": "b28863299ea97f97f48ea2979ddf9f092158e62ee7a6f0282371f77f56567f25"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py",
+      "sha256": "ea41ea26b22ddc9aa099437da36951d0d07455944f44c8a21de19ba263611987"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/models.py",
+      "sha256": "695eab201db47c29c60c4c65d76d83d120454ef90fbf433ae12b9545c8fe7a9b"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py",
+      "sha256": "ea6ca4587058ff672d03dd569008261e117fa41063f4e5e4778fadf8710cf5fc"
+    },
+    {
+      "path": "hook_41827_astrbot_bridge/src/hook_bridge/state.py",
+      "sha256": "e4cddaffc14dd7c730b68070c4243459cf968772a90d2894ea872a580ec7cea0"
+    },
+    {
+      "path": "data/plugins/jiang_commands/main.py",
+      "sha256": "9e6922cf710409275a08c83a0e3120378a244108e246c89eb264d8dae3ac4e5f"
+    },
+    {
+      "path": "data/plugins/jiang_commands/_conf_schema.json",
+      "sha256": "69ada2ddad28bd5476b4b683944e6227974e7ce2f9f8974ec4085c5436f5efe0"
+    },
+    {
+      "path": "data/plugins/astrbot_plugin_proactive_chat/_conf_schema.json",
+      "sha256": "abd6bdfe469da6e7e3f35c3d3ec1211c4d442341140a18b19cdd6f8b4937858c"
+    },
+    {
+      "path": "data/plugins/astrbot_plugin_proactive_chat/LICENSE",
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    }
+  ]
+}

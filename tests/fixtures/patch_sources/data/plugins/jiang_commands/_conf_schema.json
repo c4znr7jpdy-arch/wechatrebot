@@ -1,0 +1,28 @@
+{
+  "content_api_id": {
+    "description": "热点与备用天气服务账号",
+    "hint": "用于热点新闻和天气备用数据源；不使用这些能力时可留空。",
+    "type": "string",
+    "default": ""
+  },
+  "content_api_key": {
+    "description": "热点与备用天气服务密钥",
+    "hint": "密钥只保存在本机，页面不会回显。",
+    "type": "string",
+    "default": "",
+    "_secret": true
+  },
+  "weather_detail_token": {
+    "description": "天气详情服务令牌",
+    "hint": "可选；用于补充空气质量、能见度等详情，留空仍可使用基础天气。",
+    "type": "string",
+    "default": "",
+    "_secret": true
+  },
+  "random_image_proxy": {
+    "description": "随机图片网络代理",
+    "hint": "可选，例如 http://127.0.0.1:7890。",
+    "type": "string",
+    "default": ""
+  }
+}
