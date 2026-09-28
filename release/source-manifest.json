@@ -93,6 +93,16 @@
     },
     {
       "origin": "commercial",
+      "source": "patches/hook-recall-explicit-receipt.asm",
+      "target": "legal/corresponding-source/hook-recall-explicit-receipt.asm"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/hook_recall_patch.py",
+      "target": "legal/corresponding-source/hook_recall_patch.py"
+    },
+    {
+      "origin": "commercial",
       "source": "scripts/build_runtime.py",
       "target": "legal/corresponding-source/build_runtime.py"
     },
@@ -331,7 +341,9 @@
       "origin": "project",
       "source": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
       "target": "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
-      "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D"
+      "transform": "hook-recall-explicit-receipt-v1",
+      "input_sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D",
+      "sha256": "C3F64AF5E3BF30135FF5B193BE7F9BE6E7F03174BDD4B66E5C921E3A0D14B977"
     }
   ]
 }

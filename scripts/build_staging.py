@@ -20,6 +20,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
+from wechatrebot_manager import hook_recall_patch
 
 
 _SENSITIVE_FIELD = re.compile(
@@ -78,6 +79,40 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest().upper()
+
+
+def _copy_source_entry(source: Path, target: Path, entry: dict) -> None:
+    transform = entry.get("transform")
+    if transform is not None:
+        if transform != hook_recall_patch.TRANSFORM:
+            raise RuntimeError(f"unknown source transform: {transform}")
+        if (
+            entry.get("input_sha256") != hook_recall_patch.SOURCE_SHA256
+            or entry.get("sha256") != hook_recall_patch.PATCHED_SHA256
+        ):
+            raise RuntimeError("HOOK recall transform hashes do not match the reviewed adapter")
+    elif "input_sha256" in entry:
+        raise RuntimeError("input_sha256 requires a source transform")
+    expected = entry.get("input_sha256") if transform else entry.get("sha256")
+    if expected:
+        if not source.is_file():
+            raise RuntimeError(f"hash-pinned source is not a file: {source}")
+        actual = _sha256(source)
+        if actual != str(expected).upper():
+            raise RuntimeError(
+                f"source hash mismatch: {entry['source']}; expected {expected}, actual {actual}"
+            )
+    excludes = entry.get("exclude", [])
+    if not isinstance(excludes, list) or not all(
+        isinstance(value, str) and value for value in excludes
+    ):
+        raise RuntimeError(f"invalid exclude list: {entry['source']}")
+    if transform:
+        patched = hook_recall_patch.patch_hook_recall(source.read_bytes())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(patched)
+    else:
+        _copy(source, target, tuple(excludes))
 
 
 def _copied_record(target: Path, output: Path) -> dict[str, str]:
@@ -589,23 +624,8 @@ def main(argv: list[str] | None = None) -> int:
         source = (origin / entry["source"]).resolve()
         if not source.exists():
             raise FileNotFoundError(source)
-        expected_sha256 = entry.get("sha256")
-        if expected_sha256:
-            if not source.is_file():
-                raise RuntimeError(f"hash-pinned source is not a file: {source}")
-            actual_sha256 = _sha256(source)
-            if actual_sha256 != str(expected_sha256).upper():
-                raise RuntimeError(
-                    f"source hash mismatch: {entry['source']}; "
-                    f"expected {expected_sha256}, actual {actual_sha256}"
-                )
         target = output / entry["target"]
-        excludes = entry.get("exclude", [])
-        if not isinstance(excludes, list) or not all(
-            isinstance(value, str) and value for value in excludes
-        ):
-            raise RuntimeError(f"invalid exclude list: {entry['source']}")
-        _copy(source, target, tuple(excludes))
+        _copy_source_entry(source, target, entry)
         copied.append(_copied_record(target, output))
 
     _remove_embedded_checkin_accounts(output)
