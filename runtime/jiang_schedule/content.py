@@ -209,7 +209,10 @@ class ContentService:
             ):
                 return {"ready": False, "message": "影视播放服务尚未配置，请更新或重新安装"}
             if feature == "jiang_commands":
-                self._configuration()
+                content_config = self._configuration()
+                if action == "news" and not all(str(content_config.get(key) or "").strip()
+                                                for key in ("content_api_id", "content_api_key")):
+                    return {"ready": False, "message": "抖音热榜尚未配置，请联系管理员检查内容服务配置"}
         except (OSError, ValueError, AttributeError):
             return {"ready": False, "message": "无法确认内容功能是否就绪，请检查功能中心"}
         return {"ready": True, "message": ""}

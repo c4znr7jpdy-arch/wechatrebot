@@ -28,54 +28,59 @@ def _load_news_module():
             sys.modules["nonebot"] = previous
 
 
-def test_public_news_payload_is_normalized() -> None:
+def test_douyin_payload_is_sorted_and_normalized():
     module = _load_news_module()
-    items = module._normalize_toutiao_items(
-        {"data": [{"Title": "热点一", "HotValue": "42", "Url": "https://example.test/1"},
-                   {"Title": "", "HotValue": 3}]},
-        10,
-    )
-    assert items == [{
-        "title": "热点一", "hot_value": 42, "url": "https://example.test/1",
-    }]
+    assert module.normalize_items({"code": 200, "data": [
+        {"title": "低", "hot_value": "2"}, {"title": "高", "hot_value": "42"},
+        {"title": ""}, None]}, 1) == [{"title": "高", "hot_value": 42}]
 
 
-def test_news_uses_public_endpoint_without_hidden_credentials(monkeypatch) -> None:
+def test_news_uses_douyin_credentials_and_never_falls_back(monkeypatch):
     module = _load_news_module()
     calls = []
-
     class Response:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"data": [{"Title": "公开热榜", "HotValue": "8"}]}
-
+        def raise_for_status(self): pass
+        def json(self): return {"code": 200, "data": [{"title": "抖音新闻", "hot_value": 8}]}
     class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
         async def get(self, url, **kwargs):
             calls.append((url, kwargs))
             return Response()
-
-    monkeypatch.delenv("JIANG_CONTENT_API_ID", raising=False)
-    monkeypatch.delenv("JIANG_CONTENT_API_KEY", raising=False)
+    monkeypatch.setenv("JIANG_CONTENT_API_ID", "test-id")
+    monkeypatch.setenv("JIANG_CONTENT_API_KEY", "test-key")
     monkeypatch.setattr(module.httpx, "AsyncClient", Client)
+    result = asyncio.run(module.fetch_hot_news(3))
+    assert result == [{"title": "抖音新闻", "hot_value": 8}]
+    assert calls == [(module.DOUYIN_API_URL, {"params": {"id": "test-id", "key": "test-key"}})]
+    assert "抖音热榜" in module.format_news(result)
+    monkeypatch.delenv("JIANG_CONTENT_API_KEY")
+    import pytest
+    with pytest.raises(RuntimeError, match="尚未配置"):
+        asyncio.run(module.fetch_hot_news())
+    assert len(calls) == 1
 
-    assert asyncio.run(module.fetch_hot_news(3)) == [
-        {"title": "公开热榜", "hot_value": 8, "url": ""}
-    ]
-    assert calls[0][0] == module._TOUTIAO_HOT_BOARD_URL
+
+def test_news_failure_does_not_expose_credentials(monkeypatch):
+    module = _load_news_module()
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def get(self, *args, **kwargs): raise ValueError("secret-test-key")
+    logs = []
+    monkeypatch.setenv("JIANG_CONTENT_API_ID", "id")
+    monkeypatch.setenv("JIANG_CONTENT_API_KEY", "secret-test-key")
+    monkeypatch.setattr(module.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(module.logger, "warning", lambda *args: logs.append(str(args)))
+    import pytest
+    with pytest.raises(RuntimeError, match="暂时不可用") as exc:
+        asyncio.run(module.fetch_hot_news())
+    assert "secret-test-key" not in str(exc.value) + str(logs)
 
 
-def test_news_schedule_readiness_does_not_require_hidden_credentials(tmp_path: Path) -> None:
+def test_news_schedule_uses_same_credentials_and_adapter(tmp_path: Path) -> None:
     package = tmp_path / "runtime"
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
@@ -102,9 +107,27 @@ def test_news_schedule_readiness_does_not_require_hidden_credentials(tmp_path: P
     context = SimpleNamespace(get_all_stars=lambda: [SimpleNamespace(
         root_dir_name="jiang_commands", activated=True, star_cls=object(),
     )])
-    assert module.ContentService(context, tmp_path).readiness("news") == {
-        "ready": True, "message": "",
-    }
+    service = module.ContentService(context, tmp_path)
+    assert service.readiness("news")["ready"] is False
+    (config_root / "jiang_commands_config.json").write_text(
+        json.dumps({"content_api_id": "test-id", "content_api_key": "test-key"}), encoding="utf-8")
+    assert service.readiness("news") == {"ready": True, "message": ""}
+    news = _load_news_module()
+    async def fetch(count):
+        assert count == 5
+        return [{"title": "定时抖音热榜"}]
+    news.fetch_hot_news = fetch
+    previous = sys.modules.get("ai_plugin.news")
+    previous_package = sys.modules.get("ai_plugin")
+    sys.modules["ai_plugin"] = SimpleNamespace(news=news)
+    sys.modules["ai_plugin.news"] = news
+    try:
+        result = asyncio.run(service.generate({"action": "news", "arguments": {"count": 5}}))
+        assert "抖音热榜" in result.text and "定时抖音热榜" in result.text
+    finally:
+        for key, old in (("ai_plugin.news", previous), ("ai_plugin", previous_package)):
+            if old is None: sys.modules.pop(key, None)
+            else: sys.modules[key] = old
 
 
 def test_news_runtime_is_overlaid_after_project_source() -> None:

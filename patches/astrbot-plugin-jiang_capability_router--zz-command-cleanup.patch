@@ -1,0 +1,58 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -120,7 +120,7 @@
+             "当用户要求实际获取、查询、生成或发送机器人已有功能时，"
+             "优先调用 capability_invoke，不要只告诉用户命令，也不要假装已经执行。\n"
+             "可调用范围：疯狂星期四文案、热点新闻、城市天气、Epic喜加一、"
+-            "省份油价、燕云十六声动态、B站用户动态、盛世活动查询、报名和取消报名。\n"
++            "省份油价、B站用户动态、盛世活动查询、报名和取消报名。\n"
+             "用户说‘再来一个、继续、换一个、再查一次’等续调表达时，"
+             "结合下面的最近动作调用同一能力；当前消息或引用里有明确对象时，"
+             "明确对象优先。没有最近动作且‘文案’类型不明确时只问一次澄清。\n"
+@@ -181,7 +181,7 @@
+         capability_id: str = "",
+         arguments_json: str = "",
+     ):
+-        """实际调用姜小妹已有的插件能力。用户要求获取、查询、发送或“再来一个”时使用，不要只回复命令。支持 content.kfc、info.news、info.weather、info.epic、info.oilprice、info.yanyun_dynamic、info.bili_dynamic、info.raid_activity、action.raid_signup、action.raid_cancel_signup。报名与取消报名只有在用户当前消息明确授权时才执行。工具会结合当前会话最近动作处理“再来、继续、换一个”等指代，并直接把结果发送到当前聊天。
++        """实际调用姜小妹已有的插件能力。用户要求获取、查询、发送或“再来一个”时使用，不要只回复命令。支持 content.kfc、info.news、info.weather、info.epic、info.oilprice、info.bili_dynamic、info.raid_activity、action.raid_signup、action.raid_cancel_signup。报名与取消报名只有在用户当前消息明确授权时才执行。工具会结合当前会话最近动作处理“再来、继续、换一个”等指代，并直接把结果发送到当前聊天。
+ 
+         Args:
+             intent(string): 用户本次请求的原意，尽量保留“再来一个”等原话。
+diff --git a/capabilities.py b/capabilities.py
+--- a/capabilities.py
++++ b/capabilities.py
+@@ -105,14 +105,6 @@
+     return format_oilprice(data)
+ 
+ 
+-async def _run_yanyun(_: dict[str, Any]) -> CapabilityMediaResult:
+-    text, image_path = await fetch_latest_dynamic_message(
+-        "1567141152",
+-        title="燕云十六声",
+-    )
+-    return CapabilityMediaResult(text=text, image_path=image_path)
+-
+-
+ async def _run_bili_dynamic(
+     arguments: dict[str, Any],
+ ) -> CapabilityMediaResult:
+@@ -184,18 +176,6 @@
+         side_effect="read",
+         delivery="direct",
+         handler=_run_oilprice,
+-    ),
+-    CapabilitySpec(
+-        capability_id="info.yanyun_dynamic",
+-        name="燕云十六声动态",
+-        description="查询燕云十六声官方最新动态",
+-        aliases=("燕云", "燕云十六声", "燕云动态", "燕云官方动态"),
+-        required_arguments=(),
+-        argument_hints={},
+-        permission="public",
+-        side_effect="read",
+-        delivery="direct",
+-        handler=_run_yanyun,
+     ),
+     CapabilitySpec(
+         capability_id="info.bili_dynamic",

@@ -42,7 +42,7 @@ def test_common_commands_guide_exposes_grouped_customer_commands():
         "趣味与游戏",
         "其他",
     ]
-    assert guide["commands"][0]["items"][0] == ("/新闻", "今日热点新闻")
+    assert guide["commands"][0]["items"][0] == ("/新闻", "抖音热榜（也支持定时发送）")
     assert guide["commands"][1]["items"] == (
         ("@机器人 帮我画 xxx", "文生图"),
         ("@机器人 P图/改图/图生图", "编辑图片（需引用图片）"),
@@ -50,7 +50,7 @@ def test_common_commands_guide_exposes_grouped_customer_commands():
     rendered = [item[0] for group in guide["commands"] for item in group["items"]]
     assert all("\\" not in item for item in rendered)
     assert all("姜小妹" not in item for item in rendered)
-    assert all("燕云" not in item for item in rendered)
+    assert all(not any(word in item for word in ("燕云", "理想", "塔罗", "占卜")) for item in rendered)
     assert all("定时" not in item for item in rendered)
     assert all("订阅动态" not in item for item in rendered)
     assert all("启用" not in item and "禁用" not in item for item in rendered)

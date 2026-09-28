@@ -19,7 +19,7 @@ import uuid
 BEIJING = timezone(timedelta(hours=8), "Asia/Shanghai")
 ACTION_NAMES = {
     "weather": "天气预报",
-    "news": "热点资讯",
+    "news": "抖音热榜",
     "oilprice": "油价提醒",
     "kfc": "星期四文案",
     "short_drama": "影视推荐",
@@ -51,7 +51,7 @@ SCHEDULED_COMMANDS = (
         "reason": "", "alternative": "",
     },
     {
-        "id": "news", "display_name": "热点资讯", "action": "news",
+        "id": "news", "display_name": "抖音热榜", "action": "news",
         "status": "supported", "aliases": ("新闻", "资讯", "热点"),
         "parameters": ("资讯条数",), "dependencies": ("常用查询功能",),
         "recipient_types": ("group", "private"), "external_write": False,

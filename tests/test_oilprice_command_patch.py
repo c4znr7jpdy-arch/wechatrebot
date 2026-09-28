@@ -140,8 +140,5 @@ def test_oilprice_fetch_failure_replies_instead_of_silence(patched_tree):
 
 
 def test_oilprice_help_shows_both_orders(patched_tree):
-    assignment = next(node for node in patched_tree.body if isinstance(node, ast.Assign)
-                      and any(isinstance(t, ast.Name) and t.id == 'HELP_DATA' for t in node.targets))
-    help_data = ast.literal_eval(assignment.value)
-    assert any('山东油价' in example and '油价山东' in example
-               for _command, example in help_data['常用命令'])
+    source = (ROOT / 'runtime/jiang_commands/command_help.py').read_text(encoding='utf-8')
+    assert '/山东油价 或 /油价山东' in source

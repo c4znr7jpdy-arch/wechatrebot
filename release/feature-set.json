@@ -14,7 +14,7 @@
     {"module": "astrbot_plugin_qq_group_daily_analysis", "display_name": "群聊分析", "ownership": "third-party", "configuration": "schema", "default_enabled": true, "description": "汇总群聊活跃时段、热门话题、成员称号和精彩发言，支持手动分析与定时日报。"},
     {"module": "astrbot_plugin_self_iterative_core", "display_name": "自动改代码（实验）", "ownership": "third-party", "configuration": "schema", "default_enabled": false, "visible": false, "description": "可读写并重新加载功能代码的实验维护能力，不建议普通用户或新安装默认启用。"},
     {"module": "jiang_capability_router", "display_name": "功能调度", "ownership": "owner", "configuration": "schema", "default_enabled": true, "visible": false, "description": "识别自然语言意图并把请求交给合适的功能处理。"},
-    {"module": "jiang_commands", "display_name": "常用指令", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "提供新闻、天气、Epic、油价、趣味内容和帮助等常用指令。"},
+    {"module": "jiang_commands", "display_name": "常用指令", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "提供抖音热榜、天气、Epic、KFC、油价和功能帮助。"},
     {"module": "jiang_group_notice", "display_name": "群成员变动通知", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "在成员加入、退出或群昵称变化时发送提示；不能发布或编辑微信群公告。"},
     {"module": "jiang_image", "display_name": "图片生成", "ownership": "owner", "configuration": "schema-and-page", "default_enabled": true, "description": "提供文生图、图生图和模型管理能力。"},
     {"module": "jiang_mimo_emoji_voice", "display_name": "表情语音", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "把选中的表情回复转换为匹配情绪的语音。"},

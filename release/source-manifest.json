@@ -164,7 +164,13 @@
     {
       "origin": "project",
       "source": "data/plugins/jiang_commands",
-      "target": "app/astrbot/data/plugins/jiang_commands"
+      "target": "app/astrbot/data/plugins/jiang_commands",
+      "exclude": [
+        "tarot_cards",
+        "help_card.png",
+        "font_test_bold.png",
+        "font_test_normal.png"
+      ]
     },
     {
       "origin": "project",
@@ -283,7 +289,9 @@
       "source": "ai_plugin/ai_plugin",
       "target": "app/astrbot/ai_plugin/ai_plugin",
       "exclude": [
-        "weather_test.png"
+        "weather_test.png",
+        "help_card.py",
+        "plugin_manager.py"
       ]
     },
     {
@@ -344,6 +352,16 @@
       "transform": "hook-recall-explicit-receipt-v1",
       "input_sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D",
       "sha256": "C3F64AF5E3BF30135FF5B193BE7F9BE6E7F03174BDD4B66E5C921E3A0D14B977"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/jiang_commands/command_help.py",
+      "target": "app/astrbot/data/plugins/jiang_commands/command_help.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/jiang_commands/metadata.yaml",
+      "target": "app/astrbot/data/plugins/jiang_commands/metadata.yaml"
     }
   ]
 }
