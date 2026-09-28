@@ -883,8 +883,9 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
     assert result["error"]["code"] == "UPD-1016"
 
 
+@pytest.mark.parametrize("runtime_stop", [True, False])
 def test_install_update_runs_in_background_and_reports_progress(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, runtime_stop
 ) -> None:
     release = UpdateRelease(
         version="0.9.0",
@@ -901,10 +902,12 @@ def test_install_update_runs_in_background_and_reports_progress(
     api._lifecycle.refresh = lambda: SimpleNamespace(
         state=SimpleNamespace(value="STOPPED"), online=False, can_stop=False
     )
-    api._lifecycle.request_stop = lambda: None
+    stops = []
+    api._lifecycle.request_stop = lambda: stops.append(True)
     monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
     launched = threading.Event()
-    prepared = SimpleNamespace()
+    prepared = SimpleNamespace(payload_root=tmp_path / "payload")
+    monkeypatch.setattr(app_shell, "payload_requires_runtime_stop", lambda path: runtime_stop)
 
     def fake_prepare(*_args, progress_callback, **_kwargs):
         progress_callback("download", 50, 100)
@@ -926,6 +929,7 @@ def test_install_update_runs_in_background_and_reports_progress(
     assert status["ok"] is True
     assert status["data"]["state"] == "restarting"
     assert status["data"]["percent"] == 100
+    assert bool(stops) is runtime_stop
 
 
 def test_background_download_waits_for_owned_wechat_before_stopping_services(

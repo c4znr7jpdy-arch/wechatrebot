@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import urllib.error
 import zipfile
@@ -13,7 +14,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from wechatrebot_manager.payload import sha256_file
+from wechatrebot_manager.payload import PayloadError, installed_payload_fingerprint, sha256_file
 from wechatrebot_manager.updates import (
     PRODUCT_ID,
     UpdateChannel,
@@ -238,8 +239,9 @@ def test_update_archive_supports_long_windows_staging_paths(tmp_path: Path) -> N
 
 
 def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
     install = tmp_path / "install"
     (install / "updates").mkdir(parents=True)
     (install / "manager").mkdir()
@@ -268,6 +270,7 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     assert apply_update_plan(plan.plan_path, restart=False) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
     assert (install / "卸载机器人.exe").read_bytes() == b"new-manager"
+    assert (install / "启动机器人.exe").read_bytes() == b"new-manager"
     assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "updated"
     result = json.loads(
         (install / "updates" / "update-result.json").read_text(encoding="utf-8")
@@ -283,6 +286,7 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
 def test_startup_failure_restores_previous_manager_and_payload(
     monkeypatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
     install = tmp_path / "install"
     (install / "updates").mkdir(parents=True)
     (install / "manager").mkdir()
@@ -337,6 +341,147 @@ def test_startup_failure_restores_previous_manager_and_payload(
     assert result["error_code"] == "UPD-1009"
     assert result["status"] == "failed"
     assert launches == ["started", "started"]
+
+
+def _ready_incremental_update(tmp_path: Path) -> tuple[Path, PreparedUpdate]:
+    install = tmp_path / "install"
+    baseline = {
+        "manager/WeChatReBot.exe": b"old-manager",
+        "app/astrbot/data/plugins/example/main.py": b"old-plugin",
+        "app/astrbot/data/plugins/example/removed.png": b"unused-image",
+        "runtime/unchanged.txt": b"shared-runtime",
+    }
+    entries = []
+    for relative, content in baseline.items():
+        target = install / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        entries.append({"path": relative, "sha256": sha256_file(target)})
+    (install / "config").mkdir()
+    (install / "config/installed-payload.json").write_text(
+        json.dumps({"schema_version": 1, "files": entries}), encoding="utf-8"
+    )
+    (install / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8"
+    )
+    working = install / "updates/.pending-delta"
+    payload = working / "extracted/payload"
+    replacement = payload / "app/astrbot/data/plugins/example/main.py"
+    replacement.parent.mkdir(parents=True)
+    replacement.write_bytes(b"new-plugin")
+    (payload / "release-manifest.json").write_text(
+        json.dumps({
+            "schema_version": 2,
+            "update_kind": "incremental",
+            "base_fingerprint": installed_payload_fingerprint(install),
+            "files": [{"path": replacement.relative_to(payload).as_posix(), "sha256": sha256_file(replacement)}],
+            "remove": [entries[2]],
+        }), encoding="utf-8"
+    )
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease(
+        "0.9.9", "update", (), "", "https://updates.example.test/update.zip", 7, "A" * 64, False
+    )
+    return install, PreparedUpdate(release, working, payload, archive)
+
+
+def test_plugin_incremental_update_uses_current_helper_and_only_backs_up_changes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
+    plan = create_update_plan(
+        prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0
+    )
+    assert plan.helper_executable.read_bytes() == b"old-manager"
+    journal = updates_module._snapshot_update_targets(
+        prepared.payload_root, install, install / "updates/test-rollback", update_id="test", version="0.9.9"
+    )
+    assert {entry["path"] for entry in journal["files"]} == {
+        "app/astrbot/data/plugins/example/main.py",
+        "app/astrbot/data/plugins/example/removed.png",
+        ".wechatrebot-install.json",
+        "config/installed-payload.json",
+    }
+    assert apply_update_plan(plan.plan_path, restart=False) == 0
+    assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"new-plugin"
+    assert not (install / "app/astrbot/data/plugins/example/removed.png").exists()
+    assert (install / "manager/WeChatReBot.exe").read_bytes() == b"old-manager"
+    assert not (install / "卸载机器人.exe").exists()
+    assert not (install / "启动机器人.exe").exists()
+
+
+def test_incremental_helper_rechecks_baseline_before_touching_files(tmp_path: Path) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    plan = create_update_plan(
+        prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0
+    )
+    changed = install / "app/astrbot/data/plugins/example/main.py"
+    changed.write_bytes(b"changed-after-preparation")
+    assert apply_update_plan(plan.plan_path, restart=False) == 1
+    assert changed.read_bytes() == b"changed-after-preparation"
+    assert (install / "app/astrbot/data/plugins/example/removed.png").is_file()
+    assert not (install / "updates/update-journal.json").exists()
+
+
+def test_incremental_plan_rejects_wrong_base_before_copying_helper(tmp_path: Path) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    (install / "app/astrbot/data/plugins/example/main.py").write_bytes(b"modified")
+    with pytest.raises(PayloadError, match="现有文件"):
+        create_update_plan(
+            prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0
+        )
+    assert not (prepared.working_root / "WeChatReBot-Updater.exe").exists()
+
+
+def test_incremental_startup_failure_restores_deleted_files_and_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    before = (install / "config/installed-payload.json").read_bytes()
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
+    plan = create_update_plan(
+        prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0
+    )
+    monkeypatch.setattr(updates_module, "_restart_manager", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(updates_module, "_stop_restarted_manager", lambda *_args: None)
+    def fail_startup(*_args):
+        raise UpdateFailure("UPD-1009", "failed test startup")
+    monkeypatch.setattr(updates_module, "_wait_for_startup_confirmation", fail_startup)
+    assert apply_update_plan(plan.plan_path) == 1
+    assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"old-plugin"
+    assert (install / "app/astrbot/data/plugins/example/removed.png").read_bytes() == b"unused-image"
+    assert (install / "config/installed-payload.json").read_bytes() == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process discovery")
+def test_runtime_guard_ignores_unrelated_python_and_rejects_install_runtime(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from wechatrebot_manager import launcher, uninstaller
+    install, prepared = _ready_incremental_update(tmp_path)
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda: (101, 202))
+    monkeypatch.setattr(launcher, "process_identity", lambda _pid: SimpleNamespace(executable=str(tmp_path / "other/python.exe")))
+    updates_module.assert_update_runtime_stopped(prepared.payload_root, install)
+    monkeypatch.setattr(launcher, "process_identity", lambda pid: SimpleNamespace(executable=str(install / "runtime/python/python.exe")) if pid == 202 else None)
+    with pytest.raises(UpdateFailure) as error:
+        updates_module.assert_update_runtime_stopped(prepared.payload_root, install)
+    assert error.value.definition.code == "UPD-1005"
+
+
+def test_active_runtime_blocks_update_before_journal_or_modifications(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    plan = create_update_plan(prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0)
+    def blocked(*_args):
+        raise UpdateFailure("UPD-1005", "runtime alive")
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", blocked)
+    assert apply_update_plan(plan.plan_path, restart=False) == 1
+    assert not (install / "updates/update-journal.json").exists()
+    assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"old-plugin"
+    assert (install / "app/astrbot/data/plugins/example/removed.png").exists()
 
 
 class _DownloadResponse(io.BytesIO):
@@ -457,7 +602,11 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
         False,
         uncompressed_size=100,
     )
-    monkeypatch.setattr(updates_module, "_estimated_rollback_bytes", lambda _root: 50)
+    measured = []
+    def estimate(_root, payload):
+        measured.append(payload)
+        return 50
+    monkeypatch.setattr(updates_module, "_estimated_rollback_bytes", estimate)
     reserve = 64 * 1024**2
     monkeypatch.setattr(
         updates_module.shutil,
@@ -466,6 +615,7 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
     )
 
     updates_module._ensure_update_disk_space(tmp_path, release)
+    assert not measured
 
     monkeypatch.setattr(
         updates_module.shutil,
@@ -473,7 +623,8 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
         lambda _path: SimpleNamespace(free=100 + 2 * 50 + reserve - 1, total=0, used=0),
     )
     with pytest.raises(UpdateFailure) as error:
-        updates_module._ensure_update_disk_space(tmp_path, release, staged=True)
+        updates_module._ensure_update_disk_space(tmp_path, release, staged=True, payload_root=tmp_path / "payload")
+    assert measured == [tmp_path / "payload"]
     assert error.value.definition.code == "UPD-1004"
 
 
