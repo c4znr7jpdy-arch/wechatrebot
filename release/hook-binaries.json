@@ -21,10 +21,10 @@
       "role": "hook-library-c2c-video-patched",
       "architecture": "x64",
       "pe_machine": "0x8664",
-      "size": 11469312,
-      "sha256": "21FAFB726A287093020B4CAE799C3B1839397B735BE5B8354C927052A46A6C8D",
+      "size": 11469824,
+      "sha256": "C3F64AF5E3BF30135FF5B193BE7F9BE6E7F03174BDD4B66E5C921E3A0D14B977",
       "authenticode": "not-signed",
-      "provenance": "original work independently authored by Wechatrebot, including the C2C video implementation; signed rights declaration pending"
+      "provenance": "original work independently authored by Wechatrebot, including the C2C video implementation and deterministic explicit-receipt recall adapter; signed rights declaration pending"
     }
   ]
 }

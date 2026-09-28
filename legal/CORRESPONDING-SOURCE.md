@@ -10,6 +10,7 @@
 - AstrBot 4.26.6 的已安装 Python 源码及资源：`runtime/python/Lib/site-packages/astrbot/`；
 - AstrBot 本地修改补丁：`legal/corresponding-source/astrbot-4.26.6-wechat.patch`，以及同目录全部 `astrbot-plugin-*.patch` 插件适配补丁；
 - 固定依赖与复建输入：`legal/runtime-requirements.lock`、`legal/runtime-wheelhouse.json` 和 `legal/corresponding-source/build_runtime.py`；
+- HOOK 撤回回执适配：`legal/corresponding-source/hook_recall_patch.py` 和 `hook-recall-explicit-receipt.asm`，仅在构建暂存副本时转换固定哈希的 DLL；
 - 第三方许可证文本：`legal/THIRD-PARTY-LICENSES.txt`。
 
 Twitter 运行模块直接交付包含本地适配的完整源码，不再依赖旧版 Twitter 补丁。其目录内的 `UPSTREAM.md` 记录 Ars1027 上游 v1.12.0 的固定提交、导入日期及微信适配范围，`LICENSE` 保留上游许可原文；许可证清单读取与载荷相同的源码目录。
