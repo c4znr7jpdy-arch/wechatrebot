@@ -29,9 +29,13 @@ from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
+    _is_user_config,
     install_payload,
     payload_relative_paths,
+    payload_removed_paths,
+    payload_requires_runtime_stop,
     sha256_file,
+    validate_incremental_base,
     verify_payload,
 )
 from .single_instance import SingleInstanceLock
@@ -467,24 +471,82 @@ def extract_update_archive(
 
 
 def _is_preserved_user_config(relative: Path) -> bool:
-    parts = tuple(part.casefold() for part in relative.parts)
-    if not parts:
-        return False
-    if parts[0] == "config":
-        return len(parts) > 1 and parts[1] not in {
-            "installed-payload.json",
-            "templates",
-        }
-    return len(parts) >= 4 and parts[:4] == (
-        "app",
-        "astrbot",
-        "data",
-        "config",
-    )
+    return _is_user_config(relative)
 
 
-def _estimated_rollback_bytes(install_root: Path) -> int:
+def _update_target_paths(payload_root: Path) -> set[Path]:
+    paths = set(payload_relative_paths(payload_root))
+    paths.update(payload_removed_paths(payload_root))
+    if Path("manager/WeChatReBot.exe") in paths:
+        paths.update({Path("启动机器人.exe"), Path("卸载机器人.exe")})
+    paths.update({Path(INSTALL_MARKER), Path("config/installed-payload.json")})
+    return paths
+
+
+def _validate_update_baseline(payload_root: Path, install_root: Path) -> None:
+    validate_incremental_base(payload_root, install_root)
+
+
+def assert_update_runtime_stopped(
+    payload_root: str | Path, install_root: str | Path
+) -> None:
+    """Read-only guard: never replace runtime files while their users are alive."""
+    payload = Path(payload_root).expanduser().resolve()
+    if not payload_requires_runtime_stop(payload):
+        return
+    root = Path(install_root).expanduser().resolve()
+    if os.name != "nt":
+        raise UpdateError("当前平台无法确认机器人运行状态，已取消运行时更新。")
+    from .launcher import process_identity
+    from .uninstaller import _iter_windows_process_ids, _process_module_paths
+
+    processes = _iter_windows_process_ids()
+    if not processes:
+        raise UpdateError("无法检查机器人进程状态，已取消运行时更新。")
+    changed_binaries = {
+        os.path.normcase(str((root / relative).resolve()))
+        for relative in _update_target_paths(payload)
+        if relative.suffix.casefold() in {".dll", ".pyd", ".exe"}
+        and relative.parts[0].casefold() in {"app", "runtime"}
+    }
+    blockers: list[int] = []
+    for pid in processes:
+        if pid in {0, os.getpid()}:
+            continue
+        identity = process_identity(pid)
+        in_runtime = bool(
+            identity
+            and any(
+                _path_within(Path(identity.executable), root / directory)
+                for directory in ("app", "runtime")
+            )
+        )
+        holds_binary = bool(changed_binaries) and any(
+            os.path.normcase(str(path.resolve())) in changed_binaries
+            for path in _process_module_paths(pid)
+        )
+        if in_runtime or holds_binary:
+            blockers.append(pid)
+    if blockers:
+        raise UpdateFailure(
+            "UPD-1005",
+            "更新文件仍被进程占用：" + ", ".join(map(str, blockers)),
+            public_message="请先停止机器人；若微信仍占用待更新文件，请退出微信后重试。",
+        )
+
+
+def _estimated_rollback_bytes(
+    install_root: Path, payload_root: Path | None = None
+) -> int:
     """Estimate the files the helper must retain to make rollback possible."""
+    if payload_root is not None:
+        return sum(
+            (install_root / relative).stat().st_size
+            for relative in _update_target_paths(payload_root)
+            if not _is_preserved_user_config(relative)
+            and (install_root / relative).is_file()
+            and not (install_root / relative).is_symlink()
+        )
     manifest_path = install_root / "config" / "installed-payload.json"
     try:
         manifest = _read_json_object(manifest_path)
@@ -532,11 +594,19 @@ def _ensure_update_disk_space(
     *,
     uncompressed_size: int | None = None,
     staged: bool = False,
+    payload_root: Path | None = None,
 ) -> None:
     expanded = uncompressed_size or release.uncompressed_size
     if not expanded:
         expanded = max(release.package_size * 4, 64 * 1024**2)
-    rollback = _estimated_rollback_bytes(install_root)
+    rollback = (
+        _estimated_rollback_bytes(install_root, payload_root)
+        if payload_root is not None
+        else 0
+    )
+    # Before extraction the changed file set is unknown. Check download space
+    # now and the exact rollback budget below after verifying the payload, rather
+    # than stat every installed runtime file for a small component update.
     # Before downloading, both the extracted payload and install transaction
     # staging must fit. Once downloaded/extracted, only install staging remains
     # to be allocated. Keep two old-file snapshots: the crash-safe outer journal
@@ -628,18 +698,20 @@ def prepare_update(
         )
         if release.uncompressed_size and actual_uncompressed != release.uncompressed_size:
             raise UpdateFailure("UPD-1003", "更新包展开体积和签名清单不一致。")
+        verified = verify_payload(
+            payload_root,
+            progress_callback=progress_callback,
+        )
+        _validate_update_baseline(payload_root, root)
         _ensure_update_disk_space(
             root,
             release,
             uncompressed_size=actual_uncompressed,
             staged=True,
-        )
-        verify_payload(
-            payload_root,
-            progress_callback=progress_callback,
+            payload_root=payload_root,
         )
         manager = payload_root / "manager" / "WeChatReBot.exe"
-        if not manager.is_file():
+        if not manager.is_file() and verified.manifest.get("schema_version") != 2:
             raise UpdateError("更新包缺少桌面管理器。")
         logger.write("package_verified", state="verified", version=release.version)
         return PreparedUpdate(release, working, payload_root, final_archive)
@@ -699,13 +771,17 @@ def create_update_plan(
         raise UpdateError("更新计划引用了暂存目录之外的文件。") from exc
     if not _path_within(prepared.payload_root, working):
         raise UpdateError("更新计划引用了暂存目录之外的文件。")
+    verified = verify_payload(prepared.payload_root)
+    _validate_update_baseline(prepared.payload_root, root)
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
     helper = working / "WeChatReBot-Updater.exe"
     helper_source = prepared.payload_root / "manager" / "WeChatReBot.exe"
     if not helper_source.is_file():
-        raise UpdateError("更新包缺少可运行的独立更新程序。")
+        if verified.manifest.get("schema_version") != 2:
+            raise UpdateError("更新包缺少可运行的独立更新程序。")
+        helper_source = source_executable
     shutil.copy2(helper_source, helper)
     application_pid = int(parent_pid if parent_pid is not None else os.getpid())
     update_id = uuid.uuid4().hex
@@ -930,14 +1006,7 @@ def _snapshot_update_targets(
     update_id: str,
     version: str,
 ) -> dict[str, object]:
-    paths = set(payload_relative_paths(payload_root))
-    paths.update(
-        {
-            Path(INSTALL_MARKER),
-            Path("config/installed-payload.json"),
-            Path("卸载机器人.exe"),
-        }
-    )
+    paths = _update_target_paths(payload_root)
     files_root = rollback_root / "files"
     files_root.mkdir(parents=True, exist_ok=True)
     snapshots: list[dict[str, object]] = []
@@ -1096,6 +1165,9 @@ def apply_update_plan(
                 _wait_for_process_exit(pid)
             except UpdateError as exc:
                 raise UpdateFailure("UPD-1005", str(exc)) from exc
+        verify_payload(payload_root)
+        _validate_update_baseline(payload_root, root)
+        assert_update_runtime_stopped(payload_root, root)
         rollback_root = root / "updates" / f".rollback-{update_id}"
         rollback_root.mkdir(parents=True, exist_ok=False)
         journal = _snapshot_update_targets(
@@ -1130,10 +1202,14 @@ def apply_update_plan(
         # Manager-only updates must also refresh the standalone uninstall
         # entrypoint.  Otherwise a customer who double-clicks the old copy
         # could still run pre-update deletion rules.
-        from .uninstaller import ensure_uninstall_executable
+        if Path("manager/WeChatReBot.exe") in payload_relative_paths(payload_root):
+            from .installed_entries import ensure_launcher_executable
+            from .uninstaller import ensure_uninstall_executable
 
-        if not ensure_uninstall_executable(root):
-            raise UpdateError("无法刷新卸载程序。")
+            if not ensure_launcher_executable(root):
+                raise UpdateError("无法刷新启动程序。")
+            if not ensure_uninstall_executable(root):
+                raise UpdateError("无法刷新卸载程序。")
         write_json_atomic(
             root / INSTALL_MARKER,
             {"schema_version": 1, "state": "ready"},
@@ -1577,6 +1653,7 @@ __all__ = [
     "UpdatePlan",
     "UpdateRelease",
     "apply_update_plan",
+    "assert_update_runtime_stopped",
     "canonical_manifest_bytes",
     "check_for_update",
     "cleanup_stale_update_workdirs",

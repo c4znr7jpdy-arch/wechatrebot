@@ -55,7 +55,7 @@ python scripts\build_update_status.py `
 - `--manager-build artifacts\...`：复用已经完成且清单校验通过的管理器构建。
 - `--skip-tests`、`--skip-remote-smoke`：仅用于明确知道风险的故障排查，不建议正式发布使用。
 
-增量包不会重建或遍历完整 staging，适合管理器及其内置静态资源更新。只要运行时、`app/astrbot/data/plugins/`、桥接程序或 hook 文件发生变化，就必须使用下面的完整载荷流程。
+管理器增量包不会重建或遍历完整 staging，适合管理器及其内置静态资源更新。新增的 [组件增量流程](incremental-updates.md) 还支持依赖兼容的插件、桥接 Python 源码和资源变化。Python、底层依赖、AstrBot 核心补丁及 hook 等原生二进制变化仍走下面的完整载荷流程。旧客户端须先通过原有 schema 1 管理器增量升级更新器，才能接收 schema 2 组件增量；组件包绑定安装基线，不能直接向不同基线的所有客户广播。
 
 ### 完整载荷发布
 

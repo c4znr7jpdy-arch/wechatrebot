@@ -89,6 +89,7 @@ from .updates import (
     prepare_update,
     recover_interrupted_update,
 )
+from .payload import payload_requires_runtime_stop
 from .update_errors import UpdateFailure
 from .update_logger import UpdateLogger
 from .shortcuts import refresh_windows_shortcuts
@@ -2107,57 +2108,59 @@ class ApplicationApi:
                 return
             self._install_requested = ""
 
-            self._set_update_status(
-                state="running",
-                phase="stopping_services",
-                completed=1,
-                total=1,
-                percent=100,
-                message="更新文件已校验，正在安全停止机器人",
-                error=None,
-            )
-            try:
-                self._lifecycle.request_stop()
-                deadline = time.monotonic() + 900
-                while time.monotonic() < deadline:
+            payload_root = getattr(prepared, "payload_root", None)
+            if payload_root is None or payload_requires_runtime_stop(payload_root):
+                self._set_update_status(
+                    state="running",
+                    phase="stopping_services",
+                    completed=1,
+                    total=1,
+                    percent=100,
+                    message="更新文件已校验，正在安全停止机器人",
+                    error=None,
+                )
+                try:
+                    self._lifecycle.request_stop()
+                    deadline = time.monotonic() + 900
+                    while time.monotonic() < deadline:
+                        view = self._lifecycle.refresh()
+                        state = getattr(view.state, "value", str(view.state))
+                        if state == "STOPPED" and not view.online and not view.can_stop:
+                            break
+                        if state == "STOP_WAIT_WECHAT":
+                            self._set_update_status(
+                                state="running",
+                                phase="waiting_wechat",
+                                completed=1,
+                                total=1,
+                                percent=100,
+                                message="请先退出机器人微信，检测关闭后会自动继续",
+                                error=None,
+                            )
+                        else:
+                            self._set_update_status(
+                                state="running",
+                                phase="stopping_services",
+                                completed=1,
+                                total=1,
+                                percent=100,
+                                message="正在安全停止微信连接和回复引擎",
+                                error=None,
+                            )
+                        time.sleep(1)
+                    else:
+                        code = "UPD-1014"
+                        raise UpdateFailure(code, "等待机器人微信退出超时。")
                     view = self._lifecycle.refresh()
                     state = getattr(view.state, "value", str(view.state))
-                    if state == "STOPPED" and not view.online and not view.can_stop:
-                        break
-                    if state == "STOP_WAIT_WECHAT":
-                        self._set_update_status(
-                            state="running",
-                            phase="waiting_wechat",
-                            completed=1,
-                            total=1,
-                            percent=100,
-                            message="请先退出机器人微信，检测关闭后会自动继续",
-                            error=None,
-                        )
-                    else:
-                        self._set_update_status(
-                            state="running",
-                            phase="stopping_services",
-                            completed=1,
-                            total=1,
-                            percent=100,
-                            message="正在安全停止微信连接和回复引擎",
-                            error=None,
-                        )
-                    time.sleep(1)
-                else:
-                    code = "UPD-1014"
-                    raise UpdateFailure(code, "等待机器人微信退出超时。")
-                view = self._lifecycle.refresh()
-                state = getattr(view.state, "value", str(view.state))
-                if state != "STOPPED" or view.online or view.can_stop:
-                    raise UpdateFailure("UPD-1006", "托管的微信连接未能停止。")
-            except UpdateFailure:
-                raise
-            except Exception as exc:
-                service_name = str(getattr(exc, "service_name", ""))
-                code = "UPD-1006" if "bridge" in service_name.casefold() else "UPD-1011"
-                raise UpdateFailure(code, str(exc)) from exc
+                    if state != "STOPPED" or view.online or view.can_stop:
+                        raise UpdateFailure("UPD-1006", "托管的微信连接未能停止。")
+                except UpdateFailure:
+                    raise
+                except Exception as exc:
+                    service_name = str(getattr(exc, "service_name", ""))
+                    code = "UPD-1006" if "bridge" in service_name.casefold() else "UPD-1011"
+                    raise UpdateFailure(code, str(exc)) from exc
 
             self._set_update_status(
                 state="running",

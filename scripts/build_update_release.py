@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 import tomllib
 import urllib.parse
@@ -90,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = args.payload.expanduser().resolve()
     verified = verify_payload(payload)
+    if args.include and verified.manifest.get("schema_version") == 2:
+        parser.error("incremental payloads must be published intact; --include is not supported")
     verified_by_path = {
         item.relative_path.as_posix(): item for item in verified.files
     }
@@ -142,11 +146,27 @@ def main(argv: list[str] | None = None) -> int:
             "payload/release-manifest.json",
             json.dumps(package_manifest, ensure_ascii=False, indent=2) + "\n",
         )
-        for item in selected:
-            package.write(
-                item.source_path,
-                f"payload/{item.relative_path.as_posix()}",
+        with ExitStack() as sources:
+            source_archive = (
+                sources.enter_context(zipfile.ZipFile(verified.root))
+                if verified.root.is_file()
+                else None
             )
+            members = (
+                {info.filename.casefold(): info for info in source_archive.infolist()}
+                if source_archive is not None
+                else {}
+            )
+            for item in selected:
+                relative = item.relative_path.as_posix()
+                if source_archive is None:
+                    package.write(item.source_path, f"payload/{relative}")
+                else:
+                    # Archive payload files share source_path=the source ZIP;
+                    # copy each verified member, never the ZIP itself.
+                    with source_archive.open(members[relative.casefold()]) as source:
+                        with package.open(f"payload/{relative}", "w", force_zip64=True) as target:
+                            shutil.copyfileobj(source, target, length=1024 * 1024)
     with zipfile.ZipFile(archive, "r") as package:
         uncompressed_size = sum(item.file_size for item in package.infolist())
 

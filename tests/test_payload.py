@@ -8,7 +8,11 @@ import pytest
 from wechatrebot_manager.payload import (
     PayloadError,
     install_payload,
+    installed_payload_fingerprint,
     payload_relative_paths,
+    payload_removed_paths,
+    payload_requires_runtime_stop,
+    validate_incremental_base,
     verify_payload,
 )
 
@@ -55,6 +59,17 @@ def test_tampered_payload_is_rejected_before_install(tmp_path: Path) -> None:
         verify_payload(payload)
 
 
+def test_archive_member_case_must_match_manifest(tmp_path: Path) -> None:
+    payload = tmp_path / "payload"
+    source = _payload(payload)
+    archive = tmp_path / "case-mismatch.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.write(payload / "release-manifest.json", "release-manifest.json")
+        package.write(source, "App/Example.txt")
+    with pytest.raises(PayloadError, match="大小写"):
+        verify_payload(archive)
+
+
 def test_streaming_install_rejects_tamper_before_replacing_target(tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     source = _payload(payload)
@@ -72,7 +87,7 @@ def test_streaming_install_rejects_tamper_before_replacing_target(tmp_path: Path
 
 @pytest.mark.parametrize(
     "relative",
-    ["config/defaults.json", "app/astrbot/data/config/cmd_config.json"],
+    ["config/defaults.json", "app/astrbot/data/config/cmd_config.json", "app/astrbot/data/cmd_config.json"],
 )
 def test_update_preserves_existing_user_configuration(
     tmp_path: Path, relative: str
@@ -332,3 +347,217 @@ def test_install_rejects_final_target_path_overflow_before_creating_root(
         install_payload(archive_path, install_root)
 
     assert not install_root.exists()
+
+
+def _installed_tree(root: Path, contents: dict[str, bytes]) -> dict[str, str]:
+    hashes = {}
+    for relative, content in contents.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        hashes[relative] = hashlib.sha256(content).hexdigest().upper()
+    (root / "config").mkdir(exist_ok=True)
+    (root / "config/installed-payload.json").write_text(json.dumps({
+        "schema_version": 1,
+        "release_version": "0.9.9",
+        "release_build": 7,
+        "files": [{"path": path, "sha256": digest} for path, digest in hashes.items()],
+    }), encoding="utf-8")
+    return hashes
+
+
+def _incremental_payload(
+    root: Path, install: Path, *, files: dict[str, bytes] | None = None,
+    remove: dict[str, str] | None = None,
+) -> Path:
+    root.mkdir(parents=True)
+    entries = []
+    for relative, content in (files or {}).items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        entries.append({"path": relative, "sha256": hashlib.sha256(content).hexdigest().upper()})
+    (root / "release-manifest.json").write_text(json.dumps({
+        "schema_version": 2,
+        "update_kind": "incremental",
+        "base_fingerprint": installed_payload_fingerprint(install),
+        "files": entries,
+        "remove": [{"path": path, "sha256": digest} for path, digest in (remove or {}).items()],
+    }), encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("packed", [False, True])
+def test_schema2_updates_adds_deletes_and_preserves_full_inventory(tmp_path: Path, packed: bool) -> None:
+    install = tmp_path / "install"
+    hashes = _installed_tree(install, {
+        "app/shared/main.py": b"old", "app/shared/obsolete.py": b"remove me",
+        "runtime/python.exe": b"runtime", "app/astrbot/data/cmd_config.json": b"user settings",
+    })
+    delta = _incremental_payload(tmp_path / "delta", install,
+        files={"app/shared/main.py": b"new", "app/shared/new.py": b"added"},
+        remove={"app/shared/obsolete.py": hashes["app/shared/obsolete.py"]})
+    if packed:
+        archive = tmp_path / "delta.wrb"
+        with zipfile.ZipFile(archive, "w") as handle:
+            for file in delta.rglob("*"):
+                if file.is_file():
+                    handle.write(file, file.relative_to(delta).as_posix())
+        delta = archive
+    validate_incremental_base(delta, install)
+    assert payload_requires_runtime_stop(delta)
+    assert payload_removed_paths(delta) == (Path("app/shared/obsolete.py"),)
+    install_payload(delta, install)
+    assert (install / "app/shared/main.py").read_bytes() == b"new"
+    assert (install / "app/shared/new.py").read_bytes() == b"added"
+    assert not (install / "app/shared/obsolete.py").exists()
+    assert (install / "app/astrbot/data/cmd_config.json").read_bytes() == b"user settings"
+    manifest = json.loads((install / "config/installed-payload.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["release_build"] == 7
+    assert {entry["path"] for entry in manifest["files"]} == {
+        "app/shared/main.py", "app/shared/new.py", "runtime/python.exe", "app/astrbot/data/cmd_config.json",
+    }
+
+
+def test_schema2_delete_only_payload(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    hashes = _installed_tree(install, {"legal/obsolete.txt": b"old"})
+    delta = _incremental_payload(tmp_path / "delta", install, remove=hashes)
+    assert verify_payload(delta).files == ()
+    assert payload_relative_paths(delta) == ()
+    assert not payload_requires_runtime_stop(delta)
+    install_payload(delta, install)
+    assert not (install / "legal/obsolete.txt").exists()
+    assert json.loads((install / "config/installed-payload.json").read_text())["files"] == []
+
+
+@pytest.mark.parametrize("change", ["replace", "remove", "missing", "unregistered", "base", "new-content"])
+def test_schema2_rejects_drift_before_changing_any_installed_file(tmp_path: Path, change: str) -> None:
+    install = tmp_path / "install"
+    hashes = _installed_tree(install, {"app/first.py": b"old", "app/last.py": b"old last"})
+    delta = _incremental_payload(tmp_path / "delta", install,
+        files={"app/first.py": b"new", "app/added.py": b"added"},
+        remove={"app/last.py": hashes["app/last.py"]})
+    if change == "replace":
+        (install / "app/first.py").write_bytes(b"local edit")
+    elif change == "remove":
+        (install / "app/last.py").write_bytes(b"local edit")
+    elif change == "missing":
+        (install / "app/last.py").unlink()
+    elif change == "unregistered":
+        (install / "app/added.py").write_bytes(b"user file")
+    elif change == "base":
+        manifest_path = delta / "release-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["base_fingerprint"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest))
+    else:
+        (delta / "app/added.py").write_bytes(b"tampered")
+    before = {str(path.relative_to(install)): path.read_bytes() for path in install.rglob("*") if path.is_file()}
+    with pytest.raises(PayloadError):
+        install_payload(delta, install)
+    after = {str(path.relative_to(install)): path.read_bytes() for path in install.rglob("*") if path.is_file()}
+    assert after == before
+
+
+def test_schema2_manifest_write_failure_rolls_back_deletes_adds_and_replacements(tmp_path: Path, monkeypatch) -> None:
+    from wechatrebot_manager import payload as payload_module
+
+    install = tmp_path / "install"
+    hashes = _installed_tree(install, {"app/first.py": b"old", "app/last.py": b"old last"})
+    before_manifest = (install / "config/installed-payload.json").read_bytes()
+    delta = _incremental_payload(tmp_path / "delta", install,
+        files={"app/first.py": b"new", "app/added.py": b"added"},
+        remove={"app/last.py": hashes["app/last.py"]})
+    real_write = payload_module.write_json_atomic
+
+    def write_then_fail(path, content):
+        real_write(path, content)
+        raise OSError("write failure")
+
+    monkeypatch.setattr(payload_module, "write_json_atomic", write_then_fail)
+    with pytest.raises(OSError, match="write failure"):
+        install_payload(delta, install)
+    assert (install / "app/first.py").read_bytes() == b"old"
+    assert (install / "app/last.py").read_bytes() == b"old last"
+    assert not (install / "app/added.py").exists()
+    assert (install / "config/installed-payload.json").read_bytes() == before_manifest
+    assert not tuple((install / "updates").glob(".*-*"))
+
+
+@pytest.mark.parametrize("path", [
+    "config/defaults.json", "app/astrbot/data/cmd_config.json",
+    "app/astrbot/data/config/plugin.json", "app/astrbot/data/plugin_data/state.db",
+    "data/private.json", "runtime/python.exe", "app/bridge/native.dll",
+    "config/installed-payload.json", "app/../outside.py",
+])
+@pytest.mark.parametrize("removing", [False, True])
+def test_schema2_rejects_protected_and_unsafe_changes(tmp_path: Path, path: str, removing: bool) -> None:
+    install = tmp_path / "install"
+    _installed_tree(install, {"app/ok.py": b"ok"})
+    delta = _incremental_payload(tmp_path / "delta", install, files={"app/new.py": b"new"})
+    manifest_path = delta / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    entry = {"path": path, "sha256": "0" * 64}
+    manifest["files"] = [] if removing else [entry]
+    manifest["remove"] = [entry] if removing else []
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(PayloadError):
+        validate_incremental_base(delta, install)
+
+
+def test_fingerprint_ignores_mutable_config_and_canonicalizes_inventory(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    _installed_tree(install, {"runtime/python.exe": b"runtime", "app/ok.py": b"ok",
+        "app/astrbot/data/cmd_config.json": b"config"})
+    original = installed_payload_fingerprint(install)
+    manifest_path = install / "config/installed-payload.json"
+    manifest = json.loads(manifest_path.read_text())
+    for entry in manifest["files"]:
+        entry["path"] = entry["path"].upper()
+        entry["sha256"] = entry["sha256"].lower()
+        if "CMD_CONFIG" in entry["path"]:
+            entry["sha256"] = "0" * 64
+    manifest["files"].reverse()
+    manifest_path.write_text(json.dumps(manifest))
+    assert installed_payload_fingerprint(install) == original
+    manifest["files"].append({"path": "runtime/extra.py", "sha256": "0" * 64})
+    manifest_path.write_text(json.dumps(manifest))
+    assert installed_payload_fingerprint(install) != original
+
+
+def test_schema2_does_not_hash_unchanged_runtime(tmp_path: Path, monkeypatch) -> None:
+    from wechatrebot_manager import payload as payload_module
+
+    install = tmp_path / "install"
+    _installed_tree(install, {"runtime/python.exe": b"runtime", "app/ok.py": b"old"})
+    delta = _incremental_payload(tmp_path / "delta", install, files={"app/ok.py": b"new"})
+    real_hash = payload_module.sha256_file
+
+    def guarded_hash(path):
+        assert path != install / "runtime/python.exe", "unchanged runtime must not be scanned"
+        return real_hash(path)
+
+    monkeypatch.setattr(payload_module, "sha256_file", guarded_hash)
+    validate_incremental_base(delta, install)
+    install_payload(delta, install)
+
+
+@pytest.mark.parametrize("parent_link", [False, True])
+def test_schema2_rejects_symlink_target_or_parent(tmp_path: Path, parent_link: bool) -> None:
+    install = tmp_path / "install"
+    _installed_tree(install, {"app/real/file.py": b"old"})
+    delta = _incremental_payload(tmp_path / "delta", install, files={"app/linked/file.py": b"new"})
+    linked = install / "app/linked"
+    try:
+        if parent_link:
+            linked.symlink_to(install / "app/real", target_is_directory=True)
+        else:
+            linked.mkdir()
+            (linked / "file.py").symlink_to(install / "app/real/file.py")
+    except OSError:
+        pytest.skip("symbolic link privilege unavailable")
+    with pytest.raises(PayloadError, match="符号链接"):
+        install_payload(delta, install)
+    assert (install / "app/real/file.py").read_bytes() == b"old"

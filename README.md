@@ -4,6 +4,10 @@
 
 商业版只使用 `hook_41827_astrbot_bridge` 新 HOOK。发布扫描会拒绝旧 `Py/main.py`、`NoveLoader.dll`、`NoveHelper.dll`、旧 6199 端口、运行日志、数据库、敏感配置和微信客户端文件。
 
+## 日常功能更新
+
+已有完整安装后，日常修改命令、新闻、插件代码或资源，使用 `scripts/update-local-incremental.ps1`。入口从最新且已同步的 `master` 组装源码，比较安装清单，只安装变化文件并删除已登记的废弃文件；不构建 Python、FFmpeg 或完整安装器。管理器变化时只额外构建管理器。详情和兼容边界见 [本地增量更新](docs/incremental-updates.md)。
+
 ## 开发者本地一键打包
 
 本机桌面“本地打包完整载荷”快捷方式调用 `scripts/build-local-package.ps1`。双击即可依次构建管理器、Python 运行时、完整载荷和 Inno Setup 离线安装器，校验后生成 ZIP 和 SHA-256 文件，并打开产物目录。首次构建可能下载依赖，需要 Python 3.13 x64 和 Inno Setup 7；默认插件源码目录为 `E:\Project`。
