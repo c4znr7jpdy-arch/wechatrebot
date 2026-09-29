@@ -39,4 +39,6 @@ def test_dedicated_config_iframe_fills_remaining_detail_height() -> None:
 
     assert "#detail-view:not([hidden]) { min-height: 100%; display: flex; flex-direction: column; }" in styles
     assert "#pages-panel:not([hidden]) { min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column; }" in styles
-    assert "#plugin-frame { width: 100%; height: auto; min-height: 560px; flex: 1 1 auto;" in styles
+    assert "#plugin-frame { width: 100%; height: 100%; min-height: 180px; flex: 1 1 auto;" in styles
+    assert ".detail-pane.showing-page { overflow: hidden; }" in styles
+    assert ".detail-pane.showing-page #detail-view { height: 100%; min-height: 0; }" in styles

@@ -2641,6 +2641,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
                 if split.path in {
+                    "/theme-tokens.css",
                     "/feature-page-theme.js",
                     "/feature-page-overrides.css",
                     "/design-overrides.css",
@@ -2873,7 +2874,7 @@ def run_plugin_center(
             width=1180,
             height=760,
             min_size=(960, 640),
-            background_color="#F8FAFD",
+            background_color="#F3F2EE",
             text_select=True,
         )
         webview.start(gui="edgechromium", debug=False, private_mode=True)
