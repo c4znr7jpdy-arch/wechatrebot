@@ -12,6 +12,8 @@ const state = {
   pendingAction: null,
 };
 const requestedFeatureId = new URLSearchParams(window.location.search).get("feature") || "";
+document.documentElement.classList.toggle("embedded", Boolean(requestedFeatureId)
+  && new URLSearchParams(window.location.search).get("embedded") === "1");
 const themeChannel = "wechatrebot-theme";
 
 function applyTheme(theme) {

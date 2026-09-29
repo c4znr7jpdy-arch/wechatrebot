@@ -329,7 +329,7 @@ class ApplicationApi:
             pages = detail.get("pages") or ()
             if not pages:
                 raise PluginCenterError("当前功能没有专属配置页。")
-            content_path = self._features.page_entry(str(feature_id), str(pages[0]))["content_path"]
+            content_path = "/plugin-center?" + urlencode({"feature": feature_id, "embedded": "1"})
             server = self._ensure_feature_page_server()
             base = f"http://127.0.0.1:{server.server_port}"
             return self._ok({"url": f"{base}{content_path}", "origin": base})

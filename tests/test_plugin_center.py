@@ -1931,6 +1931,14 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
             with urlopen(f"{base}{path}", timeout=2) as response:
                 assert response.status == 200
                 assert response.read() == expected
+        for path, marker in (
+            ("/plugin-center?feature=example&embedded=1", b'id="plugin-frame"'),
+            ("/assets/app.js", b"handlePluginPageRequest"),
+            ("/assets/app.css", b"html.embedded"),
+        ):
+            with urlopen(f"{base}{path}", timeout=2) as response:
+                assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+                assert marker in response.read()
     finally:
         server.shutdown()
         server.server_close()

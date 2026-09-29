@@ -1296,7 +1296,7 @@ def test_feature_page_opens_when_lifecycle_is_online_but_engine_probe_lags(tmp_p
 
     assert result["ok"] is True
     assert result["data"] == {
-        "url": "http://127.0.0.1:4321/page.html",
+        "url": "http://127.0.0.1:4321/plugin-center?feature=feature-twitter&embedded=1",
         "origin": "http://127.0.0.1:4321",
     }
 
@@ -1657,8 +1657,7 @@ def test_twitter_is_embedded_in_feature_center_without_generic_configuration() -
     assert 'id="featurePageFrame"' in script
     assert 'api("get_feature_page", detail.id)' in script
     assert 'api("request_feature_page", state.selectedFeature, "POST"' in script
-    assert "const TWITTER_FEATURE_IDS" in script
-    assert "const pageOnly = TWITTER_FEATURE_IDS.has(detail.id)" in script
+    assert "const pageOnly = Boolean(detail.pages?.length);" in script
     assert "get_feature_page" in app_shell.PUBLIC_API_METHODS
     assert "request_feature_page" in app_shell.PUBLIC_API_METHODS
 

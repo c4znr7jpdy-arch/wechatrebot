@@ -123,7 +123,6 @@
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
-  const TWITTER_FEATURE_IDS = new Set(["feature-f859116566a52243", "feature-twitter"]);
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
   function hasGroupMemberCount(value) {
     return Number.isSafeInteger(value) && value > 0;
@@ -1040,7 +1039,8 @@
         : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
     const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
     const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
-    const pageOnly = TWITTER_FEATURE_IDS.has(detail.id) && detail.configuration === "page" && detail.pages?.length;
+    const pageOnly = Boolean(detail.pages?.length);
+    $("#featureDetail").classList.toggle("native-page", pageOnly);
     const imageServiceSelection = detail.configuration_profile === "image-service-selection";
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
