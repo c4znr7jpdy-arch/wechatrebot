@@ -1,0 +1,29 @@
+--- a/main.py
++++ b/main.py
+@@ -453,7 +453,7 @@
+         if edit_prompt and quoted_image_path:
+             event.stop_event()
+             async for r in self._do_image_edit(event, edit_prompt, quoted_image_path):
+-                yield r
++                await event.send(r)
+             return
+ 
+         # ── 图生图：有引用图片 + 画图意图（自动转编辑）──
+@@ -461,7 +461,7 @@
+         if image_prompt and quoted_image_path:
+             event.stop_event()
+             async for r in self._do_image_edit(event, image_prompt, quoted_image_path):
+-                yield r
++                await event.send(r)
+             return
+ 
+         # ── 文生图 ──
+@@ -471,7 +471,7 @@
+             if not prompt:
+                 prompt = image_prompt
+             async for r in self._do_image_gen(event, prompt, aspect):
+-                yield r
++                await event.send(r)
+             return
+ 
+     # ── 切换模型命令 ──────────────────────────────────────

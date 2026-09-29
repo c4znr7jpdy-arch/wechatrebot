@@ -2,7 +2,7 @@
   "schema_version": 1,
   "snapshot_date": "2026-09-24",
   "project_revision": "3029c95619a32b84a251eb41591af4e781aecc32",
-  "notes": "Unpatched build inputs, LF normalized. Bridge and jiang_commands are tracked at project_revision; proactive_chat 1.2.4 is a local external dependency snapshot with its upstream license. The bridge __init__.py trailing blank line is normalized.",
+  "notes": "Unpatched build inputs, LF normalized. Bridge and jiang_commands are tracked at project_revision; proactive_chat 1.2.4 is a local external dependency snapshot with its upstream license. The bridge __init__.py trailing blank line is normalized. jiang_image 2.1.0 unpatched build inputs were added on 2026-09-29 from the local dependency source; no user configuration is included.",
   "files": [
     {
       "path": "hook_41827_astrbot_bridge/src/hook_bridge/__init__.py",
@@ -79,6 +79,30 @@
     {
       "path": "data/plugins/astrbot_plugin_proactive_chat/LICENSE",
       "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    },
+    {
+      "path": "data/plugins/jiang_image/_conf_schema.json",
+      "sha256": "8bc55755fab5729d94dded3884a5d14423a3f911ebbda3616c4c0c3dd61ea435"
+    },
+    {
+      "path": "data/plugins/jiang_image/main.py",
+      "sha256": "e675505c64145851f604c7d895d4a6cf8a9c2c668dbd1cbdfc94a36783fb7e70"
+    },
+    {
+      "path": "data/plugins/jiang_image/model_manager.py",
+      "sha256": "f59aa201877adbdbdf8deaf5bdd419ab612c1c9d0889baa40308305354a1b194"
+    },
+    {
+      "path": "data/plugins/jiang_image/pages/model-manager/app.js",
+      "sha256": "0162522402b70059ac9700f73bbf1cbebafafa857616ea0837dfcd11cfbebda5"
+    },
+    {
+      "path": "data/plugins/jiang_image/pages/model-manager/index.html",
+      "sha256": "4b633bdba8e925b120ee9a2ea7c9e2a5a5dcfd0eb0fbd05453820004cbc92fc4"
+    },
+    {
+      "path": "data/plugins/jiang_image/pages/model-manager/styles.css",
+      "sha256": "497880816bf6d893aec3f3d190612f7387271e33545209eb9cd2906cc096e517"
     }
   ]
 }

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>生图模型管理</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">JIANG IMAGE · RUNTIME CONTROL</p>
+          <h1>生图模型管理</h1>
+          <p class="subtitle">新增、切换和热更新生成模型。保存后下一次生图立即使用，无需重启 AstrBot。</p>
+        </div>
+        <div class="hero-actions">
+          <button class="button secondary" id="reload-button">从磁盘热重载</button>
+          <button class="button primary" id="add-button">添加生成模型</button>
+        </div>
+      </header>
+
+      <section class="summary" aria-label="运行状态">
+        <article>
+          <span>当前默认模型</span>
+          <strong id="active-summary">载入中</strong>
+        </article>
+        <article>
+          <span>已启用 / 总数</span>
+          <strong id="count-summary">—</strong>
+        </article>
+        <article>
+          <span>配置状态</span>
+          <strong class="online">热更新已启用</strong>
+        </article>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <div>
+            <h2>生成应用</h2>
+            <p>回退优先级为 0 表示不参与自动回退；数字越小越先尝试。</p>
+          </div>
+        </div>
+        <div class="model-grid" id="model-grid">
+          <div class="empty-state">正在读取模型配置…</div>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop hidden" id="modal-backdrop">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">MODEL PROFILE</p>
+            <h2 id="modal-title">添加生成模型</h2>
+          </div>
+          <button class="icon-button" id="close-modal" aria-label="关闭">×</button>
+        </header>
+
+        <form id="model-form">
+          <div class="form-body">
+            <div class="form-section">
+              <h3>基本信息</h3>
+              <div class="form-grid">
+                <label>
+                  <span>模型 ID</span>
+                  <input name="id" required maxlength="64" placeholder="gemai-gpt-image-2k" />
+                  <small>保存后不建议修改；只允许字母、数字、点、下划线、短横线。</small>
+                </label>
+                <label>
+                  <span>显示名称</span>
+                  <input name="name" required maxlength="100" placeholder="GemAI GPT Image 2K" />
+                </label>
+                <label>
+                  <span>协议</span>
+                  <select name="protocol">
+                    <option value="openai_images">OpenAI Images API</option>
+                    <option value="openai_chat">OpenAI Chat 生图</option>
+                    <option value="minimax">MiniMax Image API</option>
+                  </select>
+                </label>
+                <label>
+                  <span>模型名</span>
+                  <input name="model" required placeholder="gpt-image-2-2K" />
+                </label>
+                <label class="wide">
+                  <span>API Base URL</span>
+                  <input name="base_url" required type="url" placeholder="https://api.gemai.cc/v1" />
+                </label>
+                <label class="toggle-line">
+                  <input name="enabled" type="checkbox" checked />
+                  <span>启用此模型</span>
+                </label>
+                <label class="toggle-line">
+                  <input name="supports_edit" type="checkbox" />
+                  <span>允许图生图 / 图片编辑</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3>API Key</h3>
+              <div class="form-grid">
+                <label>
+                  <span>密钥来源</span>
+                  <select name="source_type" id="source-type">
+                    <option value="stored">保存在插件配置</option>
+                    <option value="environment">环境变量 / .env.prod</option>
+                    <option value="astrbot_provider">AstrBot Provider</option>
+                  </select>
+                </label>
+                <label data-source="stored">
+                  <span>API Key</span>
+                  <input name="api_key" type="password" autocomplete="new-password" placeholder="留空则保留原 Key" />
+                </label>
+                <label class="hidden" data-source="environment">
+                  <span>环境变量名</span>
+                  <input name="env_name" placeholder="GPT_IMAGE_API_KEY" />
+                </label>
+                <label class="hidden" data-source="astrbot_provider">
+                  <span>Provider ID</span>
+                  <input name="provider_id" placeholder="openai_embedding" />
+                </label>
+                <label>
+                  <span>认证方式</span>
+                  <select name="auth_type">
+                    <option value="bearer">Authorization: Bearer</option>
+                    <option value="header">自定义请求头</option>
+                    <option value="none">无需认证</option>
+                  </select>
+                </label>
+                <label>
+                  <span>自定义 Key 请求头</span>
+                  <input name="api_key_header" placeholder="X-API-Key" />
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3>端点与生成参数</h3>
+              <div class="form-grid">
+                <label>
+                  <span>文生图路径</span>
+                  <input name="generation_path" placeholder="images/generations" />
+                </label>
+                <label>
+                  <span>图生图路径</span>
+                  <input name="edit_path" placeholder="images/edits" />
+                </label>
+                <label>
+                  <span>模型列表路径</span>
+                  <input name="models_path" placeholder="models" />
+                </label>
+                <label>
+                  <span>尺寸参数模式</span>
+                  <select name="size_mode">
+                    <option value="pixels">size（像素）</option>
+                    <option value="ratio_size">size（比例，GemAI 2K/4K）</option>
+                    <option value="aspect_ratio">aspect_ratio（比例）</option>
+                    <option value="omit">不发送尺寸参数</option>
+                  </select>
+                </label>
+                <label>
+                  <span>响应格式</span>
+                  <input name="response_format" placeholder="url（留空则不发送）" />
+                </label>
+                <label>
+                  <span>超时（秒）</span>
+                  <input name="timeout_seconds" type="number" min="5" max="900" value="300" />
+                </label>
+                <label>
+                  <span>回退优先级</span>
+                  <input name="fallback_priority" type="number" min="0" max="99" value="0" />
+                </label>
+                <label class="toggle-line">
+                  <input name="trust_env" type="checkbox" />
+                  <span>使用系统代理环境变量</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3>高级透传</h3>
+              <div class="form-grid">
+                <label class="wide">
+                  <span>额外请求参数（JSON）</span>
+                  <textarea name="extra_body" rows="5" spellcheck="false">{}</textarea>
+                  <small>会覆盖同名的默认请求参数，适合质量、分辨率或供应商自定义字段。</small>
+                </label>
+                <label class="wide">
+                  <span>额外请求头（JSON）</span>
+                  <textarea name="extra_headers" rows="4" spellcheck="false">{}</textarea>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <footer class="modal-footer">
+            <span id="form-hint">保存后立即热更新。</span>
+            <div>
+              <button class="button secondary" type="button" id="cancel-button">取消</button>
+              <button class="button primary" type="submit" id="save-button">保存并应用</button>
+            </div>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

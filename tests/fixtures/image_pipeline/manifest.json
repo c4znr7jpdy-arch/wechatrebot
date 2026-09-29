@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "astrbot_version": "4.26.6",
+  "source": "installed runtime under E:/ceshianzhuang/smoke-install/runtime/python/Lib/site-packages/astrbot/core/pipeline; selected methods only",
+  "license": "AGPL-3.0-or-later; see installed astrbot-4.26.6.dist-info/licenses/LICENSE",
+  "files": [
+    {
+      "path": "context_utils.py",
+      "sha256": "f4d51533e935b25f6f483608f8489586f18a48e62bcb81048daa58d71759d6c4"
+    },
+    {
+      "path": "scheduler.py",
+      "sha256": "d4bf9fc6fd81280730ca8bd2b754ab684592200783681c238b1e9f09a75d2de6"
+    },
+    {
+      "path": "stage.py",
+      "sha256": "97693ac03c268bc88a95f09df71f12766094f0833b7b6e7ef017c191f0cbdf77"
+    }
+  ]
+}

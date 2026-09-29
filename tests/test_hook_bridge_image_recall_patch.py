@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -112,7 +113,8 @@ def recall_client(tmp_path):
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
     # The directory patch changes get_friends immediately after recall. Check
     # real staging order so its context cannot break the new recall patch.
-    for name in ("hook-bridge-group-directory.patch", "hook-bridge-recall-api-fallback.patch"):
+    for name in ("hook-bridge-group-directory.patch", "hook-bridge-recall-api-fallback.patch",
+                 "hook-bridge-z-recall-diagnostics.patch"):
         subprocess.run(
             ["git", "apply", "--whitespace=error-all", "-p2", "--directory=app/bridge",
              str(ROOT / "patches" / name)],
@@ -188,3 +190,88 @@ def test_transport_and_server_errors_are_not_retried(recall_client, status):
     with pytest.raises(recall_client.HookApiError):
         asyncio.run(client.recall("9007199254740993", 1790236882, "wxid_test"))
     assert calls == ["/api/revoke_msg"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"errCode": 1, "data": {"errCode": 0, "data": "private transport detail"}},
+    {"errCode": 1, "data": {"baseResponse": {"ret": -1}, "sysWording": "private account"}},
+    {"errCode": 1, "data": None},
+])
+def test_recall_failure_reports_envelope_codes_without_private_content(recall_client, payload):
+    client = object.__new__(recall_client.HookClient)
+    calls = []
+
+    async def post(path, body, **kwargs):
+        calls.append(path)
+        return payload
+
+    client._post = post
+    result = asyncio.run(client.recall("9007199254740993", 1790236882, "wxid_fixture"))
+    assert not result.ok
+    assert calls == ["/api/revoke_msg"]
+    assert 'recall_response=[{"errCode":1' in result.error
+    assert "private" not in result.error
+    assert "wxid_fixture" not in result.error
+    assert "9007199254740993" not in result.error
+    if isinstance(payload["data"], dict):
+        if "errCode" in payload["data"]:
+            assert '"errCode":0' in result.error
+        else:
+            assert '"base_ret":-1' in result.error
+
+
+@pytest.mark.parametrize("payload,category", [
+    ({"errCode": 1, "errMsg": "请求处理成功", "data": {
+        "errCode": 0, "errMsg": "请求处理失败", "data": {},
+    }}, "empty_or_invalid_pb"),
+    ({"errCode": 1, "data": {
+        "errCode": 0, "errMsg": "未匹配到cmdid 请联系作者", "data": {},
+    }}, "missing_cmdid"),
+    ({"errCode": 0, "data": {}}, "transport_failure"),
+    ({"errCode": 1, "errMsg": "请求处理成功", "data": {}}, "completion_unconfirmed"),
+    ({"errCode": 1, "data": {"newMsgId": "12345"}}, "completion_unconfirmed"),
+    ({"errCode": 1, "data": {"BaseResponse": {"Ret": -1}}}, "server_rejected"),
+    ({"errCode": 1, "data": {"baseResponse": {"ret": 0}},
+      "success": False}, "transport_failure"),
+    ({"errCode": 1, "data": {"baseResponse": {"ret": False}}}, "completion_unconfirmed"),
+    ({"errCode": 1, "data": {"baseResponse": {"ret": 0.1}}}, "completion_unconfirmed"),
+    ({"errCode": "PRIVATE_TEST_TOKEN", "data": {
+        "baseResponse": {"ret": 0},
+    }}, "invalid_response"),
+    ({"baseResponse": {"ret": 0}, "data": {
+        "baseResponse": {"ret": -1},
+    }}, "server_rejected"),
+    ({"baseResponse": {"ret": 0}, "data": {"data": {"data": {"data": {
+        "errCode": 0,
+    }}}}}, "invalid_response"),
+])
+def test_recall_requires_server_confirmation_even_when_generic_send_parser_accepts(
+    recall_client, payload, category,
+):
+    result = recall_client._recall_result(recall_client.parse_send_result(payload))
+    assert not result.ok
+    assert f"({category})" in result.error
+    assert "PRIVATE_TEST_TOKEN" not in result.error
+
+
+@pytest.mark.parametrize("payload", [
+    {"baseResponse": {"ret": 0}},
+    {"errCode": 1, "data": {"baseResponse": {"ret": "0"}}},
+    {"code": 0, "data": {"BaseResponse": {"Ret": 0}}},
+    {"errCode": 1, "data": json.dumps({"baseResponse": {"ret": 0}})},
+])
+def test_recall_accepts_explicit_server_success_shapes(recall_client, payload):
+    result = recall_client._recall_result(recall_client.parse_send_result(payload))
+    assert result.ok
+    assert result.error is None
+
+
+def test_recall_discards_untrusted_error_text_from_diagnostics(recall_client):
+    payload = {
+        "errCode": 1, "errMsg": "failed for PRIVATE_TEST_TOKEN",
+        "data": {"baseResponse": {"ret": -1}, "sysWording": "PRIVATE_ACCOUNT"},
+    }
+    result = recall_client._recall_result(recall_client.parse_send_result(payload))
+    assert not result.ok
+    assert "PRIVATE" not in result.error
+    assert "server_rejected" in result.error

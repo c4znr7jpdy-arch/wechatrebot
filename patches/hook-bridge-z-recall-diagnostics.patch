@@ -1,0 +1,101 @@
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -287,6 +287,87 @@
+         for key in ("errMsg", "msg", "message", "error")
+     ).casefold()
+     return "url is not supported" in detail or "route not found" in detail
++
++
++def _recall_code(value: Any) -> int | None:
++    # Completion codes are integers, never truthy booleans or rounded floats.
++    if isinstance(value, bool) or not isinstance(value, (int, str)):
++        return None
++    if isinstance(value, str) and not re.fullmatch(r"-?[0-9]{1,10}", value):
++        return None
++    number = int(value)
++    return number if -(1 << 31) <= number < (1 << 31) else None
++
++
++def _recall_result(result: SendResult) -> SendResult:
++    """Require server confirmation and log only fixed failure categories/codes.
++
++    The pinned DLL wraps SendPbWaitStr failures in errCode=1/data={errCode:0}.
++    Outer success text, message IDs and nested zero codes cannot confirm recall.
++    """
++    layers = []
++    current: Any = result.raw
++    confirmed = False
++    failure = None
++    for _ in range(4):
++        if isinstance(current, str) and len(current) <= 65536:
++            try:
++                current = json.loads(current)
++            except (ValueError, RecursionError):
++                break
++        if not isinstance(current, Mapping):
++            break
++        data = current.get("data")
++        err_code = _recall_code(current.get("errCode"))
++        code = _recall_code(current.get("code"))
++        base = _mapping(current.get("baseResponse") or current.get("BaseResponse"))
++        base_ret = _recall_code(_first_present(base.get("ret"), base.get("Ret")))
++        layers.append({
++            "errCode": err_code,
++            "code": code,
++            "base_ret": base_ret,
++            "data_type": type(data).__name__,
++        })
++        if base_ret == 0:
++            confirmed = True
++        elif base_ret is not None:
++            failure = failure or "server_rejected"
++        if err_code == 0:
++            reason = "transport_failure"
++            if current.get("errMsg") == "未匹配到cmdid 请联系作者":
++                reason = "missing_cmdid"
++            elif current.get("errMsg") == "请求处理失败" and data == {}:
++                # The DLL returns identical envelopes for both branches.
++                reason = "empty_or_invalid_pb"
++            failure = failure or reason
++        elif err_code is not None and err_code != 1:
++            failure = failure or "transport_failure"
++        if code is not None and code not in {0, 1, 200}:
++            failure = failure or "transport_failure"
++        if any(key in current and current[key] is not None and value is None
++               for key, value in (("errCode", err_code), ("code", code))):
++            failure = failure or "invalid_response"
++        if (current.get("success") is False
++                or str(current.get("status", "")).casefold() in {"failed", "error"}
++                or current.get("error")):
++            failure = failure or "transport_failure"
++        current = data
++    else:
++        if current:
++            failure = failure or "invalid_response"
++    ok = confirmed and failure is None
++    detail = json.dumps(layers, ensure_ascii=True, separators=(",", ":"))
++    return SendResult(
++        ok=ok,
++        message_id=result.message_id,
++        create_time=result.create_time,
++        to_user_name=result.to_user_name,
++        error=None if ok else (
++            f"HOOK recall failed ({failure or 'completion_unconfirmed'}); "
++            f"recall_response={detail}"
++        ),
++        raw=result.raw,
++    )
+ 
+ 
+ def _chatroom_members(data: Any) -> list[dict[str, Any]]:
+@@ -732,8 +813,8 @@
+                 raise
+         else:
+             if current_result.ok or not _is_unsupported_route(current_result):
+-                return current_result
+-        return await self._write("/api/revoke_any", payload)
++                return _recall_result(current_result)
++        return _recall_result(await self._write("/api/revoke_any", payload))
+ 
+     async def get_friends(
+         self, *, force_refresh: bool = False

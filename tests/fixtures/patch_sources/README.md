@@ -6,8 +6,9 @@
 - `hook_41827_astrbot_bridge/src/hook_bridge`：项目桥接源码及导入依赖，未包含启动入口、DLL、配置或运行数据。
 - `data/plugins/jiang_commands`：常用指令补丁需要的 `main.py` 和配置结构。
 - `data/plugins/astrbot_plugin_proactive_chat`：1.2.4 的配置结构与上游许可证。
+- `data/plugins/jiang_image`：jiang_image 2.1.0 未打补丁的源码、管理页和模型配置结构；不含个人配置或密钥。
 
-快照取自现有构建输入；来源提交、日期和每个文件的 SHA-256 记录在 `manifest.json`。
+快照取自现有构建输入或本地上游插件源码；来源提交、日期和每个文件的 SHA-256 记录在 `manifest.json`。
 所有快照统一使用 LF，Git 属性固定换行，避免 Windows checkout 改变补丁上下文和哈希。
 测试默认使用这份固定快照，不读取开发者机器上的外部项目目录。这里的文件不在产品载荷清单内。
 
