@@ -177,6 +177,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #page-features .feature-item:hover { background: var(--surface-hover); }
 #page-features .feature-item.active { color: var(--blue-700); background: var(--blue-100); box-shadow: inset 3px 0 var(--blue-600); }
 #page-features .feature-detail { padding: 22px; background: var(--surface); }
+#page-features .feature-detail.native-page { display: flex; flex-direction: column; padding: 0; overflow: hidden; scrollbar-gutter: auto; }
+#page-features .feature-detail.native-page > :not(.feature-page-panel) { display: none; }
+#page-features .native-page .feature-page-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; gap: 0; }
+#page-features .native-page .feature-page-panel iframe { flex: 1; min-height: 0; height: 0; border: 0; border-radius: 0; }
+#page-features .native-page .feature-page-status { margin: 16px; }
+#page-features .native-page [hidden] { display: none; }
+#page-features .config-section > h3,
+#page-features .feature-guide strong,
+#page-features .feature-guide ol,
+#page-features .feature-command-heading h3 { color: var(--ink); }
 #page-features .feature-title,
 #page-features .feature-detail .panel-heading { border-bottom-color: var(--line); }
 #page-features .feature-tabs { border-color: var(--line); }

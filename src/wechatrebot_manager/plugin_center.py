@@ -2647,6 +2647,9 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             try:
                 split = urlsplit(self.path)
+                if split.path == "/plugin-center":
+                    self._serve_asset("index.html", "text/html; charset=utf-8", root=_asset_root())
+                    return
                 if split.path in {"/", "/index.html"}:
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
@@ -2674,11 +2677,11 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
                     return
-                if not manager_mode and split.path == "/assets/app.css":
-                    self._serve_asset("app.css", "text/css; charset=utf-8")
+                if split.path == "/assets/app.css":
+                    self._serve_asset("app.css", "text/css; charset=utf-8", root=_asset_root())
                     return
-                if not manager_mode and split.path == "/assets/app.js":
-                    self._serve_asset("app.js", "text/javascript; charset=utf-8")
+                if split.path == "/assets/app.js":
+                    self._serve_asset("app.js", "text/javascript; charset=utf-8", root=_asset_root())
                     return
                 if manager_mode and split.path.startswith("/assets/"):
                     asset_name = split.path.removeprefix("/assets/")

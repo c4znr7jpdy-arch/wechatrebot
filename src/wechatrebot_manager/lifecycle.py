@@ -72,6 +72,7 @@ class LifecycleView:
                 "engine_ready": self.runtime.engine_ready,
                 "connection_ready": self.runtime.connection_ready,
                 "wechat_identity": self.runtime.wechat_identity,
+                "account_status_available": self.runtime.account_status_available,
                 "hook_ready": self.runtime.hook_ready,
                 "upstream_connected": self.runtime.upstream_connected,
                 "heartbeat_fresh": self.runtime.heartbeat_fresh,

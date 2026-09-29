@@ -33,6 +33,21 @@ def test_directory_manual_refresh_requeries_without_messages(tmp_path, monkeypat
     assert calls == ["/api/manager/groups"] * 2
 
 
+def test_temporary_health_failure_does_not_return_or_destroy_cached_directory(tmp_path, monkeypatch):
+    obj, account, _ = service(tmp_path, monkeypatch)
+    original = obj.list()
+    with monkeypatch.context() as patch:
+        patch.setattr(directory, "probe_bridge_health", lambda **kw: SimpleNamespace(
+            status_available=False, wechat_logged_in=False, wechat_identity="",
+        ))
+        with pytest.raises(directory.GroupDirectoryUnavailable):
+            obj.list()
+        assert obj._snapshot["items"] == original["items"]
+    assert obj.list()["items"] == original["items"]
+    account[0] = ""
+    assert obj.list()["items"] == []
+
+
 def test_directory_automatically_refreshes_stale_snapshot(tmp_path, monkeypatch):
     now = [100.0]
     monkeypatch.setattr(directory.time, "monotonic", lambda: now[0])
