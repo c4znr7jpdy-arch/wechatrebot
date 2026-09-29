@@ -1672,6 +1672,8 @@ class EngineApiClient:
                     "id": normalized.source_id,
                     "key": [normalized.api_key],
                     "api_base": normalized.api_base,
+                    "embedding_api_base": normalized.api_base,
+                    "embedding_api_key": normalized.api_key,
                     "timeout": normalized.astrbot_source()["timeout"],
                     "enable": True,
                 }
@@ -1711,6 +1713,9 @@ class EngineApiClient:
                 "type",
                 "provider_type",
                 "service_kind",
+                "embedding_model",
+                "embedding_api_base",
+                "embedding_api_key",
             ):
                 current_model.pop(inherited_field, None)
             model_payload = {**model_payload, **current_model}
@@ -2075,7 +2080,7 @@ class PluginCenterService:
         return {
             "plugins": entries,
             "engine_online": engine_online,
-            "product_name": load_robot_settings(self.install_root).profile.display_name,
+            "product_name": "WxRebot",
         }
 
     def _plugin(
@@ -2238,6 +2243,11 @@ class PluginCenterService:
             )
         configuration_profile = ""
         configuration_note = profile.note if profile else ""
+        if module_name == _GROUP_ANALYSIS_MODULE:
+            clean_basic_schema = {}
+            clean_model_schema = {}
+            configuration_profile = "advanced-only"
+            configuration_note = "所有群聊分析选项统一在专业设置中维护；自动日报在定时任务中管理。"
         if module_name == "jiang_image":
             configuration_profile = "image-service-selection"
             configuration_note = (
@@ -2659,6 +2669,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/app.css",
                     "/app.js",
                     "/core-settings.js",
+                    "/date-range.js",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")

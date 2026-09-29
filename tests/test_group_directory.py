@@ -15,6 +15,7 @@ def service(tmp_path, monkeypatch):
     monkeypatch.setattr(directory, "probe_bridge_health", lambda **kw: SimpleNamespace(
         wechat_logged_in=bool(account[0]), wechat_identity=account[0]))
     obj = directory.GroupDirectoryService(tmp_path)
+    monkeypatch.setattr(obj._portraits, "enrich", lambda account, item, entity, fetch, **kw: item)
     calls = []
     def request(port, token, identity, path, **_options):
         calls.append(path)

@@ -1,4 +1,4 @@
-"""Account-scoped, memory-only directory from the active connection service."""
+"""Account-scoped live directory with persistent portrait fallback."""
 from __future__ import annotations
 
 import copy
@@ -13,6 +13,7 @@ from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 from .runtime_status import probe_bridge_health
+from .portrait_cache import PortraitCache
 
 
 class GroupDirectoryError(ValueError):
@@ -35,6 +36,7 @@ class GroupDirectoryService:
         self._snapshot = None
         self._next_refresh_at = 0.0
         self._last_error = ""
+        self._portraits = PortraitCache(self.root)
 
     def _connection(self):
         try:
@@ -129,11 +131,20 @@ class GroupDirectoryService:
                     self._snapshot = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
                     self._next_refresh_at = time.monotonic() + self._REFRESH_INTERVAL_SECONDS
                     self._last_error = ""
-                return {**copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": account, "updated_at": None}),
+                snapshot = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": account, "updated_at": None})
+                snapshot["items"] = [self._portraits.enrich(
+                    account, item, str(item.get("group_id") or ""),
+                    lambda group_id=item.get("group_id"): self._request(
+                        port, token, account, f"/api/manager/contacts/{quote(str(group_id), safe='')}"
+                    ).get("item", {}), force=refresh,
+                ) for item in snapshot["items"]]
+                return {**snapshot,
                         "stale": bool(self._last_error),
                         "message": self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
             except GroupDirectoryError as exc:
-                return {**copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None}),
+                fallback = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None})
+                fallback["items"] = [self._portraits.enrich(self._account, item, str(item.get("group_id") or ""), None) for item in fallback["items"]]
+                return {**fallback,
                         "stale": True, "message": str(exc)}
 
     def members(self, group_id: str):

@@ -504,7 +504,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     service.engine.is_available = lambda: False  # type: ignore[method-assign]
 
     catalog = service.catalog()
-    assert catalog["product_name"] == "群聊管家"
+    assert catalog["product_name"] == "WxRebot"
     assert catalog["plugins"] == [
         {
             "id": public_id,
@@ -573,7 +573,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     ]
 
 
-def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
+def test_group_analysis_uses_professional_settings_and_preserves_values(
     tmp_path: Path,
 ) -> None:
     install = tmp_path / "install"
@@ -706,22 +706,16 @@ def test_group_analysis_uses_beginner_profile_and_preserves_advanced_values(
     assert catalog_item["field_count"] == 7
     assert catalog_item["model_field_count"] == 1
     assert catalog_item["simplified"] is True
-    assert list(detail["basic_schema"]) == ["basic", "analysis_features"]
-    assert list(detail["model_schema"]) == ["llm"]
-    assert list(detail["basic_schema"]["basic"]["items"]) == [
-        "report_template",
-        "analysis_days",
-        "min_messages_threshold",
-    ]
-    assert detail["basic_schema"]["basic"]["items"]["report_template"][
-        "labels"
-    ] == ["手账风（示例样式）", "简洁风"]
+    assert detail["basic_schema"] == detail["model_schema"] == {}
+    assert detail["configuration_profile"] == "advanced-only"
+    assert "llm" in detail["advanced_schema"]
+    assert "max_messages" in detail["advanced_schema"]["basic"]["items"]
     assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_ui_control"] == "line-list"
     assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_group_selector"] is True
     assert "/sid" not in detail["setup_steps"][0]
     assert detail["schedule_schema"]["auto_analysis"]["items"]["auto_analysis_time"]["_ui_control"] == "time-list"
     assert "prompts" not in detail["schema"]
-    assert "专业参数" in detail["configuration_note"]
+    assert "专业设置" in detail["configuration_note"]
     assert len(detail["setup_steps"]) == 3
 
     detail["config"]["basic"]["min_messages_threshold"] = 300
@@ -860,7 +854,7 @@ def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) ->
     assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == ""
 
 
-def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Path) -> None:
+def test_group_analysis_access_fields_in_professional_form(tmp_path: Path) -> None:
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"
     wechat.write_bytes(b"placeholder")
@@ -884,7 +878,8 @@ def test_group_analysis_access_fields_in_common_and_advanced_forms(tmp_path: Pat
     service.engine.is_available = lambda: False
     public_id = service.catalog()["plugins"][0]["id"]
     detail = service.detail(public_id)
-    for form in (detail["basic_schema"], detail["advanced_schema"]):
+    assert detail["basic_schema"] == detail["model_schema"] == {}
+    for form in (detail["advanced_schema"],):
         items = form["basic"]["items"]
         for key in ("admin_ids", "bot_self_ids", "group_list"):
             assert items[key]["_ui_control"] == "line-list"

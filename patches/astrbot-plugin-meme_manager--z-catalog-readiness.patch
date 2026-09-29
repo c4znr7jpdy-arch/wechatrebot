@@ -1,0 +1,76 @@
+diff --git a/pages/catalog/script.js b/pages/catalog/script.js
+--- a/pages/catalog/script.js
++++ b/pages/catalog/script.js
+@@ -1,5 +1,14 @@
++async function boundedCatalogRequest(request) {
++  let timer;
++  try {
++    return await Promise.race([request, new Promise((_, reject) => {
++      timer = setTimeout(() => reject(new Error("读取超时，请检查网络后重试。")), 25000);
++    })]);
++  } finally { clearTimeout(timer); }
++}
++
+ async function initCatalogPage() {
+-  await window.AstrBotPluginPage.ready();
++  await boundedCatalogRequest(window.AstrBotPluginPage.ready());
+ 
+   const FIXED_INDEX_URL =
+     "https://raw.githubusercontent.com/anka-afk/astrbot-meme-pack-index/main/community-index.json";
+@@ -32,7 +41,7 @@
+     }
+     try {
+       const response =
+-        await window.AstrBotPluginPage.apiGet("bridge/auth_token");
++        await boundedCatalogRequest(window.AstrBotPluginPage.apiGet("bridge/auth_token"));
+       navAuthToken = String(response?.token || "").trim();
+     } catch (_) {
+       navAuthToken = "";
+@@ -81,7 +90,7 @@
+   const catalogRetry = document.getElementById("catalog-retry");
+   const logList = document.getElementById("log-list");
+ 
+-  await applySecureNavLinks();
++  void applySecureNavLinks();
+ 
+   let cachedIndex = null;
+   let installedPackIds = new Set();
+@@ -107,11 +116,11 @@
+   }
+ 
+   async function apiGet(endpoint, params = {}) {
+-    return window.AstrBotPluginPage.apiGet(endpoint, params);
++    return boundedCatalogRequest(window.AstrBotPluginPage.apiGet(endpoint, params));
+   }
+ 
+   async function apiPost(endpoint, body = {}) {
+-    return window.AstrBotPluginPage.apiPost(endpoint, body);
++    return boundedCatalogRequest(window.AstrBotPluginPage.apiPost(endpoint, body));
+   }
+ 
+   function addLog(message, isError = false) {
+@@ -559,4 +568,11 @@
+   await fetchIndex();
+ }
+ 
+-void initCatalogPage();
++void initCatalogPage().catch((error) => {
++  document.getElementById("catalog-status-text").textContent = error.message || "页面连接失败，请重新打开。";
++  document.getElementById("catalog-status").classList.add("error");
++  for (const id of ["official-pack-count", "community-pack-count"]) document.getElementById(id).textContent = "-";
++  const retry = document.getElementById("catalog-retry");
++  retry.hidden = false;
++  retry.onclick = () => window.location.reload();
++});
+diff --git a/mixins/web_api.py b/mixins/web_api.py
+--- a/mixins/web_api.py
++++ b/mixins/web_api.py
+@@ -1264,7 +1264,7 @@
+     async def _api_fetch_community_index(self):
+         try:
+             index_url = COMMUNITY_INDEX_URL
+-            cache_data = fetch_and_cache_community_index(index_url)
++            cache_data = await asyncio.to_thread(fetch_and_cache_community_index, index_url)
+             packs = cache_data.get("index", {}).get("packs", [])
+             return (
+                 jsonify(

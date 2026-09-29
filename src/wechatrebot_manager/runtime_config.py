@@ -295,17 +295,21 @@ def _apply_provider_to_astrbot(
         # Keep vendor-specific extras, but never inherit an old unbounded/very
         # long request timeout: it can make a simple @ reply appear frozen for
         # minutes. The product timeout is part of the unified provider policy.
-        updated_fields=("id", "key", "api_base", "enable", "timeout"),
+        updated_fields=("id", "key", "api_base", "embedding_api_base", "embedding_api_key", "enable", "timeout"),
     )
     model_payload = normalized.astrbot_model()
     updated_model_fields = (
         "id",
+        "type",
+        "provider_type",
         "provider_source_id",
         "model",
         "service_kind",
         "modalities",
         "enable",
     )
+    if normalized.service_kind == "embedding":
+        updated_model_fields += ("embedding_model",)
     if normalized.thinking_enabled is not None:
         existing_models = payload.get("provider")
         existing_model = next(
@@ -605,6 +609,8 @@ def write_runtime_configs(
             )
     else:
         astrbot_payload = generated_astrbot
+    from .provider import repair_embedding_provider_types
+    repair_embedding_provider_types(astrbot_payload)
     _sync_delivery_plugins(root, astrbot_payload)
     dashboard = astrbot_payload.get("dashboard")
     if not isinstance(dashboard, dict):

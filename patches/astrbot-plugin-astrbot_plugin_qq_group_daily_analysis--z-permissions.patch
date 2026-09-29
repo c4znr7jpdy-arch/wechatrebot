@@ -93,7 +93,7 @@ index 34f287c..0be5d79 100644
 +        sender_id = str(event.get_sender_id() or "未知")
 +        return (
 +            f"❌ 您没有群聊分析管理员权限（用户 ID：{sender_id}）。"
-+            "请在“功能中心 → 群聊分析 → 常用设置”的“群聊分析管理员”列表中添加此用户 ID。"
++            "请在“功能中心 → 群聊分析 → 专业设置”的“群聊分析管理员”列表中添加此用户 ID。"
 +        )
 +
      @filter.command("群分析", alias={"group_analysis"})

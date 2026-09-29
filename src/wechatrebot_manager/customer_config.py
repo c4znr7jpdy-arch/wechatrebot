@@ -361,6 +361,7 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
         avatar_path=str(brand_payload.get("avatar_path", "")),
         welcome_text=str(brand_payload.get("welcome_text", "")),
         help_title=str(brand_payload.get("help_title", "")),
+        name_source=str(brand_payload.get("name_source") or ("wechat" if brand_payload.get("display_name", "小妹") == "小妹" else "custom")),
     ).normalized()
     # Migrate the product's former factory identity in memory. Custom brands are
     # never rewritten; the new value is persisted when the unified identity
@@ -374,6 +375,7 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
             display_name="小妹",
             short_name="小妹",
             persona_name="小妹",
+            name_source="wechat",
             avatar_path=profile.avatar_path,
             welcome_text=(
                 profile.welcome_text

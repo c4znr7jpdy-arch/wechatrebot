@@ -441,3 +441,20 @@ def test_provider_update_preserves_extensions_but_enforces_reply_timeout(
     )
     assert payload["provider_settings"]["request_max_retries"] == 1
     assert payload["provider_settings"]["fallback_chat_models"] == []
+
+
+def test_runtime_preparation_repairs_existing_embedding_without_replacing_bindings(tmp_path):
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(tmp_path, wechat)
+    path = tmp_path / "app/astrbot/data/cmd_config.json"
+    config = json.loads(path.read_text("utf-8"))
+    config["provider_sources"] = [{"id": "shared", "type": "openai_chat_completion", "api_base": "https://example.test/v1", "key": ["secret"]}]
+    config["provider"] = [{"id": "shared/vector", "provider_source_id": "shared", "model": "vector", "service_kind": "embedding"}]
+    path.write_text(json.dumps(config), encoding="utf-8")
+    write_runtime_configs(tmp_path, wechat)
+    fixed = json.loads(path.read_text("utf-8"))
+    assert fixed["provider"][0]["type"] == "openai_embedding"
+    assert fixed["provider"][0]["id"] == "shared/vector"
+    assert fixed["provider_sources"][0]["embedding_api_key"] == "secret"
+    assert fixed["provider_sources"][0]["type"] == "openai_chat_completion"

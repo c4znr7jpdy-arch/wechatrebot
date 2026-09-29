@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import json
+from pathlib import Path
 from typing import Any
 
 
@@ -26,6 +28,18 @@ def apply_reply_identity(request: Any, config: Any) -> None:
         fields.append(f"身份与表达：\n{identity}")
     if guide:
         fields.append(f"接话与表达规则：\n{guide}")
+    # Installed at app/astrbot/data/plugins/<plugin>/core/reply_identity.py.
+    # Read the single global brand authority even when a chat template overrides aliases.
+    location = Path(__file__).resolve()
+    if len(location.parents) > 6 and location.parents[2].name == "plugins":
+        brand_path = location.parents[6] / "config" / "brand.json"
+        try:
+            brand = json.loads(brand_path.read_text(encoding="utf-8-sig"))
+            name = str(brand.get("display_name") or "").strip()
+        except (OSError, ValueError, AttributeError):
+            name = ""
+        if name:
+            fields.append(f"全局机器人名称：{name}。自我介绍和被询问姓名时使用这个名称；聊天昵称与人格描述不改变全局名称。")
     if not fields:
         request.system_prompt = original
         return

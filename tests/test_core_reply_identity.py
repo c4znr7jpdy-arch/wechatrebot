@@ -98,3 +98,21 @@ def test_reply_hook_uses_live_templates_on_first_message_and_respects_whitelist(
     assert '聊天称呼：全局' in invoke(group_id)
     store.set_binding(group_id, '')
     assert 'global identity' in invoke(group_id)
+
+
+def test_global_name_overrides_template_and_updates_without_restart(tmp_path, monkeypatch):
+    import json
+    from wechatrebot_manager import core_reply_identity as helper
+    deployed = tmp_path / 'app/astrbot/data/plugins/core_plugin/core/reply_identity.py'
+    monkeypatch.setattr(helper, '__file__', str(deployed))
+    brand = tmp_path / 'config/brand.json'
+    brand.parent.mkdir()
+    config = SimpleNamespace(ai_self_identity='custom personality', reply_strategy_guide='', alias='template name')
+    request = SimpleNamespace(system_prompt='Safety rules')
+    for name in ('大狗狗', '新名称'):
+        brand.write_text(json.dumps({'display_name': name}), encoding='utf-8')
+        helper.apply_reply_identity(request, config)
+        assert f'全局机器人名称：{name}' in request.system_prompt
+        assert 'custom personality' in request.system_prompt
+        assert request.system_prompt.count('[robot_core_profile]') == 1
+    assert '大狗狗' not in request.system_prompt

@@ -643,13 +643,6 @@ class ChatHistoryService:
             clauses.append("account_id = ''")
         else:
             return ()
-        if before is not None:
-            if before_id is None:
-                clauses.append("timestamp < ?")
-                params.append(float(before))
-            else:
-                clauses.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
-                params.extend((float(before), float(before), int(before_id)))
         if search.strip():
             term = search.strip()
             if term.casefold().startswith("wxid_"):
@@ -669,16 +662,30 @@ class ChatHistoryService:
         if end_time is not None:
             clauses.append("timestamp <= ?")
             params.append(float(end_time))
+        page_clauses = ["1 = 1"]
+        if before is not None:
+            if before_id is None:
+                page_clauses.append("timestamp < ?")
+                params.append(float(before))
+            else:
+                page_clauses.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
+                params.extend((float(before), float(before), int(before_id)))
         params.append(max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
+                WITH scoped AS (
+                    SELECT *,
+                           COUNT(*) OVER (PARTITION BY role, sender_id) AS sender_message_count,
+                           MAX(timestamp) OVER (PARTITION BY role, sender_id) AS sender_last_timestamp
+                    FROM messages WHERE {' AND '.join(clauses)}
+                )
                 SELECT id, conversation_type, role, sender_id, sender_name,
                        group_id, group_name, group_nickname, wechat_name, wechat_id,
                        avatar, message_kind, quote_sender, quote_content,
-                       content, timestamp
-                FROM messages
-                WHERE {' AND '.join(clauses)}
+                       content, timestamp, sender_message_count, sender_last_timestamp
+                FROM scoped
+                WHERE {' AND '.join(page_clauses)}
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
                 """,
@@ -697,6 +704,8 @@ class ChatHistoryService:
                 "type": row["conversation_type"],
                 "role": row["role"],
                 "sender_id": row["sender_id"],
+                "sender_message_count": row["sender_message_count"],
+                "sender_last_timestamp": row["sender_last_timestamp"],
                 "sender_name": row["sender_name"] or (
                     "机器人" if row["role"] == "assistant" else row["sender_id"]
                 ),

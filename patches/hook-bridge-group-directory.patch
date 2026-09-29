@@ -364,7 +364,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b9154899
  
  
  def create_callback_app(
-@@ -18,9 +262,241 @@ def create_callback_app(
+@@ -18,9 +262,248 @@ def create_callback_app(
      callback_path: str = "/api/recvMsg",
      action_router: Any | None = None,
      status_provider: Any | None = None,
@@ -576,13 +576,20 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b9154899
 +        if denied is not None:
 +            return denied
 +        user_id = _manager_text(request.match_info.get("user_id", ""))
-+        if not _valid_contact_id(user_id):
++        is_group = _valid_group_id(user_id)
++        if not _valid_contact_id(user_id) and not is_group:
 +            return _manager_error("联系人标识无效", 400)
 +        if manager_hook is None or not hasattr(manager_hook, "get_contact"):
 +            return _manager_error("联系人详情暂不可用", 503)
 +        try:
-+            item = _normalize_contact(await manager_hook.get_contact(user_id))
-+            if item is None or item["user_id"] != user_id:
++            if user_id == account_id and hasattr(manager_hook, "get_profile"):
++                profile = await manager_hook.get_profile()
++                raw = {**profile.get("userInfo", {}), **profile.get("userInfoExt", {})}
++            else:
++                raw = await manager_hook.get_contact(user_id)
++            item = _normalize_group(raw) if is_group else _normalize_contact(raw)
++            identity_key = "group_id" if is_group else "user_id"
++            if item is None or item[identity_key] != user_id:
 +                raise ValueError("contact detail could not be normalized")
 +        except Exception:
 +            logger.exception("manager contact detail read failed")

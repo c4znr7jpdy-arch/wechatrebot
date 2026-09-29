@@ -1,6 +1,14 @@
 "use strict";
 
 (() => {
+  window.sendFeaturePageContext = function (frame) {
+    if (!frame?.contentWindow || !frame.src) return;
+    const origin = new URL(frame.src, window.location.href).origin;
+    if (origin !== window.location.origin) return;
+    frame.contentWindow.postMessage({channel: "astrbot-plugin-page", kind: "context", context: {
+      locale: "zh-CN", isDark: document.documentElement.dataset.theme === "dark",
+    }}, origin);
+  };
   window.syncFeaturePageTheme = function (frame, theme, onStylesReady = null) {
     if (!frame?.contentWindow) return;
     theme = theme === "dark" ? "dark" : "light";
@@ -46,5 +54,6 @@
       finishStyles();
     }
     frame.contentWindow.postMessage({channel: "wechatrebot-theme", theme}, "*");
+    window.sendFeaturePageContext(frame);
   };
 })();

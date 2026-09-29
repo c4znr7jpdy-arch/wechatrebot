@@ -570,6 +570,37 @@ def infer_provider_modalities(
     return ("text", "image", "audio")
 
 
+def provider_runtime_fields(service_kind: str) -> dict[str, str]:
+    """Model overrides must select the adapter, even with a shared API source."""
+    embedding = normalize_service_kind(service_kind) == "embedding"
+    return {
+        "type": "openai_embedding" if embedding else "openai_chat_completion",
+        "provider_type": "embedding" if embedding else "chat_completion",
+    }
+
+
+def repair_embedding_provider_types(payload: dict) -> bool:
+    """Repair previously saved vector models without changing IDs or credentials."""
+    changed = False
+    sources = {item.get("id"): item for item in payload.get("provider_sources", [])
+               if isinstance(item, dict)}
+    for model in payload.get("provider", []):
+        if not isinstance(model, dict) or model.get("service_kind") != "embedding":
+            continue
+        for key, value in {**provider_runtime_fields("embedding"), "embedding_model": model.get("model", "")}.items():
+            if model.get(key) != value:
+                model[key] = value
+                changed = True
+        source = sources.get(model.get("provider_source_id"), model)
+        keys = source.get("key", [])
+        api_key = keys[0] if isinstance(keys, list) and keys else keys if isinstance(keys, str) else ""
+        for key, value in {"embedding_api_base": source.get("api_base", ""), "embedding_api_key": api_key}.items():
+            if value and source.get(key) != value:
+                source[key] = value
+                changed = True
+    return changed
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAIProviderProfile:
     """Customer-supplied OpenAI-compatible model service settings."""
@@ -655,6 +686,8 @@ class OpenAIProviderProfile:
             "provider_type": "chat_completion",
             "key": [profile.api_key],
             "api_base": profile.api_base,
+            "embedding_api_base": profile.api_base,
+            "embedding_api_key": profile.api_key,
             "timeout": PROVIDER_REQUEST_TIMEOUT_SECONDS,
             "proxy": "",
             "custom_headers": {},
@@ -674,9 +707,11 @@ class OpenAIProviderProfile:
             modalities.append("tool_use")
         return {
             "id": profile.model_id,
+            **provider_runtime_fields(profile.service_kind),
             "enable": True,
             "provider_source_id": profile.source_id,
             "model": profile.model,
+            **({"embedding_model": profile.model} if profile.service_kind == "embedding" else {}),
             "service_kind": profile.service_kind,
             "modalities": modalities,
             "custom_extra_body": (

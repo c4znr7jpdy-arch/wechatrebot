@@ -51,6 +51,7 @@
     historyKind: "all",
     historyAccount: "",
     historyReadyAccount: "",
+    historyConversationSnapshot: null,
     conversations: [],
     selectedConversation: null,
     selectedMessages: [],
@@ -226,7 +227,7 @@
   function safeImageUrl(value) {
     try {
       const parsed = new URL(String(value || "").trim());
-      return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+      return ["http:", "https:"].includes(parsed.protocol) || /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(parsed.href) ? parsed.href : "";
     } catch (_error) { return ""; }
   }
 
@@ -692,7 +693,7 @@
     $("#pageContextLabel").hidden = page === "schedules";
     $("#defaultTopActions").hidden = page === "schedules";
     $("#scheduleTopActions").hidden = page !== "schedules";
-    document.title = `${PAGE_TITLES[page]} · ${state.bootstrap?.brand?.display_name || "机器人管理"}`;
+    document.title = `${PAGE_TITLES[page]} · WxRebot`;
     const content = $(".content-scroll");
     if (content) {
       content.classList.toggle("history-active", page === "history");
@@ -838,7 +839,7 @@
     if (!afterSave) state.featureFeedback = "";
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     if (!preserveTab || !Object.keys(schemas[state.featureTab] || {}).length) {
-      state.featureTab = Object.keys(schemas.basic).length ? "basic" : "models";
+      state.featureTab = Object.keys(schemas.basic).length ? "basic" : Object.keys(schemas.models).length ? "models" : "advanced";
     }
   }
 
@@ -1164,9 +1165,13 @@
   window.addEventListener("message", async (event) => {
     const frame = $("#featurePageFrame");
     const message = event.data;
-    if (!frame || event.source !== frame.contentWindow || !message
-      || message.channel !== featurePageChannel || message.kind !== "request"
-      || typeof message.requestId !== "string") return;
+    if (!frame || event.source !== frame.contentWindow || event.origin !== window.location.origin || !message
+      || message.channel !== featurePageChannel) return;
+    if (message.kind === "ready") {
+      window.sendFeaturePageContext(frame);
+      return;
+    }
+    if (message.kind !== "request" || typeof message.requestId !== "string") return;
     try {
       const data = await handleEmbeddedFeaturePageRequest(message);
       event.source.postMessage({channel: featurePageChannel, kind: "response", requestId: message.requestId, ok: true, data}, "*");
@@ -2100,14 +2105,16 @@
       return;
     }
     const load = ++state.historyLoad;
+    const filters = historyFilters();
+    const query = JSON.stringify([requestAccount, filters]);
+    const cached = state.historyConversationSnapshot;
+    const reuse = options?.localFilter === true && cached?.query === query;
     state.historyConversationsLoading = true;
     try {
-      const data = await api("get_conversations", {
+      const data = reuse ? cached.data : await api("get_conversations", {
         account_id: requestAccount,
-        kind: state.historyKind,
-        search: $("#historySearch").value,
-        start: $("#historyStart").value,
-        end: $("#historyEnd").value,
+        kind: "all",
+        ...filters,
         refresh_groups: options?.refreshGroups === true,
       });
       if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
@@ -2117,7 +2124,8 @@
         return;
       }
       saveSelectedHistoryMessages();
-      state.conversations = data.items || [];
+      state.historyConversationSnapshot = {query, data};
+      state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(true);
       if (state.selectedConversation) {
@@ -2125,13 +2133,14 @@
         state.selectedConversation = refreshed || null;
       }
       const summary = data.summary || {};
-      const visible = summary.visible_conversations ?? summary.conversations ?? 0;
-      $("#historySummary").textContent = `${visible} 个聊天 · ${summary.messages || 0} 条消息 · 个人消息 ${summary.private_messages || 0} · 群聊消息 ${summary.group_messages || 0} · 群目录 ${summary.directory_groups || 0}`;
+      const visible = state.conversations.length;
+      const visibleMessages = state.conversations.reduce((sum, item) => sum + (item.message_count || 0), 0);
+      $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
       if (state.selectedConversation) {
-        await selectConversation(state.selectedConversation.conversation_id, {silent});
+        await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse});
       } else if (state.conversations.length) {
-        await selectConversation(state.conversations[0].conversation_id, {silent: true});
+        await selectConversation(state.conversations[0].conversation_id, {silent: true, cachedOnly: reuse});
       } else {
         ++state.messageLoad;
         state.historyMessagesLoading = false;
@@ -2176,6 +2185,7 @@
     state.historyLoadingOlder = false;
     state.historyMessageQuery = "";
     state.historyReadyAccount = "";
+    state.historyConversationSnapshot = null;
   }
 
   function renderHistoryAccountGate(accountId) {
@@ -2441,7 +2451,7 @@
 
   function messageMarkup(message) {
     const assistant = message.role === "assistant";
-    const name = assistant ? "机器人" : messageSenderName(message);
+    const name = assistant ? (message.sender_name || "机器人") : messageSenderName(message);
     const identity = !assistant ? messageSenderIdentity(message) : "";
     const senderKey = messageSenderKey(message);
     const selected = !assistant && senderKey && senderKey === state.selectedSenderKey;
@@ -2551,6 +2561,11 @@
       list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     }
     const load = ++state.messageLoad;
+    if (options.cachedOnly && (cacheEntry || !changed)) {
+      state.historyMessagesLoading = false;
+      renderConversationInspector(item);
+      return;
+    }
     state.historyMessagesLoading = true;
     const cacheEpoch = state.historyMessageCacheEpoch;
     const filters = pagedHistoryFilters();
@@ -2678,7 +2693,7 @@
     const identityFacts = item.type === "group"
       ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
       : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>消息数量</dt><dd>${item.message_count} 条</dd></div><div><dt>最近消息</dt><dd>${escapeHtml(fullTime(item.last_timestamp))}</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>该发送者消息</dt><dd>${Number.isInteger(currentSender?.sender_message_count) ? `${currentSender.sender_message_count} 条` : "未统计"}</dd></div><div><dt>该发送者最近消息</dt><dd>${escapeHtml(fullTime(currentSender?.sender_last_timestamp))}</dd></div><div><dt>本会话消息</dt><dd>${item.message_count} 条</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
     $("#deleteConversation")?.addEventListener("click", () => {
@@ -3384,11 +3399,23 @@
     confirmAction({ title: "删除定时任务？", message: `“${item.name}”删除后将停止执行，相关功能的其他设置不受影响。`, confirmText: "删除任务", onConfirm: async () => { await api("delete_schedule", id); await loadSchedules(); toast("定时任务已删除。 "); } });
   }
 
+  let activityItems = [], activityPage = 1;
+  const activityPageSize = 15;
   async function loadActivity() {
     try {
-      const items = await api("get_activity");
-      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
+      activityItems = await api("get_activity");
+      renderActivity();
     } catch (error) { reportError(error); }
+  }
+
+  function renderActivity() {
+      const pages = Math.max(1, Math.ceil(activityItems.length / activityPageSize));
+      activityPage = Math.min(activityPage, pages);
+      const items = activityItems.slice((activityPage - 1) * activityPageSize, activityPage * activityPageSize);
+      $("#activityPage").textContent = `第 ${activityPage} / ${pages} 页 · 共 ${activityItems.length} 条`;
+      $("#activityPrev").disabled = activityPage <= 1;
+      $("#activityNext").disabled = activityPage >= pages;
+      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
   }
 
   async function generateResponseTrace() {
@@ -4250,10 +4277,10 @@
   }
 
   function applyBrand(brand) {
-    $("#brandName").textContent = brand.display_name;
+    $("#brandName").textContent = "WxRebot";
     const mark = $("#brandMark");
     if (mark && !mark.querySelector("img")) mark.innerHTML = '<img src="assets/app-icon.png" alt="">';
-    document.title = `${brand.display_name} · 机器人管理`;
+    document.title = "WxRebot · 机器人管理";
   }
 
   function updateToggleCopy(event) {
@@ -4313,6 +4340,8 @@
     const requestedProvider = state.webSearch.provider || "tavily";
     providerSelect.value = providers[requestedProvider] ? requestedProvider : (Object.keys(providers)[0] || "");
     form.elements.enabled.checked = Boolean(state.webSearch.enabled);
+    $("#webSearchDetails").hidden = !state.webSearch.enabled;
+    $("#clearWebSearchKey").hidden = !state.webSearch.enabled;
     form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
     updateToggleCopy({currentTarget: form.elements.enabled});
     updateWebSearchProviderCopy();
@@ -4693,6 +4722,9 @@
 
   function bindEvents() {
     initializeTheme();
+    window.initializeHistoryDateRange(() => loadConversations());
+    $("#activityPrev").addEventListener("click", () => { activityPage--; renderActivity(); });
+    $("#activityNext").addEventListener("click", () => { activityPage++; renderActivity(); });
     // Keep the browser-native calendar/clock as the single source of truth,
     // while making the whole field open it on a direct click.
     document.addEventListener("click", (event) => {
@@ -4753,7 +4785,7 @@
     $$("#historyKinds button").forEach((button) => button.addEventListener("click", () => {
       state.historyKind = button.dataset.kind;
       $$("#historyKinds button").forEach((item) => item.classList.toggle("active", item === button));
-      loadConversations();
+      loadConversations({localFilter: true});
     }));
     $("#historyFilter").addEventListener("click", loadConversations);
     $("#newMessageButton").addEventListener("click", () => {
@@ -4796,7 +4828,11 @@
       updateWebSearchProviderCopy();
     });
     $("#webSearchForm").addEventListener("change", (event) => {
-      if (event.target.name === "enabled") updateToggleCopy(event);
+      if (event.target.name === "enabled") {
+        updateToggleCopy({currentTarget: event.target});
+        $("#webSearchDetails").hidden = !event.target.checked;
+        $("#clearWebSearchKey").hidden = !event.target.checked;
+      }
     });
     $("#revealWebSearchKey").addEventListener("click", (event) => {
       const input = $("#webSearchKey");
@@ -5144,8 +5180,9 @@
       if (id !== "feature-group-analysis") return {...item, basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true};
       return {
         ...item,
-        basic_schema: groupAnalysisBasicSchema,
-        model_schema: groupAnalysisModelSchema,
+        basic_schema: {},
+        model_schema: {},
+        configuration_profile: "advanced-only",
         schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema},
         config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
@@ -5341,6 +5378,11 @@
           if (search.startsWith("wxid_")) return previewHistoryMatches(message, search);
           return [message.sender_name, message.wechat_id, message.group_nickname, message.content]
             .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(search));
+        });
+        matching.forEach((message) => {
+          const own = matching.filter((item) => item.role === message.role && item.sender_id === message.sender_id);
+          message.sender_message_count = own.length;
+          message.sender_last_timestamp = Math.max(...own.map((item) => item.timestamp));
         });
         if (filters.paged !== true) return ok(structuredClone(matching));
         const before = filters.before;
