@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import threading
 from types import SimpleNamespace as NS
 from unittest.mock import Mock
@@ -23,6 +24,26 @@ def test_native_sources_are_pinned_and_used_by_delivery():
         assert any(e['origin']=='commercial' and e['source']==f"runtime/{record['module']}" for e in entries)
         for name, digest in record['files'].items():
             assert hashlib.sha256((base/name).read_bytes()).hexdigest()==digest, name
+
+
+def test_adapted_native_plugins_pass_delivery_guard(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / 'scripts'))
+    from build_staging import _copy_source_entry
+    from release_guard import scan_release
+
+    subprocess.run(['git', 'init', '--quiet'], cwd=tmp_path, check=True)
+    stage = tmp_path / 'stage'
+    entries = json.loads((ROOT / 'release/source-manifest.json').read_text('utf-8'))['entries']
+    for module in ('meme_manager', 'astrbot_plugin_livingmemory'):
+        entry = next(e for e in entries if e['source'] == f'runtime/{module}')
+        target = stage / entry['target']
+        _copy_source_entry(ROOT / entry['source'], target, entry)
+        subprocess.run([
+            'git', 'apply', '--ignore-space-change',
+            f'--directory={target.relative_to(tmp_path).as_posix()}',
+            str(ROOT / 'patches' / f'astrbot-plugin-{module}.patch'),
+        ], cwd=tmp_path, check=True)
+    assert scan_release(stage) == []
 
 
 @pytest.mark.parametrize('outcome', ['success', 'failure', 'cancel'])

@@ -212,3 +212,25 @@ def test_guard_allows_legacy_references_in_corresponding_source(tmp_path: Path) 
     source.write_text("- port = 6199\n- NoveLoader\n", encoding="utf-8")
 
     assert _load_guard()(tmp_path) == []
+
+
+def test_guard_allows_native_plugin_placeholders_and_rendered_session_label(tmp_path: Path) -> None:
+    (tmp_path / "initializer.py").write_text(
+        "# Non-ASCII path example: C:\\Users\\<中文名>\\...\n", encoding="utf-8"
+    )
+    (tmp_path / "recall.js").write_text(
+        "html += '<span>Session: ' + esc(String(mem.metadata.session_id)) + '</span>';\n",
+        encoding="utf-8",
+    )
+    assert _load_guard()(tmp_path) == []
+
+    # The same source still rejects real paths and credentials, including keys
+    # with application-specific prefixes and secrets assigned in HTML attributes.
+    (tmp_path / "unsafe.js").write_text(
+        "// C:\\Users\\builder\\release\n"
+        'const config = {selection_store_api_token: "private-write-token-123456"};\n'
+        '<input session="private-session-value-123456">\n',
+        encoding="utf-8",
+    )
+    findings = _load_guard()(tmp_path)
+    assert {item["reason"] for item in findings} == {"developer-path", "assigned-secret"}
