@@ -22,3 +22,19 @@ index 05e680a..8919a01 100644
          semantic_mode = ""
          semantic_tool_ready = False
          if self.emotion_llm_enabled:
+diff --git a/pages/app/catalog/script.js b/pages/app/catalog/script.js
+index 4ddbeeb..b5f871c 100644
+--- a/pages/app/catalog/script.js
++++ b/pages/app/catalog/script.js
+@@ -1030,9 +1030,10 @@ async function initCatalogPage() {
+   });
+ 
+   addLog("资源广场已就绪");
+-  await restoreActiveInstall();
++  const restoredInstall = restoreActiveInstall();
+   await loadCachedIndex({ silentOnMissing: true });
+   await fetchIndex();
++  await restoredInstall;
+   await updates.resume();
+ }
+ 
