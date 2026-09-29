@@ -1,11 +1,16 @@
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
-@@ -287,6 +287,87 @@
-         for key in ("errMsg", "msg", "message", "error")
-     ).casefold()
-     return "url is not supported" in detail or "route not found" in detail
-+
-+
+@@ -270,23 +270,85 @@
+     return "表情包图片" in text and "当作文件发" in text
+ 
+ 
+-def _is_unsupported_route(result: SendResult) -> bool:
+-    """Return whether a write response means that the HTTP route is absent.
+-
+-    HOOK normally returns HTTP 200 even for an unknown route, with a JSON
+-    ``code=404`` body.  Do not fall back for an ordinary revoke failure (for
+-    example an expired message), otherwise the second request would obscure
+-    the useful error and produce a misleading unsupported-route diagnosis.
 +def _recall_code(value: Any) -> int | None:
 +    # Completion codes are integers, never truthy booleans or rounded floats.
 +    if isinstance(value, bool) or not isinstance(value, (int, str)):
@@ -21,7 +26,16 @@
 +
 +    The pinned DLL wraps SendPbWaitStr failures in errCode=1/data={errCode:0}.
 +    Outer success text, message IDs and nested zero codes cannot confirm recall.
-+    """
+     """
+-    raw = result.raw
+-    code = _integer(_first_present(raw.get("code"), raw.get("errCode")))
+-    if code == 404:
+-        return True
+-    detail = " ".join(
+-        str(raw.get(key, ""))
+-        for key in ("errMsg", "msg", "message", "error")
+-    ).casefold()
+-    return "url is not supported" in detail or "route not found" in detail
 +    layers = []
 +    current: Any = result.raw
 +    confirmed = False
@@ -88,13 +102,45 @@
  
  
  def _chatroom_members(data: Any) -> list[dict[str, Any]]:
-@@ -732,8 +813,8 @@
-                 raise
-         else:
-             if current_result.ok or not _is_unsupported_route(current_result):
--                return current_result
--        return await self._write("/api/revoke_any", payload)
-+                return _recall_result(current_result)
+@@ -711,35 +773,18 @@
+     async def recall(
+         self, message_id: str, create_time: int, to_user_name: str
+     ) -> SendResult:
+-        # The DLL bundled with the current 4.1.8.27 bridge exposes
+-        # ``/api/revoke_msg``.  Newer HOOK builds document ``/api/revoke_any``
+-        # instead, so keep the latter as a compatibility fallback.  Both
+-        # routes ultimately need the real WeChat ``newMsgId`` and timestamp;
+-        # the image send endpoint does not manufacture those values for us.
++        # Use the documented revoke endpoint once, with the exact send receipt.
+         try:
+             numeric_message_id: int | str = int(message_id)
+         except (TypeError, ValueError):
+             numeric_message_id = message_id
+ 
+-        current_result = await self._write(
+-            "/api/revoke_msg",
+-            {
+-                "newMsgId": numeric_message_id,
+-                "createTime": int(create_time),
+-                "toUserName": to_user_name,
+-            },
+-        )
+-        if current_result.ok or not _is_unsupported_route(current_result):
+-            return current_result
+-
+-        return await self._write(
+-            "/api/revoke_any",
+-            {
+-                "newMsgId": numeric_message_id,
+-                "createTime": int(create_time),
+-                "toUserName": to_user_name,
+-            },
+-        )
++        payload = {
++            "newMsgId": numeric_message_id,
++            "createTime": int(create_time),
++            "toUserName": to_user_name,
++        }
 +        return _recall_result(await self._write("/api/revoke_any", payload))
  
      async def get_friends(
