@@ -1,0 +1,48 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -696,7 +696,21 @@
+         independently specifically so it can validate that a callback really
+         changes membership without being mutated by the callback itself.
+         """
++        self_id = self.state.bot_wxid or event.account_id
++        if self_id and event.sender_id == self_id:
++            if event.kind == "group_increase":
++                # A rejoin invalidates snapshots left from our earlier stay.
++                self._polled_group_members.pop(event.conversation_id, None)
++            return False
+         previous = self._polled_group_members.get(event.conversation_id)
++        if previous is None and event.kind == "group_increase":
++            # Initial room synchronization can label an existing member as a
++            # new arrival. Only a pre-existing polling baseline can prove a join.
++            logger.info(
++                "ignored unverified group increase callback room=%s reason=no_baseline",
++                event.conversation_id,
++            )
++            return False
+         if previous is None:
+             return True
+ 
+@@ -770,6 +784,10 @@
+         room_id = event.conversation_id
+         member_id = event.sender_id
+         if not room_id or not member_id:
++            return False
++        self_id = self.state.bot_wxid or event.account_id
++        if self_id and member_id == self_id:
++            # Applies to callback and polling, including account-id fallback.
+             return False
+ 
+         identity = GroupMemberIdentity(
+@@ -856,7 +874,10 @@
+                 continue
+ 
+             previous = self._polled_group_members.get(room_id)
+-            if previous is None:
++            self_id = self.state.bot_wxid
++            if previous is None or (
++                self_id and self_id in current and self_id not in previous
++            ):
+                 self._polled_group_members[room_id] = current
+                 self.state.replace_group_member_snapshot(room_id, current)
+                 logger.info(
