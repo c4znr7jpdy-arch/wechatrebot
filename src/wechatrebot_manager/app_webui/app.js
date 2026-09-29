@@ -384,8 +384,12 @@
     const problem = current === "ERROR";
     const active = !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
-    const wechatLoggedIn = Boolean(runtime.wechat_identity);
-    const historyAccount = String(runtime.wechat_identity || "").trim();
+    const accountStatusAvailable = runtime.account_status_available !== false;
+    const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    // A failed probe is not a logout. Keep the displayed account snapshot,
+    // while the backend independently refuses unverified reads and mutations.
+    const historyAccount = accountStatusAvailable
+      ? String(runtime.wechat_identity || "").trim() : state.historyAccount;
 
     if (historyAccount !== state.historyAccount) {
       state.historyAccount = historyAccount;
@@ -419,7 +423,8 @@
 
     $("#stateTitle").textContent = status.title;
     $("#stateMessage").textContent = status.message;
-    $("#accountText").textContent = runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
+    $("#accountText").textContent = !accountStatusAvailable ? "正在确认微信连接…"
+      : runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
     $("#lastCheckText").textContent = `检查于 ${new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})}`;
 
     const global = $("#globalStatus");
@@ -2127,7 +2132,7 @@
       state.historyConversationSnapshot = {query, data};
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
-      setHistoryActionsEnabled(true);
+      setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
       if (state.selectedConversation) {
         const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
         state.selectedConversation = refreshed || null;

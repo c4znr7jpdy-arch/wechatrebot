@@ -19,6 +19,7 @@ class BridgeHealth:
     wechat_identity: str = ""
     upstream_connected: bool = False
     heartbeat_fresh: bool = False
+    legacy_profile_available: bool = False
 
     @property
     def connected(self) -> bool:
@@ -61,6 +62,9 @@ def probe_bridge_health(
         wechat_identity=str(payload.get("wechat_identity") or "").strip(),
         upstream_connected=payload.get("upstream_connected") is True,
         heartbeat_fresh=payload.get("heartbeat_fresh") is True,
+        legacy_profile_available=(
+            "status_available" not in payload and payload.get("service_ready") is True
+        ),
     )
 
 
@@ -110,6 +114,7 @@ class RuntimeSnapshot:
     hook_ready: bool | None = None
     upstream_connected: bool | None = None
     heartbeat_fresh: bool | None = None
+    account_status_available: bool = True
 
     @property
     def online(self) -> bool:
@@ -144,7 +149,7 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
     # an uninitialised account object and crash the newly opened WeChat process.
     # Keep the direct profile probe only for legacy bridges that do not expose
     # the status_available capability flag.
-    if connection and not identity and not health.status_available:
+    if connection and not identity and health.legacy_profile_available:
         identity = probe_wechat_identity(port=ports.hook_api)
     return RuntimeSnapshot(
         engine,
@@ -153,6 +158,7 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
         hook_ready=health.hook_ready,
         upstream_connected=health.upstream_connected,
         heartbeat_fresh=health.heartbeat_fresh,
+        account_status_available=health.status_available or bool(identity),
     )
 
 

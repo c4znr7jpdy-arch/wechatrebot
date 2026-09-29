@@ -739,6 +739,23 @@ def test_history_account_uses_a_fresh_runtime_identity(tmp_path: Path) -> None:
     assert api._history_account_id() == "wxid_current"
 
 
+def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_path):
+    api = _api(tmp_path)
+    api._lifecycle.refresh = lambda: SimpleNamespace(runtime=SimpleNamespace(
+        wechat_identity="wxid_cached", account_status_available=False,
+    ))
+    # No repositories are installed: touching history while unverified must fail.
+    results = [
+        api.get_conversations({"account_id": "wxid_cached"}),
+        api.get_messages("chat", {"paged": True}),
+        api.delete_conversation("chat", "wxid_cached"),
+        api.delete_history_before("2026-09-01", "wxid_cached"),
+        api.export_history("csv", "wxid_cached"),
+    ]
+    assert all(result["ok"] is False for result in results)
+    assert all("requires_login" not in result.get("data", {}) for result in results)
+
+
 def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) -> None:
     api = _api(tmp_path)
     calls = []
@@ -1544,7 +1561,7 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     assert handler.index("state.startPending = true") < handler.index("await api(")
     assert 'current === "STOPPED" && status?.environment?.ready' in script
     assert '"启动中…"' in script
-    assert "const wechatLoggedIn = Boolean(runtime.wechat_identity);" in script
+    assert "const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);" in script
     assert 'wechatLoggedIn ? "已登录"' in script
     assert 'wechatLoggedIn ? "已登录，功能启动中"' in script
     assert 'role="status" aria-live="polite" aria-atomic="true"' in markup

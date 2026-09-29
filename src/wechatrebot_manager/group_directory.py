@@ -20,6 +20,10 @@ class GroupDirectoryError(ValueError):
     pass
 
 
+class GroupDirectoryUnavailable(GroupDirectoryError):
+    """Account verification failed; never return an unverified cached directory."""
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -54,6 +58,8 @@ class GroupDirectoryService:
         except (OSError, ValueError, AttributeError):
             raise GroupDirectoryError("微信连接设置无法读取，请检查安装或重新选择微信。") from None
         health = probe_bridge_health(port=port)
+        if not getattr(health, "status_available", True) and not health.wechat_identity:
+            raise GroupDirectoryUnavailable("微信账号状态暂时不可用，请稍后重试。")
         account = health.wechat_identity if health.wechat_logged_in else ""
         if not account:
             # Unknown identity must not expose a previous account's directory.
@@ -106,6 +112,8 @@ class GroupDirectoryService:
         if not isinstance(data.get("items"), list):
             raise GroupDirectoryError("群信息格式不正确，请稍后重试。")
         after = probe_bridge_health(port=port)
+        if not getattr(after, "status_available", True) and not after.wechat_identity:
+            raise GroupDirectoryUnavailable("微信账号状态暂时不可用，请稍后重试。")
         if not after.wechat_logged_in or after.wechat_identity != account:
             self._clear_current_account(account, state_locked=state_locked)
             raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
@@ -141,6 +149,8 @@ class GroupDirectoryService:
                 return {**snapshot,
                         "stale": bool(self._last_error),
                         "message": self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
+            except GroupDirectoryUnavailable:
+                raise
             except GroupDirectoryError as exc:
                 fallback = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None})
                 fallback["items"] = [self._portraits.enrich(self._account, item, str(item.get("group_id") or ""), None) for item in fallback["items"]]

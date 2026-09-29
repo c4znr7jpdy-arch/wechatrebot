@@ -652,9 +652,11 @@ class ApplicationApi:
         try:
             view = self._lifecycle.refresh()
             runtime = getattr(view, "runtime", None)
-            return str(getattr(runtime, "wechat_identity", "") or "").strip()
-        except (AttributeError, OSError, ValueError):
-            return ""
+        except (AttributeError, OSError, ValueError) as exc:
+            raise OSError("微信账号状态暂时不可用，请稍后重试。") from exc
+        if runtime is None or getattr(runtime, "account_status_available", True) is False:
+            raise OSError("微信账号状态暂时不可用，请稍后重试。")
+        return str(getattr(runtime, "wechat_identity", "") or "").strip()
 
     def _history_contacts(self, user_ids: list[str]) -> dict[str, dict[str, str]]:
         resolver = getattr(getattr(self, "_contacts", None), "contacts", None)
@@ -795,7 +797,10 @@ class ApplicationApi:
     def get_groups(self, refresh: bool = False) -> dict[str, object]:
         if refresh:
             getattr(self, "_history_group_members", {}).clear()
-        return self._ok(self._groups.list(bool(refresh)))
+        try:
+            return self._ok(self._groups.list(bool(refresh)))
+        except GroupDirectoryError as exc:
+            return self._failed(exc)
 
     def get_group_members(self, group_id: str) -> dict[str, object]:
         try:
