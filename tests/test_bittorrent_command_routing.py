@@ -16,7 +16,7 @@ import zipfile
 import pytest
 
 from test_hot_config_runtime import _runtime_function
-from test_plugin_portability import PROJECT_PLUGINS
+from test_plugin_portability import PROJECT_PLUGINS, _patched
 from wechatrebot_manager.group_feature_runtime import group_plugins
 from wechatrebot_manager.group_policy import GroupPolicyService
 
@@ -107,7 +107,9 @@ def command_runtime(tmp_path):
     exec(compile(ast.fix_missing_locations(tree), "pinned-command-filter", "exec"), command_scope)
     command_filter = command_scope["CommandFilter"]
 
-    plugin_source = plugin_path.read_text("utf-8-sig")
+    plugin_dir = tmp_path / "bt-plugin"
+    plugin_dir.mkdir()
+    plugin_source = _patched(plugin_dir, MODULE, "main.py", all_patches=True)
     sort_scope = {}
     utils = next(node for node in ast.parse(plugin_source).body
                  if isinstance(node, ast.ClassDef) and node.name == "MagnetUtils")
@@ -174,7 +176,9 @@ def test_bt_command_reaches_search_and_skips_conversation_core(command_runtime, 
                                          "size": "1 GB", "create_time": "2026-09-16"}])
         plugin = SimpleNamespace(search_service=SimpleNamespace(search=search), enable_preview=False,
                                  _format_result=_runtime_function(plugin_source, "_format_result", {}))
-        replies = [reply async for reply in handler(plugin, event)]
+        event.send = AsyncMock()
+        await handler(plugin, event)
+        replies = [call.args[0] for call in event.send.await_args_list]
         search.assert_awaited_once_with(keyword, sort)
         assert event.stopped is True
         assert len(replies) == 1

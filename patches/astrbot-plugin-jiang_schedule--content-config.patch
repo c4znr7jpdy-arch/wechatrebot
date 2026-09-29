@@ -1,0 +1,20 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -28,9 +28,13 @@
+         / "jiang_commands_config.json"
+     )
+     try:
+-        config = json.loads(config_path.read_text("utf-8"))
+-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+-        config = {}
++        config = json.loads(config_path.read_text("utf-8-sig"))
++    except (OSError, ValueError):
++        logger.warning("内容服务配置读取失败，保留已加载配置")
++        return
++    if not isinstance(config, dict):
++        logger.warning("内容服务配置格式错误，保留已加载配置")
++        return
+     mappings = {
+         "content_api_id": "JIANG_CONTENT_API_ID",
+         "content_api_key": "JIANG_CONTENT_API_KEY",
