@@ -1,5 +1,7 @@
 import os
+import queue
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,10 +60,24 @@ def test_progress_remains_responsive_and_only_closes_after_completion() -> None:
 
 
 def test_worker_failure_reaches_visible_error_handler() -> None:
-    from wechatrebot_manager.uninstall_ui import run_uninstall_progress
+    from wechatrebot_manager.uninstall_ui import UninstallProgressWindow
 
     def fail(_progress):
         raise OSError("测试：文件被占用")
 
-    with pytest.raises(OSError, match="文件被占用"):
-        run_uninstall_progress(fail)
+    window = object.__new__(UninstallProgressWindow)
+    window.operation = fail
+    window.events = queue.Queue()
+    window.error = None
+    window.busy = True
+    window.progress = SimpleNamespace(stop=lambda: None)
+    destroyed = []
+    window.root = SimpleNamespace(destroy=lambda: destroyed.append(True))
+
+    window._work()
+    window._poll()
+
+    assert isinstance(window.error, OSError)
+    assert "文件被占用" in str(window.error)
+    assert not window.busy
+    assert destroyed == [True]
