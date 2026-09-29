@@ -442,9 +442,9 @@ def _sync_living_memory_config(
                 "use_session_filtering": True,
             },
             "reflection_engine": {"summary_trigger_rounds": 10},
-            # The graph route is valuable for advanced installations but adds a
-            # second vector request to every recall. Keep the small-user default fast.
-            "graph_memory": {"enabled": False},
+            # Match LivingMemory's native default so its graph page has data.
+            # _nested_defaults still preserves an explicit user opt-out.
+            "graph_memory": {"enabled": True},
             "agent_tools": {
                 "enable_recall_tool": True,
                 "enable_memorize_tool": False,

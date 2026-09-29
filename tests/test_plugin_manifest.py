@@ -136,7 +136,7 @@ def test_source_manifest_excludes_development_and_local_config_artifacts() -> No
         "data/plugins/astrbot_plugin_parser"
     ]["exclude"]
     assert "config.json" in by_source[
-        "data/plugins/meme_manager"
+        "runtime/meme_manager"
     ]["exclude"]
 
 
