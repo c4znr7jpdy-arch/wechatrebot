@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from collections.abc import AsyncGenerator
-import inspect
-import logging
 from pathlib import Path
 import sys
-import typing
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
+from pipeline_helpers import run_handler_pipeline
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,23 +92,6 @@ def test_private_images_do_not_require_at_and_group_images_keep_at_guard(
 @pytest.mark.parametrize("outcome", ["image", "failure"])
 def test_stopped_image_handler_finishes_after_progress_in_real_pipeline(handler, outcome):
     method, _at = handler
-    pipeline = ROOT / "tests/fixtures/image_pipeline"
-
-    class Result:
-        pass
-
-    namespace = {
-        "AsyncGenerator": AsyncGenerator, "AstrMessageEvent": object,
-        "MessageEventResult": Result, "CommandResult": Result,
-        "ProviderRequest": type("ProviderRequest", (), {}),
-        "inspect": inspect, "T": typing, "logger": logging.getLogger("test-image-pipeline"),
-    }
-    wrapper_node = next(n for n in ast.parse((pipeline / "context_utils.py").read_text("utf-8")).body
-                        if isinstance(n, ast.AsyncFunctionDef) and n.name == "call_handler")
-    scheduler_node = next(n for n in ast.walk(ast.parse((pipeline / "scheduler.py").read_text("utf-8")))
-                          if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_stages")
-    process_node = ast.parse((pipeline / "stage.py").read_text("utf-8")).body[0]
-    exec(compile(ast.Module(body=[wrapper_node, scheduler_node, process_node], type_ignores=[]), "pinned-pipeline", "exec"), namespace)
     sequence = []
     event = SimpleNamespace(
         text="生图 一只小猫", quote=None, message_obj=SimpleNamespace(message=[]),
@@ -135,23 +116,6 @@ def test_stopped_image_handler_finishes_after_progress_in_real_pipeline(handler,
 
     plugin = SimpleNamespace(_do_image_gen=generate)
 
-    class PluginStage:
-        async def process(self, event):
-            async for value in namespace["call_handler"](event, lambda e: method(plugin, e)):
-                yield value
-
-    class LlmStage:
-        async def process(self, event):
-            sequence.append("unwanted-llm-fallback")
-            yield
-
-    process_stage = SimpleNamespace(
-        star_request_sub_stage=PluginStage(), agent_sub_stage=LlmStage(),
-        ctx=SimpleNamespace(astrbot_config={"provider_settings": {"enable": True}}),
-    )
-    process_stage.process = lambda e: namespace["process"](process_stage, e)
-    scheduler = SimpleNamespace(stages=[process_stage])
-    scheduler._process_stages = lambda e, index=0: namespace["_process_stages"](scheduler, e, index)
-    asyncio.run(scheduler._process_stages(event))
+    run_handler_pipeline(method, plugin, event)
     assert sequence == ["正在画", "generation-request", "final-image" if outcome == "image" else "generation-failed"]
     assert event.stopped

@@ -16,8 +16,9 @@ REPOSITORY = Path(__file__).parents[1]
 PROJECT_PLUGINS = Path("E:/Project/data/plugins")
 
 
-def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = False) -> str:
-    source = PROJECT_PLUGINS / module / relative
+def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = False,
+             source_root: Path = PROJECT_PLUGINS) -> str:
+    source = source_root / module / relative
     if not source.is_file():
         pytest.skip("Local plugin source checkout is unavailable")
     base_patch = REPOSITORY / "patches" / f"astrbot-plugin-{module}.patch"
@@ -32,7 +33,7 @@ def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = 
     # a parent checkout when pytest's temporary directory happens to be in it.
     for patch in patches:
         for path in re.findall(r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE):
-            original = PROJECT_PLUGINS / module / path
+            original = source_root / module / path
             destination = tmp_path / path
             if destination.exists():
                 continue

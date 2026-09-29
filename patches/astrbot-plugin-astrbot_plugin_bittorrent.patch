@@ -1,0 +1,70 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -427,7 +427,7 @@
+ 
+         if len(args) < 2 or args[0] != "bt":
+             chain.append(Comp.Plain("用法：/bt （排序方式） [关键词]\n示例：/bt 热门 安达与岛村"))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+ 
+         # 解析排序参数和关键词
+@@ -443,12 +443,12 @@
+ 
+         if not results:
+             chain.append(Comp.Plain("未找到相关磁力链接，网站失效或网络问题"))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+         elif len(results) == 1 and results[0].get("error") and not results[0].get("title"):
+             # 搜索整体失败
+             chain.append(Comp.Plain(results[0]["error"]))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+         else:
+             # 第一次发送：所有基础结果 + 预览文本
+@@ -481,11 +481,11 @@
+                     name=event.get_sender_name(),
+                     uin=str(event.get_sender_id()),
+                 ))
+-            yield event.chain_result(text_chain)
++            await event.send(event.chain_result(text_chain))
+ 
+             # 第二次发送：预览图合并转发
+             if self.enable_preview and preview_nodes:
+-                yield event.chain_result([Comp.Nodes(nodes=preview_nodes)])
++                await event.send(event.chain_result([Comp.Nodes(nodes=preview_nodes)]))
+ 
+     @filter.command("btp")
+     async def magnet_preview_handler(self, event: AstrMessageEvent):
+@@ -502,19 +502,19 @@
+ 
+         if len(args) < 2:
+             chain.append(Comp.Plain("用法：/btp [磁力链接]\n示例：/btp magnet:?xt=urn:btih:xxxx"))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+ 
+         magnet_url = args[1].strip()
+         if not magnet_url.startswith("magnet:"):
+             chain.append(Comp.Plain("请输入有效的磁力链接（以 magnet: 开头）"))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+ 
+         preview = await self.whatslink_service.get_preview(magnet_url)
+         if not preview or not preview.get("name"):
+             chain.append(Comp.Plain("未查询到预览信息，链接可能无效或 API 暂不可用"))
+-            yield event.chain_result(chain)
++            await event.send(event.chain_result(chain))
+             return
+ 
+         text = (
+@@ -530,4 +530,4 @@
+             if screenshot_url:
+                 chain.append(Comp.Image.fromURL(screenshot_url))
+ 
+-        yield event.chain_result(chain)
++        await event.send(event.chain_result(chain))

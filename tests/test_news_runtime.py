@@ -1,12 +1,83 @@
 import asyncio
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
+from test_hot_config_runtime import _runtime_function
+from test_plugin_portability import _patched
 
 ROOT = Path(__file__).parents[1]
+
+
+@pytest.fixture
+def schedule_config_loader(tmp_path):
+    source = _patched(tmp_path, "jiang_schedule", "main.py", all_patches=True,
+                      source_root=ROOT / "tests/fixtures/patch_sources/data/plugins")
+    runtime = tmp_path / "app/astrbot/data"
+    path = runtime / "config/jiang_commands_config.json"
+    path.parent.mkdir(parents=True)
+    logs = []
+    loader = _runtime_function(source, "_apply_content_service_config", {
+        "Path": Path, "json": json, "os": os,
+        "__file__": str(runtime / "plugins/jiang_schedule/main.py"),
+        "logger": SimpleNamespace(warning=lambda message: logs.append(message)),
+    })
+    return loader, path, logs
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_schedule_startup_preserves_news_credentials(schedule_config_loader, monkeypatch, encoding):
+    loader, path, logs = schedule_config_loader
+    config = {"content_api_id": "test-id", "content_api_key": "test-key", "weather_detail_token": "weather"}
+    path.write_text(json.dumps(config), encoding=encoding)
+    for name in ("JIANG_CONTENT_API_ID", "JIANG_CONTENT_API_KEY", "JIANG_WEATHER_DETAIL_TOKEN"):
+        monkeypatch.setenv(name, "previous-value")
+    loader()
+    news = _load_news_module()
+    calls = []
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def get(self, url, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+                "code": 200, "data": [{"title": "热榜", "hot_value": 1}]})
+
+    monkeypatch.setattr(news.httpx, "AsyncClient", Client)
+    assert asyncio.run(news.fetch_hot_news())[0]["title"] == "热榜"
+    assert calls == [{"params": {"id": "test-id", "key": "test-key"}}]
+    assert os.environ["JIANG_WEATHER_DETAIL_TOKEN"] == "weather"
+    assert not logs
+
+
+@pytest.mark.parametrize("raw", [None, '{"key":"secret"', '[]', 'null', '"secret"'])
+def test_schedule_invalid_config_does_not_erase_loaded_credentials(schedule_config_loader, monkeypatch, raw):
+    loader, path, logs = schedule_config_loader
+    monkeypatch.setenv("JIANG_CONTENT_API_ID", "test-id")
+    monkeypatch.setenv("JIANG_CONTENT_API_KEY", "test-key")
+    if raw is not None:
+        path.write_text(raw, encoding="utf-8")
+    loader()
+    assert os.environ["JIANG_CONTENT_API_ID"] == "test-id"
+    assert os.environ["JIANG_CONTENT_API_KEY"] == "test-key"
+    assert logs and "secret" not in str(logs)
+
+
+def test_schedule_explicit_empty_config_clears_credentials(schedule_config_loader, monkeypatch):
+    loader, path, logs = schedule_config_loader
+    for name in ("JIANG_CONTENT_API_ID", "JIANG_CONTENT_API_KEY", "JIANG_WEATHER_DETAIL_TOKEN"):
+        monkeypatch.setenv(name, "previous-value")
+    path.write_text("{}", encoding="utf-8-sig")
+    loader()
+    assert os.environ["JIANG_CONTENT_API_KEY"] == ""
+    assert not logs
 
 
 def _load_news_module():
