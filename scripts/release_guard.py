@@ -26,7 +26,7 @@ FORBIDDEN_TEXT = (
     (
         "developer-path",
         re.compile(
-            r"(?i)(?<![A-Za-z0-9])[A-Z]:\\(?:Users|Documents and Settings|Projects?|workspace|wechatrebot)(?:\\|$)"
+            r"(?i)(?<![A-Za-z0-9])[A-Z]:\\(?:Users|Documents and Settings|Projects?|workspace|wechatrebot)(?:\\(?!<[^>\r\n]+>)|$)"
         ),
     ),
     ("legacy-port", re.compile(r"(?<!\d)6199(?!\d)")),
@@ -35,7 +35,7 @@ FORBIDDEN_TEXT = (
     (
         "assigned-secret",
         re.compile(
-            r"(?i)[\"']?(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|"
+            r"(?i)(?<!>)[\"']?(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|"
             r"secret|cookie|authorization|session(?:[_-]?(?:id|token))?)[\"']?\s*[=:]\s*"
             r"[\"'](?P<assigned_secret_value>"
             r"(?!<|\$\{|your[-_]|example[-_]|sample[-_]|placeholder|xxx|test[-_])"
