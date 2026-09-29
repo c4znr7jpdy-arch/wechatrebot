@@ -1,0 +1,48 @@
+{
+  "primary_base_url": {
+    "description": "\u9996\u9009\u751f\u56fe API Base URL",
+    "hint": "\u4f8b\u5982 https://api.hostcentral.cc/\uff1b\u63d2\u4ef6\u4f1a\u81ea\u52a8\u8865\u9f50 OpenAI \u517c\u5bb9\u63a5\u53e3\u7684 /v1 \u8def\u5f84\u3002",
+    "type": "string",
+    "default": "https://api.hostcentral.cc/"
+  },
+  "primary_model": {
+    "description": "\u9996\u9009\u751f\u56fe\u6a21\u578b",
+    "hint": "\u4f8b\u5982 gpt-image-2\u3002",
+    "type": "string",
+    "default": "gpt-image-2"
+  },
+  "secondary_enabled": {
+    "description": "\u542f\u7528\u6b21\u9009\u751f\u56fe\u5730\u5740",
+    "hint": "\u9996\u9009\u5730\u5740\u8fde\u63a5\u5931\u8d25\u3001\u8fd4\u56de\u9519\u8bef\u6216\u6ca1\u6709\u56fe\u7247\u65f6\uff0c\u81ea\u52a8\u5c1d\u8bd5\u6b21\u9009\u5730\u5740\u3002",
+    "type": "bool",
+    "default": true
+  },
+  "secondary_base_url": {
+    "description": "\u6b21\u9009\u751f\u56fe API Base URL",
+    "hint": "\u4f8b\u5982 https://api.gemai.cc/v1\u3002\u7559\u7a7a\u5219\u4fdd\u7559\u73b0\u6709\u6b21\u9009\u6a21\u578b\u5730\u5740\u3002",
+    "type": "string",
+    "default": "https://api.gemai.cc/v1"
+  },
+  "secondary_model": {
+    "description": "\u6b21\u9009\u751f\u56fe\u6a21\u578b",
+    "type": "string",
+    "default": "gpt-image-2-2K"
+  },
+  "tertiary_enabled": {
+    "description": "\u542f\u7528\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u5730\u5740",
+    "hint": "\u6b21\u9009\u4e5f\u5931\u8d25\u65f6\u7ee7\u7eed\u5c1d\u8bd5\u7b2c\u4e09\u987a\u4f4d\u5730\u5740\u3002",
+    "type": "bool",
+    "default": true
+  },
+  "tertiary_base_url": {
+    "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe API Base URL",
+    "hint": "\u4f8b\u5982 https://api.minimaxi.com/v1\u3002\u7559\u7a7a\u5219\u4fdd\u7559\u73b0\u6709\u7b2c\u4e09\u987a\u4f4d\u6a21\u578b\u5730\u5740\u3002",
+    "type": "string",
+    "default": "https://api.minimaxi.com/v1"
+  },
+  "tertiary_model": {
+    "description": "\u7b2c\u4e09\u987a\u4f4d\u751f\u56fe\u6a21\u578b",
+    "type": "string",
+    "default": "image-01"
+  }
+}

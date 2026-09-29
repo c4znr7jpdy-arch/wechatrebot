@@ -2,55 +2,12 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import importlib.util
-import json
 from pathlib import Path
-import shutil
-import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-
-
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path("E:/Project/data/plugins/jiang_image")
-
-
-@pytest.fixture
-def patched_image(tmp_path):
-    if not (SOURCE / "main.py").is_file():
-        pytest.skip("Local image plugin source is unavailable")
-    for name in ("main.py", "model_manager.py", "_conf_schema.json"):
-        shutil.copy2(SOURCE / name, tmp_path / name)
-    shutil.copytree(SOURCE / "pages", tmp_path / "pages")
-    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
-    for name in (
-        "astrbot-plugin-jiang_image.patch",
-        "astrbot-plugin-jiang_image--network-errors.patch",
-        "astrbot-plugin-jiang_image--z-local-proxy.patch",
-        "astrbot-plugin-jiang_image--zz-model-experience.patch",
-        "astrbot-plugin-jiang_image--zzz-stop-propagation.patch",
-    ):
-        result = subprocess.run(
-            ["git", "apply", "--check", "--ignore-space-change", str(ROOT / "patches" / name)],
-            cwd=tmp_path, capture_output=True, text=True,
-        )
-        assert result.returncode == 0, result.stderr
-        subprocess.run(["git", "apply", "--ignore-space-change", str(ROOT / "patches" / name)],
-                       cwd=tmp_path, check=True, capture_output=True)
-    schema = json.loads((tmp_path / "_conf_schema.json").read_text("utf-8"))
-    assert schema["use_system_proxy"]["type"] == "bool"
-    assert schema["use_system_proxy"]["default"] is True
-    assert schema["local_proxy_port"]["default"] == ""
-    assert schema["secondary_enabled"]["default"] is False
-    assert "tertiary_enabled" not in schema
-    spec = importlib.util.spec_from_file_location("patched_image_model_manager", tmp_path / "model_manager.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return (tmp_path / "main.py").read_text("utf-8"), module
 
 
 def test_image_models_allow_empty_then_show_new_primary_after_disk_reload(
@@ -154,8 +111,14 @@ def test_image_command_stops_propagation_before_generation(patched_image, monkey
         def get_self_id(self):
             return "bot"
 
+        def get_group_id(self):
+            return ""
+
         def stop_event(self):
             timeline.append("stopped")
+
+        async def send(self, result):
+            timeline.append(("sent", result))
 
     async def generate(_event, prompt, aspect):
         timeline.append(("generate", prompt, aspect))
@@ -163,11 +126,8 @@ def test_image_command_stops_propagation_before_generation(patched_image, monkey
 
     instance = SimpleNamespace(_do_image_gen=generate)
 
-    async def run():
-        return [item async for item in handle_image(instance, Event())]
-
-    assert asyncio.run(run()) == ["image"]
-    assert timeline == ["stopped", ("generate", "小猫图", "1:1")]
+    asyncio.run(handle_image(instance, Event()))
+    assert timeline == ["stopped", ("generate", "小猫图", "1:1"), ("sent", "image")]
 
 
 @pytest.mark.parametrize("proxy, port", [(True, "7890"), (True, ""), (False, "7890")])
