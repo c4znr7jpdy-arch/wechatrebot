@@ -1229,10 +1229,19 @@ class ApplicationApi:
         runtime = runtime if isinstance(runtime, dict) else {}
         provider = load_provider_profile(self._install_root)
         account_id = str(runtime.get("wechat_identity") or "").strip()
+        if runtime.get("account_status_available") is False:
+            account_id = ""
         directory_service = getattr(self, "_groups", None)
-        groups = directory_service.list(False) if directory_service is not None else {
-            "items": [], "stale": True, "account_id": ""
-        }
+        groups = {"items": [], "stale": True, "account_id": ""}
+        if account_id and directory_service is not None:
+            try:
+                candidate = directory_service.list(False)
+                if isinstance(candidate, dict) and candidate.get("account_id") == account_id:
+                    groups = candidate
+            except (OSError, GroupDirectoryError):
+                # Directory availability is a checklist result, not a prerequisite
+                # for opening the manager and starting its stopped bridge.
+                groups = {"items": [], "stale": True, "account_id": ""}
         group_items = groups.get("items") if isinstance(groups, dict) else []
         group_items = group_items if isinstance(group_items, list) else []
         group_stale = bool(groups.get("stale")) if isinstance(groups, dict) else True
