@@ -8,6 +8,7 @@ from typing import Any
 
 from .brand import BrandProfile
 from .customer_config import RobotSettings, load_robot_settings, save_robot_settings
+from .contact_directory import ContactDirectoryService
 from .plugin_center import (
     ConfigConflictError,
     PluginCenterError,
@@ -36,6 +37,10 @@ class RobotCoreSettingsService:
             "robot_name": settings.profile.display_name,
             "admin_id": settings.admin_id,
         }
+        robot = ContactDirectoryService(self.features.install_root).self_profile(wait=True)
+        result["identity"]["wechat_nickname"] = str(robot.get("nickname") or robot.get("name") or "")
+        if settings.profile.name_source == "wechat":
+            result["identity"]["robot_name"] = ""
         self._normalize_identity(result, settings.profile.display_name)
         result["template_schema"] = self._template_schema(result["advanced_schema"])
         return result
@@ -113,12 +118,19 @@ class RobotCoreSettingsService:
         current = load_robot_settings(self.features.install_root)
         values = identity if isinstance(identity, dict) else {}
         robot_name = str(values.get("robot_name") or "").strip()
+        name_source = "custom" if robot_name else "wechat"
+        if not robot_name:
+            robot = ContactDirectoryService(self.features.install_root).self_profile(wait=True)
+            robot_name = str(robot.get("nickname") or robot.get("name") or "").strip()
+            if not robot_name:
+                raise PluginCenterError("尚未读取到机器人微信昵称，请连接微信或填写自定义名称。")
         admin_id = str(values.get("admin_id") or "").strip()
         normalized_admin_id = normalize_admin_id(admin_id) or ""
         profile = BrandProfile(
             display_name=robot_name,
             short_name=robot_name,
             persona_name=robot_name,
+            name_source=name_source,
             avatar_path=current.profile.avatar_path,
             welcome_text=(
                 current.profile.welcome_text.replace(current.profile.display_name, robot_name)

@@ -5,6 +5,7 @@ import copy
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import sqlite3
 import time
 from urllib.parse import quote
 
@@ -182,6 +183,24 @@ class ContactDirectoryService(GroupDirectoryService):
                     for current in self._directory_snapshot.get("items", [])
                 ]
         return {**data, "item": item}
+
+    def self_profile(self, *, wait: bool = False) -> dict[str, object]:
+        """Read only the verified logged-in robot's profile, never a peer's."""
+        try:
+            with self._lock:
+                port, token, account = self._connection()
+            def fetch():
+                data = self._request(port, token, account, f"/api/manager/contacts/{quote(account, safe='')}")
+                item = self._public_contact(data.get("item"))
+                if not item or item["user_id"] != account:
+                    raise GroupDirectoryError("机器人资料与当前账号不一致。")
+                return item
+            item = {"user_id": account}
+            if wait and not self._portraits.read(account, account)[0]:
+                item = fetch()
+            return self._portraits.enrich(account, item, account, fetch)
+        except (GroupDirectoryError, OSError, ValueError, sqlite3.Error):
+            return {}
 
     @staticmethod
     def _contact_ids(values) -> list[str]:

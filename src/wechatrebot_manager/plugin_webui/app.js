@@ -12,8 +12,6 @@ const state = {
   pendingAction: null,
 };
 const requestedFeatureId = new URLSearchParams(window.location.search).get("feature") || "";
-const memeManagerFeatureId = "feature-222a5d37d93c5449";
-const maxLocalMemeZipBytes = 119 * 1024 * 1024;
 const themeChannel = "wechatrebot-theme";
 
 function applyTheme(theme) {
@@ -170,10 +168,13 @@ window.addEventListener("message", async (event) => {
     event.origin !== window.location.origin ||
     event.source !== frame.contentWindow ||
     !message ||
-    message.channel !== pluginPageChannel ||
-    message.kind !== "request" ||
-    typeof message.requestId !== "string"
+    message.channel !== pluginPageChannel
   ) return;
+  if (message.kind === "ready") {
+    window.sendFeaturePageContext(frame);
+    return;
+  }
+  if (message.kind !== "request" || typeof message.requestId !== "string") return;
   try {
     const data = await handlePluginPageRequest(message);
     event.source.postMessage(
@@ -800,7 +801,9 @@ function applyConfigSearch() {
 function renderConfigPanels() {
   const fields = el("config-fields");
   fields.replaceChildren();
-  const basicSchema = state.detail.basic_schema || state.detail.schema || {};
+  const advancedOnly = state.detail.configuration_profile === "advanced-only";
+  const basicSchema = advancedOnly ? state.detail.advanced_schema || {} : state.detail.basic_schema || state.detail.schema || {};
+  el("basic-tab").textContent = advancedOnly ? "专业设置" : "基础配置";
   const modelSchema = state.detail.model_schema || {};
   const hasBasic = state.detail.configurable && Object.keys(basicSchema).length > 0;
   const configurationNote = customerText(state.detail.configuration_note || "");
@@ -840,6 +843,9 @@ function renderDetail() {
   configSearch.value = "";
   renderConfigPanels();
   renderPages();
+  const nativePage = Boolean(state.detail.pages?.length);
+  document.querySelector(".detail-pane").classList.toggle("native-page", nativePage);
+  document.querySelector(".tabs").hidden = nativePage;
   setDirty(false);
 }
 
@@ -854,9 +860,7 @@ function renderPages() {
   frame.onload = null;
   frame.removeAttribute("src");
   el("page-placeholder").hidden = false;
-  const isMemeManager = state.currentId === memeManagerFeatureId;
-  el("meme-pack-import").hidden = !isMemeManager;
-  if (isMemeManager) void refreshMemePackStorage();
+
   pages.forEach((pageName) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -866,63 +870,6 @@ function renderPages() {
     button.addEventListener("click", () => openPluginPage(pageName, button));
     picker.appendChild(button);
   });
-}
-
-async function refreshMemePackStorage() {
-  const featureId = state.currentId;
-  try {
-    const data = await api(`/control/plugins/${encodeURIComponent(featureId)}/pack-storage`);
-    if (state.currentId === featureId) el("meme-pack-path").textContent = data.path;
-  } catch (error) {
-    if (state.currentId === featureId) el("meme-pack-path").textContent = `目录读取失败：${error.message}`;
-  }
-}
-
-async function uploadLocalMemePack() {
-  const status = el("meme-pack-status");
-  if (state.currentId !== memeManagerFeatureId) return;
-  if (!state.detail?.enabled) {
-    status.textContent = "表情管理尚未加载，请重启机器人后再导入。";
-    return;
-  }
-  const file = el("meme-pack-file").files?.[0];
-  if (!file || !file.name.toLowerCase().endsWith(".zip")) {
-    el("meme-pack-file").setAttribute("aria-invalid", "true");
-    status.textContent = "请选择表情包 ZIP 文件。";
-    el("meme-pack-file").focus();
-    return;
-  }
-  if (file.size > maxLocalMemeZipBytes) {
-    el("meme-pack-file").setAttribute("aria-invalid", "true");
-    status.textContent = "ZIP 超过 119 MB，请选择较小的表情包。";
-    el("meme-pack-file").focus();
-    return;
-  }
-  el("meme-pack-file").removeAttribute("aria-invalid");
-  const button = el("meme-pack-upload");
-  const form = new FormData();
-  form.append("file", file, file.name);
-  form.append("overwrite", String(el("meme-pack-overwrite").checked));
-  form.append("set_as_default", String(el("meme-pack-default").checked));
-  button.disabled = true;
-  status.textContent = "正在导入，请等待；较大的表情包可能需要数分钟。";
-  try {
-    const response = await fetch(
-      `/control/plugins/${encodeURIComponent(state.currentId)}/extension/packs/import`,
-      { method: "POST", body: form },
-    );
-    const payload = await response.json();
-    if (!response.ok) throw new Error(customerText(payload?.message || "导入失败。"));
-    const data = pluginRequestData(payload);
-    status.textContent = `导入成功：${customerText(data.pack_id || file.name)}。`;
-    el("meme-pack-file").value = "";
-    const activePage = el("page-picker").querySelector(".page-button.active");
-    if (activePage) await openPluginPage(activePage.dataset.pageName, activePage);
-  } catch (error) {
-    status.textContent = `导入失败：${customerText(error?.message || "请重试。")}`;
-  } finally {
-    button.disabled = false;
-  }
 }
 
 async function selectPlugin(moduleName, openFirstPage = false) {
@@ -935,13 +882,13 @@ async function selectPlugin(moduleName, openFirstPage = false) {
   try {
     const detail = await api(`/control/plugins/${encodeURIComponent(moduleName)}`);
     state.detail = detail;
-    state.config = clone(detail.config || {});
+    state.config = clone(detail.configuration_profile === "advanced-only" ? detail.advanced_config || {} : detail.config || {});
     state.revision = detail.revision;
     loadingView.hidden = true;
     detailView.hidden = false;
     renderDetail();
     const shouldOpenFirstPage = Boolean(
-      state.detail.pages?.length && (openFirstPage || !state.detail.configurable),
+      state.detail.pages?.length,
     );
     showTab(shouldOpenFirstPage ? "pages" : "basic");
     if (shouldOpenFirstPage) {
@@ -1150,11 +1097,7 @@ el("open-full-config").addEventListener("click", openFullConfigPage);
 el("basic-tab").addEventListener("click", () => showTab("basic"));
 el("models-tab").addEventListener("click", () => showTab("models"));
 el("pages-tab").addEventListener("click", () => showTab("pages"));
-el("meme-pack-upload").addEventListener("click", () => { void uploadLocalMemePack(); });
-el("meme-pack-file").addEventListener("change", () => {
-  el("meme-pack-file").removeAttribute("aria-invalid");
-  el("meme-pack-status").textContent = "";
-});
+
 el("modal-cancel").addEventListener("click", closeDiscardModal);
 el("modal-confirm").addEventListener("click", () => {
   const action = state.pendingAction;

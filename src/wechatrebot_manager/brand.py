@@ -22,6 +22,7 @@ class BrandProfile:
     welcome_text: str = ""
     help_title: str = ""
     schema_version: int = 1
+    name_source: str = "custom"
 
     def validate(self) -> tuple[str, ...]:
         errors: list[str] = []
@@ -63,6 +64,7 @@ class BrandProfile:
             welcome_text=self.welcome_text.strip() or f"你好，我是{display_name}。",
             help_title=self.help_title.strip() or f"{display_name}帮助",
             schema_version=self.schema_version,
+            name_source=self.name_source,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -109,6 +111,7 @@ def install_brand_profile(
             welcome_text=normalized.welcome_text,
             help_title=normalized.help_title,
             schema_version=normalized.schema_version,
+            name_source=normalized.name_source,
         )
     save_brand_profile(root / "config" / "brand.json", normalized)
     return normalized

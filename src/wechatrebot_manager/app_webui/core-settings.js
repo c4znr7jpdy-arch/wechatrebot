@@ -115,11 +115,6 @@
         const adminInput = $("#coreForm")?.elements.admin_id;
         if (nameInput) {
           const robotName = String(nameInput.value || "").trim();
-          if (!robotName) {
-            const error = new Error("机器人名称不能为空。");
-            error.input = nameInput;
-            throw error;
-          }
           state.identity = {robot_name: robotName, admin_id: String(adminInput?.value || "").trim()};
         }
       }
@@ -140,11 +135,11 @@
       if (state.view === "monitor") { renderMonitor(); return; }
       const template = currentTemplate();
       const schemas = {basic: state.detail.basic_schema || {}, models: state.detail.model_schema || {}, advanced: state.detail.advanced_schema || {}};
-      const identityMarkup = state.view === "global" && state.tab === "basic" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><span class="eyebrow">常用设置</span><h3 id="coreIdentityTitle">机器人名称与管理员</h3><p>机器人名称同时用于窗口、导航、自我介绍和首个点名昵称。</p></div><span class="status-badge">统一身份</span></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" required value="${esc(state.identity.robot_name || "小妹")}"><small>默认名称为“小妹”；保存后不再保留旧名称。</small><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><small>留空表示暂不设置管理员；管理员权限在机器人重启后生效。</small><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
+      const identityMarkup = state.view === "global" && state.tab === "basic" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><span class="eyebrow">常用设置</span><h3 id="coreIdentityTitle">机器人名称与管理员</h3><p>机器人名称用于自我介绍和聊天身份；产品名称固定为 WxRebot。</p></div><span class="status-badge">统一身份</span></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><small>留空使用机器人的微信昵称；填写后作为全局名称，所有聊天共用。</small><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><small>留空表示暂不设置管理员；管理员权限在机器人重启后生效。</small><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
       root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "全局配置")}</h2><p>${state.view === "template" ? "身份、唤醒、离场应答、回复长度、能量与节奏；其余参数跟随全局。" : "完整对话核心配置，机器人名称、管理员和群聊身份都从这里统一管理。"}</p></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : '<span class="status-badge online">统一加载</span>'}</div>
         ${state.view === "global" ? `<div class="config-tabs" aria-label="核心配置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key, label]) => `<button type="button" data-core-tab="${key}" aria-pressed="${state.tab === key}" class="${state.tab === key ? "active" : ""}">${label}</button>`).join("")}</div>${state.tab === "models" ? '<p class="feature-prerequisite">群聊分析模型是完整使用所必需的；这里的绑定不会改变日常回复模型。</p>' : ''}` : ''}
         <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<label class="form-field full">模板说明<textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>` : ''}${identityMarkup}${schemaMarkup(schema(), state.config, [], "core-")}</form>
-        <div class="core-savebar"><span class="form-note" id="coreNote" role="status">${esc(note())}</span><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
+        <p class="form-note" id="coreNote" role="status">${esc(note())}</p><div class="core-savebar"><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
       if (state.view === "template") attachOverrides();
       else attachResets();
       $$('[data-core-tab]', root()).forEach((button) => button.addEventListener("click", () => {

@@ -218,15 +218,6 @@ textarea:focus-visible,
 .page-button { height: 38px; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--control-surface); color: var(--ink); cursor: pointer; }
 .page-button.active { border-color: var(--primary); color: var(--primary); background: var(--blue-100); }
 #pages-panel:not([hidden]) { min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column; }
-.meme-pack-import { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
-.meme-pack-import[hidden] { display: none; }
-.meme-pack-import-copy { display: grid; gap: 4px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.meme-pack-import-copy strong { color: var(--text); font-size: 14px; }
-.meme-pack-import-copy code { overflow-wrap: anywhere; color: var(--text); font-family: inherit; }
-.meme-pack-import-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
-.meme-pack-import-actions input[type="file"] { max-width: 100%; }
-.meme-pack-import-actions label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
-#meme-pack-status { min-height: 18px; color: var(--muted); font-size: 12px; }
 #plugin-frame { width: 100%; height: 100%; min-height: 180px; flex: 1 1 auto; border: 1px solid var(--border); background: var(--control-surface); }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(8, 24, 43, .48); }
@@ -335,3 +326,13 @@ html[data-theme="dark"] .toast { color: #f4f8ff; background: #243449; }
 .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
 .button.secondary:hover:not(:disabled) { color: var(--primary-hover); border-color: var(--primary); }
 html[data-theme="dark"] .plugin-item.active { background: linear-gradient(90deg, rgba(78,133,226,.52), rgba(45,84,137,.34)); }
+
+/* Native plugin configuration owns the entire right content area. */
+.detail-pane.native-page { padding: 0; overflow: hidden; }
+.detail-pane.native-page #detail-view { height: 100%; display: flex; flex-direction: column; gap: 0; }
+.detail-pane.native-page .detail-header, .detail-pane.native-page .tabs { display: none; }
+.detail-pane.native-page .page-picker { margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.detail-pane.native-page #pages-panel { flex: 1; min-height: 0; overflow: hidden; }
+.detail-pane.native-page #plugin-frame { display: block; min-height: 0; height: 0; flex: 1; border: 0; border-radius: 0; }
+.detail-pane.native-page #plugin-frame[hidden] { display: none; }
+.detail-pane.native-page .notice:not(:empty) { margin: 8px 16px; }

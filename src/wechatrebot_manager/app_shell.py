@@ -759,7 +759,7 @@ class ApplicationApi:
                         known[group_id]["display_name"] = group_name or known[group_id].get("display_name")
                         # History rows carry the sender's portrait. A group may
                         # only use the portrait returned for that group.
-                        known[group_id]["avatar"] = str(group.get("avatar") or "")
+                        known[group_id]["avatar"] = str(group.get("avatar") or known[group_id].get("avatar") or "")
                         known[group_id]["member_count"] = group.get("member_count")
                         continue
                     if start_time is not None or end_time is not None:
@@ -1015,6 +1015,14 @@ class ApplicationApi:
                         message["wechat_id"] = str(
                             contact.get("alias") or message.get("sender_id") or ""
                         )
+            replies = [message for message in messages if message.get("role") == "assistant"]
+            if replies:
+                robot = self._contacts.self_profile() if hasattr(getattr(self, "_contacts", None), "self_profile") else {}
+                name = load_robot_settings(self._install_root).profile.display_name
+                for message in replies:
+                    message["avatar"] = str(robot.get("avatar") or "")
+                    message["sender_id"] = account_id
+                    message["sender_name"] = name
             if paged:
                 return self._ok({
                     "items": messages,
@@ -2354,7 +2362,7 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
             ApplicationApi(install_root, development=True)
             if development else ApplicationApi(install_root)
         )
-        title = f"{brand.display_name} · 机器人管理"
+        title = "WxRebot · 机器人管理"
         if development:
             title += " [源码验证]"
         server = api._ensure_feature_page_server()
@@ -2371,7 +2379,7 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
             tray = None
             window.events.shown += api.confirm_update_startup
             if not development:
-                tray = WindowsTrayController(window, brand.display_name)
+                tray = WindowsTrayController(window, "WxRebot")
                 window.events.shown += tray.start
                 window.events.closing += tray.handle_window_closing
                 window.events.closed += tray.stop

@@ -460,3 +460,28 @@ def test_history_hides_structured_xml_in_views_and_exports(tmp_path: Path) -> No
         assert exported in json_contents
     assert "<emoji" not in csv_text and "<appmsg" not in csv_text
     assert "<emoji" not in json_text and "<appmsg" not in json_text
+
+
+def test_sender_statistics_cover_all_filtered_messages_not_just_current_page(tmp_path):
+    source = _bridge_source(tmp_path)
+    with sqlite3.connect(source) as connection:
+        original = connection.execute("SELECT * FROM messages WHERE id=1").fetchone()
+        for index in range(2, 35):
+            row = list(original)
+            row[0] = index
+            row[5] = "wxid_c" if index < 30 else "wxid_other"
+            row[9] = float(100 + index)
+            row[11] = "incoming-" + str(index)
+            connection.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+        row = list(original)
+        row[0], row[1], row[11] = 35, "another_bot", "another-account"
+        connection.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+    service = ChatHistoryService(tmp_path)
+    page = service.messages("456@chatroom", account_id="wxid_bot", limit=3)
+    assert len(page) == 3
+    assert all(message["sender_message_count"] == 5 for message in page)
+    older = service.messages("456@chatroom", account_id="wxid_bot", before=129, limit=3)
+    assert all(message["sender_message_count"] == 29 for message in older)
+    filtered = service.messages("456@chatroom", account_id="wxid_bot", start_time=125, limit=20)
+    assert {message["sender_id"]: message["sender_message_count"] for message in filtered} == {"wxid_c": 5, "wxid_other": 5}
+    assert service.messages("456@chatroom", account_id="missing") == ()

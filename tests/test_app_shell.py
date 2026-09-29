@@ -1855,7 +1855,7 @@ def test_run_application_uses_explicit_webview_api_allowlist(
     assert exposed == list(app_shell.PUBLIC_API_METHODS)
     assert api._window is not None
     assert isinstance(api._tray, FakeTray)
-    assert api._tray.title == "测试机器人"
+    assert api._tray.title == "WxRebot"
     assert handlers == {
         "shown": [api.confirm_update_startup, api._tray.start],
         "closing": [api._tray.handle_window_closing],

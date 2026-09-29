@@ -1,0 +1,30 @@
+diff --git a/core/debounce_manager.py b/core/debounce_manager.py
+--- a/core/debounce_manager.py
++++ b/core/debounce_manager.py
+@@ -330,14 +330,15 @@
+ 
+     def _reset_record_after_gate(self, record: DebounceRecord, reason: str) -> None:
+         """硬门闩阻断放行时，保留最后边界事件并按完整巡检时长重计。"""
+-        if record.kind == "assistant":
++        if record.kind == "assistant" and not record.must_reply:
+             key = (record.chat_id, record.sender_id)
+             if self._assistant.get(key) is record:
+                 self._assistant.pop(key, None)
+             record.kind = "secretary"
+             self._secretary[record.chat_id] = record
+ 
+-        record.delay = self._secretary_delay(record.chat_id)
++        record.delay = (self._accelerate_delay(record.chat_id)
++                        if record.must_reply else self._secretary_delay(record.chat_id))
+         record.created_at = time.time()
+         record.timer = asyncio.create_task(self._timer_handler(record))
+         label = self._record_label(record.kind)
+@@ -753,7 +754,7 @@
+                     self._reset_record_after_gate(record, "assistant_busy")
+                     return
+ 
+-                if not record.leave_reply_trigger:
++                if not record.leave_reply_trigger and not record.must_reply:
+                     rest_remaining = self._remaining_assistant_rest(record.chat_id)
+                     if rest_remaining > 0:
+                         self._log_gate_decision(

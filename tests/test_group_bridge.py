@@ -1035,3 +1035,27 @@ def test_inbound_structured_history_stores_a_summary_instead_of_xml(
         assert metadata["quote_content"] == "周六算你的"
     elif case_id == "revoke":
         assert metadata["message_kind"] == "revoke"
+
+
+def test_robot_profile_and_group_contact_portraits_use_actual_hook_sources(patched_bridge):
+    calls = []
+    class Hook:
+        async def get_profile(self):
+            calls.append('profile')
+            return {'userInfo': {'userName': {'String': 'wxid_bot'}, 'nickName': {'String': 'Robot'}}, 'userInfoExt': {'smallHeadImgUrl': 'https://wx.qlogo.cn/self'}}
+        async def get_contact(self, user):
+            calls.append(user)
+            return {'userName': {'String': user}, 'nickName': {'String': 'Group'}, 'smallHeadImgUrl': 'https://wx.qlogo.cn/group'}
+    app = patched_bridge['callback_server'].create_callback_app(asyncio.Queue(), 1024,
+        manager_hook=Hook(), manager_query_token='local-secret', status_provider=lambda: {'wechat_identity': 'wxid_bot'})
+    async def exercise(client):
+        for user, name, avatar in [('wxid_bot', 'Robot', 'self'), ('123@chatroom', 'Group', 'group')]:
+            response = await client.get('/api/manager/contacts/' + user, headers=_headers())
+            assert response.status == 200
+            item = (await response.json())['data']['item']
+            assert item['name'] == name
+            assert item['avatar'] == 'https://wx.qlogo.cn/' + avatar
+        denied = await client.get('/api/manager/contacts/wxid_bot', headers=_headers(account='other'))
+        assert denied.status == 409
+    _run(_with_client(app, exercise))
+    assert calls == ['profile', '123@chatroom']

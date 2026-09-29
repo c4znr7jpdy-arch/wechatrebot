@@ -112,21 +112,6 @@
 
           <div id="pages-panel" class="tab-panel" hidden>
             <div id="page-picker" class="page-picker"></div>
-            <section id="meme-pack-import" class="meme-pack-import" hidden aria-label="本地表情包">
-              <div class="meme-pack-import-copy">
-                <strong>本地表情包</strong>
-                <span>市场安装和本地导入的表情包保存在：<code id="meme-pack-path">正在读取目录…</code></span>
-                <span>可导入包含 manifest.json 和 memes 目录的 ZIP 包，最大 119 MB。</span>
-              </div>
-              <div class="meme-pack-import-actions">
-                <input id="meme-pack-file" type="file" accept=".zip,application/zip" aria-label="选择本地表情包 ZIP" aria-describedby="meme-pack-help meme-pack-status" />
-                <label><input id="meme-pack-overwrite" type="checkbox" />覆盖同名包</label>
-                <label><input id="meme-pack-default" type="checkbox" />设为默认</label>
-                <button id="meme-pack-upload" class="button secondary" type="button">导入本地 ZIP</button>
-              </div>
-              <span id="meme-pack-help" class="sr-only">选择符合表情包目录规范的 ZIP 文件后导入。</span>
-              <span id="meme-pack-status" role="status" aria-live="polite"></span>
-            </section>
             <div id="page-placeholder" class="state-view compact">
               <strong>选择一个高级管理页</strong>
               <span>高级页面仅在机器人运行时可用</span>

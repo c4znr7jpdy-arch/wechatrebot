@@ -55,7 +55,7 @@ def test_core_is_single_settings_entry_and_exposes_all_schema_fields(tmp_path):
     assert 'AngelHeart' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
     assert '助理' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
     assert '助手' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
-    assert detail['identity'] == {'robot_name': '小妹', 'admin_id': ''}
+    assert detail['identity'] == {'robot_name': '', 'admin_id': '', 'wechat_nickname': ''}
     assert detail['advanced_config']['wake_interaction']['alias'] == '小妹'
     assert detail['advanced_config']['personality']['ai_self_identity'].startswith('你是小妹')
     config = detail['advanced_config']
@@ -276,3 +276,18 @@ def test_core_is_not_optional_in_group_or_private_feature_scopes(tmp_path):
     assert private.save('wxid_bot', 'wxid_friend', {'allowed_features': [], 'bot_enabled': False})['allowed_features'] == [core_module]
     assert group.get('wxid_bot', 'room@chatroom')['bot_enabled'] is False
     assert private.overview('wxid_bot', 'wxid_friend')['policy']['bot_enabled'] is False
+
+
+def test_blank_global_name_uses_wechat_nickname_and_custom_name_is_preserved(tmp_path, monkeypatch):
+    from wechatrebot_manager.contact_directory import ContactDirectoryService
+    monkeypatch.setattr(ContactDirectoryService, 'self_profile', lambda self, **kw: {'nickname': '微信昵称'})
+    service = _service(tmp_path)
+    detail = service.detail()
+    assert detail['identity']['wechat_nickname'] == '微信昵称'
+    assert detail['identity']['robot_name'] == ''
+    service.save_global(detail['advanced_config'], detail['revision'], {'robot_name': '', 'admin_id': ''})
+    assert load_robot_settings(tmp_path).profile.display_name == '微信昵称'
+    assert service.detail()['identity']['robot_name'] == ''
+    detail = service.detail()
+    service.save_global(detail['advanced_config'], detail['revision'], {'robot_name': '小妹', 'admin_id': ''})
+    assert service.detail()['identity']['robot_name'] == '小妹'

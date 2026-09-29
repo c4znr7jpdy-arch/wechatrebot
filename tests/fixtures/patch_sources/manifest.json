@@ -2,7 +2,7 @@
   "schema_version": 1,
   "snapshot_date": "2026-09-24",
   "project_revision": "3029c95619a32b84a251eb41591af4e781aecc32",
-  "notes": "Unpatched build inputs, LF normalized. Bridge and jiang_commands are tracked at project_revision; proactive_chat 1.2.4 is a local external dependency snapshot with its upstream license. The bridge __init__.py trailing blank line is normalized. jiang_image 2.1.0 unpatched build inputs were added on 2026-09-29 from the local dependency source; no user configuration is included. BitTorrent 1.3.0 main.py and upstream license plus jiang_schedule main.py were added on 2026-09-29 from unpatched dependency inputs for delivery and content configuration regressions; no user configuration is included.",
+  "notes": "Unpatched build inputs, LF normalized. Bridge and jiang_commands are tracked at project_revision; proactive_chat 1.2.4 is a local external dependency snapshot with its upstream license. The bridge __init__.py trailing blank line is normalized. jiang_image 2.1.0 unpatched build inputs were added on 2026-09-29 from the local dependency source; no user configuration is included. BitTorrent 1.3.0 main.py and upstream license plus jiang_schedule main.py were added on 2026-09-29 from unpatched dependency inputs for delivery and content configuration regressions; no user configuration is included. Selected unpatched AngelHeart debounce and LivingMemory initialization/UI inputs were added on 2026-09-29 for targeted regression tests. Meme manager catalog-loading-state baseline and web API inputs added for catalog readiness tests.",
   "files": [
     {
       "path": "hook_41827_astrbot_bridge/src/hook_bridge/__init__.py",
@@ -115,6 +115,26 @@
     {
       "path": "data/plugins/jiang_schedule/main.py",
       "sha256": "816bcfa2745280871621aeeddd37674be9f3c8544a1e26dfb8e1c5939a60f9a9"
+    },
+    {
+      "path": "data/plugins/astrbot_plugin_angel_heart/core/debounce_manager.py",
+      "sha256": "226d0aeadee7c708537d09a6d386461d079475e079fa6dede8af7cd6bae6b8bb"
+    },
+    {
+      "path": "data/plugins/astrbot_plugin_livingmemory/core/plugin_initializer.py",
+      "sha256": "2f11d01ebc6e93734cdf7d4add5a15128bd5494e86ab49fe9a5f02ccaca86191"
+    },
+    {
+      "path": "data/plugins/astrbot_plugin_livingmemory/pages/dashboard/modules/memory-page.js",
+      "sha256": "d13c33732330dcf5d80e5794a2cf8954968512d3d109b059b9c7489524320ebc"
+    },
+    {
+      "path": "data/plugins/meme_manager/mixins/web_api.py",
+      "sha256": "41db13e0473176676f230e62e8adc56d87541f3a681e92bdb781f5b9c3e9cc67"
+    },
+    {
+      "path": "data/plugins/meme_manager/pages/catalog/script.js",
+      "sha256": "ba341c6326d8d78725be99d83fd5698d7d5c285fa103ee9d9c5f02e94e353505"
     }
   ]
 }
