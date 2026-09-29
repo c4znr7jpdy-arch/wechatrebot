@@ -413,6 +413,7 @@
       && state.selectedFeature
       && !state.featureDirty
       && !state.featureSaving
+      && !$("#featurePageFrame")?.getAttribute("src")
     ) {
       state.featurePrefetch += 1;
       state.featureDetails = {};
@@ -1358,6 +1359,9 @@
       state.featureDirty ||
       state.featureSaving
     ) return;
+    // Native pages own their drafts and navigation. Rebuilding their iframe on
+    // window focus would discard that state, even when our schema form is clean.
+    if ($("#featurePageFrame")?.getAttribute("src")) return;
     await openFeature(state.selectedFeature, false, true);
   }
 
