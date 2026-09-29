@@ -22,6 +22,7 @@ function applyTheme(theme) {
   document.documentElement.style.colorScheme = normalized === "dark" ? "dark" : "light";
   const colorScheme = document.querySelector('meta[name="color-scheme"]');
   if (colorScheme) colorScheme.content = normalized === "dark" ? "dark light" : "light dark";
+  window.syncFeaturePageTheme(document.getElementById("plugin-frame"), normalized);
 }
 
 window.addEventListener("message", (event) => {
@@ -850,6 +851,7 @@ function renderPages() {
   picker.replaceChildren();
   const frame = el("plugin-frame");
   frame.hidden = true;
+  frame.onload = null;
   frame.removeAttribute("src");
   el("page-placeholder").hidden = false;
   const isMemeManager = state.currentId === memeManagerFeatureId;
@@ -1044,9 +1046,15 @@ async function openPluginPage(pageName, button) {
   try {
     const data = await api(`/control/plugins/${encodeURIComponent(state.currentId)}/pages/${encodeURIComponent(pageName)}/entry`);
     const frame = el("plugin-frame");
+    frame.hidden = true;
+    el("page-placeholder").hidden = false;
+    frame.onload = () => window.syncFeaturePageTheme(
+      frame, document.documentElement.dataset.theme, () => {
+        frame.hidden = false;
+        el("page-placeholder").hidden = true;
+      },
+    );
     frame.src = data.content_path;
-    frame.hidden = false;
-    el("page-placeholder").hidden = true;
     setNotice("");
   } catch (error) {
     setNotice(error.message, "error");
@@ -1165,4 +1173,9 @@ window.addEventListener("focus", () => { refreshCurrentPluginState(); });
   el(id).disabled = false;
 });
 
+try {
+  applyTheme(window.localStorage.getItem("wechatrebot-theme"));
+} catch (_error) {
+  applyTheme(document.documentElement.dataset.theme);
+}
 loadCatalog();

@@ -1798,6 +1798,50 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
         thread.join(timeout=2)
 
 
+@pytest.mark.parametrize("frozen", [False, True])
+def test_dedicated_window_serves_shared_theme_dependencies(tmp_path: Path, monkeypatch, frozen: bool) -> None:
+    source = Path(plugin_center.__file__).with_name("app_webui")
+    dependencies = {
+        "feature-page-theme.js": "text/javascript",
+        "feature-page-overrides.css": "text/css",
+        "design-overrides.css": "text/css",
+        "assets/AlimamaShuHeiTi-Bold.woff2": "font/woff2",
+        "assets/AlibabaPuHuiTi2-Regular.woff2": "font/woff2",
+        "assets/AlibabaPuHuiTi2-Bold.woff2": "font/woff2",
+    }
+    if frozen:
+        bundle = tmp_path / "bundle" / "wechatrebot_manager"
+        for directory in ("plugin_webui", "app_webui"):
+            for relative in ("index.html", *dependencies):
+                original = Path(plugin_center.__file__).with_name(directory) / relative
+                if original.is_file():
+                    target = bundle / directory / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(original.read_bytes())
+        monkeypatch.setattr(plugin_center.sys, "_MEIPASS", str(bundle.parent), raising=False)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(object()))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base, timeout=2) as response:
+            page = response.read().decode("utf-8")
+            assert page.index('/feature-page-theme.js') < page.index('/assets/app.js')
+            assert "<script>" not in page  # Standalone CSP rejects inline initialization.
+        for relative, content_type in dependencies.items():
+            with urlopen(f"{base}/{relative}", timeout=2) as response:
+                assert response.headers.get_content_type() == content_type
+                assert response.headers["Cache-Control"] == "no-store"
+                assert response.read() == (source / relative).read_bytes()
+        with pytest.raises(HTTPError) as rejected:
+            urlopen(f"{base}/assets/../index.html", timeout=2)
+        assert rejected.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_local_web_handler_hosts_plugin_page_bridge_and_preserves_content_type() -> None:
     calls: list[tuple[str, str, bytes | None]] = []
 

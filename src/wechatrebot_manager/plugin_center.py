@@ -2489,6 +2489,7 @@ def _asset_root() -> Path:
 def _handler(service: PluginCenterService, *, manager_assets: Path | None = None):
     assets = manager_assets if manager_assets is not None else _asset_root()
     manager_mode = manager_assets is not None
+    shared_assets = assets if manager_mode else assets.with_name("app_webui")
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "WeChatReBot"
@@ -2548,8 +2549,8 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
         def _parts(self) -> list[str]:
             return [unquote(part) for part in urlsplit(self.path).path.strip("/").split("/") if part]
 
-        def _serve_asset(self, relative: str, content_type: str) -> None:
-            target = assets / relative
+        def _serve_asset(self, relative: str, content_type: str, *, root: Path | None = None) -> None:
+            target = (root if root is not None else assets) / relative
             if not target.is_file():
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面资源不存在。"})
                 return
@@ -2639,12 +2640,24 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                 if split.path in {"/", "/index.html"}:
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
+                if split.path in {
+                    "/feature-page-theme.js",
+                    "/feature-page-overrides.css",
+                    "/design-overrides.css",
+                    "/assets/AlimamaShuHeiTi-Bold.woff2",
+                }:
+                    suffix = Path(split.path).suffix
+                    content_type = {
+                        ".css": "text/css; charset=utf-8",
+                        ".js": "text/javascript; charset=utf-8",
+                        ".woff2": "font/woff2",
+                    }[suffix]
+                    self._serve_asset(split.path.lstrip("/"), content_type, root=shared_assets)
+                    return
                 if manager_mode and split.path in {
                     "/app.css",
                     "/app.js",
                     "/core-settings.js",
-                    "/design-overrides.css",
-                    "/feature-page-overrides.css",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
