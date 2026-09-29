@@ -33,6 +33,11 @@
     },
     {
       "origin": "commercial",
+      "source": "release/native-plugin-sources.json",
+      "target": "legal/native-plugin-sources.json"
+    },
+    {
+      "origin": "commercial",
       "source": "release/runtime-requirements.lock",
       "target": "legal/runtime-requirements.lock"
     },
@@ -137,8 +142,8 @@
       "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart"
     },
     {
-      "origin": "project",
-      "source": "data/plugins/astrbot_plugin_livingmemory",
+      "origin": "commercial",
+      "source": "runtime/astrbot_plugin_livingmemory",
       "target": "app/astrbot/data/plugins/astrbot_plugin_livingmemory"
     },
     {
@@ -257,8 +262,8 @@
       "target": "app/astrbot/data/plugins/jiang_video_understanding"
     },
     {
-      "origin": "project",
-      "source": "data/plugins/meme_manager",
+      "origin": "commercial",
+      "source": "runtime/meme_manager",
       "target": "app/astrbot/data/plugins/meme_manager",
       "exclude": [
         "config.json"

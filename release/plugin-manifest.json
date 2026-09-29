@@ -15,7 +15,7 @@
     {"name": "jiang_server_status", "version": "1.3.0", "ownership": "excluded", "license": "Proprietary", "review_status": "excluded"},
     {"name": "jiang_tide", "version": "1.1.2", "ownership": "excluded", "license": "Proprietary", "review_status": "excluded"},
     {"name": "jiang_yanyun_checkin", "version": "2.0.3", "ownership": "excluded", "license": "Proprietary", "review_status": "excluded"},
-    {"name": "astrbot_plugin_livingmemory", "version": "2.3.6", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
+    {"name": "astrbot_plugin_livingmemory", "version": "2.6.1", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_mimo_tts_clone", "version": "0.7.2", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
     {"name": "astrbot_plugin_mnemosyne", "version": "2.1.5", "ownership": "excluded", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "excluded"},
     {"name": "astrbot_plugin_music", "version": "2.1.1", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
@@ -36,6 +36,6 @@
     {"name": "jiang_schedule", "version": "1.2.0", "ownership": "owner", "license": "Proprietary", "review_status": "owner-rights-pending"},
     {"name": "jiang_short_drama", "version": "2.5.3", "ownership": "owner", "license": "Proprietary", "review_status": "owner-rights-pending"},
     {"name": "jiang_video_understanding", "version": "1.0.0", "ownership": "owner", "license": "Proprietary", "review_status": "owner-rights-pending"},
-    {"name": "meme_manager", "version": "4.03", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"}
+    {"name": "meme_manager", "version": "5.1.0", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"}
   ]
 }

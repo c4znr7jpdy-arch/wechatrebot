@@ -1,0 +1,24 @@
+diff --git a/main.py b/main.py
+index 05e680a..8919a01 100644
+--- a/main.py
++++ b/main.py
+@@ -32,6 +32,7 @@ from .image_host.img_sync import ImageSync
+ from .mixins.commands import CommandMixin
+ from .mixins.event_handlers import EventHandlerMixin, normalize_trigger_scope
+ from .mixins.web_api import WebAPIMixin
++from .wechatrebot_group_policy import group_allows_meme_prompt
+ from .utils import dict_to_string, load_json
+ 
+ MEME_PROMPT_MARKER_START = "<!-- meme_manager_prompt:start -->"
+@@ -837,6 +838,11 @@ class MemeSender(Star, WebAPIMixin, CommandMixin, EventHandlerMixin):
+     def _apply_request_prompt(
+         self, req: ProviderRequest, event: AstrMessageEvent | None = None
+     ) -> None:
++        if not group_allows_meme_prompt(
++            Path.cwd().parent.parent / "data/manager/group-policies.json", event
++        ):
++            req.system_prompt = self._strip_meme_prompt(req.system_prompt)
++            return
+         semantic_mode = ""
+         semantic_tool_ready = False
+         if self.emotion_llm_enabled:

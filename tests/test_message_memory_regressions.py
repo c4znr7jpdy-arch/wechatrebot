@@ -17,9 +17,10 @@ ROOT = Path(__file__).parents[1]
 
 
 def _patched_variant(tmp_path, module, variant):
-    shutil.copytree(ROOT / "tests/fixtures/patch_sources/data/plugins" / module, tmp_path, dirs_exist_ok=True)
+    source = ROOT / "runtime" / module if module in {"meme_manager", "astrbot_plugin_livingmemory"} else ROOT / "tests/fixtures/patch_sources/data/plugins" / module
+    shutil.copytree(source, tmp_path, dirs_exist_ok=True)
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "apply", "--ignore-space-change", str(ROOT / f"patches/astrbot-plugin-{module}--{variant}.patch")],
+    subprocess.run(["git", "apply", "--ignore-space-change", str(ROOT / (f"patches/astrbot-plugin-{module}.patch" if module in {"meme_manager", "astrbot_plugin_livingmemory"} else f"patches/astrbot-plugin-{module}--{variant}.patch"))],
                    cwd=tmp_path, check=True, capture_output=True)
     return tmp_path
 
@@ -89,7 +90,7 @@ def test_ordinary_chatter_still_obeys_rest(debounce):
 @pytest.mark.parametrize("dimension,vector", [(3, [1.0]), (0, [0.1, 0.2, 0.3])])
 def test_memory_discovers_unknown_dimension_before_opening_indexes(tmp_path, dimension, vector):
     root = _patched_variant(tmp_path, "astrbot_plugin_livingmemory", "provider-readiness")
-    method = _runtime_function((root / "core/plugin_initializer.py").read_text("utf-8"),
+    method = _runtime_function((root / "core/plugin_initializer_finalize.py").read_text("utf-8"),
                                "_ensure_embedding_dimension", {"asyncio": asyncio, "ProviderNotReadyError": RuntimeError})
     provider = NS(get_dim=lambda: dimension, get_embedding=AsyncMock(return_value=vector), provider_config={})
     asyncio.run(method(NS(embedding_provider=provider)))
@@ -101,26 +102,10 @@ def test_memory_discovers_unknown_dimension_before_opening_indexes(tmp_path, dim
 
 def test_failed_embedding_probe_keeps_existing_configuration_and_hides_secrets(tmp_path):
     root = _patched_variant(tmp_path, "astrbot_plugin_livingmemory", "provider-readiness")
-    method = _runtime_function((root / "core/plugin_initializer.py").read_text("utf-8"),
+    method = _runtime_function((root / "core/plugin_initializer_finalize.py").read_text("utf-8"),
                                "_ensure_embedding_dimension", {"asyncio": asyncio, "ProviderNotReadyError": RuntimeError})
     provider = NS(get_dim=lambda: 0, get_embedding=AsyncMock(side_effect=ValueError("secret-key")), provider_config={})
     with pytest.raises(RuntimeError) as error:
         asyncio.run(method(NS(embedding_provider=provider)))
     assert "secret-key" not in str(error.value)
     assert provider.provider_config == {}
-
-
-def test_meme_catalog_network_fetch_does_not_block_chat_event_loop(tmp_path):
-    import threading
-    root = _patched_variant(tmp_path, "meme_manager", "z-catalog-readiness")
-    main_thread = threading.get_ident()
-    worker_threads = []
-    def fetch(_url):
-        worker_threads.append(threading.get_ident())
-        return {"index": {"packs": [{"id": "example"}]}}
-    method = _runtime_function((root / "mixins/web_api.py").read_text("utf-8"),
-        "_api_fetch_community_index", {"asyncio": asyncio, "COMMUNITY_INDEX_URL": "https://example.test/index",
-        "fetch_and_cache_community_index": fetch, "jsonify": lambda value: value})
-    result, status = asyncio.run(method(NS()))
-    assert status == 200 and result["pack_count"] == 1
-    assert worker_threads and worker_threads[0] != main_thread

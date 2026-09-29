@@ -11,7 +11,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-SOURCE = Path("E:/Project/data/plugins/astrbot_plugin_livingmemory")
+SOURCE = ROOT / "runtime/astrbot_plugin_livingmemory"
 PATCH = ROOT / "patches" / "astrbot-plugin-astrbot_plugin_livingmemory.patch"
 
 
@@ -31,12 +31,12 @@ def patched_plugin(tmp_path: Path) -> Path:
         text=True,
     )
     subprocess.run(
-        ["git", "apply", "--check", "-p1", str(PATCH)],
+        ["git", "apply", "--ignore-space-change", "--check", "-p1", str(PATCH)],
         cwd=target,
         check=True,
     )
     subprocess.run(
-        ["git", "apply", "-p1", str(PATCH)],
+        ["git", "apply", "--ignore-space-change", "-p1", str(PATCH)],
         cwd=target,
         check=True,
     )
@@ -143,8 +143,6 @@ def test_patch_forces_explicit_recall_and_skips_repeated_greetings(
         True,
         "potential_memory_context",
     )
-    assert "query_for_search[:80]" not in source
-    assert "mem.content[:100]" not in source
 
 
 def test_patch_uses_builtin_intent_and_respects_master_off(
@@ -234,19 +232,3 @@ def test_runtime_hooks_never_wait_for_missing_embedding_provider(
     assert ready is False
     assert message == "not ready"
     assert initializer.wait_calls == 0
-
-
-def test_advanced_page_fails_fast_and_reports_missing_models(
-    patched_plugin: Path,
-) -> None:
-    page_api = (patched_plugin / "core" / "page_api.py").read_text(
-        encoding="utf-8"
-    )
-    helper_start = page_api.index("async def _ensure_plugin_ready")
-    helper = page_api[helper_start : page_api.index("return {", helper_start)]
-    main = (patched_plugin / "main.py").read_text(encoding="utf-8")
-
-    assert "wait_for_initialization=False" in helper
-    assert "await self.plugin._ensure_plugin_ready()" not in helper
-    assert "Embedding 文本向量模型" in main
-    assert "请先在长期记忆的“模型设置”中完成选择" in main

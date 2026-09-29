@@ -21,7 +21,7 @@
     "pilk 0.2.4",
     "pyinstaller 6.22.2",
     "astrbot_plugin_angel_heart 2.2.2",
-    "astrbot_plugin_livingmemory 2.3.6",
+    "astrbot_plugin_livingmemory 2.6.1",
     "astrbot_plugin_self_learning 3.4.5",
     "astrbot_plugin_bittorrent 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1",
     "astrbot_plugin_twitter 1.12.0",
@@ -36,11 +36,11 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "41CC2D56BCF654142785EF5A05D376209680ED4BCF87155F2812189298D1B257"
+      "sha256": "33E9EFE59B3F2ABD6CE4E7042A579BA5FEA4C8E51982BF7CEC86097CDFD07BC0"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
-      "sha256": "D28A1C8ADF081D39FBB59F48827B95FF60D753762FD56588AFD4E0B9C234C1EF"
+      "sha256": "1F026E03122EED49E94DEE72B78E4A5E74704EC8D5B5C9FF77D8681855007FEC"
     },
     "license_texts": {
       "path": "legal/THIRD-PARTY-LICENSES.txt",

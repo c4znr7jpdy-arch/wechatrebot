@@ -6066,7 +6066,7 @@
       "type": "application",
       "group": "delivered-plugin",
       "name": "astrbot_plugin_livingmemory",
-      "version": "2.3.6",
+      "version": "2.6.1",
       "licenses": [
         {
           "license": {
@@ -6550,7 +6550,7 @@
       "type": "application",
       "group": "delivered-plugin",
       "name": "meme_manager",
-      "version": "4.03",
+      "version": "5.1.0",
       "licenses": [
         {
           "license": {

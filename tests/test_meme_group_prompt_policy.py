@@ -99,11 +99,11 @@ def test_non_group_conversation_keeps_existing_meme_behavior(tmp_path: Path) -> 
     ) is True
 
 
-def test_delivery_patch_injects_fixed_hidden_prompt_at_request_time() -> None:
-    patch = (ROOT / "patches" / "astrbot-plugin-meme_manager--hidden-group-emotions.patch").read_text(
+def test_delivery_patch_gates_native_prompt_at_request_time() -> None:
+    patch = (ROOT / "patches" / "astrbot-plugin-meme_manager.patch").read_text(
         encoding="utf-8"
     )
-    assert "HIDDEN_MEME_PROMPT_HEAD" in patch
+    assert "HIDDEN_MEME_PROMPT_HEAD" not in patch
     assert "group_allows_meme_prompt" in patch
     assert "req.system_prompt = self._strip_meme_prompt(req.system_prompt)" in patch
     assert "persona[\"prompt\"] = self.persona_base_prompts[key]" not in patch
