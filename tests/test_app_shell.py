@@ -151,6 +151,45 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
     }
 
 
+@pytest.mark.parametrize("account,available,directory_result,expected,calls_expected", [
+    ("", False, None, "offline", 0),
+    ("", True, None, "offline", 0),
+    ("wxid_old", False, None, "offline", 0),
+    ("wxid_current", True, app_shell.GroupDirectoryError("unavailable"), "offline", 1),
+    ("wxid_current", True, OSError("timeout"), "offline", 1),
+    ("wxid_current", True, {"account_id": "wxid_old", "items": [{}], "stale": False}, "offline", 1),
+    ("wxid_current", True, {"account_id": "wxid_current", "items": [{}], "stale": False}, "ready", 1),
+])
+def test_bootstrap_survives_offline_directory_without_cross_account_counts(
+    tmp_path, monkeypatch, account, available, directory_result, expected, calls_expected
+):
+    api = _api(tmp_path)
+    view = {"state": "STOPPED", "can_start": True, "online": False,
+            "runtime": {"wechat_identity": account, "account_status_available": available}}
+    api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: view)
+    calls = []
+
+    def directory(force):
+        calls.append(force)
+        if isinstance(directory_result, Exception):
+            raise directory_result
+        assert directory_result is not None, "Unverified account must not query groups"
+        return directory_result
+
+    api._groups = SimpleNamespace(list=directory)
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _: None)
+    result = api.bootstrap()
+    assert result["ok"] is True
+    assert result["data"]["version"] == app_shell.__version__
+    assert result["data"]["status"]["can_start"] is True
+    items = {item["id"]: item for item in result["data"]["readiness"]["items"]}
+    assert items["groups"]["status"] == expected
+    assert len(calls) == calls_expected
+    if not available:
+        assert items["account"]["status"] != "ready"
+    assert api._lifecycle.events.items == []
+
+
 def test_first_provider_save_uses_jyjapi_grok_source(
     monkeypatch, tmp_path: Path
 ) -> None:
