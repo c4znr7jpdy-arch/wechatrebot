@@ -1,235 +1,95 @@
 diff --git a/_conf_schema.json b/_conf_schema.json
-index c405e95..e9334e6 100644
+index 464bc1a..db56cd8 100644
 --- a/_conf_schema.json
 +++ b/_conf_schema.json
-@@ -159,6 +159,6 @@
-                 "default": "smart",
--                "options": ["smart", "always", "off"]
-+                "options": ["smart", "always", "manual", "off"]
-             },
-             "casual_query_max_chars": {
-                 "description": "短闲聊识别长度",
-                 "hint": "smart 模式下，只有小于该长度且命中闲聊模板的消息才会跳过召回。",
-diff --git a/main.py b/main.py
-index e423a1c..c0d817a 100644
---- a/main.py
-+++ b/main.py
-@@ -305,9 +305,16 @@ class LivingMemoryPlugin(Star):
-         except Exception as e:
-             logger.error(f"被动群聊消息捕获失败: {e}", exc_info=True)
- 
--    async def _ensure_plugin_ready(self) -> tuple[bool, str]:
-+    async def _ensure_plugin_ready(
-+        self, *, wait_for_initialization: bool = True
-+    ) -> tuple[bool, str]:
-         """确保插件已完成初始化并且运行期组件可用"""
--        if not await self.initializer.ensure_initialized():
-+        initialized = (
-+            await self.initializer.ensure_initialized()
-+            if wait_for_initialization
-+            else self.initializer.is_initialized
-+        )
-+        if not initialized:
-             return False, self._get_initialization_status_message()
- 
-         if not await self._ensure_runtime_components():
-@@ -327,6 +335,17 @@ class LivingMemoryPlugin(Star):
-                 "init.failed",
-                 error=self.initializer.error_message or t("common.unknown_error"),
-             )
-         else:
-+            missing_providers = []
-+            if not getattr(self.initializer, "embedding_provider", None):
-+                missing_providers.append("Embedding 文本向量模型")
-+            if not getattr(self.initializer, "llm_provider", None):
-+                missing_providers.append("聊天模型")
-+            if missing_providers:
-+                return (
-+                    "长期记忆尚未就绪：缺少"
-+                    f"{'、'.join(missing_providers)}。"
-+                    "请先在长期记忆的“模型设置”中完成选择。"
-+                )
-             return t(
-                 "init.in_progress",
-@@ -350,7 +369,9 @@ class LivingMemoryPlugin(Star):
-     @filter.on_llm_request()
-     async def handle_memory_recall(self, event: AstrMessageEvent, req: ProviderRequest):
-         """[Event Hook] Query and inject long-term memory before LLM request"""
--        ready, _ = await self._ensure_plugin_ready()
-+        ready, _ = await self._ensure_plugin_ready(
-+            wait_for_initialization=False
-+        )
-         if not ready:
-             logger.debug("插件未完成初始化，跳过记忆召回")
-             return
-@@ -365,7 +386,9 @@ class LivingMemoryPlugin(Star):
-         self, event: AstrMessageEvent, resp: LLMResponse
-     ):
-         """[Event Hook] Check if reflection and memory storage is needed after LLM response"""
--        ready, _ = await self._ensure_plugin_ready()
-+        ready, _ = await self._ensure_plugin_ready(
-+            wait_for_initialization=False
-+        )
-         if not ready:
-             logger.debug("插件未完成初始化，跳过记忆反思")
-             return
-@@ -381,7 +404,9 @@ class LivingMemoryPlugin(Star):
-         if not event.get_extra("_clean_ltm_session", False):
-             return
- 
--        ready, _ = await self._ensure_plugin_ready()
-+        ready, _ = await self._ensure_plugin_ready(
-+            wait_for_initialization=False
-+        )
-         if not ready:
-             return
- 
-diff --git a/core/page_api.py b/core/page_api.py
---- a/core/page_api.py
-+++ b/core/page_api.py
-@@ -197,6 +197,8 @@ class PageAPI:
-             - ready_dict: 包含 memory_engine 等组件的字典
-             - error_dict: 错误响应字典（如果有错误）
-         """
--        ready, message = await self.plugin._ensure_plugin_ready()
-+        ready, message = await self.plugin._ensure_plugin_ready(
-+            wait_for_initialization=False
-+        )
-         if not ready:
-             return None, self.utils.error(message or "插件尚未就绪")
-
+@@ -308,6 +308,24 @@
+                     "max": 10000,
+                     "step": 1
+                 }
++            },
++            "auto_recall_mode": {
++                "description": "自动召回策略",
++                "hint": "smart（推荐）会跳过“在干嘛/在吗”等低信息闲聊，记忆型问题仍正常召回；always 保持逐句召回；off 只保留主动记忆工具。保存后下一条消息生效。",
++                "type": "string",
++                "default": "smart",
++                "options": [
++                    "smart",
++                    "always",
++                    "manual",
++                    "off"
++                ]
++            },
++            "casual_query_max_chars": {
++                "description": "短闲聊识别长度",
++                "hint": "smart 模式下，只有小于该长度且命中闲聊模板的消息才会跳过召回。",
++                "type": "int",
++                "default": 24
+             }
+         }
+     },
 diff --git a/core/event_handler_modules/memory_recall.py b/core/event_handler_modules/memory_recall.py
-index 04b709a..0460693 100644
+index 1ad1f23..2a3794b 100644
 --- a/core/event_handler_modules/memory_recall.py
 +++ b/core/event_handler_modules/memory_recall.py
-@@ -31,12 +31,12 @@ if TYPE_CHECKING:
+@@ -4,6 +4,7 @@
+ """
+ 
+ import asyncio
++import re
+ import time
+ from datetime import datetime
+ from typing import TYPE_CHECKING
+@@ -33,6 +34,62 @@ if TYPE_CHECKING:
  class MemoryRecall:
      """记忆召回类"""
  
--    _MEMORY_INTENT_RE = re.compile(
 +    _EXPLICIT_MEMORY_INTENT_RE = re.compile(
-         r"(记得|还记得|之前|上次|以前|当时|我说过|我喜欢|我叫|我是谁|谁是|哪天|什么时候|remember|last time|before)",
-         re.IGNORECASE,
-     )
-     _CASUAL_RE = re.compile(
--        r"^(@?[一-鿿\w-]+\s*)?(在干嘛|干嘛|干吗|在吗|吃了吗|睡了吗|干啥|在干啥|早|早上好|下午好|晚上好|晚安|哈喽|喂+|哈哈+|嗯+|哦+|好的|行|可以|收到|谢谢|谢了|在呢|没干嘛|怎么了|啥事)[！!？?~。.]*$",
++        r"(记得|还记得|之前|上次|以前|当时|我说过|我喜欢|我叫|我是谁|谁是|哪天|什么时候|remember|last time|before)",
++        re.IGNORECASE,
++    )
++
++    _CASUAL_RE = re.compile(
 +        r"^((?:你?好)+|在干嘛|干嘛|干吗|在吗|吃了吗|睡了吗|干啥|在干啥|早|早上好|下午好|晚上好|晚安|哈喽|喂+|哈哈+|嗯+|哦+|好的|行|可以|收到|谢谢|谢了|在呢|没干嘛|怎么了|啥事)[！!？?~。.]*$",
-         re.IGNORECASE,
-     )
- 
-@@ -137,19 +144,20 @@ class MemoryRecall:
-                 # 若 top_k <= 0，跳过记忆检索和注入，但上述清理和消息存储已执行
-                 top_k = self.config_manager.get("recall_engine.top_k", 5)
-                 if top_k <= 0:
-+                    self._set_recall_state(event, "disabled", "top_k_disabled")
-                     logger.info(
-                         f"[{session_id}] top_k={top_k} <= 0，跳过记忆检索和注入"
-                     )
-                     return
- 
-                 if not actual_query:
-+                    self._set_recall_state(event, "skipped", "empty_query")
-                     logger.warning(f"[{session_id}] 原始用户消息为空，跳过记忆召回")
-                     return
- 
-                 should_recall, recall_reason = self._should_auto_recall(actual_query)
--                if hasattr(event, "set_extra"):
--                    event.set_extra("livingmemory_recall", should_recall)
--                    event.set_extra("livingmemory_recall_reason", recall_reason)
-+                state = "searching" if should_recall else "skipped"
-+                self._set_recall_state(event, state, recall_reason)
-                 if not should_recall:
-                     logger.info(
-                         f"[{session_id}] 智能召回决策: skip reason={recall_reason}"
-@@ -209,7 +217,7 @@ class MemoryRecall:
- 
-                 # 执行记忆召回
-                 logger.info(
--                    f"[{session_id}] 开始记忆召回，查询='{query_for_search[:80]}...'"
-+                    f"[{session_id}] 开始记忆召回 reason={recall_reason}"
-                 )
- 
-                 recalled_memories = await self.memory_engine.search_memories(
-@@ -240,8 +248,7 @@ class MemoryRecall:
-                     for i, mem in enumerate(recalled_memories, 1):
-                         logger.debug(
-                             f"[{session_id}] 记忆 #{i}: 得分={mem.final_score:.3f}, "
--                            f"重要性={mem.metadata.get('importance', 0.5):.2f}, "
--                            f"内容={mem.content[:100]}..."
-+                            f"重要性={mem.metadata.get('importance', 0.5):.2f}"
-                         )
- 
-                     # 根据配置选择注入方式（含 Provider 兼容降级）
-@@ -273,11 +280,13 @@ class MemoryRecall:
- 
-                     if injection_method == "user_message_before":
-                         req.prompt = memory_str + "\n\n" + (req.prompt or "")
-+                        self._set_recall_state(event, "injected", recall_reason)
-                         logger.info(
-                             f"[{session_id}] 成功向用户消息前注入 {len(recalled_memories)} 条记忆"
-                         )
-                     elif injection_method == "user_message_after":
-                         req.prompt = (req.prompt or "") + "\n\n" + memory_str
-+                        self._set_recall_state(event, "injected", recall_reason)
-                         logger.info(
-                             f"[{session_id}] 成功向用户消息后注入 {len(recalled_memories)} 条记忆"
-                         )
-@@ -291,6 +300,7 @@ class MemoryRecall:
-                         )
-                         if fake_messages:
-                             req.contexts.extend(fake_messages)
-+                            self._set_recall_state(event, "injected", recall_reason)
-                             logger.info(
-                                 f"[{session_id}] 成功以伪造工具调用方式注入 "
-                                 f"{len(recalled_memories)} 条记忆"
-@@ -301,16 +311,19 @@ class MemoryRecall:
-                         req.extra_user_content_parts.append(
-                             TextPart(text=memory_str).mark_as_temp()
-                         )
-+                        self._set_recall_state(event, "injected", recall_reason)
-                         logger.info(
-                             f"[{session_id}] 成功向用户消息末尾注入 "
-                             f"{len(recalled_memories)} 条记忆"
-                         )
-                 else:
-+                    self._set_recall_state(event, "no_match", recall_reason)
-                     logger.info(f"[{session_id}] 未找到相关记忆")
- 
-         except asyncio.CancelledError:
-             raise
-         except Exception as e:
-+            self._set_recall_state(event, "error", "recall_failed")
-             logger.error(f"处理 on_llm_request 钩子时发生错误: {e}", exc_info=True)
- 
-     def _should_auto_recall(self, query: str) -> tuple[bool, str]:
-@@ -321,14 +321,15 @@ class MemoryRecall:
-         ).strip().lower()
-         if mode == "off":
-             return False, "auto_recall_off"
--        if mode == "always":
--            return True, "always"
--
-         text = self._normalize_query_for_routing(query)
-         if not text:
-             return False, "empty_after_normalize"
--        if self._MEMORY_INTENT_RE.search(text):
--            return True, "memory_intent"
++        re.IGNORECASE,
++    )
++
++    def _should_auto_recall(self, query: str) -> tuple[bool, str]:
++        """Route only memory-bearing messages to long-term retrieval."""
++        mode = str(
++            self.config_manager.get("recall_engine.auto_recall_mode", "smart")
++            or "smart"
++        ).strip().lower()
++        if mode == "off":
++            return False, "auto_recall_off"
++        text = self._normalize_query_for_routing(query)
++        if not text:
++            return False, "empty_after_normalize"
 +        if self._EXPLICIT_MEMORY_INTENT_RE.search(text):
 +            return True, "explicit_memory_request"
 +        if mode == "manual":
 +            return False, "manual_no_explicit_request"
 +        if mode == "always":
 +            return True, "always"
- 
-         max_chars = int(
-             self.config_manager.get("recall_engine.casual_query_max_chars", 24)
-@@ -346,8 +374,18 @@ class MemoryRecall:
-         text = re.sub(r"\[At:[^\]]+\]", "", text, flags=re.IGNORECASE)
-         text = text.replace("\u2005", " ").replace("\u200b", " ")
-         text = re.sub(r"\s+", " ", text).strip()
++
++        max_chars = int(
++            self.config_manager.get("recall_engine.casual_query_max_chars", 24)
++            or 24
++        )
++        if len(text) <= max_chars and self._CASUAL_RE.fullmatch(text):
++            return False, "short_casual"
++        return True, "potential_memory_context"
++
++    @staticmethod
++    def _normalize_query_for_routing(query: str) -> str:
++        text = str(query or "").strip()
++        # Bridge/history prefixes are transport metadata, not the user's intent.
++        text = re.sub(r"^\[[^\]]{1,180}\]\s*", "", text)
++        text = re.sub(r"\[At:[^\]]+\]", "", text, flags=re.IGNORECASE)
++        text = text.replace("\u2005", " ").replace("\u200b", " ")
++        text = re.sub(r"\s+", " ", text).strip()
 +        text = re.sub(r"^(?:@[^\s@]{1,40}\s*)+", "", text).strip()
-         return text
- 
++        return text
++
 +    @staticmethod
 +    def _set_recall_state(event: AstrMessageEvent, state: str, reason: str) -> None:
 +        """Expose only bounded routing state; never expose message or memory text."""
@@ -239,6 +99,136 @@ index 04b709a..0460693 100644
 +        event.set_extra("livingmemory_recall_state", state)
 +        event.set_extra("livingmemory_recall_reason", reason)
 +
-     def _remove_injected_memories_from_context(
-         self, req: ProviderRequest, session_id: str
-     ) -> int:
+     def __init__(
+         self,
+         context,
+@@ -166,6 +223,11 @@ class MemoryRecall:
+                     logger.warning(f"[{session_id}] 原始用户消息为空，跳过记忆召回")
+                     return
+ 
++                should_recall, recall_reason = self._should_auto_recall(actual_query)
++                self._set_recall_state(event, "searching" if should_recall else "skipped", recall_reason)
++                if not should_recall:
++                    return
++
+                 # 获取过滤配置
+                 filtering_config = self.config_manager.filtering_settings
+                 use_persona_filtering = filtering_config.get(
+diff --git a/core/page_api.py b/core/page_api.py
+index 0346230..b12d196 100644
+--- a/core/page_api.py
++++ b/core/page_api.py
+@@ -323,7 +323,7 @@ class PluginPageApi:
+             - ready_dict: 包含 memory_engine 等组件的字典
+             - error_dict: 错误响应字典（如果有错误）
+         """
+-        ready, message = await self.plugin._ensure_plugin_ready()
++        ready, message = await self.plugin._ensure_plugin_ready(wait_for_initialization=False)
+         if not ready:
+             return None, self.utils.error(message or "插件尚未就绪")
+ 
+diff --git a/core/plugin_initializer_finalize.py b/core/plugin_initializer_finalize.py
+index 0cf0205..55f01e6 100644
+--- a/core/plugin_initializer_finalize.py
++++ b/core/plugin_initializer_finalize.py
+@@ -46,6 +46,8 @@ class InitializerFinalizeMixin:
+ 
+             faiss_vec_db_cls = self._load_faiss_vec_db_class()
+ 
++            await self._ensure_embedding_dimension()
++
+             # 检查索引文件维度与当前 embedding provider 维度是否一致
+             await self._check_and_fix_dimension_mismatch(str(index_path))
+             if graph_memory_enabled:
+@@ -666,3 +668,18 @@ class InitializerFinalizeMixin:
+             except Exception:
+                 logger.warning("关闭 FaissVecDB 失败", exc_info=True)
+             self.db = None
++
++    async def _ensure_embedding_dimension(self) -> None:
++        """Resolve unknown dimensions before opening or migrating existing indexes."""
++        provider = self.embedding_provider
++        if provider.get_dim() > 0:
++            return
++        try:
++            vector = await asyncio.wait_for(provider.get_embedding("dimension probe"), timeout=15.0)
++            if not isinstance(vector, list) or not vector or not all(
++                isinstance(value, (int, float)) and not isinstance(value, bool) for value in vector
++            ):
++                raise ValueError("invalid embedding")
++        except Exception:
++            raise ProviderNotReadyError("向量模型连接失败或未返回有效向量，请检查模型服务；原有记忆和索引未改动") from None
++        provider.provider_config["embedding_dimensions"] = len(vector)
+diff --git a/main.py b/main.py
+index 0486e46..0160d18 100644
+--- a/main.py
++++ b/main.py
+@@ -287,9 +287,9 @@ class LivingMemoryPlugin(Star):
+         except Exception as e:
+             logger.error(f"被动群聊消息捕获失败: {e}", exc_info=True)
+ 
+-    async def _ensure_plugin_ready(self) -> tuple[bool, str]:
++    async def _ensure_plugin_ready(self, *, wait_for_initialization: bool = True) -> tuple[bool, str]:
+         """确保插件已完成初始化并且运行期组件可用"""
+-        if not await self.initializer.ensure_initialized():
++        if not (await self.initializer.ensure_initialized() if wait_for_initialization else self.initializer.is_initialized):
+             return False, self._get_initialization_status_message()
+ 
+         if not await self._ensure_runtime_components():
+@@ -332,7 +332,7 @@ class LivingMemoryPlugin(Star):
+     @filter.on_llm_request()
+     async def handle_memory_recall(self, event: AstrMessageEvent, req: ProviderRequest):
+         """[Event Hook] Query and inject long-term memory before LLM request"""
+-        ready, _ = await self._ensure_plugin_ready()
++        ready, _ = await self._ensure_plugin_ready(wait_for_initialization=False)
+         if not ready:
+             logger.debug("插件未完成初始化，跳过记忆召回")
+             return
+@@ -347,7 +347,7 @@ class LivingMemoryPlugin(Star):
+         self, event: AstrMessageEvent, resp: LLMResponse
+     ):
+         """[Event Hook] Check if reflection and memory storage is needed after LLM response"""
+-        ready, _ = await self._ensure_plugin_ready()
++        ready, _ = await self._ensure_plugin_ready(wait_for_initialization=False)
+         if not ready:
+             logger.debug("插件未完成初始化，跳过记忆反思")
+             return
+@@ -366,7 +366,7 @@ class LivingMemoryPlugin(Star):
+         ):
+             return
+ 
+-        ready, _ = await self._ensure_plugin_ready()
++        ready, _ = await self._ensure_plugin_ready(wait_for_initialization=False)
+         if not ready:
+             return
+ 
+diff --git a/pages/dashboard/modules/memory-page.js b/pages/dashboard/modules/memory-page.js
+index 9422abc..392a938 100644
+--- a/pages/dashboard/modules/memory-page.js
++++ b/pages/dashboard/modules/memory-page.js
+@@ -93,7 +93,12 @@ export class MemoryPage {
+     } catch (e) {
+       if (fetchGeneration !== this._fetchGeneration) return;
+       this.showToast(e.message || window.t("misc.fetchMemoriesFail"), true);
+-      this.renderEmpty();
++      this.state.memory.items = [];
++      this.state.memory.hasMore = false;
++      this.renderEmpty(e.message || window.t("misc.fetchMemoriesFail"));
++      document.getElementById("mem-pagination-info").textContent = "记忆服务暂不可用，不能确认记录数量";
++      document.getElementById("mem-prev").disabled = true;
++      document.getElementById("mem-next").disabled = true;
+     }
+   }
+ 
+@@ -204,9 +209,9 @@ export class MemoryPage {
+   /**
+    * 渲染空表格
+    */
+-  renderEmpty() {
++  renderEmpty(error = "") {
+     const tbody = document.getElementById("memories-body");
+-    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">' + window.t("table.noData") + '</td></tr>';
++    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">' + (error ? esc(error) : window.t("table.noData")) + '</td></tr>';
+     tbody.style.paddingTop = "0";
+     tbody.style.paddingBottom = "0";
+     this.updateSelectionControls();

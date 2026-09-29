@@ -362,7 +362,7 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
     assert living["provider_settings"]["llm_provider_id"] == provider.model_id
     assert living["recall_engine"]["auto_recall_mode"] == "smart"
     assert living["recall_engine"]["vector_search_timeout_seconds"] == 0.8
-    assert living["graph_memory"]["enabled"] is False
+    assert living["graph_memory"]["enabled"] is True
     assert "explicit_recall_phrases" not in living["recall_engine"]
     assert emotion["Self_Learning_Basic"]["enable_message_capture"] is False
     assert emotion["Advanced_Settings"]["save_raw_messages"] is False
@@ -370,6 +370,7 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
     assert emotion["Integration_Settings"]["delegate_memory_to_livingmemory"] is True
 
     living["recall_engine"]["auto_recall_mode"] = "always"
+    living["graph_memory"]["enabled"] = False
     (data / "config" / "astrbot_plugin_livingmemory_config.json").write_text(
         json.dumps(living), encoding="utf-8"
     )
@@ -380,6 +381,7 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
         )
     )
     assert preserved["recall_engine"]["auto_recall_mode"] == "always"
+    assert preserved["graph_memory"]["enabled"] is False
 
 
 def test_provider_update_preserves_extensions_but_enforces_reply_timeout(

@@ -10,7 +10,7 @@
 |---|---|---:|---|
 | delivered-plugin | astrbot_plugin_angel_heart | 2.2.2 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_bittorrent | 1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1 | AGPL-3.0-only |
-| delivered-plugin | astrbot_plugin_livingmemory | 2.3.6 | AGPL-3.0-only |
+| delivered-plugin | astrbot_plugin_livingmemory | 2.6.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_mimo_tts_clone | 0.7.2 | MIT |
 | delivered-plugin | astrbot_plugin_music | 2.1.1 | MIT |
 | delivered-plugin | astrbot_plugin_parser | 1.5.6 | MIT |
@@ -31,7 +31,7 @@
 | delivered-plugin | jiang_schedule | 1.2.0 | Proprietary |
 | delivered-plugin | jiang_short_drama | 2.5.3 | Proprietary |
 | delivered-plugin | jiang_video_understanding | 1.0.0 | Proprietary |
-| delivered-plugin | meme_manager | 4.03 | MIT |
+| delivered-plugin | meme_manager | 5.1.0 | MIT |
 | manager-build | altgraph | 0.17.5 | MIT |
 | manager-build | bottle | 0.13.4 | MIT |
 | manager-build | cffi | 2.1.1 | MIT-0 |
