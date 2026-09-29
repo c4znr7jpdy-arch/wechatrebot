@@ -1802,6 +1802,7 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
 def test_dedicated_window_serves_shared_theme_dependencies(tmp_path: Path, monkeypatch, frozen: bool) -> None:
     source = Path(plugin_center.__file__).with_name("app_webui")
     dependencies = {
+        "theme-tokens.css": "text/css",
         "feature-page-theme.js": "text/javascript",
         "feature-page-overrides.css": "text/css",
         "design-overrides.css": "text/css",

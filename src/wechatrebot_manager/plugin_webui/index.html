@@ -10,29 +10,27 @@
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
-      <div>
-        <h1 id="product-title">功能配置中心</h1>
+    <aside class="plugin-rail" aria-label="功能列表">
+      <div class="brand-block">
+        <h1 id="product-title">功能配置</h1>
         <p>管理已交付功能、独立模型和高级设置</p>
       </div>
-      <div class="engine-state" id="engine-state" role="status"><i></i><span>正在检查回复引擎</span></div>
-    </header>
-
+      <div class="rail-heading">
+        <div><strong>已交付功能</strong><span id="plugin-count">0 项</span></div>
+        <label class="search-box">
+          <span class="sr-only">搜索功能</span>
+          <input id="plugin-search" type="search" placeholder="搜索功能名称" autocomplete="off">
+          <button id="clear-search" type="button" aria-label="清空搜索" disabled>×</button>
+        </label>
+      </div>
+      <div id="plugin-list" class="plugin-list" role="listbox" aria-label="功能列表"></div>
+      <div id="plugin-empty" class="rail-empty" hidden>没有找到匹配的功能</div>
+    </aside>
     <main class="workspace">
-      <aside class="plugin-rail" aria-label="功能列表">
-        <div class="rail-heading">
-          <div><strong>已交付功能</strong><span id="plugin-count">0 项</span></div>
-          <label class="search-box">
-            <span class="sr-only">搜索功能</span>
-            <input id="plugin-search" type="search" placeholder="搜索功能名称" autocomplete="off">
-            <button id="clear-search" type="button" aria-label="清空搜索" disabled>×</button>
-          </label>
-        </div>
-        <div id="plugin-list" class="plugin-list" role="listbox" aria-label="功能列表"></div>
-        <div id="plugin-empty" class="rail-empty" hidden>没有找到匹配的功能</div>
-      </aside>
-
+      <header class="topbar">
+        <div class="window-heading"><span>功能中心</span><strong>专属配置</strong></div>
+        <div class="engine-state" id="engine-state" role="status"><i></i><span>正在检查回复引擎</span></div>
+      </header>
       <section class="detail-pane" aria-live="polite">
         <div id="loading-view" class="state-view">
           <div class="spinner" aria-hidden="true"></div>

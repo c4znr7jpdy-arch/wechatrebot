@@ -1,43 +1,6 @@
-/* Product design v1: warm neutral workspace with restrained forest-green actions. */
-:root {
-  --navy-950: #eae9e3;
-  --navy-900: #fcfbf8;
-  --navy-800: #dde1d9;
-  --blue-700: #2b4539;
-  --blue-600: #365647;
-  --blue-100: #dde5dc;
-  --green-700: #365647;
-  --green-600: #466a56;
-  --green-100: #e1e9e1;
-  --amber-700: #805a26;
-  --amber-100: #f4ead9;
-  --red-700: #873d37;
-  --red-100: #f5e5e2;
-  --ink: #272b28;
-  --muted: #62675f;
-  --subtle: #747a71;
-  --line: #ddded6;
-  --line-strong: #a9ada4;
-  --surface: #fcfbf8;
-  --surface-2: #f6f5f1;
-  --surface-muted: #f1f0eb;
-  --surface-inset: #f7f7f3;
-  --surface-hover: #f5f6f1;
-  --surface-selected: #edf1eb;
-  --control-surface: #ffffff;
-  --message-canvas: #f7f9fc;
-  --chart-surface: #ffffff;
-  --chart-summary: #f8fafc;
-  --chart-footer: #fbfcfe;
-  --chart-divider: #edf1f5;
-  --chart-track-border: #e2e8f0;
-  --chart-grid-a: #f8fafc;
-  --chart-grid-b: #e7edf4;
-  --canvas: #f3f2ee;
-  --shadow: none;
-  --radius: 8px;
-}
+@import url("/theme-tokens.css");
 
+/* Product design v1: warm neutral workspace with restrained forest-green actions. */
 body { color: var(--ink); background: var(--canvas); }
 .toast { color: var(--green-700); background: var(--green-100); }
 .toast.error { color: #fff; }
@@ -431,46 +394,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-toggle svg { width: 15px; height: 15px; flex: 0 0 15px; }
 
 /* Dark mode: a cool graphite canvas with blue actions and readable semantic states. */
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --navy-950: #0a111b;
-  --navy-900: #121c29;
-  --navy-800: #1d3046;
-  --blue-700: #a6c6ff;
-  --blue-600: #6ea8ff;
-  --blue-100: #1d3049;
-  --green-700: #8fe0ba;
-  --green-600: #4fc58c;
-  --green-100: #173c35;
-  --amber-700: #f3c27a;
-  --amber-100: #44331e;
-  --red-700: #ff9fa9;
-  --red-100: #47262e;
-  --ink: #edf3fb;
-  --ink-2: #d0dbea;
-  --muted: #aab8c9;
-  --subtle: #8292a7;
-  --line: #2b3b50;
-  --line-strong: #43566e;
-  --surface: #151f2c;
-  --surface-2: #1b2939;
-  --surface-muted: #1c2a3a;
-  --surface-inset: #101923;
-  --surface-hover: #1d2c3e;
-  --surface-selected: #203754;
-  --control-surface: #111b27;
-  --message-canvas: #101923;
-  --chart-surface: #121c29;
-  --chart-summary: #182535;
-  --chart-footer: #101923;
-  --chart-divider: #2b3b50;
-  --chart-track-border: #34475d;
-  --chart-grid-a: #172435;
-  --chart-grid-b: #223249;
-  --canvas: #0d141d;
-  --shadow: 0 16px 38px rgba(0, 0, 0, .28);
-}
-
 html[data-theme="dark"],
 html[data-theme="dark"] body,
 html[data-theme="dark"] .app-shell,

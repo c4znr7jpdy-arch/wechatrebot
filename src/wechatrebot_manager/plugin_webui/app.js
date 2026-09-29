@@ -983,6 +983,7 @@ function showTab(name) {
     el(`${tabName}-tab`).setAttribute("aria-selected", selected.toString());
   });
   const pages = name === "pages";
+  document.querySelector(".detail-pane").classList.toggle("showing-page", pages);
   el("config-form").hidden = pages;
   el("basic-panel").hidden = name !== "basic";
   el("models-panel").hidden = name !== "models";
@@ -1099,10 +1100,10 @@ async function loadCatalog() {
     if (requested) {
       el("plugin-search").closest(".search-box").hidden = true;
       el("plugin-count").previousElementSibling.textContent = "当前功能";
-      document.querySelector(".topbar p").textContent = "只管理当前功能的专属配置";
+      document.querySelector(".brand-block p").textContent = "只管理当前功能的专属配置";
     }
     if (data.product_name) {
-      el("product-title").textContent = `${customerText(data.product_name)} · 功能配置`;
+      el("product-title").textContent = customerText(data.product_name);
       document.title = requested
         ? `${customerText(data.product_name)} · ${customerText(requested.display_name)}配置`
         : `${customerText(data.product_name)} · 功能配置`;
