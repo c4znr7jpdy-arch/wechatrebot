@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from .installed_entries import START_EXECUTABLE_NAME, ensure_launcher_executable, native_uninstaller
+
 
 _SHORTCUT_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,7 @@ $launchTargets = @(
 foreach ($shortcutPath in $launchTargets) {
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $env:WECHATREBOT_SHORTCUT_TARGET
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
     $shortcut.Description = $env:WECHATREBOT_SHORTCUT_DESCRIPTION
@@ -28,6 +31,7 @@ if (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET) {
     $uninstallPath = Join-Path $programs '卸载微信机器人.lnk'
     $shortcut = $shell.CreateShortcut($uninstallPath)
     $shortcut.TargetPath = $env:WECHATREBOT_UNINSTALL_TARGET
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
 $shortcut.Description = '彻底卸载微信机器人（保留聊天记录）'
@@ -48,16 +52,33 @@ $ErrorActionPreference = 'Stop'
 $shell = New-Object -ComObject WScript.Shell
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
+$commonDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$commonPrograms = [Environment]::GetFolderPath('CommonPrograms')
 $targets = @(
     (Join-Path $desktop 'WeChat ReBot.lnk'),
     (Join-Path $programs 'WeChat ReBot.lnk'),
-    (Join-Path $programs '卸载微信机器人.lnk')
+    (Join-Path $programs '卸载微信机器人.lnk'),
+    (Join-Path $commonDesktop 'WeChat ReBot.lnk'),
+    (Join-Path $commonPrograms 'WeChat ReBot.lnk'),
+    (Join-Path $commonPrograms '卸载微信机器人.lnk')
 )
+$launchPaths = @($env:WECHATREBOT_SHORTCUT_TARGET, (Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR 'manager\WeChatReBot.exe'))
+$uninstallPaths = @($env:WECHATREBOT_UNINSTALL_TARGET, (Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR '卸载机器人.exe'))
 foreach ($shortcutPath in $targets) {
     if (-not (Test-Path -LiteralPath $shortcutPath)) {
         continue
     }
     $shortcut = $shell.CreateShortcut($shortcutPath)
+    if ($shortcut.TargetPath -in $launchPaths) {
+        $shortcut.TargetPath = $env:WECHATREBOT_SHORTCUT_TARGET
+    } elseif ($shortcut.TargetPath -in $uninstallPaths) {
+        if (-not (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET)) { continue }
+        $shortcut.TargetPath = $env:WECHATREBOT_UNINSTALL_TARGET
+    } else {
+        continue
+    }
+    $shortcut.Arguments = ''
+    $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
     $shortcut.Save()
 }
@@ -126,7 +147,7 @@ def _shortcut_environment(
             ),
             "WECHATREBOT_SHORTCUT_WORKDIR": str(root),
             "WECHATREBOT_SHORTCUT_DESCRIPTION": description,
-            "WECHATREBOT_UNINSTALL_TARGET": str(root / "卸载机器人.exe"),
+            "WECHATREBOT_UNINSTALL_TARGET": str(native_uninstaller(root) or root / "卸载机器人.exe"),
         }
     )
     return environment
@@ -163,8 +184,8 @@ def create_windows_shortcuts(
     if os.name != "nt":
         return False
     root = Path(install_root).expanduser().resolve()
-    target = root / "manager" / "WeChatReBot.exe"
-    if not target.is_file():
+    target = root / START_EXECUTABLE_NAME
+    if not ensure_launcher_executable(root):
         return False
     return _run_shortcut_script(
         _SHORTCUT_SCRIPT,
@@ -177,15 +198,15 @@ def refresh_windows_shortcuts(
     *,
     description: str,
 ) -> bool:
-    """Refresh existing shortcut icons without recreating deleted shortcuts."""
+    """Repair this installation's existing targets without recreating deleted shortcuts."""
 
     if os.name != "nt":
         return False
     root = Path(install_root).expanduser().resolve()
-    target = root / "manager" / "WeChatReBot.exe"
-    if not target.is_file():
-        return False
+    target = root / START_EXECUTABLE_NAME
     try:
+        if not ensure_launcher_executable(root):
+            return False
         return _run_shortcut_script(
             _REFRESH_SHORTCUT_SCRIPT,
             _shortcut_environment(root, target, description=description),

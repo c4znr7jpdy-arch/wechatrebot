@@ -11,6 +11,15 @@ import uuid
 START_EXECUTABLE_NAME = "启动机器人.exe"
 
 
+def native_uninstaller(install_root: Path) -> Path | None:
+    """Use Inno's entry only when its companion uninstall data is present."""
+    executable = install_root / "unins000.exe"
+    data = executable.with_suffix(".dat")
+    if all(path.is_file() and not path.is_symlink() for path in (executable, data)):
+        return executable
+    return None
+
+
 def copy_manager_executable(root: Path, name: str, source: Path) -> bool:
     if not source.is_file():
         return False

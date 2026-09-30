@@ -85,11 +85,11 @@ Source: "{#PayloadArchive}"; DestDir: "{tmp}"; DestName: "payload.zip"; Flags: d
 #endif
 
 [Icons]
-Name: "{autoprograms}\{#ProductName}"; Filename: "{app}\manager\WeChatReBot.exe"; Parameters: "gui --install-root ""{app}"""; WorkingDir: "{app}"; IconFilename: "{app}\manager\WeChatReBot.exe"
-Name: "{autodesktop}\{#ProductName}"; Filename: "{app}\manager\WeChatReBot.exe"; Parameters: "gui --install-root ""{app}"""; WorkingDir: "{app}"; IconFilename: "{app}\manager\WeChatReBot.exe"; Tasks: desktopicon
+Name: "{autoprograms}\{#ProductName}"; Filename: "{app}\启动机器人.exe"; WorkingDir: "{app}"; IconFilename: "{app}\manager\WeChatReBot.exe"
+Name: "{autodesktop}\{#ProductName}"; Filename: "{app}\启动机器人.exe"; WorkingDir: "{app}"; IconFilename: "{app}\manager\WeChatReBot.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\manager\WeChatReBot.exe"; Parameters: "gui --install-root ""{app}"""; Description: "启动 {#ProductName}"; Flags: postinstall nowait skipifsilent runasoriginaluser
+Filename: "{app}\启动机器人.exe"; Description: "启动 {#ProductName}"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

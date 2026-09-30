@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .brand import BrandProfile
 from .install_paths import INSTALL_MARKER
+from .installed_entries import ensure_launcher_executable
 from .installer import InstallRequest, perform_install
 from .location import load_install_location, locator_path
 from .uninstaller import (
@@ -41,6 +42,8 @@ def install_from_native_setup(
     )
     if verified is None:
         raise RuntimeError("原生安装程序未提供有效载荷。")
+    if not ensure_launcher_executable(root):
+        raise RuntimeError("无法创建安装目录的启动程序。")
     return {
         "ok": True,
         "install_root": str(root),

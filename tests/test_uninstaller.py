@@ -43,6 +43,32 @@ def test_uninstall_executable_is_created_and_refreshed(tmp_path: Path) -> None:
     assert target.read_bytes() == b"manager-v2-updated"
 
 
+def test_native_uninstaller_prevents_duplicate_and_uses_native_arguments(monkeypatch, tmp_path):
+    root = _installation(tmp_path / "install")
+    native = root / "unins000.exe"
+    native.write_bytes(b"inno-uninstaller")
+    native.with_suffix(".dat").write_bytes(b"inno-data")
+    legacy = root / uninstaller.UNINSTALL_EXECUTABLE_NAME
+    legacy.write_bytes(b"legacy")
+    assert uninstaller.ensure_uninstall_executable(root)
+    assert not legacy.exists()
+    assert native.read_bytes() == b"inno-uninstaller"
+    assert native.with_suffix(".dat").read_bytes() == b"inno-data"
+    calls = []
+    monkeypatch.setattr(uninstaller.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    uninstaller.launch_installed_uninstaller(root)
+    assert calls == [[str(native)]]
+    assert uninstaller.ensure_uninstall_executable(root)
+    assert not legacy.exists()
+
+
+def test_incomplete_native_uninstaller_keeps_legacy_recovery(tmp_path):
+    root = _installation(tmp_path / "install")
+    (root / "unins000.exe").write_bytes(b"incomplete")
+    assert uninstaller.ensure_uninstall_executable(root)
+    assert (root / uninstaller.UNINSTALL_EXECUTABLE_NAME).is_file()
+
+
 def test_remove_installation_cleans_product_and_local_residuals(
     tmp_path: Path,
 ) -> None:

@@ -14,7 +14,7 @@ from typing import Callable
 
 from . import __version__
 from .install_paths import INSTALL_MARKER
-from .installed_entries import copy_manager_executable
+from .installed_entries import copy_manager_executable, native_uninstaller
 from .json_io import write_json_atomic
 from .location import chat_history_path, locator_path
 from .shortcuts import remove_windows_shortcuts
@@ -115,6 +115,9 @@ def ensure_uninstall_executable(
     source_executable: str | Path | None = None,
 ) -> bool:
     root = validate_uninstall_root(install_root)
+    if native_uninstaller(root) is not None:
+        (root / UNINSTALL_EXECUTABLE_NAME).unlink(missing_ok=True)
+        return True
     source = Path(
         source_executable or root / "manager" / "WeChatReBot.exe"
     ).expanduser().resolve()
@@ -129,6 +132,18 @@ def register_windows_uninstaller(
     if os.name != "nt":
         return False
     root = validate_uninstall_root(install_root)
+    if native_uninstaller(root) is not None:
+        # Do not create a second Windows Apps entry for an Inno installation.
+        import winreg
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_REGISTRY_KEY) as key:
+                location, _ = winreg.QueryValueEx(key, "InstallLocation")
+            if _same_path(location, root):
+                remove_windows_uninstaller_registration()
+        except FileNotFoundError:
+            pass
+        return True
     executable = root / UNINSTALL_EXECUTABLE_NAME
     if not executable.is_file():
         return False
@@ -186,11 +201,12 @@ def provision_uninstaller(
 
 def launch_installed_uninstaller(install_root: str | Path) -> None:
     root = validate_uninstall_root(install_root)
-    executable = root / UNINSTALL_EXECUTABLE_NAME
+    native = native_uninstaller(root)
+    executable = native or root / UNINSTALL_EXECUTABLE_NAME
     if not executable.is_file():
         raise UninstallError("卸载程序不存在，请重新打开管理软件后重试。")
     subprocess.Popen(
-        [str(executable), "uninstall", "--install-root", str(root)],
+        [str(executable)] if native else [str(executable), "uninstall", "--install-root", str(root)],
         cwd=root,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
