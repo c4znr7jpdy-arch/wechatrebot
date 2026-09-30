@@ -13,6 +13,9 @@ def test_native_setup_uses_verified_backend_without_duplicate_entrypoints(
 
     def install(request, **kwargs):
         calls.append((request, kwargs))
+        manager = request.install_root / "manager" / "WeChatReBot.exe"
+        manager.parent.mkdir(parents=True)
+        manager.write_bytes(b"manager")
         return SimpleNamespace(files=(object(), object()))
 
     monkeypatch.setattr(native_setup, "perform_install", install)
@@ -31,6 +34,8 @@ def test_native_setup_uses_verified_backend_without_duplicate_entrypoints(
     assert options == {"create_shortcuts": False, "create_entrypoints": False}
     assert result["file_count"] == 2
     assert result["stopped_processes"] == 0
+    assert (request.install_root / "启动机器人.exe").read_bytes() == b"manager"
+    assert not (request.install_root / "卸载机器人.exe").exists()
 
 
 def test_native_setup_stops_existing_install_before_replacing_files(
@@ -40,6 +45,8 @@ def test_native_setup_stops_existing_install_before_replacing_files(
     install.mkdir()
     (install / native_setup.INSTALL_MARKER).write_text("{}", encoding="utf-8")
     events: list[str] = []
+    (install / "manager").mkdir()
+    (install / "manager" / "WeChatReBot.exe").write_bytes(b"manager")
 
     monkeypatch.setattr(
         native_setup,
@@ -107,3 +114,6 @@ def test_inno_script_uses_native_scope_download_and_downgrade_guards() -> None:
     assert "install-from-native-setup" in script
     assert "prepare-native-uninstall" in script
     assert "function InitializeUninstall: Boolean" in script
+    icons = script.split("[Icons]", 1)[1].split("[Run]", 1)[0]
+    assert icons.count('Filename: "{app}\\启动机器人.exe"') == 2
+    assert "Parameters:" not in icons

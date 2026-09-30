@@ -6,10 +6,81 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from .installed_entries import START_EXECUTABLE_NAME, ensure_launcher_executable, native_uninstaller
+
+
+# WScript.Shell can reject non-ANSI target names on English Windows. Use the
+# Unicode Shell Link interface for creation, reading and updates on every host.
+_UNICODE_SHELL_SCRIPT = r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+
+[ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+class ShellLinkObject {}
+
+[ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, IntPtr findData, uint flags);
+    void GetIDList(out IntPtr value);
+    void SetIDList(IntPtr value);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int size);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int size);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+    void GetHotkey(out short value);
+    void SetHotkey(short value);
+    void GetShowCmd(out int value);
+    void SetShowCmd(int value);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, out int index);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+    void Resolve(IntPtr window, uint flags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+}
+
+public class UnicodeShortcut {
+    readonly IShellLinkW link;
+    readonly string file;
+    public UnicodeShortcut(string path) {
+        file = path;
+        link = (IShellLinkW)new ShellLinkObject();
+        if (File.Exists(path)) ((IPersistFile)link).Load(path, 0);
+    }
+    public string TargetPath {
+        get { var text = new StringBuilder(32768); link.GetPath(text, text.Capacity, IntPtr.Zero, 4); return text.ToString(); }
+        set { link.SetPath(value); }
+    }
+    public string Arguments {
+        get { var text = new StringBuilder(32768); link.GetArguments(text, text.Capacity); return text.ToString(); }
+        set { link.SetArguments(value); }
+    }
+    public string WorkingDirectory { set { link.SetWorkingDirectory(value); } }
+    public string Description { set { link.SetDescription(value); } }
+    public string IconLocation {
+        set {
+            int comma = value.LastIndexOf(',');
+            link.SetIconLocation(comma < 0 ? value : value.Substring(0, comma), comma < 0 ? 0 : int.Parse(value.Substring(comma + 1)));
+        }
+    }
+    public void Save() { ((IPersistFile)link).Save(file, true); }
+}
+
+public class UnicodeShortcutFactory {
+    public UnicodeShortcut CreateShortcut(string path) { return new UnicodeShortcut(path); }
+}
+'@
+""".strip()
+
 
 _SHORTCUT_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
-$shell = New-Object -ComObject WScript.Shell
+$shell = New-Object UnicodeShortcutFactory
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
 $launchTargets = @(
@@ -19,6 +90,7 @@ $launchTargets = @(
 foreach ($shortcutPath in $launchTargets) {
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $env:WECHATREBOT_SHORTCUT_TARGET
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
     $shortcut.Description = $env:WECHATREBOT_SHORTCUT_DESCRIPTION
@@ -28,6 +100,7 @@ if (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET) {
     $uninstallPath = Join-Path $programs '卸载微信机器人.lnk'
     $shortcut = $shell.CreateShortcut($uninstallPath)
     $shortcut.TargetPath = $env:WECHATREBOT_UNINSTALL_TARGET
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
 $shortcut.Description = '彻底卸载微信机器人（保留聊天记录）'
@@ -45,19 +118,36 @@ if (-not (Test-Path -LiteralPath $folderIni)) {
 
 _REFRESH_SHORTCUT_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
-$shell = New-Object -ComObject WScript.Shell
+$shell = New-Object UnicodeShortcutFactory
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
+$commonDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$commonPrograms = [Environment]::GetFolderPath('CommonPrograms')
 $targets = @(
     (Join-Path $desktop 'WeChat ReBot.lnk'),
     (Join-Path $programs 'WeChat ReBot.lnk'),
-    (Join-Path $programs '卸载微信机器人.lnk')
+    (Join-Path $programs '卸载微信机器人.lnk'),
+    (Join-Path $commonDesktop 'WeChat ReBot.lnk'),
+    (Join-Path $commonPrograms 'WeChat ReBot.lnk'),
+    (Join-Path $commonPrograms '卸载微信机器人.lnk')
 )
+$launchPaths = @($env:WECHATREBOT_SHORTCUT_TARGET, (Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR 'manager\WeChatReBot.exe'))
+$uninstallPaths = @($env:WECHATREBOT_UNINSTALL_TARGET, (Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR '卸载机器人.exe'))
 foreach ($shortcutPath in $targets) {
     if (-not (Test-Path -LiteralPath $shortcutPath)) {
         continue
     }
     $shortcut = $shell.CreateShortcut($shortcutPath)
+    if ($shortcut.TargetPath -in $launchPaths) {
+        $shortcut.TargetPath = $env:WECHATREBOT_SHORTCUT_TARGET
+    } elseif ($shortcut.TargetPath -in $uninstallPaths) {
+        if (-not (Test-Path -LiteralPath $env:WECHATREBOT_UNINSTALL_TARGET)) { continue }
+        $shortcut.TargetPath = $env:WECHATREBOT_UNINSTALL_TARGET
+    } else {
+        continue
+    }
+    $shortcut.Arguments = ''
+    $shortcut.WorkingDirectory = $env:WECHATREBOT_SHORTCUT_WORKDIR
     $shortcut.IconLocation = $env:WECHATREBOT_SHORTCUT_ICON + ',0'
     $shortcut.Save()
 }
@@ -65,6 +155,9 @@ $iconRefresh = Get-Command ie4uinit.exe -ErrorAction SilentlyContinue
 if ($null -ne $iconRefresh) {
     & $iconRefresh.Source -show | Out-Null
 }
+# No interactive Explorer may be present (for example during unattended updates).
+# Shortcut saves above are authoritative; icon-cache refresh is best effort.
+exit 0
 """.strip()
 
 
@@ -126,7 +219,7 @@ def _shortcut_environment(
             ),
             "WECHATREBOT_SHORTCUT_WORKDIR": str(root),
             "WECHATREBOT_SHORTCUT_DESCRIPTION": description,
-            "WECHATREBOT_UNINSTALL_TARGET": str(root / "卸载机器人.exe"),
+            "WECHATREBOT_UNINSTALL_TARGET": str(native_uninstaller(root) or root / "卸载机器人.exe"),
         }
     )
     return environment
@@ -142,7 +235,7 @@ def _run_shortcut_script(script: str, environment: dict[str, str]) -> bool:
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            _UNICODE_SHELL_SCRIPT + "\n" + script,
         ],
         env=environment,
         stdin=subprocess.DEVNULL,
@@ -163,8 +256,8 @@ def create_windows_shortcuts(
     if os.name != "nt":
         return False
     root = Path(install_root).expanduser().resolve()
-    target = root / "manager" / "WeChatReBot.exe"
-    if not target.is_file():
+    target = root / START_EXECUTABLE_NAME
+    if not ensure_launcher_executable(root):
         return False
     return _run_shortcut_script(
         _SHORTCUT_SCRIPT,
@@ -177,15 +270,15 @@ def refresh_windows_shortcuts(
     *,
     description: str,
 ) -> bool:
-    """Refresh existing shortcut icons without recreating deleted shortcuts."""
+    """Repair this installation's existing targets without recreating deleted shortcuts."""
 
     if os.name != "nt":
         return False
     root = Path(install_root).expanduser().resolve()
-    target = root / "manager" / "WeChatReBot.exe"
-    if not target.is_file():
-        return False
+    target = root / START_EXECUTABLE_NAME
     try:
+        if not ensure_launcher_executable(root):
+            return False
         return _run_shortcut_script(
             _REFRESH_SHORTCUT_SCRIPT,
             _shortcut_environment(root, target, description=description),

@@ -238,14 +238,19 @@ def test_update_archive_supports_long_windows_staging_paths(tmp_path: Path) -> N
     assert (payload / Path(*relative.split("/")[1:])).read_bytes() == b"long-path-ok"
 
 
+@pytest.mark.parametrize("native", [False, True])
 def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, native: bool,
 ) -> None:
     monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
     install = tmp_path / "install"
     (install / "updates").mkdir(parents=True)
     (install / "manager").mkdir()
     (install / "manager" / "WeChatReBot.exe").write_bytes(b"old-manager")
+    if native:
+        (install / "unins000.exe").write_bytes(b"inno-uninstaller")
+        (install / "unins000.dat").write_bytes(b"inno-data")
+        (install / "卸载机器人.exe").write_bytes(b"legacy")
     (install / ".wechatrebot-install.json").write_text(
         json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8"
     )
@@ -269,7 +274,12 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     assert plan_payload["wait_pids"] == [0]
     assert apply_update_plan(plan.plan_path, restart=False) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
-    assert (install / "卸载机器人.exe").read_bytes() == b"new-manager"
+    if native:
+        assert not (install / "卸载机器人.exe").exists()
+        assert (install / "unins000.exe").read_bytes() == b"inno-uninstaller"
+        assert (install / "unins000.dat").read_bytes() == b"inno-data"
+    else:
+        assert (install / "卸载机器人.exe").read_bytes() == b"new-manager"
     assert (install / "启动机器人.exe").read_bytes() == b"new-manager"
     assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "updated"
     result = json.loads(
