@@ -1,4 +1,5 @@
 import ast
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
@@ -34,7 +35,7 @@ def _run(source, method_name, message, results=None, preview=None, enable_previe
     sent = []
     event = NS(message_str=message, stopped=False, result=None,
                _has_send_oper=False, is_at_or_wake_command=True, call_llm=False,
-               get_sender_name=lambda: "user", get_sender_id=lambda: "user",
+               get_sender_name=lambda: "祈", get_sender_id=lambda: "user",
                get_extra=lambda key: [method_name], chain_result=PipelineResult)
     event.stop_event = lambda: setattr(event, "stopped", True)
     event.is_stopped = lambda: event.stopped
@@ -78,6 +79,48 @@ def test_search_delivers_both_result_and_preview(bt_source):
     plugin.search_service.search.assert_awaited_once_with("测试 电影", "hot")
     assert len(sent) == 2
     assert sent[1][0].nodes[0]["content"][1].url == "https://example.test/image.png"
+
+
+def test_disabled_preview_skips_service_and_all_preview_messages(bt_source):
+    sent, plugin = _run(
+        bt_source, "magnet_search_handler", "/bt 测试",
+        [{"title": "测试", "magnet_link": "magnet:test", "size": "1 GB", "create_time": "today"}],
+        {"name": "测试", "screenshots": [{"screenshot": "https://example.test/image.png"}]},
+        False,
+    )
+    plugin.whatslink_service.get_preview.assert_not_awaited()
+    assert len(sent) == 1
+    text = "".join(item.text for item in sent[0])
+    assert "magnet:test" in text and "预览" not in text
+
+
+@pytest.mark.parametrize("preview,expected", [
+    (None, "结果1无预览图"),
+    ({"name": "测试", "screenshots": []}, "结果1无预览图"),
+    ({"name": "测试", "screenshots": [{}]}, "结果1无预览图"),
+    ({"name": "测试", "screenshots": [{"screenshot": "https://example.test/image.png"}]}, "结果1预览图"),
+])
+def test_preview_bridge_output_has_no_sender_prefix(bt_source, preview, expected):
+    sent, plugin = _run(
+        bt_source, "magnet_search_handler", "/bt 测试",
+        [{"title": "测试", "magnet_link": "magnet:test", "size": "1 GB", "create_time": "today"}],
+        preview, True,
+    )
+    plugin.whatslink_service.get_preview.assert_awaited_once_with("magnet:test")
+    bridge = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py"
+    expand = _runtime_function(bridge.read_text("utf-8"), "_expand_forward_nodes", {
+        "Mapping": Mapping, "UnsupportedSegmentError": ValueError,
+    })
+    nodes = [{**node, "content": [
+        {"type": "text", "data": {"text": item.text}} if hasattr(item, "text")
+        else {"type": "image", "data": {"file": item.url}}
+        for item in node["content"]
+    ]} for node in sent[1][0].nodes]
+    expanded = expand(nodes)
+    text = "".join(item["data"]["text"] for item in expanded[0] if item["type"] == "text")
+    assert text == expected
+    if expected == "结果1预览图":
+        assert expanded[0][1] == {"type": "image", "data": {"file": "https://example.test/image.png"}}
 
 
 @pytest.mark.parametrize("message,preview,expected", [

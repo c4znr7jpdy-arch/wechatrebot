@@ -268,6 +268,15 @@ def common_schema(module_name: str, schema: dict[str, Any]) -> dict[str, Any]:
                     result[key] = {**copy.deepcopy(field), "items": children}
         return result
     projected = select(schema) or schema
+    if module_name == "astrbot_plugin_bittorrent":
+        preview = projected.get("magnet_search", {}).get("items", {}).get("enable_preview")
+        if isinstance(preview, dict):
+            preview.update({
+                "description": "预览图开关",
+                "hint": "开启后附带预览信息和预览图；关闭后仅返回搜索结果，不再发送预览图或无预览图提示。/btp 手动预览不受影响。",
+                "_ui_group": "功能开关",
+                "_ui_full": True,
+            })
     if module_name == "jiang_image":
         groups = (
             ("主生图模型", ("primary_model",)),

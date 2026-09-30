@@ -1192,6 +1192,44 @@ def test_meme_pack_upload_has_its_own_limit_and_storage_directory(
         service.meme_pack_storage("feature-0123456789abcdef")
 
 
+@pytest.mark.parametrize("initial", [None, False, True])
+def test_bittorrent_preview_switch_preserves_and_saves_config(tmp_path: Path, initial) -> None:
+    install, _ = _install(tmp_path)
+    module = "astrbot_plugin_bittorrent"
+    plugin = install / "app/astrbot/data/plugins" / module
+    plugin.mkdir()
+    schema = {"magnet_search": {"type": "object", "description": "核心配置", "items": {
+        "base_url": {"type": "string", "default": "https://example.test"},
+        "max_results": {"type": "int", "default": 3},
+        "request_timeout": {"type": "int", "default": 15},
+        "enable_preview": {"type": "bool", "default": True},
+    }}}
+    (plugin / "_conf_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    config_path = install / "app/astrbot/data/config" / f"{module}_config.json"
+    stored = {"magnet_search": {"request_timeout": 23}, "unknown": "keep"}
+    if initial is not None:
+        stored["magnet_search"]["enable_preview"] = initial
+    config_path.write_text(json.dumps(stored), encoding="utf-8")
+    service = PluginCenterService(install)
+    service.engine.is_available = lambda: False
+    public_id = next(item["id"] for item in service.catalog()["plugins"]
+                     if item["display_name"] == "资源检索")
+    detail = service.detail(public_id)
+    field = detail["basic_schema"]["magnet_search"]["items"]["enable_preview"]
+    assert field["description"] == "预览图开关"
+    assert field["_ui_group"] == "功能开关" and field["type"] == "bool"
+    assert detail["config"]["magnet_search"]["enable_preview"] is (True if initial is None else initial)
+    for enabled in (False, True):
+        detail["config"]["magnet_search"]["enable_preview"] = enabled
+        assert service.save(public_id, detail["config"], detail["revision"])["saved"]
+        detail = service.detail(public_id)
+        assert detail["config"]["magnet_search"]["enable_preview"] is enabled
+        saved = json.loads(config_path.read_text("utf-8"))
+        assert saved["magnet_search"]["request_timeout"] == 23
+        assert saved["unknown"] == "keep"
+    assert "_ui_group" not in schema["magnet_search"]["items"]["enable_preview"]
+
+
 def test_offline_save_preserves_unknown_values_and_detects_conflict(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
     service = PluginCenterService(install)
