@@ -108,7 +108,11 @@ $link.Arguments = 'keep'
 $link.Save()
 '''
     assert shortcuts._run_shortcut_script(setup, environment)
-    assert shortcuts._run_shortcut_script(script, environment)
+    # Unattended Windows hosts may reject the optional Explorer icon refresh.
+    script = script.replace("& $iconRefresh.Source -show | Out-Null", "& $env:ComSpec /c exit 7")
+    completed = subprocess.run(["powershell.exe", "-NoProfile", "-Command", script],
+                               env=environment, capture_output=True)
+    assert completed.returncode == 0, repr(completed.stdout) + repr(completed.stderr)
     # Deleted desktop shortcuts must stay deleted; another installation stays untouched.
     assert not (tmp_path / "Desktop" / "WeChat ReBot.lnk").exists()
     inspect = r'''

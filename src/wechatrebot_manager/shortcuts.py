@@ -86,6 +86,9 @@ $iconRefresh = Get-Command ie4uinit.exe -ErrorAction SilentlyContinue
 if ($null -ne $iconRefresh) {
     & $iconRefresh.Source -show | Out-Null
 }
+# No interactive Explorer may be present (for example during unattended updates).
+# Shortcut saves above are authoritative; icon-cache refresh is best effort.
+exit 0
 """.strip()
 
 
