@@ -9,9 +9,78 @@ import subprocess
 from .installed_entries import START_EXECUTABLE_NAME, ensure_launcher_executable, native_uninstaller
 
 
+# WScript.Shell can reject non-ANSI target names on English Windows. Use the
+# Unicode Shell Link interface for creation, reading and updates on every host.
+_UNICODE_SHELL_SCRIPT = r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+
+[ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+class ShellLinkObject {}
+
+[ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, IntPtr findData, uint flags);
+    void GetIDList(out IntPtr value);
+    void SetIDList(IntPtr value);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int size);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int size);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+    void GetHotkey(out short value);
+    void SetHotkey(short value);
+    void GetShowCmd(out int value);
+    void SetShowCmd(int value);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, out int index);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+    void Resolve(IntPtr window, uint flags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+}
+
+public class UnicodeShortcut {
+    readonly IShellLinkW link;
+    readonly string file;
+    public UnicodeShortcut(string path) {
+        file = path;
+        link = (IShellLinkW)new ShellLinkObject();
+        if (File.Exists(path)) ((IPersistFile)link).Load(path, 0);
+    }
+    public string TargetPath {
+        get { var text = new StringBuilder(32768); link.GetPath(text, text.Capacity, IntPtr.Zero, 4); return text.ToString(); }
+        set { link.SetPath(value); }
+    }
+    public string Arguments {
+        get { var text = new StringBuilder(32768); link.GetArguments(text, text.Capacity); return text.ToString(); }
+        set { link.SetArguments(value); }
+    }
+    public string WorkingDirectory { set { link.SetWorkingDirectory(value); } }
+    public string Description { set { link.SetDescription(value); } }
+    public string IconLocation {
+        set {
+            int comma = value.LastIndexOf(',');
+            link.SetIconLocation(comma < 0 ? value : value.Substring(0, comma), comma < 0 ? 0 : int.Parse(value.Substring(comma + 1)));
+        }
+    }
+    public void Save() { ((IPersistFile)link).Save(file, true); }
+}
+
+public class UnicodeShortcutFactory {
+    public UnicodeShortcut CreateShortcut(string path) { return new UnicodeShortcut(path); }
+}
+'@
+""".strip()
+
+
 _SHORTCUT_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
-$shell = New-Object -ComObject WScript.Shell
+$shell = New-Object UnicodeShortcutFactory
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
 $launchTargets = @(
@@ -49,7 +118,7 @@ if (-not (Test-Path -LiteralPath $folderIni)) {
 
 _REFRESH_SHORTCUT_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
-$shell = New-Object -ComObject WScript.Shell
+$shell = New-Object UnicodeShortcutFactory
 $desktop = [Environment]::GetFolderPath('Desktop')
 $programs = [Environment]::GetFolderPath('Programs')
 $commonDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
@@ -166,7 +235,7 @@ def _run_shortcut_script(script: str, environment: dict[str, str]) -> bool:
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            _UNICODE_SHELL_SCRIPT + "\n" + script,
         ],
         env=environment,
         stdin=subprocess.DEVNULL,

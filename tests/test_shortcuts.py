@@ -94,7 +94,7 @@ def test_refresh_repairs_public_targets_and_preserves_other_installations(tmp_pa
         environment[f"TEST_{name}"] = str(folder)
         script = script.replace(f"[Environment]::GetFolderPath('{name}')", f"$env:TEST_{name}")
     setup = r'''
-$s = New-Object -ComObject WScript.Shell
+$s = New-Object UnicodeShortcutFactory
 $link = $s.CreateShortcut((Join-Path $env:TEST_CommonDesktopDirectory 'WeChat ReBot.lnk'))
 $link.TargetPath = Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR 'manager\WeChatReBot.exe'
 $link.Arguments = 'gui --install-root "old"'
@@ -110,14 +110,14 @@ $link.Save()
     assert shortcuts._run_shortcut_script(setup, environment)
     # Unattended Windows hosts may reject the optional Explorer icon refresh.
     script = script.replace("& $iconRefresh.Source -show | Out-Null", "& $env:ComSpec /c exit 7")
-    completed = subprocess.run(["powershell.exe", "-NoProfile", "-Command", script],
+    completed = subprocess.run(["powershell.exe", "-NoProfile", "-Command", shortcuts._UNICODE_SHELL_SCRIPT + "\n" + script],
                                env=environment, capture_output=True)
     assert completed.returncode == 0, repr(completed.stdout) + repr(completed.stderr)
     # Deleted desktop shortcuts must stay deleted; another installation stays untouched.
     assert not (tmp_path / "Desktop" / "WeChat ReBot.lnk").exists()
     inspect = r'''
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$s = New-Object -ComObject WScript.Shell
+$s = New-Object UnicodeShortcutFactory
 @((Join-Path $env:TEST_CommonDesktopDirectory 'WeChat ReBot.lnk'),
   (Join-Path $env:TEST_CommonPrograms '卸载微信机器人.lnk'),
   (Join-Path $env:TEST_Programs 'WeChat ReBot.lnk')) | ForEach-Object {
@@ -125,7 +125,7 @@ $s = New-Object -ComObject WScript.Shell
     @{target=$l.TargetPath; args=$l.Arguments}
 } | ConvertTo-Json -Compress
 '''
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", inspect],
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", shortcuts._UNICODE_SHELL_SCRIPT + "\n" + inspect],
                             env=environment, capture_output=True, check=True)
     rows = json.loads(result.stdout.decode("utf-8"))
     assert Path(rows[0]["target"]) == root / "启动机器人.exe"
