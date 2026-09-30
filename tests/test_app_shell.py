@@ -94,8 +94,8 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
     assert parsed["data"]["arguments"]["output"] == "image"
     assert parsed["data"]["status"] == "supported"
     blocked = api.parse_scheduled_command("签到")
-    assert blocked["data"]["status"] == "needs_condition"
-    assert "授权" in blocked["data"]["reason"]
+    assert blocked["data"]["status"] == "unsupported"
+    assert blocked["data"]["recognized"] is False
 
 
 def test_feature_command_reference_shows_scheduleability_status() -> None:
