@@ -103,6 +103,14 @@ export async function initNetworkSettings(bridge, onSettings) {
     if (pending || !loaded) return;
     const payload = Object.fromEntries(new FormData(form));
     payload.pre_download_media = form.elements.pre_download_media.checked;
+    payload.translate_enabled = form.elements.translate_enabled.checked;
+    payload.translate_timeout_seconds = Number(form.elements.translate_timeout_seconds.value);
+    if (!String(payload.translate_target_lang || "").trim() ||
+        !Number.isInteger(payload.translate_timeout_seconds) ||
+        payload.translate_timeout_seconds < 5 || payload.translate_timeout_seconds > 120) {
+      showError("请填写翻译目标语言，最长等待应为 5–120 秒。");
+      return;
+    }
     for (const key of ["fxtwitter_api_base", "nitter_url", "proxy"]) {
       const value = String(payload[key] || "").trim();
       if (!value && key !== "fxtwitter_api_base") continue;

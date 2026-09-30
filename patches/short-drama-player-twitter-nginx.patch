@@ -1,0 +1,16 @@
+--- a/short_drama_player.conf
++++ b/short_drama_player.conf
+@@ -78,6 +78,13 @@
+         add_header Cache-Control "no-store" always;
+     }
+ 
++    location ~ "^/short-drama/twitter/([A-Za-z0-9_-]{16,96})(/avatar)?$" {
++        proxy_pass http://127.0.0.1:6198/twitter/$1$2;
++        proxy_http_version 1.1;
++        proxy_set_header Host $host;
++        proxy_read_timeout 10s;
++    }
++
+     location = /short-drama/player {
+         root /var/www/short-drama-player;
+         try_files /index.html =404;

@@ -1,0 +1,25 @@
+--- a/selection_store.py
++++ b/selection_store.py
+@@ -84,6 +84,13 @@
+         payload = build_selection_payload(results, heading=heading, kind=kind)
+         if payload is None:
+             return None
++        token = await self.store_payload(payload)
++        return f"{self.player_url}?s={quote(token, safe='')}" if token else None
++
++    async def store_payload(self, payload: dict) -> str | None:
++        """Shared authenticated, bounded upload for selections and tweet pages."""
++        if not self.enabled:
++            return None
+         request_body = json.dumps(
+             {"payload": payload},
+             ensure_ascii=False,
+@@ -130,7 +137,7 @@
+                     if not re.fullmatch(r"[A-Za-z0-9_-]{16,96}", token):
+                         logger.warning("[SHORT_DRAMA] selection store returned invalid token")
+                         return None
+-                    return f"{self.player_url}?s={quote(token, safe='')}"
++                    return token
+         except (aiohttp.ClientError, OSError, TimeoutError, ValueError) as exc:
+             logger.warning(
+                 "[SHORT_DRAMA] selection store unavailable: %s",

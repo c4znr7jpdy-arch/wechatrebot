@@ -60,16 +60,13 @@ def format_tweet_time(tweet: dict) -> str:
     return parsed.astimezone(china_tz).strftime("%Y/%m/%d %H:%M")
 
 
-def build_card(username: str, tweet: dict, translated_text: str | None = None, *, public_base_url: str = ""):
-    bridge = TweetPageBridge(public_base_url)
+async def build_card(username: str, tweet: dict, translated_text: str | None = None, *, avatar_cache=None):
+    bridge = TweetPageBridge()
     snapshot = dict(tweet, username=tweet.get("username") or username,
                     display_date=format_tweet_time(tweet))
     if translated_text:
         snapshot["translated_text"] = translated_text
-    url = bridge.create_url(snapshot)
-    if not url:
-        raise ValueError("推文卡片缺少有效的帖子地址")
-    avatar = bridge.create_avatar_url(tweet) or str(tweet.get("avatar") or "")
+    url, avatar = await bridge.create_urls(snapshot, avatar_cache)
     author = str(tweet.get("username") or username).lstrip("@")
     summary = compact_summary(translated_text or tweet.get("text") or "")
     return Comp.Share(

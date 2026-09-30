@@ -367,7 +367,6 @@ class TwitterPlugin(Star):
                 translate_custom_prompt=self.translate_custom_prompt,
                 pre_download_media=self.pre_download_media,
                 proxy=self.proxy,
-                tweet_page_public_base_url=str(self._cfg("basic", "twitter_page_public_base_url", "") or ""),
             ),
             avatar_cache=AvatarCacheService(
                 self.twitter_api,

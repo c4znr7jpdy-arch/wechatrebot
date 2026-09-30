@@ -1,0 +1,74 @@
+--- a/state_server.py
++++ b/state_server.py
+@@ -8,6 +8,8 @@
+ from __future__ import annotations
+ 
+ import argparse
++import base64
++import binascii
+ import hashlib
+ import hmac
+ import ipaddress
+@@ -145,6 +147,21 @@
+     if not isinstance(payload, dict) or payload.get("v") != 1:
+         return None, "unsupported payload"
+     kind = payload.get("kind")
++    if kind == "tweet":
++        html = payload.get("html")
++        avatar = payload.get("avatar", "")
++        if not isinstance(html, str) or not html or len(html.encode("utf-8")) > 512 * 1024:
++            return None, "invalid tweet page"
++        if not isinstance(avatar, str) or len(avatar) > 256 * 1024:
++            return None, "invalid tweet avatar"
++        if avatar:
++            try:
++                data = base64.b64decode(avatar, validate=True)
++            except (ValueError, binascii.Error):
++                return None, "invalid tweet avatar"
++            if not data.startswith(b"\xff\xd8\xff") or not data.endswith(b"\xff\xd9"):
++                return None, "invalid tweet avatar"
++        return {"v": 1, "kind": kind, "html": html, "avatar": avatar}, None
+     if kind not in {"search", "recommendations"}:
+         return None, "unsupported selection kind"
+     heading = payload.get("heading")
+@@ -373,8 +390,40 @@
+         self.end_headers()
+         self.wfile.write(encoded)
+ 
++    def _send_tweet(self, path: str) -> None:
++        parts = path.removeprefix("/twitter/").split("/")
++        payload = self.state.get(parts[0]) if len(parts) <= 2 else None
++        avatar_request = len(parts) == 2 and parts[1] == "avatar"
++        if (not payload or payload.get("kind") != "tweet"
++                or (len(parts) == 2 and not avatar_request)):
++            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "tweet expired"})
++            return
++        if avatar_request:
++            if not payload.get("avatar"):
++                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "avatar unavailable"})
++                return
++            encoded = base64.b64decode(payload["avatar"], validate=True)
++            content_type = "image/jpeg"
++        else:
++            encoded = payload["html"].encode("utf-8")
++            content_type = "text/html; charset=utf-8"
++        self.send_response(HTTPStatus.OK)
++        self.send_header("Content-Type", content_type)
++        self.send_header("Content-Length", str(len(encoded)))
++        self.send_header("Cache-Control", "public, max-age=300")
++        self.send_header("X-Content-Type-Options", "nosniff")
++        self.send_header("Referrer-Policy", "no-referrer")
++        self.send_header("Content-Security-Policy", "sandbox; default-src 'none'; "
++                         "style-src 'unsafe-inline'; img-src data: https:; media-src https:; "
++                         "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
++        self.end_headers()
++        self.wfile.write(encoded)
++
+     def do_GET(self) -> None:  # noqa: N802
+         path = unquote(urlsplit(self.path).path)
++        if path.startswith("/twitter/"):
++            self._send_tweet(path)
++            return
+         if path == "/health":
+             self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
+             return

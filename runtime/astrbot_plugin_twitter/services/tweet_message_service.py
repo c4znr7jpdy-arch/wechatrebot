@@ -38,7 +38,6 @@ class TweetMessageSettings:
     pre_download_media: bool
     proxy: str | None
     translate_timeout_seconds: int = 60
-    tweet_page_public_base_url: str = ""
 
 
 @dataclass(slots=True)
@@ -523,8 +522,8 @@ class TweetMessageService:
             if tweet_info.get("is_r18") and not (sub_config or {}).get("r18", True):
                 return []
             try:
-                return [build_card(username, tweet_info, translated_text,
-                                   public_base_url=self.settings.tweet_page_public_base_url)]
+                return [await build_card(username, tweet_info, translated_text,
+                                         avatar_cache=self.avatar_cache)]
             except Exception as exc:
                 logger.warning(f"推文卡片构建失败，回退文字: {type(exc).__name__}")
         if mode != "screenshot":
