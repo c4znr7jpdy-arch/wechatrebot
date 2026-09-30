@@ -28,6 +28,7 @@ def _load_patched_store(tmp_path: Path):
     for patch in (
         ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzz-network-safety.patch",
         ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzzz-selection-store-safety.patch",
+        ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzzzzz-twitter-pages.patch",
     ):
         subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
         subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)

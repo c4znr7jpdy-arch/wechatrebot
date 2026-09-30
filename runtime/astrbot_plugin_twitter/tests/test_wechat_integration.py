@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import copy
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -70,6 +72,9 @@ async def test_three_message_modes_and_native_card(plugin, monkeypatch, mode):
         def __init__(self, **kw):
             self.__dict__.update(kw)
     components.Share = Share
+    bridge = importlib.import_module(f"{type(plugin).__module__.rsplit('.', 1)[0]}.services.tweet_page_server")
+    monkeypatch.setattr(bridge.TweetPageBridge, "create_urls", AsyncMock(return_value=(
+        "https://player.example/short-drama/twitter/test-token", "https://player.example/avatar.jpg")))
     messages = plugin.message_service
     messages.build_screenshot_tweet_chain = AsyncMock(return_value=[Image(file="screenshot.png")])
     tweet = {"username": "OpenAI", "tweet_id": "1234567890", "text": "测试推文 hello",
@@ -79,7 +84,8 @@ async def test_three_message_modes_and_native_card(plugin, monkeypatch, mode):
         assert isinstance(chain[0], Share)
         assert chain[0].title == "@OpenAI发了新推文"
         assert "2026/09/24 09:00" in chain[0].content
-        assert chain[0].url == "https://x.com/OpenAI/status/1234567890"
+        assert chain[0].url == "https://player.example/short-drama/twitter/test-token"
+        assert chain[0].image == "https://player.example/avatar.jpg"
     elif mode == "screenshot":
         assert isinstance(chain[0], Image)
     else:
@@ -181,6 +187,78 @@ async def test_saving_restarts_only_plugin_health_task(plugin):
     assert not plugin.network_settings.checking
     assert plugin._provider_ready
     plugin._running = False
+
+
+@pytest.mark.asyncio
+async def test_translation_save_applies_to_cards_without_reload(plugin, monkeypatch):
+    settings = plugin.network_settings.settings() | {"translate_enabled": True,
+        "translate_target_lang": "简体中文", "translate_timeout_seconds": 20}
+    await plugin.network_settings.save(settings)
+    assert plugin.config.saved["translation"]["twitter_translate_enabled"] is True
+    assert plugin.message_service.settings.translate_timeout_seconds == 20
+    plugin.context.get_current_chat_provider_id = AsyncMock(return_value="model")
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text="这是译文"))
+    plugin.context.get_provider_by_id = lambda _: None
+    text, model = await plugin.message_service.maybe_translate({"text": "original"}, "session")
+    assert (text, model) == ("这是译文", "model")
+    card_module = importlib.import_module(f"{type(plugin).__module__.rsplit('.', 1)[0]}.services.wechat_card")
+    sys.modules["astrbot.api.message_components"].Share = lambda **kw: SimpleNamespace(**kw)
+    create = AsyncMock(return_value=("https://player.example/tweet", "https://player.example/avatar"))
+    monkeypatch.setattr(card_module.TweetPageBridge, "create_urls", create)
+    card = await card_module.build_card("author", {"text": "original"}, text)
+    assert "这是译文" in card.content
+    assert create.call_args.args[0]["text"] == "original"
+    assert create.call_args.args[0]["translated_text"] == text
+
+
+@pytest.mark.asyncio
+async def test_hosted_card_uploads_cached_author_avatar(plugin, monkeypatch):
+    module = importlib.import_module(f"{type(plugin).__module__.rsplit('.', 1)[0]}.services.tweet_page_server")
+    # The renderer is owned by the existing content plugin, not a duplicate template.
+    monkeypatch.setattr(sys.modules[__name__], "_tweet_page_html",
+        lambda t: f'<img src="{t["avatar"]}"><p>{t["translated_text"]}</p>', raising=False)
+    class Server:
+        pass
+    store = SimpleNamespace(enabled=True, player_url="https://player.example/short-drama/player",
+                            store_payload=AsyncMock(return_value="abcdefghijklmnopqrstuvwx"))
+    monkeypatch.setattr(module.TweetPageBridge, "_active_plugin", lambda _: SimpleNamespace(
+        selection_store=store, player_server=Server()))
+    uri = "data:image/png;base64," + base64.b64encode(
+        (Path(__file__).parents[1] / "logo.png").read_bytes()).decode()
+    cache = SimpleNamespace(get=AsyncMock(return_value=uri))
+    tweet = {"avatar": "https://pbs.twimg.com/author.png", "translated_text": "译文",
+             "retweet": {"avatar": "https://pbs.twimg.com/wrong.png"}}
+    url, avatar = await module.TweetPageBridge().create_urls(tweet, cache)
+    cache.get.assert_awaited_once_with(tweet["avatar"])
+    payload = store.store_payload.call_args.args[0]
+    assert base64.b64decode(payload["avatar"]).startswith(b"\xff\xd8\xff")
+    assert 'src="data:image/jpeg;base64,' in payload["html"]
+    assert "pbs.twimg.com" not in payload["html"]
+    assert avatar == url + "/avatar"
+    assert url.startswith("https://player.example/short-drama/twitter/")
+    store.store_payload.return_value = None
+    with pytest.raises(ValueError, match="保存失败"):
+        await module.TweetPageBridge().create_urls(tweet, cache)
+    cache.get.return_value = None
+    with pytest.raises(ValueError, match="头像下载失败"):
+        await module.TweetPageBridge().create_urls(tweet, cache)
+
+
+@pytest.mark.asyncio
+async def test_missing_hosted_service_falls_back_to_text(plugin, monkeypatch):
+    module = importlib.import_module(f"{type(plugin).__module__.rsplit('.', 1)[0]}.services.tweet_page_server")
+    monkeypatch.setattr(module.TweetPageBridge, "_active_plugin", lambda _: None)
+    chain = await plugin.message_service.build_message_chain("author", {"text": "正文"}, {"delivery_mode": "card"})
+    assert any(isinstance(c, Plain) and "正文" in c.text for c in chain)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("translate_enabled", "false"), ("translate_timeout_seconds", True),
+    ("translate_timeout_seconds", 0), ("translate_target_lang", " ")])
+async def test_invalid_translation_does_not_write_config(plugin, field, value):
+    with pytest.raises(ValueError):
+        await plugin.network_settings.save(plugin.network_settings.settings() | {field: value})
+    assert not hasattr(plugin.config, "saved")
 
 
 @pytest.mark.parametrize("proxy", ["127.0.0.1:7892", "http://127.0.0.1", "http://host:99999", "file:///secret", "http://host:80/path"])

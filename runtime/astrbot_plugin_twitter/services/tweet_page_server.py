@@ -1,104 +1,67 @@
-"""Bridge Twitter card URLs to the existing public content server."""
+"""Publish tweet pages through the existing authenticated content service."""
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import importlib
-from urllib.parse import quote, urlsplit, urlunsplit
+from html import escape
+from io import BytesIO
 
-
-def _valid_public_base(value: object) -> str:
-    text = str(value or "").strip().rstrip("/")
-    if not text:
-        return ""
-    parsed = urlsplit(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return ""
-    if parsed.query or parsed.fragment:
-        return ""
-    return text
+from PIL import Image
 
 
 class TweetPageBridge:
-    """Create card URLs through the local page server with a public fallback."""
-
-    def __init__(self, public_base_url: object = "") -> None:
-        self.public_base_url = _valid_public_base(public_base_url)
-
-    def _rewrite_public_base(self, url: str | None) -> str | None:
-        if not url or not self.public_base_url:
-            return url
-        generated = urlsplit(url)
-        override = urlsplit(self.public_base_url)
-        base_path = override.path.rstrip("/")
-        path = f"{base_path}{generated.path}" if base_path else generated.path
-        return urlunsplit(
-            (override.scheme, override.netloc, path, generated.query, "")
-        )
-
     @staticmethod
-    def _active_server():
+    def _active_plugin():
         for module_name in (
             "data.plugins.jiang_short_drama.main",
             "jiang_short_drama.main",
         ):
             try:
                 module = importlib.import_module(module_name)
-                plugin = getattr(module, "_ACTIVE_PLUGIN", None)
-                server = getattr(plugin, "player_server", None)
-                if server is not None:
-                    return server
-            except Exception:
+            except ImportError:
                 continue
+            plugin = getattr(module, "_ACTIVE_PLUGIN", None)
+            if plugin is not None:
+                return plugin
         return None
 
     @staticmethod
-    def _direct_tweet_url(tweet_info: dict) -> str | None:
-        """Return a safe public X status URL when no local page is available.
+    def _avatar_jpeg(uri: str) -> str:
+        raw = base64.b64decode(uri.split(",", 1)[1], validate=True)
+        with Image.open(BytesIO(raw)) as image:
+            if image.width * image.height > 16_000_000:
+                raise ValueError("推主头像像素过大")
+            image.thumbnail((240, 240))
+            output = BytesIO()
+            image.convert("RGB").save(output, "JPEG", quality=88)
+        return base64.b64encode(output.getvalue()).decode("ascii")
 
-        The page server stores tweet snapshots in memory, so it can be disabled
-        in deployments that only expose the stateless short-drama player.  A
-        native WeChat link card can still be sent with the public status URL;
-        keeping this fallback here prevents that infrastructure detail from
-        changing the subscriber's selected delivery mode to plain text.
-        """
-        if not isinstance(tweet_info, dict):
-            return None
-        username = str(tweet_info.get("username") or "").strip().lstrip("@")
-        tweet_id = str(tweet_info.get("tweet_id") or "").strip()
-        if not username or not tweet_id.isdigit():
-            return None
-        if len(username) > 128 or any(
-            character in username for character in "/?#\\"
-        ):
-            return None
-        return f"https://x.com/{quote(username, safe='')}/status/{tweet_id}"
-
-    def create_url(self, tweet_info: dict) -> str | None:
-        try:
-            server = self._active_server()
-        except Exception:
-            server = None
-        if server is not None and hasattr(server, "create_tweet_url"):
-            try:
-                url = server.create_tweet_url(tweet_info)
-            except Exception:
-                url = None
-            if url:
-                return self._rewrite_public_base(url)
-        return self._direct_tweet_url(tweet_info)
-
-    def create_avatar_url(self, tweet_info: dict) -> str | None:
-        source_url = str(tweet_info.get("avatar") or "").strip()
-        if not source_url:
-            return None
-        try:
-            server = self._active_server()
-        except Exception:
-            return None
-        if server is None or not hasattr(server, "create_card_cover_url"):
-            return None
-        try:
-            url = server.create_card_cover_url(source_url)
-        except Exception:
-            return None
-        return self._rewrite_public_base(url)
+    async def create_urls(self, snapshot: dict, avatar_cache) -> tuple[str, str]:
+        plugin = self._active_plugin()
+        store = getattr(plugin, "selection_store", None)
+        if store is None or not store.enabled or not hasattr(store, "store_payload"):
+            raise ValueError("推文页面服务未配置，请检查内容服务")
+        # Reuse the original renderer even though its local listener is disabled.
+        server = plugin.player_server
+        renderer = importlib.import_module(type(server).__module__)._tweet_page_html
+        avatar_source = str(snapshot.get("avatar") or "")
+        uri = await avatar_cache.get(avatar_source) if avatar_cache else None
+        if avatar_source and not uri:
+            raise ValueError("推主头像下载失败，暂时使用文字推送")
+        avatar = await asyncio.to_thread(self._avatar_jpeg, uri) if uri else ""
+        html = renderer(snapshot)
+        if avatar:
+            html = html.replace(
+                f'src="{escape(avatar_source, quote=True)}"',
+                f'src="data:image/jpeg;base64,{avatar}"',
+            )
+        token = await store.store_payload({
+            "v": 1, "kind": "tweet", "html": html, "avatar": avatar,
+        })
+        if not token:
+            raise ValueError("推文页面保存失败，暂时使用文字推送")
+        base = store.player_url.removesuffix("/player")
+        url = f"{base}/twitter/{token}"
+        return url, f"{url}/avatar" if avatar else ""
