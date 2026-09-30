@@ -74,7 +74,7 @@ from .response_trace import ResponseTraceService
 from .retired_plugins import purge_retired_plugins
 from .schedules import ScheduleService
 from .scheduled_task_service import ScheduledTaskService
-from .task_store import inspect_scheduled_command, next_occurrences, parse_command, schedule_text
+from .task_store import inspect_scheduled_command, next_occurrences, schedule_text
 from .updates import (
     MandatoryUpdateUnavailable,
     UpdateChannel,
@@ -1116,7 +1116,7 @@ class ApplicationApi:
     def get_schedules(self) -> dict[str, object]:
         try:
             return self._ok(self._schedules.list())
-        except (OSError, ValueError, sqlite3.Error) as exc:
+        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
             return self._failed(exc)
 
     def _scheduled_task_service(self) -> ScheduledTaskService:
@@ -1168,19 +1168,19 @@ class ApplicationApi:
     def set_schedule_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
         try:
             return self._ok(self._schedules.set_enabled(job_id, bool(enabled)))
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
     def update_schedule_time(self, job_id: str, value: str) -> dict[str, object]:
         try:
             return self._ok(self._schedules.update_time(job_id, value))
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
     def delete_schedule(self, job_id: str) -> dict[str, object]:
         try:
             return self._ok(self._schedules.delete(job_id))
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
     def get_activity(self) -> dict[str, object]:

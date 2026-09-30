@@ -110,6 +110,23 @@ def test_feature_command_reference_shows_scheduleability_status() -> None:
     assert "command-schedule-status" in styles
 
 
+@pytest.mark.parametrize("operation,args,method", [
+    ("get_schedules", (), "list"),
+    ("set_schedule_enabled", ("job", False), "set_enabled"),
+    ("update_schedule_time", ("job", "09:00"), "update_time"),
+    ("delete_schedule", ("job",), "delete"),
+])
+@pytest.mark.parametrize("error", [app_shell.PluginCenterError("service unavailable"), app_shell.sqlite3.OperationalError("database is locked")])
+def test_legacy_schedule_errors_return_a_webui_error(tmp_path, operation, args, method, error):
+    api = _api(tmp_path)
+    def fail(*_args):
+        raise error
+    api._schedules = SimpleNamespace(**{method: fail})
+    result = getattr(api, operation)(*args)
+    assert result["ok"] is False
+    assert result["error"]["message"]
+
+
 def test_policy_errors_expose_user_validation_but_not_raw_io_failures(tmp_path):
     api = _api(tmp_path)
     for error, code in [
