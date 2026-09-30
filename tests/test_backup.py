@@ -167,3 +167,77 @@ def test_restore_refuses_backup_stored_inside_customer_data(tmp_path: Path) -> N
 
     with pytest.raises(BackupError, match="恢复文件不能存放"):
         restore_customer_backup(install, backup)
+
+
+@pytest.mark.parametrize("rollback_fails", [False, True])
+def test_restore_preserves_recovery_material_when_rollback_fails(
+    tmp_path: Path, monkeypatch, rollback_fails: bool,
+) -> None:
+    from wechatrebot_manager import backup as module
+
+    install = tmp_path / "install"
+    _install(install)
+    archive = tmp_path / "backup.zip"
+    create_customer_backup(install, archive)
+    current = install / "config/manager.json"
+    current.write_text('{"api_key": "latest"}', encoding="utf-8")
+    before = current.read_bytes()
+    replace = module.os.replace
+
+    def fail_replace(source, target):
+        source = Path(source)
+        if ".restore-" in str(source) and Path(target) == install / "data/memory.json":
+            raise PermissionError("simulated restore failure")
+        if rollback_fails and ".restore-rollback-" in str(source):
+            raise PermissionError("simulated rollback failure")
+        return replace(source, target)
+
+    monkeypatch.setattr(module.os, "replace", fail_replace)
+    if rollback_fails:
+        with pytest.raises(BackupError, match="回滚失败"):
+            restore_customer_backup(install, archive)
+        recoveries = list((install / "backups").glob("pre-restore-*.zip"))
+        assert len(recoveries) == 1
+        with zipfile.ZipFile(recoveries[0]) as saved:
+            assert saved.read("config/manager.json") == before
+        rollback = list((install / "updates").glob(".restore-rollback-*"))
+        assert len(rollback) == 1
+        assert (rollback[0] / "config/manager.json").read_bytes() == before
+    else:
+        with pytest.raises(PermissionError, match="restore failure"):
+            restore_customer_backup(install, archive)
+        assert current.read_bytes() == before
+        assert not list((install / "updates").glob(".restore-*"))
+
+
+def test_backup_rejects_link_in_parent_of_nested_data_root(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    _install(install)
+    outside = tmp_path / "outside"
+    (outside / "astrbot/data/config").mkdir(parents=True)
+    (outside / "astrbot/data/config/secret.json").write_text("private")
+    try:
+        (install / "app").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable in this environment")
+    with pytest.raises(BackupError, match="符号链接|目录联接"):
+        create_customer_backup(install, tmp_path / "backup.zip")
+
+
+@pytest.mark.parametrize("directory", ["updates", "backups"])
+def test_restore_rejects_redirected_transaction_directory(tmp_path, directory):
+    install = tmp_path / "install"
+    _install(install)
+    archive = tmp_path / "backup.zip"
+    create_customer_backup(install, archive)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (install / directory).symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable in this environment")
+    before = (install / "config/manager.json").read_bytes()
+    with pytest.raises(BackupError, match="符号链接|目录联接"):
+        restore_customer_backup(install, archive)
+    assert not list(outside.iterdir())
+    assert (install / "config/manager.json").read_bytes() == before

@@ -412,7 +412,7 @@ def payload_requires_runtime_stop(payload_root: str | Path) -> bool:
     return any(path.parts[0].casefold() in {"app", "runtime"} for path in paths)
 
 
-def _checked_target(root: Path, relative: Path) -> Path:
+def _checked_target(root: Path, relative: Path, *, allow_directory: bool = False) -> Path:
     candidate = root / relative
     for component in (candidate, *candidate.parents):
         if component == root.parent:
@@ -426,7 +426,7 @@ def _checked_target(root: Path, relative: Path) -> Path:
         target.relative_to(root)
     except ValueError as exc:
         raise PayloadError(f"安装目标越过根目录：{relative.as_posix()}") from exc
-    if target.exists() and not target.is_file():
+    if target.exists() and not target.is_file() and not (allow_directory and target.is_dir()):
         raise PayloadError(f"安装目标不是普通文件：{relative.as_posix()}")
     return target
 

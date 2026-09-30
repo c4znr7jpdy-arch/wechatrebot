@@ -11,7 +11,7 @@ import zipfile
 
 from . import __version__
 from .install_paths import INSTALL_MARKER
-from .payload import sha256_file
+from .payload import PayloadError, _checked_target, sha256_file
 
 
 BACKUP_ROOTS = (
@@ -50,7 +50,10 @@ def backup_source_files(install_root: str | Path) -> tuple[tuple[Path, Path], ..
 
     files: list[tuple[Path, Path]] = []
     for name in BACKUP_ROOTS:
-        source_root = root.joinpath(*PurePosixPath(name).parts)
+        try:
+            source_root = _checked_target(root, Path(name), allow_directory=True)
+        except PayloadError as exc:
+            raise BackupError(str(exc)) from exc
         if not source_root.exists():
             continue
         if not source_root.is_dir() or _is_link(source_root):
@@ -247,8 +250,11 @@ def restore_customer_backup(
         raise BackupError("恢复文件不能存放在将被恢复的 config 或 data 目录内。")
     backup_source_files(root)
 
-    updates = root / "updates"
-    backups = root / "backups"
+    try:
+        updates = _checked_target(root, Path("updates"), allow_directory=True)
+        backups = _checked_target(root, Path("backups"), allow_directory=True)
+    except PayloadError as exc:
+        raise BackupError(str(exc)) from exc
     updates.mkdir(parents=True, exist_ok=True)
     backups.mkdir(parents=True, exist_ok=True)
     transaction_id = uuid.uuid4().hex
@@ -260,6 +266,7 @@ def restore_customer_backup(
     recovery_point = backups / f"pre-restore-{timestamp}.zip"
     replaced: list[tuple[Path, Path | None]] = []
     restored_count = 0
+    rollback_failed = False
     try:
         with zipfile.ZipFile(source) as archive:
             _, entries = _validated_restore_entries(archive)
@@ -274,13 +281,10 @@ def restore_customer_backup(
         create_customer_backup(root, recovery_point)
         for staged in sorted(path for path in stage.rglob("*") if path.is_file()):
             relative = staged.relative_to(stage)
-            target = root / relative
-            lineage = [target, *target.parents]
-            for component in lineage:
-                if component == root.parent:
-                    break
-                if component.exists() and _is_link(component):
-                    raise BackupError(f"恢复目标经过符号链接：{relative.as_posix()}")
+            try:
+                target = _checked_target(root, relative)
+            except PayloadError as exc:
+                raise BackupError(str(exc)) from exc
             target.parent.mkdir(parents=True, exist_ok=True)
             previous: Path | None = None
             if target.exists():
@@ -292,20 +296,28 @@ def restore_customer_backup(
             os.replace(staged, target)
             replaced.append((target, previous))
             restored_count += 1
-    except Exception:
+    except Exception as exc:
+        rollback_errors: list[Path] = []
         for target, previous in reversed(replaced):
             try:
                 if previous is None:
                     target.unlink(missing_ok=True)
-                elif previous.exists():
+                else:
                     os.replace(previous, target)
             except OSError:
-                pass
+                rollback_errors.append(target)
+        if rollback_errors:
+            rollback_failed = True
+            raise BackupError(
+                f"恢复失败且部分文件回滚失败，已保留恢复点：{recovery_point}；"
+                f"原文件备份：{rollback}。请先恢复数据再启动机器人。"
+            ) from exc
         recovery_point.unlink(missing_ok=True)
         raise
     finally:
         shutil.rmtree(stage, ignore_errors=True)
-        shutil.rmtree(rollback, ignore_errors=True)
+        if not rollback_failed:
+            shutil.rmtree(rollback, ignore_errors=True)
     return {
         "schema_version": 1,
         "restored_file_count": restored_count,

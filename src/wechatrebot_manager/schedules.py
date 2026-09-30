@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from .customer_logs import sanitize_log_text
 from .json_io import write_json_atomic
-from .plugin_center import EngineApiClient, PluginCenterError
+from .plugin_center import EngineApiClient
 
 
 _INTERNAL_MARKERS = (
@@ -163,6 +163,11 @@ class ScheduleService:
     def list(self) -> dict[str, object]:
         if not self.database.is_file():
             return {"items": [], "running": 0, "paused": 0}
+        with self._connect() as connection:
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cron_jobs'"
+            ).fetchone() is None:
+                return {"items": [], "running": 0, "paused": 0}
         self._remove_obsolete_default_checkins()
         with self._connect() as connection:
             rows = connection.execute(
@@ -227,6 +232,7 @@ class ScheduleService:
         for row in obsolete:
             job_id = str(row["job_id"])
             name = str(row["name"] or "")
+            self._validate_source(name)
             if self.engine.is_available():
                 self.engine.request(
                     "DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}"
@@ -288,9 +294,27 @@ class ScheduleService:
     def _read_tasks(path: Path) -> dict[str, Any]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        except (FileNotFoundError, OSError, json.JSONDecodeError):
+        except FileNotFoundError:
             return {"tasks": []}
-        return payload if isinstance(payload, dict) else {"tasks": []}
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("定时任务来源配置无法读取，请先修复配置后重试。") from exc
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("tasks"), list)
+            or any(not isinstance(task, dict) for task in payload["tasks"])
+        ):
+            raise ValueError("定时任务来源配置格式不正确，请先修复配置后重试。")
+        return payload
+
+    def _validate_source(self, name: str) -> None:
+        """Reject unreadable sources before changing a live job or its database."""
+        kind = _source_kind(name)
+        if kind in {"weather", "oilprice", "kfc", "news", "bili", "checkin"}:
+            self._read_tasks(self._schedule_tasks_path())
+            if kind == "checkin":
+                self._read_checkin_config()
+        elif kind == "short_drama":
+            self._read_tasks(self._drama_tasks_path())
 
     def _update_source(
         self,
@@ -304,19 +328,18 @@ class ScheduleService:
         if kind in {"weather", "oilprice", "kfc", "news", "bili", "checkin"}:
             if kind == "checkin":
                 self._update_checkin_config(
+                    name=name,
                     enabled=enabled,
                     clock=clock,
                     delete=delete,
                 )
             path = self._schedule_tasks_path()
             payload = self._read_tasks(path)
-            tasks = payload.get("tasks")
-            tasks = tasks if isinstance(tasks, list) else []
+            tasks = payload["tasks"]
             kept: list[dict[str, Any]] = []
             for raw in tasks:
-                if not isinstance(raw, dict) or _task_name(raw) != name:
-                    if isinstance(raw, dict):
-                        kept.append(raw)
+                if _task_name(raw) != name:
+                    kept.append(raw)
                     continue
                 if delete:
                     continue
@@ -332,13 +355,11 @@ class ScheduleService:
             task_id = name.removeprefix("short_drama_recommend_")
             path = self._drama_tasks_path()
             payload = self._read_tasks(path)
-            tasks = payload.get("tasks")
-            tasks = tasks if isinstance(tasks, list) else []
+            tasks = payload["tasks"]
             kept = []
             for raw in tasks:
-                if not isinstance(raw, dict) or str(raw.get("id")) != task_id:
-                    if isinstance(raw, dict):
-                        kept.append(raw)
+                if str(raw.get("id")) != task_id:
+                    kept.append(raw)
                     continue
                 if delete:
                     continue
@@ -351,13 +372,7 @@ class ScheduleService:
             payload["tasks"] = kept
             write_json_atomic(path, payload)
 
-    def _update_checkin_config(
-        self,
-        *,
-        enabled: bool | None = None,
-        clock: tuple[int, int] | None = None,
-        delete: bool = False,
-    ) -> None:
+    def _read_checkin_config(self) -> dict[str, Any]:
         path = self._checkin_config_path()
         try:
             payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -367,12 +382,28 @@ class ScheduleService:
             # installations too, otherwise plugin startup seeds an enabled
             # default task and makes a deleted job reappear.
             payload = {"version": 1, "accounts": [], "schedule": {}}
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ValueError("签到定时配置读取失败，请先在签到设置中重新保存。") from exc
         if not isinstance(payload, dict):
             raise ValueError("签到定时配置格式不正确，请先在签到设置中重新保存。")
+        return payload
+
+    def _update_checkin_config(
+        self,
+        *,
+        name: str,
+        enabled: bool | None = None,
+        clock: tuple[int, int] | None = None,
+        delete: bool = False,
+    ) -> None:
+        payload = self._read_checkin_config()
         schedule = payload.get("schedule")
         schedule = dict(schedule) if isinstance(schedule, dict) else {}
+        session = str(schedule.get("session") or "")
+        if session and name != f"checkin_{session}":
+            # A stale target-less cron row must not disable the valid schedule
+            # the user configured after that row was originally seeded.
+            return
         if delete:
             schedule["enabled"] = False
         elif enabled is not None:
@@ -384,10 +415,11 @@ class ScheduleService:
         if not isinstance(accounts, list):
             payload["accounts"] = []
         payload.setdefault("version", 1)
-        write_json_atomic(path, payload)
+        write_json_atomic(self._checkin_config_path(), payload)
 
     def set_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
         row = self._job(job_id)
+        self._validate_source(str(row["name"]))
         online = self._engine_update(job_id, {"enabled": enabled})
         self._update_source(str(row["name"]), enabled=enabled)
         if not online:
@@ -395,7 +427,7 @@ class ScheduleService:
                 job_id,
                 enabled=int(enabled),
                 status="scheduled" if enabled else "paused",
-                next_run_time=None if not enabled else None,
+                next_run_time=None,
             )
         return {"updated": True, "enabled": enabled, "applied": online,
                 "message": "任务状态已生效。" if online else "任务状态已保存，启动机器人后使用。"}
@@ -412,15 +444,17 @@ class ScheduleService:
         if len(parts) != 5:
             raise ValueError("这个任务暂不支持修改执行时间。")
         expression = " ".join((str(minute), str(hour), *parts[2:]))
+        self._validate_source(str(row["name"]))
         online = self._engine_update(job_id, {"cron_expression": expression})
         self._update_source(str(row["name"]), clock=(hour, minute))
         if not online:
-            self._offline_update(job_id, cron_expression=expression)
+            self._offline_update(job_id, cron_expression=expression, next_run_time=None)
         return {"updated": True, "cron_expression": expression, "applied": online,
                 "message": "执行时间已生效。" if online else "执行时间已保存，启动机器人后使用。"}
 
     def delete(self, job_id: str) -> dict[str, object]:
         row = self._job(job_id)
+        self._validate_source(str(row["name"]))
         deleted_online = self.engine.is_available()
         if deleted_online:
             self.engine.request("DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}")

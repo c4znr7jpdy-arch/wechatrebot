@@ -281,3 +281,59 @@ def test_online_schedule_error_never_falls_back_to_silent_disk_edit(tmp_path, mo
             service.delete(job_id)
     assert service._schedule_tasks_path().read_bytes() == before
     assert service.list()["items"][0]["cron_expression"] == "0 8 * * *"
+
+
+@pytest.mark.parametrize("online", [False, True])
+@pytest.mark.parametrize("action", ["time", "toggle", "delete"])
+@pytest.mark.parametrize("corrupt", ['{"tasks": [', '[]', '{"tasks": {}}', '{"tasks": [null]}'])
+def test_invalid_source_is_not_overwritten_or_submitted(tmp_path, monkeypatch, online, action, corrupt):
+    database, job_id = _database(tmp_path)
+    service = ScheduleService(tmp_path)
+    source = service._schedule_tasks_path()
+    source.write_text(corrupt, encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(service.engine, "is_available", lambda: online)
+    monkeypatch.setattr(service.engine, "request", lambda *args: calls.append(args))
+    with pytest.raises(ValueError, match="定时任务.*配置"):
+        if action == "time":
+            service.update_time(job_id, "09:30")
+        elif action == "toggle":
+            service.set_enabled(job_id, False)
+        else:
+            service.delete(job_id)
+    assert source.read_text(encoding="utf-8") == corrupt
+    assert calls == []
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT enabled, cron_expression FROM cron_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone() == (1, "0 8 * * *")
+
+
+def test_list_with_engine_database_before_scheduler_initialization(tmp_path):
+    service = ScheduleService(tmp_path)
+    service.database.parent.mkdir(parents=True)
+    with sqlite3.connect(service.database) as connection:
+        connection.execute("CREATE TABLE unrelated (id TEXT)")
+    assert service.list() == {"items": [], "running": 0, "paused": 0}
+
+
+def test_offline_time_change_invalidates_old_next_run_time(tmp_path, monkeypatch):
+    _database(tmp_path)
+    service = ScheduleService(tmp_path)
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+    service.update_time("job-weather", "09:30")
+    assert service.list()["items"][0]["next_run_time"] == ""
+
+
+def test_obsolete_checkin_cleanup_preserves_current_authorized_schedule(tmp_path, monkeypatch):
+    database, _ = _checkin_database(tmp_path)
+    service = ScheduleService(tmp_path)
+    original = service._checkin_config_path().read_bytes()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO cron_jobs (job_id, name, payload, enabled) VALUES (?, ?, ?, ?)",
+            ("obsolete", "checkin_", '{"session": ""}', 1),
+        )
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+    assert {item["id"] for item in service.list()["items"]} == {"job-weather", "job-checkin"}
+    assert service._checkin_config_path().read_bytes() == original
