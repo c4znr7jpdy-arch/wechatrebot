@@ -180,7 +180,8 @@
     {
       "origin": "project",
       "source": "data/plugins/jiang_schedule",
-      "target": "app/astrbot/data/plugins/jiang_schedule"
+      "target": "app/astrbot/data/plugins/jiang_schedule",
+      "exclude": ["pages"]
     },
     {
       "origin": "project",
@@ -295,6 +296,7 @@
       "target": "app/astrbot/ai_plugin/ai_plugin",
       "exclude": [
         "weather_test.png",
+        "checkin.py",
         "help_card.py",
         "plugin_manager.py"
       ]

@@ -21,7 +21,7 @@
     {"module": "jiang_mystool", "display_name": "米游社签到", "ownership": "owner", "configuration": "none", "default_enabled": true, "description": "提供米游社账号绑定、查询和签到能力。"},
     {"module": "jiang_repeater", "display_name": "复读功能", "ownership": "owner", "configuration": "none", "default_enabled": true, "description": "在群内出现连续相同消息时进行轻量互动。"},
     {"module": "jiang_rocom", "display_name": "洛克王国助手", "ownership": "owner", "configuration": "none", "default_enabled": true, "description": "提供洛克王国角色、阵容、交换与家园等游戏能力，并需要按插件流程绑定账号。"},
-    {"module": "jiang_schedule", "display_name": "定时任务", "ownership": "owner", "configuration": "page-and-global-schedule-center", "default_enabled": true, "description": "集中管理新闻、天气、内容推送和多站点签到计划。"},
+    {"module": "jiang_schedule", "display_name": "定时任务", "ownership": "owner", "configuration": "none", "default_enabled": true, "description": "集中管理新闻、天气和内容推送计划。"},
     {"module": "jiang_short_drama", "display_name": "短剧", "ownership": "owner", "configuration": "none", "default_enabled": true, "description": "搜索影视与体育内容，并把最新推荐定时发送到所选群聊或联系人。"},
     {"module": "jiang_video_understanding", "display_name": "视频理解", "ownership": "owner", "configuration": "schema", "default_enabled": true, "description": "从微信短视频提取关键帧和音轨，生成时间线摘要。"},
     {"module": "meme_manager", "display_name": "表情管理", "ownership": "third-party", "configuration": "schema-and-page", "default_enabled": true, "description": "管理多套表情包、会话绑定、资源目录和同步设置。"}

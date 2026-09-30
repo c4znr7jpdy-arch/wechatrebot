@@ -108,16 +108,6 @@ SCHEDULED_COMMANDS = (
         "alternative": "请先在订阅管理中创建订阅。",
     },
     {
-        "id": "checkin", "display_name": "账号签到", "action": None,
-        "status": "needs_condition", "aliases": ("签到", "每日签到"),
-        "parameters": ("执行账号", "授权范围", "结果收件人"),
-        "dependencies": ("已授权的个人账号", "签到适配"),
-        "recipient_types": ("private",), "external_write": True,
-        "result": "签到结果文字", "failure_policy": "账号授权失效时跳过并提示",
-        "reason": "签到会修改外部账号状态，需要单独授权、频率限制和重复执行保护。",
-        "alternative": "请先在对应功能页完成账号授权，再创建任务。",
-    },
-    {
         "id": "contextual", "display_name": "上下文查询", "action": None,
         "status": "unsupported", "aliases": (), "parameters": ("当前对话上下文",),
         "dependencies": ("当前消息上下文",), "recipient_types": ("group", "private"),
@@ -415,8 +405,6 @@ def inspect_scheduled_command(command: str) -> dict[str, Any]:
         command_id = "epic"
     elif lowered.startswith(("订阅动态", "b站动态")):
         command_id = "bili_dynamic"
-    elif lowered in {"签到", "每日签到"}:
-        command_id = "checkin"
     elif lowered.startswith(("查询", "查一下", "介绍一下", "科普")):
         command_id = "contextual"
     elif lowered in {"理想", "图来", "占卜", "塔罗牌", "登录", "扫码"}:

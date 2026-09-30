@@ -65,7 +65,7 @@ def test_context_resolves_names_without_seeding(tmp_path: Path) -> None:
     assert context["account_id"] == ACCOUNT
     assert context["items"] == []
     assert context["command_definition_version"] == 1
-    assert any(item["id"] == "checkin" for item in context["command_catalog"])
+    assert not any(item["id"] == "checkin" for item in context["command_catalog"])
     assert context["groups"] == [{"id": GROUP, "name": "家人群", "type": "group"}]
 
 

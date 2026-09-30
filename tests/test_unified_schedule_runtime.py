@@ -91,9 +91,7 @@ def test_runtime_health_exposes_command_scheduling_contract(tmp_path: Path) -> N
     assert health["command_definition_version"] == 1
     catalog = health["command_catalog"]
     assert any(item["id"] == "weather" and item["status"] == "supported" for item in catalog)
-    checkin = next(item for item in catalog if item["id"] == "checkin")
-    assert checkin["status"] == "needs_condition"
-    assert checkin["external_write"] is True
+    assert not any(item["id"] == "checkin" for item in catalog)
 
 
 def test_runtime_generates_once_and_submits_only_live_recipient(tmp_path: Path) -> None:
