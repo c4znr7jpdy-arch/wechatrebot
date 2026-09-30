@@ -131,6 +131,8 @@ html[data-manager-feature-page="mimo"] .pulse-dot {
 }
 
 html[data-manager-feature-page="mimo"] .studio-card,
+html[data-manager-feature-page="mimo"] .hero-panel,
+html[data-manager-feature-page="mimo"] .studio-switch,
 html[data-manager-feature-page="mimo"] .signal-card,
 html[data-manager-feature-page="mimo"] .workflow-strip article,
 html[data-manager-feature-page="mimo"] .readiness-item,
@@ -211,6 +213,29 @@ html[data-manager-feature-page="mimo"] h2 {
 
 html[data-manager-feature-page="mimo"] .readiness-item {
   background: var(--surface-2);
+}
+
+html[data-manager-feature-page="mimo"] .studio-switch:hover {
+  border-color: var(--blue-600);
+  background: var(--surface-hover);
+}
+
+html[data-manager-feature-page="mimo"] .runtime-diagnostics {
+  background: var(--line);
+}
+
+html[data-manager-feature-page="mimo"] .runtime-diagnostics > div {
+  background: var(--surface-2);
+}
+
+html[data-manager-feature-page="mimo"] .policy-note,
+html[data-manager-feature-page="mimo"] .access-summary-list article.is-active {
+  border-color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-manager-feature-page="mimo"] .policy-note strong {
+  color: var(--amber-700);
 }
 
 html[data-manager-feature-page="mimo"] label {
