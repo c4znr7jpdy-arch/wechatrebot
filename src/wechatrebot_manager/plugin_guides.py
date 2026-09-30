@@ -10,7 +10,7 @@ _GUIDES = {
     "astrbot_plugin_angel_heart": ("协调群聊接话和多人上下文", "先到群聊&私聊管理选择群聊和回复方式；需要调整上下文长度时再打开专属配置页。", "它不会建立独立长期记忆库；会话上下文仍受回复引擎的上下文范围限制。", ()),
     "astrbot_plugin_bittorrent": ("按关键词查找资源索引", "先填写可用的资源索引站地址，再调整返回数量。", "只检索有权访问和使用的内容；索引站需要可访问。", ("magnet_search.base_url", "magnet_search.max_results", "magnet_search.enable_preview")),
     "astrbot_plugin_livingmemory": ("记住重要对话并在需要时回忆", "先在模型设置中选择 Embedding 文本向量模型和聊天模型，再保持智能召回。", "需要单独配置 Embedding 模型；Grok 等聊天模型不能替代。明确回忆会检索，普通问候默认跳过。", ("provider_settings.embedding_provider_id", "provider_settings.llm_provider_id", "recall_engine.auto_recall_mode", "recall_engine.top_k", "reflection_engine.summary_trigger_rounds")),
-    "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "打开专属配置页填写语音服务密钥，管理授权音色、使用范围和语音参数；保存后查看页面反馈并在测试聊天中验证。", "需要 MiMo 语音服务和已授权的参考音频；自动语音会产生服务用量。", ()),
+    "astrbot_plugin_mimo_tts_clone": ("把文字读成指定声音", "打开专属配置页填写语音服务密钥，管理授权音色、使用范围和语音参数；需要概率发送语音时，在页面中开启自动语音并调整触发概率。", "需要 MiMo 语音服务和已授权的参考音频；自动语音会产生服务用量。", ()),
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),
     "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
@@ -24,14 +24,14 @@ _GUIDES = {
     "jiang_commands.setu": ("发送一张随机图片", "在聊天中发送“图来”；需要自动撤回时打开开关并填写等待秒数。", "在群聊管理中独立勾选“图来”；“常用指令”不会代替此开关。自动撤回依赖微信返回可撤回的消息标识。", ("setu_recall_enabled", "setu_recall_seconds")),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先到“设置 → 模型服务”添加图片模型，再在这里选择主模型；确有需要时可启用一个备用模型。服务地址、模型名称和密钥只在模型服务中管理。", "需要支持生图的图片模型服务；聊天模型不能自动替代生图模型。", ("primary_model", "secondary_enabled", "secondary_model", "use_system_proxy", "local_proxy_port")),
-    "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
+    "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音；它随表情触发，不受普通自动语音概率控制。普通文字回复的概率语音请到语音克隆页面设置。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
     "jiang_rocom": ("使用洛克王国游戏助手", "按插件提示通过二维码或已有凭据绑定游戏账号，再使用角色、阵容、交换或家园能力。", "这是特定游戏工具，不是运势功能；账号凭据不要发到群里。", ()),
     "jiang_schedule": ("安排内容推送和签到", "在定时任务选择内容、聊天和时间；天气等内容还需在群聊&私聊管理允许对应功能，再打开该聊天的定时接收开关。旧版计划留在兼容区。", "功能中心启用不等于向全部群发送；没有用户创建并启用的任务时不会推送。旧式群聊写操作仍要求可靠管理员身份。", ()),
     "jiang_short_drama": ("搜索内容并安排推送", "无需专属配置页；在定时任务中选择影视推荐、分类、数量和发送聊天。播放卡片统一打开托管中间页，无需在本机启动服务。", "仅访问有权使用的内容；播放依赖内容源与托管播放页可用。", ()),
     "jiang_video_understanding": ("总结微信短视频", "发送视频后使用 /总结视频；先保留当前抽帧数量。", "需要能理解图片的模型；音频不可用时会退回画面分析。", ("max_duration_seconds", "max_file_size_mb", "frame_count", "vision_provider_id", "audio_provider_id", "semantic_fallback_provider_id")),
-    "meme_manager": ("管理聊天使用的表情包", "打开专属配置页导入表情包，再到群聊&私聊管理为需要的群勾选“表情管理”。人格只需正常填写，系统会在允许表情的群聊中自动加入隐藏的情绪标签规则。", "只导入有权使用的表情；云端同步需要相应图床或存储账号。", ("storage.provider", "sync.status_cache_ttl_seconds")),
+    "meme_manager": ("管理聊天使用的表情包", "打开专属配置页导入并启用表情包，再到群聊&私聊管理为需要的群勾选“表情管理”。在常用设置调整表情出现概率；插件会按当前表情包提供选图规则，人格中无需重复填写情绪标签。", "概率控制普通回复的表情附加，分类模式的纯表情回复会保留发送以免空回复；仍需可用图片且适合当前对话。云端同步保持选配。", ("generation.emotion.probability", "generation.emotion.max_memes_per_message", "storage.provider", "sync.status_cache_ttl_seconds")),
 }
 
 

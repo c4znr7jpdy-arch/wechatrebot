@@ -775,7 +775,7 @@ def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> Non
         names.add(module_name)
     else:
         names.discard(module_name)
-    engine["plugin_set"] = sorted(names)
+    engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
     write_json_atomic(engine_path, engine)
 
 

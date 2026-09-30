@@ -20,7 +20,10 @@ _MODULE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 # These modules shipped in older full payloads but are no longer part of the
 # customer product.  Manager-only updates cannot replace the installed legal
 # manifest, so filter them here as well as removing them from future payloads.
-RETIRED_PLUGIN_MODULES = frozenset({"astrbot_plugin_mnemosyne"})
+RETIRED_PLUGIN_MODULES = frozenset({
+    "astrbot_plugin_mnemosyne",
+    "jiang_yanyun_checkin",
+})
 
 
 @dataclass(frozen=True, slots=True)

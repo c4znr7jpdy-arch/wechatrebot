@@ -278,27 +278,28 @@ def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> N
     ]
 
 
-def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
-    tmp_path: Path,
+@pytest.mark.parametrize("retired_module", ["astrbot_plugin_mnemosyne", "jiang_yanyun_checkin"])
+def test_delivery_retires_legacy_plugins_and_loads_private_emotion_defaults(
+    tmp_path: Path, retired_module: str,
 ) -> None:
     install = tmp_path / "install"
     data = install / "app" / "astrbot" / "data"
     for module in (
         "astrbot_plugin_livingmemory",
-        "astrbot_plugin_mnemosyne",
+        retired_module,
         "astrbot_plugin_self_learning",
     ):
         (data / "plugins" / module).mkdir(parents=True)
-    retired_config = data / "config" / "astrbot_plugin_mnemosyne_config.json"
+    retired_config = data / "config" / f"{retired_module}_config.json"
     retired_config.parent.mkdir(parents=True)
     retired_config.write_text("{}", encoding="utf-8")
-    retired_data = data / "plugin_data" / "astrbot_plugin_mnemosyne"
+    retired_data = data / "plugin_data" / retired_module
     retired_data.mkdir(parents=True)
     retired_source = (
         install
         / "legal"
         / "corresponding-source"
-        / "astrbot-plugin-astrbot_plugin_mnemosyne.patch"
+        / f"astrbot-plugin-{retired_module}.patch"
     )
     retired_source.parent.mkdir(parents=True)
     retired_source.write_text("legacy", encoding="utf-8")
@@ -315,7 +316,7 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
                             "default_enabled": True,
                         },
                         {
-                            "module": "astrbot_plugin_mnemosyne",
+                            "module": retired_module,
                             "display_name": "外部向量记忆",
                             "configuration": "schema",
                             "description": "进阶替代",
@@ -354,8 +355,8 @@ def test_delivery_retires_old_vector_memory_and_loads_private_emotion_defaults(
     )
 
     assert "astrbot_plugin_livingmemory" in engine["plugin_set"]
-    assert "astrbot_plugin_mnemosyne" not in engine["plugin_set"]
-    assert not (data / "plugins" / "astrbot_plugin_mnemosyne").exists()
+    assert retired_module not in engine["plugin_set"]
+    assert not (data / "plugins" / retired_module).exists()
     assert not retired_config.exists()
     assert not retired_data.exists()
     assert not retired_source.exists()

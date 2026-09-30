@@ -334,7 +334,7 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_landscape_video_requests_device_orientation(player_page):
+def test_mobile_landscape_video_requests_device_orientation(player_page, tmp_path):
     page = player_page
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("""() => {
@@ -350,6 +350,7 @@ def test_mobile_landscape_video_requests_device_orientation(player_page):
     assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+    page.screenshot(path=str(tmp_path / "container-fullscreen.png"))
 
     page.locator("#speedButton").click()
     assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
@@ -417,17 +418,105 @@ def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_fullscreen_uses_webkit_video_fullscreen_when_available(player_page):
+def test_mobile_fullscreen_keeps_custom_player_when_only_video_fullscreen_exists(player_page, tmp_path):
     page = player_page
     page.set_viewport_size({"width": 390, "height": 844})
     page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
     page.locator("#video").evaluate("node => { node.__webkitFullscreen = false; node.webkitEnterFullscreen = () => { node.__webkitFullscreen = true; node.dispatchEvent(new Event('webkitbeginfullscreen')); }; node.webkitExitFullscreen = () => { node.__webkitFullscreen = false; node.dispatchEvent(new Event('webkitendfullscreen')); }; Object.defineProperty(node, 'webkitDisplayingFullscreen', { configurable: true, get: () => node.__webkitFullscreen }); }")
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === true")
+    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
+    assert not page.locator("#video").evaluate("node => node.webkitDisplayingFullscreen")
+    bounds = page.locator("#videoShell").bounding_box()
+    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
+    assert page.get_by_role("button", name="切换倍速，当前 1 倍").is_visible()
+    page.screenshot(path=str(tmp_path / "ios-custom-fullscreen.png"))
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    assert page.get_by_role("dialog", name="选择剧集").is_visible()
+    page.screenshot(path=str(tmp_path / "ios-custom-fullscreen-episodes.png"))
+    page.locator("#sheetClose").click()
     assert page.get_by_label("退出全屏", exact=True).is_visible()
     page.get_by_label("退出全屏", exact=True).click()
     page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === false")
     assert not page.locator("#videoShell").evaluate("node => node.classList.contains('pseudo-fullscreen')")
+
+
+@pytest.mark.parametrize("restore", ["success", "rejected", "pending"])
+@pytest.mark.parametrize("initial", ["portrait-primary", "landscape-secondary"])
+def test_fullscreen_exit_restores_entry_orientation_without_retaining_lock(player_page, restore, initial):
+    page = player_page
+    page.evaluate("""({restore, initial}) => {
+      window.orientationCalls = [];
+      Object.defineProperty(screen.orientation, 'type', {configurable: true, value: initial});
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: mode => {
+        window.orientationCalls.push(mode);
+        if (mode === 'landscape') return Promise.resolve();
+        if (restore === 'rejected') return Promise.reject(new Error('unsupported'));
+        if (restore === 'pending') return new Promise(resolve => { window.resolveRestore = resolve; });
+        return Promise.resolve();
+      }});
+      Object.defineProperty(screen.orientation, 'unlock', {configurable: true, value: () => window.orientationCalls.push('unlock')});
+    }""", {"restore": restore, "initial": initial})
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("window.orientationCalls.includes('landscape')")
+    page.get_by_label("退出全屏", exact=True).click()
+    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+    calls = page.evaluate("window.orientationCalls")
+    assert calls[:2] == ["landscape", initial]
+    assert calls[-1] == "unlock"
+    if restore == "pending":
+        # A late restoration cannot release the lock of a newly opened player.
+        page.get_by_label("全屏播放", exact=True).click()
+        page.wait_for_function("window.orientationCalls.filter(value => value === 'landscape').length === 2")
+        calls = page.evaluate("window.orientationCalls")
+        page.evaluate("window.resolveRestore()")
+        page.wait_for_timeout(50)
+        assert page.evaluate("window.orientationCalls") == calls
+
+
+def test_system_fullscreen_exit_releases_successful_orientation_lock(player_page):
+    page = player_page
+    page.evaluate("""() => {
+      window.orientationCalls = [];
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async mode => window.orientationCalls.push(mode)});
+      Object.defineProperty(screen.orientation, 'unlock', {configurable: true, value: () => window.orientationCalls.push('unlock')});
+    }""")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("window.orientationCalls.includes('landscape')")
+    page.evaluate("document.exitFullscreen()")
+    page.wait_for_function("!document.body.classList.contains('player-fullscreen')")
+    assert page.evaluate("window.orientationCalls") == ["landscape", "unlock"]
+
+
+@pytest.mark.parametrize("reenter", [False, True])
+def test_delayed_orientation_lock_cannot_survive_exit_or_unlock_new_session(player_page, reenter):
+    page = player_page
+    page.evaluate("""() => {
+      window.orientationCalls = [];
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: mode => {
+        window.orientationCalls.push(mode);
+        if (window.orientationCalls.filter(value => value === 'landscape').length === 1) {
+          return new Promise(resolve => { window.resolveLandscape = resolve; });
+        }
+        return Promise.resolve();
+      }});
+      Object.defineProperty(screen.orientation, 'unlock', {configurable: true, value: () => window.orientationCalls.push('unlock')});
+    }""")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("window.orientationCalls.includes('landscape')")
+    # System exits can happen while the Screen Orientation promise is still pending.
+    page.evaluate("document.exitFullscreen()")
+    page.wait_for_function("!document.body.classList.contains('player-fullscreen')")
+    assert page.evaluate("window.orientationCalls.at(-1)") == "unlock"
+    if reenter:
+        page.get_by_label("全屏播放", exact=True).click()
+        page.wait_for_function("window.orientationCalls.filter(value => value === 'landscape').length === 2")
+    calls = page.evaluate("window.orientationCalls")
+    page.evaluate("window.resolveLandscape()")
+    page.wait_for_timeout(50)
+    if reenter:
+        assert page.evaluate("window.orientationCalls") == calls
+    else:
+        assert page.evaluate("window.orientationCalls") == calls + ["unlock"]
 
 
 @pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])

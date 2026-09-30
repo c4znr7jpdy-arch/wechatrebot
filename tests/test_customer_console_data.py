@@ -299,8 +299,10 @@ def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path
     assert "astrbot_plugin_music" not in config["plugin_set"]
 
 
-def test_plugin_toggle_preserves_hidden_foundations_and_retires_old_vector_memory(
-    tmp_path: Path,
+@pytest.mark.parametrize("retired_module", ["astrbot_plugin_mnemosyne", "jiang_yanyun_checkin"])
+@pytest.mark.parametrize("use_wildcard", [True, False])
+def test_plugin_toggle_preserves_hidden_foundations_and_retires_legacy_plugins(
+    tmp_path: Path, retired_module: str, use_wildcard: bool,
 ) -> None:
     install, _ = _install(tmp_path)
     plugin_root = install / "app" / "astrbot" / "data" / "plugins"
@@ -308,23 +310,27 @@ def test_plugin_toggle_preserves_hidden_foundations_and_retires_old_vector_memor
         "astrbot_plugin_music",
         "astrbot_plugin_livingmemory",
         "astrbot_plugin_self_learning",
-        "astrbot_plugin_mnemosyne",
+        retired_module,
     ):
         (plugin_root / module).mkdir(parents=True, exist_ok=True)
     config_path = install / "app" / "astrbot" / "data" / "cmd_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["plugin_set"] = ["*"]
+    config["plugin_set"] = ["*"] if use_wildcard else [
+        "astrbot_plugin_music", "astrbot_plugin_livingmemory",
+        "astrbot_plugin_self_learning", retired_module,
+    ]
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
     set_plugin_enabled(install, "astrbot_plugin_music", False)
     updated = json.loads(config_path.read_text(encoding="utf-8"))
     assert "astrbot_plugin_livingmemory" in updated["plugin_set"]
     assert "astrbot_plugin_self_learning" in updated["plugin_set"]
-    assert "astrbot_plugin_mnemosyne" not in {
+    assert retired_module not in updated["plugin_set"]
+    assert retired_module not in {
         item.module_name for item in load_plugins(install)
     }
     with pytest.raises(ValueError, match="不存在或尚未交付"):
-        set_plugin_enabled(install, "astrbot_plugin_mnemosyne", True)
+        set_plugin_enabled(install, retired_module, True)
 
 
 def test_logs_and_diagnostics_remove_implementation_brand(tmp_path: Path) -> None:

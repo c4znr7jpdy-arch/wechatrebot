@@ -1,27 +1,48 @@
 diff --git a/main.py b/main.py
-index 05e680a..8919a01 100644
 --- a/main.py
 +++ b/main.py
-@@ -32,6 +32,7 @@ from .image_host.img_sync import ImageSync
+@@ -32,7 +32,8 @@
  from .mixins.commands import CommandMixin
  from .mixins.event_handlers import EventHandlerMixin, normalize_trigger_scope
  from .mixins.web_api import WebAPIMixin
+-from .utils import dict_to_string, load_json
 +from .wechatrebot_group_policy import group_allows_meme_prompt
- from .utils import dict_to_string, load_json
++from .utils import dict_to_string, load_json, probability_hit
  
  MEME_PROMPT_MARKER_START = "<!-- meme_manager_prompt:start -->"
-@@ -837,6 +838,11 @@ class MemeSender(Star, WebAPIMixin, CommandMixin, EventHandlerMixin):
+ MEME_PROMPT_MARKER_END = "<!-- meme_manager_prompt:end -->"
+@@ -837,12 +838,15 @@
      def _apply_request_prompt(
          self, req: ProviderRequest, event: AstrMessageEvent | None = None
      ) -> None:
-+        if not group_allows_meme_prompt(
++        meme_allowed = group_allows_meme_prompt(
 +            Path.cwd().parent.parent / "data/manager/group-policies.json", event
-+        ):
-+            req.system_prompt = self._strip_meme_prompt(req.system_prompt)
-+            return
++        )
          semantic_mode = ""
          semantic_tool_ready = False
-         if self.emotion_llm_enabled:
+-        if self.emotion_llm_enabled:
++        if meme_allowed and self.emotion_llm_enabled:
+             if self._semantic_pack_ready(event=event, req=req):
+                 semantic_mode = "llm"
+-        else:
++        elif meme_allowed:
+             semantic_tool_ready = self._semantic_pack_ready(
+                 event=event, req=req, require_tool=True
+             )
+@@ -867,6 +871,13 @@
+             event.set_extra("meme_manager_stream_filtered", False)
+             event.set_extra("meme_manager_reply_provider_id", "")
+             event.set_extra("meme_manager_reply_model", "")
++        if not meme_allowed or (
++            semantic_mode == "tool" and not probability_hit(self.emotions_probability)
++        ):
++            # Keep skipped semantic requests out of the category fallback path.
++            self._remove_semantic_tool(req)
++            req.system_prompt = self._strip_meme_prompt(req.system_prompt)
++            return
+         if semantic_mode == "tool":
+             req.system_prompt = (
+                 self._strip_meme_prompt(req.system_prompt)
 diff --git a/pages/app/catalog/script.js b/pages/app/catalog/script.js
 index 4ddbeeb..b5f871c 100644
 --- a/pages/app/catalog/script.js
@@ -38,3 +59,40 @@ index 4ddbeeb..b5f871c 100644
    await updates.resume();
  }
  
+diff --git a/mixins/event_handlers.py b/mixins/event_handlers.py
+--- a/mixins/event_handlers.py
++++ b/mixins/event_handlers.py
+@@ -1064,6 +1064,9 @@
+         # 旧版分类匹配结果。
+         event.set_extra("meme_manager_semantic_response_processed", True)
+         if semantic_mode == "llm":
++            if not probability_hit(self.emotions_probability):
++                event.set_extra("meme_manager_semantic_candidates", {})
++                return await self._resp_semantic_impl(event, response, text)
+             return await self._resp_semantic_llm_impl(event, response, text)
+         if semantic_mode == "tool":
+             return await self._resp_semantic_impl(event, response, text)
+diff --git a/_conf_schema.json b/_conf_schema.json
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -405,7 +405,7 @@
+             "description": "表情出现概率",
+             "type": "int",
+             "default": 100,
+-            "hint": "语义 Tool 模式下，每轮按此概率决定是否注入并要求回复模型调用 search_memes，范围为 1-100",
++            "hint": "普通回复按此概率附加表情。智能选图在回复或选图前判断一次，未命中不检索或调用辅助模型；分类模式仅含表情的回复仍会发送，避免空回复。",
+             "slider": {
+               "min": 1,
+               "max": 100,
+diff --git a/pages/app/settings/config.js b/pages/app/settings/config.js
+--- a/pages/app/settings/config.js
++++ b/pages/app/settings/config.js
+@@ -432,7 +432,7 @@
+   };
+   const hints = {
+     "generation.emotion.probability":
+-      "在语义检索模式下，每轮按此概率决定是否让回复模型选图。",
++      "普通回复按此概率附加表情。智能选图在回复或选图前判断一次，未命中不检索或调用辅助模型；分类模式仅含表情的回复仍会发送，避免空回复。",
+     "generation.emotion.llm.enabled":
+       "将选图交给情感辅助模型，回复模型只负责对话。",
+     "generation.emotion.llm.provider_id":

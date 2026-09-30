@@ -590,7 +590,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,309 @@
+@@ -406,8 +275,327 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -720,13 +720,37 @@ diff --git a/index.html b/index.html
 +          morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false');
 +        }
 +      });
-+      let orientationLockRequested = false, orientationLockPending = false;
++      let fullscreenOrientation = null, fullscreenTransition = false;
 +      const hasHorizontalVideo = () => video.videoWidth > video.videoHeight && video.videoHeight > 0;
 +      const activeFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
 +      const nativeVideoFullscreenActive = () => video.webkitDisplayingFullscreen === true;
 +      const playerFullscreenActive = () => activeFullscreenElement() === videoShell
 +        || videoShell.classList.contains('pseudo-fullscreen')
 +        || nativeVideoFullscreenActive();
++      const unlockOrientation = () => {
++        try { screen.orientation?.unlock?.(); }
++        catch (_error) { /* Unsupported hosts keep their own device orientation policy. */ }
++      };
++      const releaseOrientation = (session) => {
++        if (!session) return;
++        if (session.locked || session.pending) unlockOrientation();
++        session.locked = false;
++      };
++      const restoreOrientation = async (session) => {
++        if (!session) return;
++        session.exiting = true;
++        let timer;
++        try {
++          if (session.locked && screen.orientation?.lock) {
++            // Restore before leaving container fullscreen, while lock permission exists.
++            const restored = Promise.resolve(screen.orientation.lock(session.initial)).then(() => {
++              if (!fullscreenOrientation || fullscreenOrientation === session) unlockOrientation();
++            }, () => { /* Rejected restoration must not prevent exiting fullscreen. */ });
++            await Promise.race([restored, new Promise(resolve => { timer = setTimeout(resolve, 300); })]);
++          }
++        } catch (_error) { /* Synchronous host errors use the same unlock fallback. */ }
++        finally { clearTimeout(timer); releaseOrientation(session); }
++      };
 +      const syncPseudoFullscreenLayout = () => {
 +        const rotate = videoShell.classList.contains('pseudo-fullscreen')
 +          && hasHorizontalVideo()
@@ -739,20 +763,26 @@ diff --git a/index.html b/index.html
 +        syncPseudoFullscreenLayout();
 +        document.body.classList.toggle('player-fullscreen', active);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
-+        if ((!active || !hasHorizontalVideo()) && orientationLockRequested) {
-+          try { screen.orientation?.unlock?.(); } catch (_error) {}
-+          orientationLockRequested = false;
++        if ((!active && !fullscreenTransition) || !hasHorizontalVideo()) {
++          releaseOrientation(fullscreenOrientation);
++          if (!active && !fullscreenTransition) fullscreenOrientation = null;
 +        }
 +        showControls();
 +      };
 +      const requestLandscapeOrientation = async () => {
-+        if (!hasHorizontalVideo() || orientationLockRequested || orientationLockPending) return;
-+        orientationLockPending = true;
++        const session = fullscreenOrientation;
++        if (!session || session.exiting || session.locked || session.pending
++          || !playerFullscreenActive() || !hasHorizontalVideo() || !screen.orientation?.lock) return;
++        session.pending = true;
 +        try {
-+          if (!screen.orientation?.lock) throw new Error('Orientation lock unavailable');
 +          await screen.orientation.lock('landscape');
-+          orientationLockRequested = true;
-+        } catch (_error) {} finally { orientationLockPending = false; }
++          session.locked = true;
++          if (fullscreenOrientation !== session || session.exiting || !playerFullscreenActive() || !hasHorizontalVideo()) {
++            // A late result may belong to an exited session, never unlock a newer one.
++            if (!fullscreenOrientation || fullscreenOrientation === session) releaseOrientation(session);
++          }
++        } catch (_error) { /* The container/page fullscreen remains usable without a device lock. */ }
++        finally { session.pending = false; }
 +        syncFullscreen();
 +      };
 +      const waitForNativeFullscreen = (request) => new Promise((resolve) => {
@@ -771,45 +801,33 @@ diff --git a/index.html b/index.html
 +        timer = setTimeout(finish, 220);
 +        Promise.resolve(request).catch(() => {}).finally(check);
 +      });
-+      const waitForNativeVideoFullscreen = () => new Promise((resolve) => {
-+        let timer = null;
-+        const finish = () => {
-+          if (timer !== null) clearTimeout(timer);
-+          video.removeEventListener('webkitbeginfullscreen', check);
-+          video.removeEventListener('webkitendfullscreen', check);
-+          resolve(nativeVideoFullscreenActive());
-+        };
-+        const check = () => {
-+          if (nativeVideoFullscreenActive()) finish();
-+        };
-+        video.addEventListener('webkitbeginfullscreen', check);
-+        video.addEventListener('webkitendfullscreen', check);
-+        timer = setTimeout(finish, 220);
-+        check();
-+      });
 +      fullButton.addEventListener('click', async () => {
++        if (fullscreenTransition) return;
++        fullscreenTransition = true;
 +        let entering = false;
 +        try {
 +          if (playerFullscreenActive()) {
++            await restoreOrientation(fullscreenOrientation);
 +            if (nativeVideoFullscreenActive()) video.webkitExitFullscreen?.();
 +            else if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-+            else videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape');
++            videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape');
 +          }
-+          else if (videoShell.requestFullscreen) {
++          else {
 +            entering = true;
-+            if (!await waitForNativeFullscreen(videoShell.requestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
-+          } else if (videoShell.webkitRequestFullscreen) {
-+            entering = true;
-+            if (!await waitForNativeFullscreen(videoShell.webkitRequestFullscreen())) videoShell.classList.add('pseudo-fullscreen');
-+          } else if (video.webkitEnterFullscreen) {
-+            entering = true;
-+            video.webkitEnterFullscreen();
-+            if (!await waitForNativeVideoFullscreen()) videoShell.classList.add('pseudo-fullscreen');
++            fullscreenOrientation = {
++              initial: screen.orientation?.type || (innerHeight > innerWidth ? 'portrait' : 'landscape'),
++              locked: false, pending: false, exiting: false,
++            };
++            const request = videoShell.requestFullscreen || videoShell.webkitRequestFullscreen;
++            if (!request || !await waitForNativeFullscreen(request.call(videoShell))) videoShell.classList.add('pseudo-fullscreen');
 +          }
-+          else { entering = true; videoShell.classList.add('pseudo-fullscreen'); }
-+        } catch (_error) { if (!playerFullscreenActive()) { entering = true; videoShell.classList.add('pseudo-fullscreen'); } }
++        } catch (_error) {
++          if (entering) videoShell.classList.add('pseudo-fullscreen');
++          else showHint('暂时无法退出全屏，请使用系统返回');
++        }
++        finally { fullscreenTransition = false; }
 +        syncFullscreen();
-+        if (entering) await requestLandscapeOrientation();
++        if (entering) requestLandscapeOrientation();
 +      });
 +      document.addEventListener('fullscreenchange', syncFullscreen);
 +      document.addEventListener('webkitfullscreenchange', syncFullscreen);
@@ -821,7 +839,7 @@ diff --git a/index.html b/index.html
 +        if (event.isComposing) return;
 +        if (event.key === 'Escape' && episodeSheet.hidden) {
 +          if (!morePanel.hidden) { morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false'); moreButton.focus(); }
-+          else if (videoShell.classList.contains('pseudo-fullscreen')) { videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape'); syncFullscreen(); }
++          else if (videoShell.classList.contains('pseudo-fullscreen')) fullButton.click();
 +        }
 +        if (event.target === video && [' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
 +          event.preventDefault();
@@ -900,7 +918,7 @@ diff --git a/index.html b/index.html
  
        const fail = (message) => {
          statusNode.textContent = message;
-@@ -415,15 +529,27 @@
+@@ -415,15 +603,27 @@
          retry.hidden = false;
        };
  
@@ -931,7 +949,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +647,7 @@
+@@ -521,7 +721,7 @@
            }
            return { name, url };
          });
@@ -940,7 +958,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +661,71 @@
+@@ -535,6 +735,71 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -1012,7 +1030,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +743,29 @@
+@@ -552,22 +817,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1045,7 +1063,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +784,15 @@
+@@ -586,14 +858,15 @@
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
@@ -1067,7 +1085,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +813,15 @@
+@@ -614,27 +887,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1102,7 +1120,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,17 +883,69 @@
+@@ -696,17 +957,69 @@
          updateQualityActive();
        };
  
@@ -1175,7 +1193,7 @@ diff --git a/index.html b/index.html
        };
  
  
-@@ -717,6 +956,10 @@
+@@ -717,6 +1030,10 @@
          const loadId = ++episodeLoadId;
          removeEpisodeReadyListener();
          current = index;
@@ -1186,7 +1204,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -749,7 +992,6 @@
+@@ -749,7 +1066,6 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1194,7 +1212,7 @@ diff --git a/index.html b/index.html
          video.pause();
          video.removeAttribute('src');
          video.load();
-@@ -784,44 +1026,75 @@
+@@ -784,44 +1100,75 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1300,7 +1318,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1103,16 @@
+@@ -830,11 +1177,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1317,7 +1335,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1134,11 @@
+@@ -856,10 +1208,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1330,7 +1348,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1161,7 @@
+@@ -882,7 +1235,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1339,7 +1357,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1170,66 @@
+@@ -891,21 +1244,66 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1415,7 +1433,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1242,7 @@
+@@ -918,6 +1316,7 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1423,7 +1441,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1266,15 @@
+@@ -941,6 +1340,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1439,7 +1457,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1292,21 @@
+@@ -958,12 +1366,21 @@
          }
        });
        syncNativeControls();

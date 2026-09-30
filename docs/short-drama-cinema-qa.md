@@ -103,3 +103,15 @@ final result: passed
 
 - 播放器专项测试：`31 passed`；新增/更新的 4 个全屏路径测试全部通过；托管安全与补丁检查：`6 passed`。
 - `db60cac` 已于 2026-09-19 更新线上托管静态页 `/var/www/short-drama-player/index.html`。替换前页面 SHA-256 为 `4ed6bcebf7b7ebc5234473f035d0c83384eb5d3b58ecb5a5909ebc80b8a2ec13`，备份在 `/root/nginx-backups/short-drama-device-fullscreen-20260919-db60cac`；替换后服务器文件、公网 HTTPS 页面与本地候选页的 SHA-256 均为 `036f8a828b3100c34e8b1998c107df0be8a9e64ecd8f73766b10843d232c9512`，`HTTP 200`，状态服务 `active`，`nginx -t` 通过。本次仍未制作或发布客户端安装包。
+
+### 保留自定义全屏与退出方向恢复（2026-09-30）
+
+本轮修复沿用容器 Fullscreen API 和页面全屏实现，移除主动调用 `video.webkitEnterFullscreen()` 的分支。iOS 仅提供视频原生全屏时，改为占满当前可用视口的自定义播放器；横屏片源在竖持触屏视口整体旋转，倍速、进度和选集仍在播放器内。页面继续监听宿主自行触发的原生视频全屏事件。
+
+进入全屏前记录屏幕方向。自定义退出按钮先在全屏权限尚有效时尝试恢复进入前方向，最多等待 300ms，然后解除方向锁并退出；原本横持时不会强制转成竖屏。系统返回或退出全屏事件也会释放已成功或正在等待的方向锁。延迟完成的旧请求不会解锁新一次全屏的方向锁；方向恢复被拒绝或悬挂时仍可正常退出，不保留强制竖屏锁。
+
+- 使用现有离线视频夹具和 Chromium Playwright，未启动机器人。Browser plugin not available，沿用项目已有浏览器测试；外部 `E:/Project/deploy/short_drama_player` 仅作为只读补丁基线。
+- 定向检查覆盖：容器全屏中的自定义控件和选集、无容器 API 的 iOS 模拟、静默全屏失败、竖屏/方形/宽银幕视频尺寸、进入前横竖方向恢复、恢复拒绝/超时、系统退出、方向锁延迟完成与快速重入。测试同时检查页面异常；补丁应用与页面 JavaScript 语法检查复用托管页安全测试。
+- 实际命令：`python -m pytest tests/test_short_drama_player_controls.py tests/test_short_drama_player_hardening.py::test_hosted_player_removes_open_url_and_third_party_fallback -q -k 'fullscreen or orientation or video_aspect_fit or hosted_player_removes'`，结果 `18 passed, 23 deselected in 21.38s`；`git diff --check` 通过。截图保存在 pytest 临时目录，检查了 390×844 容器全屏、旋转页面全屏与选集弹窗。
+- 实机边界：本轮没有真实 iPhone、Android 或微信内置浏览器验收。页面全屏只能占满宿主提供的网页视口，不能强制隐藏 iOS/微信导航栏和系统手势区；浏览器允许容器全屏时才能获得浏览器提供的完整屏幕区域。设备最终方向仍遵循操作系统与用户的方向设置，不能承诺在所有宿主强制恢复竖屏。
+- 本轮只改代码和测试，没有同步服务器或更新客户端包；线上页面效果尚未改变。
