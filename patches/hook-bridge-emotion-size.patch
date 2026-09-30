@@ -1,0 +1,140 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/emotion_media.py b/hook_41827_astrbot_bridge/src/hook_bridge/emotion_media.py
+new file mode 100644
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/emotion_media.py
+@@ -0,0 +1,61 @@
++"""Bound local stickers before handing them to HOOK's emotion endpoint."""
++from pathlib import Path
++
++from PIL import Image, ImageOps
++
++
++# Conservative delivery budget; leave headroom below the HOOK file downgrade.
++EMOTION_MAX_BYTES = 480 * 1024
++EMOTION_MAX_EDGE = 240
++_MAX_SOURCE_FRAMES = 1000
++
++
++def _palette_frame(frame: Image.Image, colors: int) -> Image.Image:
++    alpha = frame.getchannel("A")
++    result = frame.convert("RGB").quantize(colors=colors, method=Image.Quantize.MEDIANCUT)
++    result.paste(255, mask=alpha.point(lambda value: 255 if value < 128 else 0))
++    result.info["transparency"] = 255
++    return result
++
++
++def _write_gif(frames, durations, destination, *, edge, colors, stride, loop):
++    selected, timing = [], []
++    for start in range(0, len(frames), stride):
++        frame = frames[start].copy()
++        frame.thumbnail((edge, edge), Image.Resampling.LANCZOS)
++        selected.append(_palette_frame(frame, colors))
++        timing.append(sum(durations[start:start + stride]))
++    options = {"loop": loop} if loop is not None else {}
++    selected[0].save(
++        destination, format="GIF", save_all=True, append_images=selected[1:],
++        duration=timing, disposal=2, transparency=255, optimize=False, **options,
++    )
++
++
++def prepare_sticker(source: Path, destination: Path, max_bytes: int) -> None:
++    """Keep animation timing/transparency while reducing dimensions and palette.
++
++    Only the cache destination is written. Failure never sends the source as a file.
++    """
++    frames, durations = [], []
++    with Image.open(source) as image:
++        count = getattr(image, "n_frames", 1)
++        if count > _MAX_SOURCE_FRAMES:
++            raise ValueError("emotion has too many frames to safely convert")
++        loop = image.info.get("loop")
++        for index in range(count):
++            image.seek(index)
++            frame = ImageOps.exif_transpose(image).convert("RGBA")
++            frame.thumbnail((EMOTION_MAX_EDGE, EMOTION_MAX_EDGE), Image.Resampling.LANCZOS)
++            frames.append(frame)
++            durations.append(max(10, int(image.info.get("duration", 100))))
++    budget = min(max_bytes, EMOTION_MAX_BYTES)
++    for edge, colors, stride in ((240, 128, 1), (200, 96, 1), (160, 64, 2),
++                                 (120, 48, 3), (96, 32, 4), (64, 16, 6)):
++        # Preserve at least two sampled frames for animated inputs.
++        stride = min(stride, max(1, (len(frames) + 1) // 2))
++        _write_gif(frames, durations, destination, edge=edge, colors=colors,
++                   stride=stride, loop=loop)
++        if destination.stat().st_size <= budget:
++            return
++    raise ValueError("emotion cannot fit the sticker delivery budget")
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/media.py b/hook_41827_astrbot_bridge/src/hook_bridge/media.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/media.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/media.py
+@@ -17,6 +17,8 @@
+ 
+ from aiohttp import ClientSession, ClientTimeout
+ from PIL import Image, ImageOps, UnidentifiedImageError
++
++from .emotion_media import EMOTION_MAX_BYTES, EMOTION_MAX_EDGE, prepare_sticker
+ 
+ 
+ _IMAGE_SUFFIXES = {
+@@ -145,12 +147,6 @@
+         raise UnsupportedMediaSource("media source must be an absolute path or URI")
+ 
+     @staticmethod
+-    def _convert_to_gif(source: Path, destination: Path) -> None:
+-        with Image.open(source) as image:
+-            frame = ImageOps.exif_transpose(image)
+-            frame.save(destination, format="GIF", optimize=True)
+-
+-    @staticmethod
+     def _image_format(source: Path) -> str:
+         with Image.open(source) as image:
+             return str(image.format or "").upper()
+@@ -163,12 +159,14 @@
+             raise UnsupportedMediaSource(
+                 f"emotion image format cannot be read: {source}"
+             ) from exc
+-        if image_format == "GIF":
+-            return source
++        if image_format == "GIF" and source.stat().st_size <= min(self.max_bytes, EMOTION_MAX_BYTES):
++            with Image.open(source) as image:
++                if max(image.size) <= EMOTION_MAX_EDGE:
++                    return source
+ 
+         destination = self._destination(".gif")
+         try:
+-            await asyncio.to_thread(self._convert_to_gif, source, destination)
++            await asyncio.to_thread(prepare_sticker, source, destination, self.max_bytes)
+             if destination.stat().st_size > self.max_bytes:
+                 raise MediaTooLarge(f"media exceeds {self.max_bytes} bytes")
+             return destination
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -250,13 +250,7 @@
+ 
+ 
+ def _is_large_emotion_file_fallback(result: SendResult) -> bool:
+-    """Recognize HOOK's successful large-emotion downgrade response.
+-
+-    WeChat sends an oversized emotion as a file, but the HOOK endpoint still
+-    returns ``errCode=10002`` with a message containing this explanation.  It
+-    is an operationally successful send, so it must not be surfaced to
+-    OneBot/AstrBot as an ``ActionFailed``.
+-    """
++    """Detect a file downgrade; delivery is not successful sticker delivery."""
+     details = [result.error or ""]
+     for key in ("errMsg", "msg", "message", "error"):
+         value = result.raw.get(key)
+@@ -538,9 +532,10 @@
+         result = await self._write(
+             "/api/send_emotion_msg", {"wxid": wxid, "filepath": str(path)}
+         )
+-        if not result.ok and _is_large_emotion_file_fallback(result):
++        if _is_large_emotion_file_fallback(result):
+             return SendResult(
+-                ok=True,
++                ok=False,
++                error="HOOK sent the emotion as a file; sticker delivery failed",
+                 message_id=result.message_id,
+                 create_time=result.create_time,
+                 to_user_name=result.to_user_name,

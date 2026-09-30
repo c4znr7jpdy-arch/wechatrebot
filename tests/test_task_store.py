@@ -59,8 +59,8 @@ def test_scheduled_command_inspection_explains_supported_and_blocked_commands() 
     assert supported["definition"]["external_write"] is False
 
     checkin = inspect_scheduled_command("/签到")
-    assert checkin["status"] == "needs_condition"
-    assert "授权" in checkin["reason"]
+    assert checkin["status"] == "unsupported"
+    assert checkin["recognized"] is False
     assert checkin["alternative"]
 
     contextual = inspect_scheduled_command("查询上次会议")

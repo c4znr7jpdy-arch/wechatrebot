@@ -483,7 +483,7 @@ _CUSTOMER_SCHEMA_PROFILES = {
 _MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
 # Product-managed pages stay out of the feature center even when an older full
 # installation still declares them in legal/feature-set.json.
-_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama", "jiang_image"})
+_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama", "jiang_image", "jiang_schedule"})
 _MANAGER_NO_CONFIGURATION_MODULES = frozenset({"jiang_short_drama"})
 _LEGACY_IMAGE_MODEL_SENTINELS = {
     "primary": "__legacy_image_primary__",

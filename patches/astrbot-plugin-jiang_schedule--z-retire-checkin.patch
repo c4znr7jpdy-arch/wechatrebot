@@ -1,0 +1,294 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -14,7 +14,6 @@
+ 
+ from astrbot.api import star
+ from astrbot.api.event import AstrMessageEvent, filter
+-from astrbot.api.web import error_response, json_response, request
+ import astrbot.api.message_components as Comp
+ from astrbot.core.message.message_event_result import MessageChain, Plain
+ 
+@@ -75,17 +74,12 @@
+     sys.path.insert(0, _AI_PLUGIN_PARENT)
+ 
+ import ai_plugin.bilibili_dynamic as _bilibili_dynamic_module
+-import ai_plugin.checkin as _checkin_module
+ 
+ _bilibili_dynamic_module = importlib.reload(_bilibili_dynamic_module)
+-_checkin_module = importlib.reload(_checkin_module)
+ download_bili_image = _bilibili_dynamic_module.download_image
+ dynamic_image_url = _bilibili_dynamic_module.dynamic_image_url
+ fetch_dynamics = _bilibili_dynamic_module.fetch_dynamics
+ format_latest_dynamic = _bilibili_dynamic_module.format_latest_dynamic
+-checkin_all = _checkin_module.checkin_all
+-CheckinConfigError = _checkin_module.CheckinConfigError
+-_CHECKIN_MANAGER = _checkin_module.get_manager()
+ 
+ # 运行时 context 引用（回调发消息用）
+ _CTX = None
+@@ -96,7 +90,6 @@
+ _BILI_STATE_FILE = _DATA_DIR / "bili_state.json"
+ _BILI_SEEN_LIMIT = 30
+ _BILI_POLL_LOCK = asyncio.Lock()
+-_CHECKIN_CONFIG_LOCK = asyncio.Lock()
+ 
+ 
+ def _record_schedule_action(
+@@ -125,10 +118,10 @@
+     rf"^{_COMMAND_PREFIX}(?:定时|订阅动态|取消订阅动态|订阅列表)"
+ )
+ _RE_ADD = re.compile(
+-    rf"{_COMMAND_PREFIX}定时(新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四|签到)\s*(?:(周[一二三四五六日天])\s*)?(?:([一-鿿]{{2,6}})\s*)?(\d{{1,2}})[:\：]?(\d{{2}})?\s*点?"
++    rf"{_COMMAND_PREFIX}定时(新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四)\s*(?:(周[一二三四五六日天])\s*)?(?:([一-鿿]{{2,6}})\s*)?(\d{{1,2}})[:\：]?(\d{{2}})?\s*点?"
+ )
+ _RE_DEL = re.compile(
+-    rf"{_COMMAND_PREFIX}定时删除(新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四|B站动态|b站动态|签到)"
++    rf"{_COMMAND_PREFIX}定时删除(新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四|B站动态|b站动态)"
+ )
+ _RE_LIST = re.compile(rf"{_COMMAND_PREFIX}定时列表")
+ _RE_BILI_SUB = re.compile(
+@@ -160,15 +153,12 @@
+         return "kfc"
+     if raw in ("B站动态", "b站动态"):
+         return "bili_dynamic"
+-    if raw == "签到":
+-        return "checkin"
+     return raw
+ 
+ 
+ def _type_label(t: str) -> str:
+     return {"news": "热点新闻", "weather": "天气预报", "epic": "Epic喜加一",
+-            "oilprice": "每日油价", "kfc": "KFC疯狂星期四", "bili_dynamic": "B站动态订阅",
+-            "checkin": "每日签到"}.get(t, t)
++            "oilprice": "每日油价", "kfc": "KFC疯狂星期四", "bili_dynamic": "B站动态订阅"}.get(t, t)
+ 
+ 
+ def _parse_time(hour_str: str, minute_str: Optional[str]) -> tuple[int, int]:
+@@ -226,13 +216,6 @@
+     )
+ 
+ 
+-def _shared_checkin_denied_message() -> str:
+-    return (
+-        "每日签到会使用机器人保存的站点账号，因此只有机器人管理员可以设置。"
+-        "本次没有修改；如需使用，请联系机器人管理员。"
+-    )
+-
+-
+ # ── 持久化 ──────────────────────────────────────────────
+ 
+ def _load_tasks() -> list[dict]:
+@@ -247,29 +230,6 @@
+ def _save_tasks(tasks: list[dict]):
+     _TASK_FILE.parent.mkdir(parents=True, exist_ok=True)
+     _TASK_FILE.write_text(json.dumps({"tasks": tasks}, ensure_ascii=False, indent=2), "utf-8")
+-
+-
+-def _apply_checkin_task_config() -> bool:
+-    """让 tasks.json 中的签到任务与 WebUI 配置保持一致。"""
+-    tasks = _load_tasks()
+-    # 首次启用 WebUI 时优先迁移用户原来通过命令配置的时间和群，
+-    # 只有找不到旧任务时才使用签到模块的默认值。
+-    if not _CHECKIN_MANAGER.config_file.exists():
+-        legacy = next((task for task in tasks if task.get("type") == "checkin"), None)
+-        if legacy:
+-            _CHECKIN_MANAGER.update_schedule({
+-                "enabled": True,
+-                "time": f"{int(legacy.get('hour', 8)):02d}:{int(legacy.get('minute', 30)):02d}",
+-                "session": legacy.get("session", ""),
+-            })
+-    updated = [task for task in tasks if task.get("type") != "checkin"]
+-    desired = _CHECKIN_MANAGER.schedule_task()
+-    if desired:
+-        updated.append(desired)
+-    if updated == tasks:
+-        return False
+-    _save_tasks(updated)
+-    return True
+ 
+ 
+ def _load_bili_state() -> dict:
+@@ -593,19 +553,6 @@
+         )
+ 
+ 
+-async def _cb_checkin(session: str, **kwargs):
+-    """定时签到推送"""
+-    ctx = _CTX
+-    if not ctx:
+-        return
+-    try:
+-        msg = await checkin_all()
+-        await ctx.send_message(session, MessageChain([Plain(msg)]))
+-        logger.info(f"[SCHEDULE] 签到已推送 → {session}")
+-    except Exception as e:
+-        logger.exception(f"[SCHEDULE] 签到推送失败: {e}")
+-
+-
+ # 回调映射
+ _CALLBACKS = {
+     "news": _cb_news,
+@@ -613,7 +560,6 @@
+     "kfc": _cb_kfc,
+     "oilprice": _cb_oilprice,
+     "bili_dynamic": _cb_bili_dynamic,
+-    "checkin": _cb_checkin,
+ }
+ 
+ 
+@@ -661,7 +607,8 @@
+         if task.get("enabled", True) is False:
+             logger.info(f"[SCHEDULE] 跳过已暂停任务: {_make_job_name(task)}")
+             continue
+-        await _register_task(ctx, task)
++        if task.get("type") in _CALLBACKS:
++            await _register_task(ctx, task)
+ 
+     # 验证注册结果
+     all_jobs = await cron.list_jobs()
+@@ -718,7 +665,6 @@
+         # AstrBot 热重载插件时不一定再次调用 initialize()，构造阶段先绑定，
+         # 保证新注册的定时回调仍能取得发送上下文。
+         _CTX = context
+-        self._register_page_apis()
+         from .unified_runtime import UnifiedRuntime
+         self._unified = UnifiedRuntime(context)
+         self._unified.register_apis()
+@@ -728,70 +674,6 @@
+         except RuntimeError:
+             pass  # initialize will start it once the event loop is available.
+ 
+-    def _register_page_apis(self) -> None:
+-        """注册签到管理 Plugin Page API。"""
+-        if not hasattr(self.context, "register_web_api"):
+-            logger.warning("[SCHEDULE] 当前 AstrBot 不支持 Plugin Pages")
+-            return
+-        routes = (
+-            ("checkin/config", self.page_checkin_config, ["GET"], "Check-in dashboard data"),
+-            ("checkin/accounts/save", self.page_checkin_save_account, ["POST"], "Save check-in account"),
+-            ("checkin/schedule/save", self.page_checkin_save_schedule, ["POST"], "Save check-in schedule"),
+-            ("checkin/run", self.page_checkin_run, ["POST"], "Run check-in now"),
+-        )
+-        for path, handler, methods, description in routes:
+-            self.context.register_web_api(
+-                f"/jiang_schedule/page/{path}", handler, methods, description
+-            )
+-
+-    async def page_checkin_config(self):
+-        try:
+-            return json_response({"status": "ok", "data": _CHECKIN_MANAGER.public_config()})
+-        except CheckinConfigError as exc:
+-            return error_response(str(exc), status_code=400)
+-        except Exception as exc:
+-            logger.exception("[SCHEDULE] WebUI 读取签到配置失败")
+-            return error_response(str(exc), status_code=500)
+-
+-    async def page_checkin_save_account(self):
+-        try:
+-            payload = await request.json(default={})
+-            account = (payload or {}).get("account", payload)
+-            async with _CHECKIN_CONFIG_LOCK:
+-                config = _CHECKIN_MANAGER.upsert_account(account)
+-            return json_response({"status": "ok", "data": config})
+-        except CheckinConfigError as exc:
+-            return error_response(str(exc), status_code=400)
+-        except Exception as exc:
+-            logger.exception("[SCHEDULE] WebUI 保存签到站点失败")
+-            return error_response(str(exc), status_code=500)
+-
+-    async def page_checkin_save_schedule(self):
+-        try:
+-            payload = await request.json(default={})
+-            schedule = (payload or {}).get("schedule", payload)
+-            async with _CHECKIN_CONFIG_LOCK:
+-                config = _CHECKIN_MANAGER.update_schedule(schedule)
+-                _apply_checkin_task_config()
+-                await _sync_jobs(self.context)
+-            return json_response({"status": "ok", "data": config})
+-        except CheckinConfigError as exc:
+-            return error_response(str(exc), status_code=400)
+-        except Exception as exc:
+-            logger.exception("[SCHEDULE] WebUI 保存签到定时任务失败")
+-            return error_response(str(exc), status_code=500)
+-
+-    async def page_checkin_run(self):
+-        try:
+-            payload = await request.json(default={})
+-            account_id = str((payload or {}).get("id") or "").strip() or None
+-            result = await _CHECKIN_MANAGER.run(account_id)
+-            return json_response({"status": "ok", "data": result})
+-        except CheckinConfigError as exc:
+-            return error_response(str(exc), status_code=400)
+-        except Exception as exc:
+-            logger.exception("[SCHEDULE] WebUI 手动签到失败")
+-            return error_response(str(exc), status_code=502)
+ 
+     async def initialize(self) -> None:
+         """启动时加载所有定时任务"""
+@@ -800,7 +682,6 @@
+         logger.info("[SCHEDULE] initialize 开始")
+         self._unified.start()
+         try:
+-            _apply_checkin_task_config()
+             await _sync_jobs(self.context)
+             tasks = _load_tasks()
+             if tasks:
+@@ -827,7 +708,7 @@
+         # ── 列表 ──
+         if _RE_LIST.search(text):
+             tasks = _load_tasks()
+-            mine = [t for t in tasks if t.get("session") == session]
++            mine = [t for t in tasks if t.get("session") == session and t.get("type") in _CALLBACKS]
+             unified = await self._unified.command_tasks(event)
+             if not mine and not unified:
+                 yield event.plain_result("当前聊天暂无定时任务")
+@@ -861,20 +742,6 @@
+         m = _RE_DEL.search(text)
+         if m:
+             t = _normalize_type(m.group(1))
+-            if t == "checkin":
+-                if not event.is_admin():
+-                    yield event.plain_result(_shared_checkin_denied_message())
+-                    return
+-                schedule = _CHECKIN_MANAGER.public_config()["schedule"]
+-                owner_session = str(schedule.get("session") or "")
+-                if schedule.get("enabled") and owner_session == session:
+-                    _CHECKIN_MANAGER.update_schedule({**schedule, "enabled": False})
+-                    _apply_checkin_task_config()
+-                    await _sync_jobs(self.context)
+-                    yield event.plain_result("已删除「每日签到」定时任务")
+-                else:
+-                    yield event.plain_result("当前聊天没有每日签到定时任务")
+-                return
+             tasks = _load_tasks()
+             new_tasks = []
+             removed = await self._unified.command_delete(event, t)
+@@ -899,27 +766,6 @@
+             city = m.group(3) or ""
+             hour, minute = _parse_time(m.group(4), m.group(5))
+ 
+-            if t == "checkin":
+-                if not event.is_admin():
+-                    yield event.plain_result(_shared_checkin_denied_message())
+-                    return
+-                schedule = _CHECKIN_MANAGER.public_config()["schedule"]
+-                owner_session = str(schedule.get("session") or "")
+-                if schedule.get("enabled") and owner_session and owner_session != session:
+-                    yield event.plain_result(
+-                        "每日签到已在另一个聊天中启用。为避免改动其他聊天的任务，"
+-                        "本次没有修改；请先由原聊天的机器人管理员停用。"
+-                    )
+-                    return
+-                _CHECKIN_MANAGER.update_schedule({
+-                    "enabled": True,
+-                    "time": f"{hour:02d}:{minute:02d}",
+-                    "session": session,
+-                })
+-                _apply_checkin_task_config()
+-                await _sync_jobs(self.context)
+-                yield event.plain_result(f"已更新「每日签到」→ 每天 {hour:02d}:{minute:02d}")
+-                return
+ 
+             if t == "weather" and not city:
+                 yield event.plain_result("天气任务需要指定城市，如: /定时天气 绵阳 8点")
