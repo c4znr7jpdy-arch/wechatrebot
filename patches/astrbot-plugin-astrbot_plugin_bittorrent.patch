@@ -25,8 +25,12 @@ diff --git a/main.py b/main.py
              return
          else:
              # 第一次发送：所有基础结果 + 预览文本
-@@ -481,11 +481,11 @@
-                     name=event.get_sender_name(),
+@@ -478,14 +478,14 @@
+                     node_content = [Comp.Plain(f"结果{idx}无预览图")]
+                 preview_nodes.append(Comp.Node(
+                     content=node_content,
+-                    name=event.get_sender_name(),
++                    name="",
                      uin=str(event.get_sender_id()),
                  ))
 -            yield event.chain_result(text_chain)
