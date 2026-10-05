@@ -71,6 +71,7 @@ from .provider import (
     supports_thinking_toggle,
 )
 from .response_trace import ResponseTraceService
+from .runtime_config import bind_missing_analysis_model
 from .retired_plugins import purge_retired_plugins
 from .schedules import ScheduleService
 from .scheduled_task_service import ScheduledTaskService
@@ -97,6 +98,10 @@ from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .installed_entries import ensure_launcher_executable
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
+
+
+class AnalysisModelBindingError(PluginCenterError):
+    """A provider was saved, but its dependent analysis binding was not confirmed."""
 
 
 PUBLIC_API_METHODS = (
@@ -404,6 +409,8 @@ class ApplicationApi:
         # filesystem/transport errors, which can contain paths or credentials.
         if isinstance(exc, (GroupPolicyError, PrivatePolicyError, ConfigConflictError)):
             error["detail"] = str(exc)
+        if isinstance(exc, AnalysisModelBindingError):
+            error["message"] = str(exc)
         self._lifecycle.events.emit(
             "APP_ERROR",
             "failed",
@@ -1445,6 +1452,10 @@ class ApplicationApi:
                     profile,
                     make_default=make_default,
                 )
+            if saved.service_kind == "chat":
+                self._bind_group_analysis_model(
+                    saved if make_default else current, client, hot_applied
+                )
             return self._ok(
                 {
                     "id": saved.model_id,
@@ -1490,6 +1501,35 @@ class ApplicationApi:
             )
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
+
+    def _bind_group_analysis_model(
+        self, profile: OpenAIProviderProfile | None,
+        client: EngineApiClient, online: bool,
+    ) -> None:
+        data_root = self._install_root / "app" / "astrbot" / "data"
+        module = "astrbot_plugin_angel_heart"
+        if profile is None or not (data_root / "plugins" / module).is_dir():
+            return
+        try:
+            path = data_root / "config" / f"{module}_config.json"
+            if online:
+                snapshot = client.get_config(module)
+                config = snapshot["config"]
+            else:
+                config = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+            if not isinstance(config, dict):
+                raise ValueError("机器人核心配置格式不正确。")
+            if not bind_missing_analysis_model(config, profile):
+                return
+            if online:
+                client.save_config(module, config, snapshot["revision"])
+            else:
+                write_json_atomic(path, config)
+        except (OSError, ValueError, PluginCenterError) as exc:
+            raise AnalysisModelBindingError(
+                "模型已保存，但群聊分析模型自动绑定未完成。"
+                "请在机器人核心的模型设置中核对绑定，并查看运行记录。"
+            ) from exc
 
     @staticmethod
     def _requested_thinking(value: Any) -> bool:
@@ -1572,6 +1612,9 @@ class ApplicationApi:
                 client.set_default_provider(provider_id)
             else:
                 set_default_provider(self._install_root, provider_id)
+            self._bind_group_analysis_model(
+                load_provider_profile(self._install_root), client, hot_applied
+            )
             return self._ok(
                 {
                     "id": provider_id,
