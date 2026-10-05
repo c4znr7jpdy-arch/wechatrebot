@@ -22,7 +22,7 @@
     {"name": "astrbot_plugin_parser", "version": "1.5.6", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
     {"name": "astrbot_plugin_patch_at_wxid", "version": "0.1.0", "ownership": "local-patch", "license": "Proprietary", "review_status": "owner-rights-pending"},
     {"name": "astrbot_plugin_proactive_chat", "version": "1.2.4", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
-    {"name": "astrbot_plugin_qq_group_daily_analysis", "version": "4.10.9.3", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
+    {"name": "astrbot_plugin_qq_group_daily_analysis", "version": "5.7.4", "ownership": "third-party", "license": "MIT", "license_file": "LICENSE", "review_status": "notice-review-required"},
     {"name": "astrbot_plugin_self_iterative_core", "version": "1.1.1", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_self_learning", "version": "3.4.5", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "jiang_capability_router", "version": "1.1.0", "ownership": "owner", "license": "Proprietary", "review_status": "owner-rights-pending"},

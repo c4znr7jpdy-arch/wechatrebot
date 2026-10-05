@@ -122,7 +122,7 @@ def test_memory_hot_reload_stops_partially_initialized_instance(tmp_path: Path) 
 
 
 def test_report_patch_preserves_browser_fallback(tmp_path: Path) -> None:
-    source = _patched(tmp_path, "astrbot_plugin_qq_group_daily_analysis", "src/infrastructure/reporting/generators.py")
+    source = (REPOSITORY / "runtime/astrbot_plugin_qq_group_daily_analysis/src/infrastructure/reporting/generators.py").read_text("utf-8")
     tree = ast.parse(source)
     launches = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "launch"]
     channels = [[keyword.value.value for keyword in node.keywords if keyword.arg == "channel" and isinstance(keyword.value, ast.Constant)] for node in launches]

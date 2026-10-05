@@ -10,3 +10,5 @@ tests/fixtures/patch_sources/** text eol=lf
 # Pinned native plugin snapshots must retain reproducible source bytes.
 runtime/meme_manager/** text=auto eol=lf
 runtime/astrbot_plugin_livingmemory/** text=auto eol=lf
+
+runtime/astrbot_plugin_qq_group_daily_analysis/** text=auto eol=lf

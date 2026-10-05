@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import ast
+import __future__
 import asyncio
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-import re
-import shutil
 import sqlite3
-import subprocess
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,17 +15,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PLUGIN = Path("E:/Project/data/plugins/astrbot_plugin_qq_group_daily_analysis")
-BASE_PATCH = ROOT / "patches/astrbot-plugin-astrbot_plugin_qq_group_daily_analysis.patch"
-SOURCE_PATCH = (
-    ROOT
-    / "patches/astrbot-plugin-astrbot_plugin_qq_group_daily_analysis--source.patch"
-)
-PERMISSIONS_PATCH = (
-    ROOT
-    / "patches/astrbot-plugin-astrbot_plugin_qq_group_daily_analysis--z-permissions.patch"
-)
-PLUGIN_PATCHES = (BASE_PATCH, SOURCE_PATCH, PERMISSIONS_PATCH)
+PLUGIN = ROOT / "runtime/astrbot_plugin_qq_group_daily_analysis"
 
 
 @pytest.fixture
@@ -53,7 +41,7 @@ def _permission_event(sender: str, admin: bool = False):
 
 @pytest.mark.parametrize("name", [
     "analyze_group_daily", "set_output_format", "set_report_template",
-    "view_templates", "analysis_settings", "incremental_status",
+    "view_templates", "analysis_settings", "incremental_status", "generate_group_comic",
 ])
 def test_analysis_commands_reject_non_admin_before_side_effects(analysis_permissions, name):
     source, scope, plugin = analysis_permissions
@@ -78,7 +66,10 @@ def test_analysis_commands_reject_non_admin_before_side_effects(analysis_permiss
 def test_analysis_admin_can_change_plugin_setting(analysis_permissions, sender, global_admin):
     source, scope, plugin = analysis_permissions
     saved = []
-    plugin.config_manager = SimpleNamespace(set_output_format=saved.append)
+    async def set_format(event, value):
+        saved.append(value)
+        yield "已设置"
+    plugin.settings_command_handler = SimpleNamespace(handle_set_output_format=set_format)
     method = _method(source, "set_output_format", scope)
 
     async def run():
@@ -88,6 +79,25 @@ def test_analysis_admin_can_change_plugin_setting(analysis_permissions, sender, 
     assert saved == ["text"]
     plugin.config["basic"]["admin_ids"] = []
     assert plugin._commercial_is_analysis_admin(_permission_event(sender, global_admin)) is global_admin
+
+
+@pytest.mark.parametrize("days", [1, 7])
+def test_analysis_command_preserves_requested_days(analysis_permissions, days):
+    source, scope, plugin = analysis_permissions
+    requested = []
+
+    async def analyze(event, value):
+        requested.append(value)
+        yield "生成报告"
+
+    plugin.analysis_command_handler = SimpleNamespace(handle_daily_analysis=analyze)
+    method = _method(source, "analyze_group_daily", scope)
+
+    async def run():
+        return [reply async for reply in method(plugin, _permission_event("wxid_analysis_admin"), days)]
+
+    assert asyncio.run(run()) == ["生成报告"]
+    assert requested == [days]
 
 
 @pytest.mark.parametrize("admins,sender", [
@@ -101,40 +111,7 @@ def test_analysis_admin_requires_exact_nonempty_user_id(analysis_permissions, ad
 
 
 def _patched_plugin(tmp_path: Path) -> Path:
-    if not PLUGIN.is_dir():
-        pytest.skip("Local group analysis plugin source checkout is unavailable")
-
-    files: set[str] = set()
-    for patch in PLUGIN_PATCHES:
-        files.update(
-            re.findall(
-                r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE
-            )
-        )
-    for relative in files:
-        target = tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(PLUGIN / relative, target)
-
-    subprocess.run(
-        ["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True
-    )
-    # The extension patch is intentionally based on the already-commercialized
-    # source. This test also locks down the required build order.
-    for patch in PLUGIN_PATCHES:
-        subprocess.run(
-            ["git", "apply", "--check", "--whitespace=error-all", str(patch)],
-            cwd=tmp_path,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "apply", "--whitespace=error-all", str(patch)],
-            cwd=tmp_path,
-            check=True,
-            capture_output=True,
-        )
-    return tmp_path
+    return PLUGIN
 
 
 def _method(source: str, name: str, namespace: dict[str, Any]):
@@ -147,7 +124,7 @@ def _method(source: str, name: str, namespace: dict[str, Any]):
     )
     node.decorator_list = []
     exec(
-        compile(ast.Module(body=[node], type_ignores=[]), "group-analysis", "exec"),
+        compile(ast.Module(body=[node], type_ignores=[]), "group-analysis", "exec", flags=__future__.annotations.compiler_flag),
         namespace,
     )
     return namespace[name]
@@ -179,6 +156,9 @@ class _ContentType:
     TEXT = "text"
     IMAGE = "image"
     AT = "at"
+    EMOJI = "emoji"
+    VOICE = "voice"
+    VIDEO = "video"
 
 
 @dataclass(frozen=True)

@@ -1013,7 +1013,7 @@
 
   function featureCommandScheduleHint(command) {
     const text = String(command || "").replace(/^[/\\]/, "").trim();
-    if (/(天气|新闻|资讯|热点|油价|kfc|疯狂星期四|星期四文案|短剧推荐|影视推荐|提醒)/i.test(text)) {
+    if (/(群分析|天气|新闻|资讯|热点|油价|kfc|疯狂星期四|星期四文案|短剧推荐|影视推荐|提醒)/i.test(text)) {
       return {label: "支持定时", status: "supported"};
     }
     if (/(签到|订阅动态|b站动态|epic|喜加一|免费游戏)/i.test(text)) {
@@ -2810,9 +2810,14 @@
       ? [...new Set(auto.scheduled_group_list.map((value) => String(value || "").trim()).filter(Boolean))]
       : [];
     const legacyBlacklist = auto.scheduled_group_list_mode === "blacklist";
-    const groups = legacyBlacklist
-      ? (state.scheduledContext?.groups || []).map((entry) => entry.id).filter((id) => !configured.includes(id))
-      : configured;
+    const basic = state.groupAnalysisSchedule?.schedule_config?.basic || {};
+    const inherited = auto.scheduled_group_list_mode === "inherit";
+    const matches = (values, id) => values.some((value) => value === id || String(value).endsWith(`:${id}`));
+    const directory = (state.scheduledContext?.groups || []).map((entry) => entry.id);
+    const baseGroups = Array.isArray(basic.group_list) ? basic.group_list : [];
+    const groups = inherited
+      ? directory.filter((id) => basic.group_list_mode === "whitelist" ? matches(baseGroups, id) : basic.group_list_mode === "blacklist" ? !matches(baseGroups, id) : true)
+      : legacyBlacklist ? directory.filter((id) => !matches(configured, id)) : configured;
     const rawTimes = Array.isArray(auto.auto_analysis_time)
       ? auto.auto_analysis_time
       : String(auto.auto_analysis_time || "").split(/\r?\n/);
@@ -2831,7 +2836,7 @@
       account_id: state.scheduledContext?.account_id || "",
       name: "群分析自动日报",
       action: "group_analysis",
-      arguments: {times},
+      arguments: {times, days: Number(detail.schedule_config?.basic?.analysis_days || 1)},
       targets: groups.map((id) => ({type: "group", id, name: directory.get(id) || id})),
       schedule: {kind: "daily", time: times[0], timezone: "Asia/Shanghai"},
       schedule_text: `每天 ${times.join("、")}`,
@@ -2860,7 +2865,7 @@
       account_id: state.scheduledContext?.account_id || "",
       name: "群分析自动日报",
       action: "group_analysis",
-      arguments: {times: times.length ? times : ["23:00"]},
+      arguments: {times: times.length ? times : ["23:00"], days: Number(state.groupAnalysisSchedule?.schedule_config?.basic?.analysis_days || 1)},
       targets: groups.map((id) => ({type: "group", id, name: directory.get(id) || id})),
       schedule: {kind: "daily", time: times[0] || "23:00", timezone: "Asia/Shanghai"},
       enabled: groups.length > 0 && times.length > 0,
@@ -2898,7 +2903,7 @@
   function scheduledTimingMarkup(schedule, action = "", argumentsValue = {}) {
     if (action === "group_analysis") {
       const times = Array.isArray(argumentsValue.times) && argumentsValue.times.length ? argumentsValue.times : ["23:00"];
-      return `<div class="scheduled-analysis-timing"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind" disabled><option value="daily">每天</option></select><small>群聊分析按每天固定时间汇总各群当天消息。</small></div><div class="group-analysis-time-list" id="scheduledAnalysisTimes">${times.map((value, index) => `<div class="group-analysis-time-row"><label for="scheduledAnalysisTime-${index}">生成时间 ${index + 1}</label><input id="scheduledAnalysisTime-${index}" type="time" data-analysis-time="${index}" value="${escapeHtml(value)}"><button class="row-action group-analysis-time-remove" type="button" data-remove-analysis-time="${index}" aria-label="移除生成时间 ${index + 1}" ${times.length === 1 ? "disabled" : ""}>×</button></div>`).join("")}</div><button class="button ghost small group-analysis-time-add" id="scheduledAddAnalysisTime" type="button">${icon("i-plus")}添加生成时间</button></div><p class="subtle">可添加多个生成时间；机器人离线错过的时间不会补发。</p>`;
+      return `<div class="scheduled-analysis-timing"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind" disabled><option value="daily">每天</option></select><small>每天按所选范围汇总各群消息；近 7 天会生成滚动周报。</small></div><div class="group-analysis-time-list" id="scheduledAnalysisTimes">${times.map((value, index) => `<div class="group-analysis-time-row"><label for="scheduledAnalysisTime-${index}">生成时间 ${index + 1}</label><input id="scheduledAnalysisTime-${index}" type="time" data-analysis-time="${index}" value="${escapeHtml(value)}"><button class="row-action group-analysis-time-remove" type="button" data-remove-analysis-time="${index}" aria-label="移除生成时间 ${index + 1}" ${times.length === 1 ? "disabled" : ""}>×</button></div>`).join("")}</div><button class="button ghost small group-analysis-time-add" id="scheduledAddAnalysisTime" type="button">${icon("i-plus")}添加生成时间</button></div><p class="subtle">可添加多个生成时间；机器人离线错过的时间不会补发。</p>`;
     }
     const kinds = {daily: "每天", thursday: "每周四", weekdays: "每周一至周五", weekends: "每周末（周六、周日）", weekly: "每周（自选星期，可多选）", monthly: "每月（自选日期，可多选）", once: "仅一次"};
     return `<div class="scheduled-time-fields"><div class="form-field"><label for="scheduledKind">重复方式</label><select id="scheduledKind">${Object.entries(kinds).map(([value, label]) => `<option value="${value}" ${scheduledKindValue(schedule) === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
@@ -2924,6 +2929,8 @@
     const detail = state.groupAnalysisSchedule;
     if (!detail) throw new Error("群聊分析设置尚未读取，请刷新后重试。 ");
     const config = structuredClone(detail.schedule_config || {});
+    config.basic ||= {};
+    config.basic.analysis_days = Math.max(1, Math.min(30, Number(editor.arguments?.days || 1)));
     config.auto_analysis ||= {};
     config.auto_analysis.scheduled_group_list_mode = "whitelist";
     config.auto_analysis.scheduled_group_list = (editor.targets || [])
@@ -3018,7 +3025,7 @@
     const args = editor.arguments;
     const field = (key, label, control) => `<div class="form-field"><label for="scheduledArg-${key}">${label}</label>${control}</div>`;
     if (editor.action === "weather") return field("city", "城市", `<input id="scheduledArg-city" data-task-arg="city" value="${escapeHtml(args.city || "")}" placeholder="例如：青岛" maxlength="80">`) + field("day", "天气日期", `<select id="scheduledArg-day" data-task-arg="day"><option value="today" ${args.day !== "tomorrow" ? "selected" : ""}>执行当天</option><option value="tomorrow" ${args.day === "tomorrow" ? "selected" : ""}>执行日的明天</option></select><small>以图片卡片发送，与手动查询的样式一致。</small>`);
-    if (editor.action === "group_analysis") return `<div class="scheduled-analysis-intro"><strong>群聊分析日报</strong><p class="subtle">每天汇总所选群聊的消息，生成独立日报。请在“发给谁”中只选择群聊。</p></div>`;
+    if (editor.action === "group_analysis") return `<div class="scheduled-analysis-intro"><strong>群聊分析报告</strong><p class="subtle">按下面的范围和时间，为所选群分别生成报告。请在“发给谁”中选择群聊。</p><div class="form-field"><label for="scheduledAnalysisDays">统计范围</label><select id="scheduledAnalysisDays">${[...new Set([1, 7, Number(editor.arguments.days || 1)])].map((days) => `<option value="${days}" ${days === Number(editor.arguments.days || 1) ? "selected" : ""}>近 ${days} 天</option>`).join("")}</select><small>与群聊分析常用设置共用统计范围；手动发送 /群分析 1 或 /群分析 7 可单次指定。</small></div></div>`;
     if (editor.action === "news") return field("count", "资讯条数", `<input id="scheduledArg-count" data-task-arg="count" type="number" min="1" max="30" value="${escapeHtml(args.count ?? 10)}"><small>每次执行获取最新资讯。</small>`);
     if (editor.action === "oilprice") return field("province", "省份", `<input id="scheduledArg-province" data-task-arg="province" value="${escapeHtml(args.province || "")}" maxlength="80" placeholder="例如：山东">`);
     if (editor.action === "short_drama") return field("media_type", "推荐分类", `<select id="scheduledArg-media_type" data-task-arg="media_type">${["短剧", "电视剧", "电影", "动漫", "综艺", "体育", "全部"].map((value) => `<option value="${value}" ${args.media_type === value ? "selected" : ""}>${value === "体育" ? "体育回放" : value === "全部" ? "全部分类" : value}</option>`).join("")}</select>`) + field("limit", "每次推荐", `<input id="scheduledArg-limit" data-task-arg="limit" type="number" min="1" max="20" value="${escapeHtml(args.limit ?? 12)}"><small>每次执行实时获取最新内容，并发送可点击播放的微信卡片。</small>`);
@@ -3080,6 +3087,7 @@
       $$('#scheduledWeekdays input').forEach((input) => { input.checked = (editor.schedule.weekdays || []).includes(Number(input.value)); });
     };
     if (analysisTask) {
+      $("#scheduledAnalysisDays").addEventListener("change", (event) => { editor.arguments.days = Number(event.target.value); scheduledChanged(); });
       const syncAnalysisTimes = () => {
         const times = [...new Set($$('[data-analysis-time]', root).map((input) => input.value.trim()).filter((value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value)))];
         editor.arguments.times = times.length ? times : ["23:00"];
@@ -5187,19 +5195,22 @@
         };
       }
       if (id !== "feature-group-analysis") return {...item, basic_schema: {}, model_schema: {}, schema: {}, config: {}, revision: "preview", providers: [], personas: [], engine_online: true};
+      const {auto_analysis: analysisScheduleSchema, ...analysisCommonSchema} = groupAnalysisBasicSchema;
       return {
         ...item,
-        basic_schema: {},
+        basic_schema: {...analysisCommonSchema, ...groupAnalysisModelSchema},
         model_schema: {},
-        configuration_profile: "advanced-only",
-        schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema},
+        configuration_profile: "group-analysis-simple",
+        schedule_schema: {basic: groupAnalysisBasicSchema.basic, auto_analysis: analysisScheduleSchema},
+        schedule_config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
+        schema: {...analysisCommonSchema, ...groupAnalysisModelSchema},
         config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema, incremental: {type: "object", description: "增量分析设置", items: {
           incremental_group_list: {description: "增量分析群列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "从群聊列表下拉选择；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID。目标群还须通过基础群聊权限和定时名单。"},
         }}, performance: {type: "object", description: "并发设置", items: {max_concurrent: {type: "int", description: "同时生成报告数量", min: 1, max: 5, default: 1}}}},
         configuration_note: "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数继续使用推荐值，保存时不会被重置。",
-        setup_steps: ["在“自动日报群”旁点击“从群聊列表添加”，无需在群里发送命令", "选择需要生成日报的群；多个群可以继续添加", "确认生成时间和分析模型后保存"],
+        setup_steps: ["在常用设置中选择分析模型与报告内容", "到主定时任务标签选择群聊、统计范围和生成时间", "也可在群里发送 /群分析 1 或 /群分析 7"],
         revision: "preview",
         providers: [],
         personas: [],

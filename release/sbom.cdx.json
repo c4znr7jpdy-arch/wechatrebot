@@ -6285,7 +6285,7 @@
       "type": "application",
       "group": "delivered-plugin",
       "name": "astrbot_plugin_qq_group_daily_analysis",
-      "version": "4.10.9.3 # 本地兼容版：模板 1 更换为姜小妹主题",
+      "version": "5.7.4",
       "licenses": [
         {
           "license": {

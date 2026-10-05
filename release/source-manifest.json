@@ -152,8 +152,8 @@
       "target": "app/astrbot/data/plugins/astrbot_plugin_self_learning"
     },
     {
-      "origin": "project",
-      "source": "data/plugins/astrbot_plugin_qq_group_daily_analysis",
+      "origin": "commercial",
+      "source": "runtime/astrbot_plugin_qq_group_daily_analysis",
       "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis"
     },
     {
