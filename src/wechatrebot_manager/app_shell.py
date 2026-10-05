@@ -26,10 +26,12 @@ from .customer_config import (
     load_provider_services,
     load_web_search_settings,
     load_robot_settings,
+    load_ui_theme,
     provider_reference_modules,
     replace_provider_references,
     replace_provider_value,
     save_provider_profile,
+    save_ui_theme,
     save_web_search_settings,
     save_provider_thinking_preference,
     set_default_provider,
@@ -106,6 +108,7 @@ class AnalysisModelBindingError(PluginCenterError):
 
 PUBLIC_API_METHODS = (
     "bootstrap",
+    "save_theme",
     "get_status",
     "check_environment",
     "start_robot",
@@ -421,6 +424,13 @@ class ApplicationApi:
             "ok": False,
             "error": error,
         }
+
+    def save_theme(self, theme: str) -> dict[str, object]:
+        try:
+            save_ui_theme(self._install_root, theme)
+            return self._ok({"theme": theme})
+        except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
 
     def bootstrap(self) -> dict[str, object]:
         try:
@@ -2430,7 +2440,7 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
                 width=1380,
                 height=860,
                 min_size=(1080, 680),
-                background_color="#F3F6FA",
+                background_color="#111827" if load_ui_theme(install_root) == "dark" else "#F3F6FA",
                 text_select=True,
             )
             tray = None

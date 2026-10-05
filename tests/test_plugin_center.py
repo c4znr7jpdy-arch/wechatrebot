@@ -1930,10 +1930,14 @@ def test_local_web_handler_hosts_plugin_page_bridge_and_preserves_content_type()
         thread.join(timeout=2)
 
 
-def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> None:
+@pytest.mark.parametrize("theme", ["", "dark", "light"])
+def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, theme: str) -> None:
     assets = tmp_path / "app_webui"
     (assets / "assets").mkdir(parents=True)
-    (assets / "index.html").write_text("<script src='app.js'></script>", encoding="utf-8")
+    (assets / "index.html").write_text('<html lang="zh-CN"><script src="app.js"></script></html>', encoding="utf-8")
+    if theme:
+        from wechatrebot_manager.customer_config import save_ui_theme
+        save_ui_theme(tmp_path, theme)
     (assets / "app.css").write_text("body{}", encoding="utf-8")
     (assets / "design-overrides.css").write_text(".design-ready{}", encoding="utf-8")
     (assets / "app.js").write_text("window.loaded = true;", encoding="utf-8")
@@ -1941,6 +1945,8 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
     (assets / "assets" / "app-icon.png").write_bytes(b"PNG")
 
     class FakeService:
+        install_root = tmp_path
+
         def catalog(self):
             return {"plugins": [], "engine_online": False, "product_name": "测试机器人"}
 
@@ -1953,6 +1959,8 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path) -> 
     try:
         with urlopen(f"{base}/", timeout=2) as response:
             assert response.status == 200
+            html = response.read().decode("utf-8")
+            assert (f'data-saved-theme="{theme}"' in html) if theme else ('data-saved-theme' not in html)
             assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
             content_security_policy = response.headers["Content-Security-Policy"]
             assert "default-src 'self'" in content_security_policy

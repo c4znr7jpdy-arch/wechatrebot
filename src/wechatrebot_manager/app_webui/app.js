@@ -173,6 +173,8 @@
   }
 
   function storedTheme() {
+    const saved = document.documentElement.dataset.savedTheme;
+    if (saved === "dark" || saved === "light") return saved;
     try {
       return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
     } catch (_error) {
@@ -4796,8 +4798,18 @@
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
     $("#globalRefresh").addEventListener("click", refreshStatus);
-    $("#themeToggle").addEventListener("click", () => {
-      applyTheme(state.theme === "dark" ? "light" : "dark", true);
+    $("#themeToggle").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const theme = state.theme === "dark" ? "light" : "dark";
+        await api("save_theme", theme);
+        applyTheme(theme, true);
+      } catch (error) {
+        reportError(error);
+      } finally {
+        button.disabled = false;
+      }
     });
     $("#primaryAction").addEventListener("click", runPrimaryAction);
     $("#forceStopAction").addEventListener("click", runForceStop);
@@ -5523,6 +5535,7 @@
       get_maintenance: () => ok({preview: {file_count: 18, uncompressed_size: 39636172, can_create: true}, backups: [{id: "robot-backup-preview.zip", file_name: "robot-backup-preview.zip", size: 12740121, modified_at: new Date(Date.now() - 86400000).toISOString()}], diagnostics: {summary: {error_count: 0, warning_count: 1, check_count: 14}}}),
       create_backup: () => ok({id: "robot-backup-new.zip"}, "设置、人格和长期记忆已备份。"),
       validate_restore: (id) => ok({valid: true, backup_id: id}), restore_backup: (id) => ok({backup_id: id}, "备份已经恢复，并已保留恢复前副本。"),
+      save_theme: (theme) => ok({theme}),
       get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
       open_install_folder: () => ok({opened: true}), open_uninstaller: () => ok({opened: true}),
       check_update: () => ok({enabled: true, current: true, release: null}), install_update: (version) => ok({accepted: true, version}),

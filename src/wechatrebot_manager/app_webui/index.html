@@ -8,17 +8,6 @@
   <link rel="icon" type="image/png" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
-  <script>
-    (() => {
-      try {
-        if (window.localStorage.getItem("wechatrebot-theme") === "dark") {
-          document.documentElement.dataset.theme = "dark";
-        }
-      } catch (_error) {
-        // WebView2 can deny storage access for a fresh local document.
-      }
-    })();
-  </script>
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
