@@ -5210,7 +5210,7 @@
           incremental_group_list: {description: "增量分析群列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "从群聊列表下拉选择；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID。目标群还须通过基础群聊权限和定时名单。"},
         }}, performance: {type: "object", description: "并发设置", items: {max_concurrent: {type: "int", description: "同时生成报告数量", min: 1, max: 5, default: 1}}}},
         configuration_note: "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数继续使用推荐值，保存时不会被重置。",
-        setup_steps: ["在常用设置中选择分析模型与报告内容", "到主定时任务标签选择群聊、统计范围和生成时间", "也可在群里发送 /群分析 1 或 /群分析 7"],
+        setup_steps: ["在常用设置中选择分析模型与报告内容", "到主定时任务标签选择群聊、统计范围和生成时间，无需在群里发送命令", "也可在群里发送 /群分析 1 或 /群分析 7"],
         revision: "preview",
         providers: [],
         personas: [],
