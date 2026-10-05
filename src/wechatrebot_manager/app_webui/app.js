@@ -954,7 +954,7 @@
     control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
     if (field._report_previews) {
       const preview = field._report_previews[String(value)] || "";
-      control += `<figure class="report-style-preview" data-report-preview-for="${fieldId}" data-report-previews="${escapeHtml(JSON.stringify(field._report_previews))}"><a ${preview ? `href="${escapeHtml(preview)}"` : ""} target="_blank" rel="noopener" aria-label="放大报告样式预览" ${preview ? "" : "hidden"}><img ${preview ? `src="${escapeHtml(preview)}"` : ""} alt="报告样式预览（示例数据）" loading="lazy"></a><figcaption>${preview ? "示例数据 · 点击图片放大" : "此自定义样式暂无预览"}</figcaption></figure>`;
+      control += `<figure class="report-style-preview" data-report-preview-for="${fieldId}" data-report-previews="${escapeHtml(JSON.stringify(field._report_previews))}"><button type="button" class="report-preview-trigger" aria-label="查看完整报告样式预览" ${preview ? "" : "hidden"}><img ${preview ? `src="${escapeHtml(preview)}"` : ""} alt="报告样式预览（示例数据）" loading="lazy"></button><figcaption>${preview ? "示例数据 · 点击查看完整长图" : "此自定义样式暂无预览"}</figcaption></figure>`;
     }
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
@@ -1096,14 +1096,17 @@
       const previews = JSON.parse(figure.dataset.reportPreviews);
       select?.addEventListener("change", () => {
         const src = previews[select.value];
-        const link = figure.querySelector("a"), img = figure.querySelector("img");
-        link.hidden = !src;
-        figure.querySelector("figcaption").textContent = src ? "示例数据 · 点击图片放大" : "此自定义样式暂无预览";
-        if (src) { link.href = src; img.src = src; }
-        else { link.removeAttribute("href"); img.removeAttribute("src"); }
+        const trigger = figure.querySelector("button"), img = figure.querySelector("img");
+        trigger.hidden = !src;
+        figure.querySelector("figcaption").textContent = src ? "示例数据 · 点击查看完整长图" : "此自定义样式暂无预览";
+        if (src) img.src = src;
+        else img.removeAttribute("src");
+      });
+      figure.querySelector("button").addEventListener("click", () => {
+        window.openReportPreview(previews[select.value], select.selectedOptions[0]?.textContent);
       });
       figure.querySelector("img").addEventListener("error", () => {
-        figure.querySelector("a").hidden = true;
+        figure.querySelector("button").hidden = true;
         figure.querySelector("figcaption").textContent = "样式预览暂时无法加载，请重新读取。";
       });
     });
