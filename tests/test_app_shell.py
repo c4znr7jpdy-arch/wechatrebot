@@ -482,6 +482,106 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
     assert captured["make_default"] is False
 
 
+@pytest.mark.parametrize("online", [False, True])
+@pytest.mark.parametrize("operation", ["save", "default"])
+@pytest.mark.parametrize("binding", ["", "custom/analysis"])
+def test_model_settings_fill_only_empty_analysis_binding(
+    monkeypatch, tmp_path: Path, online: bool, operation: str, binding: str,
+) -> None:
+    api = _api(tmp_path)
+    profile = app_shell.OpenAIProviderProfile(
+        api_key="test-key", api_base="https://example.test/v1", model="chat-model",
+    ).normalized()
+    app_shell.save_provider_profile(tmp_path, profile)
+    data_root = tmp_path / "app" / "astrbot" / "data"
+    (data_root / "plugins" / "astrbot_plugin_angel_heart").mkdir(parents=True)
+    path = data_root / "config" / "astrbot_plugin_angel_heart_config.json"
+    config = {"analyzer_model": binding, "wake_interaction": {"enter_on_mention_only": False}}
+    app_shell.write_json_atomic(path, config)
+    calls = []
+
+    class Client:
+        def is_available(self):
+            return online
+
+        def save_provider(self, *args, **kwargs):
+            calls.append("provider")
+
+        def set_default_provider(self, provider_id):
+            calls.append("provider")
+
+        def get_config(self, module):
+            return {"config": copy.deepcopy(config), "revision": "before"}
+
+        def save_config(self, module, values, revision):
+            assert revision == "before"
+            assert module == "astrbot_plugin_angel_heart"
+            calls.append("analysis")
+            config.update(values)
+            return {"verified": True, "state": "applied"}
+
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: Client())
+    if operation == "save":
+        result = api.save_provider({
+            "provider_id": profile.model_id, "api_key": "",
+            "api_base": profile.api_base, "model": profile.model,
+        })
+    else:
+        result = api.set_default_provider(profile.model_id)
+    assert result["ok"] is True
+    actual = config if online else json.loads(path.read_text(encoding="utf-8"))
+    assert actual["analyzer_model"] == (binding or profile.model_id)
+    assert actual["wake_interaction"]["enter_on_mention_only"] is False
+    if online:
+        assert ("analysis" in calls) == (not binding)
+        assert json.loads(path.read_text(encoding="utf-8"))["analyzer_model"] == binding
+
+
+def test_analysis_binding_failure_reports_model_already_saved(monkeypatch, tmp_path: Path) -> None:
+    api = _api(tmp_path)
+    profile = app_shell.OpenAIProviderProfile(
+        api_key="test-key", api_base="https://example.test/v1", model="chat-model",
+    ).normalized()
+    app_shell.save_provider_profile(tmp_path, profile)
+    (tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart").mkdir(parents=True)
+    calls = []
+
+    def reject(*args):
+        raise app_shell.PluginCenterError("未收到生效确认")
+
+    client = SimpleNamespace(
+        is_available=lambda: True,
+        set_default_provider=lambda provider_id: calls.append(provider_id),
+        get_config=lambda module: {"config": {}, "revision": "before"},
+        save_config=reject,
+    )
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: client)
+    result = api.set_default_provider(profile.model_id)
+    assert result["ok"] is False
+    assert calls == [profile.model_id]
+    assert "模型已保存，但群聊分析模型自动绑定未完成" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("kind", ["chat", "image", "embedding", "voice"])
+def test_adding_extra_model_keeps_analysis_on_default_chat(
+    monkeypatch, tmp_path: Path, kind: str,
+) -> None:
+    api = _api(tmp_path)
+    default = app_shell.save_provider_profile(tmp_path, app_shell.OpenAIProviderProfile(
+        api_key="test-key", api_base="https://example.test/v1", model="default-chat",
+    ))
+    (tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart").mkdir(parents=True)
+    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    result = api.save_provider({
+        "api_key": "test-key", "api_base": "https://example.test/v1",
+        "model": "extra-model", "service_kind": kind,
+    })
+    assert result["ok"] is True
+    path = tmp_path / "app/astrbot/data/config/astrbot_plugin_angel_heart_config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    assert config.get("analyzer_model", "") == (default.model_id if kind == "chat" else "")
+
+
 def test_model_discovery_reuses_saved_key_without_exposing_it(
     monkeypatch, tmp_path: Path
 ) -> None:

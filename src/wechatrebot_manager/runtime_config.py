@@ -370,6 +370,18 @@ def _sync_delivery_plugins(
         ]
 
 
+def bind_missing_analysis_model(
+    config: dict[str, object], profile: OpenAIProviderProfile | None,
+) -> bool:
+    """Seed an empty analysis binding without replacing an explicit choice."""
+    if profile is None or profile.service_kind != "chat":
+        return False
+    if str(config.get("analyzer_model") or "").strip():
+        return False
+    config["analyzer_model"] = profile.normalized().model_id
+    return True
+
+
 def _sync_angel_heart_model(
     astrbot_data_root: Path,
     provider_profile: OpenAIProviderProfile | None,
@@ -395,11 +407,10 @@ def _sync_angel_heart_model(
                 "说话自然、直接、简短，不使用机械的客服措辞。"
             )
         }
-    if provider_profile is not None:
-        model_id = provider_profile.normalized().model_id
-        for field in ("analyzer_model", "image_caption_provider_id"):
-            if not str(payload.get(field) or "").strip():
-                payload[field] = model_id
+    bind_missing_analysis_model(payload, provider_profile)
+    if provider_profile is not None and provider_profile.service_kind == "chat":
+        if not str(payload.get("image_caption_provider_id") or "").strip():
+            payload["image_caption_provider_id"] = provider_profile.normalized().model_id
     if payload:
         write_json_atomic(path, payload)
 
@@ -629,7 +640,9 @@ def write_runtime_configs(
     ).strip()
     if robot_name == "\u59dc\u5c0f\u59b9\u673a\u5668\u4eba":
         robot_name = "小妹"
-    _sync_angel_heart_model(astrbot_data_root, provider_profile, robot_name)
+    _sync_angel_heart_model(
+        astrbot_data_root, provider_profile if provider_make_default else None, robot_name
+    )
     _sync_living_memory_config(astrbot_data_root, provider_profile)
     _sync_emotion_config(astrbot_data_root)
     manager_path = root / "config" / "manager.json"

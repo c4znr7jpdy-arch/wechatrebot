@@ -253,6 +253,22 @@ def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path
     ]
 
 
+@pytest.mark.parametrize("kind,make_default", [
+    ("image", False), ("embedding", False), ("voice", False), ("chat", False),
+])
+def test_extra_models_do_not_seed_group_analysis(
+    tmp_path: Path, kind: str, make_default: bool,
+) -> None:
+    (tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart").mkdir(parents=True)
+    write_runtime_configs(tmp_path, provider_profile=OpenAIProviderProfile(
+        api_key="test-key", api_base="https://example.test/v1", model="extra-model",
+        service_kind=kind,
+    ), provider_make_default=make_default)
+    path = tmp_path / "app/astrbot/data/config/astrbot_plugin_angel_heart_config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    assert not config.get("analyzer_model")
+
+
 def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> None:
     install = tmp_path / "install"
     legal = install / "legal"
