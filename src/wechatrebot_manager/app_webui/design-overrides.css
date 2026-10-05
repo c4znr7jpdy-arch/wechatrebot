@@ -720,4 +720,10 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 
 #page-history .history-toolbar { grid-template-columns: auto minmax(200px,1fr) auto auto; }
 #historyDateRange { white-space: nowrap; }
+@media (max-width: 520px) {
+  .date-range-dialog { padding: 20px; }
+  .date-range-dialog .modal-actions { flex-wrap: wrap; }
+  .date-range-dialog .modal-actions .button { flex: 1; white-space: nowrap; }
+  .date-range-dialog #rangeClear { flex-basis: 100%; }
+}
 @media (max-width: 1100px) { #page-history .history-toolbar { grid-template-columns: 1fr auto; } #page-history .history-toolbar .search-box { grid-column: 1 / -1; } }

@@ -246,7 +246,7 @@
           <div class="history-toolbar panel">
               <div class="segmented" id="historyKinds"><button class="active" data-kind="all" data-action-bound disabled>全部</button><button data-kind="private" data-action-bound disabled>个人聊天</button><button data-kind="group" data-action-bound disabled>群聊</button></div>
               <label class="search-box wide" id="historySearchBox"><svg><use href="#i-search"/></svg><input id="historySearch" type="search" placeholder="搜索昵称、微信号或内容" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
-            <input type="hidden" id="historyStart"><input type="hidden" id="historyEnd"><button class="button secondary" type="button" id="historyDateRange" aria-haspopup="dialog">最近一周</button>
+            <input type="hidden" id="historyStart"><input type="hidden" id="historyEnd"><button class="button secondary" type="button" id="historyDateRange" aria-haspopup="dialog">不限时间 · 最新消息</button>
                 <button class="button ghost small" id="historyFilter" data-action-bound disabled>筛选</button>
           </div>
           <div class="history-summary" id="historySummary"></div>
@@ -436,9 +436,10 @@
   <script src="app.js?v=20260922-force-stop-layout"></script>
   <dialog id="historyDateDialog" class="date-range-dialog" aria-labelledby="rangeTitle">
     <div class="panel-heading"><h2 id="rangeTitle">选择日期范围</h2><button type="button" id="rangeWeek" class="button ghost small">最近一周</button></div>
-    <div class="range-fields"><label>开始日期<input id="rangeStart" readonly aria-label="选择开始日期"></label><span>至</span><label>结束日期<input id="rangeEnd" readonly aria-label="选择结束日期"></label></div>
+    <p class="subtle">不选日期时显示最新消息，每次加载 20 条；向上滚动可查看更早消息。</p>
+    <div class="range-fields"><label>开始日期<input id="rangeStart" readonly placeholder="不限" aria-label="选择开始日期"></label><span>至</span><label>结束日期<input id="rangeEnd" readonly placeholder="不限" aria-label="选择结束日期"></label></div>
     <div class="range-navigation"><button class="button ghost small" id="rangePrev" type="button" aria-label="上个月">←</button><span>先选择开始日期，再选择结束日期</span><button class="button ghost small" id="rangeNext" type="button" aria-label="下个月">→</button></div>
-    <div id="historyCalendar" class="range-calendars"></div><div class="modal-actions"><button class="button secondary" id="rangeCancel" type="button">取消</button><button class="button primary" id="rangeApply" type="button">应用日期</button></div>
+    <div id="historyCalendar" class="range-calendars"></div><div class="modal-actions"><button class="button ghost" id="rangeClear" type="button">清空时间，查看最新</button><button class="button secondary" id="rangeCancel" type="button">取消</button><button class="button primary" id="rangeApply" type="button">应用日期</button></div>
   </dialog>
 </body>
 </html>
