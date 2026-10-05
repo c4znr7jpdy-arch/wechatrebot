@@ -662,6 +662,7 @@ class ChatHistoryService:
         if end_time is not None:
             clauses.append("timestamp <= ?")
             params.append(float(end_time))
+        scope_params = tuple(params)
         page_clauses = ["1 = 1"]
         if before is not None:
             if before_id is None:
@@ -674,22 +675,27 @@ class ChatHistoryService:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                WITH scoped AS (
-                    SELECT *,
-                           COUNT(*) OVER (PARTITION BY role, sender_id) AS sender_message_count,
-                           MAX(timestamp) OVER (PARTITION BY role, sender_id) AS sender_last_timestamp
-                    FROM messages WHERE {' AND '.join(clauses)}
+                WITH page AS (
+                    SELECT * FROM messages
+                    WHERE {' AND '.join(clauses + page_clauses)}
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                ), sender_stats AS (
+                    SELECT role, sender_id, COUNT(*) AS sender_message_count,
+                           MAX(timestamp) AS sender_last_timestamp
+                    FROM messages
+                    WHERE {' AND '.join(clauses)}
+                      AND (role, sender_id) IN (SELECT role, sender_id FROM page)
+                    GROUP BY role, sender_id
                 )
                 SELECT id, conversation_type, role, sender_id, sender_name,
                        group_id, group_name, group_nickname, wechat_name, wechat_id,
                        avatar, message_kind, quote_sender, quote_content,
                        content, timestamp, sender_message_count, sender_last_timestamp
-                FROM scoped
-                WHERE {' AND '.join(page_clauses)}
+                FROM page JOIN sender_stats USING (role, sender_id)
                 ORDER BY timestamp DESC, id DESC
-                LIMIT ?
                 """,
-                params,
+                (*params, *scope_params),
             ).fetchall()
         messages: list[dict[str, Any]] = []
         for row in reversed(rows):

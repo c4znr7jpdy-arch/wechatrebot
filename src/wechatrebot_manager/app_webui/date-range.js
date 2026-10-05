@@ -8,11 +8,14 @@ window.initializeHistoryDateRange = function (onApply) {
   const calendar = document.getElementById("historyCalendar");
   const format = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   const today = new Date();
-  const week = new Date(today); week.setDate(week.getDate() - 7);
-  start.value = format(week); end.value = format(today);
+  start.value = ""; end.value = "";
   let draftStart = start.value, draftEnd = end.value, selecting = "start";
   let month = new Date(today.getFullYear(), today.getMonth(), 1);
-  const label = () => { trigger.textContent = `${start.value.replaceAll("-", "/")} — ${end.value.replaceAll("-", "/")}`; };
+  const label = () => {
+    trigger.textContent = start.value && end.value
+      ? `${start.value.replaceAll("-", "/")} — ${end.value.replaceAll("-", "/")}`
+      : "不限时间 · 最新消息";
+  };
   function render() {
     document.getElementById("rangeStart").value = draftStart.replaceAll("-", "/");
     document.getElementById("rangeEnd").value = draftEnd.replaceAll("-", "/");
@@ -31,7 +34,10 @@ window.initializeHistoryDateRange = function (onApply) {
   }
   trigger.addEventListener("click", () => {
     draftStart = start.value; draftEnd = end.value; selecting = "start";
-    month = new Date(Number(draftStart.slice(0, 4)), Number(draftStart.slice(5, 7)) - 1, 1);
+    const now = new Date();
+    month = draftStart
+      ? new Date(Number(draftStart.slice(0, 4)), Number(draftStart.slice(5, 7)) - 1, 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
     render(); dialog.showModal(); document.getElementById("rangeStart").focus();
   });
   for (const field of ["start", "end"]) {
@@ -46,7 +52,7 @@ window.initializeHistoryDateRange = function (onApply) {
       selecting = "end";
     } else {
       draftEnd = value;
-      if (draftStart > value) draftStart = value;
+      if (!draftStart || draftStart > value) draftStart = value;
     }
     render();
   });
@@ -58,6 +64,10 @@ window.initializeHistoryDateRange = function (onApply) {
     draftStart = format(from); draftEnd = format(now); month = new Date(from.getFullYear(), from.getMonth(), 1); render();
   });
   document.getElementById("rangeCancel").addEventListener("click", () => dialog.close());
+  document.getElementById("rangeClear").addEventListener("click", () => {
+    start.value = ""; end.value = ""; draftStart = ""; draftEnd = "";
+    label(); dialog.close(); onApply();
+  });
   document.getElementById("rangeApply").addEventListener("click", () => {
     start.value = draftStart; end.value = draftEnd; label(); dialog.close(); onApply();
   });

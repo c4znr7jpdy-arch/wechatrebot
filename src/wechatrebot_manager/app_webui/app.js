@@ -62,6 +62,7 @@
     historyMessagesLoading: false,
     historyPolling: false,
     historyHasMore: false,
+    historyHasNewer: false,
     historyLoadingOlder: false,
     historyOlderLoad: 0,
     historyMessageQuery: "",
@@ -116,6 +117,8 @@
   const HISTORY_PAGE_SIZE = 20;
   const HISTORY_PRELOAD_THRESHOLD = 120;
   const HISTORY_MESSAGE_CACHE_LIMIT = 32;
+  const HISTORY_MESSAGE_WINDOW_LIMIT = 200;
+  const HISTORY_MESSAGE_CACHE_TTL_MS = 30000;
   const GROUP_DIRECTORY_RETRY_DELAYS_MS = [1500, 4000];
   const GROUP_MEMBER_RETRY_DELAYS_MS = [800, 2000];
   const GROUP_MEMBER_REQUEST_CONCURRENCY = 4;
@@ -2147,9 +2150,9 @@
       $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
       if (state.selectedConversation) {
-        await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse});
+        await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
       } else if (state.conversations.length) {
-        await selectConversation(state.conversations[0].conversation_id, {silent: true, cachedOnly: reuse});
+        await selectConversation(state.conversations[0].conversation_id, {silent: true, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
       } else {
         ++state.messageLoad;
         state.historyMessagesLoading = false;
@@ -2191,6 +2194,7 @@
     state.selectedMessages = [];
     state.selectedSenderKey = "";
     state.historyHasMore = false;
+    state.historyHasNewer = false;
     state.historyLoadingOlder = false;
     state.historyMessageQuery = "";
     state.historyReadyAccount = "";
@@ -2287,9 +2291,11 @@
       query: state.historyMessageQuery,
       messages: state.selectedMessages.slice(),
       hasMore: state.historyHasMore,
+      hasNewer: state.historyHasNewer,
       scrollTop: $("#messageList").scrollTop,
       senderKey: state.selectedSenderKey,
-      updatedAt: Date.now(),
+      fetchedAt: previous?.fetchedAt || 0,
+      revision: previous?.revision || "",
     });
   }
 
@@ -2305,6 +2311,12 @@
     state.historyMessageCacheEpoch += 1;
     state.historyMessageCache.clear();
     state.historyMessageRequests.clear();
+  }
+
+  function showHistoryNewerMessages() {
+    const button = $("#newMessageButton");
+    button.textContent = "回到最新消息";
+    button.hidden = false;
   }
 
   function requestHistoryMessagePage(key, conversationId, filters) {
@@ -2531,10 +2543,16 @@
     const previousScroll = list.scrollTop;
     list.insertAdjacentHTML("afterbegin", older.map(messageMarkup).join(""));
     bindAvatarFallbacks(list);
+    list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
     state.selectedMessages = mergeMessages(older, state.selectedMessages);
+    if (state.selectedMessages.length > HISTORY_MESSAGE_WINDOW_LIMIT) {
+      state.selectedMessages = state.selectedMessages.slice(0, HISTORY_MESSAGE_WINDOW_LIMIT);
+      while (list.children.length > HISTORY_MESSAGE_WINDOW_LIMIT) list.lastElementChild.remove();
+      state.historyHasNewer = true;
+      showHistoryNewerMessages();
+    }
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
-    list.scrollTop = previousScroll + (list.scrollHeight - previousHeight);
     saveSelectedHistoryMessages();
   }
 
@@ -2542,6 +2560,7 @@
     const item = state.conversations.find((value) => value.conversation_id === conversationId);
     if (!item) return;
     const silent = options?.silent === true;
+    const latest = options?.latest === true;
     const query = JSON.stringify(historyFilters());
     const changed = state.selectedConversation?.conversation_id !== conversationId || state.historyMessageQuery !== query;
     const list = $("#messageList");
@@ -2549,11 +2568,12 @@
     state.selectedConversation = item;
     const requestAccount = state.historyAccount;
     const key = historyMessageCacheKey(requestAccount, conversationId, query);
-    const cacheEntry = changed ? getHistoryMessageCacheEntry(key) : null;
+    const cacheEntry = getHistoryMessageCacheEntry(key);
     if (changed) {
       state.selectedMessages = cacheEntry?.messages.slice() || [];
       state.selectedSenderKey = cacheEntry?.senderKey || "";
       state.historyHasMore = cacheEntry?.hasMore || false;
+      state.historyHasNewer = cacheEntry?.hasNewer || false;
       state.historyLoadingOlder = false;
       state.historyMessageQuery = query;
       state.historyOlderLoad += 1;
@@ -2570,9 +2590,14 @@
       list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
     }
     const load = ++state.messageLoad;
-    if (options.cachedOnly && (cacheEntry || !changed)) {
+    const revision = JSON.stringify([item.message_count, item.last_timestamp]);
+    const fresh = cacheEntry && Date.now() - cacheEntry.fetchedAt < HISTORY_MESSAGE_CACHE_TTL_MS
+      && cacheEntry.revision === revision;
+    if (!latest && (state.historyHasNewer || (options.cachedOnly && (cacheEntry || !changed))
+        || (fresh && !options.forceRefresh))) {
       state.historyMessagesLoading = false;
       renderConversationInspector(item);
+      if (state.historyHasNewer) showHistoryNewerMessages();
       return;
     }
     state.historyMessagesLoading = true;
@@ -2591,8 +2616,22 @@
         && state.selectedConversation?.conversation_id === conversationId
         && state.historyMessageQuery === query;
       const priorMessages = previous?.messages || (current ? state.selectedMessages : []);
-      const messages = mergeMessages(priorMessages, page.items);
-      const hasMore = previous?.messages.length > page.items.length ? previous.hasMore : page.has_more;
+      const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+      const overlaps = !priorMessages.length || page.items.some((message) => priorMessages.some((prior) => prior.id === message.id));
+      let messages = latest || !overlaps ? page.items : mergeMessages(priorMessages, page.items);
+      let hasMore = latest || !overlaps || priorMessages.length <= page.items.length ? page.has_more : (previous?.hasMore ?? state.historyHasMore);
+      // Do not insert a disconnected latest page into an older window being read.
+      if (current && !latest && priorMessages.length && page.items.length && !nearBottom
+          && (!overlaps || messages.length > HISTORY_MESSAGE_WINDOW_LIMIT)) {
+        state.historyHasNewer = true;
+        saveSelectedHistoryMessages();
+        showHistoryNewerMessages();
+        return;
+      }
+      if (messages.length > HISTORY_MESSAGE_WINDOW_LIMIT) {
+        messages = messages.slice(-HISTORY_MESSAGE_WINDOW_LIMIT);
+        hasMore = true;
+      }
       const scrollTop = current ? list.scrollTop : (previous?.scrollTop || cacheEntry?.scrollTop || 0);
       const senderKey = current ? state.selectedSenderKey : (previous?.senderKey || cacheEntry?.senderKey || "");
       setHistoryMessageCacheEntry(key, {
@@ -2601,15 +2640,17 @@
         query,
         messages,
         hasMore,
+        hasNewer: false,
         scrollTop,
         senderKey,
-        updatedAt: Date.now(),
+        fetchedAt: Date.now(),
+        revision,
       });
       if (current) {
         state.historyHasMore = hasMore;
-        const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-        if ((changed && !cacheEntry) || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
-          renderMessages(messages, {nearBottom});
+        state.historyHasNewer = false;
+        if (latest || (changed && !cacheEntry) || messagesSignature(messages) !== messagesSignature(state.selectedMessages)) {
+          renderMessages(messages, {nearBottom, forceBottom: latest});
         }
         renderConversationInspector(item);
       }
@@ -2621,7 +2662,10 @@
       }
       if (!silent && !cacheEntry && load === state.messageLoad) reportError(error);
     } finally {
-      if (load === state.messageLoad) state.historyMessagesLoading = false;
+      if (load === state.messageLoad) {
+        state.historyMessagesLoading = false;
+        if (state.historyHasNewer) showHistoryNewerMessages();
+      }
     }
   }
 
@@ -2629,7 +2673,7 @@
     const list = $("#messageList");
     const selected = state.selectedConversation;
     const oldest = state.selectedMessages[0];
-    if (!selected || !oldest || !state.historyHasMore || state.historyLoadingOlder || list.scrollTop > HISTORY_PRELOAD_THRESHOLD) return;
+    if (!selected || !oldest || !state.historyHasMore || state.historyLoadingOlder || state.historyMessagesLoading || list.scrollTop > HISTORY_PRELOAD_THRESHOLD) return;
     state.historyLoadingOlder = true;
     const request = ++state.historyOlderLoad;
     const messageGeneration = state.messageLoad;
@@ -2685,7 +2729,7 @@
         || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
-      await loadConversations({silent: true, refreshGroups: true});
+      await loadConversations({silent: true, refreshGroups: true, forceRefresh: true});
     } finally {
       state.historyPolling = false;
     }
@@ -4739,7 +4783,7 @@
 
   function bindEvents() {
     initializeTheme();
-    window.initializeHistoryDateRange(() => loadConversations());
+    window.initializeHistoryDateRange(() => loadConversations({latest: true}));
     $("#activityPrev").addEventListener("click", () => { activityPage--; renderActivity(); });
     $("#activityNext").addEventListener("click", () => { activityPage++; renderActivity(); });
     // Keep the browser-native calendar/clock as the single source of truth,
@@ -4804,8 +4848,12 @@
       $$("#historyKinds button").forEach((item) => item.classList.toggle("active", item === button));
       loadConversations({localFilter: true});
     }));
-    $("#historyFilter").addEventListener("click", loadConversations);
+    $("#historyFilter").addEventListener("click", () => loadConversations({forceRefresh: true}));
     $("#newMessageButton").addEventListener("click", () => {
+      if (state.historyHasNewer && state.selectedConversation) {
+        void selectConversation(state.selectedConversation.conversation_id, {latest: true});
+        return;
+      }
       const list = $("#messageList");
       list.scrollTop = list.scrollHeight;
       $("#newMessageButton").hidden = true;
@@ -4814,7 +4862,7 @@
       const list = $("#messageList");
       updateHistoryMessageScrollPosition();
       if (list.scrollTop <= HISTORY_PRELOAD_THRESHOLD) void loadOlderMessages();
-      if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
+      if (!state.historyHasNewer && list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
     $("#exportHistory").addEventListener("click", async () => {
       const accountId = state.historyAccount;
