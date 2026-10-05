@@ -902,6 +902,35 @@ def test_group_analysis_access_fields_in_both_forms(tmp_path: Path) -> None:
     assert saved["group_list_mode"] == "whitelist"
 
 
+def test_full_group_analysis_schema_has_customer_copy_and_follow_default(tmp_path: Path) -> None:
+    from wechatrebot_manager.plugin_center import _customer_schema, _group_analysis_ui_schema, _with_runtime_choices
+    schema = json.loads((Path(__file__).parents[1] / "runtime/astrbot_plugin_qq_group_daily_analysis/_conf_schema.json").read_text(encoding="utf-8"))
+    projected = _group_analysis_ui_schema(_with_runtime_choices(
+        schema, providers=[{"value": "chat/model", "label": "聊天模型"}],
+        embedding_providers=[], rerank_providers=[], image_providers=[], personas=[],
+    ))
+    public = _customer_schema(projected, {})
+    text = json.dumps(public, ensure_ascii=False).lower()
+    assert "astrbot" not in text
+    assert "onebot" not in text
+    assert "完整会话" not in text
+    provider = public["llm"]["items"]["llm_provider_id"]
+    assert provider["options"] == ["", "chat/model"]
+    assert provider["labels"][0] == "跟随默认聊天模型（推荐）"
+    assert provider["_required"] is False
+    for section, key in (("basic", "group_list"), ("daily_comic", "comic_group_list"), ("incremental", "incremental_group_list")):
+        field = public[section]["items"][key]
+        assert field["_ui_control"] == "line-list"
+        assert "123456@chatroom" in field["placeholder"]
+        assert field["_ui_tint"] is True
+    assert public["daily_comic"]["items"]["comic_characters"]["placeholder"].startswith("可选")
+    assets = Path(__file__).parents[1] / "src/wechatrebot_manager/app_webui"
+    previews = public["basic"]["items"]["report_template"]["_report_previews"]
+    assert len(previews) == 11
+    for url in previews.values():
+        assert (assets / url.lstrip("/")).is_file()
+
+
 def test_delivery_policy_hides_legacy_and_technical_configuration(tmp_path: Path) -> None:
     install = tmp_path / "install"
     plugin_root = install / "app" / "astrbot" / "data" / "plugins"

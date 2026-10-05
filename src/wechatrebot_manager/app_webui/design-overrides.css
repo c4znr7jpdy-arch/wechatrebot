@@ -1,5 +1,20 @@
 @import url("/theme-tokens.css");
 
+.form-field.tinted-list {
+  padding: 14px; border: 1px solid var(--line); border-radius: 8px;
+  background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--muted) 5%, transparent) 10px 11px), var(--surface);
+}
+.form-field.tinted-list textarea { background: var(--canvas); }
+.form-field.tinted-list textarea::placeholder { color: var(--muted); opacity: .85; line-height: 1.65; }
+.report-style-preview { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); }
+.report-style-preview a { display: block; max-height: 320px; overflow: hidden; border-radius: 5px; }
+.report-style-preview a[hidden] { display: none; }
+.report-style-preview img { display: block; width: 100%; max-width: 520px; height: auto; margin: 0 auto; }
+.report-style-preview figcaption { margin-top: 8px; color: var(--muted); font-size: 12px; text-align: center; }
+html[data-theme="dark"] .feature-form .form-field.tinted-list {
+  background-image: repeating-linear-gradient(135deg, transparent 0 10px, rgba(164,190,220,.045) 10px 11px);
+}
+
 /* Product design v1: warm neutral workspace with restrained forest-green actions. */
 body { color: var(--ink); background: var(--canvas); }
 .toast { color: var(--green-700); background: var(--green-100); }
