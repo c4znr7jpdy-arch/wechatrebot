@@ -15,7 +15,7 @@ _GUIDES = {
     "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
     "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "只填写允许主动联系的会话，再打开对应的群聊或私聊开关。", "主动消息会发送给真实联系人；先在测试会话试用，避免打扰。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.session_list", "group_settings.group_idle_trigger_minutes")),
-    "astrbot_plugin_qq_group_daily_analysis": ("把一天群聊整理成日报", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
+    "astrbot_plugin_qq_group_daily_analysis": ("整理近 1 天或 7 天的群聊报告", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
     "astrbot_plugin_twitter": ("订阅 X（Twitter）账号，以文字、微信卡片或截图推送", "在下方内嵌订阅页手动设置数据源、代理、推主和推送形式，也可在目标群发送 /推特关注 OpenAI 卡片；网页和命令使用同一份会话订阅。", "网络设置对本功能生效，订阅和推送形式按会话隔离；截图失败回退文字，卡片沿用微信推文卡片样式。", ()),
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
     "astrbot_plugin_self_learning": ("让回复带有稳定的情绪和关系感", "默认使用精简情感模式；需要模仿群聊风格时再单独开启学习并选择范围。", "情感功能不等于长期记忆。开启消息学习会保存群聊样本，必须先明确范围和征得群成员同意。", ("Affection_System_Settings.enable_affection_system", "Mood_System_Settings.enable_daily_mood", "Social_Context_Settings.enable_social_context_injection", "Runtime_Internal_Settings.llm_hook_profile", "Self_Learning_Basic.enable_message_capture")),
@@ -38,6 +38,13 @@ _GUIDES = {
 # Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
 # even when the plugin source contains internal or administrator-only helpers.
 _COMMANDS = {
+    "astrbot_plugin_qq_group_daily_analysis": (
+        {"title": "群聊报告", "items": (
+            ("/群分析 1", "分析最近 1 天的本机群聊记录"),
+            ("/群分析 7", "分析最近 7 天的本机群聊记录"),
+            ("/群分析", "使用常用设置中的统计天数"),
+        )},
+    ),
     "astrbot_plugin_twitter": (
         {"title": "订阅与推送形式（仅当前会话）", "items": (
             ("/推特关注 OpenAI 卡片", "订阅推主；形式可选文字、卡片、截图，可追加 r18 或 媒体"),

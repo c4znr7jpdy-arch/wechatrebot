@@ -76,6 +76,11 @@ def test_feature_center_and_history_contracts_are_exposed() -> None:
 
 def test_group_analysis_schedule_is_removed_from_feature_form() -> None:
     schema = {
+        "basic": {"type": "object", "items": {
+            "analysis_days": {"type": "int"},
+            "group_list_mode": {"type": "string"},
+            "group_list": {"type": "list"},
+        }},
         "auto_analysis": {
             "type": "object",
             "items": {
@@ -89,7 +94,9 @@ def test_group_analysis_schedule_is_removed_from_feature_form() -> None:
     assert set(schedule["auto_analysis"]["items"]) == {
         "scheduled_group_list",
         "auto_analysis_time",
+        "scheduled_group_list_mode",
     }
+    assert set(schedule["basic"]["items"]) == {"analysis_days", "group_list_mode", "group_list"}
     assert set(_setu_schema({})) == {"setu_recall_enabled", "setu_recall_seconds"}
     assert "jiang_mystool" in DEFAULT_GROUP_FEATURES
     assert DEFAULT_GROUP_FEATURES == MANAGER_DEFAULTS

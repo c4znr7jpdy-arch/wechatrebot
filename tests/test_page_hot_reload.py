@@ -14,7 +14,8 @@ LOG = SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, e
 
 
 def method(module, file, name, namespace=None):
-    path = STAGED / module / file
+    vendored = Path(__file__).parents[1] / "runtime" / module / file
+    path = vendored if module == "astrbot_plugin_qq_group_daily_analysis" else STAGED / module / file
     if not path.is_file():
         pytest.skip("Source-only staging fixture unavailable")
     tree = ast.parse(path.read_text("utf-8-sig"))

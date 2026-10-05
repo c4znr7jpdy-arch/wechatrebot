@@ -573,7 +573,7 @@ def test_catalog_uses_opaque_ids_and_detail_white_labels_schema(tmp_path: Path) 
     ]
 
 
-def test_group_analysis_uses_professional_settings_and_preserves_values(
+def test_group_analysis_uses_simple_settings_and_preserves_values(
     tmp_path: Path,
 ) -> None:
     install = tmp_path / "install"
@@ -706,8 +706,9 @@ def test_group_analysis_uses_professional_settings_and_preserves_values(
     assert catalog_item["field_count"] == 7
     assert catalog_item["model_field_count"] == 1
     assert catalog_item["simplified"] is True
-    assert detail["basic_schema"] == detail["model_schema"] == {}
-    assert detail["configuration_profile"] == "advanced-only"
+    assert detail["model_schema"] == {}
+    assert "llm_provider_id" in detail["basic_schema"]["llm"]["items"]
+    assert detail["configuration_profile"] == "group-analysis-simple"
     assert "llm" in detail["advanced_schema"]
     assert "max_messages" in detail["advanced_schema"]["basic"]["items"]
     assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_ui_control"] == "line-list"
@@ -854,7 +855,7 @@ def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) ->
     assert json.loads(config_path.read_text("utf-8"))["primary_api_key"] == ""
 
 
-def test_group_analysis_access_fields_in_professional_form(tmp_path: Path) -> None:
+def test_group_analysis_access_fields_in_both_forms(tmp_path: Path) -> None:
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"
     wechat.write_bytes(b"placeholder")
@@ -878,8 +879,8 @@ def test_group_analysis_access_fields_in_professional_form(tmp_path: Path) -> No
     service.engine.is_available = lambda: False
     public_id = service.catalog()["plugins"][0]["id"]
     detail = service.detail(public_id)
-    assert detail["basic_schema"] == detail["model_schema"] == {}
-    for form in (detail["advanced_schema"],):
+    assert detail["model_schema"] == {}
+    for form in (detail["basic_schema"], detail["advanced_schema"]):
         items = form["basic"]["items"]
         for key in ("admin_ids", "bot_self_ids", "group_list"):
             assert items[key]["_ui_control"] == "line-list"

@@ -16,7 +16,7 @@
 | delivered-plugin | astrbot_plugin_parser | 1.5.6 | MIT |
 | delivered-plugin | astrbot_plugin_patch_at_wxid | UNKNOWN | Proprietary |
 | delivered-plugin | astrbot_plugin_proactive_chat | 1.2.4 | AGPL-3.0-only |
-| delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 4.10.9.3 # 本地兼容版：模板 1 更换为姜小妹主题 | MIT |
+| delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 5.7.4 | MIT |
 | delivered-plugin | astrbot_plugin_self_iterative_core | 1.1.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_self_learning | 3.4.5 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_twitter | 1.12.0 | AGPL-3.0-only |

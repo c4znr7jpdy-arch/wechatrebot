@@ -216,7 +216,7 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
         "继续使用推荐值，保存时不会被重置。"
     ),
     setup_steps=(
-        "先在模型设置中选择用于分析的模型并保存",
+        "先在常用设置中选择用于分析的模型并保存",
         "到定时任务中的“群聊分析自动日报”选择群聊和生成时间",
         "先积累足够消息，再从测试群验证一次完整报告",
     ),
@@ -292,13 +292,24 @@ def _group_analysis_schedule_schema(schema: dict[str, Any]) -> dict[str, Any]:
             selected[key] = {**copy.deepcopy(field), **overrides}
     if not selected:
         return {}
-    return {
+    if isinstance(items.get("scheduled_group_list_mode"), dict):
+        selected["scheduled_group_list_mode"] = copy.deepcopy(items["scheduled_group_list_mode"])
+    result = {
         "auto_analysis": {
             **copy.deepcopy(section),
             "description": "自动日报",
             "items": selected,
         }
     }
+    days = schema.get("basic", {}).get("items", {}).get("analysis_days")
+    if isinstance(days, dict):
+        basic_items = schema["basic"]["items"]
+        result["basic"] = {"type": "object", "items": {
+            key: copy.deepcopy(basic_items[key])
+            for key in ("analysis_days", "group_list_mode", "group_list")
+            if key in basic_items
+        }}
+    return result
 
 
 def _without_group_analysis_schedule(schema: dict[str, Any]) -> dict[str, Any]:
@@ -483,7 +494,7 @@ _CUSTOMER_SCHEMA_PROFILES = {
 _MANAGER_SCHEMA_POLICY_OVERRIDES = frozenset({_ANGEL_HEART_MODULE})
 # Product-managed pages stay out of the feature center even when an older full
 # installation still declares them in legal/feature-set.json.
-_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama", "jiang_image", "jiang_schedule"})
+_MANAGER_HIDDEN_PAGE_MODULES = frozenset({"jiang_short_drama", "jiang_image", "jiang_schedule", _GROUP_ANALYSIS_MODULE})
 _MANAGER_NO_CONFIGURATION_MODULES = frozenset({"jiang_short_drama"})
 _LEGACY_IMAGE_MODEL_SENTINELS = {
     "primary": "__legacy_image_primary__",
@@ -2244,10 +2255,10 @@ class PluginCenterService:
         configuration_profile = ""
         configuration_note = profile.note if profile else ""
         if module_name == _GROUP_ANALYSIS_MODULE:
-            clean_basic_schema = {}
+            clean_basic_schema = clean_schema
             clean_model_schema = {}
-            configuration_profile = "advanced-only"
-            configuration_note = "所有群聊分析选项统一在专业设置中维护；自动日报在定时任务中管理。"
+            configuration_profile = "group-analysis-simple"
+            configuration_note = "在常用设置中选择分析模型、使用范围和报告内容；自动日报统一在主定时任务标签管理。专业设置按需展开。"
         if module_name == "jiang_image":
             configuration_profile = "image-service-selection"
             configuration_note = (
