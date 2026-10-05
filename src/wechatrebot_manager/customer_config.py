@@ -141,6 +141,21 @@ def _object(path: Path) -> dict[str, Any]:
     return value
 
 
+def load_ui_theme(root: str | Path) -> str:
+    preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    theme = preferences.get("theme")
+    return theme if theme in ("light", "dark") else ""
+
+
+def save_ui_theme(root: str | Path, theme: str) -> None:
+    if theme not in ("light", "dark"):
+        raise ValueError("界面主题只能选择浅色或深色。")
+    path = Path(root) / "data/manager/ui-preferences.json"
+    preferences = _object(path)
+    preferences["theme"] = theme
+    write_json_atomic(path, preferences)
+
+
 def _paths(root: str | Path) -> tuple[Path, Path, Path]:
     install = Path(root).expanduser().resolve()
     return (

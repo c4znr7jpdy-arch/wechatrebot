@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
 
-from .customer_config import PluginEntry, load_plugins, load_robot_settings, set_plugin_enabled
+from .customer_config import PluginEntry, load_plugins, load_robot_settings, load_ui_theme, set_plugin_enabled
 from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
 from .plugin_guides import advanced_schema, common_schema, get_plugin_guide
@@ -2576,6 +2576,12 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面资源不存在。"})
                 return
             raw = target.read_bytes()
+            if manager_mode and root is None and relative == "index.html":
+                theme = load_ui_theme(service.install_root)
+                if theme:
+                    raw = raw.replace(b'<html lang="zh-CN">', (
+                        f'<html lang="zh-CN" data-saved-theme="{theme}" data-theme="{theme}">'
+                    ).encode("utf-8"), 1)
             self.send_response(HTTPStatus.OK)
             self._security_headers()
             self.send_header(
