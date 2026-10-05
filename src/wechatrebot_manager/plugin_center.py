@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
 
+from .group_analysis_settings import REPORT_STYLE_LABELS, group_analysis_ui_schema as _group_analysis_ui_schema
 from .customer_config import PluginEntry, load_plugins, load_robot_settings, load_ui_theme, set_plugin_enabled
 from .feature_policy import DeliveryFeature, load_delivery_features
 from .json_io import write_json_atomic
@@ -127,18 +128,8 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
                     "report_template",
                     {
                         "description": "报告样式",
-                        "hint": "“手账风”就是示例截图中的长图样式。",
-                        "_option_labels": {
-                            "scrapbook": "手账风（示例样式）",
-                            "\u59dc\u5c0f\u59b9": "小妹主题",
-                            "simple": "简洁风",
-                            "spring_festival": "新春风",
-                            "BlueArchive": "蔚蓝档案",
-                            "HatsuneMiku": "初音未来",
-                            "retro_futurism": "复古未来",
-                            "hack": "极客终端",
-                            "format": "通用排版",
-                        },
+                        "hint": "下方为示例数据生成的样式预览，点击可放大。实际内容以群聊分析结果为准。",
+                        "_option_labels": REPORT_STYLE_LABELS,
                     },
                 ),
                 (
@@ -203,9 +194,9 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
                     "llm_provider_id",
                     {
                         "description": "用于分析的模型",
-                        "hint": "必须选择可用模型；没有模型时只能生成消息数、活跃时段等基础统计，热门话题、群友画像、金句和聊天质量不会出现。",
-                        "_blank_label": "请选择模型（完整分析所必需）",
-                        "_required": True,
+                        "hint": "与全局模型服务共用模型，无需重复配置。默认跟随聊天模型；群聊有独立模型时优先使用。选择具体模型后，仅本报告固定使用它。",
+                        "_blank_label": "跟随默认聊天模型（推荐）",
+                        "_required": False,
                     },
                 ),
             ),
@@ -216,7 +207,7 @@ _GROUP_ANALYSIS_PROFILE = CustomerSchemaProfile(
         "继续使用推荐值，保存时不会被重置。"
     ),
     setup_steps=(
-        "先在常用设置中选择用于分析的模型并保存",
+        "在全局模型服务配置聊天模型，报告默认跟随使用",
         "到定时任务中的“群聊分析自动日报”选择群聊和生成时间",
         "先积累足够消息，再从测试群验证一次完整报告",
     ),
@@ -507,60 +498,6 @@ _MANAGER_PAGE_ONLY_MODULES = frozenset(
 )
 
 
-def _group_analysis_ui_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    result = copy.deepcopy(schema)
-    group_hint = (
-        "点击“从群聊列表添加”下拉选择群；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID，"
-        "或填写群标识（例如 123456@chatroom）。手动填写时建议直接复制完整会话 ID。"
-    )
-    overrides = {
-        "basic": {
-            "admin_ids": {
-                "description": "群聊分析管理员",
-                "_ui_control": "line-list",
-                "placeholder": "例如：wxid_admin",
-                "hint": "每行填写一个用户 ID，使用权限提示中显示的 ID；请勿填写群标识或昵称。仅授予本插件的分析和设置指令权限；机器人管理员仍可使用。留空时仅机器人管理员可用。",
-                "_ui_tint": True,
-            },
-            "group_list_mode": {
-                "labels": ["白名单：仅允许列表中的群", "黑名单：屏蔽列表中的群", "不限制群聊"],
-                "hint": "决定哪些群可以使用群聊分析。白名单为空时没有群可用；黑名单为空时不屏蔽群；不限制群聊时忽略下面的名单。此项不会授予管理员权限。",
-            },
-            "group_list": {
-                "_ui_control": "line-list", "_group_selector": True,
-                "placeholder": "从群聊列表选择，或粘贴完整会话 ID", "hint": group_hint,
-            },
-            "bot_self_ids": {
-                "_ui_control": "line-list", "_ui_tint": True,
-                "placeholder": "例如：wxid_robot\nwxid_member",
-                "hint": "每行填写一个不希望参与报告统计的用户 ID，例如机器人或其他群成员；请勿填写群标识或昵称。留空表示不额外屏蔽用户；这里不会授予管理员权限。",
-            },
-        },
-        "auto_analysis": {
-            "scheduled_group_list_mode": {"hint": "白名单只对列表中的群生成定时日报，空列表不生成；黑名单屏蔽列表中的群。目标群还须通过基础群聊权限。"},
-            "scheduled_group_list": {
-                "_ui_control": "line-list", "_group_selector": True,
-                "placeholder": "从群聊列表选择，或粘贴完整会话 ID",
-                "hint": group_hint + "定时白名单留空时不生成日报。",
-            },
-        },
-        "incremental": {
-            "incremental_group_list_mode": {"hint": "白名单只让列表中的群使用增量分析，空列表不启用；黑名单让列表外的群使用增量分析。目标群还须通过基础群聊权限和定时名单。"},
-            "incremental_group_list": {
-                "_ui_control": "line-list", "_group_selector": True,
-                "placeholder": "从群聊列表选择，或粘贴完整会话 ID", "hint": group_hint,
-            },
-        },
-    }
-    for section_key, fields in overrides.items():
-        section = result.get(section_key, {})
-        items = section.get("items", {}) if isinstance(section, dict) else {}
-        for key, changes in fields.items():
-            if isinstance(items.get(key), dict):
-                items[key].update(changes)
-    return result
-
-
 def _hide_customer_internal_schema(
     module_name: str,
     schema: dict[str, Any],
@@ -840,6 +777,8 @@ def _white_label_schema(value: Any) -> Any:
     if isinstance(value, list):
         return [_white_label_schema(item) for item in value]
     if isinstance(value, str):
+        value = re.sub(r'https?://[^\s）)<>"]*(?:astrbot|onebot)[^\s）)<>"]*', "功能中心", value, flags=re.I)
+        value = re.sub(r"(?i)(?:ll)?onebot", "微信连接", value)
         value = re.sub(r"天使(?:之)?心", "机器人核心", value)
         value = value.replace("angel_describe_image", "历史图片描述")
         value = re.sub(r"(?i)angel[-_ ]?heart", "机器人核心", value)
@@ -2258,7 +2197,7 @@ class PluginCenterService:
             clean_basic_schema = clean_schema
             clean_model_schema = {}
             configuration_profile = "group-analysis-simple"
-            configuration_note = "在常用设置中选择分析模型、使用范围和报告内容；自动日报统一在主定时任务标签管理。专业设置按需展开。"
+            configuration_note = "模型与全局模型服务共用，在常用设置调整使用范围和报告内容；自动日报统一在主定时任务标签管理。专业设置按需展开。"
         if module_name == "jiang_image":
             configuration_profile = "image-service-selection"
             configuration_note = (

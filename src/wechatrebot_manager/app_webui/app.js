@@ -939,7 +939,8 @@
       const unlisted = !field.options.some((option) => String(option) === current);
       control = `<select class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-required="${field._required === true}" data-type="${escapeHtml(type)}">${unlisted ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current || "未设置")}（当前值）</option>` : ""}${field.options.map((option, index) => `<option value="${escapeHtml(option)}" ${current === String(option) ? "selected" : ""}>${escapeHtml(optionNames[index] ?? option)}</option>`).join("")}</select>`;
     } else if (["list", "template_list"].includes(type)) {
-      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="json" rows="5">${escapeHtml(JSON.stringify(value ?? [], null, 2))}</textarea>`;
+      const empty = !value || (Array.isArray(value) && !value.length);
+      control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="json" rows="5" placeholder="${escapeHtml(field.placeholder || "可选，留空表示不设置")}">${escapeHtml(empty ? "" : JSON.stringify(value, null, 2))}</textarea>`;
     } else if (type === "text" || field.editor_mode || field.editor_language === "json") {
       control = `<textarea class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${field.editor_language === "json" ? "json-string" : "string"}" rows="4">${escapeHtml(value ?? "")}</textarea>`;
     } else {
@@ -951,6 +952,10 @@
       control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(uiControl === "proxy-port" ? uiControl : type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
     }
     control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
+    if (field._report_previews) {
+      const preview = field._report_previews[String(value)] || "";
+      control += `<figure class="report-style-preview" data-report-preview-for="${fieldId}" data-report-previews="${escapeHtml(JSON.stringify(field._report_previews))}"><a ${preview ? `href="${escapeHtml(preview)}"` : ""} target="_blank" rel="noopener" aria-label="放大报告样式预览" ${preview ? "" : "hidden"}><img ${preview ? `src="${escapeHtml(preview)}"` : ""} alt="报告样式预览（示例数据）" loading="lazy"></a><figcaption>${preview ? "示例数据 · 点击图片放大" : "此自定义样式暂无预览"}</figcaption></figure>`;
+    }
     if (field.secret) control += '<button type="button" class="secret-reveal button ghost" aria-controls="' + fieldId + '" aria-pressed="false">显示密钥</button>';
     if (field._group_selector) control += '<button type="button" class="group-field-button button secondary small" data-target="' + fieldId + '">' + icon("i-users") + '从群聊列表添加</button>';
     const dependsOn = field._ui_depends_on ? ` data-depends-on="${escapeHtml(JSON.stringify([...path.slice(0, -1), field._ui_depends_on]))}"` : "";
@@ -1086,6 +1091,22 @@
       } catch (error) { showFeatureError(error); }
     }));
     const featureForm = $("#featureForm");
+    (featureForm ? $$('[data-report-preview-for]', featureForm) : []).forEach((figure) => {
+      const select = document.getElementById(figure.dataset.reportPreviewFor);
+      const previews = JSON.parse(figure.dataset.reportPreviews);
+      select?.addEventListener("change", () => {
+        const src = previews[select.value];
+        const link = figure.querySelector("a"), img = figure.querySelector("img");
+        link.hidden = !src;
+        figure.querySelector("figcaption").textContent = src ? "示例数据 · 点击图片放大" : "此自定义样式暂无预览";
+        if (src) { link.href = src; img.src = src; }
+        else { link.removeAttribute("href"); img.removeAttribute("src"); }
+      });
+      figure.querySelector("img").addEventListener("error", () => {
+        figure.querySelector("a").hidden = true;
+        figure.querySelector("figcaption").textContent = "样式预览暂时无法加载，请重新读取。";
+      });
+    });
     featureForm?.addEventListener("input", () => {
       state.featureDirty = true; state.featureFeedback = "";
       $("#featureNote").textContent = "有修改尚未保存。";
@@ -5133,7 +5154,7 @@
       basic: {description: "基础设置", type: "object", items: {
         admin_ids: {description: "群聊分析管理员", type: "list", _ui_control: "line-list", _ui_tint: true, placeholder: "例如：wxid_admin", hint: "每行填写一个用户 ID，使用权限提示中显示的 ID；仅授予本插件的指令权限，机器人管理员仍可使用。留空时仅机器人管理员可用。"},
         group_list_mode: {description: "群聊权限模式", type: "string", options: ["whitelist", "blacklist", "none"], labels: ["白名单：仅允许列表中的群", "黑名单：屏蔽列表中的群", "不限制群聊"], hint: "白名单为空时没有群可用；黑名单为空时不屏蔽群；不限制群聊时忽略名单。此项不会授予管理员权限。"},
-        group_list: {description: "群组白/黑名单列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "点击“从群聊列表添加”下拉选择群；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID，或填写群标识（例如 123456@chatroom）。"},
+        group_list: {description: "群组白/黑名单列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或填写 123456@chatroom", hint: "从“群聊管理”复制群标识，例如 123456@chatroom；每行一个，不填写群昵称。"},
         bot_self_ids: {description: "群分析时屏蔽的用户ID列表", type: "list", _ui_control: "line-list", _ui_tint: true, placeholder: "例如：wxid_robot\nwxid_member", hint: "每行填写一个不希望参与报告统计的用户 ID，例如机器人或其他群成员；请勿填写群标识或昵称。留空表示不额外屏蔽用户；这里不会授予管理员权限。"},
         report_template: {description: "报告样式", type: "string", options: ["小妹", "BlueArchive", "scrapbook", "retro_futurism", "HatsuneMiku", "hack", "spring_festival", "simple", "format"], labels: ["小妹主题", "蔚蓝档案", "手账风（示例样式）", "复古未来", "初音未来", "极客终端", "新春风", "简洁风", "通用排版"], hint: "“手账风”就是示例截图中的长图样式。"},
         analysis_days: {description: "统计最近几天", type: "int", min: 1, max: 30, hint: "一般保持 1 天；需要周报时可改为 7 天。"},
@@ -5267,7 +5288,7 @@
         config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_config: structuredClone(previewSavedConfigs.get(id) || groupAnalysisConfig),
         advanced_schema: {...groupAnalysisBasicSchema, ...groupAnalysisModelSchema, incremental: {type: "object", description: "增量分析设置", items: {
-          incremental_group_list: {description: "增量分析群列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或粘贴完整会话 ID", hint: "从群聊列表下拉选择；多个群一行一个。也可粘贴 /sid 获取的完整会话 ID。目标群还须通过基础群聊权限和定时名单。"},
+          incremental_group_list: {description: "增量分析群列表", type: "list", _ui_control: "line-list", _group_selector: true, placeholder: "从群聊列表选择，或填写 123456@chatroom", hint: "从“群聊管理”复制群标识，例如 123456@chatroom；每行一个。目标群还须通过基础使用范围和定时名单。"},
         }}, performance: {type: "object", description: "并发设置", items: {max_concurrent: {type: "int", description: "同时生成报告数量", min: 1, max: 5, default: 1}}}},
         configuration_note: "这里只展示日常会用到的设置。渲染、重试、并发和提示词等专业参数继续使用推荐值，保存时不会被重置。",
         setup_steps: ["在常用设置中选择分析模型与报告内容", "到主定时任务标签选择群聊、统计范围和生成时间，无需在群里发送命令", "也可在群里发送 /群分析 1 或 /群分析 7"],
