@@ -4,15 +4,15 @@ from pathlib import Path
 WEBUI = Path(__file__).parents[1] / "src" / "wechatrebot_manager" / "app_webui"
 
 
-def test_schedule_list_keeps_its_context_heading_and_integrated_toolbar() -> None:
+def test_schedule_list_keeps_a_concise_heading_and_integrated_toolbar() -> None:
     markup = (WEBUI / "index.html").read_text(encoding="utf-8")
     schedule = markup[markup.index('id="page-schedules"'):markup.index('id="scheduledTaskEditor"')]
 
     assert 'id="scheduleTopActions" hidden' in markup
-    assert 'id="pageContextLabel"' in markup
+    assert 'id="pageContextLabel"' not in markup
     assert "北京时间 UTC+8" in markup
     assert schedule.count('id="scheduleHeading"') == 1
-    assert 'id="scheduleHeadingDescription"' in schedule
+    assert 'id="scheduleHeadingDescription"' not in schedule
     assert 'class="schedule-stat-pills"' in schedule
     assert 'class="schedule-table-topbar"' in schedule
     assert 'id="scheduleTableTotal"' in schedule

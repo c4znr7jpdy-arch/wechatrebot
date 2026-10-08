@@ -38,6 +38,62 @@ _GUIDES = {
 # Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
 # even when the plugin source contains internal or administrator-only helpers.
 _COMMANDS = {
+    "astrbot_plugin_angel_heart": (
+        {"title": "使用方式", "items": (("群聊回复", "在群聊管理选择回复方式和使用范围"),)},
+    ),
+    "astrbot_plugin_bittorrent": (
+        {"title": "资源检索", "items": (
+            ("/bt 关键词", "搜索资源索引"),
+            ("/bt 热门 关键词", "按热度搜索"),
+            ("/btp 磁力链接", "查看资源信息"),
+        )},
+    ),
+    "astrbot_plugin_music": (
+        {"title": "点歌", "items": (
+            ("点歌 七里香", "搜索歌曲"),
+            ("QQ点歌 七里香", "使用 QQ 音源"),
+            ("网易点歌 七里香", "使用网易音源"),
+        )},
+    ),
+    "astrbot_plugin_parser": (
+        {"title": "使用方式", "items": (("发送分享链接", "自动解析支持的平台链接"),)},
+    ),
+    "astrbot_plugin_proactive_chat": (
+        {"title": "使用方式", "items": (("设置会话范围", "添加目标会话，再开启群聊或私聊主动消息"),)},
+    ),
+    "astrbot_plugin_self_learning": (
+        {"title": "使用方式", "items": (("记忆和情感", "在设置 → 机器人核心调整好感度和每日心情"),)},
+    ),
+    "jiang_group_notice": (
+        {"title": "使用方式", "items": (("成员变动通知", "勾选入群、退群或昵称变化事件，填写通知文案"),)},
+    ),
+    "jiang_image": (
+        {"title": "图片生成", "items": (
+            ("@机器人 帮我画一只猫", "按描述生成图片"),
+            ("@机器人 把背景改成蓝色", "引用图片后编辑"),
+        )},
+    ),
+    "jiang_mimo_emoji_voice": (
+        {"title": "使用方式", "items": (("表情语音", "配置语音克隆和表情管理后，随表情回复触发"),)},
+    ),
+    "jiang_repeater": (
+        {"title": "使用方式", "items": (("连续相同消息", "允许此功能的群聊中自动参与复读"),)},
+    ),
+    "jiang_schedule": (
+        {"title": "使用方式", "items": (("新建定时任务", "在定时任务中选择内容、接收对象和执行时间"),)},
+    ),
+    "jiang_short_drama": (
+        {"title": "影视搜索", "items": (
+            ("短剧 剧名", "搜索短剧"),
+            ("电影 片名", "搜索电影"),
+            ("电视剧 剧名", "搜索电视剧"),
+            ("短剧推荐", "查看最新推荐"),
+            ("剧", "查看分类和用法"),
+        )},
+    ),
+    "jiang_video_understanding": (
+        {"title": "视频总结", "items": (("/总结视频", "发送视频后总结内容；需视觉模型"),)},
+    ),
     "astrbot_plugin_qq_group_daily_analysis": (
         {"title": "群聊报告", "items": (
             ("/群分析 1", "分析最近 1 天的本机群聊记录"),
@@ -238,7 +294,7 @@ def get_plugin_guide(module_name: str) -> dict[str, Any]:
     summary, step, prerequisite, paths = row
     guide = {
         "summary": summary,
-        "setup_steps": (step, "保存后查看生效状态；需要账号或外部服务时，再在测试会话验证一次。"),
+        "setup_steps": (step,),
         "prerequisites": (prerequisite,),
         "common_fields": paths,
     }

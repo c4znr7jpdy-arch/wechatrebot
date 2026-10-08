@@ -14,6 +14,7 @@
     selectedFeature: null,
     featureDetail: null,
     featureTab: "basic",
+    featureReferenceOpen: {},
     featureDirty: false,
     featureSaving: false,
     featureLoad: 0,
@@ -700,7 +701,6 @@
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
     $("#pageTitle").textContent = PAGE_TITLES[page];
-    $("#pageContextLabel").hidden = page === "schedules";
     $("#defaultTopActions").hidden = page === "schedules";
     $("#scheduleTopActions").hidden = page !== "schedules";
     document.title = `${PAGE_TITLES[page]} · WxRebot`;
@@ -751,7 +751,7 @@
       state.features = data.plugins || [];
       state.featuresEngineOnline = Boolean(data.engine_online);
       state.featuresLoaded = true;
-      $("#featureSummary").textContent = `${state.features.length} 项功能 · ${data.engine_online ? "设置可立即应用" : "设置将在下次启动时应用"}`;
+      $("#featureSummary").textContent = `${state.features.length} 项功能`;
       renderFeatureList();
       renderHelp();
       if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
@@ -802,8 +802,7 @@
       return label.includes("常用");
     };
     const items = state.features.filter((item) => audienceMatch(item) && (!keyword || item.display_name.toLocaleLowerCase("zh-CN").includes(keyword)));
-    const onlineText = state.featuresEngineOnline ? "设置可立即应用" : "设置将在下次启动时应用";
-    $("#featureSummary").textContent = `${items.length} / ${state.features.length} 项功能 · ${onlineText}`;
+    $("#featureSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
     $("#featureList").innerHTML = items.length ? items.map((item) => `
       <button class="feature-item ${state.selectedFeature === item.id ? "active" : ""}" data-feature-id="${escapeHtml(item.id)}">
         <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "已加载")}</small></span>
@@ -1032,6 +1031,24 @@
     return {label: "不支持定时", status: "unsupported"};
   }
 
+  function featureReferenceMarkup(detail) {
+    if (["长期记忆", "语音克隆", "推特推送", "表情管理"].includes(detail.display_name)) return "";
+    const groups = Array.isArray(detail.guide?.commands) ? detail.guide.commands : [];
+    const commands = groups.map((group) => `<div class="feature-command-group">${groups.length > 1 ? `<strong>${escapeHtml(group.title || "指令")}</strong>` : ""}<div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map(([command, description]) => {
+      const hint = group.title === "使用方式" ? null : featureCommandScheduleHint(command);
+      return `<div class="feature-command-item"><code>${escapeHtml(command || "")}</code><span>${escapeHtml(description || "")}${hint?.status === "supported" ? `<small class="command-schedule-status supported">${hint.label}</small>` : ""}</span></div>`;
+    }).join("")}</div></div>`).join("");
+    const scheduleButton = detail.scheduled_action === "group_analysis" ? "配置自动日报" : "创建定时任务";
+    return `<details class="feature-quick-reference" id="featureQuickReference" ${state.featureReferenceOpen[detail.id] !== false ? "open" : ""}>
+      <summary><span>快速参考</span><span class="reference-toggle-label" aria-hidden="true">${state.featureReferenceOpen[detail.id] !== false ? "收起" : "展开"}</span></summary>
+      <div class="feature-reference-body">${commands ? `<div class="feature-command-groups">${commands}</div>` : ""}
+      <div class="feature-reference-actions">${detail.scheduled_action ? `<button class="button secondary small" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button>` : ""}
+      ${detail.configuration_profile === "image-service-selection" ? '<button class="button secondary small" id="manageImageModels" type="button" data-action-bound disabled>管理图片模型</button>' : ""}
+      <button class="button ghost small" id="openFeatureHelp" type="button">帮助</button></div>
+      ${detail.has_legacy_image_model ? '<p class="feature-prerequisite">旧图片配置已保留；选择模型服务后迁移。</p>' : ""}</div>
+    </details>`;
+  }
+
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
@@ -1039,42 +1056,33 @@
     $("#featureDetail").dataset.featureName = detail.display_name || "";
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
     const currentSchema = schemas[state.featureTab] || schemas.basic;
-    const guide = detail.guide || {};
-    const commandGroups = Array.isArray(guide.commands) ? guide.commands : [];
-    const commandMarkup = commandGroups.length ? `<section class="feature-command-list" aria-labelledby="feature-command-title"><div class="feature-command-heading"><div><span class="eyebrow">快速参考</span><h3 id="feature-command-title">常用指令</h3></div><span>复制到聊天即可使用</span></div><div class="feature-command-groups">${commandGroups.map((group) => `<div class="feature-command-group"><strong>${escapeHtml(group.title || "指令")}</strong><div class="feature-command-items">${(Array.isArray(group.items) ? group.items : []).map((item) => { const hint = featureCommandScheduleHint(item[0]); return `<div class="feature-command-item"><code>${escapeHtml(item[0] || "")}</code><span>${escapeHtml(item[1] || "")}<small class="command-schedule-status ${hint.status}">${hint.label}</small></span></div>`; }).join("")}</div></div>`).join("")}</div></section>` : "";
-    const scheduleAction = detail.scheduled_action || "";
-    const scheduleCopy = scheduleAction === "short_drama"
-      ? "短剧、影视与体育回放推荐可以安排发送到多个聊天。"
-      : scheduleAction === "group_analysis"
-        ? "选择自动日报群和每天生成时间，群聊分析会按群生成独立日报。"
-        : "天气、资讯、油价和文字提醒可以安排发送到多个聊天。";
-    const scheduleButton = scheduleAction === "group_analysis" ? "配置自动日报" : "创建定时任务";
-    const defaultNote = !detail.engine_online ? "暂未连接到机器人：仅保存到本机；启动后加载。若机器人仍在运行，连接恢复后请重新保存。" : "保存时自动加载并核验，无需重启机器人。正在执行的工作可能被中断。";
+    const referenceMarkup = featureReferenceMarkup(detail);
+    const defaultNote = !detail.engine_online ? "未连接，仅保存本机；下次启动生效，或重连后重新保存。" : "保存并应用可能中断正在执行的任务。";
     const pageOnly = Boolean(detail.pages?.length);
     $("#featureDetail").classList.toggle("native-page", pageOnly);
-    const imageServiceSelection = detail.configuration_profile === "image-service-selection";
+    $("#featureDetail").classList.toggle("has-reference", Boolean(referenceMarkup));
     $("#featureDetail").innerHTML = `
       <div class="feature-detail-head">
-        <div><span class="eyebrow">功能设置</span><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(guide.summary || detail.description || "按需配置后保存。")}</p></div>
-        <span class="status-badge online">统一加载</span>
+        <h2>${escapeHtml(detail.display_name)}</h2>
       </div>
-      ${scheduleAction ? `<div class="feature-schedule-entry"><p>${scheduleCopy}</p><button class="button secondary" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button></div>` : ""}
-      <div class="feature-help-entry"><span>完整用法、使用条件和示例已集中到帮助。</span><button class="button ghost small" id="openFeatureHelp" type="button">查看此功能帮助</button></div>
-      ${imageServiceSelection ? `<section class="feature-model-service-entry" aria-label="图片模型服务配置"><div><strong>图片模型统一在模型服务管理</strong><p>${escapeHtml(detail.configuration_note || "在模型服务中添加图片模型后，在此选择主模型和备用模型。")}</p></div><button class="button secondary small" id="manageImageModels" type="button" data-action-bound disabled>管理图片模型服务</button></section>` : ""}
-      ${commandMarkup}
+      ${referenceMarkup}
       ${pageOnly ? `
         <section class="feature-page-panel" aria-label="${escapeHtml(detail.display_name)}专属配置">
           <div class="feature-page-status" id="featurePageStatus" role="status">正在打开专属配置页…</div>
           <iframe id="featurePageFrame" title="${escapeHtml(detail.display_name)}专属配置页" hidden></iframe>
         </section>` : detail.configurable ? `
         <div class="config-tabs" aria-label="设置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key,label]) => `<button type="button" data-tab="${key}" aria-pressed="${state.featureTab === key}" class="${state.featureTab === key ? "active" : ""}">${label}</button>`).join("")}</div>
-        ${state.featureTab === "advanced" ? '<p class="feature-prerequisite">这里包含完整参数。不了解的项目请保留原值；列表按字段说明填写。</p>' : ""}
         <form id="featureForm" class="feature-form" novalidate>${schemaMarkup(currentSchema, detail.config)}${!Object.keys(currentSchema).length ? '<div class="empty-state compact"><p>此分类无需配置</p></div>' : ""}</form>
-        <div class="feature-savebar"><span class="form-note" id="featureNote" role="status">${escapeHtml(state.featureFeedback || (state.featureDirty ? "有修改尚未保存。" : defaultNote))}</span><div class="feature-save-actions">
+        <div class="feature-savebar"><span class="form-note" id="featureNote" role="status">${escapeHtml(state.featureFeedback || (state.featureDirty ? "有未保存的修改。" : defaultNote))}</span><div class="feature-save-actions">
         ${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}
         <button class="button ghost" id="refreshFeature" type="button" data-action-bound disabled>重新读取</button>
         <button class="button primary" id="saveFeature" type="button" data-action-bound disabled>${detail.engine_online ? "保存并应用" : "保存设置"}</button></div></div>` :
-        `<div class="empty-state compact"><p>${detail.display_name === "语音克隆" ? "请打开专属配置页填写服务密钥，管理授权音色、使用范围和语音参数；保存后查看生效反馈。" : detail.scheduled_action === "short_drama" ? "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" : detail.pages?.length ? "请在专属配置页中管理；每次保存都以该页反馈为准。" : "无需填写参数；接入条件请按指引确认，使用范围在群聊中单独勾选。"}</p>${detail.pages?.length ? `<button class="button secondary" id="openFeatureCenter" type="button" ${!detail.engine_online ? 'disabled title="请先启动机器人"' : ""}>打开专属配置页</button>` : ""}</div>`}`;
+        ""}`;
+    const reference = $("#featureQuickReference");
+    reference?.addEventListener("toggle", () => {
+      state.featureReferenceOpen[detail.id] = reference.open;
+      $(".reference-toggle-label", reference).textContent = reference.open ? "收起" : "展开";
+    });
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     const manageImageModels = $("#manageImageModels");
     if (manageImageModels) {
@@ -1112,7 +1120,7 @@
     });
     featureForm?.addEventListener("input", () => {
       state.featureDirty = true; state.featureFeedback = "";
-      $("#featureNote").textContent = "有修改尚未保存。";
+      $("#featureNote").textContent = "有未保存的修改。";
       $$("textarea", featureForm).forEach(growTextarea);
     });
     if (featureForm) syncFeatureDependencies(featureForm);
@@ -1133,7 +1141,7 @@
         button.textContent = controller.checked ? "不使用备用模型" : "添加备用模型";
         state.featureDirty = true;
         state.featureFeedback = "";
-        $("#featureNote").textContent = "有修改尚未保存。";
+        $("#featureNote").textContent = "有未保存的修改。";
         syncFeatureDependencies(featureForm);
       }));
     }
@@ -1457,9 +1465,6 @@
     $("#privateManagementPanel").hidden = tab !== "private";
     $("#refreshGroups").hidden = tab !== "groups";
     $("#refreshContacts").hidden = tab !== "private";
-    $("#chatManagementDescription").textContent = tab === "groups"
-      ? "管理机器人所在群聊的回复规则、可用功能和成员信息。"
-      : "读取当前微信通讯录，查看个人资料并配置每位联系人的可用功能。";
     if (tab === "groups") await loadGroups(true, {background: state.groupsLoaded});
     if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
   }
@@ -1686,10 +1691,10 @@
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><div class="member-identities"><small><span>微信号</span>${escapeHtml(item.wechat_id || "未提供")}</small><small><span>微信标识</span>${escapeHtml(item.user_id || "未提供")}</small></div></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
-    const header = `<header class="inspector-hero"><span class="eyebrow">当前群聊</span><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
+    const header = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
     const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
     const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
-    const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">群主、管理员和头像等微信接口未提供的信息保持“未知”，不会推断。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
+    const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">微信未提供的信息显示为“未知”。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
     panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "group", id: group.group_id, name: group.name}, state.groupAccount));
     $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
@@ -1725,7 +1730,7 @@
       <div class="toggle-line"><span><strong>定时任务安静时段</strong><small>仅限制本群已配置的定时任务</small></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="groupQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="groupQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label><span>每日定时任务上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>只限制已配置的定时任务；填 0 表示暂停定时推送。</small></label>
-      <div class="policy-summary">普通消息与卡片不受定时任务限额影响；主动聊天由各功能自行配置。当前接口未提供可靠群主权限时，只允许修改本机机器人规则，不会冒充群主管理成员。</div>
+      <div class="policy-summary">定时限额不影响普通回复；这里只修改机器人规则。</div>
     </form>`;
   }
 
@@ -2094,7 +2099,7 @@
         : facts ? `<dl class="contact-facts">${facts}</dl>` : '<div class="profile-state">当前接口没有返回更多个人资料。</div>';
     const policyData = state.privatePolicies[contact.user_id];
     const saveDisabled = !policyData || policyData.loading || policyData.error;
-    panel.innerHTML = `<header class="inspector-hero"><span class="eyebrow">当前联系人</span><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></header>
+    panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></header>
       <div class="inspector-scroll contact-detail-scroll"><section class="contact-profile"><div class="contact-section-heading"><h3>个人详情</h3><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</section>${privatePolicyMarkup(policyData)}</div>
       <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存私聊规则</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
@@ -3070,7 +3075,6 @@
     $("#scheduledTaskRuns").hidden = true;
     $("#newScheduledTask").hidden = false;
     $("#scheduleHeading").textContent = "定时任务";
-    $("#scheduleHeadingDescription").textContent = "管理定时发送、执行时间和逐对象结果。";
     state.scheduledTimeLoad += 1;
   }
 
@@ -3112,7 +3116,6 @@
     const root = $("#scheduledTaskEditor");
     root.hidden = false;
     $("#scheduleHeading").textContent = "安排定时消息";
-    $("#scheduleHeadingDescription").textContent = "填写内容、接收对象和执行时间，保存前检查实际安排。";
     const analysisTask = editor.action === "group_analysis";
     const targetIntro = analysisTask ? "选择需要生成日报的群聊。" : "固定选择当前账号的聊天，可同时选择群聊和私聊。";
     const targetTabs = analysisTask ? `<div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button></div>` : `<div class="inspector-tabs" aria-label="发送对象类型"><button type="button" data-scheduled-target-tab="group" aria-pressed="true" class="active">群聊</button><button type="button" data-scheduled-target-tab="private" aria-pressed="false">私聊</button></div>`;
@@ -3121,10 +3124,10 @@
         <section class="panel scheduled-form-section"><h3><span>1</span>做什么</h3><div class="form-field"><label for="scheduledName">任务名称</label><input id="scheduledName" value="${escapeHtml(editor.name || "")}" placeholder="自动使用内容名称，也可以自己命名" maxlength="80" ${analysisTask ? 'readonly aria-describedby="scheduledNameHint"' : ""}>${analysisTask ? '<small id="scheduledNameHint">群聊分析日报使用固定名称。</small>' : ""}</div>
         <div class="form-field"><label for="scheduledAction">发送内容</label><select id="scheduledAction">${Object.entries(SCHEDULED_ACTIONS).map(([value, name]) => `<option value="${value}" ${value === editor.action ? "selected" : ""}>${name}</option>`).join("")}</select></div><div id="scheduledArguments" class="scheduled-arguments">${scheduledArgumentsMarkup(editor)}</div>
         <div id="scheduledReadiness" class="schedule-notice"></div><button class="row-action" id="scheduledPrepareFeature" type="button" hidden>去准备功能，保留当前草稿</button>
-        ${analysisTask ? "" : `<details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>命令会先检查参数、依赖、收件人类型和执行语义，不会执行命令或发送消息。</small><p class="schedule-command-catalog">${escapeHtml(scheduledCommandCatalogText())}</p></details>`}</section>
+        ${analysisTask ? "" : `<details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>只识别并填写，不发送消息。</small><p class="schedule-command-catalog">${escapeHtml(scheduledCommandCatalogText())}</p></details>`}</section>
         <section class="panel scheduled-form-section"><h3><span>2</span>发给谁</h3><p class="subtle">${targetIntro}</p><div class="scheduled-selected" id="scheduledSelected"></div>${targetTabs}<div class="form-field"><label for="scheduledTargetSearch">搜索聊天</label><label class="search-box wide" id="scheduledTargetSearchBox"><svg><use href="#i-search"/></svg><input id="scheduledTargetSearch" type="search" placeholder="搜索群名、昵称或备注" autocomplete="off"><button type="button" class="clear-search" aria-label="清空聊天搜索">×</button></label></div><div id="scheduledTargetChoices" class="scheduled-target-choices"></div></section>
         <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3>${scheduledTimingMarkup(editor.schedule, editor.action, editor.arguments)}</section>
-      </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">${analysisTask ? "群聊分析沿用当前功能的群聊权限。保存后按所选群和时间生成日报。" : "启用只授权本任务向所选聊天定时发送，不会允许 AI 主动聊天。聊天总开关、安静时段及每日上限仍然有效。"}</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions">${analysisTask ? "" : '<button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button>'}<button class="button primary" id="scheduledSaveEnabled" type="button">${analysisTask ? editor.group_analysis_persisted ? "保存并启用" : "创建并启用" : editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>${analysisTask ? "群聊分析暂不支持在这里预览或测试发送；可保存后在测试群查看报告。" : "预览只在这里显示；测试发送必须再明确选择一个聊天。"}</small></aside></div>`;
+      </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">${analysisTask ? "日报需通过群聊分析权限。" : "发送仍受聊天权限、安静时段和每日上限限制。"}</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions">${analysisTask ? "" : '<button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button>'}<button class="button primary" id="scheduledSaveEnabled" type="button">${analysisTask ? editor.group_analysis_persisted ? "保存并启用" : "创建并启用" : editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>${analysisTask ? "群聊分析暂不支持在这里预览或测试发送；可保存后在测试群查看报告。" : "预览只在这里显示；测试发送必须再明确选择一个聊天。"}</small></aside></div>`;
     $("#scheduledBack").addEventListener("click", () => { if (!guardScheduledDraft(showScheduledList)) { state.scheduledEditor = null; showScheduledList(); } });
     $("#scheduledTaskForm").addEventListener("submit", (event) => event.preventDefault());
     $("#scheduledName").addEventListener("input", (event) => { editor.name = event.target.value; scheduledChanged(false); });
@@ -3450,7 +3453,6 @@
     const root = $("#scheduledTaskRuns");
     $("#scheduleListView").hidden = true; $("#scheduledTaskEditor").hidden = true; root.hidden = false;
     $("#scheduleHeading").textContent = "执行记录";
-    $("#scheduleHeadingDescription").textContent = "按对象查看本次任务的发送结果和原因。";
     root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · 执行记录</h2><p>已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
     $("#scheduledRunsBack").addEventListener("click", showScheduledList);
     try {
@@ -3502,7 +3504,7 @@
       $("#activityPage").textContent = `第 ${activityPage} / ${pages} 页 · 共 ${activityItems.length} 条`;
       $("#activityPrev").disabled = activityPage <= 1;
       $("#activityNext").disabled = activityPage >= pages;
-      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status === "failed" ? "操作未完成，请按错误码处理" : "状态已记录")}</small></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
+      $("#activityList").innerHTML = items.length ? items.map((item) => `<article class="activity-item ${escapeHtml(item.status)}"><time class="activity-time">${escapeHtml(fullTime(item.time))}</time><span class="activity-node" aria-hidden="true"></span><div class="activity-title"><strong>${escapeHtml(item.title)}</strong></div><span class="activity-result ${item.status === "failed" ? "failed" : ""}"><i></i>${item.status === "failed" ? "已恢复" : "成功"}</span><span class="activity-code">${escapeHtml(item.code || "")}</span></article>`).join("") : '<div class="empty-state compact"><p>当前还没有运行记录</p></div>';
   }
 
   async function generateResponseTrace() {
@@ -3575,7 +3577,7 @@
       button.disabled = false;
       button.removeAttribute("aria-busy");
       const needsReview = state.responseTraces?.[0]?.stages?.some((stage) => stage.status === "pending");
-      button.textContent = needsReview ? "先核对聊天再重试" : "再次发送并生成";
+      button.textContent = needsReview ? "先核对聊天再重试" : "再次发送测试";
     }
   }
 
@@ -3591,7 +3593,7 @@
     badge.className = `status-badge ${hasFailure ? "error" : hasPending || hasSkipped ? "warning" : traces.length ? "online" : "checking"}`;
     badge.innerHTML = `<span></span>${hasFailure ? "发送失败" : hasPending ? "结果待确认" : hasSkipped ? "未发送" : traces.length ? "发送完成" : "等待生成"}`;
     if (!latest) {
-      list.innerHTML = '<div class="empty-state compact"><p>点击“发送测试并生成”后，会向微信团队发送一条测试消息。</p></div>';
+      list.innerHTML = '<div class="empty-state compact"><p>尚无测试结果</p></div>';
       return;
     }
 
@@ -3933,9 +3935,7 @@
     form.elements.provider_id.value = "";
     form.elements.preset.value = presetId;
     applyProviderPreset(presetId);
-    $("#providerEditorEyebrow").textContent = "新建服务";
     $("#providerEditorTitle").textContent = "新建模型服务";
-    $("#providerEditorSubtitle").textContent = presetId === "deepseek" ? "添加到当前设备，不影响其他安装。" : "选择一个模型供应商，然后确认连接信息。";
     $("#apiKeyHint").textContent = "API Key / Token Plan 只保存在本机，不会回显";
     $("#testProvider").hidden = true;
     $("#deleteProvider").hidden = true;
@@ -3964,13 +3964,7 @@
     $("#providerModelHint").textContent = service.model
       ? `当前模型：${service.model}；可手动填写，也可从服务端读取后选择`
       : "可手动填写，也可从服务端读取后选择";
-    $("#providerEditorEyebrow").textContent = "编辑服务";
     $("#providerEditorTitle").textContent = service.name;
-    $("#providerEditorSubtitle").textContent = service.is_default
-      ? "当前回复模型"
-      : service.service_kind === "chat"
-        ? "已配置，可切换为回复模型"
-        : "已配置，供相关功能选择";
     $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；聊天模型默认按多模态请求";
     $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置 API Key / Token Plan";
     $("#testProvider").hidden = !service.configured;
@@ -4030,7 +4024,7 @@
           <div class="provider-service-body">
             <div class="provider-card-tags">
               <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : item.service_kind === "voice" ? "语音" : "文本"))}</span>
-              <span>${item.configured ? "配置已统一共享" : "缺少 API Key / Token Plan"}</span>
+              <span>${item.configured ? "已配置" : "缺少 API Key / Token Plan"}</span>
             </div>
             <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
@@ -4053,11 +4047,11 @@
       </div>` : `
       <div class="provider-empty-state">
         <div class="provider-empty-visual" aria-hidden="true"><span></span><i></i><span></span></div>
-        <span class="eyebrow">从这里开始</span>
+
         <h3>还没有模型服务</h3>
-        <p>新建聊天、向量、图片或语音模型后，可在对应功能设置中直接选择。</p>
+
         <button class="button primary" type="button" data-action-bound disabled data-provider-create>新建模型服务</button>
-        <div class="provider-empty-assurances"><span>API Key / Token Plan 仅存本机</span><span>保存后再启用</span><span>可随时更换</span></div>
+
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
     renderHomeSetupAlerts();

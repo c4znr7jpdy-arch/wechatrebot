@@ -59,6 +59,24 @@ def test_common_commands_guide_exposes_grouped_customer_commands():
     assert all("语音" not in item for item in rendered)
 
 
+def test_visible_features_have_quick_reference_except_dedicated_exclusions():
+    root = Path(__file__).parents[1]
+    features = json.loads((root / "release/feature-set.json").read_text("utf-8"))["features"]
+    excluded = {"长期记忆", "语音克隆", "推特推送", "表情管理"}
+    modules = [row["module"] for row in features if row.get("visible", True) and row["display_name"] not in excluded]
+    for module in [*modules, "jiang_commands.setu"]:
+        groups = get_plugin_guide(module).get("commands", ())
+        assert groups, module
+        assert all(group["title"] and group["items"] for group in groups), module
+        assert all(command and description for group in groups for command, description in group["items"]), module
+
+
+def test_quick_reference_is_detached_from_shared_guide_data():
+    guide = get_plugin_guide("astrbot_plugin_bittorrent")
+    guide["commands"][0]["title"] = "changed"
+    assert get_plugin_guide("astrbot_plugin_bittorrent")["commands"][0]["title"] == "资源检索"
+
+
 def test_curated_paths_match_local_delivered_schemas():
     import pytest
     root = Path(__file__).parents[1] / "artifacts/staging-hot-config-validation-20260907-final/app/astrbot/data/plugins"
