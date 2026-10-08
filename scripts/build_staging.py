@@ -634,6 +634,13 @@ def main(argv: list[str] | None = None) -> int:
         _apply_bridge_patch(commercial_root, output)
     _apply_plugin_patches(commercial_root, output)
 
+    office_plugin = output / "app/astrbot/data/plugins/astrbot_plugin_office_assistant"
+    if office_plugin.is_dir():
+        subprocess.run(
+            [sys.executable, str(commercial_root / "scripts/build_office_renderer.py"), str(office_plugin)],
+            cwd=commercial_root, check=True,
+        )
+
     runtime_summary: dict[str, object] | None = None
     if args.runtime_root:
         runtime_root = args.runtime_root.expanduser().resolve()

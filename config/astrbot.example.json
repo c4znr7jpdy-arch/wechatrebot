@@ -71,7 +71,8 @@
     "jiang_schedule",
     "jiang_short_drama",
     "jiang_video_understanding",
-    "meme_manager"
+    "meme_manager",
+    "astrbot_plugin_office_assistant"
   ],
   "timezone": "Asia/Shanghai",
   "log_level": "INFO",

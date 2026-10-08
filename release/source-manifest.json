@@ -369,6 +369,11 @@
       "origin": "commercial",
       "source": "runtime/jiang_commands/metadata.yaml",
       "target": "app/astrbot/data/plugins/jiang_commands/metadata.yaml"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/astrbot_plugin_office_assistant",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_office_assistant"
     }
   ]
 }

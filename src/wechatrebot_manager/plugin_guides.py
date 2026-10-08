@@ -7,6 +7,7 @@ from typing import Any
 
 # Paths use the delivered upstream schema. Omitted settings remain in Advanced.
 _GUIDES = {
+    "astrbot_plugin_office_assistant": ("读取文件并生成办公文档", "直接说“生成 Word 周报”或“整理成 Excel”；上传文件后可用 /doc list 查看，再用 /doc use 加要求继续处理。", "需要支持工具调用的聊天模型。默认仅管理员和白名单用户可用；群聊还需在群聊管理允许 Office 助手。PDF 转换可用性见 /pdf_status，复杂 Excel 本机脚本默认关闭。", ("permission_settings.allow_all_users", "permission_settings.whitelist_users", "trigger_settings.enable_features_in_group", "trigger_settings.require_at_in_group", "file_settings.max_file_size_mb", "file_settings.auto_delete_files", "feature_settings.enable_pdf_conversion", "preview_settings.enable")),
     "astrbot_plugin_angel_heart": ("协调群聊接话和多人上下文", "先到群聊&私聊管理选择群聊和回复方式；需要调整上下文长度时再打开专属配置页。", "它不会建立独立长期记忆库；会话上下文仍受回复引擎的上下文范围限制。", ()),
     "astrbot_plugin_bittorrent": ("按关键词查找资源索引", "先填写可用的资源索引站地址，再调整返回数量。", "只检索有权访问和使用的内容；索引站需要可访问。", ("magnet_search.base_url", "magnet_search.max_results", "magnet_search.enable_preview")),
     "astrbot_plugin_livingmemory": ("记住重要对话并在需要时回忆", "先在模型设置中选择 Embedding 文本向量模型和聊天模型，再保持智能召回。", "需要单独配置 Embedding 模型；Grok 等聊天模型不能替代。明确回忆会检索，普通问候默认跳过。", ("provider_settings.embedding_provider_id", "provider_settings.llm_provider_id", "recall_engine.auto_recall_mode", "recall_engine.top_k", "reflection_engine.summary_trigger_rounds")),
@@ -38,6 +39,16 @@ _GUIDES = {
 # Curated from the plugin's HELP_DATA. Keep this customer-facing list stable
 # even when the plugin source contains internal or administrator-only helpers.
 _COMMANDS = {
+    "astrbot_plugin_office_assistant": (
+        {"title": "办公文档", "items": (
+            ("生成 Word 周报", "用自然语言描述内容，生成后发回文件"),
+            ("/doc list", "查看当前会话上传的文件"),
+            ("/doc use 文件ID 处理要求", "选择上传文件继续分析或整理"),
+            ("/img add 图片用途", "发送图片后登记为文档素材"),
+            ("/fileinfo", "查看文件功能状态"),
+            ("/pdf_status", "查看 PDF 转换环境"),
+        )},
+    ),
     "astrbot_plugin_angel_heart": (
         {"title": "使用方式", "items": (("群聊回复", "在群聊管理选择回复方式和使用范围"),)},
     ),
@@ -247,6 +258,7 @@ _COMMANDS = {
 # audience, readiness, recommendation.  This is product guidance only: it never
 # toggles, deletes, or rewrites a customer's existing plugin configuration.
 _ASSESSMENTS = {
+    "astrbot_plugin_office_assistant": ("办公选配", "需要聊天模型和用户授权", "适合文档、基础表格和基础 PPT；管理员先私聊试用，再按需开放用户和群聊。PDF 转换依赖 Office 或 LibreOffice。"),
     "astrbot_plugin_angel_heart": ("群聊常用", "可用但已纠正名称", "保留。适合多人群聊的接话与上下文协调，但不应宣传为长期记忆。"),
     "astrbot_plugin_bittorrent": ("群聊常用", "默认开启", "可直接使用 /bt 加关键词检索；结果来自外部索引，请确认内容授权并遵守当地规则。"),
     "astrbot_plugin_livingmemory": ("对话基础", "需要 Embedding 模型", "保留为唯一主长期记忆；普通寒暄跳过，明确回忆请求必须尝试检索。"),

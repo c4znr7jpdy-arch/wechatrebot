@@ -144,7 +144,7 @@ diff --git a/official/astrbot/core/platform/wechat_group_policy.py b/expected/as
 new file mode 100644
 --- /dev/null
 +++ b/expected/astrbot/core/platform/wechat_group_policy.py
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,80 @@
 +"""Pure runtime group-feature policy, copied into the pinned engine patch."""
 +from __future__ import annotations
 +
@@ -156,6 +156,7 @@ new file mode 100644
 +DEFAULT_GROUP_FEATURES = (
 +    "astrbot_plugin_angel_heart",
 +    "astrbot_plugin_bittorrent",
++    "astrbot_plugin_office_assistant",
 +    "astrbot_plugin_music",
 +    "astrbot_plugin_parser",
 +    "astrbot_plugin_twitter",

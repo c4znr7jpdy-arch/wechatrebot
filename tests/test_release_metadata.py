@@ -32,6 +32,7 @@ def _metadata_copy(tmp_path: Path) -> Path:
     shutil.copytree(source / "patches", target / "patches")
     (target / "scripts").mkdir()
     shutil.copy2(source / "scripts" / "build_runtime.py", target / "scripts")
+    shutil.copy2(source / "scripts" / "build_office_renderer.py", target / "scripts")
     return target
 
 
