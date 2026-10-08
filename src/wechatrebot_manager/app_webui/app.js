@@ -1039,8 +1039,8 @@
       return `<div class="feature-command-item"><code>${escapeHtml(command || "")}</code><span>${escapeHtml(description || "")}${hint?.status === "supported" ? `<small class="command-schedule-status supported">${hint.label}</small>` : ""}</span></div>`;
     }).join("")}</div></div>`).join("");
     const scheduleButton = detail.scheduled_action === "group_analysis" ? "配置自动日报" : "创建定时任务";
-    return `<details class="feature-quick-reference" id="featureQuickReference" ${state.featureReferenceOpen[detail.id] !== false ? "open" : ""}>
-      <summary><span>快速参考</span><span class="reference-toggle-label" aria-hidden="true">${state.featureReferenceOpen[detail.id] !== false ? "收起" : "展开"}</span></summary>
+    return `<details class="feature-quick-reference" id="featureQuickReference" data-feature-id="${escapeHtml(detail.id)}" ${state.featureReferenceOpen[detail.id] !== false ? "open" : ""}>
+      <summary><span>快速参考</span><span class="reference-toggle-label" aria-hidden="true"><span class="reference-collapse-label">收起</span><span class="reference-expand-label">展开</span></span></summary>
       <div class="feature-reference-body">${commands ? `<div class="feature-command-groups">${commands}</div>` : ""}
       <div class="feature-reference-actions">${detail.scheduled_action ? `<button class="button secondary small" id="featureScheduledTask" type="button" data-action-bound disabled>${scheduleButton}</button>` : ""}
       ${detail.configuration_profile === "image-service-selection" ? '<button class="button secondary small" id="manageImageModels" type="button" data-action-bound disabled>管理图片模型</button>' : ""}
@@ -1052,6 +1052,8 @@
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
+    const previousReference = $("#featureQuickReference");
+    if (previousReference) state.featureReferenceOpen[previousReference.dataset.featureId] = previousReference.open;
     $("#featureDetail").dataset.featureId = detail.id || "";
     $("#featureDetail").dataset.featureName = detail.display_name || "";
     const schemas = {basic: detail.basic_schema || {}, models: detail.model_schema || {}, advanced: detail.advanced_schema || detail.schema || {}};
@@ -1080,8 +1082,7 @@
         ""}`;
     const reference = $("#featureQuickReference");
     reference?.addEventListener("toggle", () => {
-      state.featureReferenceOpen[detail.id] = reference.open;
-      $(".reference-toggle-label", reference).textContent = reference.open ? "收起" : "展开";
+      if (reference.isConnected) state.featureReferenceOpen[detail.id] = reference.open;
     });
     $("#featureScheduledTask")?.addEventListener("click", () => openScheduledFromFeature());
     const manageImageModels = $("#manageImageModels");

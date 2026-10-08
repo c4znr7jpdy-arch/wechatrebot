@@ -189,6 +189,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .feature-quick-reference > summary::-webkit-details-marker { display: none; }
 .feature-quick-reference > summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; border-radius: 9px; }
 .reference-toggle-label { flex-shrink: 0; color: var(--muted); font-size: 12px; font-weight: 400; }
+.feature-quick-reference:not([open]) .reference-collapse-label,
+.feature-quick-reference[open] .reference-expand-label { display: none; }
 .feature-reference-body { padding: 0 16px 14px; }
 .feature-reference-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .feature-command-group > strong { color: var(--ink); }
