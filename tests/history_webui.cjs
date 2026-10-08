@@ -170,7 +170,7 @@ async function manualRefresh() {
   c.window.setTimeout = callback => { timeoutCallback = callback; return 1; };
   c.window.clearTimeout = () => {};
   c.response = () => new Promise(() => {});
-  const timeoutRequest = c.requestHistoryRead('get_messages', 'a', {});
+  const timeoutRequest = c.requestHistoryRead(c.api('get_messages', 'a', {}));
   timeoutCallback();
   await assert.rejects(timeoutRequest, /读取记录超时，请点击刷新/);
 }

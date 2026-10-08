@@ -2141,11 +2141,11 @@
     }
   }
 
-  async function requestHistoryRead(method, ...args) {
+  async function requestHistoryRead(request) {
     let timer;
     try {
       return await Promise.race([
-        api(method, ...args),
+        request,
         new Promise((_, reject) => {
           timer = window.setTimeout(() => reject(new Error("读取记录超时，请点击刷新。")), 20000);
         }),
@@ -2186,12 +2186,12 @@
     const reuse = options?.localFilter === true && cached?.query === query;
     state.historyConversationsLoading = true;
     try {
-      const data = reuse ? cached.data : await requestHistoryRead("get_conversations", {
+      const data = reuse ? cached.data : await requestHistoryRead(api("get_conversations", {
         account_id: requestAccount,
         kind: "all",
         ...filters,
         refresh_groups: options?.refreshGroups === true,
-      });
+      }));
       if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
       if (data.requires_login || data.account_changed || data.account_id !== requestAccount) {
         invalidateHistoryState();
@@ -2390,7 +2390,7 @@
   function requestHistoryMessagePage(key, conversationId, filters) {
     const pending = state.historyMessageRequests.get(key);
     if (pending) return pending;
-    const request = requestHistoryRead("get_messages", conversationId, filters).then(normalizeMessagePage);
+    const request = requestHistoryRead(api("get_messages", conversationId, filters)).then(normalizeMessagePage);
     state.historyMessageRequests.set(key, request);
     request.then(
       () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
@@ -2752,7 +2752,7 @@
       if (request === state.historyOlderLoad) status.hidden = false;
     }, 300);
     try {
-      const page = normalizeMessagePage(await requestHistoryRead("get_messages", selected.conversation_id, pagedHistoryFilters(oldest)));
+      const page = normalizeMessagePage(await requestHistoryRead(api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest))));
       if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
