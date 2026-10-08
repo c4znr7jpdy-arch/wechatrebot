@@ -10,6 +10,8 @@ def test_twitter_replacement_contracts():
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--tb=short",
          "runtime/astrbot_plugin_twitter/tests/test_wechat_integration.py",
+         "runtime/astrbot_plugin_twitter/tests/test_reconnect_polling.py",
+         "runtime/astrbot_plugin_twitter/tests/test_translation_recovery.py",
          "runtime/astrbot_plugin_twitter/tests/test_twitter_webui.py"],
         cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60,

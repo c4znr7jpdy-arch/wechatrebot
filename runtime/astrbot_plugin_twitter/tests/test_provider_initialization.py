@@ -174,9 +174,13 @@ def _load_main_module():
 
 
 @pytest.fixture
-def plugin_module():
+def plugin_module(monkeypatch):
     FakeTwitterAPI.instances.clear()
-    return _load_main_module()
+    module = _load_main_module()
+    polling = sys.modules[f"{module.__package__}.services.polling_service"]
+    # Existing delivery tests use short synthetic IDs and no elapsed outage.
+    monkeypatch.setattr(polling, "time", types.SimpleNamespace(time=lambda: 0, monotonic=lambda: 0))
+    return module
 
 
 @pytest.fixture

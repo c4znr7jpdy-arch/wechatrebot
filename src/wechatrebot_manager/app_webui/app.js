@@ -65,6 +65,7 @@
     historyHasMore: false,
     historyHasNewer: false,
     historyLoadingOlder: false,
+    historyManualRefresh: false,
     historyOlderLoad: 0,
     historyMessageQuery: "",
     historyMessageCache: new Map(),
@@ -2140,6 +2141,36 @@
     }
   }
 
+  async function requestHistoryRead(request) {
+    let timer;
+    try {
+      return await Promise.race([
+        request,
+        new Promise((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error("读取记录超时，请点击刷新。")), 20000);
+        }),
+      ]);
+    } finally { window.clearTimeout(timer); }
+  }
+
+  async function refreshHistoryRecords() {
+    if (!state.historyAccount || state.historyManualRefresh) return;
+    state.historyManualRefresh = true;
+    clearHistoryMessageCache();
+    state.messageLoad += 1;
+    state.historyOlderLoad += 1;
+    state.historyLoadingOlder = false;
+    $("#olderMessagesStatus").hidden = true;
+    $("#messageList").removeAttribute("aria-busy");
+    setHistoryActionsEnabled(false);
+    try {
+      await loadConversations({forceRefresh: true, refreshGroups: true, latest: true});
+    } finally {
+      state.historyManualRefresh = false;
+      setHistoryActionsEnabled(state.historyReadyAccount === state.historyAccount);
+    }
+  }
+
   async function loadConversations(options = {}) {
     const silent = options?.silent === true;
     const requestAccount = state.historyAccount;
@@ -2155,12 +2186,12 @@
     const reuse = options?.localFilter === true && cached?.query === query;
     state.historyConversationsLoading = true;
     try {
-      const data = reuse ? cached.data : await api("get_conversations", {
+      const data = reuse ? cached.data : await requestHistoryRead(api("get_conversations", {
         account_id: requestAccount,
         kind: "all",
         ...filters,
         refresh_groups: options?.refreshGroups === true,
-      });
+      }));
       if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
       if (data.requires_login || data.account_changed || data.account_id !== requestAccount) {
         invalidateHistoryState();
@@ -2212,6 +2243,11 @@
     const cleanButton = $("#cleanHistory");
     if (exportButton) exportButton.disabled = !enabled;
     if (cleanButton) cleanButton.disabled = !enabled;
+    const refreshButton = $("#refreshHistory");
+    if (refreshButton) {
+      refreshButton.disabled = !state.historyAccount || state.status?.runtime?.account_status_available === false || state.historyManualRefresh;
+      refreshButton.textContent = state.historyManualRefresh ? "刷新中…" : "刷新";
+    }
   }
 
   function invalidateHistoryState() {
@@ -2354,7 +2390,7 @@
   function requestHistoryMessagePage(key, conversationId, filters) {
     const pending = state.historyMessageRequests.get(key);
     if (pending) return pending;
-    const request = api("get_messages", conversationId, filters).then(normalizeMessagePage);
+    const request = requestHistoryRead(api("get_messages", conversationId, filters)).then(normalizeMessagePage);
     state.historyMessageRequests.set(key, request);
     request.then(
       () => { if (state.historyMessageRequests.get(key) === request) state.historyMessageRequests.delete(key); },
@@ -2619,7 +2655,7 @@
       renderMessages(state.selectedMessages, {restoreScrollTop: cacheEntry.scrollTop});
       renderConversationInspector(item);
     } else if (changed) {
-      list.innerHTML = '<div class="loading-row">正在读取消息…</div>';
+      list.innerHTML = '<div class="loading-row message-read-status"><span>正在读取消息…</span><small>若长时间未读到记录，点击刷新。</small></div>';
     }
     const load = ++state.messageLoad;
     const revision = JSON.stringify([item.message_count, item.last_timestamp]);
@@ -2690,7 +2726,7 @@
       if (changed && !cacheEntry && load === state.messageLoad && requestAccount === state.historyAccount
           && state.selectedConversation?.conversation_id === conversationId) {
         list.removeAttribute("aria-busy");
-        list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>后台会自动重试，请稍后查看。</p></div>';
+        list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>请点击刷新重试。</p></div>';
       }
       if (!silent && !cacheEntry && load === state.messageLoad) reportError(error);
     } finally {
@@ -2716,7 +2752,7 @@
       if (request === state.historyOlderLoad) status.hidden = false;
     }, 300);
     try {
-      const page = normalizeMessagePage(await api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest)));
+      const page = normalizeMessagePage(await requestHistoryRead(api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest))));
       if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
@@ -4804,6 +4840,7 @@
 
   function bindEvents() {
     initializeTheme();
+    window.initializePanelLayout();
     window.initializeHistoryDateRange(() => loadConversations({latest: true}));
     $("#activityPrev").addEventListener("click", () => { activityPage--; renderActivity(); });
     $("#activityNext").addEventListener("click", () => { activityPage++; renderActivity(); });
@@ -4880,6 +4917,7 @@
       loadConversations({localFilter: true});
     }));
     $("#historyFilter").addEventListener("click", () => loadConversations({forceRefresh: true}));
+    $("#refreshHistory").addEventListener("click", refreshHistoryRecords);
     $("#newMessageButton").addEventListener("click", () => {
       if (state.historyHasNewer && state.selectedConversation) {
         void selectConversation(state.selectedConversation.conversation_id, {latest: true});
@@ -5033,7 +5071,7 @@
           state.selectedMessages = [];
           state.selectedSenderKey = "";
           if (state.activePage === "history") {
-            $("#messageList").innerHTML = '<div class="loading-row">正在读取消息…</div>';
+            $("#messageList").innerHTML = '<div class="loading-row message-read-status"><span>正在读取消息…</span><small>若长时间未读到记录，点击刷新。</small></div>';
             await loadConversations();
           }
         },

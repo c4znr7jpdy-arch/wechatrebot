@@ -8,6 +8,7 @@ AstrBot Twitter 推文转发插件
 import asyncio
 import copy
 import re
+from dataclasses import replace
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
@@ -394,6 +395,7 @@ class TwitterPlugin(Star):
                 custom_nitter_url=self.custom_nitter_url,
                 website_list=tuple(self.website_list),
                 max_tweets_per_user=self.poll_max_tweets_per_user,
+                poll_interval_seconds=self.poll_interval * 60,
             ),
         )
 
@@ -573,6 +575,10 @@ class TwitterPlugin(Star):
                 raise
 
             self.poll_interval = minutes
+            if getattr(self, "polling_service", None) is not None:
+                self.polling_service.settings = replace(
+                    self.polling_service.settings, poll_interval_seconds=minutes * 60
+                )
             self._poll_wakeup.set()
 
     async def _wait_for_next_poll(self) -> None:

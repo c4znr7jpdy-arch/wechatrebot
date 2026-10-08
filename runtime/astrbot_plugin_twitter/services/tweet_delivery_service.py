@@ -106,6 +106,18 @@ class TweetDeliveryService:
         self._collected_tweets.clear()
         self._pending_retweet_seen.clear()
 
+    def discard_collected_author(self, username: str) -> None:
+        """清除过期推主的缓存，同时保留其他推主本轮的新消息。"""
+        self._collected_tweets = {
+            umo: remaining
+            for umo, tweets in self._collected_tweets.items()
+            if (remaining := [tweet for tweet in tweets if tweet.username.casefold() != username.casefold()])
+        }
+        self._pending_retweet_seen = {
+            umo: {tweet.retweet_dedup_id for tweet in tweets if tweet.retweet_dedup_id}
+            for umo, tweets in self._collected_tweets.items()
+        }
+
     @staticmethod
     def split_chain_for_nodes(
         chain: list,

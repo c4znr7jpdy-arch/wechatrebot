@@ -1,6 +1,7 @@
 """单轮订阅检查、游标推进和 Nitter 镜像切换。"""
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +21,9 @@ from .tweet_delivery_service import (
 )
 from .tweet_message_service import TranslationCycleState
 
+TWITTER_EPOCH_MS = 1288834974657
+MIN_RECOVERY_GAP_SECONDS = 15 * 60
+
 
 @dataclass(frozen=True, slots=True)
 class PollingSettings:
@@ -30,6 +34,7 @@ class PollingSettings:
     custom_nitter_url: str
     website_list: tuple[str, ...]
     max_tweets_per_user: int = 5
+    poll_interval_seconds: int = 5 * 60
 
 
 class PollingService:
@@ -48,6 +53,34 @@ class PollingService:
         self.settings = settings
         self._pending_collective_cursors: dict[str, str] = {}
         self._pending_collective_tweet_ids: dict[str, list[str]] = {}
+        self._pending_collective_times: dict[str, float] = {}
+        self._started_at = time.time()
+        self._started_monotonic = time.monotonic()
+        self._live_since: dict[str, float] = {}
+        self._last_completed_checks: dict[str, float] = {}
+
+    @property
+    def recovery_gap_seconds(self) -> int:
+        return max(MIN_RECOVERY_GAP_SECONDS, self.settings.poll_interval_seconds * 2)
+
+    async def _live_cursor(self, username: str, stored_cursor: str) -> str:
+        """启动或长时间中断后，从恢复时点继续，不抓取离线积压。"""
+        key = username.casefold()
+        last_completed = self._last_completed_checks.get(key, self._started_monotonic)
+        cutoff = self._live_since.get(key, self._started_at)
+        if time.monotonic() - last_completed > self.recovery_gap_seconds:
+            cutoff = max(cutoff, time.time())
+        self._live_since[key] = cutoff
+        # Twitter Snowflake: timestamp occupies the high bits (12 + 5 + 5).
+        floor = max(0, int(cutoff * 1000) - TWITTER_EPOCH_MS) << 22
+        previous = int(stored_cursor) if str(stored_cursor).isdigit() else 0
+        if floor > previous:
+            cursor = str(floor)
+            if not await self.subscriptions.update_cursor(username, cursor):
+                return cursor
+            logger.info(f"@{username} 已跳过离线积压，从当前推送时段继续")
+            return cursor
+        return stored_cursor
 
     @property
     def has_pending_collective(self) -> bool:
@@ -68,6 +101,7 @@ class PollingService:
         )
         if tweet_id not in pending_ids:
             pending_ids.append(tweet_id)
+        self._pending_collective_times.setdefault(username, time.monotonic())
         current_id = self._pending_collective_cursors.get(username, "")
         if not current_id or int(tweet_id) > int(current_id):
             self._pending_collective_cursors[username] = tweet_id
@@ -102,6 +136,14 @@ class PollingService:
         """发送集体转发缓存，并只提交发送成功推主的候选游标。"""
         if not self.delivery.collective_enabled:
             return
+        for username, queued_at in list(self._pending_collective_times.items()):
+            if time.monotonic() - queued_at <= self.recovery_gap_seconds:
+                continue
+            self.delivery.discard_collected_author(username)
+            self._pending_collective_cursors.pop(username, None)
+            self._pending_collective_tweet_ids.pop(username, None)
+            self._pending_collective_times.pop(username, None)
+            logger.info(f"@{username} 已丢弃过期的待发送推文")
         if not self.delivery.has_collected and not self._pending_collective_cursors:
             return
 
@@ -109,6 +151,7 @@ class PollingService:
         pending_tweet_ids = self._pending_collective_tweet_ids
         self._pending_collective_cursors = {}
         self._pending_collective_tweet_ids = {}
+        self._pending_collective_times = {}
         try:
             flush_result = await self.delivery.flush_collected()
         except Exception as exc:
@@ -131,6 +174,7 @@ class PollingService:
                     item for item in recent_deliveries if item.username == username
                 )} if recent_deliveries else {}),
             )
+            self._last_completed_checks[username.casefold()] = time.monotonic()
         # Never put a separate history write ahead of successful authors' cursors.
         await self._save_partial_history(tuple(
             item for item in recent_deliveries
@@ -215,7 +259,7 @@ class PollingService:
     ) -> bool:
         """检查一个推主的新推文，并仅推进已成功处理的游标。"""
         try:
-            since_id = info.get("since_id", "")
+            since_id = await self._live_cursor(username, str(info.get("since_id") or ""))
             processed_tweet_ids = self.subscriptions.processed_tweet_ids(info)
             new_tweet_items = await self.twitter_api.get_user_timeline_items(
                 username,
@@ -223,6 +267,7 @@ class PollingService:
             )
 
             if not new_tweet_items:
+                self._last_completed_checks[username.casefold()] = time.monotonic()
                 return True
 
             latest_subs = await self.subscriptions.get_all()
@@ -233,6 +278,7 @@ class PollingService:
             max_tweets = max(1, int(self.settings.max_tweets_per_user))
             pushed_count = 0
             detail_failed = False
+            delivery_failed = False
             for item_index, item in enumerate(new_tweet_items):
                 if pushed_count >= max_tweets:
                     remaining = len(new_tweet_items) - item_index
@@ -245,6 +291,8 @@ class PollingService:
                 tweet_id = str(item.get("tweet_id") or "")
                 tweet_username = str(item.get("username") or username)
                 if not tweet_id.isdigit():
+                    continue
+                if since_id.isdigit() and int(tweet_id) <= int(since_id):
                     continue
 
                 if tweet_id in processed_tweet_ids:
@@ -282,12 +330,14 @@ class PollingService:
                     cycle=cycle,
                 )
                 if not isinstance(delivery_result, DeliveryResult):
+                    delivery_failed = True
                     logger.error(
                         f"@{username} 推送服务返回了无效结果，保留游标: "
                         f"{tweet_id}"
                     )
                     break
                 if delivery_result.state is DeliveryState.FAILED:
+                    delivery_failed = True
                     logger.warning(
                         f"@{username} 推文发送失败，保留游标等待重试: "
                         f"{tweet_id}"
@@ -300,6 +350,8 @@ class PollingService:
                 if delivery_result.counts_toward_limit:
                     pushed_count += 1
 
+            if not detail_failed and not delivery_failed and username not in self._pending_collective_cursors:
+                self._last_completed_checks[username.casefold()] = time.monotonic()
             return not detail_failed
         except FxTwitterTimelineError as exc:
             logger.warning(

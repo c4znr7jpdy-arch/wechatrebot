@@ -52,9 +52,11 @@ function historyContext() {
   const state = {historyAccount: 'account-a', conversations: [], selectedMessages: [],
     selectedConversation: null, historyMessageQuery: '', historyMessageCache: new Map(),
     historyMessageRequests: new Map(), historyMessageCacheEpoch: 0, historyOlderLoad: 0,
-    messageLoad: 0, historyHasMore: false, historyHasNewer: false};
+    messageLoad: 0, historyLoad: 0, historyHasMore: false, historyHasNewer: false, historyKind: 'all',
+    historyManualRefresh: false, historyReadyAccount: 'account-a'};
   const calls = [];
   const context = vm.createContext({state, $, Date, Map, Set, JSON, Number, String,
+    window: {setTimeout, clearTimeout},
     api: async (method, id, filters) => { calls.push({method, id, filters}); return context.response(id); },
     renderConversations() {}, renderConversationHeader() {}, renderConversationInspector() {},
     reportError(error) { throw error; },
@@ -64,7 +66,8 @@ function historyContext() {
       if (options.forceBottom || options.nearBottom) $('#messageList').scrollTop = 900;
     }, renderHistoryAccountGate() {},
   });
-  const names = ['historyFilters', 'pagedHistoryFilters', 'normalizeMessagePage', 'mergeMessages',
+  const names = ['requestHistoryRead', 'refreshHistoryRecords', 'loadConversations', 'setHistoryActionsEnabled',
+    'historyFilters', 'pagedHistoryFilters', 'normalizeMessagePage', 'mergeMessages',
     'historyMessageCacheKey', 'getHistoryMessageCacheEntry', 'setHistoryMessageCacheEntry',
     'saveSelectedHistoryMessages', 'clearHistoryMessageCache', 'requestHistoryMessagePage',
     'showHistoryNewerMessages', 'messagesSignature', 'selectConversation'];
@@ -144,5 +147,33 @@ async function history() {
   assert.equal(s.historyMessageCache.size, 32);
 }
 
-(async () => { dates(); await history(); console.log('history date, cache, pagination and account isolation: passed'); })()
+async function manualRefresh() {
+  const {context: c, state: s, calls, $} = historyContext();
+  s.conversations = [{conversation_id: 'a', message_count: 1, last_timestamp: 1}];
+  let resolveOld;
+  c.response = () => new Promise(resolve => { resolveOld = resolve; });
+  const oldRequest = c.selectConversation('a');
+  assert.match($('#messageList').innerHTML, /若长时间未读到记录，点击刷新/);
+  c.response = id => typeof id === 'object'
+    ? {account_id: 'account-a', items: [{conversation_id: 'a', message_count: 2, last_timestamp: 2}], summary: {}}
+    : {account_id: 'account-a', items: messages(2, 2), has_more: false};
+  await c.refreshHistoryRecords();
+  assert.equal(calls.length, 3, 'manual refresh must bypass the pending request');
+  assert.equal(s.selectedMessages[0].id, 2);
+  assert.equal(s.historyManualRefresh, false);
+  assert.equal($('#refreshHistory').disabled, false);
+  resolveOld({account_id: 'account-a', items: messages(1, 1), has_more: false});
+  await oldRequest;
+  assert.equal(s.selectedMessages[0].id, 2, 'the old response must not replace refreshed records');
+
+  let timeoutCallback;
+  c.window.setTimeout = callback => { timeoutCallback = callback; return 1; };
+  c.window.clearTimeout = () => {};
+  c.response = () => new Promise(() => {});
+  const timeoutRequest = c.requestHistoryRead(c.api('get_messages', 'a', {}));
+  timeoutCallback();
+  await assert.rejects(timeoutRequest, /读取记录超时，请点击刷新/);
+}
+
+(async () => { dates(); await history(); await manualRefresh(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

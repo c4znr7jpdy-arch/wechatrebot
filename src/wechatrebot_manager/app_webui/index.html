@@ -65,6 +65,7 @@
     <main class="main-area">
       <header class="topbar">
         <div><strong id="pageTitle">运行中心</strong></div>
+        <button class="button ghost small" id="resetPanelLayout" type="button" hidden>恢复布局</button>
         <div class="top-actions" id="defaultTopActions">
           <button class="button ghost small" id="globalRefresh" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新状态</button>
           <span class="status-badge checking" id="globalStatus"><span></span>正在检查</span>
@@ -230,7 +231,7 @@
         </section>
 
         <section class="page" id="page-history" aria-labelledby="historyHeading">
-          <div class="page-heading compact"><div><h1 id="historyHeading">消息中心</h1></div><button class="button secondary" id="exportHistory" data-action-bound disabled><svg><use href="#i-download"/></svg>导出记录</button></div>
+          <div class="page-heading compact"><div><h1 id="historyHeading">消息中心</h1></div><div class="button-row"><button class="button secondary" id="refreshHistory" type="button" data-action-bound disabled>刷新</button><button class="button secondary" id="exportHistory" data-action-bound disabled><svg><use href="#i-download"/></svg>导出记录</button></div></div>
           <div class="history-toolbar panel">
               <div class="segmented" id="historyKinds"><button class="active" data-kind="all" data-action-bound disabled>全部</button><button data-kind="private" data-action-bound disabled>个人聊天</button><button data-kind="group" data-action-bound disabled>群聊</button></div>
               <label class="search-box wide" id="historySearchBox"><svg><use href="#i-search"/></svg><input id="historySearch" type="search" placeholder="搜索昵称、微信号或内容" autocomplete="off"><button type="button" class="clear-search" data-action-bound disabled aria-label="清空搜索">×</button></label>
@@ -411,6 +412,7 @@
   <script src="core-settings.js?v=0.9.3-robot-core"></script>
   <script src="date-range.js"></script>
   <script src="report-preview.js"></script>
+  <script src="panel-layout.js"></script>
   <script src="app.js?v=20260922-force-stop-layout"></script>
   <dialog id="historyDateDialog" class="date-range-dialog" aria-labelledby="rangeTitle">
     <div class="panel-heading"><h2 id="rangeTitle">选择日期范围</h2><button type="button" id="rangeWeek" class="button ghost small">最近一周</button></div>
