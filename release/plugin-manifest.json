@@ -2,6 +2,7 @@
   "schema_version": 1,
   "ignored_directories": ["__pycache__", ".pytest_cache", "data", "logs"],
   "plugins": [
+    {"name": "astrbot_plugin_office_assistant", "version": "1.9.2", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_angel_heart", "version": "2.2.2", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_bittorrent", "version": "1.3.0", "ownership": "third-party", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "copyleft-review-required"},
     {"name": "astrbot_plugin_hapi_connector_disabled", "version": "2.1.3", "ownership": "excluded", "license": "AGPL-3.0-only", "license_file": "LICENSE", "review_status": "excluded"},

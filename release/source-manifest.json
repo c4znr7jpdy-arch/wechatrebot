@@ -399,6 +399,11 @@
       "origin": "commercial",
       "source": "runtime/capability_declarations/astrbot_plugin_proactive_chat.json",
       "target": "app/astrbot/data/plugins/astrbot_plugin_proactive_chat/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/astrbot_plugin_office_assistant",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_office_assistant"
     }
   ]
 }

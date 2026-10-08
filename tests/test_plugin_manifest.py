@@ -17,7 +17,9 @@ def test_plugin_manifest_accounts_for_every_project_plugin() -> None:
         path.name for path in project_plugins.iterdir() if path.is_dir()
     } - ignored
     declared = {item["name"] for item in payload["plugins"]}
-    assert actual == declared
+    native = json.loads((commercial_root / "release/native-plugin-sources.json").read_text("utf-8"))
+    native_modules = {item["module"] for item in native["plugins"]}
+    assert actual | native_modules == declared
     assert all("gate" not in item for item in payload["plugins"])
 
 
@@ -71,7 +73,7 @@ def test_delivery_manifests_install_every_non_excluded_plugin() -> None:
         and Path(item["target"]).parts[4] != "_nonebot_stubs.py"
     }
 
-    assert len(delivered) == 24
+    assert len(delivered) == 25
     assert delivered == feature_modules == source_modules
     assert excluded == {
         "astrbot_plugin_apis",

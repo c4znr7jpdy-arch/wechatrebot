@@ -173,7 +173,35 @@ diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform
 index a69cb91..f60f2b7 100644
 --- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
 +++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
-@@ -325,7 +325,12 @@ class AiocqhttpAdapter(Platform):
+@@ -25,6 +25,16 @@
+ from ...register import register_platform_adapter
+ from .aiocqhttp_message_event import *
+ from .aiocqhttp_message_event import AiocqhttpMessageEvent
++
++
++def _wechat_local_file(data: dict, platform_id: str):
++    """Only the local WeChat bridge is allowed to hand off local attachments."""
++    source = data.get("file")
++    if platform_id != "aiocqhttp_hook41827" or not isinstance(source, str):
++        return None
++    if not source.startswith("file:///"):
++        return None
++    return File(name=str(data.get("name") or "attachment.bin"), file=source)
+ 
+ 
+ @register_platform_adapter(
+@@ -253,6 +263,10 @@
+ 
+             elif t == "file":
+                 for m in m_group:
++                    local_file = _wechat_local_file(m["data"], self.metadata.id)
++                    if local_file is not None:
++                        abm.message.append(local_file)
++                        continue
+                     if m["data"].get("url") and m["data"].get("url").startswith("http"):
+                         # Lagrange
+                         logger.info("guessing lagrange")
+@@ -325,7 +339,12 @@ class AiocqhttpAdapter(Platform):
                                  get_reply=False,
                              )
  
@@ -187,7 +215,7 @@ index a69cb91..f60f2b7 100644
                                  id=abm_reply.message_id,
                                  chain=abm_reply.message,
                                  sender_id=abm_reply.sender.user_id,
-@@ -333,8 +338,15 @@ class AiocqhttpAdapter(Platform):
+@@ -333,8 +352,15 @@ class AiocqhttpAdapter(Platform):
                                  time=abm_reply.timestamp,
                                  message_str=abm_reply.message_str,
                                  text=abm_reply.message_str,  # for compatibility
@@ -204,7 +232,7 @@ index a69cb91..f60f2b7 100644
  
                              abm.message.append(reply_seg)
                          except BaseException as e:
-@@ -352,43 +364,54 @@ class AiocqhttpAdapter(Platform):
+@@ -352,43 +378,54 @@ class AiocqhttpAdapter(Platform):
                              abm.message.append(At(qq="all", name="全体成员"))
                              continue
  
@@ -293,7 +321,7 @@ index a69cb91..f60f2b7 100644
                      except ActionFailed as e:
                          logger.error(f"获取 @ 用户信息失败: {e}，此消息段将被忽略。")
                      except BaseException as e:
-@@ -427,10 +450,10 @@ class AiocqhttpAdapter(Platform):
+@@ -427,10 +464,10 @@ class AiocqhttpAdapter(Platform):
      def run(self) -> Awaitable[Any]:
          if not self.host or not self.port:
              logger.warning(

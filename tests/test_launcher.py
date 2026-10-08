@@ -103,6 +103,9 @@ def test_specs_share_one_python_and_include_both_services(tmp_path: Path) -> Non
         "runtime\\ffmpeg\\bin"
     )
     assert specs[1].environment["PATH"] == specs[0].environment["PATH"]
+    assert specs[0].environment["PATH"].split(os.pathsep)[1] == str(
+        tmp_path / "runtime/python/Lib/site-packages/playwright/driver"
+    )
     assert tmp_path / "runtime" / "ffmpeg" / "bin" / "ffmpeg.exe" in specs[
         0
     ].required_files

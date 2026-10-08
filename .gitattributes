@@ -12,3 +12,5 @@ runtime/meme_manager/** text=auto eol=lf
 runtime/astrbot_plugin_livingmemory/** text=auto eol=lf
 
 runtime/astrbot_plugin_qq_group_daily_analysis/** text=auto eol=lf
+
+runtime/astrbot_plugin_office_assistant/** text=auto eol=lf
