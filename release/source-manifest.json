@@ -223,8 +223,8 @@
       "target": "app/astrbot/data/plugins/astrbot_plugin_self_iterative_core"
     },
     {
-      "origin": "project",
-      "source": "data/plugins/jiang_capability_router",
+      "origin": "commercial",
+      "source": "runtime/jiang_capability_router",
       "target": "app/astrbot/data/plugins/jiang_capability_router"
     },
     {
@@ -369,6 +369,36 @@
       "origin": "commercial",
       "source": "runtime/jiang_commands/metadata.yaml",
       "target": "app/astrbot/data/plugins/jiang_commands/metadata.yaml"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_image.json",
+      "target": "app/astrbot/data/plugins/jiang_image/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_short_drama.json",
+      "target": "app/astrbot/data/plugins/jiang_short_drama/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_schedule.json",
+      "target": "app/astrbot/data/plugins/jiang_schedule/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_bittorrent.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_bittorrent/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_video_understanding.json",
+      "target": "app/astrbot/data/plugins/jiang_video_understanding/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_proactive_chat.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_proactive_chat/capabilities.json"
     },
     {
       "origin": "commercial",

@@ -1,0 +1,22 @@
+{
+  "recent_action_ttl_seconds": {
+    "description": "最近动作可用于‘再来一个’等续调表达的有效秒数",
+    "type": "int",
+    "default": 600
+  },
+  "recent_action_max_per_session": {
+    "description": "每个会话最多保留的最近动作数量",
+    "type": "int",
+    "default": 5
+  },
+  "inject_capability_prompt": {
+    "description": "是否在 LLM 请求中注入能力使用规则和最近动作",
+    "type": "bool",
+    "default": true
+  },
+  "block_unknown_slash_llm": {
+    "description": "阻止未被插件处理的 / 开头消息继续进入大模型，已注册的斜杠命令不受影响",
+    "type": "bool",
+    "default": true
+  }
+}

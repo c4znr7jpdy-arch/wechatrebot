@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "search",
+      "description": "根据关键词检索资源索引，沿用原插件预览图配置。",
+      "handler": "magnet_search_handler",
+      "message_pattern": "bt .+",
+      "examples": [
+        "bt 关键词"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "preview",
+      "description": "预览指定磁力链接。",
+      "handler": "magnet_preview_handler",
+      "message_pattern": "btp magnet:\\?[^\\r\\n]+",
+      "examples": [
+        "btp magnet:?xt=urn:btih:..."
+      ],
+      "effect": "read"
+    }
+  ]
+}

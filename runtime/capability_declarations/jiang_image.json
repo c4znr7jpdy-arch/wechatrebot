@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "generate",
+      "description": "生成或编辑图片。群聊仍要求用户原消息 @机器人；编辑需要原消息引用图片。不会替用户补造 @ 或图片。",
+      "handler": "handle_image",
+      "message_pattern": "(?:画一张|生成图片|生图|改图|修图) .+",
+      "examples": [
+        "画一张 海边的橘猫",
+        "改图 把背景换成海滩"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "model",
+      "description": "切换当前画图模型，属于配置修改。",
+      "handler": "switch_model",
+      "message_pattern": "切换画图模型 .+",
+      "examples": [
+        "切换画图模型 模型名"
+      ],
+      "effect": "write"
+    }
+  ]
+}

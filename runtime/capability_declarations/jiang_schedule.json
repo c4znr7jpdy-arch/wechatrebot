@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "list",
+      "description": "查看当前聊天的定时任务。",
+      "handler": "schedule",
+      "message_pattern": "/定时列表",
+      "examples": [
+        "/定时列表"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "manage",
+      "description": "添加、删除或修改定时计划请先使用原插件帮助或管理器定时任务页；不会根据简介擅自构造任务。",
+      "examples": [
+        "/定时帮助"
+      ],
+      "effect": "write"
+    }
+  ]
+}
