@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "search",
+      "description": "搜索短剧、电影、电视剧、动漫、综艺或体育回放，返回原插件链接卡片。",
+      "handler": "short_drama",
+      "message_pattern": "(?:(?:短剧|电影|电视剧|动漫|综艺|体育) .+|短剧推荐|影视帮助)",
+      "examples": [
+        "电影 流浪地球",
+        "电视剧 狂飙",
+        "体育 足球",
+        "短剧推荐"
+      ],
+      "effect": "read"
+    }
+  ]
+}

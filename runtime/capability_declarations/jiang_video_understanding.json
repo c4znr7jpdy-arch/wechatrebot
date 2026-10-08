@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "video",
+      "description": "用户发送微信视频时按插件配置自动提取画面和音轨并理解；需要真实视频消息，不能用一条文本命令代替。",
+      "examples": [],
+      "effect": "read"
+    }
+  ]
+}

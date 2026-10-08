@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "proactive",
+      "description": "按会话白名单、沉默时间、免打扰和未回复上限主动聊天。通过功能中心或插件 WebUI 配置；当前对话不会自动授予向其他会话主动发送的权限。",
+      "examples": [],
+      "effect": "write"
+    }
+  ]
+}
