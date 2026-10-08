@@ -1409,7 +1409,8 @@ def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
     assert 'data-audience="advanced"' not in audience
     assert 'previewFeature("feature-parser", "链接解析", "none"' in script
     assert 'configuration_profile: "image-service-selection"' in script
-    assert "管理图片模型服务" in script
+    assert 'id="manageImageModels"' in script
+    assert "管理图片模型" in script
     assert 'primary_api_key: {description: "主生图 API Key"' not in script
     assert 'advanced_schema: {}' in script
     assert '.filter(([key]) => Object.keys(schemas[key]).length)' in script
@@ -1483,7 +1484,8 @@ def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
-    assert "机器人消息发送甘特图" in markup
+    assert "<h2>发送耗时</h2>" in markup
+    assert "测试会向微信团队发送“发送路径测试”。" in markup
     assert "stage.offset_seconds" in script
     assert "const numericDuration = (stage)" in script
     assert 'class="gantt-track"' in script
@@ -1503,7 +1505,8 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
 
     assert 'data-page="groups"' in markup
     assert 'id="refreshGroups"' in markup
-    assert "管理机器人所在群聊的回复规则、可用功能和成员信息" in markup
+    assert '<h1 id="groupHeading">群聊&amp;私聊管理</h1>' in markup
+    assert 'id="chatManagementDescription"' not in markup
     assert 'api("get_groups", refresh)' in script
     assert 'api("get_group_members", request.groupId)' in script
     assert '<span>微信号</span>' in script
@@ -1511,7 +1514,7 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert 'item.wechat_id || "未提供"' in script
     assert 'item.user_id || "未提供"' in script
     assert 'previousAccount !== state.groupAccount' in script
-    assert "当前接口未提供" in script
+    assert "定时限额不影响普通回复；这里只修改机器人规则。" in script
     assert "从群聊列表添加" in script
     assert "无需在群里发送命令" in script
     assert "群聊数量暂不可用" in script
@@ -1801,7 +1804,9 @@ def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() ->
 
     assert voice["configuration"] == "page"
     assert 'previewFeature("feature-voice-clone", "语音克隆", "page"' in script
-    assert "请打开专属配置页填写服务密钥" in script
+    assert "const pageOnly = Boolean(detail.pages?.length);" in script
+    assert 'id="featurePageFrame"' in script
+    assert "if (pageOnly) void openEmbeddedFeaturePage(detail);" in script
 
 
 def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page() -> None:
@@ -1818,7 +1823,9 @@ def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page
     assert 'previewFeature("feature-drama", "短剧", "none"' in script
     assert 'page: "recommendation-schedules"' not in script
     assert "管理旧版短剧计划" not in script
-    assert "无需专属配置；需要定时发送时，从上方创建影视推荐任务。" in script
+    assert 'scheduledAction: "short_drama"' in script
+    assert 'id="featureScheduledTask"' in script
+    assert 'addEventListener("click", () => openScheduledFromFeature())' in script
 
 
 def test_twitter_is_embedded_in_feature_center_without_generic_configuration() -> None:
@@ -1968,8 +1975,9 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
     assert 'if (action === "group_analysis")' in script
     assert '已打开群聊分析自动日报设置' in script
-    assert 'feature-command-list' in script
-    assert 'guide.commands' in script
+    assert 'class="feature-quick-reference"' in script
+    assert 'id="featureQuickReference"' in script
+    assert 'detail.guide?.commands' in script
     assert '_ui_control: "line-list"' in script
     assert '_ui_control: "time-list"' in script
     assert '手账风（示例样式）' in script
