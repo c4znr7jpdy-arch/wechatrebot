@@ -1971,6 +1971,7 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
     (assets / "design-overrides.css").write_text(".design-ready{}", encoding="utf-8")
     (assets / "app.js").write_text("window.loaded = true;", encoding="utf-8")
     (assets / "report-preview.js").write_text("window.preview = true;", encoding="utf-8")
+    (assets / "panel-layout.js").write_text("window.layout = true;", encoding="utf-8")
     (assets / "core-settings.js").write_text("window.core = true;", encoding="utf-8")
     (assets / "assets" / "app-icon.png").write_bytes(b"PNG")
 
@@ -2004,6 +2005,7 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
             ("/app.js", b"window.loaded = true;"),
             ("/core-settings.js", b"window.core = true;"),
             ("/report-preview.js", b"window.preview = true;"),
+            ("/panel-layout.js", b"window.layout = true;"),
             ("/assets/app-icon.png", b"PNG"),
         ):
             with urlopen(f"{base}{path}", timeout=2) as response:

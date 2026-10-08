@@ -2630,6 +2630,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/core-settings.js",
                     "/date-range.js",
                     "/report-preview.js",
+                    "/panel-layout.js",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")

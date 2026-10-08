@@ -346,6 +346,9 @@ async def test_blocked_translation_still_delivers_and_commits_cursors(
     monkeypatch.setattr(
         polling_module, "asyncio", types.SimpleNamespace(sleep=no_delay)
     )
+    monkeypatch.setattr(
+        polling_module, "time", types.SimpleNamespace(time=lambda: 0, monotonic=lambda: 0)
+    )
     api = API()
     subscriptions = plugin_module.SubscriptionService(get_kv, put_kv, api, lambda: True)
     messages = make_service(plugin_module, context, text_render_mode="text")
