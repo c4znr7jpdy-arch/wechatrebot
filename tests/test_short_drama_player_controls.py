@@ -1,20 +1,18 @@
 """Custom player interaction regression checks using a locally generated video, no network."""
-from pathlib import Path
 import re
-import shutil
 import subprocess
 from urllib.parse import urlsplit
 
+import imageio_ffmpeg
 import pytest
+from playwright.sync_api import sync_playwright
 
 from test_short_drama_player_hardening import _patched_player
 
 
 @pytest.fixture(scope="module")
 def player_assets(tmp_path_factory):
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        pytest.skip("ffmpeg is required for the local video fixture")
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     root = tmp_path_factory.mktemp("native-player")
     checkout = _patched_player(root)
     media = root / "sample.mp4"
@@ -29,14 +27,15 @@ def player_assets(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def browser():
-    playwright = pytest.importorskip("playwright.sync_api")
-    with playwright.sync_playwright() as runtime:
-        chrome = Path("C:/Program Files/Google/Chrome/Application/chrome.exe")
-        if not chrome.is_file():
-            pytest.skip("Chrome is required for native media control checks")
-        instance = runtime.chromium.launch(executable_path=str(chrome))
+    with sync_playwright() as runtime:
+        instance = runtime.chromium.launch()
         yield instance
         instance.close()
+
+
+@pytest.fixture(scope="module")
+def screenshots(tmp_path_factory):
+    return tmp_path_factory.mktemp("player-screenshots")
 
 
 @pytest.fixture
@@ -113,6 +112,15 @@ def player_page(browser, player_assets, request):
 
 def play_click(page):
     page.locator("#togglePlayback").click()
+
+
+def exit_fullscreen(page):
+    page.get_by_label("退出全屏", exact=True).click()
+    # The handler awaits orientation restoration before removing fullscreen state.
+    page.wait_for_function("""!document.fullscreenElement
+      && !document.getElementById('video').webkitDisplayingFullscreen
+      && !document.getElementById('videoShell').classList.contains('pseudo-fullscreen')
+      && !document.body.classList.contains('player-fullscreen')""")
 
 
 def test_custom_controls_toggle_once_and_seeking_keeps_pause(player_page):
@@ -237,14 +245,12 @@ def test_episode_groups_modal_focus_and_current_state(cinema_catalog):
 
 
 @pytest.mark.parametrize("width", [320, 390, 768, 1440])
-def test_cinema_catalog_and_player_responsive(cinema_catalog, width):
+def test_cinema_catalog_and_player_responsive(cinema_catalog, width, screenshots):
     page = cinema_catalog
     page.set_viewport_size({"width": width, "height": 900})
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     # Failed posters fall back to title initials without broken-image chrome.
     page.wait_for_function("document.querySelectorAll('.cover img').length === 0")
-    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
-    screenshots.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(screenshots / f"catalog-{width}.png"), full_page=True)
     page.locator(".recommend-card").first.click()
     page.wait_for_function("document.getElementById('video').readyState >= 2")
@@ -329,8 +335,7 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
     page.locator("#sheetEpisodeRanges").get_by_role("button", name="31–60").click()
     page.locator("#sheetEpisodeGrid").get_by_label("第32集", exact=True).click()
     assert page.locator("#meta").inner_text() == "第32集"
-    page.get_by_label("退出全屏", exact=True).click()
-    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+    exit_fullscreen(page)
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
@@ -369,8 +374,7 @@ def test_mobile_landscape_video_requests_device_orientation(player_page, tmp_pat
     assert panel["x"] + panel["width"] <= 390 and panel["y"] + panel["height"] <= 844
     page.locator("#sheetClose").click()
     assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
-    page.get_by_label("退出全屏", exact=True).click()
-    page.wait_for_function("!document.fullscreenElement")
+    exit_fullscreen(page)
     assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
 
 
@@ -396,7 +400,7 @@ def test_mobile_fullscreen_fallback_rotates_landscape_video(player_page):
     page.get_by_role("button", name="选择剧集", exact=True).click()
     assert page.get_by_role("dialog", name="选择剧集").is_visible()
     page.locator("#sheetClose").click()
-    page.get_by_label("退出全屏", exact=True).click()
+    exit_fullscreen(page)
     assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
 
 
@@ -412,7 +416,7 @@ def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
     assert shell.evaluate("node => getComputedStyle(node).transform") != "none"
     bounds = shell.bounding_box()
     assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-    page.get_by_label("退出全屏", exact=True).click()
+    exit_fullscreen(page)
     assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
     assert not shell.evaluate("node => node.classList.contains('pseudo-landscape')")
 
@@ -435,7 +439,7 @@ def test_mobile_fullscreen_keeps_custom_player_when_only_video_fullscreen_exists
     page.screenshot(path=str(tmp_path / "ios-custom-fullscreen-episodes.png"))
     page.locator("#sheetClose").click()
     assert page.get_by_label("退出全屏", exact=True).is_visible()
-    page.get_by_label("退出全屏", exact=True).click()
+    exit_fullscreen(page)
     page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === false")
     assert not page.locator("#videoShell").evaluate("node => node.classList.contains('pseudo-fullscreen')")
 
@@ -458,8 +462,7 @@ def test_fullscreen_exit_restores_entry_orientation_without_retaining_lock(playe
     }""", {"restore": restore, "initial": initial})
     page.get_by_label("全屏播放", exact=True).click()
     page.wait_for_function("window.orientationCalls.includes('landscape')")
-    page.get_by_label("退出全屏", exact=True).click()
-    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+    exit_fullscreen(page)
     calls = page.evaluate("window.orientationCalls")
     assert calls[:2] == ["landscape", initial]
     assert calls[-1] == "unlock"
@@ -524,7 +527,7 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page = player_page
     width, height, mode = aspect
     clip = tmp_path / "aspect.mp4"
-    subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
                     f"testsrc2=size={width}x{height}:rate=12", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast",
                     "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(clip)], check=True, timeout=15)
     page.route("**/aspect.mp4", lambda route: route.fulfill(body=clip.read_bytes(), content_type="video/mp4", headers={"Access-Control-Allow-Origin": "*"}))
@@ -543,7 +546,7 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
         assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
         bounds = shell.bounding_box()
         assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-        page.get_by_label("退出全屏", exact=True).click()
+        exit_fullscreen(page)
     for viewport in [{"width": 390, "height": 844}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
         page.set_viewport_size(viewport)
         video = page.locator("#video").bounding_box()
@@ -645,7 +648,7 @@ def test_compact_metadata_failure_can_retry_without_losing_playback(player_page)
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page):
+def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page, screenshots):
     page = player_page
     page.set_viewport_size({"width": 375, "height": 480})
     payload = {"v": 1, "kind": "search", "heading": "手机片单", "items": [{
@@ -683,7 +686,6 @@ def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page):
     assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
     swipe(190, 30, 190, 65)  # Backdrop cannot move the background.
     assert abs(page.locator("#videoShell").bounding_box()["y"] - previous_top) < 1
-    screenshots = Path(__file__).parents[1] / "output/playwright/cinema"
     page.screenshot(path=str(screenshots / "mobile-sheet-scroll-375.png"))
     page.locator("#sheetClose").click()
     assert page.evaluate("window.scrollY") == previous_scroll
