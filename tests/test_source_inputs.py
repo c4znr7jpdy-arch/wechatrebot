@@ -64,3 +64,8 @@ def test_build_and_test_code_has_no_external_project_paths():
                 if name in {"Path", "open"} and isinstance(node.args[0], ast.Constant):
                     value = str(node.args[0].value).replace("\\", "/").casefold()
                     assert not value.startswith(forbidden), path.relative_to(root)
+
+
+def test_vendor_cannot_override_checkout_line_endings():
+    root = Path(__file__).parents[1]
+    assert list((root / "vendor").rglob(".gitattributes")) == []

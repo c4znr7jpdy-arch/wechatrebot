@@ -1213,10 +1213,6 @@
       "sha256": "62e84496fe5c111baca89e11574b6282937ba785b689972ed8cf8a1f5f433284"
     },
     {
-      "path": "data/plugins/astrbot_plugin_angel_heart/.gitattributes",
-      "sha256": "a4eb39ddd0ee968ab3103129793df34666272c084859490834f605dc7f599669"
-    },
-    {
       "path": "data/plugins/astrbot_plugin_angel_heart/.gitignore",
       "sha256": "46dc63828b423e1c19eb8aa4e85e34c1beb3463b1ecd19b10a987792b6fa8b2e"
     },
@@ -2099,10 +2095,6 @@
     {
       "path": "data/plugins/astrbot_plugin_proactive_chat/.devin/wiki.json",
       "sha256": "29d2038638f8727e6b1081b9f2984f1a78636da49d83a6faf027d90db3dbd997"
-    },
-    {
-      "path": "data/plugins/astrbot_plugin_proactive_chat/.gitattributes",
-      "sha256": "b12750b2059e196c300c16d69697eb485dc40ff6f7d8675623284342ac6a65a7"
     },
     {
       "path": "data/plugins/astrbot_plugin_proactive_chat/.gitignore",
@@ -5830,7 +5822,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "d086c2a2d799811b7b37dc0a34fe5ccb98dedb9d61c5cbde0a3da6141f24d6a8"
+      "sha256": "f0f52df7fe414f475bb2439ac4dcd5e8f9ae6ddc2f1e0cd4532ad0e9adb18003"
     }
   ]
 }
