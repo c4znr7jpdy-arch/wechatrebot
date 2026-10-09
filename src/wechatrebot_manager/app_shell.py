@@ -19,6 +19,7 @@ from .chat_history import ChatHistoryService
 from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
+    ProviderService,
     delete_provider_profile,
     delete_provider_thinking_preference,
     apply_web_search_values,
@@ -436,15 +437,15 @@ class ApplicationApi:
         try:
             started = time.perf_counter()
             settings = load_robot_settings(self._install_root)
-            provider = load_provider_profile(self._install_root)
             providers = load_provider_services(self._install_root)
+            provider = load_provider_profile(self._install_root, services=providers)
             channel = self._load_update_channel()
             configured = time.perf_counter()
             status = self._lifecycle.refresh().to_dict()
             checked = time.perf_counter()
             experience = self._experience_service().snapshot()
             experienced = time.perf_counter()
-            readiness = self._onboarding_readiness(view=status)
+            readiness = self._onboarding_readiness(view=status, provider_services=providers)
             ready = time.perf_counter()
             return self._ok(
                 {
@@ -1252,7 +1253,10 @@ class ApplicationApi:
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def _onboarding_readiness(self, *, view: dict[str, object] | None = None) -> dict[str, object]:
+    def _onboarding_readiness(
+        self, *, view: dict[str, object] | None = None,
+        provider_services: tuple[ProviderService, ...] | None = None,
+    ) -> dict[str, object]:
         """Build a read-only first-use checklist from current local state."""
         if view is None:
             view = self._lifecycle.refresh().to_dict()
@@ -1260,7 +1264,7 @@ class ApplicationApi:
         runtime = view.get("runtime") if isinstance(view, dict) else {}
         environment = environment if isinstance(environment, dict) else {}
         runtime = runtime if isinstance(runtime, dict) else {}
-        provider = load_provider_profile(self._install_root)
+        provider = load_provider_profile(self._install_root, services=provider_services)
         account_id = str(runtime.get("wechat_identity") or "").strip()
         if runtime.get("account_status_available") is False:
             account_id = ""

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from wechatrebot_manager import customer_config
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.customer_config import (
     RobotSettings,
@@ -278,6 +279,83 @@ def test_provider_references_are_named_and_migrated_before_deletion(
     assert [item.provider_id for item in load_provider_services(install)] == [
         deepseek.model_id
     ]
+
+
+def test_provider_catalog_reads_each_config_once_and_sees_later_changes(monkeypatch, tmp_path):
+    install, _ = _install(tmp_path)
+    profiles = [OpenAIProviderProfile(
+        api_key="synthetic-key", api_base="https://example.test/v1",
+        model=f"model-{number}", source_id="example",
+    ) for number in range(3)]
+    for number, profile in enumerate(profiles):
+        save_provider_profile(install, profile, make_default=number == 0)
+    config_root = install / "app/astrbot/data/config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    shared = config_root / "shared_config.json"
+    shared.write_text(json.dumps({
+        "nested": {"ids": [profiles[0].model_id, profiles[1].model_id]},
+        "description": f"Text containing {profiles[2].model_id} is not a reference",
+    }), encoding="utf-8")
+    broken = config_root / "broken_config.json"
+    broken.write_text("{broken", encoding="utf-8")
+    reads = []
+    original = customer_config._object
+
+    def read(path):
+        if path.parent == config_root:
+            reads.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(customer_config, "_object", read)
+    services = {item.provider_id: item for item in load_provider_services(install)}
+    expected_reads = sorted(path.name for path in config_root.glob("*_config.json"))
+    assert sorted(reads) == expected_reads
+    assert "shared" in services[profiles[0].model_id].reference_modules
+    assert "shared" in services[profiles[1].model_id].reference_modules
+    assert "shared" not in services[profiles[2].model_id].reference_modules
+
+    # A second request sees the disk change; there is no long-lived cache.
+    shared.write_text(json.dumps({"provider": profiles[2].model_id}), encoding="utf-8")
+    reads.clear()
+    refreshed = {item.provider_id: item for item in load_provider_services(install)}
+    assert sorted(reads) == expected_reads
+    assert "shared" not in refreshed[profiles[0].model_id].reference_modules
+    assert "shared" in refreshed[profiles[2].model_id].reference_modules
+
+    # Bulk display may skip malformed files; deletion must still fail closed
+    # and leave every plugin config untouched, including the unreadable one.
+    before = {path: path.read_bytes() for path in config_root.glob("*_config.json")}
+    with pytest.raises(ValueError, match="暂不能删除服务"):
+        provider_reference_modules(install, profiles[0].model_id, strict=True)
+    with pytest.raises(ValueError, match="暂不能删除服务"):
+        replace_provider_references(install, profiles[0].model_id, profiles[1].model_id)
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("kind", ["empty", "missing_default", "invalid_default", "configured"])
+def test_provider_profile_reuses_services_without_weakening_default_checks(monkeypatch, tmp_path, kind):
+    service = customer_config.ProviderService(
+        provider_id="example/model", source_id="example", display_name="Example",
+        api_base="https://example.test/v1", model="model", api_key="synthetic-key",
+        is_default=kind != "missing_default", is_recommended=False, thinking_enabled=False,
+    )
+    if kind == "invalid_default":
+        from dataclasses import replace
+        service = replace(service, api_key="")
+    services = () if kind == "empty" else (service,)
+
+    def unexpected_read(_root):
+        pytest.fail("An explicit service snapshot must not read configuration again")
+
+    monkeypatch.setattr(customer_config, "load_provider_services", unexpected_read)
+    profile = load_provider_profile(tmp_path, services=services)
+    if kind == "configured":
+        assert profile is not None
+        assert profile.model == "model"
+        assert profile.api_key == "synthetic-key"
+        assert profile.thinking_enabled is False
+    else:
+        assert profile is None
 
 
 def test_plugin_list_only_uses_customer_names_and_persists_toggle(tmp_path: Path) -> None:

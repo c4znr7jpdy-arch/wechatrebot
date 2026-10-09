@@ -173,7 +173,7 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
             admin_id="wxid_admin",
         ),
     )
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root, **_kwargs: None)
 
     result = api.bootstrap()
 
@@ -207,6 +207,52 @@ def test_bootstrap_reuses_status_and_reports_stage_timings(monkeypatch, tmp_path
     }
 
 
+def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
+    loaded = []
+
+    def services(_root):
+        model = f"model-{len(loaded)}"
+        loaded.append(model)
+        return (app_shell.ProviderService(
+            provider_id=f"example/{model}", source_id="example", display_name=model,
+            api_base="https://example.test/v1", model=model, api_key="synthetic-key",
+            is_default=True, is_recommended=False,
+        ),)
+
+    monkeypatch.setattr(app_shell, "load_provider_services", services)
+    for expected in ("model-0", "model-1"):
+        result = api.bootstrap()
+        assert result["ok"] is True
+        data = result["data"]
+        provider_check = next(item for item in data["readiness"]["items"] if item["id"] == "provider")
+        assert data["provider"]["model"] == expected
+        assert data["providers"][0]["model"] == expected
+        assert provider_check["detail"] == expected
+        assert provider_check["status"] == "ready"
+        assert "synthetic-key" not in json.dumps(data)
+    assert loaded == ["model-0", "model-1"]
+
+
+def test_independent_readiness_still_loads_current_provider_settings(monkeypatch, tmp_path):
+    from wechatrebot_manager import customer_config
+
+    api = _api(tmp_path)
+    refreshes = []
+    loads = []
+
+    def refresh():
+        refreshes.append(True)
+        return SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
+
+    api._lifecycle.refresh = refresh
+    monkeypatch.setattr(customer_config, "load_provider_services", lambda root: loads.append(root) or ())
+    assert api.get_onboarding_readiness()["ok"] is True
+    assert refreshes == [True]
+    assert loads == [tmp_path]
+
+
 @pytest.mark.parametrize("account,available,directory_result,expected,calls_expected", [
     ("", False, None, "offline", 0),
     ("", True, None, "offline", 0),
@@ -233,7 +279,7 @@ def test_bootstrap_survives_offline_directory_without_cross_account_counts(
         return directory_result
 
     api._groups = SimpleNamespace(list=directory)
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _: None)
+    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _, **_kwargs: None)
     result = api.bootstrap()
     assert result["ok"] is True
     assert result["data"]["version"] == app_shell.__version__

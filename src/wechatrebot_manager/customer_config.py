@@ -299,15 +299,17 @@ def replace_provider_value(
 
 def _provider_reference_files(
     root: str | Path,
-    provider_id: str,
+    provider_ids: tuple[str, ...],
     *,
     strict: bool,
-) -> tuple[tuple[str, Path, dict[str, Any]], ...]:
+) -> dict[str, tuple[tuple[str, Path, dict[str, Any]], ...]]:
     install = Path(root).expanduser().resolve()
     config_root = install / "app" / "astrbot" / "data" / "config"
-    if not config_root.is_dir():
-        return ()
-    references: list[tuple[str, Path, dict[str, Any]]] = []
+    references: dict[str, list[tuple[str, Path, dict[str, Any]]]] = {
+        provider_id: [] for provider_id in provider_ids
+    }
+    if not references or not config_root.is_dir():
+        return {provider_id: () for provider_id in references}
     for path in sorted(config_root.glob("*_config.json"), key=lambda item: item.name.casefold()):
         try:
             payload = _object(path)
@@ -317,10 +319,11 @@ def _provider_reference_files(
                     f"{path.name} 无法读取；为避免留下失效模型引用，暂不能删除服务。"
                 ) from None
             continue
-        _, count = replace_provider_value(payload, provider_id, provider_id)
-        if count:
-            references.append((path.name[: -len("_config.json")], path, payload))
-    return tuple(references)
+        for provider_id, matches in references.items():
+            _, count = replace_provider_value(payload, provider_id, provider_id)
+            if count:
+                matches.append((path.name[: -len("_config.json")], path, payload))
+    return {provider_id: tuple(matches) for provider_id, matches in references.items()}
 
 
 def provider_reference_modules(
@@ -329,8 +332,8 @@ def provider_reference_modules(
     return tuple(
         module_name
         for module_name, _path, _payload in _provider_reference_files(
-            root, provider_id, strict=strict
-        )
+            root, (provider_id,), strict=strict
+        )[provider_id]
     )
 
 
@@ -343,8 +346,8 @@ def replace_provider_references(
         raise ValueError("请选择另一个已配置的模型接替当前服务。")
     pending: list[tuple[str, Path, dict[str, Any], dict[str, Any]]] = []
     for module_name, path, original in _provider_reference_files(
-        root, provider_id, strict=True
-    ):
+        root, (provider_id,), strict=True
+    )[provider_id]:
         updated, count = replace_provider_value(
             copy.deepcopy(original), provider_id, replacement_provider_id
         )
@@ -502,6 +505,12 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
                 ),
             )
         )
+    # A catalog request can contain many models. Read each plugin config once
+    # for this request; later requests and destructive checks still read fresh
+    # files through the same exact-value matching rules.
+    references = _provider_reference_files(
+        install, tuple(item.provider_id for item in services), strict=False,
+    )
     services = [
         ProviderService(
             provider_id=item.provider_id,
@@ -512,9 +521,7 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
             api_key=item.api_key,
             is_default=item.is_default,
             is_recommended=item.is_recommended,
-            reference_modules=provider_reference_modules(
-                install, item.provider_id
-            ),
+            reference_modules=tuple(module for module, _path, _payload in references[item.provider_id]),
             thinking_enabled=item.thinking_enabled,
             service_kind=item.service_kind,
             modalities=item.modalities,
@@ -533,9 +540,14 @@ def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
     )
 
 
-def load_provider_profile(root: str | Path) -> OpenAIProviderProfile | None:
+def load_provider_profile(
+    root: str | Path, *, services: tuple[ProviderService, ...] | None = None,
+) -> OpenAIProviderProfile | None:
+    """Read the default model, optionally reusing this request's service list."""
+    if services is None:
+        services = load_provider_services(root)
     service = next(
-        (item for item in load_provider_services(root) if item.is_default),
+        (item for item in services if item.is_default),
         None,
     )
     if service is None or not service.configured:
