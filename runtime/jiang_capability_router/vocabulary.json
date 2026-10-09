@@ -1,0 +1,3777 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "follow_twitter"
+      ],
+      "phrases": [
+        "关注推主",
+        "订阅推主",
+        "添加推主",
+        "新增订阅",
+        "追更博主",
+        "订阅推特",
+        "关注这个推主",
+        "把这个博主加进订阅",
+        "以后推送他的推文",
+        "有新推文就提醒",
+        "这个账号更新时通知",
+        "订阅这个X账号",
+        "加个推特关注",
+        "追踪这个推特账号"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "batch_follow_twitter"
+      ],
+      "phrases": [
+        "批量关注",
+        "批量订阅",
+        "多个推主",
+        "一键关注",
+        "批量添加推主",
+        "一次订阅好几个博主",
+        "把这些推主都加上",
+        "导入多个推特账号",
+        "同时关注这些账号",
+        "成批添加推特订阅"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "unfollow_twitter"
+      ],
+      "phrases": [
+        "取关",
+        "退订",
+        "取消关注",
+        "取消订阅",
+        "移除推主",
+        "删除推主",
+        "取关这个博主",
+        "不再订阅这个账号",
+        "把他从订阅里移除",
+        "这位推主不用推了",
+        "退订这个推特账号",
+        "删掉这一条推特订阅"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "batch_unfollow_twitter"
+      ],
+      "phrases": [
+        "批量取关",
+        "批量退订",
+        "批量移除推主",
+        "批量删除订阅",
+        "取消这些推主的订阅",
+        "这些博主都不关注了",
+        "一次取关多个账号",
+        "把这几个推主移出列表"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "clear_all_subscriptions"
+      ],
+      "phrases": [
+        "清空订阅",
+        "全部取关",
+        "全部退订",
+        "清空推特",
+        "删除所有订阅",
+        "移除全部推主",
+        "一个推主都不留",
+        "把推特订阅全删掉",
+        "重置推特关注列表",
+        "清空这个群的推主列表"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "list_follows"
+      ],
+      "phrases": [
+        "关注了谁",
+        "订阅了谁",
+        "推主列表",
+        "关注列表",
+        "订阅列表",
+        "已订阅",
+        "查订阅",
+        "看关注",
+        "看推主",
+        "本群订阅",
+        "群里关注",
+        "订阅名单",
+        "有哪些推主",
+        "我订了哪些人",
+        "这个群在追谁",
+        "看看本群订阅",
+        "列出关注的博主",
+        "目前关注哪些账号",
+        "推特都订阅了什么",
+        "列一下已经添加的推主",
+        "哪些人的推文会推过来",
+        "谁在我的订阅里",
+        "哪些推主",
+        "哪些博主",
+        "哪几位推主",
+        "哪几个推主",
+        "关注情况",
+        "订阅情况",
+        "关注记录",
+        "订阅记录",
+        "在追谁"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "toggle_push"
+      ],
+      "phrases": [
+        "暂停推送",
+        "恢复推送",
+        "关闭推送",
+        "开启推送",
+        "推送开关",
+        "停止推送",
+        "继续推送",
+        "以后别推了",
+        "推文先停一下",
+        "先不要推特消息",
+        "暂停本群推文",
+        "重新开始推送",
+        "让推特继续发",
+        "本群推特免打扰",
+        "关闭这个群的推特推送",
+        "开启这个群的推特推送"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "set_twitter_format"
+      ],
+      "phrases": [
+        "推送格式",
+        "推文格式",
+        "卡片模式",
+        "文字模式",
+        "截图模式",
+        "改成卡片",
+        "换成截图",
+        "改成文字",
+        "推文卡片",
+        "推特截图",
+        "推主格式",
+        "设置推主推送形式",
+        "以后用卡片推文",
+        "这个博主只发文字",
+        "这个账号改用截图",
+        "调整某个推主的展示方式"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "twitter_help"
+      ],
+      "phrases": [
+        "推特用法",
+        "推特教程",
+        "推特指令",
+        "订阅教程",
+        "推特怎么用",
+        "如何订阅博主",
+        "推特支持哪些命令",
+        "关注推主怎么操作",
+        "推特功能说明",
+        "X订阅帮助"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "test_tweet"
+      ],
+      "phrases": [
+        "最新推文",
+        "最新一条",
+        "再推一次",
+        "立即推送",
+        "手动推送",
+        "试推",
+        "补推",
+        "重推",
+        "最新卡片",
+        "推特测试",
+        "再推最新一条",
+        "推我一次最新的卡片",
+        "把最新推文发来",
+        "现在发一次推文",
+        "这个推主最近发了什么",
+        "补一条最新推特",
+        "重新推一遍最新推文",
+        "发一下订阅账号的近况",
+        "测试推主推送",
+        "拿一条最新推文看看"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_twitter",
+      "names": [
+        "parse_tweet_link"
+      ],
+      "phrases": [
+        "解析推文",
+        "推文链接",
+        "推特链接",
+        "X链接",
+        "转发推文",
+        "推文卡片解析",
+        "把这个推特链接展开",
+        "这条推文讲了什么",
+        "提取推文里的图片",
+        "提取推特视频",
+        "解析这个X帖子",
+        "发出链接里的推文"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_BitTorrent",
+      "names": [
+        "magnet_search_handler"
+      ],
+      "phrases": [
+        "磁力",
+        "磁链",
+        "种子",
+        "找资源",
+        "搜资源",
+        "找磁力",
+        "搜磁链",
+        "磁力搜索",
+        "种子搜索",
+        "资源检索",
+        "BT搜索",
+        "BT种子",
+        "找个种子",
+        "搜一下磁力资源",
+        "按热度找资源",
+        "按时间找磁力",
+        "按文件大小找资源",
+        "找可用磁力链接"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_BitTorrent",
+      "names": [
+        "magnet_preview_handler"
+      ],
+      "phrases": [
+        "磁力预览",
+        "磁链预览",
+        "种子预览",
+        "资源预览",
+        "看看磁链内容",
+        "磁力里有什么",
+        "这条磁链包含哪些文件",
+        "打开种子信息",
+        "查看磁力资源详情",
+        "预览这个magnet链接"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "status"
+      ],
+      "phrases": [
+        "记忆状态",
+        "记忆统计",
+        "记忆数量",
+        "记忆系统",
+        "记忆存储状态",
+        "长期记忆有多少条",
+        "记忆库是否正常",
+        "看看记忆系统状态",
+        "记忆功能运行情况",
+        "存了多少条长期记忆"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "search"
+      ],
+      "phrases": [
+        "搜索记忆",
+        "查找记忆",
+        "检索记忆",
+        "记忆检索",
+        "搜记忆库",
+        "长期记忆搜索",
+        "查一条已保存的记忆",
+        "按关键词查记忆",
+        "从记忆库里查找",
+        "管理员查询长期记忆"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "forget"
+      ],
+      "phrases": [
+        "删除记忆",
+        "忘掉记忆",
+        "遗忘记忆",
+        "移除记忆",
+        "删掉那条记忆",
+        "把这条长期记忆删掉",
+        "清除指定记忆",
+        "不要保存这条回忆",
+        "移除错误记忆记录"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "rebuild_index"
+      ],
+      "phrases": [
+        "重建索引",
+        "记忆索引",
+        "修复索引",
+        "重新索引",
+        "重建记忆索引",
+        "修复记忆搜索索引",
+        "重新建立向量索引",
+        "记忆库重新建索引"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "rebuild_graph"
+      ],
+      "phrases": [
+        "重建图谱",
+        "记忆图谱",
+        "图谱索引",
+        "图记忆重建",
+        "重建关系网络",
+        "重新生成记忆关系图",
+        "重建图记忆索引",
+        "修复记忆图谱索引"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "webui"
+      ],
+      "phrases": [
+        "记忆后台",
+        "记忆页面",
+        "记忆面板",
+        "记忆管理页",
+        "打开记忆管理页面",
+        "长期记忆后台入口",
+        "记忆WebUI地址",
+        "查看记忆管理界面"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "summarize"
+      ],
+      "phrases": [
+        "总结记忆",
+        "归纳记忆",
+        "提炼记忆",
+        "立即总结",
+        "整理聊天记忆",
+        "把这段聊天存成记忆",
+        "现在归纳本轮对话",
+        "手动触发记忆总结",
+        "把待总结内容整理一下",
+        "生成本会话长期记忆"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "reset"
+      ],
+      "phrases": [
+        "重置记忆上下文",
+        "清除记忆上下文",
+        "重置本轮记忆",
+        "重置会话记忆",
+        "重新开始记忆上下文",
+        "清掉当前注入的记忆",
+        "重置长期记忆引用",
+        "不再引用本轮记忆"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "cleanup"
+      ],
+      "phrases": [
+        "清理记忆片段",
+        "清理历史注入",
+        "记忆清理预览",
+        "清理注入痕迹",
+        "移除历史消息里的记忆片段",
+        "预览记忆清理范围",
+        "执行记忆片段清理",
+        "清除重复注入内容"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "help"
+      ],
+      "phrases": [
+        "记忆帮助",
+        "记忆教程",
+        "记忆用法",
+        "记忆指令",
+        "长期记忆怎么用",
+        "记忆系统有哪些命令",
+        "怎样管理记忆库",
+        "记忆功能使用说明"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "tts_command"
+      ],
+      "phrases": [
+        "朗读",
+        "念出来",
+        "读出来",
+        "读一遍",
+        "语音朗读",
+        "文字转语音",
+        "文本转语音",
+        "把这段话念出来",
+        "用语音读给我听",
+        "把文字变成语音",
+        "说一段语音",
+        "发个语音条",
+        "念一下这段文字",
+        "用声音回复这句话"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "list_voices_command"
+      ],
+      "phrases": [
+        "音色列表",
+        "声音列表",
+        "可用音色",
+        "有哪些声音",
+        "有哪些音色",
+        "看看能用的音色",
+        "列出已保存音色",
+        "克隆音色名单",
+        "音色库里有什么",
+        "查看MiMo音色"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "set_user_voice_command"
+      ],
+      "phrases": [
+        "设置音色",
+        "个人音色",
+        "我的声音",
+        "换个音色",
+        "用户音色",
+        "换一种声音",
+        "给我换个声音",
+        "设置我的专属音色",
+        "以后对我用这个声音",
+        "调整个人默认音色"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "set_global_voice_command"
+      ],
+      "phrases": [
+        "默认音色",
+        "全局音色",
+        "默认声音",
+        "全局声音",
+        "设置默认音色",
+        "更换机器人默认声音",
+        "所有会话的默认音色",
+        "把这个设为全局音色",
+        "修改全局语音声音"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "set_group_voice_command"
+      ],
+      "phrases": [
+        "群音色",
+        "群声音",
+        "本群音色",
+        "群默认音色",
+        "这个群的声音",
+        "给本群设置音色",
+        "本群使用这个声音",
+        "修改群默认声音",
+        "换一下群里的朗读音色"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "set_emotion_voice_command"
+      ],
+      "phrases": [
+        "情绪音色",
+        "情感音色",
+        "情绪声音",
+        "情感声音",
+        "高兴时的声音",
+        "悲伤时的声音",
+        "生气时的音色",
+        "设置不同情绪的音色",
+        "给某种情绪绑定声音",
+        "配置情绪语音"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "status_command"
+      ],
+      "phrases": [
+        "语音状态",
+        "音色状态",
+        "TTS状态",
+        "语音服务状态",
+        "语音服务正常吗",
+        "看看语音合成状态",
+        "MiMo连接状态",
+        "音色克隆服务情况",
+        "朗读功能诊断"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "tasks_command"
+      ],
+      "phrases": [
+        "语音任务",
+        "合成队列",
+        "朗读队列",
+        "TTS任务",
+        "正在合成什么",
+        "看看语音生成进度",
+        "语音排队情况",
+        "哪些语音还没生成",
+        "查看语音任务列表"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "cancel_task_command"
+      ],
+      "phrases": [
+        "取消语音",
+        "取消朗读",
+        "停止合成",
+        "终止语音任务",
+        "这条语音别生成了",
+        "取消正在生成的语音",
+        "停掉这个朗读任务",
+        "取消指定合成任务"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "clear_tasks_command"
+      ],
+      "phrases": [
+        "清空语音",
+        "清空朗读",
+        "清空队列",
+        "清空合成队列",
+        "删除语音任务记录",
+        "语音任务全部清掉",
+        "清空TTS任务列表",
+        "清理所有语音任务"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "query_lyrics"
+      ],
+      "phrases": [
+        "歌词",
+        "查歌词",
+        "找歌词",
+        "歌曲台词",
+        "这首歌的歌词",
+        "把歌词发出来",
+        "歌词写了什么",
+        "找一下完整歌词",
+        "想看这首歌的词",
+        "七里香歌词",
+        "这句歌词是哪首歌"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "collect_song"
+      ],
+      "phrases": [
+        "收藏歌曲",
+        "收藏音乐",
+        "加入歌单",
+        "存入歌单",
+        "收进歌单",
+        "把这首歌收藏",
+        "这首加入我的歌单",
+        "喜欢这首歌帮我存着",
+        "保存这首音乐",
+        "歌单里加一首"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "uncollect_song"
+      ],
+      "phrases": [
+        "取消收藏",
+        "删除收藏歌曲",
+        "移出歌单",
+        "歌单取藏",
+        "移除歌曲",
+        "这首歌不收藏了",
+        "把这首从歌单删掉",
+        "取消这首歌的收藏",
+        "从我的歌单移除这首"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "view_playlist"
+      ],
+      "phrases": [
+        "歌单",
+        "收藏列表",
+        "我的音乐",
+        "我的歌单",
+        "收藏的歌",
+        "喜欢的歌",
+        "看看收藏了什么歌",
+        "列出我的歌曲收藏",
+        "我存过哪些音乐",
+        "打开我的歌单",
+        "歌单里有什么"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "play_from_playlist"
+      ],
+      "phrases": [
+        "播放歌单",
+        "歌单点歌",
+        "收藏点播",
+        "播放收藏",
+        "按序号点歌",
+        "放歌单里的歌",
+        "播放我收藏的那首",
+        "按编号播放歌曲",
+        "听歌单里的第三首",
+        "从收藏里选一首播放"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "delete_file"
+      ],
+      "phrases": [
+        "删除文件",
+        "删除文档",
+        "移除文件",
+        "删掉工作区文件",
+        "永久删除这份文件",
+        "把生成的文档删掉",
+        "从工作区移除文档",
+        "删除机器人保存的文件"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "fileinfo"
+      ],
+      "phrases": [
+        "文件工具状态",
+        "文档工具信息",
+        "工作区信息",
+        "文件管理状态",
+        "文件助手运行信息",
+        "查看文件存储信息",
+        "文档工作区在哪里",
+        "Office助手状态"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "list_files"
+      ],
+      "phrases": [
+        "工作区文件",
+        "文件列表",
+        "生成的文件",
+        "文档列表",
+        "机器人存了哪些文件",
+        "列出工作区文档",
+        "看看生成过的文件",
+        "查机器人里的Office文件",
+        "工作区中有哪些文档"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "pdf_status"
+      ],
+      "phrases": [
+        "PDF状态",
+        "转换状态",
+        "转换环境",
+        "PDF转换可用吗",
+        "文档转换服务状态",
+        "检查PDF转换依赖",
+        "PDF转换工具信息",
+        "查看文件转换环境"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "doc_help"
+      ],
+      "phrases": [
+        "文档帮助",
+        "文件帮助",
+        "文档命令",
+        "文档怎么用",
+        "上传文件怎么处理",
+        "文件助手使用说明",
+        "查看doc用法",
+        "文档处理指令"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "doc_list"
+      ],
+      "phrases": [
+        "上传列表",
+        "已上传文件",
+        "本次上传",
+        "会话文件",
+        "我传了哪些文件",
+        "看看刚上传的文档",
+        "当前聊天有什么附件",
+        "列出本轮上传文件",
+        "本会话可用文件"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "doc_clear"
+      ],
+      "phrases": [
+        "清理上传",
+        "清空附件",
+        "清理会话文件",
+        "删除上传缓存",
+        "清掉本轮上传文件",
+        "清空当前聊天附件",
+        "移除这个会话的文件",
+        "清理已上传文档"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "doc_use"
+      ],
+      "phrases": [
+        "选择文件",
+        "指定文件",
+        "继续处理",
+        "切换文档",
+        "用这份文件",
+        "接着处理刚才的文档",
+        "选择第二个附件",
+        "基于这个文件继续",
+        "指定本轮要处理的文档"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_help"
+      ],
+      "phrases": [
+        "配图帮助",
+        "图片资源用法",
+        "图片池帮助",
+        "文档配图教程",
+        "图片怎么加进PPT",
+        "图片引用怎么用",
+        "查看img命令",
+        "上传配图使用说明"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_add"
+      ],
+      "phrases": [
+        "加入图片池",
+        "注册图片",
+        "添加配图",
+        "保存上传图片",
+        "把这张图加入资源池",
+        "登记刚发的图片",
+        "添加文档图片素材",
+        "把附件图片存为配图"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_list"
+      ],
+      "phrases": [
+        "图片列表",
+        "配图列表",
+        "图片资源",
+        "图片素材",
+        "本轮图片",
+        "看看已上传的图片",
+        "资源池里有哪些图",
+        "列出可用配图",
+        "查看当前会话图片"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_active"
+      ],
+      "phrases": [
+        "当前配图",
+        "活动图片",
+        "正在用的图",
+        "本轮选中图片",
+        "现在选的是哪张图",
+        "查看当前活动图片",
+        "文档当前使用哪张图",
+        "看看本轮选定配图"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_use"
+      ],
+      "phrases": [
+        "选择配图",
+        "指定图片",
+        "切换配图",
+        "使用这张图",
+        "PPT配图",
+        "文档配图",
+        "用第二张图做配图",
+        "选这张图放进文档",
+        "本轮使用这张图片",
+        "将这张作为幻灯片素材"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_note"
+      ],
+      "phrases": [
+        "图片备注",
+        "配图备注",
+        "素材说明",
+        "修改图注备注",
+        "给这张图加备注",
+        "改一下图片的说明",
+        "标记这个图片素材",
+        "更新图片资源备注"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "img_clear"
+      ],
+      "phrases": [
+        "清空图片池",
+        "清理配图",
+        "清空会话图片",
+        "移除图片资源",
+        "清掉本轮上传的图",
+        "清理当前会话图片",
+        "删除配图缓存",
+        "把图片资源池清空"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_parser",
+      "names": [
+        "open_parser"
+      ],
+      "phrases": [
+        "开启解析",
+        "打开解析",
+        "恢复解析",
+        "启用解析",
+        "链接自动解析",
+        "开启视频解析",
+        "本群启用链接解析",
+        "以后自动展开链接",
+        "开始解析分享链接",
+        "打开链接识别"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_parser",
+      "names": [
+        "close_parser"
+      ],
+      "phrases": [
+        "关闭解析",
+        "暂停解析",
+        "停止解析",
+        "禁用解析",
+        "不要自动解析",
+        "本群关闭链接解析",
+        "以后别展开链接",
+        "暂停视频链接解析",
+        "分享链接不自动处理",
+        "关掉链接识别"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_parser",
+      "names": [
+        "login_bilibili"
+      ],
+      "phrases": [
+        "B站登录",
+        "扫码登录B站",
+        "哔哩哔哩登录",
+        "登录哔哩哔哩",
+        "B站二维码",
+        "刷新B站登录",
+        "用二维码登录B站",
+        "关联B站账号",
+        "bilibili扫码登录"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "analyze_group_daily"
+      ],
+      "phrases": [
+        "群分析",
+        "群总结",
+        "群日报",
+        "群聊总结",
+        "聊天总结",
+        "群聊报告",
+        "群聊统计",
+        "水群统计",
+        "活跃统计",
+        "群话题",
+        "群友画像",
+        "群聊圣经",
+        "今天群里聊了什么",
+        "总结一下本群聊天",
+        "生成群聊分析报告",
+        "看看群里的热门话题",
+        "谁今天最活跃",
+        "群聊内容回顾"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "generate_group_comic"
+      ],
+      "phrases": [
+        "群漫画",
+        "聊天漫画",
+        "群聊漫画",
+        "群友漫画",
+        "群聊画成漫画",
+        "把聊天做成漫画",
+        "生成群聊趣味漫画",
+        "根据群聊画四格",
+        "用漫画回顾聊天",
+        "群里的故事画出来"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "set_output_format"
+      ],
+      "phrases": [
+        "报告格式",
+        "分析格式",
+        "群报格式",
+        "切换报告格式",
+        "群分析改为图片",
+        "群分析改为PDF",
+        "修改群聊报告输出",
+        "设置分析结果格式"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "set_report_template"
+      ],
+      "phrases": [
+        "报告模板",
+        "分析模板",
+        "更换模板",
+        "群报模板",
+        "切换群分析模板",
+        "调整群聊报告样式",
+        "换一个分析报告模板",
+        "设置群日报模板"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "view_templates"
+      ],
+      "phrases": [
+        "模板列表",
+        "查看模板",
+        "模板预览",
+        "可用模板",
+        "有哪些群报模板",
+        "看看分析报告模板",
+        "预览群聊报告样式",
+        "列出分析模板"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "analysis_settings"
+      ],
+      "phrases": [
+        "分析设置",
+        "群分析配置",
+        "自动群报",
+        "群报设置",
+        "配置群分析",
+        "修改自动分析时间",
+        "群聊分析参数",
+        "查看群分析设置",
+        "定时群报设置"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "incremental_status"
+      ],
+      "phrases": [
+        "增量状态",
+        "分析窗口",
+        "统计窗口",
+        "增量分析",
+        "群分析进度",
+        "当前分析时间范围",
+        "滑动窗口状态",
+        "哪些聊天已经分析过",
+        "群聊增量分析状态"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "learning_status_command"
+      ],
+      "phrases": [
+        "学习状态",
+        "自学习状态",
+        "学习进度",
+        "学习统计",
+        "最近学了什么",
+        "学习系统运行情况",
+        "语言学习状态",
+        "查看学习服务状态"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "start_learning_command"
+      ],
+      "phrases": [
+        "开启学习",
+        "开始学习",
+        "启动学习",
+        "恢复学习",
+        "启用自学习",
+        "开始学习群聊",
+        "启动表达方式学习",
+        "让机器人继续学习"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "stop_learning_command"
+      ],
+      "phrases": [
+        "停止学习",
+        "暂停学习",
+        "关闭学习",
+        "禁用自学习",
+        "先别继续学习",
+        "停掉群聊学习",
+        "暂停表达方式学习",
+        "让学习服务停下"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "force_learning_command"
+      ],
+      "phrases": [
+        "立即学习",
+        "强制学习",
+        "学一轮",
+        "马上学习",
+        "执行一次学习",
+        "手动触发学习周期",
+        "现在处理待学习内容",
+        "马上跑一轮语言学习"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "remember_command"
+      ],
+      "phrases": [
+        "记住说法",
+        "学习表达",
+        "记住这段对话",
+        "记住引用对话",
+        "学习这句话的说法",
+        "把引用消息当作表达示例",
+        "学一下这种聊天方式",
+        "记下这段对话的表达风格"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "affection_status_command"
+      ],
+      "phrases": [
+        "好感度",
+        "亲密度",
+        "好感状态",
+        "关系状态",
+        "看看好感度",
+        "我和机器人的关系",
+        "查询当前好感状态",
+        "对我的好感有多少"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "set_mood_command"
+      ],
+      "phrases": [
+        "设置情绪",
+        "修改心情",
+        "改变情绪",
+        "机器人心情",
+        "切换心情状态",
+        "把心情设为高兴",
+        "手动调整机器人情绪",
+        "配置当前情绪状态"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "ping"
+      ],
+      "phrases": [
+        "自迭代测试",
+        "迭代诊断",
+        "开发核心测试",
+        "检查自迭代核心",
+        "自迭代插件可用吗",
+        "测试开发辅助功能",
+        "自迭代服务状态"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_commands",
+      "names": [
+        "news"
+      ],
+      "phrases": [
+        "热榜",
+        "热点",
+        "热搜",
+        "抖音热榜",
+        "今日热搜",
+        "实时热点",
+        "看看热搜榜",
+        "现在有什么新闻",
+        "最近大家在讨论什么",
+        "看一眼今天的热点",
+        "发一下新闻摘要"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_commands",
+      "names": [
+        "epic"
+      ],
+      "phrases": [
+        "喜加一",
+        "周免",
+        "免费游戏",
+        "免费领取",
+        "白嫖游戏",
+        "Epic周免",
+        "E宝送啥",
+        "这周送什么游戏",
+        "看看现在能领的游戏",
+        "本周喜加一名单",
+        "Epic现在有什么免费的"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_commands",
+      "names": [
+        "kfc"
+      ],
+      "phrases": [
+        "疯四",
+        "肯德基",
+        "星期四",
+        "疯狂星期四",
+        "V我五十",
+        "疯四文案",
+        "整段疯四",
+        "发一段肯德基段子",
+        "来点星期四文学",
+        "今天的疯四文案",
+        "给我一条V我50"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_commands",
+      "names": [
+        "help"
+      ],
+      "phrases": [
+        "功能列表",
+        "命令列表",
+        "功能说明",
+        "用法大全",
+        "怎么使用",
+        "你会什么",
+        "你能干什么",
+        "有什么功能",
+        "都有哪些指令",
+        "查看机器人帮助",
+        "列出可用命令",
+        "有哪些能用的插件",
+        "支持什么操作"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_help"
+      ],
+      "phrases": [
+        "洛克帮助",
+        "洛克用法",
+        "洛克教程",
+        "王国助手",
+        "洛克王国功能",
+        "洛克有哪些命令",
+        "洛克机器人怎么用",
+        "洛克功能说明"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_qq_login"
+      ],
+      "phrases": [
+        "洛克QQ登录",
+        "洛克QQ扫码",
+        "QQ绑定洛克",
+        "洛克扫码登录QQ",
+        "用QQ登录洛克",
+        "绑定QQ区账号",
+        "获取洛克QQ二维码",
+        "洛克QQ账号登录"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_wechat_login"
+      ],
+      "phrases": [
+        "洛克微信登录",
+        "洛克微信扫码",
+        "微信绑定洛克",
+        "微信区登录",
+        "用微信登录洛克",
+        "绑定微信区账号",
+        "获取洛克微信二维码",
+        "洛克微信账号登录"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_import"
+      ],
+      "phrases": [
+        "洛克导入",
+        "导入凭证",
+        "洛克凭证",
+        "凭证绑定",
+        "导入洛克账号",
+        "通过凭证添加账号",
+        "用已有凭证绑定洛克",
+        "手动导入洛克登录信息"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_bind_list"
+      ],
+      "phrases": [
+        "绑定列表",
+        "洛克账号",
+        "绑定账号",
+        "已绑定",
+        "我的洛克号",
+        "看看绑定了哪些洛克账号",
+        "列出我的游戏账号",
+        "当前有哪些洛克绑定"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_switch"
+      ],
+      "phrases": [
+        "切换洛克",
+        "切换主号",
+        "切换账号",
+        "更换主号",
+        "把另一个洛克号设为主号",
+        "切换当前游戏账号",
+        "换个洛克账号查询",
+        "设置主要洛克账号"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_unbind"
+      ],
+      "phrases": [
+        "洛克解绑",
+        "解绑账号",
+        "移除绑定",
+        "删除绑定",
+        "解除洛克绑定",
+        "这个洛克账号解绑",
+        "把旧游戏账号移除",
+        "删除指定洛克账号绑定"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_refresh"
+      ],
+      "phrases": [
+        "刷新凭证",
+        "更新凭证",
+        "洛克刷新",
+        "续期凭证",
+        "刷新当前洛克登录",
+        "重新获取账号凭证",
+        "更新这个洛克号的登录状态",
+        "刷新游戏账号认证"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_refresh_all"
+      ],
+      "phrases": [
+        "刷新所有凭证",
+        "批量刷新凭证",
+        "全部账号续期",
+        "洛克全量刷新",
+        "所有洛克账号刷新登录",
+        "管理员刷新全部绑定",
+        "统一更新游戏凭证",
+        "批量更新洛克认证"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_cleanup"
+      ],
+      "phrases": [
+        "清理无效绑定",
+        "删除无效绑定",
+        "移除失效账号",
+        "清理过期绑定",
+        "洛克无效账号清理",
+        "批量删除失效凭证绑定",
+        "清掉不能用的洛克账号",
+        "清理游戏账号残留"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_profile"
+      ],
+      "phrases": [
+        "角色档案",
+        "洛克档案",
+        "角色资料",
+        "洛克资料",
+        "我的洛克角色",
+        "查询游戏角色信息",
+        "看看洛克个人档案",
+        "洛克角色面板",
+        "小洛克资料卡"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_battle_record"
+      ],
+      "phrases": [
+        "战绩",
+        "对战",
+        "战绩查询",
+        "对战记录",
+        "洛克战绩",
+        "胜负记录",
+        "最近打得怎么样",
+        "查看洛克最近战绩",
+        "游戏对局记录",
+        "看看最近的比赛结果"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_package"
+      ],
+      "phrases": [
+        "背包",
+        "精灵收藏",
+        "洛克背包",
+        "精灵收集",
+        "收集进度",
+        "我的精灵",
+        "已经收集了哪些精灵",
+        "查看洛克精灵背包",
+        "查游戏里的宠物收藏",
+        "看看我有哪些宠物"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_lineup"
+      ],
+      "phrases": [
+        "阵容",
+        "配队",
+        "组队",
+        "阵容助手",
+        "洛克阵容",
+        "阵容推荐",
+        "队伍搭配",
+        "精灵配队",
+        "看看洛克阵容",
+        "查询精灵搭配方案"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_lineup_detail"
+      ],
+      "phrases": [
+        "阵容详情",
+        "查看阵容",
+        "阵容构成",
+        "队伍详情",
+        "这套阵容有哪些精灵",
+        "看一下阵容具体信息",
+        "展开某个阵容",
+        "查询指定阵容详情"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_exchange_hall"
+      ],
+      "phrases": [
+        "交换大厅",
+        "精灵交换",
+        "交换信息",
+        "交换列表",
+        "宠物交换",
+        "洛克交换",
+        "看看交换大厅",
+        "查询可交换精灵",
+        "最近有哪些交换信息",
+        "精灵交换需求"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_merchant"
+      ],
+      "phrases": [
+        "远行商人",
+        "旅行商人",
+        "商人位置",
+        "商人商品",
+        "商人在哪",
+        "商人卖啥",
+        "查看远行商人",
+        "今天商人带了什么",
+        "找一下远行商人位置",
+        "洛克商人出售清单"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_player_search"
+      ],
+      "phrases": [
+        "洛克玩家",
+        "玩家查询",
+        "玩家资料",
+        "查询玩家",
+        "找个洛克玩家",
+        "看看别人的角色",
+        "搜索游戏玩家信息",
+        "按名字查洛克玩家"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_home"
+      ],
+      "phrases": [
+        "洛克家园",
+        "家园信息",
+        "家园状态",
+        "我的家园",
+        "家园详情",
+        "看看家园怎么样",
+        "查询洛克家园情况",
+        "家园菜园状态",
+        "查看家园资料"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_shop"
+      ],
+      "phrases": [
+        "洛克商店",
+        "商店商品",
+        "商店查询",
+        "游戏商店",
+        "商店卖啥",
+        "查看洛克商店",
+        "当前商店里有什么",
+        "查询游戏商店货物"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_friendship"
+      ],
+      "phrases": [
+        "好友关系",
+        "洛克好友",
+        "游戏好友",
+        "关系查询",
+        "看看洛克好友关系",
+        "查询角色之间的关系",
+        "游戏里和谁是好友",
+        "查看好友关联"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_student"
+      ],
+      "phrases": [
+        "洛克学生",
+        "学生查询",
+        "学生资料",
+        "学生信息",
+        "查询洛克学生",
+        "查看游戏学生记录",
+        "看看学生详细资料",
+        "洛克学生情况"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_search_eggs"
+      ],
+      "phrases": [
+        "查蛋",
+        "宠物蛋",
+        "精灵蛋",
+        "洛克查蛋",
+        "查蛋信息",
+        "精灵蛋查询",
+        "看看这个蛋是什么",
+        "查询蛋的资料",
+        "游戏宠物蛋信息",
+        "查一下精灵蛋"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_breeding"
+      ],
+      "phrases": [
+        "配种",
+        "繁育",
+        "孵蛋",
+        "洛克配种",
+        "精灵繁育",
+        "配种查询",
+        "配种方案",
+        "宠物繁殖",
+        "看看精灵怎么配种",
+        "查询洛克繁育搭配"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_wiki"
+      ],
+      "phrases": [
+        "精灵图鉴",
+        "精灵百科",
+        "宠物图鉴",
+        "洛克百科",
+        "精灵资料",
+        "种族值",
+        "精灵属性",
+        "精灵wiki",
+        "这个精灵什么属性",
+        "查宠物百科资料",
+        "洛克精灵详细介绍"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "rocom_skill"
+      ],
+      "phrases": [
+        "技能",
+        "招式",
+        "技能图鉴",
+        "技能百科",
+        "洛克技能",
+        "招式效果",
+        "技能威力",
+        "查技能属性",
+        "这个技能有什么效果",
+        "精灵招式说明",
+        "洛克技能详细资料"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "subscribe_merchant"
+      ],
+      "phrases": [
+        "商人订阅",
+        "订阅商人",
+        "商人提醒",
+        "商人通知",
+        "关注远行商人",
+        "商人来了提醒我",
+        "订阅远行商人的变化",
+        "给我推送商人消息",
+        "开启商人更新通知"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "unsubscribe_merchant"
+      ],
+      "phrases": [
+        "取消商人订阅",
+        "退订商人",
+        "关闭商人提醒",
+        "取消远行商人",
+        "商人消息别推了",
+        "停止远行商人通知",
+        "不再关注远行商人",
+        "关掉商人更新提醒"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "subscribe_home_garden"
+      ],
+      "phrases": [
+        "菜园订阅",
+        "订阅菜园",
+        "菜园提醒",
+        "菜园通知",
+        "家园菜园",
+        "开启菜园提醒",
+        "成熟了提醒我",
+        "订阅家园菜园状态",
+        "推送家园菜园变化"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "subscribe_home_inspiration"
+      ],
+      "phrases": [
+        "灵感订阅",
+        "订阅灵感",
+        "灵感提醒",
+        "灵感通知",
+        "家园灵感",
+        "开启灵感提醒",
+        "订阅家园灵感状态",
+        "家园有灵感时通知",
+        "推送灵感更新"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "jiang_rocom",
+      "names": [
+        "unsubscribe_home"
+      ],
+      "phrases": [
+        "取消家园订阅",
+        "退订家园",
+        "关闭家园提醒",
+        "取消菜园提醒",
+        "取消灵感提醒",
+        "家园消息别推了",
+        "停止家园通知",
+        "关掉菜园和灵感推送"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "list_emotions"
+      ],
+      "phrases": [
+        "查看图库",
+        "表情分类",
+        "图库列表",
+        "表情目录",
+        "有哪些表情分类",
+        "看看本地表情图库",
+        "列出表情包类型",
+        "查看已安装表情包"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "add_category_command"
+      ],
+      "phrases": [
+        "添加分类",
+        "新建表情分类",
+        "创建表情类型",
+        "新增图库分类",
+        "给表情包分个类",
+        "建立新的表情类别",
+        "添加一个表情目录",
+        "新建表情包分类"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "upload_meme"
+      ],
+      "phrases": [
+        "添加表情",
+        "上传表情",
+        "导入表情",
+        "收藏表情包",
+        "把这张加入表情库",
+        "保存这个表情包",
+        "给图库添加表情",
+        "上传新的表情素材"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "restore_default_memes_command"
+      ],
+      "phrases": [
+        "恢复默认表情",
+        "恢复表情包",
+        "安装默认表情",
+        "重置默认表情包",
+        "装回官方表情包",
+        "重新安装默认图库",
+        "恢复官方表情资源",
+        "设置官方默认表情包"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "clear_category_command"
+      ],
+      "phrases": [
+        "清空表情分类",
+        "清空指定图库",
+        "清理这类表情",
+        "删除分类内表情",
+        "这类表情全部清掉",
+        "清空某个类型的图片",
+        "保留分类但清空表情",
+        "删除某类表情内容"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "clear_all_emojis_command"
+      ],
+      "phrases": [
+        "清空表情",
+        "清空全部图库",
+        "删除全部表情",
+        "清理所有表情",
+        "所有表情包都删掉",
+        "把表情图库清空",
+        "清空所有类型的图片",
+        "删除图库里的全部表情"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "delete_category_command"
+      ],
+      "phrases": [
+        "删除表情分类",
+        "删除类型本身",
+        "移除图库分类",
+        "删除整个表情类别",
+        "连分类一起删掉",
+        "移除这个表情类型及图片",
+        "删除某类表情目录",
+        "清掉表情分类和描述"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "check_sync_status"
+      ],
+      "phrases": [
+        "表情同步状态",
+        "图库同步状态",
+        "图床状态",
+        "检查表情同步",
+        "哪些表情还没同步",
+        "图库和云端一致吗",
+        "表情上传同步进度",
+        "查看图床同步情况"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "sync_to_remote"
+      ],
+      "phrases": [
+        "表情上传云端",
+        "同步到云端",
+        "上传图库",
+        "本地同步上去",
+        "把本地表情传到图床",
+        "表情增量上传",
+        "将图库同步到云端",
+        "上传本地表情资源"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "sync_from_remote"
+      ],
+      "phrases": [
+        "下载云端表情",
+        "从云端同步",
+        "下载图库",
+        "拉取云端图库",
+        "把图床表情同步回来",
+        "表情增量下载",
+        "从云端补全本地表情",
+        "下载远程表情资源"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "overwrite_to_remote"
+      ],
+      "phrases": [
+        "覆盖云端图库",
+        "覆盖到云端",
+        "云端跟本地一致",
+        "以本地图库为准",
+        "删除云端多余表情",
+        "本地表情覆盖图床",
+        "把云端图库完全替换",
+        "用本地全量覆盖云端"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "overwrite_from_remote"
+      ],
+      "phrases": [
+        "覆盖本地图库",
+        "从云端覆盖",
+        "本地跟云端一致",
+        "以云端图库为准",
+        "删除本地多余表情",
+        "图床表情覆盖本地",
+        "把本地图库完全替换",
+        "用云端全量覆盖本地"
+      ]
+    },
+    {
+      "kind": "command",
+      "plugin": "meme_manager",
+      "names": [
+        "show_library_stats"
+      ],
+      "phrases": [
+        "图库统计",
+        "表情统计",
+        "表情数量",
+        "图库大小",
+        "统计表情包数量",
+        "本地一共多少表情",
+        "看看图库详细统计",
+        "每类有多少表情包"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_music",
+      "names": [
+        "play_song_by_name"
+      ],
+      "phrases": [
+        "点歌",
+        "听歌",
+        "放歌",
+        "播歌",
+        "来首歌",
+        "放一首",
+        "听一首",
+        "搜歌曲",
+        "音乐播放",
+        "歌曲点播",
+        "来点音乐",
+        "我想听歌",
+        "想听周杰伦",
+        "放首七里香",
+        "放点轻音乐",
+        "找首歌听听",
+        "把这首音乐放出来",
+        "来一首流行歌曲",
+        "用音乐卡片发一首歌",
+        "搜这位歌手的歌"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_angel_heart",
+      "names": [
+        "angel_describe_image"
+      ],
+      "phrases": [
+        "识图",
+        "看图",
+        "读图",
+        "图片理解",
+        "图片分析",
+        "图片描述",
+        "看懂图片",
+        "识别图片",
+        "读取图中文字",
+        "截图文字",
+        "照片内容",
+        "这张图里是什么",
+        "描述一下这张照片",
+        "看看图片上的字",
+        "读一下截图中的报错",
+        "比较图里的两个数值",
+        "理解刚发的图片",
+        "识别照片里的物体"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "mimo_tts_speak"
+      ],
+      "phrases": [
+        "语音",
+        "朗读",
+        "念出来",
+        "读出来",
+        "读一遍",
+        "配音",
+        "语音条",
+        "转语音",
+        "文字转语音",
+        "语音合成",
+        "用声音说",
+        "读给我听",
+        "把这句话念给我听",
+        "用语音回复",
+        "把这段文字读一遍",
+        "给这段内容配音",
+        "发一段温柔的语音",
+        "用开心的语气说",
+        "念一段晚安祝福",
+        "用选定音色朗读"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "recall_long_term_memory"
+      ],
+      "phrases": [
+        "回忆",
+        "往事",
+        "记得吗",
+        "还记得",
+        "以前说过",
+        "之前聊过",
+        "过去提过",
+        "长期记忆",
+        "找回记忆",
+        "翻翻记忆",
+        "回忆一下",
+        "我以前告诉过你",
+        "上次说的那件事",
+        "记得我的喜好吗",
+        "想想之前聊的内容",
+        "从记忆里找一下",
+        "我们以前讨论过什么",
+        "以前保存的偏好",
+        "之前提到的安排",
+        "你记住了哪些事"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "memorize_long_term_memory"
+      ],
+      "phrases": [
+        "记住",
+        "记下来",
+        "记着",
+        "存个记忆",
+        "保存记忆",
+        "长期记住",
+        "记在心里",
+        "以后要记得",
+        "把这件事记下来",
+        "记住我的偏好",
+        "这件事以后别忘了",
+        "把这个信息长期保存",
+        "我喜欢的东西记一下",
+        "保存这条重要信息",
+        "以后聊天记得这点",
+        "更新你对我的记忆"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "read_file"
+      ],
+      "phrases": [
+        "读文件",
+        "读文档",
+        "看附件",
+        "文件内容",
+        "文档内容",
+        "附件内容",
+        "读取Word",
+        "读取PDF",
+        "读取PPT",
+        "阅读文档",
+        "文档分析",
+        "分析附件",
+        "总结文档",
+        "提取文本",
+        "这份文件写了什么",
+        "帮我看看这个附件",
+        "读一下上传的合同",
+        "把文档里的要点整理出来",
+        "查看PDF的内容",
+        "根据这份文档回答",
+        "合同",
+        "条款",
+        "文件摘要",
+        "条款提炼",
+        "提取要点",
+        "概括文档",
+        "文件解读",
+        "合同要点"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "read_workbook"
+      ],
+      "phrases": [
+        "读表",
+        "看表格",
+        "读取表格",
+        "读取Excel",
+        "读取工作簿",
+        "查看Sheet",
+        "表格内容",
+        "Excel分析",
+        "工作簿内容",
+        "解读这份表",
+        "看一下上传的Excel",
+        "这个工作表有哪些数据",
+        "汇总已有表格内容",
+        "读取电子表格",
+        "分析工作簿里的统计"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "create_office_file"
+      ],
+      "phrases": [
+        "简单Excel输出",
+        "一次性PPT输出",
+        "旧版Office生成",
+        "简单表格文件",
+        "旧版文档生成入口",
+        "创建简单的Office文件"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "execute_excel_script"
+      ],
+      "phrases": [
+        "处理表格",
+        "修改表格",
+        "整理表格",
+        "合并表格",
+        "拆分表格",
+        "表格去重",
+        "数据清洗",
+        "分组汇总",
+        "统计求和",
+        "筛选数据",
+        "排序表格",
+        "批量计算",
+        "调整单元格",
+        "补充公式",
+        "生成统计表",
+        "按部门汇总金额",
+        "合并几份Excel",
+        "清理重复数据行",
+        "给这份工作簿加公式",
+        "把杂乱的表整理好",
+        "设置表头和列宽",
+        "调整表格样式",
+        "计算每个人的总成绩",
+        "去重",
+        "求和",
+        "汇总",
+        "去个重",
+        "筛选",
+        "排序",
+        "计算合计",
+        "按月汇总"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "convert_to_pdf"
+      ],
+      "phrases": [
+        "转PDF",
+        "转换PDF",
+        "导出PDF",
+        "转成PDF",
+        "Word转PDF",
+        "Excel转PDF",
+        "PPT转PDF",
+        "文档转PDF",
+        "表格转PDF",
+        "幻灯片转PDF",
+        "转换成PDF文件",
+        "把这份文档转为PDF",
+        "把表格转换成PDF",
+        "转成方便打印的PDF",
+        "将Office文件转为PDF"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "convert_from_pdf"
+      ],
+      "phrases": [
+        "PDF转Word",
+        "PDF转Excel",
+        "PDF转文档",
+        "PDF转表格",
+        "还原可编辑文档",
+        "把PDF变成Word",
+        "PDF转换为docx",
+        "PDF转换为xlsx",
+        "把PDF里的表转成Excel",
+        "转换PDF为可编辑文件",
+        "将PDF转为办公文档"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "create_workbook"
+      ],
+      "phrases": [
+        "新建表格",
+        "创建表格",
+        "新建工作簿",
+        "创建Excel",
+        "做个表格",
+        "做一张表",
+        "制作清单",
+        "制作台账",
+        "新建电子表格",
+        "做份预算表",
+        "制作排班表",
+        "做一个费用表",
+        "生成Excel草稿",
+        "从头创建工作簿",
+        "整理成新的统计表"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "write_rows"
+      ],
+      "phrases": [
+        "填写表格",
+        "写入数据",
+        "追加行",
+        "补全表格",
+        "表格填数",
+        "单元格数据",
+        "添加表格行",
+        "把数据填进工作表",
+        "向工作簿写入记录",
+        "再补几行数据",
+        "给表格加一列内容",
+        "往新建表里录入信息"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "export_workbook"
+      ],
+      "phrases": [
+        "导出Excel",
+        "保存Excel",
+        "导出表格",
+        "下载工作簿",
+        "生成xlsx",
+        "保存工作簿",
+        "把表格文件发来",
+        "完成表格并导出",
+        "导出这份Excel草稿",
+        "保存成电子表格文件"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "create_document"
+      ],
+      "phrases": [
+        "写文档",
+        "做文档",
+        "新建文档",
+        "创建Word",
+        "生成Word",
+        "写报告",
+        "写方案",
+        "写通知",
+        "写简历",
+        "做PPT",
+        "创建PPT",
+        "做幻灯片",
+        "演示文稿",
+        "汇报材料",
+        "会议纪要",
+        "工作总结",
+        "制作演示文稿",
+        "生成一份报告文档",
+        "做一个项目汇报PPT",
+        "写成Word文档",
+        "制作培训课件",
+        "准备一份演讲幻灯片",
+        "做个产品介绍文档",
+        "新建文档草稿"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "add_blocks"
+      ],
+      "phrases": [
+        "文档正文",
+        "添加段落",
+        "添加章节",
+        "补充内容",
+        "插入表格",
+        "添加标题",
+        "文档排版",
+        "补写章节",
+        "继续写正文",
+        "往Word里加内容",
+        "给文档增加一节",
+        "插入引用和说明",
+        "把这些内容填进文档",
+        "在报告中增加表格"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "add_slides"
+      ],
+      "phrases": [
+        "添加幻灯片",
+        "增加页面",
+        "续写PPT",
+        "补充幻灯片",
+        "演示页内容",
+        "加一页PPT",
+        "再做几页幻灯片",
+        "给演示文稿补内容",
+        "新增一页总结",
+        "往PPT里放图文",
+        "添加一张演示页面"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "finalize_document"
+      ],
+      "phrases": [
+        "文档定稿",
+        "确认定稿",
+        "完成草稿",
+        "结束编写",
+        "标记文档完成",
+        "把文档草稿定稿",
+        "完成演示文稿草稿",
+        "文档内容已写完",
+        "导出前完成定稿"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_office_assistant",
+      "names": [
+        "export_document"
+      ],
+      "phrases": [
+        "导出文档",
+        "导出Word",
+        "导出PPT",
+        "保存文档",
+        "保存演示",
+        "生成docx",
+        "生成pptx",
+        "把文档文件发来",
+        "把做好的PPT发来",
+        "下载生成的报告",
+        "导出已经定稿的文档",
+        "将文档保存成文件"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "meme_manager",
+      "names": [
+        "search_memes"
+      ],
+      "phrases": [
+        "表情",
+        "贴图",
+        "斗图",
+        "表情包",
+        "发个表情",
+        "来个表情",
+        "搞笑表情",
+        "可爱表情",
+        "开心表情",
+        "伤心表情",
+        "生气表情",
+        "无语表情",
+        "哭笑不得",
+        "笑哭了",
+        "找张表情",
+        "搜表情包",
+        "来张猫猫表情",
+        "发个晚安表情",
+        "给个加油表情",
+        "找个符合心情的表情包",
+        "发一张感谢的表情",
+        "整张摸鱼表情",
+        "用表情包回复",
+        "找个庆祝用的贴图"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "group_daily_analysis_get_report"
+      ],
+      "phrases": [
+        "历史群报",
+        "历史群聊",
+        "群报归档",
+        "查询群报",
+        "已有群报",
+        "昨天群报",
+        "上周群报",
+        "历史话题",
+        "群聊金句",
+        "群友称号",
+        "群聊活跃度",
+        "查历史分析报告",
+        "之前的群聊总结",
+        "昨天群里聊了什么",
+        "找一下上周群聊话题",
+        "查询保存过的群日报",
+        "看看以前的群友画像",
+        "历史群聊活动统计",
+        "今天群里有什么话题"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_qq_group_daily_analysis",
+      "names": [
+        "group_daily_analysis_trigger"
+      ],
+      "phrases": [
+        "立即分析群聊",
+        "生成本群日报",
+        "现在总结群聊",
+        "手动群分析",
+        "触发群分析",
+        "马上生成群报",
+        "分析最近群聊内容",
+        "生成新的群聊总结",
+        "跑一次群聊分析",
+        "立即生成群聊报告",
+        "给当前群做个总结",
+        "重新分析",
+        "更新日报",
+        "重做群报",
+        "更新群报",
+        "重新统计群聊"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_write_file"
+      ],
+      "phrases": [
+        "修改插件代码",
+        "编写插件源码",
+        "写入插件文件",
+        "编辑开发文件",
+        "保存插件代码",
+        "给插件源码增加功能",
+        "更改指定插件文件",
+        "写一份插件实现"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_read_file"
+      ],
+      "phrases": [
+        "查看插件源码",
+        "读取插件代码",
+        "看源码文件",
+        "阅读插件实现",
+        "打开开发文件",
+        "看看这个插件怎么实现",
+        "读一下插件里的代码",
+        "检查指定源码内容"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_list_files"
+      ],
+      "phrases": [
+        "插件文件列表",
+        "查看源码目录",
+        "列出插件文件",
+        "开发目录结构",
+        "插件里有哪些文件",
+        "看看插件项目目录",
+        "查看开发文件树",
+        "列出代码目录内容"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_load_plugin"
+      ],
+      "phrases": [
+        "加载插件",
+        "重载插件",
+        "重新加载",
+        "热加载插件",
+        "启用开发插件",
+        "应用修改后的插件代码",
+        "重新载入指定插件",
+        "加载刚写好的插件"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_check_logs"
+      ],
+      "phrases": [
+        "查看日志",
+        "检查日志",
+        "插件日志",
+        "运行日志",
+        "错误日志",
+        "开发日志",
+        "最近插件报了什么错",
+        "看看机器人日志",
+        "查插件运行报错",
+        "读取开发诊断日志"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_list_plugins"
+      ],
+      "phrases": [
+        "已装插件",
+        "插件列表",
+        "加载列表",
+        "安装列表",
+        "开发插件目录",
+        "查看已加载插件",
+        "机器人装了哪些插件",
+        "查插件实际名称",
+        "列出当前插件状态"
+      ]
+    },
+    {
+      "kind": "tool",
+      "plugin": "astrbot_plugin_self_iterative_core",
+      "names": [
+        "dev_uninstall_plugin"
+      ],
+      "phrases": [
+        "卸载插件",
+        "移除插件",
+        "删除插件",
+        "卸掉这个插件",
+        "卸载指定插件",
+        "把不用的插件移除",
+        "卸载已安装的扩展",
+        "删除指定插件程序"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_short_drama",
+      "names": [
+        "search"
+      ],
+      "phrases": [
+        "短剧",
+        "短片剧",
+        "微短剧",
+        "小短剧",
+        "搜短剧",
+        "找短剧",
+        "看短剧",
+        "追短剧",
+        "短剧推荐",
+        "短剧全集",
+        "短剧片单",
+        "热门短剧",
+        "最近短剧",
+        "都市短剧",
+        "古装短剧",
+        "现代短剧",
+        "甜宠短剧",
+        "霸总短剧",
+        "霸道总裁",
+        "豪门短剧",
+        "重生短剧",
+        "穿越短剧",
+        "穿书短剧",
+        "逆袭短剧",
+        "复仇短剧",
+        "赘婿短剧",
+        "战神短剧",
+        "闪婚短剧",
+        "替嫁短剧",
+        "萌宝短剧",
+        "团宠短剧",
+        "契约婚姻",
+        "先婚后爱",
+        "破镜重圆",
+        "追妻火葬场",
+        "双向奔赴",
+        "欢喜冤家",
+        "职场恋爱",
+        "校园恋爱",
+        "总裁夫人",
+        "豪门恩怨",
+        "婆媳短剧",
+        "家庭短剧",
+        "年代短剧",
+        "民国短剧",
+        "悬疑短剧",
+        "推理短剧",
+        "搞笑短剧",
+        "喜剧短剧",
+        "热血短剧",
+        "修仙短剧",
+        "玄幻短剧",
+        "仙侠短剧",
+        "武侠短剧",
+        "宫斗短剧",
+        "种田短剧",
+        "美食短剧",
+        "女频短剧",
+        "男频短剧",
+        "大女主短剧",
+        "小甜剧",
+        "下饭剧",
+        "爽剧",
+        "虐恋剧",
+        "甜宠剧",
+        "恋爱剧",
+        "轻喜剧",
+        "家庭剧",
+        "都市剧",
+        "古装剧",
+        "悬疑剧",
+        "刑侦剧",
+        "年代剧",
+        "找部下饭的剧",
+        "推荐点甜甜的短剧",
+        "想看重生逆袭",
+        "找个霸总的短剧",
+        "有没有古装的小短剧",
+        "想追一部爽剧",
+        "来点轻松搞笑的剧",
+        "电影",
+        "电视剧",
+        "网剧",
+        "追剧",
+        "看片",
+        "找片",
+        "找电影",
+        "搜电影",
+        "看电影",
+        "电影推荐",
+        "电影资源",
+        "喜剧电影",
+        "爱情电影",
+        "科幻电影",
+        "悬疑电影",
+        "动作电影",
+        "动画电影",
+        "犯罪电影",
+        "剧情电影",
+        "纪录片",
+        "经典老片",
+        "热门电影",
+        "电视剧推荐",
+        "国产电视剧",
+        "想找一部电视剧",
+        "搜一下这部剧",
+        "查查哪里能看这部电影",
+        "动漫",
+        "动画",
+        "番剧",
+        "国漫",
+        "日漫",
+        "新番",
+        "追番",
+        "看番",
+        "找番",
+        "热血动漫",
+        "搞笑动漫",
+        "治愈动漫",
+        "奇幻动漫",
+        "动漫推荐",
+        "找一部动画片",
+        "综艺",
+        "综艺推荐",
+        "音乐综艺",
+        "真人秀",
+        "脱口秀",
+        "访谈节目",
+        "搞笑综艺",
+        "找个综艺看看",
+        "体育回放",
+        "赛事回放",
+        "比赛回放",
+        "足球回放",
+        "篮球回放",
+        "比赛录像",
+        "赛事录像",
+        "NBA回放",
+        "英超回放",
+        "中超回放",
+        "欧冠回放",
+        "看看昨晚比赛录像",
+        "找一下足球比赛回放",
+        "影视卡片",
+        "播放卡片",
+        "影视搜索",
+        "资源卡片",
+        "发个能看的链接",
+        "短剧用法",
+        "影视帮助"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "astrbot_plugin_BitTorrent",
+      "names": [
+        "search"
+      ],
+      "phrases": [
+        "磁力搜索",
+        "磁链搜索",
+        "种子检索",
+        "BT检索",
+        "磁力资源",
+        "资源索引",
+        "电影种子",
+        "软件种子",
+        "学习资料种子",
+        "找一个磁力资源",
+        "搜这部电影的种子",
+        "哪里有相关磁链",
+        "按关键词查BT资源",
+        "找一份资料的磁力链接"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "astrbot_plugin_BitTorrent",
+      "names": [
+        "preview"
+      ],
+      "phrases": [
+        "磁力链接预览",
+        "磁链内容",
+        "种子内容",
+        "磁力详情",
+        "资源文件列表",
+        "预览磁链包含的文件",
+        "这条磁力是什么资源",
+        "查看种子详情",
+        "给我看看这个磁链"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_image",
+      "names": [
+        "generate"
+      ],
+      "phrases": [
+        "画图",
+        "绘画",
+        "生图",
+        "改图",
+        "修图",
+        "重画",
+        "配图",
+        "插画",
+        "海报",
+        "头像",
+        "壁纸",
+        "画一张",
+        "生成图片",
+        "图片生成",
+        "文字生图",
+        "文生图",
+        "图生图",
+        "图片编辑",
+        "图片修改",
+        "换背景",
+        "换衣服",
+        "改颜色",
+        "换风格",
+        "二次元头像",
+        "水彩画",
+        "油画风",
+        "像素画",
+        "国风插画",
+        "卡通形象",
+        "做个海报",
+        "画只小猫",
+        "给我画幅画",
+        "把背景换成海边",
+        "根据这张图重新画",
+        "将照片改成动漫风",
+        "把这张图修一下",
+        "生成一张风景壁纸",
+        "画一幅城市夜景",
+        "设计一张活动海报",
+        "做一张可爱的头像",
+        "照着参考图生成"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_image",
+      "names": [
+        "model"
+      ],
+      "phrases": [
+        "画图模型",
+        "生图模型",
+        "切换模型",
+        "更换模型",
+        "换个模型",
+        "修改绘图模型",
+        "切换图片生成模型",
+        "换一个画图服务模型",
+        "设置当前生图模型",
+        "用另一个模型画图"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_schedule",
+      "names": [
+        "list"
+      ],
+      "phrases": [
+        "定时列表",
+        "定时任务",
+        "计划列表",
+        "任务清单",
+        "提醒列表",
+        "已设提醒",
+        "查看计划",
+        "已有任务",
+        "本群任务",
+        "本群提醒",
+        "有哪些定时",
+        "有哪些提醒",
+        "看看我的定时任务",
+        "我设置了什么提醒",
+        "这个群安排了哪些推送",
+        "列出当前聊天的计划",
+        "现有哪些自动发送任务",
+        "已添加的定时消息",
+        "查询本会话任务"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_schedule",
+      "names": [
+        "manage"
+      ],
+      "phrases": [
+        "设置提醒",
+        "添加提醒",
+        "取消提醒",
+        "删除提醒",
+        "修改提醒",
+        "暂停任务",
+        "恢复任务",
+        "新增计划",
+        "修改计划",
+        "删除计划",
+        "定时发送",
+        "定点推送",
+        "每天提醒",
+        "每周提醒",
+        "每日推送",
+        "循环提醒",
+        "一次提醒",
+        "指定时间",
+        "定时帮助",
+        "提醒我喝水",
+        "到点叫我",
+        "每天早上发天气",
+        "每晚推送新闻",
+        "周末提醒我",
+        "把提醒时间改一下",
+        "先停掉这个计划",
+        "以后不用提醒了",
+        "怎么添加定时任务",
+        "怎样删除自动推送",
+        "配置周期性消息",
+        "设一个每日提醒"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "jiang_video_understanding",
+      "names": [
+        "video"
+      ],
+      "phrases": [
+        "视频理解",
+        "视频分析",
+        "视频总结",
+        "短视频总结",
+        "视频内容",
+        "看视频",
+        "视频转写",
+        "提取音轨",
+        "画面分析",
+        "关键帧",
+        "时间线",
+        "视频里说了什么",
+        "概括这段视频",
+        "帮我看懂这个视频",
+        "总结刚发的视频",
+        "视频中的人在做什么",
+        "把视频说的话整理出来",
+        "按时间列出视频内容",
+        "这段视频讲什么故事",
+        "提取视频主要信息",
+        "分析微信视频附件"
+      ]
+    },
+    {
+      "kind": "declaration",
+      "plugin": "astrbot_plugin_proactive_chat",
+      "names": [
+        "proactive"
+      ],
+      "phrases": [
+        "主动聊天",
+        "主动消息",
+        "主动关心",
+        "主动问候",
+        "主动找我",
+        "定期闲聊",
+        "沉默唤醒",
+        "主动陪聊",
+        "免打扰时段",
+        "闲时问候",
+        "机器人先开口",
+        "长时间不说话就聊聊",
+        "一会儿没聊天主动问候",
+        "主动聊天白名单",
+        "主动消息怎么配置",
+        "主动关心功能在哪",
+        "不回复时少发消息",
+        "配置主动聊天间隔"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "content.kfc"
+      ],
+      "phrases": [
+        "疯四文学",
+        "肯德基文案",
+        "星期四文案",
+        "肯德基段子",
+        "疯狂星期四段子",
+        "星期四笑话",
+        "V我50文案",
+        "转我五十文案",
+        "来条疯四文案",
+        "再来一段疯四",
+        "整点星期四段子",
+        "发一个疯狂星期四",
+        "给我讲个肯德基的段子",
+        "今天星期四有什么文案",
+        "想看V我50的段子"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.news"
+      ],
+      "phrases": [
+        "新闻",
+        "热点",
+        "热搜",
+        "热榜",
+        "新闻榜",
+        "热点榜",
+        "今日新闻",
+        "新闻摘要",
+        "热门新闻",
+        "社会热点",
+        "实时热搜",
+        "最新热点",
+        "今日榜单",
+        "最近热闻",
+        "看看今天发生了什么",
+        "现在大家都在聊什么",
+        "刷一下今天热榜",
+        "发几条最近的热点",
+        "今天有什么大事",
+        "来点时事新闻",
+        "想了解最新热搜",
+        "看看抖音有什么热门话题"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.weather"
+      ],
+      "phrases": [
+        "天气",
+        "气温",
+        "降雨",
+        "下雨",
+        "晴天",
+        "阴天",
+        "湿度",
+        "风力",
+        "温度",
+        "带伞",
+        "冷不冷",
+        "热不热",
+        "下雨吗",
+        "会下雨",
+        "天气预报",
+        "今日气温",
+        "出门带伞",
+        "体感温度",
+        "天气情况",
+        "最高温度",
+        "最低温度",
+        "当地天气",
+        "今天冷吗",
+        "今天热吗",
+        "现在外面多少度",
+        "出门要不要带伞",
+        "这边会不会下雨",
+        "成都今天穿什么合适",
+        "北京气温怎么样",
+        "明天上海天气如何",
+        "查一下杭州的天气",
+        "今天适不适合出门"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.epic"
+      ],
+      "phrases": [
+        "免费游戏",
+        "游戏周免",
+        "本周免费",
+        "限免游戏",
+        "游戏限免",
+        "本周白嫖",
+        "免费领取游戏",
+        "Epic限免",
+        "Epic送的游戏",
+        "E宝周免",
+        "免费领什么",
+        "今天送啥游戏",
+        "这周有哪些游戏不要钱",
+        "现在能白领哪些游戏",
+        "看看Epic赠送游戏",
+        "本周可以领什么游戏",
+        "给我看看喜加一"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.oilprice"
+      ],
+      "phrases": [
+        "油价",
+        "汽油",
+        "柴油",
+        "加油",
+        "油多少钱",
+        "汽油价",
+        "柴油价",
+        "加油价格",
+        "每升价格",
+        "今日油价",
+        "当地油价",
+        "汽油价格",
+        "柴油价格",
+        "92号汽油",
+        "95号汽油",
+        "98号汽油",
+        "零号柴油",
+        "92多少钱",
+        "95多少钱",
+        "98多少钱",
+        "今天加油多少钱一升",
+        "查一下四川的汽油价",
+        "北京现在油价多少",
+        "看看本省加油价格",
+        "一升柴油什么价",
+        "九二汽油多少钱",
+        "九五汽油多少钱"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.bili_dynamic"
+      ],
+      "phrases": [
+        "B站动态",
+        "哔哩动态",
+        "哔哩哔哩动态",
+        "UP主动态",
+        "B站更新",
+        "UP更新",
+        "B站近况",
+        "动态卡片",
+        "哔站动态",
+        "查询B站UID",
+        "看看这个UP的动态",
+        "这个UP主最近发了什么",
+        "查一下B站账号最新消息",
+        "看看指定UID的动态",
+        "哔哩哔哩最近更新了啥",
+        "发一下这个UP最新动态",
+        "bilibili最新动态"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "info.raid_activity"
+      ],
+      "phrases": [
+        "活动日历",
+        "活动列表",
+        "报名活动",
+        "可报活动",
+        "近期活动",
+        "盛世活动",
+        "活动安排",
+        "有哪些活动能参加",
+        "最近有什么团可以报",
+        "查看盛世活动日程",
+        "看看活动报名列表",
+        "当前有哪些开放的活动"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "action.raid_signup"
+      ],
+      "phrases": [
+        "活动报名",
+        "报名参加",
+        "报个名",
+        "报名入团",
+        "参加活动",
+        "我要参加",
+        "给我报上",
+        "帮我占个位",
+        "报名这个盛世活动",
+        "用群备注参加活动",
+        "我想加入这次活动",
+        "给这个活动报名"
+      ]
+    },
+    {
+      "kind": "natural",
+      "plugin": "",
+      "names": [
+        "action.raid_cancel_signup"
+      ],
+      "phrases": [
+        "取消报名",
+        "撤销报名",
+        "退出活动",
+        "退出报名",
+        "不参加了",
+        "退掉报名",
+        "取消我的名额",
+        "把我的报名撤掉",
+        "这次活动我去不了",
+        "撤销这个盛世活动报名",
+        "退出这次活动",
+        "删除我的活动报名"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_angel_heart",
+      "names": [
+        "astrbot_plugin_angel_heart"
+      ],
+      "phrases": [
+        "插话",
+        "接话",
+        "在场离场",
+        "参与时机",
+        "群聊控频",
+        "叫到才回复",
+        "被叫到才接话",
+        "减少频繁插话",
+        "控制群聊参与",
+        "天使之心",
+        "群里什么时候接话",
+        "避免打断别人聊天"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_parser",
+      "names": [
+        "astrbot_plugin_parser"
+      ],
+      "phrases": [
+        "链接解析",
+        "视频解析",
+        "分享解析",
+        "展开链接",
+        "万能解析",
+        "抖音解析",
+        "B站解析",
+        "快手解析",
+        "小红书解析",
+        "微博解析",
+        "油管解析",
+        "tiktok解析",
+        "图集解析",
+        "音频解析",
+        "解析分享的视频",
+        "提取分享链接内容",
+        "自动识别视频链接",
+        "看看这个分享链接"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_proactive_chat",
+      "names": [
+        "astrbot_plugin_proactive_chat"
+      ],
+      "phrases": [
+        "主动陪伴",
+        "主动找人聊天",
+        "自动问候",
+        "主动关怀",
+        "闲聊间隔",
+        "聊天免打扰",
+        "主动聊天配置",
+        "管理主动消息",
+        "主动问候设置",
+        "长时间沉默后聊天"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "jiang_group_notice",
+      "names": [
+        "jiang_group_notice"
+      ],
+      "phrases": [
+        "入群欢迎",
+        "退群告别",
+        "欢迎新人",
+        "新人欢迎",
+        "入群通知",
+        "退群通知",
+        "欢迎卡片",
+        "告别卡片",
+        "进群欢迎语",
+        "有人入群时欢迎",
+        "群成员变动通知",
+        "新成员欢迎图片"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "jiang_repeater",
+      "names": [
+        "jiang_repeater"
+      ],
+      "phrases": [
+        "复读",
+        "复读机",
+        "智能复读",
+        "连续复读",
+        "跟着复读",
+        "重复消息",
+        "相同消息",
+        "群聊复读",
+        "连续两条一样的话",
+        "群里重复说话时跟一句"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "jiang_mimo_emoji_voice",
+      "names": [
+        "jiang_mimo_emoji_voice"
+      ],
+      "phrases": [
+        "表情配音",
+        "表情语音",
+        "语音表情",
+        "表情联动",
+        "表情包配语音",
+        "发表情时说话",
+        "表情触发语音",
+        "文字替换为语音条",
+        "表情包和声音一起发",
+        "表情语音联动设置"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_mimo_tts_clone",
+      "names": [
+        "astrbot_plugin_mimo_tts_clone"
+      ],
+      "phrases": [
+        "音色克隆",
+        "克隆声音",
+        "声音克隆",
+        "参考音频",
+        "授权音频",
+        "音色试听",
+        "语音导演",
+        "克隆音色管理",
+        "上传音色样本",
+        "管理已授权声音",
+        "试听克隆后的音色",
+        "调整语音表达风格"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_livingmemory",
+      "names": [
+        "astrbot_plugin_livingmemory"
+      ],
+      "phrases": [
+        "记忆系统",
+        "长期记忆库",
+        "记忆管理",
+        "记忆生命周期",
+        "聊天记忆",
+        "会话记忆",
+        "记忆归纳",
+        "记忆召回",
+        "长期保存聊天要点",
+        "对话后的记忆整理"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "astrbot_plugin_self_learning",
+      "names": [
+        "astrbot_plugin_self_learning"
+      ],
+      "phrases": [
+        "自学习",
+        "学习说话",
+        "表达学习",
+        "语言风格",
+        "聊天风格",
+        "口头禅",
+        "学习群友的表达",
+        "模仿说话方式",
+        "学习对话示例",
+        "维护好感与情绪"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "meme_manager",
+      "names": [
+        "meme_manager"
+      ],
+      "phrases": [
+        "表情图库",
+        "表情资源",
+        "表情广场",
+        "表情管理",
+        "社区表情包",
+        "官方表情包",
+        "资源包安装",
+        "表情自动收集",
+        "会话选包",
+        "人格选包",
+        "表情管理页面",
+        "导入社区表情资源"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "jiang_mystool",
+      "names": [
+        "jiang_mystool"
+      ],
+      "phrases": [
+        "米游社",
+        "米游社工具",
+        "米游社助手",
+        "米游社功能",
+        "米游社工具配置",
+        "米游社插件说明",
+        "米游社适配",
+        "查看米游社功能设置"
+      ]
+    },
+    {
+      "kind": "plugin",
+      "plugin": "jiang_capability_router",
+      "names": [
+        "jiang_capability_router"
+      ],
+      "phrases": [
+        "能力目录",
+        "功能检索",
+        "查找功能",
+        "插件能力",
+        "命令检索",
+        "自然语言调用",
+        "用一句话找功能",
+        "按关键词找命令",
+        "机器人能力清单",
+        "查询当前可用功能"
+      ]
+    }
+  ]
+}
