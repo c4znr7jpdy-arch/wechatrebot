@@ -17,6 +17,8 @@ function fixture() {
       removeAttribute(name) { delete this.attributes[name]; }, focus() { this.focused = true; }});
     return elements.get(id);
   };
+  $('#scheduleRows').innerHTML = 'old-a|pending-a';
+  $('#taskRows').innerHTML = 'task-a';
   const controls = [$('old-control')], calls = [], dialogs = [], errors = [], toasts = [];
   const responses = {
     get_scheduled_task_context: {account_id: 'account-a', items: [{id: 'task-a'}], groups: [], contacts: []},

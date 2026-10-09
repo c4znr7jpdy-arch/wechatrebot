@@ -52,3 +52,4 @@ def test_legacy_migration_ui_state_regressions(scenario: str) -> None:
         capture_output=True, text=True, encoding="utf-8", timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert f"passed: {scenario}" in result.stdout, "The asynchronous UI check did not finish"
