@@ -73,6 +73,8 @@
     historyMessageCacheEpoch: 0,
     schedules: [],
     scheduledContext: null,
+    legacyMigrations: [],
+    legacyMigrationLoading: false,
     scheduledCommandCatalog: [],
     scheduledEditor: null,
     scheduledDirty: false,
@@ -298,9 +300,11 @@
 
   function reportError(error) {
     const product = error?.product;
-    const detail = typeof product?.detail === "string" ? product.detail.trim() : "";
+    const title = product?.title || "操作未完成";
+    const detail = (typeof product?.detail === "string" ? product.detail.trim() : "")
+      || (typeof product?.message === "string" ? product.message.trim() : "");
     const message = product
-      ? `${product.title || "操作未完成"}${detail ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
+      ? `${title}${detail && detail !== title ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
       : (error?.message || "操作未完成，请稍后重试。 ");
     toast(message, "error");
   }
@@ -2850,29 +2854,46 @@
     const generation = ++state.scheduledLoad;
     const button = $("#refreshSchedules");
     button.disabled = true;
+    $$("button", $("#scheduleRows")).forEach((control) => { control.disabled = true; });
     try {
-      const [context, legacy, groupAnalysis] = await Promise.allSettled([
+      const [context, legacy, groupAnalysis, migrations] = await Promise.allSettled([
         api("get_scheduled_task_context"),
         api("get_schedules"),
         loadGroupAnalysisScheduleDetail(),
+        api("get_legacy_schedule_migrations"),
       ]);
       if (generation !== state.scheduledLoad) return;
-      if (context.status === "rejected") throw context.reason;
-      state.scheduledContext = context.value;
-      state.scheduledCommandCatalog = Array.isArray(context.value.command_catalog) ? context.value.command_catalog : [];
-      state.schedules = legacy.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action) : [];
-      state.groupAnalysisSchedule = groupAnalysis.status === "fulfilled" ? groupAnalysis.value : null;
+      const contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
+      state.scheduledContext = contextData;
+      state.scheduledCommandCatalog = Array.isArray(contextData.command_catalog) ? contextData.command_catalog : [];
+      const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
+      state.legacyMigrations = migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
+      const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
+      state.schedules = legacyAccountMatches && migrations.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action && !state.legacyMigrations.some((migration) => migration.job_id === item.id)) : [];
+      state.groupAnalysisSchedule = context.status === "fulfilled" && groupAnalysis.status === "fulfilled" ? groupAnalysis.value : null;
       const message = $("#scheduleContextMessage");
-      message.textContent = context.value.message || (!context.value.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
+      message.textContent = contextData.message || (!contextData.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
+      if (context.status === "rejected" && state.legacyMigrations.length) message.textContent += " 可继续完成下方已确认的旧任务迁移。";
       if (legacy.status === "rejected") message.textContent += " 已有功能任务暂时无法读取，请刷新重试。";
       if (legacy.status === "fulfilled" && legacy.value.message) message.textContent += ` ${legacy.value.message}`;
+      if (migrations.status === "rejected") message.textContent += " 旧任务迁移记录暂时无法读取，请检查后重试。";
+      if ((contextData.account_id && legacy.status === "fulfilled" && legacy.value.account_id && !legacyAccountMatches) || state.legacyMigrations.length !== migrationItems.length) message.textContent += " 微信账号已变化，其他账号的旧任务已隐藏，请刷新重试。";
       message.hidden = !message.textContent;
       renderSchedules();
       renderScheduledTasks();
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
     } catch (error) {
+      if (generation !== state.scheduledLoad) return;
+      state.scheduledContext = null;
+      state.scheduledCommandCatalog = [];
+      state.schedules = [];
+      state.legacyMigrations = [];
+      state.groupAnalysisSchedule = null;
+      renderSchedules();
+      renderScheduledTasks();
       $("#scheduleContextMessage").hidden = false;
       $("#scheduleContextMessage").textContent = error.message || "任务暂时无法读取，请刷新重试。";
+      if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
       reportError(error);
     } finally { if (generation === state.scheduledLoad) button.disabled = false; }
   }
@@ -3503,10 +3524,59 @@
   }
 
   function renderSchedules() {
-    $("#legacyScheduleSection").hidden = !state.schedules.length;
+    $("#legacyScheduleSection").hidden = !state.schedules.length && !state.legacyMigrations.length;
+    if (state.legacyMigrations.length) $("#legacyScheduleSection").open = true;
     $("#scheduleRows").innerHTML = state.schedules.length ? state.schedules.map((item) => `
       <tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.source)}</td><td>${escapeHtml(item.target)}</td><td>${escapeHtml(item.schedule_text)}</td><td>${escapeHtml(shortTime(item.next_run_time))}</td><td><span class="task-status ${item.enabled ? "running" : ""}">${item.status}</span></td><td><div class="row-actions"><button class="row-action" data-action="toggle" data-id="${escapeHtml(item.id)}">${item.enabled ? "暂停" : "开启"}</button><button class="row-action" data-action="edit" data-id="${escapeHtml(item.id)}">改时间</button><button class="row-action delete" data-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : '<tr><td colspan="7" class="table-empty">当前没有业务定时任务</td></tr>';
-    $$(".row-action", $("#scheduleRows")).forEach((button) => button.addEventListener("click", () => scheduleAction(button.dataset.action, button.dataset.id)));
+    $$("tr", $("#scheduleRows")).forEach((row, index) => {
+      const item = state.schedules[index];
+      if (item && ["weather", "news", "oilprice", "kfc", "short_drama"].includes(item.source_kind)) {
+        const button = document.createElement("button");
+        button.className = "row-action"; button.textContent = "迁入任务中心";
+        button.addEventListener("click", () => beginLegacyMigration(item.id, "", button));
+        row.querySelector(".row-actions").prepend(button);
+      }
+    });
+    if (state.legacyMigrations.length) {
+      if (!state.schedules.length) $("#scheduleRows").innerHTML = "";
+      $("#scheduleRows").insertAdjacentHTML("beforeend", state.legacyMigrations.map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>旧任务迁移</td><td>${escapeHtml(item.targets.map((target) => target.id).join("、"))}</td><td>${escapeHtml(item.schedule_text)}</td><td>迁入后暂停</td><td>待完成迁移</td><td><div class="row-actions"><button class="row-action" data-migration="${escapeHtml(item.key)}">继续迁移</button>${item.can_cancel ? `<button class="row-action" data-cancel-migration="${escapeHtml(item.key)}">取消迁移</button>` : ""}</div></td></tr>`).join(""));
+    }
+    $$("[data-action]", $("#scheduleRows")).forEach((button) => button.addEventListener("click", () => scheduleAction(button.dataset.action, button.dataset.id)));
+    $$("[data-migration]", $("#scheduleRows")).forEach((button) => button.addEventListener("click", () => beginLegacyMigration("", button.dataset.migration, button)));
+    $$("[data-cancel-migration]", $("#scheduleRows")).forEach((button) => button.addEventListener("click", async () => {
+      try { const result = await api("cancel_legacy_schedule_migration", button.dataset.cancelMigration); await loadSchedules(); toast(result.message); }
+      catch (error) { reportError(error); }
+    }));
+  }
+
+  async function beginLegacyMigration(id, key = "", button = null) {
+    if (state.legacyMigrationLoading || !$("#modalBackdrop").hidden) return;
+    state.legacyMigrationLoading = true;
+    const generation = state.scheduledLoad;
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+    try {
+      const plan = await api("preview_legacy_schedule_migration", id, key);
+      if (state.activePage !== "schedules" || generation !== state.scheduledLoad) return;
+      const directory = state.scheduledContext?.account_id === plan.account_id ? [...(state.scheduledContext.groups || []), ...(state.scheduledContext.contacts || [])] : [];
+      const targets = plan.targets.map((target) => {
+        const entry = directory.find((item) => item.type === target.type && item.id === target.id);
+        return entry ? `${entry.name}（${target.id}）` : target.id;
+      }).join("、");
+      const count = plan.arguments.count || plan.arguments.limit;
+      if (button?.isConnected) { button.disabled = false; button.focus(); }
+      confirmAction({title: "迁入任务中心", intent: "primary", confirmText: key ? "继续迁移" : "停止并迁移", pendingText: "正在处理…",
+        message: `账号：${plan.account_id}。${scheduledName(plan)}${count ? `，每次 ${count} 条` : ""}；${plan.schedule_text}；发送到 ${targets}。原状态：${plan.previously_enabled ? "已启用" : "已暂停"}。${plan.message}`,
+        onConfirm: async () => {
+          const result = await api("migrate_legacy_schedule", plan.token);
+          await loadSchedules();
+          toast(result.pending ? result.message : `${result.message}重新登录原账号后，可在任务列表核对草稿。`);
+        },
+      });
+    } catch (error) { reportError(error); }
+    finally {
+      state.legacyMigrationLoading = false;
+      if (button?.isConnected) { button.disabled = false; button.removeAttribute("aria-busy"); }
+    }
   }
 
   async function scheduleAction(action, id) {
@@ -5533,6 +5603,10 @@
       },
       delete_conversation: () => ok({deleted: 34}), delete_history_before: () => ok({deleted: 120}), export_history: () => ok({path: "D:\\聊天记录.csv"}),
       get_schedules: () => ok({running: 0, paused: 0, items: []}),
+      get_legacy_schedule_migrations: () => ok({items: []}),
+      preview_legacy_schedule_migration: () => { throw new Error("请先选择属于当前账号的旧任务。"); },
+      migrate_legacy_schedule: () => ok({pending: true, message: "预览模式不会停止机器人或迁移数据。"}),
+      cancel_legacy_schedule_migration: () => ok({cancelled: true, message: "迁移确认已取消。"}),
       get_scheduled_task_context: () => ok({account_id: "wxid_demo_account", items: structuredClone([...previewTasks.values()]), capabilities: Object.entries(SCHEDULED_ACTIONS).map(([id, name]) => ({id, name, ready: true, message: "预览模式"})), command_catalog: Object.entries(SCHEDULED_ACTIONS).map(([id, display_name]) => ({id, display_name, action: id, status: "supported", parameters: [], dependencies: [], recipient_types: ["group", "private"], external_write: false, result: "预览内容", failure_policy: "按对象记录失败", reason: "", alternative: ""})).concat([{id: "checkin", display_name: "账号签到", action: null, status: "needs_condition", reason: "签到需要单独授权和重复执行保护。", alternative: "请先在对应功能页完成账号授权，再创建任务。"}]), command_definition_version: 1, groups: structuredClone(previewTaskGroups), contacts: previewContacts.filter((entry) => entry.contact_type === "微信好友").map((entry) => ({id: entry.user_id, name: entry.name})), online: true, runtime_ready: true, message: ""}),
       save_scheduled_task: (payload) => ok(previewTaskSave(payload)),
       delete_scheduled_task: (_account, id) => { previewTasks.delete(id); return ok({deleted: true}); },
