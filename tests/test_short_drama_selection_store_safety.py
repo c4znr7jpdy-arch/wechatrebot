@@ -9,14 +9,14 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT = Path("E:/Project")
+PROJECT = Path(__file__).parents[1] / "vendor"
 
 
 def _load_patched_store(tmp_path: Path):
     source_root = PROJECT / "data/plugins/jiang_short_drama"
     required = ("search.py", "watch_url.py", "selection_store.py")
     if not all((source_root / name).is_file() for name in required):
-        pytest.skip("short-drama upstream source is unavailable")
+        pytest.fail("short-drama upstream source is unavailable")
 
     package_name = f"safe_short_drama_store_{tmp_path.name.replace('-', '_')}"
     checkout = tmp_path / package_name

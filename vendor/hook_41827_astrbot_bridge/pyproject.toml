@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hook-41827-astrbot-bridge"
+version = "0.1.0"
+description = "HOOK 4.1.8.27 to AstrBot OneBot V11 bridge"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aiohttp>=3.13,<4",
+    "Pillow>=12,<13",
+    "websockets>=15,<16",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=1,<2",
+    "pytest-aiohttp>=1.1,<2",
+]
+
+[project.scripts]
+hook-astrbot-bridge = "hook_bridge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

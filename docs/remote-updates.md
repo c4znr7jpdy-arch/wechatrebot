@@ -63,7 +63,7 @@ python scripts\build_update_status.py `
 
 ```powershell
 .\scripts\publish-full-update.ps1 `
-  --source-root 'E:\Project' `
+  --source-root '.\vendor' `
   --title '完整载荷稳定性更新' `
   --note '修复旧版管理器更新回滚' `
   --yes

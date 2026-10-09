@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_removal_patch_and_packaged_assets(tmp_path):
-    source = ROOT / 'tests/fixtures/patch_sources/data/plugins/jiang_commands'
+    source = ROOT / 'vendor/data/plugins/jiang_commands'
     target = tmp_path / 'commands'
     shutil.copytree(source, target)
     subprocess.run(['git', 'init', '--quiet'], cwd=tmp_path, check=True)

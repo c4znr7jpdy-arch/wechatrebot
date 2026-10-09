@@ -14,13 +14,13 @@ import pytest
 from wechatrebot_manager.plugin_center import EngineApiClient, PluginCenterError, _json_revision
 
 ROOT = Path(__file__).parents[1]
-SOURCE = Path("E:/Project/astrbot_venv/Lib/site-packages")
+SOURCE = ROOT / "vendor/engine"
 
 
 def _patched_runtime_source(tmp_path: Path, relative: Path) -> str:
     source = SOURCE / relative
     if not source.is_file():
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     target = tmp_path / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
@@ -64,7 +64,7 @@ def _runtime_function(source: str, name: str, namespace: dict, *, last: bool = F
 def service_class(tmp_path):
     relative = Path("astrbot/dashboard/services/config_service.py")
     if not (SOURCE / relative).is_file():
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
     shutil.copy2(SOURCE / relative, target)
@@ -183,7 +183,7 @@ def test_runtime_readiness_hook_cannot_report_success_early(service_class):
 def test_unknown_reload_target_never_falls_through_to_reload_all(tmp_path):
     relative = Path("astrbot/core/star/star_manager.py")
     if not (SOURCE / relative).is_file():
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
     shutil.copy2(SOURCE / relative, target)
@@ -204,7 +204,7 @@ def test_unknown_reload_target_never_falls_through_to_reload_all(tmp_path):
 def test_enabling_disabled_plugin_unbinds_stale_handlers_before_reload(tmp_path):
     relative = Path("astrbot/core/star/star_manager.py")
     if not (SOURCE / relative).is_file():
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
     shutil.copy2(SOURCE / relative, target)
@@ -355,7 +355,7 @@ def test_success_without_receipt_is_not_hot_success(tmp_path):
 def test_both_save_routes_keep_revision_and_verification_receipt(tmp_path, name):
     relative = Path("astrbot/dashboard/api/plugins.py")
     if not (SOURCE / relative).is_file():
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
     shutil.copy2(SOURCE / relative, target)

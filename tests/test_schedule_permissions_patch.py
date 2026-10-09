@@ -11,7 +11,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PLUGIN_SOURCE = Path("E:/Project/data/plugins/jiang_schedule/main.py")
+PLUGIN_SOURCE = ROOT / "vendor/data/plugins/jiang_schedule/main.py"
 BASE_PATCH = ROOT / "patches" / "astrbot-plugin-jiang_schedule.patch"
 PERMISSIONS_PATCH = (
     ROOT / "patches" / "astrbot-plugin-jiang_schedule--permissions.patch"
@@ -21,7 +21,7 @@ PERMISSIONS_PATCH = (
 @pytest.fixture(scope="module")
 def patched_source(tmp_path_factory: pytest.TempPathFactory) -> str:
     if not PLUGIN_SOURCE.is_file():
-        pytest.skip("commercial AstrBot plugin source is unavailable")
+        pytest.fail("commercial AstrBot plugin source is unavailable")
     root = tmp_path_factory.mktemp("schedule-permissions")
     # The host user profile is itself a Git worktree. Create a nested repository so
     # git apply cannot resolve patch paths against that unrelated parent checkout.

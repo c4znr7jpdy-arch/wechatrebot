@@ -1,4 +1,4 @@
-param([string]$SourceRoot = 'E:\Project', [switch]$Plan, [switch]$PackageOnly, [switch]$ManagerOnly)
+param([string]$SourceRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'vendor'), [switch]$Plan, [switch]$PackageOnly, [switch]$ManagerOnly)
 $ErrorActionPreference = 'Stop'
 $updateExitCode = 1
 try {

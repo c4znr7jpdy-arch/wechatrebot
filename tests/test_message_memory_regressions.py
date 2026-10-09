@@ -17,7 +17,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def _patched_variant(tmp_path, module, variant):
-    source = ROOT / "runtime" / module if module in {"meme_manager", "astrbot_plugin_livingmemory"} else ROOT / "tests/fixtures/patch_sources/data/plugins" / module
+    source = ROOT / "runtime" / module if module in {"meme_manager", "astrbot_plugin_livingmemory"} else ROOT / "vendor/data/plugins" / module
     shutil.copytree(source, tmp_path, dirs_exist_ok=True)
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "apply", "--ignore-space-change", str(ROOT / (f"patches/astrbot-plugin-{module}.patch" if module in {"meme_manager", "astrbot_plugin_livingmemory"} else f"patches/astrbot-plugin-{module}--{variant}.patch"))],

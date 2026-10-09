@@ -19,6 +19,7 @@ import uuid
 import zipfile
 
 from packaging.version import Version
+from source_inputs import verify_source_inputs
 
 
 COMMERCIAL_ROOT = Path(__file__).resolve().parents[1]
@@ -614,7 +615,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="一键测试、构建、签名并发布完整载荷更新。"
     )
-    parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--source-root", type=Path, default=COMMERCIAL_ROOT / "vendor")
     parser.add_argument("--title", default="完整载荷更新")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--minimum-supported-version", default="0.7.0")
@@ -670,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.error("找不到 Windows OpenSSH 的 ssh.exe 或 scp.exe")
 
-    source_root = args.source_root.expanduser().resolve()
+    source_root = verify_source_inputs(COMMERCIAL_ROOT, args.source_root)
     if not source_root.is_dir():
         parser.error(f"项目源码目录不存在：{source_root}")
     private_key = args.private_key.expanduser().resolve()

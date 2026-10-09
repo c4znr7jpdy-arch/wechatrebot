@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from wechatrebot_manager.payload import _is_user_config, sha256_file, validate_incremental_path
+from source_inputs import repository_sources, verify_source_inputs
 
 # Changes to these inputs require a compatible base runtime, not a script patch.
 BASE_INPUTS = {
@@ -65,7 +66,7 @@ def require_master(root: Path) -> None:
     subprocess.run(["git", "fetch", "origin", "master"], cwd=root, check=True)
     if git("branch", "--show-current") != "master" or git("rev-parse", "HEAD") != git("rev-parse", "origin/master"):
         raise RuntimeError("请从已同步 origin/master 的 master 工作树执行本地更新。")
-    protected = ("src/", "runtime/", "scripts/", "patches/", "release/", "assets/", "config/", "installer/", "pyproject.toml")
+    protected = ("src/", "runtime/", "scripts/", "patches/", "release/", "assets/", "config/", "installer/", "vendor/", "pyproject.toml")
     changed = git("diff", "HEAD", "--name-only").splitlines()
     changed += git("ls-files", "--others", "--exclude-standard").splitlines()
     if any(path.startswith(protected) for path in changed):
@@ -207,13 +208,16 @@ def apply_local(payload_archive: Path, install: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-root", type=Path, default=Path("E:/Project"))
+    parser.add_argument("--source-root", type=Path, default=ROOT / "vendor")
     parser.add_argument("--install-root", type=Path)
     parser.add_argument("--plan", action="store_true", help="只检查基线与更新范围，不构建或安装")
     parser.add_argument("--package-only", action="store_true", help="只生成本地增量包")
     parser.add_argument("--manager-only", action="store_true", help="只更新管理器，不扫描插件与运行环境")
     args = parser.parse_args(argv)
     try:
+        source_root = repository_sources(ROOT, args.source_root)
+        if not args.manager_only:
+            verify_source_inputs(ROOT, source_root)
         install = (args.install_root or installed_root()).resolve()
         require_master(ROOT)
         if not args.manager_only:
@@ -231,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         output = ROOT / "artifacts" / ("local-incremental-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
         output.mkdir(parents=True)
         candidate = output / "candidate"
-        scopes = stage_sources(ROOT, args.source_root.resolve(), install, candidate, manager_only=args.manager_only)
+        scopes = stage_sources(ROOT, source_root, install, candidate, manager_only=args.manager_only)
         if needs_manager:
             python = select_build_python(ROOT)
             command = [sys.executable, str(ROOT / "scripts/build_manager.py"), "--output", str(output / "manager-build")]

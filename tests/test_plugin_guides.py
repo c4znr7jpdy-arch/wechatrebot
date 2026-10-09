@@ -77,11 +77,11 @@ def test_quick_reference_is_detached_from_shared_guide_data():
     assert get_plugin_guide("astrbot_plugin_bittorrent")["commands"][0]["title"] == "资源检索"
 
 
-def test_curated_paths_match_local_delivered_schemas():
+def test_curated_paths_match_local_delivered_schemas(patched_plugins):
     import pytest
-    root = Path(__file__).parents[1] / "artifacts/staging-hot-config-validation-20260907-final/app/astrbot/data/plugins"
+    root = patched_plugins
     if not root.exists():
-        pytest.skip("Delivered source fixture unavailable")
+        pytest.fail("Delivered source fixture unavailable")
     delivered_modules = [module for module in _GUIDES if (root / module).is_dir()]
     assert delivered_modules, "Delivered source fixture contains no guided modules"
     for module in delivered_modules:

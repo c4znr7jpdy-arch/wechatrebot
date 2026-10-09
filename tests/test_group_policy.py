@@ -21,6 +21,11 @@ ACCOUNT_B = "wxid_robot_b"
 GROUP = "51632940287@chatroom"
 
 
+@pytest.fixture(autouse=True)
+def current_schedule_account(monkeypatch):
+    monkeypatch.setattr(ScheduleService, "_runtime_account", lambda self: ACCOUNT_A)
+
+
 def test_setu_has_independent_group_checkbox_and_persists(tmp_path):
     _feature_set(tmp_path)
     service = GroupPolicyService(tmp_path)
@@ -80,7 +85,7 @@ def _schedule_database(root: Path) -> None:
                 f"weather_source:GroupMessage:{GROUP}",
                 "天气预报",
                 "0 8 * * *",
-                json.dumps({"session": f"source:GroupMessage:{GROUP}"}),
+                json.dumps({"account_id": "wxid_robot_a", "session": f"source:GroupMessage:{GROUP}"}),
                 1,
                 "scheduled",
                 "",
@@ -92,7 +97,7 @@ def _schedule_database(root: Path) -> None:
                 "news_source:GroupMessage:other@chatroom",
                 "新闻",
                 "0 9 * * *",
-                json.dumps({"session": "source:GroupMessage:other@chatroom"}),
+                json.dumps({"account_id": "wxid_robot_a", "session": "source:GroupMessage:other@chatroom"}),
                 1,
                 "scheduled",
                 "",

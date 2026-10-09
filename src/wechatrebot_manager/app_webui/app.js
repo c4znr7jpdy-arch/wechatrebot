@@ -2865,6 +2865,7 @@
       const message = $("#scheduleContextMessage");
       message.textContent = context.value.message || (!context.value.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
       if (legacy.status === "rejected") message.textContent += " 已有功能任务暂时无法读取，请刷新重试。";
+      if (legacy.status === "fulfilled" && legacy.value.message) message.textContent += ` ${legacy.value.message}`;
       message.hidden = !message.textContent;
       renderSchedules();
       renderScheduledTasks();

@@ -370,7 +370,7 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         origin = entry.get("origin")
         source_path = entry.get("source")
         target_path = entry.get("target")
-        if origin not in {"commercial", "project"}:
+        if origin not in {"commercial", "vendor"}:
             errors.append(f"source entry {index} has invalid origin")
         for label, value in (("source", source_path), ("target", target_path)):
             if not _safe_repo_path(value):

@@ -1,0 +1,39 @@
+{
+  "magnet_search": {
+    "description": "核心配置",
+    "type": "object",
+    "hint": "可自定义站点地址、返回结果数、超时时间、预览开关",
+    "items": {
+      "base_url": {
+        "description": "填写磁力狗站点地址",
+        "type": "string",
+        "hint": "若链接失效，请访问 https://ciligou.im 获取当前可用地址",
+        "default": "https://clg02.cc"
+      },
+      "search_path": {
+        "description": "搜索接口路径",
+        "type": "string",
+        "hint": "正常情况下无需修改。需以/开头，匹配站点实际接口",
+        "default": "/search"
+      },
+      "max_results": {
+        "description": "单次搜索返回的最大结果数",
+        "type": "int",
+        "hint": "建议设置 3-5（详情页解密需耗时）",
+        "default": 3
+      },
+      "request_timeout": {
+        "description": "HTTP 请求超时时间（单位：秒）",
+        "type": "int",
+        "hint": "详情页解密需耗时，建议设置 15-20",
+        "default": 15
+      },
+      "enable_preview": {
+        "description": "搜索结果是否附带 whatslink.info 预览（文件信息+截图）",
+        "type": "bool",
+        "hint": "关闭后 bt 搜索不再调用 whatslink API，btp 命令不受影响",
+        "default": true
+      }
+    }
+  }
+}

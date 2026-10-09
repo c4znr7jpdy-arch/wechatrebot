@@ -67,12 +67,11 @@ def test_group_feature_policy_fails_closed_and_is_account_scoped(tmp_path):
 
 
 def test_pinned_engine_patch_applies_and_contains_identical_group_policy(tmp_path):
-    wheel = ROOT / "artifacts/runtime-cache/wheels-py313-win-amd64/astrbot-4.26.6-py3-none-any.whl"
-    if not wheel.is_file():
-        pytest.skip("Pinned engine cache is required for patch integration verification")
+    engine = ROOT / "vendor/engine"
     relative = "astrbot/core/pipeline/waking_check/stage.py"
-    with zipfile.ZipFile(wheel) as archive:
-        archive.extract(relative, tmp_path)
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((engine / relative).read_bytes())
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     result = subprocess.run(["git", "apply", "-p2", "--whitespace=error-all", "--include=" + relative,
                              "--include=astrbot/core/platform/wechat_group_policy.py",

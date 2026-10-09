@@ -15,6 +15,8 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from source_inputs import verify_source_inputs
+
 
 def build_steps(source: Path, output: Path, wheelhouse: Path | None = None,
                 runtime: Path | None = None, build_python: Path | None = None) -> list[tuple[str, list[str]]]:
@@ -167,13 +169,13 @@ def finish_package(output: Path, version: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-root", type=Path, default=Path("E:/Project"))
+    parser.add_argument("--source-root", type=Path, default=ROOT / "vendor")
     parser.add_argument("--plan", action="store_true", help="Show steps without building")
     parser.add_argument("--open-output", action="store_true")
     args = parser.parse_args(argv)
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     output = ROOT / "artifacts" / f"local-full-{version}-{datetime.now():%Y%m%d-%H%M%S-%f}"
-    source = args.source_root.expanduser().resolve()
+    source = verify_source_inputs(ROOT, args.source_root)
     steps = build_steps(source, output)
     if args.plan:
         print(json.dumps({"output": str(output), "steps": steps}, ensure_ascii=False, indent=2))

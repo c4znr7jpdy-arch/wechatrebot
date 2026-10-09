@@ -188,6 +188,25 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
     }
 
 
+def test_bootstrap_reuses_status_and_reports_stage_timings(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    calls = []
+
+    def refresh():
+        calls.append("status")
+        return SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
+
+    api._lifecycle.refresh = refresh
+    clock = iter([1, 1.01, 1.03, 1.04, 1.10])
+    monkeypatch.setattr(app_shell.time, "perf_counter", lambda: next(clock))
+    result = api.bootstrap()
+    assert result["ok"] is True
+    assert calls == ["status"]
+    assert result["data"]["startup_timing_ms"] == {
+        "configuration": 10, "status": 20, "experience": 10, "readiness": 60, "total": 100,
+    }
+
+
 @pytest.mark.parametrize("account,available,directory_result,expected,calls_expected", [
     ("", False, None, "offline", 0),
     ("", True, None, "offline", 0),

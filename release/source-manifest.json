@@ -122,22 +122,22 @@
       "target": "legal/feature-set.json"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "hook_41827_astrbot_bridge/src",
       "target": "app/bridge/src"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "hook_41827_astrbot_bridge/pyproject.toml",
       "target": "app/bridge/pyproject.toml"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "hook_41827_astrbot_bridge/config.example.json",
       "target": "config/templates/bridge.example.json"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_angel_heart",
       "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart"
     },
@@ -147,7 +147,7 @@
       "target": "app/astrbot/data/plugins/astrbot_plugin_livingmemory"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_self_learning",
       "target": "app/astrbot/data/plugins/astrbot_plugin_self_learning"
     },
@@ -157,17 +157,17 @@
       "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_music",
       "target": "app/astrbot/data/plugins/astrbot_plugin_music"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_short_drama",
       "target": "app/astrbot/data/plugins/jiang_short_drama"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_commands",
       "target": "app/astrbot/data/plugins/jiang_commands",
       "exclude": [
@@ -178,23 +178,25 @@
       ]
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_schedule",
       "target": "app/astrbot/data/plugins/jiang_schedule",
-      "exclude": ["pages"]
+      "exclude": [
+        "pages"
+      ]
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_bittorrent",
       "target": "app/astrbot/data/plugins/astrbot_plugin_bittorrent"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_mimo_tts_clone",
       "target": "app/astrbot/data/plugins/astrbot_plugin_mimo_tts_clone"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_parser",
       "target": "app/astrbot/data/plugins/astrbot_plugin_parser",
       "exclude": [
@@ -205,20 +207,24 @@
       "origin": "commercial",
       "source": "runtime/astrbot_plugin_twitter",
       "target": "app/astrbot/data/plugins/astrbot_plugin_twitter",
-      "exclude": ["tests", "__pycache__", "*.pyc"]
+      "exclude": [
+        "tests",
+        "__pycache__",
+        "*.pyc"
+      ]
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_patch_at_wxid",
       "target": "app/astrbot/data/plugins/astrbot_plugin_patch_at_wxid"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_proactive_chat",
       "target": "app/astrbot/data/plugins/astrbot_plugin_proactive_chat"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/astrbot_plugin_self_iterative_core",
       "target": "app/astrbot/data/plugins/astrbot_plugin_self_iterative_core"
     },
@@ -228,37 +234,37 @@
       "target": "app/astrbot/data/plugins/jiang_capability_router"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_group_notice",
       "target": "app/astrbot/data/plugins/jiang_group_notice"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_image",
       "target": "app/astrbot/data/plugins/jiang_image"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_mimo_emoji_voice",
       "target": "app/astrbot/data/plugins/jiang_mimo_emoji_voice"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_mystool",
       "target": "app/astrbot/data/plugins/jiang_mystool"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_repeater",
       "target": "app/astrbot/data/plugins/jiang_repeater"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_rocom",
       "target": "app/astrbot/data/plugins/jiang_rocom"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/jiang_video_understanding",
       "target": "app/astrbot/data/plugins/jiang_video_understanding"
     },
@@ -276,22 +282,22 @@
       "target": "app/astrbot/data/plugins/meme_manager/wechatrebot_group_policy.py"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/config/jiang_short_drama_config.json",
       "target": "app/astrbot/data/config/jiang_short_drama_config.json"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/config/astrbot_plugin_music_config.json",
       "target": "app/astrbot/data/config/astrbot_plugin_music_config.json"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "data/plugins/_nonebot_stubs.py",
       "target": "app/astrbot/data/plugins/_nonebot_stubs.py"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "ai_plugin/ai_plugin",
       "target": "app/astrbot/ai_plugin/ai_plugin",
       "exclude": [
@@ -307,7 +313,7 @@
       "target": "app/astrbot/ai_plugin/ai_plugin/news.py"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "nonebot-plugin-mystool/src/nonebot_plugin_mystool",
       "target": "app/astrbot/nonebot-plugin-mystool/src/nonebot_plugin_mystool"
     },
@@ -337,23 +343,23 @@
       "target": "app/astrbot/ai_plugin/ai_plugin/scheduled_weather.py"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "nonebot-plugin-mystool/LICENSE",
       "target": "app/astrbot/nonebot-plugin-mystool/LICENSE"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "ai_plugin/nonebot_plugin_rocom",
       "target": "app/astrbot/ai_plugin/nonebot_plugin_rocom"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "hook_41827_astrbot_bridge/vendor/hook/x64 inject.exe",
       "target": "app/bridge/vendor/hook/x64 inject.exe",
       "sha256": "F839265D1D986BD072135038A27DDB242F39165C572BCB16609A9030A304734E"
     },
     {
-      "origin": "project",
+      "origin": "vendor",
       "source": "hook_41827_astrbot_bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
       "target": "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
       "transform": "hook-recall-explicit-receipt-v1",

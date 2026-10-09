@@ -214,7 +214,7 @@ class ApplicationApi:
         )
         self._contacts = ContactDirectoryService(self._install_root)
         self._groups = GroupDirectoryService(self._install_root)
-        self._schedules = ScheduleService(self._install_root)
+        self._schedules = ScheduleService(self._install_root, account_hint=self._history_account_id)
         self._response_traces = ResponseTraceService(self._install_root)
         self._group_policies = GroupPolicyService(
             self._install_root, schedules=self._schedules
@@ -434,15 +434,23 @@ class ApplicationApi:
 
     def bootstrap(self) -> dict[str, object]:
         try:
+            started = time.perf_counter()
             settings = load_robot_settings(self._install_root)
             provider = load_provider_profile(self._install_root)
             providers = load_provider_services(self._install_root)
             channel = self._load_update_channel()
+            configured = time.perf_counter()
+            status = self._lifecycle.refresh().to_dict()
+            checked = time.perf_counter()
+            experience = self._experience_service().snapshot()
+            experienced = time.perf_counter()
+            readiness = self._onboarding_readiness(view=status)
+            ready = time.perf_counter()
             return self._ok(
                 {
                     "version": __version__,
                     "install_root": str(self._install_root),
-                    "status": self._lifecycle.refresh().to_dict(),
+                    "status": status,
                     "brand": {
                         **settings.profile.to_dict(),
                         "admin_id": settings.admin_id,
@@ -460,8 +468,15 @@ class ApplicationApi:
                         "api_key_configured": bool(provider and provider.api_key),
                     },
                     "providers": [item.to_public_dict() for item in providers],
-                    "experience": self._experience_service().snapshot(),
-                    "readiness": self._onboarding_readiness(),
+                    "experience": experience,
+                    "readiness": readiness,
+                    "startup_timing_ms": {
+                        "configuration": round((configured - started) * 1000, 1),
+                        "status": round((checked - configured) * 1000, 1),
+                        "experience": round((experienced - checked) * 1000, 1),
+                        "readiness": round((ready - experienced) * 1000, 1),
+                        "total": round((ready - started) * 1000, 1),
+                    },
                     "provider_presets": [dict(item) for item in MODEL_PROVIDER_PRESETS],
                     "update": {
                         "enabled": bool(channel and channel.enabled),
@@ -1237,9 +1252,10 @@ class ApplicationApi:
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def _onboarding_readiness(self) -> dict[str, object]:
+    def _onboarding_readiness(self, *, view: dict[str, object] | None = None) -> dict[str, object]:
         """Build a read-only first-use checklist from current local state."""
-        view = self._lifecycle.refresh().to_dict()
+        if view is None:
+            view = self._lifecycle.refresh().to_dict()
         environment = view.get("environment") if isinstance(view, dict) else {}
         runtime = view.get("runtime") if isinstance(view, dict) else {}
         environment = environment if isinstance(environment, dict) else {}

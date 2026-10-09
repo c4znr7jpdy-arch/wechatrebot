@@ -11,8 +11,8 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path('E:/Project/data/plugins/jiang_commands/main.py')
-OIL_SOURCE = Path('E:/Project/ai_plugin/ai_plugin/oilprice.py')
+SOURCE = ROOT / 'vendor/data/plugins/jiang_commands/main.py'
+OIL_SOURCE = ROOT / 'vendor/ai_plugin/ai_plugin/oilprice.py'
 
 
 @pytest.mark.parametrize('message, province', [
@@ -33,7 +33,7 @@ def test_declared_oilprice_pattern_without_source_checkout(message, province):
 @pytest.fixture(scope='module')
 def patched_tree(tmp_path_factory):
     if not SOURCE.is_file() or not OIL_SOURCE.is_file():
-        pytest.skip('Commands source checkout is unavailable')
+        pytest.fail('Commands source checkout is unavailable')
     commercial = tmp_path_factory.mktemp('oilprice-command')
     output = commercial / 'artifacts/staging'
     plugin = output / 'app/astrbot/data/plugins/jiang_commands'

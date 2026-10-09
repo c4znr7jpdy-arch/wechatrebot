@@ -104,15 +104,14 @@ def test_public_download_page_must_return_not_found(monkeypatch) -> None:
 
 
 def test_full_update_entry_runs_complete_build_and_publish_pipeline(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, vendor_inputs
 ) -> None:
     module = _publisher()
     root = tmp_path / "commercial"
     scripts = root / "scripts"
-    source = tmp_path / "project"
+    source = vendor_inputs(root)
     (root / "artifacts").mkdir(parents=True)
     scripts.mkdir()
-    source.mkdir()
     (root / "src").mkdir()
     (root / "pyproject.toml").write_text(
         '[project]\nname="test"\nversion="0.8.7"\n', encoding="utf-8"

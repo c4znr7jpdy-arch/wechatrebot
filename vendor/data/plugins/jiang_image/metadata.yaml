@@ -1,0 +1,7 @@
+name: jiang_image
+display_name: 姜小妹生图
+desc: 支持 HostCentral 首选、自动回退与自定义模型热更新的文生图/图生图插件
+short_desc: HostCentral 生图与 WebUI 模型管理
+author: fch
+version: 2.1.0
+astrbot_version: ">=4.24.2"

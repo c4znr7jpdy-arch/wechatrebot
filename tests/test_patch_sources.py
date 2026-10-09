@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_patch_source_snapshot_matches_its_manifest() -> None:
-    root = Path(__file__).parent / "fixtures/patch_sources"
+    root = Path(__file__).parents[1] / "vendor"
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["files"], "Patch tests require a pinned source snapshot"
     for entry in manifest["files"]:
