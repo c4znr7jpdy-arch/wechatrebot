@@ -62,6 +62,29 @@ diff --git a/main.py b/main.py
          if self._is_private_chat(chat_id):
              if not self.config_manager.takeover_private_chat_context:
                  logger.debug(
+@@ -310,6 +315,22 @@
+                 f"AngelHeart[{chat_id}]: 完成点记录 assistant/tool 链失败: {e}",
+                 exc_info=True,
+             )
++        finally:
++            # Direct-result tools have no respond-stage callback. The agent-done
++            # hook runs after the whole tool batch; release only this event's work.
++            if getattr(response, "tools_call_name", None):
++                work_id = event.get_extra("angelheart_work_id", "")
++                if work_id and getattr(getattr(run_context, "context", None), "event", None) is event:
++                    try:
++                        self.angel_context.work_ledger.complete_work(
++                            chat_id, str(work_id), status="done",
++                            result_summary="工具调用已结束",
++                        )
++                    except Exception:
++                        logger.error(
++                            f"AngelHeart[{chat_id}]: 工具完成后收口工作账本失败",
++                            exc_info=True,
++                        )
+ 
+     # --- 内部方法 ---
+     def on_config_saved(self):
 diff --git a/core/reply_identity.py b/core/reply_identity.py
 new file mode 100644
 --- /dev/null

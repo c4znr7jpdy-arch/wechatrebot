@@ -66,6 +66,24 @@ index 43f6beb..b98df04 100644
  
          # 如果有工具调用，还需处理工具调用
          if llm_resp.tools_call_name:
+@@ -969,6 +976,17 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
+ 
+             self.req.append_tool_calls_result(tool_calls_result)
+ 
++            if self._state == AgentState.DONE:
++                # A tool returning None ends the loop without a text response.
++                # Notify only after every tool result is in the closed history.
++                self.final_llm_resp = llm_resp
++                try:
++                    await self.agent_hooks.on_agent_done(self.run_context, llm_resp)
++                except Exception as e:
++                    logger.error(f"Error in on_agent_done hook: {e}", exc_info=True)
++                finally:
++                    self._resolve_unconsumed_follow_ups()
++
+     async def step_until_done(
+         self, max_step: int
+     ) -> T.AsyncGenerator[AgentResponse, None]:
 diff --git a/official/astrbot/core/config/default.py b/expected/astrbot/core/config/default.py
 index 6156601..d101d8d 100644
 --- a/official/astrbot/core/config/default.py
