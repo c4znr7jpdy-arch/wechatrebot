@@ -1,0 +1,4 @@
+name: jiang_mystool
+desc: 米游社工具的 AstrBot 适配层，基于 nonebot-plugin-mystool v2.10.2
+author: fch
+version: 2.7.1

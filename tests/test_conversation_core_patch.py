@@ -6,7 +6,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-SOURCE = Path("E:/Project/data/plugins/astrbot_plugin_self_learning")
+SOURCE = ROOT / "vendor/data/plugins/astrbot_plugin_self_learning"
 PATCH = ROOT / "patches" / "astrbot-plugin-astrbot_plugin_self_learning.patch"
 
 
@@ -14,7 +14,7 @@ def test_conversation_core_hot_update_removes_explicit_memory_phrases(
     tmp_path: Path,
 ) -> None:
     if not SOURCE.is_dir():
-        pytest.skip("emotion plugin source is unavailable")
+        pytest.fail("emotion plugin source is unavailable")
     target = tmp_path / "astrbot_plugin_self_learning"
     shutil.copytree(SOURCE, target)
     # The host user profile can itself be a Git worktree. Make the copied plugin

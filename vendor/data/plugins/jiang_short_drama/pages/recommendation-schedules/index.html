@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>影视定时推荐</title>
+    <link rel="stylesheet" href="./styles.css?v=2.2.0" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">JIANG MEDIA · SCHEDULE</p>
+          <h1>影视定时推荐</h1>
+          <p class="subtitle">在指定群聊按时发送最新资源卡片，点击即可查看封面并进入播放器。</p>
+        </div>
+        <button class="button primary" id="add-button">＋ 新建任务</button>
+      </header>
+
+      <section class="summary" aria-label="任务概览">
+        <article><span>已启用</span><strong id="enabled-count">—</strong></article>
+        <article><span>任务总数</span><strong id="task-count">—</strong></article>
+        <article><span>时区</span><strong id="timezone">Asia/Shanghai</strong></article>
+      </section>
+
+      <section class="section-heading">
+        <div>
+          <h2>推荐任务</h2>
+          <p>“立即测试”会立刻向目标群发送一次，不影响原定时间。</p>
+        </div>
+      </section>
+      <section class="task-grid" id="task-grid">
+        <div class="empty-state">正在读取定时任务…</div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop hidden" id="modal-backdrop">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">RECOMMENDATION TASK</p>
+            <h2 id="modal-title">新建推荐任务</h2>
+          </div>
+          <button class="icon-button" id="close-modal" type="button" aria-label="关闭">×</button>
+        </header>
+        <form id="task-form">
+          <div class="form-body">
+            <label>
+              <span>任务名称</span>
+              <input name="name" maxlength="40" required placeholder="晚间短剧推荐" />
+            </label>
+            <label>
+              <span>推荐分类</span>
+              <select name="media_type" id="media-type"></select>
+            </label>
+            <label class="wide">
+              <span>目标群聊 UMO</span>
+              <input name="session" required placeholder="aiocqhttp:GroupMessage:51632940287@chatroom" />
+              <small>从 AstrBot 会话信息复制完整 UMO，只接受 GroupMessage。</small>
+            </label>
+            <label>
+              <span>发送时间</span>
+              <input name="time" type="time" required value="20:00" />
+            </label>
+            <label>
+              <span>每次推荐</span>
+              <select name="limit">
+                <option value="6">6 部</option>
+                <option value="8">8 部</option>
+                <option value="12" selected>12 部</option>
+                <option value="16">16 部</option>
+                <option value="20">20 部</option>
+              </select>
+            </label>
+            <fieldset class="wide">
+              <legend>发送星期</legend>
+              <div class="day-grid" id="day-grid"></div>
+              <small>不选择星期表示每天发送。</small>
+            </fieldset>
+            <label class="toggle-line wide">
+              <input name="enabled" type="checkbox" checked />
+              <span>保存后立即启用</span>
+            </label>
+          </div>
+          <footer class="modal-footer">
+            <span>保存后无需重启 AstrBot。</span>
+            <div>
+              <button class="button secondary" id="cancel-button" type="button">取消</button>
+              <button class="button primary" id="save-button" type="submit">保存任务</button>
+            </div>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+    <script type="module" src="./app.js?v=2.2.0"></script>
+  </body>
+</html>

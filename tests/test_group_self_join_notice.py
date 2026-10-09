@@ -21,7 +21,7 @@ BOT = "wxid_bot"
 @pytest.fixture
 def bridge(tmp_path):
     package_dir = tmp_path / "app/bridge/src/hook_bridge"
-    shutil.copytree(ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge/src/hook_bridge", package_dir)
+    shutil.copytree(ROOT / "vendor/hook_41827_astrbot_bridge/src/hook_bridge", package_dir)
     manifest = json.loads((ROOT / "release/source-manifest.json").read_text("utf-8"))
     for entry in manifest["entries"]:
         if entry["origin"] == "commercial" and entry["target"].startswith("app/bridge/src/hook_bridge/"):

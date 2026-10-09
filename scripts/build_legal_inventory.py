@@ -11,6 +11,8 @@ import tomllib
 from urllib.parse import quote
 import uuid
 
+from source_inputs import verify_source_inputs
+
 
 _LICENSE_CLASSIFIERS = {
     "Apache Software License": "Apache-2.0",
@@ -407,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build release SBOM and NOTICE inputs.")
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--manager-site-packages", type=Path, required=True)
-    parser.add_argument("--project-root", type=Path, required=True)
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1] / "vendor")
     parser.add_argument("--sbom", type=Path, required=True)
     parser.add_argument("--notices", type=Path, required=True)
     parser.add_argument("--licenses", type=Path, required=True)
@@ -420,6 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repository = Path(__file__).resolve().parents[1]
+    args.project_root = verify_source_inputs(repository, args.project_root)
     runtime_root = args.runtime_root.resolve()
     runtime_site_packages = runtime_root / "python" / "Lib" / "site-packages"
     feature_set = json.loads(

@@ -1,0 +1,32 @@
+{
+    "enable_whitelist": {
+        "description": "是否启用白名单权限控制",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，只有白名单中的用户才能使用自迭代的相关功能。"
+    },
+    "whitelist_users": {
+        "description": "白名单用户列表",
+        "type": "list",
+        "default": [],
+        "hint": "填写允许使用自迭代核心的管理员用户ID"
+    },
+    "verbose_steps": {
+        "description": "显示步骤提示",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，执行读写文件、查看日志等操作时会发送提示消息（如：📝 正在编写文件...）。"
+    },
+    "log_lines_default": {
+        "description": "默认读取日志行数",
+        "type": "int",
+        "default": 100,
+        "hint": "工具 dev_check_logs 默认读取的日志行数。"
+    },
+    "plugin_base_dir": {
+        "description": "插件安装根目录",
+        "type": "string",
+        "default": "./data/plugins",
+        "hint": "插件开发和读取的根路径，通常无需修改。"
+    }
+}

@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {
+    --white: #f8fcff;
+    --muted: rgba(239, 249, 255, 0.82);
+    --line: rgba(235, 249, 255, 0.27);
+    --glass: linear-gradient(145deg, rgba(80, 174, 232, 0.34), rgba(12, 111, 190, 0.36));
+    --glass-border: rgba(233, 249, 255, 0.52);
+    --shadow: 0 14px 34px rgba(0, 69, 137, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html,
+  body {
+    width: 864px;
+    height: 1705px;
+    overflow: hidden;
+  }
+
+  body {
+    position: relative;
+    color: var(--white);
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+    background:
+      radial-gradient(circle at 84% 13%, rgba(255, 247, 185, 0.35), transparent 128px),
+      radial-gradient(ellipse at 23% 31%, rgba(235, 250, 255, 0.22), transparent 290px),
+      radial-gradient(ellipse at 92% 53%, rgba(158, 227, 255, 0.25), transparent 310px),
+      linear-gradient(180deg, #0570c9 0%, #078bd7 39%, #17a8df 72%, #32bce8 100%);
+  }
+
+  body::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.82;
+    background:
+      radial-gradient(ellipse at 7% 19%, rgba(255,255,255,0.36) 0 4%, transparent 22%),
+      radial-gradient(ellipse at 13% 25%, rgba(255,255,255,0.20) 0 6%, transparent 27%),
+      radial-gradient(ellipse at 92% 25%, rgba(255,255,255,0.34) 0 5%, transparent 24%),
+      radial-gradient(ellipse at 89% 34%, rgba(255,255,255,0.19) 0 5%, transparent 27%),
+      linear-gradient(108deg, transparent 0 44%, rgba(255,255,255,0.08) 55%, transparent 71%);
+    filter: blur(2px);
+  }
+
+  body::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: 0;
+    right: 0;
+    bottom: 65px;
+    height: 610px;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at 18% 72%, rgba(245,252,255,0.28), transparent 32%),
+      radial-gradient(ellipse at 80% 58%, rgba(232,250,255,0.24), transparent 34%);
+    filter: blur(12px);
+  }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    padding: 28px 34px 0;
+  }
+
+  .topbar {
+    height: 76px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .location {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .location-icon {
+    width: 31px;
+    height: 38px;
+    margin-top: 2px;
+    filter: drop-shadow(0 4px 10px rgba(0, 62, 127, 0.28));
+  }
+
+  .city {
+    font-size: 34px;
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-shadow: 0 4px 12px rgba(0, 66, 132, 0.28);
+  }
+
+  .updated {
+    margin-top: 10px;
+    font-size: 20px;
+    line-height: 1;
+    font-weight: 500;
+    color: rgba(245, 252, 255, 0.90);
+  }
+
+  .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    padding-top: 4px;
+  }
+
+  .top-actions svg {
+    width: 38px;
+    height: 38px;
+    fill: none;
+    stroke: #f8fcff;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 4px 10px rgba(0, 65, 130, 0.25));
+  }
+
+  .hero {
+    position: relative;
+    height: 436px;
+  }
+
+  .hero-copy {
+    position: absolute;
+    z-index: 2;
+    top: 58px;
+    left: 30px;
+  }
+
+  .hero-temp {
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    font-size: 168px;
+    line-height: 0.78;
+    font-weight: 400;
+    letter-spacing: -8px;
+    text-shadow: 0 9px 24px rgba(0, 67, 133, 0.25);
+  }
+
+  .hero-weather {
+    margin-top: 34px;
+    font-size: 48px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-shadow: 0 5px 14px rgba(0, 67, 133, 0.28);
+  }
+
+  .hero-feels,
+  .hero-range {
+    margin-top: 24px;
+    font-size: 31px;
+    line-height: 1;
+    font-weight: 500;
+    color: rgba(248, 253, 255, 0.94);
+    text-shadow: 0 4px 12px rgba(0, 67, 133, 0.24);
+  }
+
+  .hero-range { margin-top: 20px; font-size: 28px; }
+
+  .hero-icon {
+    position: absolute;
+    z-index: 1;
+    top: 84px;
+    right: 16px;
+    width: 320px;
+    height: 255px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 28px 26px rgba(0, 71, 137, 0.28));
+  }
+
+  .hero-icon img {
+    position: relative;
+    z-index: 2;
+    width: 286px;
+    height: 286px;
+    object-fit: contain;
+  }
+
+  .glass {
+    position: relative;
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    box-shadow: var(--shadow);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    overflow: hidden;
+  }
+
+  .glass::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(150deg, rgba(255,255,255,0.13), transparent 34%, rgba(255,255,255,0.04));
+  }
+
+  .metrics {
+    height: 151px;
+    border-radius: 28px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .metric {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .metric + .metric::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 30px;
+    bottom: 27px;
+    width: 1px;
+    background: rgba(236, 249, 255, 0.36);
+  }
+
+  .metric-icon {
+    width: 43px;
+    height: 43px;
+    margin-bottom: 14px;
+    fill: none;
+    stroke: #eaf8ff;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.94;
+  }
+
+  .metric:first-child .metric-icon { stroke: #8de48c; }
+
+  .metric-value {
+    max-width: 172px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 23px;
+    line-height: 1;
+    font-weight: 600;
+    text-shadow: 0 4px 10px rgba(0, 65, 128, 0.25);
+  }
+
+  .alert {
+    height: 130px;
+    margin-top: 14px;
+    border-radius: 27px;
+    display: grid;
+    grid-template-columns: 98px 1fr 132px;
+    align-items: center;
+    padding: 0 25px 0 20px;
+  }
+
+  .alert.alert-red,
+  .alert.alert-orange,
+  .alert.alert-yellow,
+  .alert.alert-blue,
+  .alert.alert-active {
+    border-color: rgba(255, 239, 222, 0.66);
+    background: linear-gradient(102deg, #ed3218 0%, #f64a1a 52%, #ff6a31 100%);
+    box-shadow: 0 14px 30px rgba(150, 45, 13, 0.28), inset 0 1px 0 rgba(255,255,255,0.28);
+  }
+
+  .alert.alert-yellow,
+  .alert.alert-blue {
+    background: linear-gradient(102deg, #ed3218 0%, #f64a1a 52%, #ff6a31 100%);
+  }
+
+  .alert-icon {
+    width: 76px;
+    height: 76px;
+    filter: drop-shadow(0 6px 12px rgba(126, 39, 12, 0.25));
+  }
+
+  .alert-copy { min-width: 0; }
+
+  .alert-title {
+    font-size: 30px;
+    line-height: 1.06;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 4px 11px rgba(114, 30, 12, 0.25);
+  }
+
+  .alert-detail {
+    margin-top: 13px;
+    font-size: 19px;
+    line-height: 1.25;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: rgba(255,255,255,0.94);
+  }
+
+  .alert-action {
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 22px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .alert-action svg {
+    width: 19px;
+    height: 34px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .hourly {
+    height: 262px;
+    margin-top: 14px;
+    border-radius: 28px;
+    padding: 23px 24px 20px;
+  }
+
+  .section-title {
+    position: relative;
+    z-index: 1;
+    font-size: 26px;
+    line-height: 1;
+    font-weight: 800;
+    text-shadow: 0 4px 11px rgba(0, 63, 126, 0.24);
+  }
+
+  .hourly-list {
+    position: relative;
+    z-index: 1;
+    height: 184px;
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  .hour-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .hour-item + .hour-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 11px;
+    bottom: 1px;
+    width: 1px;
+    background: rgba(236,249,255,0.27);
+  }
+
+  .hour-time {
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 600;
+  }
+
+  .hour-icon {
+    width: 78px;
+    height: 78px;
+    margin: 8px 0 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 11px 12px rgba(0, 56, 116, 0.26));
+  }
+
+  .hour-icon img { width: 76px; height: 76px; object-fit: contain; }
+
+  .hour-temp {
+    font-size: 35px;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: -1px;
+  }
+
+  .daily {
+    height: 556px;
+    margin-top: 14px;
+    border-radius: 28px;
+    padding: 24px 22px 18px;
+  }
+
+  .daily-list {
+    position: relative;
+    z-index: 1;
+    margin-top: 15px;
+  }
+
+  .day-row {
+    height: 68px;
+    display: grid;
+    grid-template-columns: 108px 70px 128px 62px 1fr 62px;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .day-row:last-child { border-bottom: 0; }
+
+  .day-row.selected {
+    border-radius: 16px;
+    background: rgba(235, 249, 255, 0.17);
+    box-shadow: inset 0 0 0 1px rgba(245, 252, 255, 0.48), 0 7px 18px rgba(0, 75, 143, 0.16);
+  }
+
+  .day-name,
+  .day-weather,
+  .day-low,
+  .day-high {
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 600;
+  }
+
+  .day-name { padding-left: 13px; font-weight: 700; }
+  .day-weather { padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .day-low { text-align: right; color: rgba(245, 252, 255, 0.93); }
+  .day-high { text-align: right; padding-right: 9px; }
+
+  .day-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 66px;
+    height: 58px;
+    filter: drop-shadow(0 8px 9px rgba(0, 58, 119, 0.22));
+  }
+
+  .day-icon img { width: 57px; height: 57px; object-fit: contain; }
+
+  .trend {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+  }
+
+  .trend svg { width: 100%; height: 42px; overflow: visible; }
+
+</style>
+</head>
+<body>
+  <main class="app weather-{{WEATHER_THEME}}">
+    <header class="topbar">
+      <div class="location">
+        <svg class="location-icon" viewBox="0 0 24 30" aria-hidden="true">
+          <path fill="#f8fcff" d="M12 0C5.7 0 .6 5.1.6 11.4c0 8.2 11.4 18.1 11.4 18.1s11.4-9.9 11.4-18.1C23.4 5.1 18.3 0 12 0Z"/>
+          <circle cx="12" cy="11" r="4" fill="#238fcf"/>
+        </svg>
+        <div>
+          <div class="city">{{CITY}}</div>
+          <div class="updated">{{UPDATED}}</div>
+        </div>
+      </div>
+      <div class="top-actions" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="hero-temp">{{LIVE_TEMP}}°</div>
+        <div class="hero-weather">{{LIVE_WEATHER}}</div>
+        <div class="hero-feels">体感 {{FEELS}}°</div>
+        <div class="hero-range">最高 {{HIGH}}° / 最低 {{LOW}}°</div>
+      </div>
+      <div class="hero-icon">{{HERO_ICON}}</div>
+    </section>
+
+    <section class="metrics glass">
+      <div class="metric">
+        <svg class="metric-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4C12 4 5 7.5 5 15c0 2.2 1.8 4 4 4 7.5 0 11-7 11-15Z"/><path d="M4 21c3-7 7-10 13-13"/></svg>
+        <div class="metric-value">空气 {{AIR_LEVEL}} {{AIR_VALUE}}</div>
+      </div>
+      <div class="metric">
+        <svg class="metric-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2S5.5 9.2 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 9.2 12 2 12 2Z"/></svg>
+        <div class="metric-value">湿度 {{HUMIDITY}}</div>
+      </div>
+      <div class="metric">
+        <svg class="metric-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h11c2 0 3-1.1 3-2.4S16 3 14.5 3C13.3 3 12.4 3.7 12 4.7"/><path d="M3 12h16c1.7 0 3 1.2 3 2.7 0 1.8-1.4 3.3-3.2 3.3-1.3 0-2.4-.8-2.8-1.9"/><path d="M3 16h8"/></svg>
+        <div class="metric-value">{{WIND}}</div>
+      </div>
+      <div class="metric">
+        <svg class="metric-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <div class="metric-value">能见度 {{VISIBILITY}}</div>
+      </div>
+    </section>
+
+    <section class="alert alert-{{ALERT_SEVERITY}} glass">
+      <svg class="alert-icon" viewBox="0 0 80 72" aria-hidden="true">
+        <path d="M34 5c2.7-4.7 9.3-4.7 12 0l32 55.5C80.7 65.2 77.3 71 72 71H8c-5.3 0-8.7-5.8-6-10.5L34 5Z" fill="rgba(255,255,255,0.94)"/>
+        <path d="M40 19v25" stroke="#ef3d1f" stroke-width="7" stroke-linecap="round"/><circle cx="40" cy="56" r="4.5" fill="#ef3d1f"/>
+      </svg>
+      <div class="alert-copy">
+        <div class="alert-title">{{ALERT_TITLE}}</div>
+        <div class="alert-detail">{{ALERT_DETAIL}}</div>
+      </div>
+      <div class="alert-action">查看详情<svg viewBox="0 0 18 32"><path d="m4 3 10 13L4 29"/></svg></div>
+    </section>
+
+    <section class="hourly glass">
+      <h2 class="section-title">逐小时预报</h2>
+      <div class="hourly-list">{{HOURLY_ITEMS}}</div>
+    </section>
+
+    <section class="daily glass">
+      <h2 class="section-title">{{DAILY_TITLE}}</h2>
+      <div class="daily-list">{{DAILY_ROWS}}</div>
+    </section>
+
+  </main>
+</body>
+</html>

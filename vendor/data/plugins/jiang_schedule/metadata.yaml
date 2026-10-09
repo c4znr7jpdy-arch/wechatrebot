@@ -1,0 +1,6 @@
+name: jiang_schedule
+display_name: 姜小妹定时与签到
+desc: 定时任务插件 — 新闻、天气、Epic、KFC、油价、B站动态及多站点签到管理
+author: fch
+version: 1.2.0
+astrbot_version: ">=4.24.2"

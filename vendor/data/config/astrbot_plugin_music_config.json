@@ -1,0 +1,46 @@
+﻿{
+    "default_player_name": "星之阁点歌",
+    "song_limit": 5,
+    "select_mode": "single",
+    "send_modes": [
+        "card(卡片模式)",
+        "file(文件模式)",
+        "record(语音模式)",
+        "text(文本模式)"
+    ],
+    "record_supported": [
+        "aiocqhttp",
+        "dingtalk",
+        "lark",
+        "line",
+        "qq_official",
+        "qq_official_webhook",
+        "satori",
+        "telegram",
+        "webchat",
+        "wecom"
+    ],
+    "file_supported": [
+        "aiocqhttp",
+        "discord",
+        "dingtalk",
+        "lark",
+        "line",
+        "misskey",
+        "qq_official",
+        "qq_official_webhook",
+        "satori",
+        "telegram",
+        "webchat",
+        "weixin_oc"
+    ],
+    "enable_comments": false,
+    "enable_lyrics": false,
+    "proxy": "",
+    "timeout": 30,
+    "timeout_recall": true,
+    "clear_cache": true,
+    "playlist_limit": 100,
+    "enc_sec_key": "45c8bcb07e69c6b545d3045559bd300db897509b8720ee2b45a72bf2d3b216ddc77fb10daec4ca54b466f2da1ffac1e67e245fea9d842589dc402b92b262d3495b12165a721aed880bf09a0a99ff94c959d04e49085dc21c78bbbe8e3331827c0ef0035519e89f097511065643120cbc478f9c0af96400ba4649265781fc9079",
+    "enc_params": "D33zyir4L/58v1qGPcIPjSee79KCzxBIBy507IYDB8EL7jEnp41aDIqpHBhowfQ6iT1Xoka8jD+0p44nRKNKUA0dv+n5RWPOO57dZLVrd+T1J/sNrTdzUhdHhoKRIgegVcXYjYu+CshdtCBe6WEJozBRlaHyLeJtGrABfMOEb4PqgI3h/uELC82S05NtewlbLZ3TOR/TIIhNV6hVTtqHDVHjkekrvEmJzT5pk1UY6r0="
+}

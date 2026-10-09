@@ -79,16 +79,17 @@ class Event:
 
 @pytest.fixture
 def command_runtime(tmp_path):
-    wheel = ROOT / "artifacts/runtime-cache/wheels-py313-win-amd64/astrbot-4.26.6-py3-none-any.whl"
+    engine = ROOT / "vendor/engine"
     plugin_path = PROJECT_PLUGINS / MODULE / "main.py"
-    if not wheel.is_file() or not plugin_path.is_file():
-        pytest.skip("Pinned engine and plugin source are required for command routing verification")
+    if not engine.is_dir() or not plugin_path.is_file():
+        pytest.fail("Pinned engine and plugin source are required for command routing verification")
     stage_path = "astrbot/core/pipeline/waking_check/stage.py"
     registry_path = "astrbot/core/star/star_handler.py"
-    with zipfile.ZipFile(wheel) as archive:
-        archive.extract(stage_path, tmp_path)
-        archive.extract(registry_path, tmp_path)
-        command_source = archive.read("astrbot/core/star/filter/command.py").decode("utf-8")
+    for relative in (stage_path, registry_path):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((engine / relative).read_bytes())
+    command_source = (engine / "astrbot/core/star/filter/command.py").read_text("utf-8")
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     for patch, includes in [
         ("astrbot-4.26.6-wechat.patch", [registry_path]),

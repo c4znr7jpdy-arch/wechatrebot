@@ -7,13 +7,13 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT = Path("E:/Project")
+PROJECT = Path(__file__).parents[1] / "vendor"
 
 
 def _patched_main(tmp_path: Path) -> str:
     source = PROJECT / "data/plugins/jiang_short_drama"
     if not (source / "main.py").is_file():
-        pytest.skip("short-drama source is unavailable")
+        pytest.fail("short-drama source is unavailable")
     checkout = tmp_path / "jiang_short_drama"
     shutil.copytree(source, checkout)
 

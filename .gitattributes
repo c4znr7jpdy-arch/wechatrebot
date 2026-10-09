@@ -5,7 +5,8 @@ legal/CORRESPONDING-SOURCE.md text eol=lf
 legal/THIRD-PARTY-NOTICES.md text eol=lf
 legal/THIRD-PARTY-LICENSES.txt text eol=lf
 release/sbom.cdx.json text eol=lf
-tests/fixtures/patch_sources/** text eol=lf
+# Preserve pinned upstream whitespace; validate these bytes through the manifest.
+vendor/** text=auto eol=lf -whitespace
 
 # Pinned native plugin snapshots must retain reproducible source bytes.
 runtime/meme_manager/** text=auto eol=lf

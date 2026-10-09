@@ -6,7 +6,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-SOURCE = Path("E:/Project/astrbot_venv/Lib/site-packages")
+SOURCE = ROOT / "vendor/engine"
 PATCH = ROOT / "patches" / "astrbot-4.26.6-wechat.patch"
 
 
@@ -16,7 +16,7 @@ def test_provider_runtime_uses_one_bounded_attempt(tmp_path: Path) -> None:
         Path("astrbot/core/provider/sources/request_retry.py"),
     )
     if not all((SOURCE / relative).is_file() for relative in relatives):
-        pytest.skip("Pinned AstrBot source unavailable")
+        pytest.fail("Pinned AstrBot source unavailable")
     for relative in relatives:
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)

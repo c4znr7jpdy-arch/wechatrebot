@@ -1,0 +1,17 @@
+{
+  "request_timeout_seconds": 10,
+  "max_concurrent_sources": 4,
+  "cache_ttl_minutes": 360,
+  "full_version_min_minutes": 30,
+  "min_fuzzy_score": 3000,
+  "player_url_template": "https://player.xiuxianjyj.xin/short-drama/player?url={url}&title={title}&episode={episode}",
+  "stateless_player_url": "https://player.xiuxianjyj.xin/short-drama/player",
+  "selection_store_api_url": "https://player.xiuxianjyj.xin/short-drama/api/selections",
+  "selection_store_api_token": "",
+  "selection_store_timeout_seconds": 8,
+  "episode_player_public_base_url": "",
+  "episode_player_bind_host": "127.0.0.1",
+  "episode_player_port": 6197,
+  "episode_player_token_ttl_minutes": 360,
+  "episode_player_max_playlists": 200
+}

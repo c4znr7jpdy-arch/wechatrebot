@@ -546,7 +546,7 @@ class GroupPolicyService:
 
     def proactive_summary(self, account_id: str, group_id: str) -> dict[str, object]:
         policy = self.get(account_id, group_id)
-        schedules = self.schedules.list()
+        schedules = self.schedules.list(account_id=account_id)
         schedule_items = [
             {
                 "id": str(item.get("id") or ""),

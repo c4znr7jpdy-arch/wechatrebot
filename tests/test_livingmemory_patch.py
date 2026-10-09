@@ -18,7 +18,7 @@ PATCH = ROOT / "patches" / "astrbot-plugin-astrbot_plugin_livingmemory.patch"
 @pytest.fixture()
 def patched_plugin(tmp_path: Path) -> Path:
     if not SOURCE.is_dir():
-        pytest.skip("long-term-memory source is unavailable")
+        pytest.fail("long-term-memory source is unavailable")
     target = tmp_path / "astrbot_plugin_livingmemory"
     shutil.copytree(SOURCE, target)
     # The host user profile can itself be a Git worktree. Make the copied plugin

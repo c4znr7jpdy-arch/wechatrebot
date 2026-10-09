@@ -12,7 +12,7 @@ from test_plugin_portability import _patched
 
 
 ROOT = Path(__file__).parents[1]
-SOURCE = ROOT / "tests/fixtures/patch_sources/data/plugins"
+SOURCE = ROOT / "vendor/data/plugins"
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_preview_bridge_output_has_no_sender_prefix(bt_source, preview, expected
         preview, True,
     )
     plugin.whatslink_service.get_preview.assert_awaited_once_with("magnet:test")
-    bridge = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py"
+    bridge = ROOT / "vendor/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py"
     expand = _runtime_function(bridge.read_text("utf-8"), "_expand_forward_nodes", {
         "Mapping": Mapping, "UnsupportedSegmentError": ValueError,
     })

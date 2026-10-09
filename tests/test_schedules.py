@@ -7,6 +7,11 @@ from wechatrebot_manager.schedules import ScheduleService
 from wechatrebot_manager.plugin_center import PluginCenterError
 
 
+@pytest.fixture(autouse=True)
+def current_account(monkeypatch):
+    monkeypatch.setattr(ScheduleService, "_runtime_account", lambda self: "wxid_robot_a")
+
+
 def _database(root: Path) -> tuple[Path, str]:
     data = root / "app" / "astrbot" / "data"
     data.mkdir(parents=True)
@@ -29,7 +34,7 @@ def _database(root: Path) -> tuple[Path, str]:
                 "weather_source:GroupMessage:123@chatroom",
                 "天气预报 定时推送",
                 "0 8 * * *",
-                json.dumps({"session": "source:GroupMessage:123@chatroom"}),
+                json.dumps({"account_id": "wxid_robot_a", "session": "source:GroupMessage:123@chatroom"}),
                 1,
                 "scheduled",
                 None,
@@ -105,7 +110,7 @@ def _checkin_database(root: Path) -> tuple[Path, str]:
                 f"checkin_{session}",
                 "每日签到 定时推送",
                 "30 8 * * *",
-                json.dumps({"session": session}),
+                json.dumps({"account_id": "wxid_robot_a", "session": session}),
                 1,
                 "scheduled",
                 None,
@@ -213,7 +218,7 @@ def test_obsolete_targetless_default_checkin_is_removed_permanently(
                 "checkin_",
                 "每日签到 定时推送",
                 "30 8 * * *",
-                json.dumps({"session": ""}),
+                json.dumps({"account_id": "wxid_robot_a", "session": ""}),
                 1,
                 "scheduled",
                 None,
@@ -337,3 +342,62 @@ def test_obsolete_checkin_cleanup_preserves_current_authorized_schedule(tmp_path
     monkeypatch.setattr(service.engine, "is_available", lambda: False)
     assert {item["id"] for item in service.list()["items"]} == {"job-weather", "job-checkin"}
     assert service._checkin_config_path().read_bytes() == original
+
+
+@pytest.mark.parametrize("owner", [None, "wxid_other"])
+@pytest.mark.parametrize("action", ["enable", "time", "delete"])
+def test_unassigned_and_other_account_jobs_cannot_be_changed(tmp_path, monkeypatch, owner, action):
+    database, job_id = _database(tmp_path)
+    with sqlite3.connect(database) as connection:
+        payload = {"session": "source:GroupMessage:123@chatroom"}
+        if owner:
+            payload["account_id"] = owner
+        connection.execute("UPDATE cron_jobs SET payload=? WHERE job_id=?", (json.dumps(payload), job_id))
+    service = ScheduleService(tmp_path)
+    source_before = service._schedule_tasks_path().read_bytes()
+    database_before = database.read_bytes()
+    monkeypatch.setattr(service.engine, "is_available", lambda: pytest.fail("Unauthorized job probed engine"))
+    result = service.list()
+    assert result["items"] == []
+    assert result["unassigned_count"] == (1 if owner is None else 0)
+    with pytest.raises(ValueError, match="账号"):
+        if action == "enable":
+            service.set_enabled(job_id, False)
+        elif action == "time":
+            service.update_time(job_id, "09:30")
+        else:
+            service.delete(job_id)
+    assert database.read_bytes() == database_before
+    assert service._schedule_tasks_path().read_bytes() == source_before
+
+
+def test_account_change_during_engine_probe_blocks_task_write(tmp_path, monkeypatch):
+    database, job_id = _database(tmp_path)
+    account = ["wxid_robot_a"]
+    service = ScheduleService(tmp_path, account_hint=lambda: account[0])
+    before = service._schedule_tasks_path().read_bytes()
+
+    def available():
+        account[0] = "wxid_robot_b"
+        return True
+
+    monkeypatch.setattr(service.engine, "is_available", available)
+    monkeypatch.setattr(service.engine, "request", lambda *args: pytest.fail("Changed account reached engine write"))
+    with pytest.raises(ValueError, match="当前微信账号"):
+        service.set_enabled(job_id, False)
+    assert service._schedule_tasks_path().read_bytes() == before
+    assert service.list()["items"] == []
+    account[0] = ""
+    assert service.list()["requires_login"] is True
+
+
+def test_unassigned_obsolete_job_is_not_deleted_on_read(tmp_path, monkeypatch):
+    database, _ = _database(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute("INSERT INTO cron_jobs(job_id,name,payload,enabled) VALUES(?,?,?,?)",
+                           ("unknown", "checkin_", '{"session":""}', 1))
+    service = ScheduleService(tmp_path)
+    monkeypatch.setattr(service.engine, "is_available", lambda: pytest.fail("Unassigned cleanup reached engine"))
+    assert service.list()["unassigned_count"] == 1
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT enabled FROM cron_jobs WHERE job_id='unknown'").fetchone() == (1,)

@@ -3,11 +3,48 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
+import tempfile
+import hashlib
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "tests/fixtures/patch_sources/data/plugins/jiang_image"
+sys.path.insert(0, str(ROOT / "scripts"))
+SOURCE = ROOT / "vendor/data/plugins/jiang_image"
+
+
+@pytest.fixture
+def vendor_inputs():
+    def create(repository):
+        source = repository / "vendor"
+        source.mkdir(parents=True)
+        raw = b"value = 1\n"
+        (source / "module.py").write_bytes(raw)
+        (source / "manifest.json").write_text(json.dumps({"schema_version": 1, "files": [
+            {"path": "module.py", "sha256": hashlib.sha256(raw).hexdigest()},
+        ]}), encoding="utf-8")
+        return source
+    return create
+
+
+@pytest.fixture(scope="session")
+def patched_plugins():
+    """Apply the product's actual plugin assembly to pinned sources, without a runtime."""
+    from build_staging import _apply_plugin_patches, _copy_source_entry
+
+    artifacts = ROOT / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="test-plugin-inputs-", dir=artifacts) as directory:
+        output = Path(directory)
+        entries = json.loads((ROOT / "release/source-manifest.json").read_text("utf-8"))["entries"]
+        for entry in entries:
+            if not entry["target"].startswith("app/astrbot/data/plugins/"):
+                continue
+            base = ROOT if entry["origin"] == "commercial" else ROOT / "vendor"
+            _copy_source_entry(base / entry["source"], output / entry["target"], entry)
+        _apply_plugin_patches(ROOT, output)
+        yield output / "app/astrbot/data/plugins"
 
 
 @pytest.fixture

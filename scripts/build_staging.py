@@ -21,6 +21,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 from wechatrebot_manager import hook_recall_patch
+from source_inputs import verify_source_inputs
 
 
 _SENSITIVE_FIELD = re.compile(
@@ -591,7 +592,7 @@ def _validate_manager_exe(value: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--source-root", type=Path, default=COMMERCIAL_ROOT / "vendor")
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--runtime-root",
@@ -606,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     commercial_root = COMMERCIAL_ROOT
-    source_root = args.source_root.resolve()
+    source_root = verify_source_inputs(commercial_root, args.source_root)
     output = (args.output or commercial_root / "artifacts" / "staging").resolve()
     artifacts_root = (commercial_root / "artifacts").resolve()
     if output != artifacts_root and artifacts_root not in output.parents:

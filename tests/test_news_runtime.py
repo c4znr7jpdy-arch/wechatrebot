@@ -17,7 +17,7 @@ ROOT = Path(__file__).parents[1]
 @pytest.fixture
 def schedule_config_loader(tmp_path):
     source = _patched(tmp_path, "jiang_schedule", "main.py", all_patches=True,
-                      source_root=ROOT / "tests/fixtures/patch_sources/data/plugins")
+                      source_root=ROOT / "vendor/data/plugins")
     runtime = tmp_path / "app/astrbot/data"
     path = runtime / "config/jiang_commands_config.json"
     path.parent.mkdir(parents=True)

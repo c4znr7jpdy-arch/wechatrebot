@@ -9,13 +9,13 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT = Path("E:/Project")
+PROJECT = Path(__file__).parents[1] / "vendor"
 
 
 def _load_patched_search(tmp_path: Path):
     source = PROJECT / "data/plugins/jiang_short_drama/search.py"
     if not source.is_file():
-        pytest.skip("short-drama upstream source is unavailable")
+        pytest.fail("short-drama upstream source is unavailable")
     checkout = tmp_path / "short-drama-network"
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)

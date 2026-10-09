@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {
+    --white: #f8fcff;
+    --muted: rgba(240, 249, 255, 0.82);
+    --line: rgba(235, 249, 255, 0.34);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 864px; height: 1080px; overflow: hidden; }
+  body {
+    color: var(--white);
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background:
+      radial-gradient(circle at 82% 18%, rgba(255, 244, 174, 0.28), transparent 170px),
+      radial-gradient(ellipse at 16% 84%, rgba(225, 249, 255, 0.25), transparent 310px),
+      linear-gradient(160deg, #0674ca 0%, #078ed8 52%, #2bb7e6 100%);
+  }
+  .card { position: relative; width: 100%; height: 100%; padding: 48px 54px; }
+  .card::before {
+    content: ""; position: absolute; inset: 24px; border-radius: 42px;
+    border: 1px solid rgba(244, 252, 255, 0.42);
+    box-shadow: inset 0 1px rgba(255,255,255,0.28), 0 20px 50px rgba(0,67,132,0.20);
+    pointer-events: none;
+  }
+  .top { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; }
+  .city { font-size: 40px; line-height: 1; font-weight: 800; }
+  .date { margin-top: 14px; color: var(--muted); font-size: 25px; font-weight: 600; }
+  .kind {
+    padding: 11px 20px; border: 1px solid rgba(245,252,255,0.50); border-radius: 22px;
+    background: rgba(223,245,255,0.12); font-size: 23px; font-weight: 700;
+  }
+  .hero {
+    position: relative; z-index: 1; height: 475px; margin-top: 35px;
+    display: grid; grid-template-columns: 1fr 350px; align-items: center;
+  }
+  .weather { font-size: 53px; font-weight: 800; line-height: 1.15; }
+  .range { display: flex; align-items: baseline; gap: 22px; margin-top: 32px; }
+  .high { font-size: 126px; font-weight: 400; line-height: 0.8; letter-spacing: -7px; }
+  .low { color: var(--muted); font-size: 43px; font-weight: 600; }
+  .icon { display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 18px 20px rgba(0,60,120,0.24)); }
+  .icon img { width: 300px; height: 300px; object-fit: contain; }
+  .details {
+    position: relative; z-index: 1; height: 190px; display: grid; grid-template-columns: repeat(4, 1fr);
+    border: 1px solid rgba(239,250,255,0.50); border-radius: 30px;
+    background: linear-gradient(145deg, rgba(90,181,234,0.32), rgba(14,111,190,0.30));
+    box-shadow: 0 14px 30px rgba(0,68,134,0.20), inset 0 1px rgba(255,255,255,0.22);
+  }
+  .detail { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .detail + .detail::before { content: ""; position: absolute; left: 0; top: 30px; bottom: 30px; width: 1px; background: var(--line); }
+  .label { color: var(--muted); font-size: 21px; font-weight: 600; }
+  .value { min-height: 38px; margin-top: 15px; font-size: 28px; font-weight: 800; white-space: nowrap; }
+  .note {
+    position: relative; z-index: 1; min-height: 76px; margin-top: 34px; padding: 20px 28px;
+    border-radius: 22px; background: rgba(4,104,181,0.24); color: rgba(245,252,255,0.88);
+    font-size: 22px; line-height: 1.55; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <header class="top">
+      <div><div class="city">{{CITY}}</div><div class="date">{{DATE}}</div></div>
+      <div class="kind">{{KIND}}</div>
+    </header>
+    <section class="hero">
+      <div>
+        <div class="weather">{{WEATHER}}</div>
+        <div class="range"><span class="high">{{HIGH}}</span><span class="low">最低 {{LOW}}</span></div>
+      </div>
+      <div class="icon">{{ICON}}</div>
+    </section>
+    <section class="details">
+      <div class="detail"><div class="label">湿度</div><div class="value">{{HUMIDITY}}</div></div>
+      <div class="detail"><div class="label">风力</div><div class="value">{{WIND}}</div></div>
+      <div class="detail"><div class="label">{{PRECIPITATION_LABEL}}</div><div class="value">{{PRECIPITATION}}</div></div>
+      <div class="detail"><div class="label">能见度</div><div class="value">{{VISIBILITY}}</div></div>
+    </section>
+    <div class="note">{{NOTE}}</div>
+  </main>
+</body>
+</html>

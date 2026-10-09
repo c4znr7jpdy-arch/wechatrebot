@@ -10,13 +10,13 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT = Path("E:/Project")
+PROJECT = Path(__file__).parents[1] / "vendor"
 
 
 def _patched_player(tmp_path: Path) -> Path:
     source = PROJECT / "deploy/short_drama_player"
     if not (source / "index.html").is_file() or not (source / "state_server.py").is_file():
-        pytest.skip("hosted short-drama player source is unavailable")
+        pytest.fail("hosted short-drama player source is unavailable")
     checkout = tmp_path / "short-drama-player"
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
@@ -222,7 +222,7 @@ def test_recommendation_http_endpoint_and_busy_cache(tmp_path, monkeypatch):
 def test_recommendation_proxy_patch_applies_to_hosted_nginx(tmp_path):
     source = PROJECT / "deploy/nginx/short_drama_player.conf"
     if not source.is_file():
-        pytest.skip("hosted nginx source unavailable")
+        pytest.fail("hosted nginx source unavailable")
     # Preserve the Linux host's LF configuration contract on Windows as well.
     (tmp_path / source.name).write_text(source.read_text("utf-8"), encoding="utf-8", newline="\n")
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)

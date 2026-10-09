@@ -20,7 +20,7 @@ from wechatrebot_manager.task_store import TaskStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(r"E:\Project\hook_41827_astrbot_bridge")
+SOURCE = ROOT / "vendor/hook_41827_astrbot_bridge"
 ACCOUNT = "wxid_bot"
 GROUP = "room@chatroom"
 CONTACT = "wxid_friend"
@@ -31,7 +31,7 @@ DUE = datetime(2026, 9, 13, 0, 1, tzinfo=timezone.utc)
 @pytest.fixture(scope="module")
 def bridge(tmp_path_factory):
     if not (SOURCE / "src/hook_bridge/onebot_client.py").is_file():
-        pytest.skip("pinned bridge checkout unavailable")
+        pytest.fail("pinned bridge checkout unavailable")
     repository = tmp_path_factory.mktemp("scheduled-delivery-bridge")
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True, capture_output=True)
     package_root = repository / "hook_41827_astrbot_bridge/src/hook_bridge"

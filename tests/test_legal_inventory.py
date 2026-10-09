@@ -146,7 +146,7 @@ def test_legal_inventory_includes_ffmpeg_in_all_artifacts(tmp_path: Path, monkey
     result = builder.main([
         "--runtime-root", str(tmp_path),
         "--manager-site-packages", str(tmp_path),
-        "--project-root", str(tmp_path),
+        "--project-root", str(Path(__file__).parents[1] / "vendor"),
         "--corresponding-source", str(corresponding_source),
         *(value for name, path in outputs.items() for value in (f"--{name}", str(path))),
     ])

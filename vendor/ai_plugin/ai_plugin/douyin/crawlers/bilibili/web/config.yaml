@@ -1,0 +1,20 @@
+TokenManager:
+  bilibili:
+    headers:
+      accept-language: zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6
+      cookie: buvid3=743C93AE-BB55-C9B4-D3EF-F7D384AD29A954704infoc; b_nut=1775196854;
+        _uuid=4235ABF5-3438-FB59-276C-EFA4E124EC3955303infoc; buvid_fp=f8b5470348e8a3b3a94fac24715a06b4;
+        rpdid=|(JY)J)RR|Rk0J'u~~lumY)lY; buvid4=BCE9F1C2-7F60-D744-E272-96510D6BBD4C56123-026040314-+lyxXVD3Og/q2Q09z0Fh3A%3D%3D;
+        SESSDATA=651845a2%2C1790748899%2C03f2f%2A42CjACNr4qB1Qb0XPnL87r3jJRfVs7iR861MF7zx65Zz6r4vEQ5XvDEHKcWETmESPHsR0SVlVqUnpYdkE1UkZPbTZPb25nQ0hsaU55WEluWXF1YzdLeWlUeE5HQkhwMFpQeDVwQ25ld21fVXViVEg1MmoyRDZLWVB4dW96ZkFrZktqUWJrZlpJekdnIIEC;
+        bili_jct=bd0b02fdef6f4af6f2a563c487ba2e87; DedeUserID=327694420; DedeUserID__ckMd5=198784011240b7e4;
+        sid=75tvrqjc; theme-tip-show=SHOWED; CURRENT_QUALITY=80; theme-avatar-tip-show=SHOWED;
+        bsource=search_google; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Nzg0MDg4ODcsImlhdCI6MTc3ODE0OTYyNywicGx0IjotMX0.jnlusW5XSQzj9J0_dfj0unFO-TQN8k3DcFCfcoUghNg;
+        bili_ticket_expires=1778408827; CURRENT_FNVAL=2000; b_lsid=36BC402D_19E02013F0D
+      origin: https://www.bilibili.com
+      origin_2: https://space.bilibili.com
+      referer: https://space.bilibili.com/
+      user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+        like Gecko) Chrome/90.0.4430.212 Safari/537.36
+    proxies:
+      http: null
+      https: null

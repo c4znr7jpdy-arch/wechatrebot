@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BRIDGE_SOURCE = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge"
+BRIDGE_SOURCE = ROOT / "vendor/hook_41827_astrbot_bridge"
 PATCH_PATH = ROOT / "patches" / "hook-bridge-image-recall-batch.patch"
 
 

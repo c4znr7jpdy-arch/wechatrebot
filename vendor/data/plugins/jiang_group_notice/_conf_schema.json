@@ -1,0 +1,14 @@
+{
+  "welcome_title": {
+    "description": "入群卡片大标题",
+    "type": "string",
+    "hint": "支持占位符：{group_name} 群名，{display_name} 群昵称，{nickname} 名称，{user_id} WxID。保存后下一张入群卡片立即生效。",
+    "default": "🎉 欢迎新成员加入！"
+  },
+  "welcome_tail": {
+    "description": "入群卡片最后一行",
+    "type": "string",
+    "hint": "例如：欢迎来到 爱人们~。支持占位符：{group_name} 群名，{display_name} 群昵称，{nickname} 名称，{user_id} WxID。",
+    "default": "欢迎来到 {group_name}~"
+  }
+}
