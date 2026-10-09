@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .discovery import flatten_commands
+from .search import CatalogQuery, match_score as _catalog_match_score, search_text
 
 
 _PLUGINS_DIR = Path(__file__).resolve().parent.parent
@@ -425,53 +426,11 @@ def missing_argument_message(
     return f"要用{capability.name}还差参数：{'；'.join(labels)}"
 
 
-def _longest_common_substring_length(left: str, right: str) -> int:
-    """Return a small fuzzy-match score suitable for short Chinese queries."""
-    if not left or not right:
-        return 0
-    previous = [0] * (len(right) + 1)
-    longest = 0
-    for left_char in left:
-        current = [0] * (len(right) + 1)
-        for index, right_char in enumerate(right, 1):
-            if left_char == right_char:
-                current[index] = previous[index - 1] + 1
-                longest = max(longest, current[index])
-        previous = current
-    return longest
-
-
-def _catalog_match_score(query: str, searchable_text: str) -> int:
-    normalized_query = normalize_intent(query)
-    normalized_text = normalize_intent(searchable_text)
-    if not normalized_query:
-        return 1
-    if normalized_query in normalized_text:
-        return len(normalized_query) + 10
-    if normalized_text and normalized_text in normalized_query:
-        return len(normalized_text) + 5
-    return _longest_common_substring_length(normalized_query, normalized_text)
-
-
 def _command_search_text(
     command: dict[str, Any],
     plugin_description: str = "",
 ) -> str:
-    aliases = command.get("aliases") or []
-    if not isinstance(aliases, list):
-        aliases = []
-    return " ".join(
-        str(value or "")
-        for value in (
-            command.get("plugin_display_name"),
-            command.get("plugin"),
-            plugin_description,
-            command.get("effective_command"),
-            command.get("original_command"),
-            command.get("description"),
-            " ".join(str(alias) for alias in aliases),
-        )
-    )
+    return " ".join((search_text(command), plugin_description))
 
 
 def _clean_command_description(value: Any) -> str:
@@ -486,21 +445,17 @@ def catalog_text(
     commands: list[dict[str, Any]] | None = None,
     plugin_descriptions: dict[str, str] | None = None,
     capabilities=None,
+    empty_message: bool = True,
 ) -> str:
     """Build the model-facing catalog for natural and command-only abilities."""
     plugin_descriptions = plugin_descriptions or {}
     normalized_query = normalize_intent(query)
 
-    selected_capabilities = [
-        capability
-        for capability in (CAPABILITIES if capabilities is None else capabilities)
-        if not normalized_query
-        or _catalog_match_score(
-            query,
-            " ".join((capability.name, capability.description, *capability.aliases)),
-        )
-        >= 2
-    ]
+    selected_capabilities = CatalogQuery(query).rank(
+        CAPABILITIES if capabilities is None else capabilities,
+        lambda item: " ".join((item.name, *item.aliases)),
+        lambda item: item.description,
+    )
 
     command_groups: dict[str, list[dict[str, Any]]] = {}
     for command in flatten_commands(commands or []):
@@ -585,6 +540,8 @@ def catalog_text(
                 lines.append(f"  - /{effective_command}{permission_note}{detail}")
 
     if not lines:
+        if not empty_message:
+            return ""
         return (
             f"当前已注册的自然能力和命令型插件中，没有匹配“{query}”的项目。"
             "可以换用插件名、功能名或命令关键词再查。"

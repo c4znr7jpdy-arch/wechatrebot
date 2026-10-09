@@ -6,6 +6,8 @@ import logging
 import re
 from pathlib import Path
 
+from .search import CatalogQuery, search_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -179,14 +181,28 @@ async def discover(context, event, commands) -> dict:
 
 def render_catalog(snapshot: dict, natural: str, query: str, tools=()) -> str:
     """Keep all plugin descriptions visible, including event-only and background plugins."""
-    needle = query.strip().casefold()
-
-    def matches(value):
-        return not needle or needle in json.dumps(value, ensure_ascii=False).casefold()
-
-    output = [natural]
+    search = CatalogQuery(query)
+    output = [natural] if natural else []
     plugin_names = {item["name"] for item in snapshot["plugins"]}
-    plugins = [item for item in snapshot["plugins"] if matches(item)]
+    owners = {item["name"]: search_text(item) for item in snapshot["plugins"]}
+    owner_text = lambda item: owners.get(item.get("plugin"), "")
+    plugins = search.rank(snapshot["plugins"], search_text)
+    selected_commands = search.rank(snapshot["commands"], search_text, owner_text)
+    declarations = search.rank(snapshot["declarations"], search_text, owner_text)
+    native = search.rank([x for x in tools if not x.get("plugin") or x["plugin"] in plugin_names],
+                         search_text, owner_text)
+    matched_owners = {item.get("plugin") for item in selected_commands + declarations + native}
+    listed_owners = {item["name"] for item in plugins}
+    plugins.extend(item for item in snapshot["plugins"]
+                   if item["name"] in matched_owners - listed_owners)
+    if search.text and snapshot["plugins"] and not (
+        natural or plugins or selected_commands or declarations or native
+    ):
+        output.append("本次关键词没有匹配结果，不代表机器人没有此功能。请按下方已授权插件简介，"
+                      "改用较短的功能关键词或空 query 再查；仍无执行入口时如实说明。")
+        plugins = snapshot["plugins"]
+    if not (natural or plugins or selected_commands or declarations or native):
+        output.append("当前会话没有已启用且获授权的插件能力；请检查插件启用和会话授权。")
     output.append("已启用插件（简介不代表已开放 AI 执行；后台功能按配置自动运行）：\n" +
                   json.dumps(plugins, ensure_ascii=False))
     commands = [{"id": "command:" + item["handler_full_name"],
@@ -194,13 +210,12 @@ def render_catalog(snapshot: dict, natural: str, query: str, tools=()) -> str:
                  "description": item.get("description", ""),
                  "parameters": item.get("parameters", ""),
                  "permission": item.get("permission", "everyone")}
-                for item in snapshot["commands"] if matches(item)]
+                for item in selected_commands]
     output.append("标准命令：可用 capability_execute；未声明只读的操作需用户发送“执行 完整命令”。\n" +
                   json.dumps(commands, ensure_ascii=False))
     output.append("插件声明的用法（handler 为空仅供说明；read 可自然调用，write 需明确执行完整命令）：\n" +
-                  json.dumps([x for x in snapshot["declarations"] if matches(x)], ensure_ascii=False))
+                  json.dumps(declarations, ensure_ascii=False))
     output.append("本轮模型已获授权的专用工具（优先直接调用）：\n" +
-                  json.dumps([x for x in tools if matches(x) and
-                              (not x.get("plugin") or x["plugin"] in plugin_names)], ensure_ascii=False))
+                  json.dumps(native, ensure_ascii=False))
     output.append("未列出或未启用的能力不得声称可用。只凭简介不能推断参数或执行成功。")
     return "\n\n".join(output)

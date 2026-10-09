@@ -13,8 +13,13 @@ ROOT = Path(__file__).parents[1]
 
 
 def load_module(name):
+    package = "capability_discovery_tests"
+    if package not in sys.modules:
+        module = ModuleType(package)
+        module.__path__ = [str(ROOT / "runtime/jiang_capability_router")]
+        sys.modules[package] = module
     spec = importlib.util.spec_from_file_location(
-        name, ROOT / "runtime/jiang_capability_router" / f"{name}.py"
+        f"{package}.{name}", ROOT / "runtime/jiang_capability_router" / f"{name}.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
