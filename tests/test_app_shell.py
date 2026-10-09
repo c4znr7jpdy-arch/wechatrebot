@@ -30,6 +30,7 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value._build_number = 0
     value._update_logger = UpdateLogger(tmp_path)
     value._catalog = load_error_catalog()
+    value._action_lock = threading.Lock()
     value._update_lock = threading.Lock()
     value._update_status_lock = threading.Lock()
     value._update_status = {
