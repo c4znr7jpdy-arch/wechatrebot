@@ -427,7 +427,7 @@
         if (["subscription", "home"].includes(state.activePage) && document.visibilityState !== "hidden") void load({silent: true});
       }, 4000);
       window.setInterval(() => {
-        if (state.activePage === "subscription" && document.visibilityState !== "hidden") void loadContact();
+        if (state.activePage === "subscription" && document.visibilityState !== "hidden") void loadContact(true);
       }, contactRefreshMs);
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState !== "hidden" && state.activePage === "subscription") refreshContactIfNeeded();

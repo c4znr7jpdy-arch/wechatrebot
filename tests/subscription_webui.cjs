@@ -206,29 +206,66 @@ async function wechatContactHasItsOwnRefreshCycle() {
   const h = harness();
   h.clock.now = Date.parse('2026-10-09T08:00:00Z');
   h.contact.expires_at = bundledContact.expires_at;
+  let remoteContact = structuredClone(h.contact), cachedContact, fetchedAt = -Infinity;
+  const downloads = [];
+  h.handlers.get_license_contact = async force => {
+    if (force || h.clock.monotonic - fetchedAt >= 60000) {
+      downloads.push(h.clock.monotonic);
+      await h.advance(200);
+      cachedContact = structuredClone(remoteContact);
+      fetchedAt = h.clock.monotonic;
+    }
+    return cachedContact === null
+      ? {state: 'unavailable', image_data_url: '', source: 'remote', message: '微信群二维码尚未配置。'}
+      : {...structuredClone(cachedContact), source: 'remote'};
+  };
   await h.ui.initialize();
+  await flush();
   assert.equal(h.element('#licenseQrImage').hidden, false);
   assert.equal(h.element('#licenseQrImage').getAttribute('src'), h.contact.image_data_url);
   assert.match(h.element('#licenseContactExpiry').textContent, /2026年10月16日前有效（北京时间）/);
   assert.equal(h.calls.filter(([method]) => method === 'get_license_contact').length, 1);
   await h.ui.onNavigate('subscription');
   await h.ui.onNavigate('subscription');
+  await h.advance(4000);
   h.intervals.find(fn => fn.delay === 4000)(); await flush();
   assert.equal(h.calls.filter(([method]) => method === 'get_license_contact').length, 1,
     'License polling and repeated navigation must not re-download the QR image');
+  assert.equal(downloads.length, 1);
 
   h.handlers.preview_activation_code = async () => ({preview_id: 'qr-preview', plan: 'month', valid_until: 1800000000});
   await h.preview('WRB-KEEP-INPUT');
   h.element('#licensePlans').listeners.click({target: {closest: () => ({})}});
   assert.equal(h.element('#licenseContactPanel').scrolled, true);
   assert.equal(h.element('#licenseContactPanel').focused, true);
+  remoteContact = {...h.contact, group_name: 'Updated WeChat group',
+    image_data_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='};
+  // The server response completed at 200 ms, so its cache is only 59.8 seconds
+  // old when the page's first 60-second timer fires.
+  await h.advance(60000 - h.clock.monotonic);
   h.intervals.find(fn => fn.delay === 60000)(); await flush();
-  assert.equal(h.calls.filter(([method]) => method === 'get_license_contact').length, 2);
-  assert.equal(h.calls.filter(([method]) => method === 'get_license_contact').at(-1)[1], false);
+  assert.equal(h.element('#licenseGroupName').textContent, remoteContact.group_name,
+    'The first refresh must display a replacement QR despite the response-completion cache');
+  assert.equal(h.element('#licenseQrImage').getAttribute('src'), remoteContact.image_data_url);
+  assert.deepEqual(downloads, [0, 60000]);
   assert.equal(h.element('#licenseCode').value, 'WRB-KEEP-INPUT');
   assert.equal(h.element('#licenseCodePreview').hidden, false);
+
+  remoteContact = null;
+  await h.advance(120000 - h.clock.monotonic);
+  h.intervals.find(fn => fn.delay === 60000)(); await flush();
+  assert.equal(h.element('#licenseQrImage').getAttribute('src'), null,
+    'The next refresh must remove a QR cleared on the server');
+  assert.equal(h.element('#licenseQrFrame').hidden, true);
+  assert.deepEqual(downloads, [0, 60000, 120000]);
+  assert.equal(h.element('#licenseCode').value, 'WRB-KEEP-INPUT');
+  assert.equal(h.element('#licenseCodePreview').hidden, false);
+
+  remoteContact = {...h.contact, group_name: 'Restored WeChat group'};
   await h.click('#licenseQrRefresh');
-  assert.equal(h.calls.filter(([method]) => method === 'get_license_contact').at(-1)[1], true);
+  assert.equal(h.element('#licenseGroupName').textContent, remoteContact.group_name);
+  assert.equal(h.element('#licenseQrImage').getAttribute('src'), remoteContact.image_data_url);
+  assert.equal(downloads.length, 4, 'An explicit manual refresh must fetch the latest QR');
   assert.equal(h.calls.some(([method]) => method === 'redeem_activation_code' || method === 'start_robot'), false);
 }
 
