@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from typing import Callable
-import webbrowser
 
 from .client import LicenseClient
-from .config import load_channel
+from .contact_client import ContactClient
 from .protocol import LicenseError
 
 
@@ -96,12 +95,10 @@ class LicensingApiMixin:
             return self._license_failed(exc)
         return self._queue_robot_action("connect_wechat", "正在连接微信，请完成登录。", "12001")
 
-    def open_license_group(self) -> dict:
-        def open_group() -> dict:
-            channel = load_channel(self._install_root)
-            if not channel.qq_url:
-                raise LicenseError("group_pending", "加群链接尚未配置；如页面已有群号，请复制后在 QQ 搜索。")
-            if not webbrowser.open(channel.qq_url):
-                raise LicenseError("browser_unavailable", "未能打开加群链接，请复制后在浏览器打开。")
-            return {"opened": True}
-        return self._license_operation(open_group)
+    def get_license_contact(self, force: bool = False) -> dict:
+        def read_contact() -> dict:
+            client = getattr(self, "_license_contacts", None)
+            if client is None:
+                self._license_contacts = client = ContactClient(self._install_root)
+            return client.snapshot(force=force)
+        return self._license_operation(read_contact)

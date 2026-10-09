@@ -13,8 +13,6 @@ class LicenseChannel:
     enabled: bool
     service_url: str
     public_keys: dict[str, str]
-    qq_group: str
-    qq_url: str
 
     @property
     def ready(self) -> bool:
@@ -40,15 +38,7 @@ def _read_channel(path: Path) -> LicenseChannel:
             if not isinstance(key_id, str) or not key_id:
                 raise ValueError()
             decode(key, 32)
-        group = str(value.get("qq_group", "")).strip()
-        if group and (not group.isascii() or not group.isdecimal() or not 5 <= len(group) <= 12):
-            raise ValueError()
-        qq_url = str(value.get("qq_url", "")).strip()
-        qq = urlsplit(qq_url)
-        if qq_url and (qq.scheme != "https" or qq.hostname not in {"qm.qq.com", "qun.qq.com"}
-                       or qq.username or qq.password or qq.port not in {None, 443}):
-            raise ValueError()
-        return LicenseChannel(value["enabled"], url, keys, group, qq_url)
+        return LicenseChannel(value["enabled"], url, keys)
     except (OSError, ValueError, TypeError) as exc:
         raise LicenseError("configuration_invalid", "授权配置无效，请联系维护者。") from exc
 

@@ -148,8 +148,7 @@ def test_calendar_terms_in_china_timezone(start, plan, anchor, expected):
 
 def config(tmp_path, **overrides):
     data = {"schema_version": 1, "enabled": True, "service_url": "https://license.example.invalid",
-            "public_keys": {"server": public_key(Ed25519PrivateKey.generate())},
-            "qq_group": "12345678", "qq_url": "https://qm.qq.com/q/test"}
+            "public_keys": {"server": public_key(Ed25519PrivateKey.generate())}}
     data.update(overrides)
     path = tmp_path / "config/licensing.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +158,7 @@ def config(tmp_path, **overrides):
 
 def test_valid_channel_and_explicit_unconfigured_channel(tmp_path):
     assert load_channel(config(tmp_path)).ready
-    pending = load_channel(config(tmp_path, enabled=False, service_url="", public_keys={}, qq_group="", qq_url=""))
+    pending = load_channel(config(tmp_path, enabled=False, service_url="", public_keys={}))
     assert not pending.ready and not pending.enabled
 
 
@@ -172,9 +171,6 @@ def test_valid_channel_and_explicit_unconfigured_channel(tmp_path):
     {"service_url": "https://license.example.invalid:bad"},
     {"service_url": "https://license.example.invalid:65536"},
     {"public_keys": {"": "bad"}}, {"public_keys": {"server": "bad"}},
-    {"qq_group": "１２３４５６"}, {"qq_group": "123"},
-    {"qq_url": "https://qm.qq.com.evil.invalid/"},
-    {"qq_url": "https://qm.qq.com:8080/"}, {"qq_url": "javascript:alert(1)"},
 ])
 def test_channel_rejects_unsafe_or_malformed_configuration(tmp_path, overrides):
     assert_invalid("configuration_invalid", lambda: load_channel(config(tmp_path, **overrides)))

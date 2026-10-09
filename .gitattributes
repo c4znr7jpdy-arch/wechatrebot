@@ -15,3 +15,10 @@ runtime/astrbot_plugin_livingmemory/** text=auto eol=lf
 runtime/astrbot_plugin_qq_group_daily_analysis/** text=auto eol=lf
 
 runtime/astrbot_plugin_office_assistant/** text=auto eol=lf
+
+# Linux activation deployment files must remain executable after Windows checkout.
+deploy/activation-service/*.sh text eol=lf
+deploy/activation-service/*.service text eol=lf
+deploy/activation-service/*.timer text eol=lf
+deploy/activation-service/Dockerfile text eol=lf
+deploy/nginx/wechatrebot-license*.conf text eol=lf

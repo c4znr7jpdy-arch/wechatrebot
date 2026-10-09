@@ -122,7 +122,7 @@ PUBLIC_API_METHODS = (
     "refresh_license",
     "connect_license_wechat",
     "bind_license_account",
-    "open_license_group",
+    "get_license_contact",
     "check_environment",
     "start_robot",
     "stop_robot",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import sqlite3
 import time
 from typing import Callable
@@ -11,6 +12,7 @@ from typing import Callable
 from aiohttp import web
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from wechatrebot_manager.licensing.contact import CONTACT_ENDPOINT, load_contact
 from wechatrebot_manager.licensing.protocol import LicenseError, issue_lease, parse_json, verify_request
 from .store import LicenseStore, lease_payload
 
@@ -24,6 +26,7 @@ def _error(code: str, message: str, status: int) -> web.Response:
 def create_app(
     store: LicenseStore, key: Ed25519PrivateKey, key_id: str, *,
     clock: Callable[[], float] = time.time, rate_requests: int = 120,
+    contact_path: Path | None = None,
 ) -> web.Application:
     if not isinstance(key, Ed25519PrivateKey) or not key_id or rate_requests < 1:
         raise ValueError("Signing key, key ID and a positive rate limit are required")
@@ -78,7 +81,13 @@ def create_app(
     async def health(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "data": {"status": "ok", "schema_version": 1}})
 
+    async def contact(request: web.Request) -> web.Response:
+        # The location is fixed by the server operator, never by request input.
+        record = await asyncio.to_thread(load_contact, contact_path) if contact_path is not None else None
+        return web.json_response({"ok": True, "data": record, "server_time": int(clock())})
+
     app = web.Application(middlewares=[boundary], client_max_size=16 * 1024)
     app.router.add_post("/v1/{action:preview|redeem|refresh|bind}", dispatch)
+    app.router.add_get(CONTACT_ENDPOINT, contact)
     app.router.add_get("/health", health)
     return app

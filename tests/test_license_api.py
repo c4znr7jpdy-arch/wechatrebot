@@ -1,6 +1,5 @@
 """Manager API authorization boundaries without launching processes or WeChat."""
 
-import json
 import threading
 from types import SimpleNamespace
 
@@ -8,6 +7,8 @@ import pytest
 
 from wechatrebot_manager import app_shell
 from wechatrebot_manager.licensing import api as licensing_api
+from wechatrebot_manager.licensing.contact import create_contact
+from wechatrebot_manager.licensing.contact_client import ContactClient
 from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.lifecycle import LifecycleController
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
@@ -36,9 +37,10 @@ def test_public_api_exposes_subscription_actions_without_raw_credential_helpers(
     assert {
         "get_license_status", "prepare_license_device", "preview_activation_code",
         "redeem_activation_code", "refresh_license", "connect_license_wechat",
-        "bind_license_account", "open_license_group",
+        "bind_license_account", "get_license_contact",
     } <= set(app_shell.PUBLIC_API_METHODS)
     assert not {"_license_client", "_check_license_start", "authorize_run"} & set(app_shell.PUBLIC_API_METHODS)
+    assert "open_license_group" not in app_shell.PUBLIC_API_METHODS
 
 
 def test_status_reads_actual_account_without_license_network_or_device_creation(setup):
@@ -144,42 +146,46 @@ def test_calling_lifecycle_start_directly_still_requires_signed_authorization(se
     assert not service.calls
 
 
-@pytest.mark.parametrize("group", ["", "12345678"])
-def test_pending_qq_link_never_opens_an_invented_link(setup, monkeypatch, group):
-    client, _, _, _ = setup
-    path = client.root / "config/licensing.json"
-    value = json.loads(path.read_text(encoding="utf-8"))
-    value["qq_group"] = group
-    path.write_text(json.dumps(value), encoding="utf-8")
+def test_contact_api_reads_anonymous_data_without_license_or_runtime_side_effects(setup, monkeypatch):
+    client, service, clock, _ = setup
     api, _, actions = make_api(client)
-    monkeypatch.setattr(licensing_api.webbrowser, "open", lambda *_: pytest.fail("must not open a browser"))
-    result = api.open_license_group()
-    assert not result["ok"] and result["error"]["code"] == "LIC-group_pending"
-    assert not actions
+    record = create_contact(b"\x89PNG\r\n\x1a\nqr", "WXRebot", clock.server + 3600)
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return {"ok": True, "data": record, "server_time": clock.server}
+
+    api._license_contacts = ContactClient(client.root, clock=clock, transport=fetch)
+    monkeypatch.setattr(api, "_license_client", lambda: pytest.fail("contact must not use licensing identity"))
+    monkeypatch.setattr(api._lifecycle, "refresh", lambda: pytest.fail("contact must not probe WeChat"))
+    configuration = (client.root / "config/licensing.json").read_bytes()
+    result = api.get_license_contact()
+    assert result["ok"] and result["data"]["source"] == "remote"
+    assert result["data"]["group_name"] == "WXRebot"
+    assert api.get_license_contact()["data"] == result["data"] and len(calls) == 1
+    assert api.get_license_contact(True)["ok"] and len(calls) == 2
+    assert not service.calls and not actions and not client.directory.exists()
+    assert (client.root / "config/licensing.json").read_bytes() == configuration
 
 
-def test_qq_link_uses_only_validated_configured_url(setup, monkeypatch):
-    client, _, _, _ = setup
-    path = client.root / "config/licensing.json"
-    value = json.loads(path.read_text(encoding="utf-8"))
-    value["qq_url"] = "https://qm.qq.com/q/configured-link"
-    path.write_text(json.dumps(value), encoding="utf-8")
+def test_contact_api_lazily_reuses_one_client_and_validates_force(setup, monkeypatch):
+    client, _, clock, _ = setup
     api, _, _ = make_api(client)
-    opened = []
-    monkeypatch.setattr(licensing_api.webbrowser, "open", lambda url: opened.append(url) or True)
-    assert api.open_license_group()["ok"]
-    assert opened == [value["qq_url"]]
+    constructed = []
 
+    def factory(root):
+        constructed.append(root)
+        return ContactClient(root, clock=clock, transport=lambda _: {
+            "ok": True, "data": None, "server_time": clock.server,
+        })
 
-def test_qq_url_validation_rejects_a_non_qq_endpoint(setup, monkeypatch):
-    client, _, _, _ = setup
-    path = client.root / "config/licensing.json"
-    value = json.loads(path.read_text(encoding="utf-8"))
-    value["qq_url"] = "https://untrusted.example/q/join"
-    path.write_text(json.dumps(value), encoding="utf-8")
-    api, _, _ = make_api(client)
-    monkeypatch.setattr(licensing_api.webbrowser, "open", lambda *_: pytest.fail("must not open a browser"))
-    assert api.open_license_group()["error"]["code"] == "LIC-configuration_invalid"
+    monkeypatch.setattr(licensing_api, "ContactClient", factory)
+    assert api.get_license_contact()["data"]["state"] == "unavailable"
+    assert api.get_license_contact(True)["data"]["state"] == "unavailable"
+    assert constructed == [client.root]
+    assert api.get_license_contact("true")["error"]["code"] == "LIC-invalid_data"
+    assert not client.directory.exists()
 
 
 def test_backend_io_error_does_not_expose_private_data(setup, monkeypatch):

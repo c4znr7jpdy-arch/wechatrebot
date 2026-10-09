@@ -25,15 +25,15 @@ REFRESH_SECONDS = 1800
 CLOCK_ROLLBACK_TOLERANCE = 5
 _REMOTE_DENIALS = {"license_unavailable", "license_revoked", "subscription_expired"}
 _ERROR_MESSAGES = {
-    "code_unavailable": "激活码不可用，请检查输入或向 QQ 群管理员领取适用的激活码。",
-    "code_expired": "激活码已过领取期限，请联系 QQ 群管理员。",
-    "code_stale": "授权绑定已变更，请联系 QQ 群管理员重新领取迁移码。",
+    "code_unavailable": "激活码不可用，请检查输入或向微信群管理员领取适用的激活码。",
+    "code_expired": "激活码已过领取期限，请联系微信群管理员。",
+    "code_stale": "授权绑定已变更，请联系微信群管理员重新领取迁移码。",
     "preview_required": "请先预览激活码，再确认兑换。",
     "preview_stale": "预览已失效，请重新预览并确认兑换。",
     "trial_used": "此设备或微信账号已使用过试用，请领取月付或年付激活码。",
     "license_unavailable": "当前设备授权不可用，请联系管理员恢复或迁移授权。",
     "license_revoked": "授权已撤销，自动化已暂停，请联系管理员。",
-    "subscription_expired": "订阅已到期，请加入 QQ 群领取续期码。",
+    "subscription_expired": "订阅已到期，请微信扫码入群领取续期码。",
     "account_bound": "授权已绑定其他微信账号，请联系管理员处理换绑。",
     "account_unavailable": "此微信账号无法绑定当前授权，请联系管理员。",
     "active_license_conflict": "本机已有有效付费授权，请联系管理员处理，不能直接替换。",
@@ -201,11 +201,10 @@ class LicenseClient:
         return {
             "enabled": channel.enabled if channel else True,
             "configured": channel.ready if channel else False,
-            "state": "unactivated", "message": "请加入 QQ 群领取激活码，并在此预览、确认兑换。",
+            "state": "unactivated", "message": "请微信扫码入群领取激活码，并在此预览、确认兑换。",
             "authorized": False, "can_connect": False, "can_run": False,
             "account": "", "license_id": "", "device_id": "", "plan": "",
             "valid_until": 0, "lease_until": 0, "expires_text": "", "remaining_seconds": 0,
-            "qq_group": channel.qq_group if channel else "", "qq_url": channel.qq_url if channel else "",
             "plans": [{"id": key, **spec} for key, spec in PLANS.items()],
             "last_error": "", "refresh_after": 0, "run_id": "", "run_granted_at": 0,
         }

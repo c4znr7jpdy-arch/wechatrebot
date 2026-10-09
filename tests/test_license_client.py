@@ -113,7 +113,7 @@ def setup(tmp_path):
     config.parent.mkdir()
     config.write_text(json.dumps({
         "schema_version": 1, "enabled": True, "service_url": "https://license.example.test",
-        "public_keys": {"test": public_key(service.key)}, "qq_group": "", "qq_url": "",
+        "public_keys": {"test": public_key(service.key)},
     }), encoding="utf-8")
     client = LicenseClient(tmp_path, transport=service, clock=clock, protection=protection)
     return client, service, clock, protection
@@ -524,17 +524,13 @@ def test_missing_device_with_existing_license_requires_migration(setup):
     assert not device_file.exists()
 
 
-def test_device_failure_preserves_configured_support_contact(setup):
+def test_device_failure_preserves_channel_status(setup):
     client, _, _, _ = setup
     running(client)
-    config = client.root / "config/licensing.json"
-    value = json.loads(config.read_text(encoding="utf-8"))
-    value.update(qq_group="12345678", qq_url="https://qm.qq.com/q/example")
-    config.write_text(json.dumps(value), encoding="utf-8")
     (client.directory / "device.json").unlink()
     result = client.snapshot()
     assert result["state"] == "device_missing"
-    assert result["qq_group"] == "12345678" and result["configured"]
+    assert result["configured"]
 
 
 def test_corrupt_cache_cannot_enable_automation_or_reset_identity(setup):

@@ -5590,8 +5590,8 @@
       const authorized = canConnect && Boolean(previewLicense.account) && previewLicense.account === status.runtime.wechat_identity;
       const messages = {
         disabled: "此安装尚未启用商业授权，现有功能可按原方式使用。",
-        unconfigured: "授权服务和 QQ 群尚未配置，请联系软件提供者。",
-        unactivated: "加入 QQ 群领取激活码，查看并确认兑换后绑定微信。",
+        unconfigured: "授权服务尚未配置，请联系软件提供者。",
+        unactivated: "微信扫码入群领取激活码，查看并确认兑换后绑定微信。",
         pending: "激活码已兑换，请连接微信并确认实际登录账号。",
         active: "授权已生效，由你确认启动机器人。",
         expired: "自动化已暂停。可兑换续期码，微信与本机数据保留。",
@@ -5600,10 +5600,24 @@
       return {...previewLicense, enabled, configured, state: previewLicenseState, authorized, can_connect: canConnect,
         current_account: status.runtime.wechat_identity || "", remaining_seconds: previewLicense.license_id ? Math.max(0, Math.floor(previewLicense.valid_until - Date.now() / 1000)) : 0,
         valid_until: previewLicense.license_id ? previewLicense.valid_until : 0, plan: previewLicense.license_id ? previewLicense.plan : "",
-        message: messages[previewLicenseState], qq_group: "", qq_url: "", plans: structuredClone(previewLicensePlans)};
+        message: messages[previewLicenseState], plans: structuredClone(previewLicensePlans)};
     };
     const previewLicenseApi = {
       get_license_status: () => ok(licenseSnapshot()),
+      get_license_contact: async () => {
+        const unavailable = {state: "unavailable", group_name: "", expires_at: 0, remaining_seconds: 0, image_data_url: "", source: "bundled",
+          message: "暂时无法获取入群二维码，请刷新重试。"};
+        if (licenseParams.get("contact") === "unavailable") return ok(unavailable);
+        try {
+          const response = await fetch("/assets/preview/licensing-contact.json", {cache: "no-store"});
+          if (!response.ok) return ok(unavailable);
+          const data = await response.json();
+          const expired = licenseParams.get("contact") === "expired" || Number(data.expires_at) <= Date.now() / 1000;
+          return ok({state: expired ? "expired" : "ready", group_name: data.group_name, expires_at: data.expires_at,
+            remaining_seconds: expired ? 0 : Math.max(0, Number(data.expires_at) - Date.now() / 1000),
+            image_data_url: expired ? "" : `data:${data.mime_type};base64,${data.image_base64}`, source: "bundled", message: ""});
+        } catch { return ok(unavailable); }
+      },
       prepare_license_device: () => { previewLicense.device_id = "a".repeat(64); return ok(licenseSnapshot()); },
       refresh_license: () => { if (previewLicenseState === "offline") previewLicenseState = "active"; return ok(licenseSnapshot()); },
       preview_activation_code: (code) => {
@@ -5640,7 +5654,6 @@
         previewLicense.account = expectedAccount; previewLicenseState = "active";
         return ok(licenseSnapshot());
       },
-      open_license_group: () => licenseError("GROUP_NOT_CONFIGURED", "QQ 群尚未配置。"),
     };
     return {
       ...previewLicenseApi,

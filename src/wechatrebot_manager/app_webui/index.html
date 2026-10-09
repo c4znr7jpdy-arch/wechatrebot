@@ -192,22 +192,28 @@
           </section>
 
           <section class="subscription-plans-section" aria-labelledby="subscriptionPlansTitle">
-            <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>试用和付费套餐均通过 QQ 群领取激活码，模型费用自理。</p></div>
+            <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>微信扫码入群，联系管理员领取激活码。模型费用自理。</p></div>
             <div class="subscription-plans" id="licensePlans"><p class="subtle">正在读取套餐…</p></div>
           </section>
 
           <div class="subscription-activation-grid">
-            <section class="subscription-group panel" aria-labelledby="licenseGroupTitle">
-              <div class="subscription-card-heading"><span class="subscription-step-number">1</span><h2 id="licenseGroupTitle">加群领取激活码</h2></div>
-              <p>加入 QQ 群联系管理员，领取 1 小时试用码，或购买月付、年付激活码。</p>
-              <div class="subscription-group-info"><span>QQ 群</span><strong id="licenseGroupNumber">待配置</strong></div>
-              <p class="subtle" id="licenseGroupNote">加群方式尚未配置，请联系软件提供者。</p>
-              <div class="button-row"><button class="button secondary" id="licenseOpenGroup" type="button" disabled>加入 QQ 群</button><button class="button ghost" id="licenseCopyGroup" type="button" disabled><svg aria-hidden="true"><use href="#i-copy"/></svg>复制群号</button></div>
+            <section class="subscription-group panel" id="licenseContactPanel" aria-labelledby="licenseGroupTitle" tabindex="-1">
+              <div class="subscription-card-heading"><span class="subscription-step-number">1</span><h2 id="licenseGroupTitle">微信扫码领码</h2></div>
+              <p>入群联系管理员，领取 1 小时试用码，或购买月付、年付激活码。</p>
+              <div class="subscription-contact-content">
+                <div class="subscription-qr" id="licenseQrFrame" hidden><img id="licenseQrImage" width="760" height="760" alt="" hidden></div>
+                <div class="subscription-contact-details">
+                  <div class="subscription-group-info"><span>微信群</span><strong id="licenseGroupName">正在读取</strong></div>
+                  <p class="subscription-contact-expiry" id="licenseContactExpiry" hidden></p>
+                  <p class="subtle" id="licenseContactMessage" role="status" aria-live="polite">正在加载入群二维码…</p>
+                  <div class="button-row"><button class="button secondary" id="licenseQrToggle" type="button" aria-controls="licenseQrFrame" aria-expanded="false" hidden>放大二维码</button><button class="button ghost" id="licenseQrRefresh" type="button">刷新二维码</button></div>
+                </div>
+              </div>
             </section>
             <section class="subscription-redeem panel" aria-labelledby="licenseRedeemTitle">
               <div class="subscription-card-heading"><span class="subscription-step-number">2</span><h2 id="licenseRedeemTitle">兑换激活码</h2></div>
               <form id="licenseCodeForm" novalidate>
-                <label class="form-field" for="licenseCode"><span>激活码</span><input id="licenseCode" name="activation_code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="160" placeholder="输入从 QQ 群领取的激活码" aria-describedby="licenseCodeHelp licenseCodeFeedback" disabled></label>
+                <label class="form-field" for="licenseCode"><span>激活码</span><input id="licenseCode" name="activation_code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="160" placeholder="输入从微信群管理员领取的激活码" aria-describedby="licenseCodeHelp licenseCodeFeedback" disabled></label>
                 <p class="subtle" id="licenseCodeHelp">先查看套餐和有效期，确认后再兑换。</p>
                 <p class="subscription-feedback" id="licenseCodeFeedback" role="status" aria-live="polite" hidden></p>
                 <button class="button primary" id="licensePreviewCode" type="submit" disabled>查看激活码</button>

@@ -36,7 +36,7 @@ def runtime(tmp_path, monkeypatch):
     config.parent.mkdir()
     config.write_text(json.dumps({
         "schema_version": 1, "enabled": True, "service_url": "https://license.example.invalid",
-        "public_keys": {"test": public_key(Ed25519PrivateKey.generate())}, "qq_group": "", "qq_url": "",
+        "public_keys": {"test": public_key(Ed25519PrivateKey.generate())},
     }), encoding="utf-8")
     client = FakeClient()
     identity = {"account": "wxid_actual"}

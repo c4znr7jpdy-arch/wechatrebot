@@ -118,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
             "--add-data",
             f"{commercial_root / 'src' / 'wechatrebot_manager' / 'licensing-channel.json'}{os.pathsep}wechatrebot_manager",
             "--add-data",
+            f"{commercial_root / 'src' / 'wechatrebot_manager' / 'licensing-contact.json'}{os.pathsep}wechatrebot_manager",
+            "--add-data",
             f"{commercial_root / 'src' / 'wechatrebot_manager' / 'error-codes.zh-CN.json'}{os.pathsep}wechatrebot_manager",
             "--collect-all",
             "webview",

@@ -6,7 +6,11 @@
     const {api, escapeHtml: esc, confirmAction, copyText, navigate, openMaintenance, refreshRuntime} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const state = {snapshot: null, preview: null, runtime: null, busy: false, loading: false,
-      epoch: 0, activePage: "home", plansKey: "", readError: "", expiredSeen: false, initialized: false};
+      epoch: 0, activePage: "home", plansKey: "", readError: "", expiredSeen: false, initialized: false,
+      contact: null, contactLoading: false, contactReadAt: 0, contactExpanded: false, contactExpiryTimer: null};
+    const contactRefreshMs = 60000;
+    const monotonicNow = () => typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now() : Date.now();
     const pausedStates = new Set(["expired", "subscription_expired", "revoked", "license_revoked", "license_unavailable",
       "suspended", "offline_expired", "lease_expired", "account_mismatch", "clock_error", "invalid"]);
     const labels = {
@@ -58,6 +62,104 @@
       if (!Number.isFinite(date.getTime())) return "—";
       return new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit",
         day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}).format(date);
+    }
+
+    function contactExpiryText(value) {
+      const date = new Date(Number(value) * 1000);
+      if (!Number.isFinite(date.getTime()) || Number(value) <= 0) return "";
+      const text = new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", year: "numeric", month: "long",
+        day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"}).format(date);
+      return `${text.replace(/\s+00:00:00$/, "")}前有效（北京时间）`;
+    }
+
+    function normalizeContact(data) {
+      const contact = {state: "unavailable", group_name: String(data?.group_name || "").trim(),
+        expires_at: Number(data?.expires_at) || 0, image_data_url: "", message: String(data?.message || ""),
+        source: ["bundled", "remote"].includes(data?.source) ? data.source : ""};
+      const remaining = Number(data?.remaining_seconds);
+      if (data?.state === "expired" || (data?.state === "ready" && Number.isFinite(remaining) && remaining <= 0)) {
+        contact.state = "expired";
+      } else if (data?.state === "ready" && Number.isFinite(contact.expires_at) && contact.expires_at > 0
+        && Number.isFinite(remaining) && remaining > 0
+        && typeof data.image_data_url === "string" && data.image_data_url.length < 4 * 1024 * 1024
+        && /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(data.image_data_url)) {
+        contact.state = "ready";
+        contact.image_data_url = data.image_data_url;
+        contact.hide_at = monotonicNow() + remaining * 1000;
+      }
+      return contact;
+    }
+
+    function renderContact() {
+      if (state.contact?.state === "ready" && state.contact.hide_at <= monotonicNow()) {
+        state.contact = {...state.contact, state: "expired", image_data_url: ""};
+      }
+      const data = state.contact;
+      const ready = data?.state === "ready";
+      if (!ready) state.contactExpanded = false;
+      const image = $("#licenseQrImage");
+      if (ready) {
+        if (image.getAttribute("src") !== data.image_data_url) image.setAttribute("src", data.image_data_url);
+        image.alt = `${data.group_name || "微信群"}入群二维码`;
+      } else {
+        image.removeAttribute("src");
+        image.alt = "";
+      }
+      image.hidden = !ready;
+      $("#licenseQrFrame").hidden = !ready;
+      $("#licenseContactPanel").classList.toggle("is-expanded", state.contactExpanded);
+      $("#licenseContactPanel").dataset.contactState = data?.state || "loading";
+      $("#licenseGroupName").textContent = data?.group_name || (state.contactLoading ? "正在读取" : "待更新");
+      $("#licenseContactExpiry").textContent = contactExpiryText(data?.expires_at);
+      $("#licenseContactExpiry").hidden = !$("#licenseContactExpiry").textContent;
+      $("#licenseContactMessage").textContent = data?.state === "expired"
+        ? "入群二维码已过期，请刷新获取最新二维码或联系管理员。已有激活码仍可兑换。"
+        : ready ? data.message || "微信扫码入群后，联系管理员领取激活码。"
+        : !data && state.contactLoading ? "正在加载入群二维码…"
+        : `${data?.message || "暂时无法获取入群二维码，请刷新重试或联系管理员。"} 已有激活码仍可兑换。`;
+      $("#licenseQrToggle").hidden = !ready;
+      $("#licenseQrToggle").textContent = state.contactExpanded ? "收起二维码" : "放大二维码";
+      $("#licenseQrToggle").setAttribute("aria-expanded", String(state.contactExpanded));
+      $("#licenseQrRefresh").disabled = state.contactLoading;
+      $("#licenseQrRefresh").textContent = state.contactLoading ? "刷新中…" : "刷新二维码";
+    }
+
+    function scheduleContactExpiry() {
+      window.clearTimeout(state.contactExpiryTimer);
+      state.contactExpiryTimer = null;
+      if (state.contact?.state !== "ready") return;
+      const delay = Math.max(0, state.contact.hide_at - monotonicNow());
+      state.contactExpiryTimer = window.setTimeout(() => {
+        renderContact();
+        scheduleContactExpiry();
+      }, Math.min(delay + 1, 2147483647));
+    }
+
+    async function loadContact(force = false) {
+      if (state.contactLoading) return;
+      state.contactLoading = true;
+      state.contactReadAt = monotonicNow();
+      renderContact();
+      try { state.contact = normalizeContact(await api("get_license_contact", force)); }
+      catch (error) {
+        state.contact = {state: "unavailable", image_data_url: "", message:
+          error?.product?.message || "暂时无法获取入群二维码，请刷新重试或联系管理员。"};
+      } finally {
+        state.contactLoading = false;
+        renderContact();
+        scheduleContactExpiry();
+      }
+    }
+
+    function refreshContactIfNeeded() {
+      renderContact();
+      if (!state.contact || monotonicNow() - state.contactReadAt >= contactRefreshMs) void loadContact();
+    }
+
+    function showGroup() {
+      refreshContactIfNeeded();
+      $("#licenseContactPanel").scrollIntoView({block: "start"});
+      $("#licenseContactPanel").focus({preventScroll: true});
     }
 
     function description() {
@@ -136,7 +238,7 @@
     function renderPlans() {
       const data = state.snapshot;
       const plans = Array.isArray(data?.plans) ? data.plans : [];
-      const key = JSON.stringify([plans, data?.qq_group, data?.qq_url]);
+      const key = JSON.stringify(plans);
       if (key === state.plansKey) return;
       state.plansKey = key;
       $("#licensePlans").innerHTML = plans.map((plan) => {
@@ -145,7 +247,7 @@
         const price = knownPrice ? new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 2}).format(amount / 100) : "待确认";
         const trial = plan.id === "trial";
         const unit = trial ? " / 1 小时" : ["yearly", "year"].includes(plan.id) ? " / 年" : " / 月";
-        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(plan.description || (trial ? "领取试用码后激活，体验完整功能。" : "1 个机器人账号，含订阅期内更新。"))}</p><button class="button ${trial ? "ghost" : "secondary"}" data-license-plan type="button" disabled>加群领取</button></article>`;
+        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(plan.description || (trial ? "领取试用码后激活，体验完整功能。" : "1 个机器人账号，含订阅期内更新。"))}</p><button class="button ${trial ? "ghost" : "secondary"}" data-license-plan type="button">扫码入群领取</button></article>`;
       }).join("") || '<p class="subtle">套餐暂时无法读取，请重新读取授权状态。</p>';
     }
 
@@ -155,24 +257,16 @@
       const busy = state.busy;
       const bound = accountId(data?.account);
       const current = accountId(data?.current_account);
-      const hasGroup = Boolean(data?.qq_group || data?.qq_url);
       $("#licenseRefresh").disabled = busy || state.loading;
       $("#licenseRefresh").textContent = busy ? "处理中…" : ready ? "重新验证" : "重新读取";
       $("#licenseCode").disabled = busy || !ready;
       $("#licensePreviewCode").disabled = busy || !ready || !$("#licenseCode").value.trim();
       $("#licenseConfirmRedeem").disabled = busy || !ready || !state.preview;
       $("#licenseCancelRedeem").disabled = busy;
-      $("#licenseOpenGroup").disabled = busy || !data?.qq_url;
-      $("#licenseCopyGroup").disabled = !hasGroup;
       $("#licenseCopyId").disabled = !data?.license_id;
       $("#licenseCopyDevice").disabled = !data?.device_id;
       $("#licensePrepareDevice").hidden = !ready || Boolean(data?.device_id);
       $("#licensePrepareDevice").disabled = busy || !ready;
-      $("#licenseCopyGroup").lastChild.textContent = !data?.qq_group && data?.qq_url ? "复制加群链接" : "复制群号";
-      document.querySelectorAll("[data-license-plan]").forEach((button) => {
-        button.disabled = busy || !hasGroup;
-        button.textContent = !hasGroup ? "QQ 群待配置" : data.qq_url ? "加群领取" : "复制群号领取";
-      });
       $("#licenseConnect").hidden = !ready || !data.can_connect || !data.license_id || Boolean(current);
       $("#licenseConnect").disabled = busy || Boolean(state.runtime?.busy);
       $("#licenseBind").hidden = !ready || !data.can_connect || !data.license_id || Boolean(bound) || !current;
@@ -203,8 +297,6 @@
       $("#licenseCurrentAccount").textContent = accountId(data.current_account) || "尚未连接";
       $("#licenseCurrentAccountRow").hidden = !data.enabled || !data.license_id;
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
-      $("#licenseGroupNumber").textContent = data.qq_group || (data.qq_url ? "通过加群链接加入" : "待配置");
-      $("#licenseGroupNote").textContent = data.qq_group || data.qq_url ? "向管理员说明所需套餐，领取激活码后在此页面兑换。" : "加群方式尚未配置，请联系软件提供者。";
       $("#licenseRedeemTitle").textContent = data.license_id ? "兑换续期码" : "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
         ? "授权服务尚未配置，暂时无法兑换激活码。" : "先查看套餐和有效期，确认后再兑换。";
@@ -289,12 +381,6 @@
         }});
     }
 
-    async function openGroup() {
-      const data = state.snapshot;
-      if (data?.qq_url) await execute(() => api("open_license_group"));
-      else if (data?.qq_group) await copyText(data.qq_group, "QQ 群号");
-    }
-
     async function runtimeAction(method, message) {
       const result = await execute(async () => {
         const response = await api(method);
@@ -317,23 +403,42 @@
       $("#licenseConnect").addEventListener("click", () => runtimeAction("connect_license_wechat", "请在微信完成登录，然后在此确认实际账号。"));
       $("#licenseBind").addEventListener("click", bindAccount);
       $("#licenseResume").addEventListener("click", () => runtimeAction("start_robot", "已提交启动请求，请在运行中心查看启动进度。"));
-      $("#licenseOpenGroup").addEventListener("click", openGroup);
-      $("#licenseCopyGroup").addEventListener("click", () => copyText(state.snapshot?.qq_group || state.snapshot?.qq_url, state.snapshot?.qq_group ? "QQ 群号" : "加群链接"));
+      $("#licenseQrRefresh").addEventListener("click", () => loadContact(true));
+      $("#licenseQrToggle").addEventListener("click", () => {
+        renderContact();
+        if (state.contact?.state !== "ready") return;
+        state.contactExpanded = !state.contactExpanded;
+        renderContact();
+        $("#licenseQrImage").scrollIntoView({block: "nearest"});
+      });
+      $("#licenseQrImage").addEventListener("error", () => {
+        if (state.contact?.state !== "ready") return;
+        state.contact = {...state.contact, state: "unavailable", image_data_url: "",
+          message: "二维码暂时无法显示，请刷新重试。"};
+        renderContact(); scheduleContactExpiry();
+      });
       $("#licenseCopyId").addEventListener("click", () => copyText(state.snapshot?.license_id, "授权编号"));
       $("#licenseCopyDevice").addEventListener("click", () => copyText(state.snapshot?.device_id, "设备编号"));
       $("#licensePrepareDevice").addEventListener("click", () => execute(() => api("prepare_license_device"), "本机设备编号已生成，可复制给群管理员办理授权迁移。"));
-      $("#licensePlans").addEventListener("click", (event) => { if (event.target.closest("[data-license-plan]")) void openGroup(); });
+      $("#licensePlans").addEventListener("click", (event) => { if (event.target.closest("[data-license-plan]")) showGroup(); });
       $("#licenseOpenHistory").addEventListener("click", () => navigate("history"));
       $("#licenseOpenMaintenance").addEventListener("click", openMaintenance);
       window.setInterval(() => {
         if (["subscription", "home"].includes(state.activePage) && document.visibilityState !== "hidden") void load({silent: true});
       }, 4000);
+      window.setInterval(() => {
+        if (state.activePage === "subscription" && document.visibilityState !== "hidden") void loadContact();
+      }, contactRefreshMs);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "hidden" && state.activePage === "subscription") refreshContactIfNeeded();
+      });
+      void loadContact();
       return load();
     }
 
     return {
       initialize,
-      async onNavigate(page) { state.activePage = page; if (page === "subscription") await load(); },
+      async onNavigate(page) { state.activePage = page; if (page === "subscription") { refreshContactIfNeeded(); await load(); } },
       updateRuntime(runtime) { state.runtime = runtime; if (state.initialized) renderControls(); },
       needsEntry() { return Boolean(state.snapshot?.enabled && !readyToStart()); },
       async beforeStart() {

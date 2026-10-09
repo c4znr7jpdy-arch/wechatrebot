@@ -63,6 +63,18 @@
 .subscription-group-info > span { color: var(--muted); font-size: 12px; }
 .subscription-group-info strong { font-size: 19px; overflow-wrap: anywhere; user-select: text; }
 .subscription-group .button-row { margin-top: 18px; }
+.subscription-group:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 4px; }
+.subscription-contact-content { display: grid; gap: 4px 24px; }
+.subscription-contact-details { min-width: 0; }
+.subscription-contact-details p { margin: 8px 0; overflow-wrap: anywhere; }
+.subscription-contact-expiry { color: var(--muted); font-size: 12px; }
+.subscription-qr { width: min(100%, 270px); margin-top: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.subscription-qr img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; }
+.subscription-group.is-expanded { grid-column: 1 / -1; }
+.subscription-group.is-expanded .subscription-contact-content { grid-template-columns: minmax(0, 480px) minmax(0, 1fr); align-items: center; }
+.subscription-group.is-expanded .subscription-qr { width: 100%; }
+.subscription-group[data-contact-state="expired"] #licenseContactMessage,
+.subscription-group[data-contact-state="unavailable"] #licenseContactMessage { color: var(--amber-700); }
 #licenseCodeForm .form-field { display: grid; gap: 8px; }
 #licenseCode { width: 100%; min-height: 42px; padding: 10px 12px; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; background: var(--control-surface); font-family: var(--font-body); }
 #licenseCode:disabled { color: var(--muted); background: var(--surface-muted); }
@@ -82,6 +94,8 @@
   .subscription-plan { padding: 18px; }
 }
 @media (max-width: 800px) {
+  .subscription-group.is-expanded .subscription-contact-content { grid-template-columns: minmax(0, 1fr); }
+  .subscription-group.is-expanded .subscription-qr { max-width: 480px; }
   .subscription-support > div { grid-template-columns: minmax(0, 1fr); gap: 7px; }
   .subscription-support .button { justify-self: start; }
   .subscription-plans { grid-template-columns: minmax(0, 1fr); }
