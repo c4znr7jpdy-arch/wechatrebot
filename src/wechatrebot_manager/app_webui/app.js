@@ -219,23 +219,28 @@
     applyTheme(storedTheme());
   }
 
-  const coreSettings = window.createRobotCoreSettings({
-    read: () => api("get_robot_core"),
-    request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
-    getGroups: (refresh = false) => api("get_groups", refresh),
-    getContacts: (refresh = false) => api("get_contacts", refresh),
-    save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
-    applyBrand: (brand) => {
-      state.bootstrap.brand = brand;
-      applyBrand(brand);
-    },
-    schemaMarkup, configFromForm, escapeHtml, confirmAction, toast, reportError, growTextarea,
-  });
+  let coreSettings;
+  let subscription;
 
-  const subscription = window.createSubscriptionPage({
-    api, escapeHtml, confirmAction, copyText, navigate, refreshRuntime: refreshStatus,
-    openMaintenance: async () => { await navigate("settings"); setSettingsSection("system", true); },
-  });
+  function initializeControllers() {
+    coreSettings = window.createRobotCoreSettings({
+      read: () => api("get_robot_core"),
+      request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
+      getGroups: (refresh = false) => api("get_groups", refresh),
+      getContacts: (refresh = false) => api("get_contacts", refresh),
+      save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
+      applyBrand: (brand) => {
+        state.bootstrap.brand = brand;
+        applyBrand(brand);
+      },
+      schemaMarkup, configFromForm, escapeHtml, confirmAction, toast, reportError, growTextarea,
+    });
+
+    subscription = window.createSubscriptionPage({
+      api, escapeHtml, confirmAction, copyText, navigate, refreshRuntime: refreshStatus,
+      openMaintenance: async () => { await navigate("settings"); setSettingsSection("system", true); },
+    });
+  }
 
   function safeImageUrl(value) {
     try {
@@ -5204,9 +5209,10 @@
   }
 
   async function initialize() {
-    bindEvents();
-    setSettingsSection("model");
     try {
+      initializeControllers();
+      bindEvents();
+      setSettingsSection("model");
       state.bootstrap = await api("bootstrap");
       fillSettings(state.bootstrap);
       renderStatus(state.bootstrap.status);
@@ -5229,6 +5235,13 @@
       reportError(error);
       $("#stateTitle").textContent = "软件未能完成初始化";
       $("#stateMessage").textContent = "请重新打开软件；若问题持续，请联系技术支持。 ";
+      $("#globalStatus").className = "status-badge error";
+      $("#globalStatus").innerHTML = "<span></span>初始化失败";
+      $("#sideHealthDot").className = "health-dot error";
+      $("#sideHealthText").textContent = "初始化失败";
+      $("#homeStatusIcon").className = "home-status-icon problem";
+      $("#homeStatusIcon").textContent = "!";
+      $("#primaryAction").disabled = true;
     }
   }
 
