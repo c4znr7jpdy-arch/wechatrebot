@@ -1,0 +1,21 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/event_normalizer.py
+@@ -511,9 +511,16 @@
+     message_type = integer(data.get("msgType"))
+     content = _message_content(data, sender_id)
+     mentions = extract_at_user_list(scalar(data.get("msgSource")))
++    # Official accounts (including WeChat Pay) can auto-reply to our replies.
++    # Drop their private callbacks before media, memory, or bot dispatch. Match
++    # the conversation ID, not a display name or forwarded message content.
++    private_contact = conversation_id.strip().casefold()
+     kind = (
+         "ignored"
+-        if conversation_id.lower() in IGNORED_PRIVATE_CONTACTS
++        if not is_group and (
++            private_contact in IGNORED_PRIVATE_CONTACTS
++            or private_contact.startswith("gh_")
++        )
+         else "message"
+     )
+ 
