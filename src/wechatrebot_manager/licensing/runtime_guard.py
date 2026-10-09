@@ -31,7 +31,7 @@ _READ_ONEBOT_ACTIONS = frozenset({
     "get_friend_list", "get_group_list", "get_group_info", "get_stranger_info", "get_user_info",
     "get_group_member_info", "get_group_member_list", "get_group_member_cache",
 })
-_EVENT_SESSION = "_wechatrebot_license_run_id"
+_EVENT_RUN_ID_FIELD = "_wechatrebot_license_run_id"
 _action_session: ContextVar[str | None] = ContextVar("wechatrebot_license_action", default=None)
 _PROVIDER_CALLS = frozenset({
     "text_chat", "text_chat_stream", "get_text", "get_audio", "get_audio_stream",
@@ -141,7 +141,7 @@ class RuntimeGuard:
             return True
         if not state.get("can_run"):
             return False
-        if queued and event.get(_EVENT_SESSION) != state.get("run_id"):
+        if queued and event.get(_EVENT_RUN_ID_FIELD) != state.get("run_id"):
             return False
         timestamp = event.get("time")
         granted = state.get("run_granted_at", 0)
@@ -156,13 +156,13 @@ class RuntimeGuard:
             if state.get("enabled"):
                 if not state.get("can_run"):
                     return None
-                value[_EVENT_SESSION] = state.get("run_id", "")
+                value[_EVENT_RUN_ID_FIELD] = state.get("run_id", "")
         return value
 
     def delivery_event(self, event: dict) -> dict | None:
         if not self.allow_event(event, queued=True):
             return None
-        return {key: value for key, value in event.items() if key != _EVENT_SESSION}
+        return {key: value for key, value in event.items() if key != _EVENT_RUN_ID_FIELD}
 
     def require_hook(self, path: str) -> None:
         if path not in _READ_HOOK_PATHS:

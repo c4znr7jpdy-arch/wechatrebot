@@ -15,6 +15,19 @@ def test_guard_accepts_clean_release(tmp_path: Path) -> None:
     assert findings == []
 
 
+def test_guard_accepts_shipped_license_runtime_guard(tmp_path: Path) -> None:
+    source = Path(__file__).parents[1] / "src/wechatrebot_manager/licensing/runtime_guard.py"
+    for relative in (
+        "manager/src/wechatrebot_manager/licensing/runtime_guard.py",
+        "legal/corresponding-source/wechatrebot_manager/licensing/runtime_guard.py",
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True)
+        target.write_bytes(source.read_bytes())
+
+    assert _load_guard()(tmp_path) == []
+
+
 def test_guard_rejects_legacy_and_runtime_data(tmp_path: Path) -> None:
     legacy = tmp_path / "Py"
     legacy.mkdir()
