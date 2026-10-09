@@ -16,7 +16,10 @@ from .environment import (
 )
 from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
-from .launcher import ProcessSupervisor, ServiceLaunchError, ServiceSpec, build_service_specs
+from .launcher import (
+    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
+    build_service_specs, installation_services_stopped,
+)
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
 
 
@@ -135,6 +138,7 @@ class LifecycleController:
         self._running_events_emitted = False
         self._wechat_closed_confirmations = 0
         self._start_in_progress = False
+        self._maintenance_processes: list[ProcessLike] = []
         self.events.emit("APP_START", "success")
         if self._uses_default_supervisor:
             try:
@@ -326,6 +330,48 @@ class LifecycleController:
                 self._wechat_closed_confirmations = 0
                 return self.view()
             return self._finish_stop()
+
+    def stop_for_maintenance(self) -> bool:
+        """Request normal shutdown and only confirm a provably stopped runtime."""
+        with self._lock:
+            if self._start_in_progress:
+                return False
+            try:
+                if self._supervisor is not None:
+                    for item in tuple(self._supervisor.running):
+                        process = item.process
+                        if not any(process is known for known in self._maintenance_processes):
+                            self._maintenance_processes.append(process)
+                self.request_stop()
+                return self.maintenance_stopped()
+            except Exception:
+                # Failure leaves the caller's maintenance transaction pending.
+                # In particular, never clear surviving processes via force_stop.
+                return False
+
+    def maintenance_stopped(self) -> bool:
+        """Read-only maintenance gate; False includes unavailable probe results."""
+        with self._lock:
+            if self._start_in_progress or self.state != LifecycleState.STOPPED:
+                return False
+            try:
+                if self._supervisor is not None and self._supervisor.running:
+                    return False
+                if any(process.poll() is None for process in self._maintenance_processes):
+                    return False
+                runtime = self._snapshotter()
+                if (
+                    runtime.engine_ready or runtime.connection_ready
+                    or runtime.wechat_identity or runtime.hook_ready
+                    or runtime.upstream_connected or runtime.heartbeat_fresh
+                ):
+                    return False
+                if not installation_services_stopped(self.install_root):
+                    return False
+            except Exception:
+                return False
+            self._maintenance_processes.clear()
+            return True
 
     def force_stop(self) -> LifecycleView:
         """Stop owned services immediately, without waiting for WeChat."""
