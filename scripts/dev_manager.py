@@ -55,6 +55,13 @@ def preview_handler(root: Path, *, watch: bool = True):
             if route == "/__dev_revision":
                 self._send(revision(root).encode(), "text/plain")
                 return
+            if route == "/assets/preview/licensing-contact.json":
+                contact = WATCH_ROOT / "licensing-contact.json"
+                if not contact.is_file():
+                    self.send_error(404)
+                    return
+                self._send(contact.read_bytes(), "application/json; charset=utf-8")
+                return
             target = Path(self.translate_path(self.path)).resolve()
             if not target.is_relative_to(root.resolve()):
                 self.send_error(403)

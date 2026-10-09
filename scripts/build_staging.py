@@ -22,6 +22,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 from wechatrebot_manager import hook_recall_patch
 from source_inputs import verify_source_inputs
+from wechatrebot_manager.licensing.bundle import validate_runtime_bundle
 
 
 _SENSITIVE_FIELD = re.compile(
@@ -485,6 +486,12 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
         if wheelhouse.get(key) != expected.get(key):
             raise RuntimeError(f"runtime wheelhouse fingerprint mismatch: {key}")
     _validate_ffmpeg_runtime(runtime_root, commercial_root, runtime_manifest.get("ffmpeg"))
+    validate_runtime_bundle(commercial_root, runtime_root / "python/Lib/site-packages",
+                            runtime_manifest.get("licensing_bundle_sha256"))
+    if runtime_manifest.get("astrbot_license_patch_sha256") != _sha256(
+        commercial_root / "patches/astrbot-4.26.6-license.patch"
+    ):
+        raise RuntimeError("Runtime authorization patch is stale; rebuild the runtime")
     return runtime_manifest
 
 

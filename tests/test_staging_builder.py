@@ -6,6 +6,7 @@ import struct
 from types import SimpleNamespace
 
 import pytest
+from wechatrebot_manager.licensing.bundle import install_runtime_bundle
 
 
 def _builder():
@@ -76,6 +77,9 @@ def _write_runtime_fixture(runtime: Path, commercial: Path) -> dict[str, object]
     helper.write_text((commercial / "src/wechatrebot_manager/group_feature_runtime.py").read_text(encoding="utf-8"), encoding="utf-8")
     (runtime / "python" / "python.exe").write_bytes(b"placeholder")
     manifest = _runtime_manifest(commercial, runtime)
+    manifest["licensing_bundle_sha256"] = install_runtime_bundle(commercial, runtime / "python/Lib/site-packages")
+    manifest["astrbot_license_patch_sha256"] = hashlib.sha256(
+        (commercial / "patches/astrbot-4.26.6-license.patch").read_bytes()).hexdigest().upper()
     (runtime / "runtime-manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
@@ -99,6 +103,17 @@ def test_runtime_root_validation_accepts_matching_fingerprint(tmp_path: Path) ->
     validated = _builder()._validate_runtime_root(runtime, commercial)
     assert validated["wheelhouse"] == manifest["wheelhouse"]
     assert validated["ffmpeg"] == manifest["ffmpeg"]
+
+
+@pytest.mark.parametrize("relative", ["licensing/runtime_guard.py", "licensing/protocol.py", "licensing-channel.json"])
+def test_runtime_rejects_stale_or_missing_authorization_code(tmp_path, relative):
+    commercial = Path(__file__).parents[1]
+    runtime = tmp_path / "runtime"
+    _write_runtime_fixture(runtime, commercial)
+    target = runtime / "python/Lib/site-packages/wechatrebot_manager" / relative
+    target.write_bytes(b"stale authorization code")
+    with pytest.raises(RuntimeError, match="authorization file"):
+        _builder()._validate_runtime_root(runtime, commercial)
 
 
 def test_runtime_root_validation_rejects_wrong_fingerprint(tmp_path: Path) -> None:

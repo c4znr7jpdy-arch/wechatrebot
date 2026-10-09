@@ -49,6 +49,9 @@ from .experience import ExperienceError, ExperienceService
 from .core_settings import RobotCoreSettingsService
 from .group_policy import GroupPolicyError, GroupPolicyService
 from .lifecycle import LifecycleController
+from .launcher import installation_services_stopped
+from .licensing.api import LicensingApiMixin
+from .licensing.protocol import LicenseError
 from .json_io import write_json_atomic
 from .payload import PayloadError
 from .private_policy import PrivateChatPolicyService, PrivatePolicyError
@@ -112,6 +115,14 @@ PUBLIC_API_METHODS = (
     "bootstrap",
     "save_theme",
     "get_status",
+    "get_license_status",
+    "prepare_license_device",
+    "preview_activation_code",
+    "redeem_activation_code",
+    "refresh_license",
+    "connect_license_wechat",
+    "bind_license_account",
+    "get_license_contact",
     "check_environment",
     "start_robot",
     "stop_robot",
@@ -202,7 +213,7 @@ def _asset_root() -> Path:
     raise FileNotFoundError("主界面资源缺失，请重新安装软件。")
 
 
-class ApplicationApi:
+class ApplicationApi(LicensingApiMixin):
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
@@ -446,7 +457,7 @@ class ApplicationApi:
             provider = load_provider_profile(self._install_root, services=providers)
             channel = self._load_update_channel()
             configured = time.perf_counter()
-            status = self._lifecycle.refresh().to_dict()
+            status = self._status_data()
             checked = time.perf_counter()
             experience = self._experience_service().snapshot()
             experienced = time.perf_counter()
@@ -500,9 +511,17 @@ class ApplicationApi:
 
     def get_status(self) -> dict[str, object]:
         try:
-            return self._ok(self._lifecycle.refresh().to_dict())
+            return self._ok(self._status_data())
         except (OSError, ValueError) as exc:
             return self._failed(exc)
+
+    def _status_data(self) -> dict:
+        view = self._lifecycle.refresh()
+        result = view.to_dict()
+        account = self._offline_history_account(view)
+        if account:
+            result.update(history_account=account, history_offline=True)
+        return result
 
     def check_environment(self) -> dict[str, object]:
         try:
@@ -515,56 +534,42 @@ class ApplicationApi:
             return self._update_failed(
                 UpdateFailure("UPD-1016", "当前版本已低于最低支持版本。")
             )
-        if not self._action_lock.acquire(blocking=False):
-            return self._ok({"accepted": False}, message="正在处理上一个操作。")
         try:
-            if has_pending_migrations(self._install_root):
-                self._action_lock.release()
-                return self._ok({"accepted": False}, message="请先在定时任务页完成中断的旧任务迁移，再启动机器人。")
-        except (OSError, ValueError, PayloadError):
-            self._action_lock.release()
-            return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
-
-        def worker() -> None:
-            try:
-                self._lifecycle.start()
-            except Exception as exc:  # pragma: no cover - final UI safety net
-                self._failed(exc, "13001")
-            finally:
-                self._action_lock.release()
-
-        threading.Thread(target=worker, daemon=True).start()
-        return self._ok({"accepted": True}, message="正在启动机器人。")
+            self._check_license_start()
+        except LicenseError as exc:
+            return self._license_failed(exc)
+        return self._queue_robot_action("start", "正在启动机器人。", "13001")
 
     def stop_robot(self) -> dict[str, object]:
-        if not self._action_lock.acquire(blocking=False):
-            return self._ok({"accepted": False}, message="正在处理上一个操作。")
-
-        def worker() -> None:
-            try:
-                self._lifecycle.request_stop()
-            except Exception as exc:  # pragma: no cover - final UI safety net
-                self._failed(exc)
-            finally:
-                self._action_lock.release()
-
-        threading.Thread(target=worker, daemon=True).start()
-        return self._ok({"accepted": True}, message="正在停止机器人。")
+        return self._queue_robot_action("request_stop", "正在停止机器人。")
 
     def force_stop_robot(self) -> dict[str, object]:
+        return self._queue_robot_action("force_stop", "正在强制停止机器人。")
+
+    def _queue_robot_action(self, action: str, message: str, error_code: str = "19000") -> dict[str, object]:
         if not self._action_lock.acquire(blocking=False):
             return self._ok({"accepted": False}, message="正在处理上一个操作。")
+        if action in {"start", "connect_wechat"}:
+            try:
+                if has_pending_migrations(self._install_root):
+                    self._action_lock.release()
+                    return self._ok({"accepted": False}, message="请先在定时任务页完成中断的旧任务迁移，再启动机器人。")
+            except (OSError, ValueError, PayloadError):
+                self._action_lock.release()
+                return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
 
         def worker() -> None:
             try:
-                self._lifecycle.force_stop()
+                getattr(self._lifecycle, action)()
+            except LicenseError as exc:
+                self._lifecycle.events.emit("APP_ERROR", "failed", code=f"LIC-{exc.code}", message=str(exc))
             except Exception as exc:  # pragma: no cover - final UI safety net
-                self._failed(exc)
+                self._failed(exc, error_code)
             finally:
                 self._action_lock.release()
 
         threading.Thread(target=worker, daemon=True).start()
-        return self._ok({"accepted": True}, message="正在强制停止机器人。")
+        return self._ok({"accepted": True}, message=message)
 
     def select_wechat(self, value: str = "") -> dict[str, object]:
         try:
@@ -703,6 +708,47 @@ class ApplicationApi:
             raise OSError("微信账号状态暂时不可用，请稍后重试。")
         return str(getattr(runtime, "wechat_identity", "") or "").strip()
 
+    def _offline_history_account(self, view) -> str:
+        """A signed device binding grants data access, never a live login identity."""
+        runtime = getattr(view, "runtime", None)
+        if (runtime is None or getattr(runtime, "connection_ready", None) is not False
+                or getattr(runtime, "engine_ready", None) is not False
+                or getattr(view, "can_stop", False)
+                or any(getattr(runtime, field, None) for field in (
+                    "wechat_identity", "hook_ready", "upstream_connected", "heartbeat_fresh"))):
+            return ""
+        status = self._license_client().snapshot()
+        if (status.get("enabled") and status.get("device_id") and status.get("license_id")
+                and status.get("account") and installation_services_stopped(self._install_root)):
+            # Signature/device validation still applies to expired entitlements.
+            # An invalid local cache returns no bound account.
+            return str(status.get("account") or "")
+        return ""
+
+    def _history_data_identity(self) -> tuple[str, bool]:
+        failure = None
+        try:
+            actual = self._history_account_id()
+            if actual:
+                return actual, False
+        except OSError as exc:
+            failure = exc
+        if not self._license_client().snapshot().get("account"):
+            if failure is not None:
+                raise failure
+            return "", False
+        try:
+            account = self._offline_history_account(self._lifecycle.refresh())
+            if account:
+                return account, True
+        except (AttributeError, OSError, ValueError) as exc:
+            if failure is not None:
+                raise failure
+            raise OSError("无法确认本机历史记录的数据身份，请稍后重试。") from exc
+        if failure is not None:
+            raise failure
+        return "", False
+
     def _history_contacts(self, user_ids: list[str]) -> dict[str, dict[str, str]]:
         resolver = getattr(getattr(self, "_contacts", None), "contacts", None)
         if not callable(resolver) or not user_ids:
@@ -722,7 +768,7 @@ class ApplicationApi:
             expected_account = str(values.get("account_id") or "").strip()
             start_time = self._date_timestamp(values.get("start"))
             end_time = self._date_timestamp(values.get("end"), end=True)
-            runtime_account = self._history_account_id()
+            runtime_account, offline = self._history_data_identity()
             empty = {
                 "messages": 0,
                 "conversations": 0,
@@ -745,8 +791,8 @@ class ApplicationApi:
                     "account_id": runtime_account,
                     "account_changed": True,
                 })
-            directory = {"items": []}
-            if kind in {"all", "group"}:
+            directory = {"items": [], "account_id": runtime_account}
+            if kind in {"all", "group"} and not offline:
                 directory = self._groups.list(values.get("refresh_groups") is True)
             directory_account = str(directory.get("account_id") or "").strip()
             if (
@@ -768,7 +814,7 @@ class ApplicationApi:
                 account_id=account_id,
             )
             items = list(history.get("items") or [])
-            private_contacts = self._history_contacts(
+            private_contacts = {} if offline else self._history_contacts(
                 [
                     str(item.get("conversation_id") or "")
                     for item in items
@@ -835,6 +881,7 @@ class ApplicationApi:
                 "items": items,
                 "summary": summary,
                 "account_id": account_id,
+                **({"offline": True} if offline else {}),
             })
         except (OSError, ValueError) as exc:
             return self._failed(exc)
@@ -944,7 +991,7 @@ class ApplicationApi:
     ) -> dict[str, object]:
         try:
             values = filters or {}
-            account_id = self._history_account_id()
+            account_id, offline = self._history_data_identity()
             expected_account = str(values.get("account_id") or "").strip()
             paged = values.get("paged") is True
             if not account_id:
@@ -1006,7 +1053,7 @@ class ApplicationApi:
                 for old_key in tuple(member_cache):
                     if old_key[0] != account_id:
                         member_cache.pop(old_key, None)
-                members = member_cache.get(cache_key)
+                members = {} if offline else member_cache.get(cache_key)
                 if members is None:
                     members = {}
                     try:
@@ -1040,7 +1087,7 @@ class ApplicationApi:
                         or message.get("sender_id")
                         or ""
                     )
-            elif any(
+            elif not offline and any(
                 message.get("role") != "assistant"
                 and (
                     not message.get("avatar")
@@ -1067,10 +1114,10 @@ class ApplicationApi:
                         )
             replies = [message for message in messages if message.get("role") == "assistant"]
             if replies:
-                robot = self._contacts.self_profile() if hasattr(getattr(self, "_contacts", None), "self_profile") else {}
+                robot = self._contacts.self_profile() if not offline and hasattr(getattr(self, "_contacts", None), "self_profile") else {}
                 name = load_robot_settings(self._install_root).profile.display_name
                 for message in replies:
-                    message["avatar"] = str(robot.get("avatar") or "")
+                    message["avatar"] = str(robot.get("avatar") or (message.get("avatar") if offline else "") or "")
                     message["sender_id"] = account_id
                     message["sender_name"] = name
             if paged:
@@ -1124,7 +1171,7 @@ class ApplicationApi:
         self, format: str = "csv", expected_account_id: str = ""
     ) -> dict[str, object]:
         try:
-            account_id = self._history_account_id()
+            account_id, _ = self._history_data_identity()
             if not account_id:
                 return self._ok({"cancelled": True, "requires_login": True})
             if expected_account_id and expected_account_id != account_id:
@@ -1146,7 +1193,7 @@ class ApplicationApi:
             )
             if not result:
                 return self._ok({"cancelled": True})
-            if self._history_account_id() != account_id:
+            if self._history_data_identity()[0] != account_id:
                 return self._ok({"cancelled": True, "account_changed": True})
             selected = result[0] if isinstance(result, (list, tuple)) else result
             target = self._history.export(

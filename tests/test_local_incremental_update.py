@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 
 import pytest
 
 from wechatrebot_manager import uninstaller, updates
 from wechatrebot_manager.payload import PayloadError, sha256_file
+from wechatrebot_manager.licensing.bundle import install_runtime_bundle
 
 
 PLUGINS = "app/astrbot/data/plugins"
@@ -229,6 +231,66 @@ def test_manager_only_plan_does_not_access_plugin_or_base_inputs(tmp_path, monke
     assert not any(scope.startswith("app/") for scope in result["components"])
     assert not (source / "artifacts").exists()
     assert not install.exists()
+
+
+@pytest.mark.parametrize("enabled_at,problem", [
+    ("source", None), ("source", "runtime_guard"),
+    ("installed_manager", "runtime_guard"), ("installed_runtime", "runtime_guard"),
+    ("source", "core_patch"), ("source", "runtime_manifest"),
+])
+def test_commercial_manager_only_requires_matching_authorization_runtime(
+    tmp_path, monkeypatch, capsys, enabled_at, problem,
+):
+    local = _script("update_local_incremental")
+    repository = Path(__file__).parents[1]
+    source, install = tmp_path / "source", tmp_path / "install"
+    package = source / "src/wechatrebot_manager"
+    for name in local.RUNTIME_FILES:
+        target = package / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repository / "src/wechatrebot_manager" / name, target)
+    channel = json.loads((package / "licensing-channel.json").read_text("utf-8"))
+    channel["enabled"] = enabled_at == "source"
+    (package / "licensing-channel.json").write_text(json.dumps(channel), encoding="utf-8")
+    site_packages = install / "runtime/python/Lib/site-packages"
+    fingerprint = install_runtime_bundle(source, site_packages)
+    (source / "patches").mkdir()
+    patch = "patches/astrbot-4.26.6-license.patch"
+    shutil.copy2(repository / patch, source / patch)
+    manifest = {"licensing_bundle_sha256": fingerprint,
+                "astrbot_license_patch_sha256": sha256_file(source / patch)}
+    manifest_path = install / "runtime/runtime-manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    if enabled_at != "source":
+        destination = (install / "manager/src/wechatrebot_manager" if enabled_at == "installed_manager"
+                       else site_packages / "wechatrebot_manager") / "licensing-channel.json"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps({**channel, "enabled": True}), encoding="utf-8")
+    if problem == "runtime_guard":
+        (site_packages / "wechatrebot_manager/licensing/runtime_guard.py").unlink()
+    elif problem == "core_patch":
+        manifest.pop("astrbot_license_patch_sha256")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    elif problem == "runtime_manifest":
+        manifest_path.unlink()
+    _files(source, {"release/source-manifest.json": json.dumps({"entries": [
+        {"origin": "commercial", "source": "src/wechatrebot_manager", "target": "manager/src/wechatrebot_manager"},
+    ]})})
+    monkeypatch.setattr(local, "ROOT", source)
+    monkeypatch.setattr(local, "require_master", lambda _root: None)
+    monkeypatch.setattr(local, "manager_changed", lambda *_args: True)
+
+    def forbidden_base_scan(*_args):
+        pytest.fail("Authorization validation must not scan plugins, Python or FFmpeg")
+
+    monkeypatch.setattr(local, "verify_base_inputs", forbidden_base_scan)
+    assert local.main(["--install-root", str(install), "--manager-only", "--plan"]) == (1 if problem else 0)
+    output = capsys.readouterr()
+    if problem:
+        assert output.err and not output.out
+    else:
+        assert json.loads(output.out)["runtime_build_required"] is False
+    assert not (source / "artifacts").exists()
 
 
 def test_cleanup_refuses_unrelated_directory(tmp_path):

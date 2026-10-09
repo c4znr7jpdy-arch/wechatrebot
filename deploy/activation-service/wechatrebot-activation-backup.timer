@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily WeChatReBot activation backup
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 Asia/Shanghai
+RandomizedDelaySec=30m
+Persistent=true
+Unit=wechatrebot-activation-backup.service
+
+[Install]
+WantedBy=timers.target

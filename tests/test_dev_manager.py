@@ -55,6 +55,32 @@ def test_preflight_rejects_unfinished_install_without_writing(tmp_path: Path):
     assert list(tmp_path.iterdir()) == [marker]
 
 
+def test_contact_preview_exposes_only_fixed_public_file(tmp_path, monkeypatch):
+    web_root = tmp_path / "app_webui"
+    web_root.mkdir()
+    public = b'{"schema_version":1}'
+    (tmp_path / "licensing-contact.json").write_bytes(public)
+    (tmp_path / "licensing-channel.json").write_text("private-channel", encoding="utf-8")
+    monkeypatch.setattr(dev, "WATCH_ROOT", tmp_path)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), dev.preview_handler(web_root, watch=False))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base + "/assets/preview/licensing-contact.json") as response:
+            assert response.read() == public
+            assert response.headers["Content-Type"].startswith("application/json")
+            assert response.headers["Cache-Control"] == "no-store"
+        for path in ("/assets/preview/licensing-channel.json", "/../licensing-channel.json"):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + path)
+            assert error.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_supervisor_restarts_only_its_child_on_source_save(monkeypatch, tmp_path: Path):
     events = []
 

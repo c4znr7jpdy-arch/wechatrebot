@@ -36,6 +36,11 @@ def _is_link(path: Path) -> bool:
     )
 
 
+def _license_path(parts: tuple[str, ...]) -> bool:
+    normalized = tuple(part.casefold() for part in parts)
+    return normalized[:2] == ("data", "licensing") or normalized == ("config", "licensing.json")
+
+
 def backup_source_files(install_root: str | Path) -> tuple[tuple[Path, Path], ...]:
     root = Path(install_root).expanduser().resolve()
     try:
@@ -59,6 +64,8 @@ def backup_source_files(install_root: str | Path) -> tuple[tuple[Path, Path], ..
         if not source_root.is_dir() or _is_link(source_root):
             raise BackupError(f"备份目录不是安全的普通目录：{name}")
         for path in sorted(source_root.rglob("*")):
+            if _license_path(path.relative_to(root).parts):
+                continue
             relative_to_source = path.relative_to(source_root)
             if "backups" in relative_to_source.parts:
                 # The memory backend keeps its own rolling snapshots. Including
@@ -156,6 +163,7 @@ def _safe_restore_path(value: object) -> Path:
         or windows.drive
         or any(part in {"", ".", ".."} for part in posix.parts)
         or any(os.path.isreserved(part) for part in posix.parts)
+        or _license_path(posix.parts)
         or not any(
             tuple(part.casefold() for part in posix.parts[: len(PurePosixPath(root).parts)])
             == tuple(part.casefold() for part in PurePosixPath(root).parts)

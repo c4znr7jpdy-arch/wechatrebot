@@ -20,6 +20,8 @@ from .launcher import (
     ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
     build_service_specs, installation_services_stopped,
 )
+from .licensing.client import LicenseClient
+from .licensing.protocol import LicenseError
 from .runtime_status import RuntimeSnapshot, runtime_snapshot
 
 
@@ -32,6 +34,8 @@ class LifecycleState(StrEnum):
     WAITING_WECHAT = "WAITING_WECHAT"
     VERIFYING_CONNECTION = "VERIFYING_CONNECTION"
     RUNNING = "RUNNING"
+    LICENSE_READY = "LICENSE_READY"
+    LICENSE_PAUSED = "LICENSE_PAUSED"
     STOP_WAIT_WECHAT = "STOP_WAIT_WECHAT"
     STOPPING = "STOPPING"
     ERROR = "ERROR"
@@ -45,6 +49,10 @@ class SupervisorLike(Protocol):
     def stop(self, timeout_seconds: float = 15) -> None: ...
 
     def force_stop(self) -> None: ...
+
+    def start_missing(self, names: tuple[str, ...]) -> tuple[object, ...]: ...
+
+    def stop_names(self, names: tuple[str, ...], timeout_seconds: float = 15) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,8 +113,10 @@ class LifecycleController:
         | None = None,
         catalog: ErrorCatalog | None = None,
         event_store: EventStore | None = None,
+        license_client: LicenseClient | None = None,
     ) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
+        self.licenses = license_client or LicenseClient(self.install_root)
         self._environment_checker = environment_checker or (
             lambda root: inspect_wechat_environment(root)
         )
@@ -139,6 +149,7 @@ class LifecycleController:
         self._wechat_closed_confirmations = 0
         self._start_in_progress = False
         self._maintenance_processes: list[ProcessLike] = []
+        self._license_pause_failed = False
         self.events.emit("APP_START", "success")
         if self._uses_default_supervisor:
             try:
@@ -146,7 +157,10 @@ class LifecycleController:
                 adopter = getattr(candidate, "adopt", None)
                 if callable(adopter) and adopter():
                     self._supervisor = candidate
-                    if not bool(getattr(candidate, "adoption_complete", False)):
+                    connection_only = {item.spec.name for item in candidate.running} == {"new-hook-bridge"}
+                    if connection_only and self._license_snapshot()["enabled"]:
+                        self.state = LifecycleState.LICENSE_READY
+                    elif not bool(getattr(candidate, "adoption_complete", False)):
                         self.state = LifecycleState.ERROR
                         self._error = self.catalog.get("13002")
                         self.events.emit(
@@ -212,12 +226,71 @@ class LifecycleController:
                 self._error = self.catalog.get(self._environment.code)
             return self.view()
 
+    def _license_snapshot(self) -> dict:
+        account = self._runtime.wechat_identity if self._runtime.account_status_available else ""
+        return self.licenses.snapshot(account)
+
+    def _pause_license(self, *, stop_on_error: bool = True) -> None:
+        try:
+            self.licenses.pause()
+            self._license_pause_failed = False
+        except LicenseError as exc:
+            # A refresh may hold the writer lock. Until the run grant is revoked,
+            # bridge tasks could still send; stop both owned services in this
+            # exceptional path instead of leaving a live sender with the old grant.
+            self._license_pause_failed = True
+            self.events.emit("APP_ERROR", "failed", code=f"LIC-{exc.code}", message=str(exc))
+            if stop_on_error and self._supervisor is not None:
+                self._supervisor.stop(timeout_seconds=0)
+                self._runtime = self._snapshotter()
+
+    def connect_wechat(self) -> LifecycleView:
+        """Open the dedicated WeChat bridge after redemption, without reply plugins."""
+        status = self._license_snapshot()
+        if not status["enabled"]:
+            return self.start()
+        if not status["can_connect"]:
+            raise LicenseError(status["state"], status["message"])
+        owned_core = self._supervisor and any(
+            item.spec.name == "astrbot" and item.process.poll() is None
+            for item in self._supervisor.running
+        )
+        if not owned_core:
+            # Also clears a grant left behind if the previous UI could not save
+            # its pause. Reconnecting must never resume bridge automation.
+            self.licenses.pause()
+            self._license_pause_failed = False
+        return self._start_services(("new-hook-bridge",))
+
     def start(self) -> LifecycleView:
+        if not self._license_snapshot()["enabled"]:
+            return self._start_services()
         with self._lock:
             if self._start_in_progress:
                 return self.view()
-            if self._supervisor is not None and self._supervisor.running:
-                return self.refresh()
+            self._runtime = self._snapshotter()
+            account = self._runtime.wechat_identity if self._runtime.account_status_available else ""
+            if not self._runtime.connection_ready or not account:
+                raise LicenseError("account_required", "请先连接微信并确认绑定实际账号。")
+            self.licenses.authorize_run(account)
+        try:
+            result = self._start_services(("astrbot", "new-hook-bridge"))
+            if result.state == LifecycleState.ERROR or not result.environment.ready:
+                self._pause_license()
+            return result
+        except Exception:
+            self._pause_license()
+            raise
+
+    def _start_services(self, names: tuple[str, ...] | None = None) -> LifecycleView:
+        with self._lock:
+            if self._start_in_progress:
+                return self.view()
+            existing = self._supervisor
+            if existing is not None and existing.running:
+                owned = {getattr(getattr(item, "spec", None), "name", "") for item in existing.running}
+                if names is None or set(names) <= owned:
+                    return self.refresh()
             environment = self.check_environment()
             if not environment.environment.ready:
                 return environment
@@ -227,11 +300,11 @@ class LifecycleController:
                 preflight_errors = self._preflight(self.install_root)
                 if preflight_errors:
                     return self._set_error("13001", detail="；".join(preflight_errors))
-                supervisor = self._supervisor_factory(self._on_progress)
+                supervisor = existing or self._supervisor_factory(self._on_progress)
                 self._supervisor = supervisor
                 self._start_in_progress = True
             except (OSError, ServiceLaunchError, ValueError) as exc:
-                self._supervisor = None
+                self._supervisor = existing
                 self._start_in_progress = False
                 return self._set_error("13001", detail=str(exc))
 
@@ -239,7 +312,10 @@ class LifecycleController:
         # hold the lifecycle lock, otherwise status polling cannot show the
         # bridge launch or tell the user to log in to WeChat.
         try:
-            supervisor.start()
+            if names is None:
+                supervisor.start()
+            else:
+                supervisor.start_missing(names)
         except (OSError, ServiceLaunchError, ValueError) as exc:
             with self._lock:
                 code = (
@@ -247,7 +323,7 @@ class LifecycleController:
                     if self.state == LifecycleState.CONNECTION_STARTING
                     else "13001"
                 )
-                if self._supervisor is supervisor:
+                if self._supervisor is supervisor and not supervisor.running:
                     self._supervisor = None
                 self._start_in_progress = False
                 return self._set_error(code, detail=str(exc))
@@ -256,6 +332,8 @@ class LifecycleController:
             self._start_in_progress = False
             self._runtime = self._snapshotter()
             self._error = None
+            if names is not None:
+                return self.refresh()
             if self._runtime.online:
                 self._mark_running()
             elif not self._runtime.wechat_identity:
@@ -291,6 +369,9 @@ class LifecycleController:
                 if self._wechat_closed_confirmations >= 2:
                     return self._finish_stop()
                 return self.view()
+            licensed_view = self._refresh_licensed()
+            if licensed_view is not None:
+                return licensed_view
             if self._supervisor is not None and self._supervisor.running:
                 exited = any(
                     getattr(item, "process", None) is not None
@@ -316,8 +397,49 @@ class LifecycleController:
                 self.state = LifecycleState.STOPPED
             return self.view()
 
+    def _refresh_licensed(self) -> LifecycleView | None:
+        status = self._license_snapshot()
+        if not status["enabled"]:
+            return None
+        supervisor = self._supervisor
+        if not supervisor or not supervisor.running:
+            if self.state != LifecycleState.ERROR:
+                self.state = LifecycleState.LICENSE_PAUSED
+            return self.view()
+        by_name = {item.spec.name: item for item in supervisor.running}
+        bridge = by_name.get("new-hook-bridge")
+        if bridge is not None and bridge.process.poll() is not None:
+            self._pause_license()
+            return None  # The existing lifecycle handles an unexpected bridge crash.
+        core = by_name.get("astrbot")
+        if core is not None and (not status["can_run"] or core.process.poll() is not None):
+            # The runtime also enforces this independently when the manager is closed.
+            self._pause_license()
+            supervisor.stop_names(("astrbot",), timeout_seconds=3)
+            self._running_events_emitted = False
+            core = None
+        if core is None:
+            if self.state == LifecycleState.ERROR:
+                return self.view()
+            if status["can_run"]:
+                self._pause_license()
+            self.state = LifecycleState.LICENSE_READY if status["authorized"] else LifecycleState.LICENSE_PAUSED
+            self._error = None
+        elif self._runtime.online:
+            self._mark_running()
+        else:
+            self.state = LifecycleState.VERIFYING_CONNECTION
+        return self.view()
+
     def request_stop(self) -> LifecycleView:
         with self._lock:
+            if self._license_snapshot()["enabled"]:
+                self._pause_license()
+                if self._supervisor is not None:
+                    self._supervisor.stop_names(("astrbot",))
+                self.state = LifecycleState.LICENSE_PAUSED
+                self._running_events_emitted = False
+                return self.view()
             if self._supervisor is None or not self._supervisor.running:
                 self.state = LifecycleState.STOPPED
                 self._error = None
@@ -376,6 +498,8 @@ class LifecycleController:
     def force_stop(self) -> LifecycleView:
         """Stop owned services immediately, without waiting for WeChat."""
         with self._lock:
+            if self._license_snapshot()["enabled"]:
+                self._pause_license(stop_on_error=False)
             supervisor = self._supervisor
             if supervisor is None or not supervisor.running:
                 self.state = LifecycleState.STOPPED
@@ -439,6 +563,8 @@ class LifecycleController:
             LifecycleState.WAITING_WECHAT: ("等待登录微信", "请在微信窗口完成登录。"),
             LifecycleState.VERIFYING_CONNECTION: ("正在确认连接", "正在检查消息通信是否正常。"),
             LifecycleState.RUNNING: ("机器人可用", "微信连接和全部功能运行正常。"),
+            LifecycleState.LICENSE_READY: ("微信连接已保留", "完成账号绑定后，点击启动机器人。"),
+            LifecycleState.LICENSE_PAUSED: ("自动化已暂停", "客户数据已保留，可前往订阅与授权继续处理。"),
             LifecycleState.STOP_WAIT_WECHAT: ("请先关闭微信", "检测到微信关闭后会自动继续停止。"),
             LifecycleState.STOPPING: ("正在停止机器人", "正在安全结束后台服务。"),
             LifecycleState.ERROR: ("机器人启动失败", "请根据错误提示处理后重试。"),
@@ -460,17 +586,23 @@ class LifecycleController:
             LifecycleState.STOPPING,
         }
         owned = self._supervisor is not None and bool(self._supervisor.running)
+        licensing = self._license_snapshot()
+        licensed = licensing["enabled"]
+        online = self._runtime.online and (not licensed or licensing["can_run"])
+        if licensed and self.state in {LifecycleState.LICENSE_READY, LifecycleState.LICENSE_PAUSED}:
+            message = ("授权暂停未能写入，已停止后台服务；请稍后重新连接微信。"
+                       if self._license_pause_failed else licensing["message"])
         return LifecycleView(
             state=self.state,
             title=title,
             message=message,
             busy=busy,
-            online=self._runtime.online,
+            online=online,
             can_start=(
                 self._environment.ready
                 and not busy
-                and not owned
-                and not self._runtime.online
+                and (not owned or licensed)
+                and not online
             ),
             can_stop=owned and not busy,
             error=self._error,
