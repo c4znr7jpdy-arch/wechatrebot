@@ -25,6 +25,8 @@ def _metadata_copy(tmp_path: Path) -> Path:
     shutil.copy2(source / "src" / "wechatrebot_manager" / "__init__.py", package)
     shutil.copy2(source / "src" / "wechatrebot_manager" / "task_store.py", package)
     shutil.copy2(source / "src" / "wechatrebot_manager" / "hook_recall_patch.py", package)
+    shutil.copytree(source / "src/wechatrebot_manager/licensing", package / "licensing",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(source / "runtime", target / "runtime")
     shutil.copytree(source / "legal", target / "legal")
     shutil.copytree(source / "config", target / "config")

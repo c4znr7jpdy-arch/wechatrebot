@@ -22,6 +22,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from wechatrebot_manager.payload import _is_user_config, sha256_file, validate_incremental_path
 from source_inputs import repository_sources, verify_source_inputs
+from wechatrebot_manager.licensing.bundle import RUNTIME_FILES, validate_runtime_bundle
+from wechatrebot_manager.licensing.config import _read_channel
 
 # Changes to these inputs require a compatible base runtime, not a script patch.
 BASE_INPUTS = {
@@ -31,6 +33,9 @@ BASE_INPUTS = {
     "release/hook-binaries.json": "legal/hook-binaries.json",
     "patches/astrbot-4.26.6-wechat.patch": "legal/corresponding-source/astrbot-4.26.6-wechat.patch",
     "patches/astrbot-4.26.6-outbound-policy.patch": "legal/corresponding-source/astrbot-4.26.6-outbound-policy.patch",
+    "patches/astrbot-4.26.6-license.patch": "legal/corresponding-source/astrbot-4.26.6-license.patch",
+    **{f"src/wechatrebot_manager/{name}": f"runtime/python/Lib/site-packages/wechatrebot_manager/{name}"
+       for name in RUNTIME_FILES},
 }
 MANAGER_INPUTS_FILE = "legal/manager-build-inputs.json"
 
@@ -83,6 +88,27 @@ def verify_base_inputs(root: Path, install: Path) -> None:
     python = runtime.get("python", {})
     if python.get("version") != PYTHON_VERSION or python.get("sha256") != PYTHON_SHA256:
         raise RuntimeError("底层组件基线不兼容：Python 版本或发行文件已变化；未启动完整构建。")
+
+
+def verify_manager_license_base(root: Path, install: Path) -> None:
+    """Check only the shared authorization files when either package enforces it."""
+    site_packages = install / "runtime/python/Lib/site-packages"
+    channels = (
+        root / "src/wechatrebot_manager/licensing-channel.json",
+        install / "manager/src/wechatrebot_manager/licensing-channel.json",
+        site_packages / "wechatrebot_manager/licensing-channel.json",
+    )
+    if not any(path.exists() and _read_channel(path).enabled for path in channels):
+        return
+    try:
+        runtime = json.loads((install / "runtime/runtime-manifest.json").read_text("utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("授权运行时清单缺失或无效，本次需要完整载荷更新；未启动构建。") from exc
+    if not isinstance(runtime, dict):
+        raise RuntimeError("授权运行时清单无效，本次需要完整载荷更新；未启动构建。")
+    validate_runtime_bundle(root, site_packages, runtime.get("licensing_bundle_sha256"))
+    if runtime.get("astrbot_license_patch_sha256") != sha256_file(root / "patches/astrbot-4.26.6-license.patch"):
+        raise RuntimeError("授权核心补丁缺失或已变更，本次需要完整载荷更新；未启动构建。")
 
 
 def manager_changed(root: Path, install: Path) -> bool:
@@ -220,7 +246,9 @@ def main(argv: list[str] | None = None) -> int:
             verify_source_inputs(ROOT, source_root)
         install = (args.install_root or installed_root()).resolve()
         require_master(ROOT)
-        if not args.manager_only:
+        if args.manager_only:
+            verify_manager_license_base(ROOT, install)
+        else:
             verify_base_inputs(ROOT, install)
         entries, scopes = source_scopes(ROOT, install, manager_only=args.manager_only)
         needs_manager = manager_changed(ROOT, install)

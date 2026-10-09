@@ -1,0 +1,103 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -1,4 +1,6 @@
+ from __future__ import annotations
++
++from wechatrebot_manager.licensing.runtime_guard import bind_account_source, runtime_guard
+ 
+ import asyncio
+ from collections.abc import Mapping
+@@ -108,6 +110,7 @@
+         self.state = state or BridgeState(
+             settings.dedup_ttl_seconds, settings.dedup_capacity
+         )
++        bind_account_source(lambda: self.state.bot_wxid if self._hook_ready else "")
+         self.history = history
+         self.router = router
+         self.onebot = onebot
+@@ -317,6 +320,9 @@
+                     await self.onebot.set_identity(
+                         event.account_id, event.sender_name
+                     )
++                elif (event.kind in {"message", "group_member_update", "group_increase", "group_decrease"}
++                      and not runtime_guard().status().get("can_run")):
++                    continue
+                 elif event.kind == "message":
+                     if not self.state.accept_message(event.message_id):
+                         logger.debug("ignored duplicate callback message %s", event.message_id)
+@@ -1742,6 +1748,7 @@
+ 
+     async def run(self) -> int:
+         configure_logging(self.settings)
++        runtime_guard().start_refresh()
+         code = 0
+         try:
+             if self.launch_injector:
+@@ -1807,6 +1814,7 @@
+         self._stop_event.set()
+ 
+     async def _shutdown(self) -> None:
++        runtime_guard().stop_refresh()
+         for task in (
+             self._consumer_task,
+             self._cleanup_task,
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -1,4 +1,6 @@
+ from __future__ import annotations
++
++from wechatrebot_manager.licensing.runtime_guard import runtime_guard
+ 
+ import asyncio
+ import base64
+@@ -458,6 +460,7 @@
+         attempts = 3 if retry_read else 1
+         for attempt in range(attempts):
+             try:
++                runtime_guard().require_hook(path)
+                 async with self.session.post(
+                     f"{self.base_url}{path}",
+                     json=dict(payload),
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1,4 +1,6 @@
+ from __future__ import annotations
++
++from wechatrebot_manager.licensing.runtime_guard import guard_bridge_action, runtime_guard
+ 
+ import asyncio
+ from collections import deque
+@@ -777,6 +779,7 @@
+         except Exception:
+             logger.exception("scheduled recall failed for %s", record.to_user_name)
+ 
++    @guard_bridge_action
+     async def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
+         action = str(request.get("action", ""))
+         echo = request.get("echo")
+@@ -1193,7 +1196,10 @@
+         if connection is None:
+             raise ConnectionError("AstrBot WebSocket is disconnected")
+         async with self._send_lock:
+-            await connection.send(json.dumps(dict(payload), ensure_ascii=False))
++            outgoing = runtime_guard().delivery_event(dict(payload))
++            if outgoing is None:
++                return
++            await connection.send(json.dumps(outgoing, ensure_ascii=False))
+ 
+     async def _receive_loop(self, connection: ClientConnection) -> None:
+         async for raw in connection:
+@@ -1337,7 +1343,9 @@
+             await self._connection.close(code=1000, reason="identity updated")
+ 
+     async def send_event(self, event: Mapping[str, Any]) -> None:
+-        await self._events.put(dict(event))
++        queued = runtime_guard().queue_event(dict(event))
++        if queued is not None:
++            await self._events.put(queued)
+ 
+     @property
+     def connected(self) -> bool:

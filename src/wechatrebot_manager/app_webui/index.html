@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
+  <link rel="stylesheet" href="subscription.css?v=20261009">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -31,6 +32,7 @@
     <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="9" r="5"/><path d="m12 12 8 8m-3-3 3-3m-6 0 3-3"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -47,6 +49,7 @@
             <button class="nav-item" data-page="history" data-action-bound disabled aria-label="消息中心" title="消息中心"><svg><use href="#i-chat"/></svg><span>消息中心</span></button>
             <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
+            <button class="nav-item" data-page="subscription" data-action-bound disabled aria-label="订阅与授权" title="订阅与授权"><svg><use href="#i-key"/></svg><span>订阅与授权</span></button>
             <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
             <button class="nav-item" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg><span>帮助</span></button>
       </nav>
@@ -83,6 +86,11 @@
             <div><h1 id="homeHeading">运行中心</h1></div>
             <div class="account-chip"><span>当前账号</span><strong id="accountText">尚未连接</strong></div>
           </div>
+
+          <section class="license-notice" id="homeLicenseNotice" aria-label="授权提醒" hidden>
+            <div><strong id="homeLicenseTitle"></strong><p id="homeLicenseMessage"></p></div>
+            <button class="button secondary" id="homeLicenseAction" type="button" disabled>查看授权</button>
+          </section>
 
           <section class="environment-alert" id="environmentAlert" hidden>
             <div class="alert-code"><span>环境检查</span><strong id="environmentCode">11001</strong></div>
@@ -149,6 +157,72 @@
             <article><span>机器人功能</span><strong id="signalCore">未启动</strong></article>
             <article><span>消息通信</span><strong id="signalMessage">未连接</strong></article>
           </div>
+        </section>
+
+        <section class="page" id="page-subscription" aria-labelledby="subscriptionHeading">
+          <div class="page-heading">
+            <div><h1 id="subscriptionHeading">订阅与授权</h1></div>
+            <button class="button ghost small" id="licenseRefresh" type="button" disabled><svg aria-hidden="true"><use href="#i-refresh"/></svg>重新验证</button>
+          </div>
+          <p class="subscription-feedback" id="licenseFeedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+          <section class="subscription-status panel" id="licenseStatusPanel" aria-labelledby="licenseStateTitle" data-tone="neutral">
+            <div class="subscription-status-heading"><div><span class="subscription-kicker">当前授权</span><h2 id="licenseStateTitle">正在读取授权</h2></div><span class="subscription-tag" id="licenseStateTag">请稍候</span></div>
+            <p id="licenseStateMessage">正在读取本机授权状态。</p>
+            <dl class="subscription-facts">
+              <div><dt>当前套餐</dt><dd id="licensePlan">未激活</dd></div>
+              <div><dt>到期时间（北京时间）</dt><dd id="licenseExpires">—</dd><small id="licenseRemaining"></small></div>
+              <div><dt>绑定微信</dt><dd id="licenseAccount">尚未绑定</dd></div>
+            </dl>
+            <ol class="subscription-steps" aria-label="授权步骤">
+              <li id="licenseStepCode"><span>1</span>领取激活码</li><li id="licenseStepRedeem"><span>2</span>兑换授权</li><li id="licenseStepAccount"><span>3</span>确认微信账号</li>
+            </ol>
+            <div class="subscription-account" id="licenseCurrentAccountRow" hidden><span>当前登录微信</span><strong id="licenseCurrentAccount"></strong></div>
+            <p class="subscription-pause-note" id="licensePausedInfo" hidden>自动回复、模型调用、主动推送和定时任务已暂停。微信与数据保留；续费后由你确认恢复，不补发暂停期间的任务。</p>
+            <div class="button-row subscription-runtime-actions">
+              <button class="button primary" id="licenseConnect" type="button" disabled hidden>连接微信</button>
+              <button class="button primary" id="licenseBind" type="button" disabled hidden>确认绑定当前微信</button>
+              <button class="button primary" id="licenseResume" type="button" disabled hidden>启动机器人</button>
+            </div>
+            <details class="subscription-support">
+              <summary>授权编号与换机</summary>
+              <p>续期时向群管理员提供授权编号；换机时提供新电脑的设备编号，领取迁移码。</p>
+              <div><span>授权编号</span><code id="licenseIdText">尚未激活</code><button class="button ghost small" id="licenseCopyId" type="button" disabled>复制授权编号</button></div>
+              <div><span>本机设备编号</span><code id="licenseDeviceText">尚未生成</code><div class="button-row"><button class="button ghost small" id="licensePrepareDevice" type="button" disabled hidden>获取本机设备编号</button><button class="button ghost small" id="licenseCopyDevice" type="button" disabled>复制设备编号</button></div></div>
+            </details>
+          </section>
+
+          <section class="subscription-plans-section" aria-labelledby="subscriptionPlansTitle">
+            <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>试用和付费套餐均通过 QQ 群领取激活码，模型费用自理。</p></div>
+            <div class="subscription-plans" id="licensePlans"><p class="subtle">正在读取套餐…</p></div>
+          </section>
+
+          <div class="subscription-activation-grid">
+            <section class="subscription-group panel" aria-labelledby="licenseGroupTitle">
+              <div class="subscription-card-heading"><span class="subscription-step-number">1</span><h2 id="licenseGroupTitle">加群领取激活码</h2></div>
+              <p>加入 QQ 群联系管理员，领取 1 小时试用码，或购买月付、年付激活码。</p>
+              <div class="subscription-group-info"><span>QQ 群</span><strong id="licenseGroupNumber">待配置</strong></div>
+              <p class="subtle" id="licenseGroupNote">加群方式尚未配置，请联系软件提供者。</p>
+              <div class="button-row"><button class="button secondary" id="licenseOpenGroup" type="button" disabled>加入 QQ 群</button><button class="button ghost" id="licenseCopyGroup" type="button" disabled><svg aria-hidden="true"><use href="#i-copy"/></svg>复制群号</button></div>
+            </section>
+            <section class="subscription-redeem panel" aria-labelledby="licenseRedeemTitle">
+              <div class="subscription-card-heading"><span class="subscription-step-number">2</span><h2 id="licenseRedeemTitle">兑换激活码</h2></div>
+              <form id="licenseCodeForm" novalidate>
+                <label class="form-field" for="licenseCode"><span>激活码</span><input id="licenseCode" name="activation_code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="160" placeholder="输入从 QQ 群领取的激活码" aria-describedby="licenseCodeHelp licenseCodeFeedback" disabled></label>
+                <p class="subtle" id="licenseCodeHelp">先查看套餐和有效期，确认后再兑换。</p>
+                <p class="subscription-feedback" id="licenseCodeFeedback" role="status" aria-live="polite" hidden></p>
+                <button class="button primary" id="licensePreviewCode" type="submit" disabled>查看激活码</button>
+              </form>
+              <section class="subscription-code-preview" id="licenseCodePreview" aria-labelledby="licenseCodePreviewTitle" hidden>
+                <h3 id="licenseCodePreviewTitle">确认兑换内容</h3><dl id="licenseCodePreviewDetails"></dl><p id="licenseCodePreviewMessage"></p>
+                <div class="button-row"><button class="button primary" id="licenseConfirmRedeem" type="button" disabled>确认兑换</button><button class="button ghost" id="licenseCancelRedeem" type="button">取消</button></div>
+              </section>
+            </section>
+          </div>
+
+          <section class="subscription-data-access" aria-label="数据与帮助">
+            <p>授权到期仍可查看配置、消息记录，并备份和导出自己的数据。</p>
+            <div class="button-row"><button class="button ghost small" id="licenseOpenHistory" type="button">查看消息记录</button><button class="button ghost small" id="licenseOpenMaintenance" type="button">设置与备份</button></div>
+          </section>
         </section>
 
         <section class="page" id="page-features" aria-label="功能中心">
@@ -413,6 +487,7 @@
   <script src="date-range.js"></script>
   <script src="report-preview.js"></script>
   <script src="panel-layout.js"></script>
+  <script src="subscription.js?v=20261009"></script>
   <script src="app.js?v=20260922-force-stop-layout"></script>
   <dialog id="historyDateDialog" class="date-range-dialog" aria-labelledby="rangeTitle">
     <div class="panel-heading"><h2 id="rangeTitle">选择日期范围</h2><button type="button" id="rangeWeek" class="button ghost small">最近一周</button></div>

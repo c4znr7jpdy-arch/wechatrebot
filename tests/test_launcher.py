@@ -365,3 +365,71 @@ def test_supervisor_persists_and_readopts_owned_processes(
     monkeypatch.setattr(os, "kill", lambda pid, sig: identities.pop(pid, None))
     adopted.stop()
     assert not state_path.exists()
+
+
+def test_partial_start_failure_and_core_stop_keep_owned_bridge(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    events = []
+    fail_core = [True]
+    pids = iter((102, 101, 103))
+    identities = {pid: ProcessIdentity(_normalized_executable(specs[0].argv[0]), pid * 10)
+                  for pid in (101, 102, 103)}
+    def popen(argv, **kwargs):
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        events.append(f"start:{name}")
+        return _FakeProcess(name, events, next(pids))
+    state_path = tmp_path / "data/service-state.json"
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *a: False)
+    supervisor = ProcessSupervisor(specs, popen_factory=popen,
+        readiness_waiter=lambda spec, _: spec.name != "astrbot" or not fail_core[0],
+        state_path=state_path, identity_probe=identities.get)
+    supervisor.start_missing(("new-hook-bridge",))
+    assert json.loads(state_path.read_text())["complete"] is False
+    with pytest.raises(ServiceLaunchError):
+        supervisor.start_missing(("astrbot",))
+    assert [item.spec.name for item in supervisor.running] == ["new-hook-bridge"]
+    assert json.loads(state_path.read_text())["services"][0]["pid"] == 102
+    fail_core[0] = False
+    supervisor.start_missing(("astrbot", "new-hook-bridge"))
+    assert json.loads(state_path.read_text())["complete"] is True
+    supervisor.stop_names(("astrbot",))
+    assert supervisor.running[0].process.poll() is None
+    assert events.count("start:new-hook-bridge") == 1
+    supervisor.stop()
+    assert not state_path.exists()
+
+
+def test_supervisor_rejects_unlicensed_legacy_entry_before_any_launch(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    _layout(tmp_path)
+    starts = []
+    client = SimpleNamespace(snapshot=lambda *a: {
+        "enabled": True, "can_run": False, "can_connect": False, "message": "尚未激活"})
+    monkeypatch.setattr("wechatrebot_manager.licensing.client.LicenseClient", lambda _: client)
+    monkeypatch.setattr("wechatrebot_manager.runtime_status.probe_bridge_health", lambda **kw:
+        SimpleNamespace(status_available=False, hook_ready=False, wechat_identity=""))
+    supervisor = ProcessSupervisor(build_service_specs(tmp_path), popen_factory=lambda *a, **kw: starts.append(a))
+    with pytest.raises(ServiceLaunchError, match="尚未激活"):
+        supervisor.start()
+    assert starts == []
+
+
+def test_force_stop_retains_service_ownership_if_process_survives(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    class SurvivingProcess(_FakeProcess):
+        def kill(self):
+            raise PermissionError("still alive")
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("bridge", timeout)
+    process = SurvivingProcess("new-hook-bridge", [])
+    monkeypatch.setattr("wechatrebot_manager.launcher.port_accepting", lambda *a: False)
+    supervisor = ProcessSupervisor(build_service_specs(tmp_path),
+        popen_factory=lambda *a, **kw: process, readiness_waiter=lambda *a: True)
+    supervisor.start_missing(("new-hook-bridge",))
+    with pytest.raises(ServiceStopError):
+        supervisor.force_stop()
+    assert supervisor.running and not supervisor.running[0].log_handle.closed
+    process.code = 0
+    supervisor.force_stop()
+    assert not supervisor.running

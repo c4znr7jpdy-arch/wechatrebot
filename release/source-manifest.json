@@ -98,6 +98,16 @@
     },
     {
       "origin": "commercial",
+      "source": "patches/astrbot-4.26.6-license.patch",
+      "target": "legal/corresponding-source/astrbot-4.26.6-license.patch"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/licensing",
+      "target": "legal/corresponding-source/wechatrebot_manager/licensing"
+    },
+    {
+      "origin": "commercial",
       "source": "patches/hook-recall-explicit-receipt.asm",
       "target": "legal/corresponding-source/hook-recall-explicit-receipt.asm"
     },

@@ -66,7 +66,7 @@ function historyContext() {
       if (options.forceBottom || options.nearBottom) $('#messageList').scrollTop = 900;
     }, renderHistoryAccountGate() {},
   });
-  const names = ['requestHistoryRead', 'refreshHistoryRecords', 'loadConversations', 'setHistoryActionsEnabled',
+  const names = ['requestHistoryRead', 'refreshHistoryRecords', 'loadConversations', 'canEditHistory', 'setHistoryActionsEnabled',
     'historyFilters', 'pagedHistoryFilters', 'normalizeMessagePage', 'mergeMessages',
     'historyMessageCacheKey', 'getHistoryMessageCacheEntry', 'setHistoryMessageCacheEntry',
     'saveSelectedHistoryMessages', 'clearHistoryMessageCache', 'requestHistoryMessagePage',
@@ -175,5 +175,28 @@ async function manualRefresh() {
   await assert.rejects(timeoutRequest, /读取记录超时，请点击刷新/);
 }
 
-(async () => { dates(); await history(); await manualRefresh(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+function offlineHistoryActions() {
+  const {context: c, state: s, $} = historyContext();
+  s.status = {history_offline: true, runtime: {account_status_available: false}};
+  c.setHistoryActionsEnabled(true);
+  assert.equal($('#exportHistory').disabled, false);
+  assert.equal($('#refreshHistory').disabled, false);
+  assert.equal($('#cleanHistory').disabled, true);
+  assert.equal($('#deleteConversation').disabled, true);
+  assert.equal(c.canEditHistory(), false);
+  s.status.history_offline = false;
+  c.setHistoryActionsEnabled(false);
+  assert.equal($('#exportHistory').disabled, true);
+  assert.equal($('#refreshHistory').disabled, true);
+  s.status.runtime = {account_status_available: true, wechat_identity: 'account-a'};
+  c.setHistoryActionsEnabled(true);
+  assert.equal($('#cleanHistory').disabled, false);
+  assert.equal($('#deleteConversation').disabled, false);
+  assert.equal(c.canEditHistory('account-b'), false);
+  s.status.history_offline = true;
+  c.setHistoryActionsEnabled(true);
+  assert.equal($('#deleteConversation').disabled, true, 'a previously rendered delete button must become read-only');
+}
+
+(async () => { dates(); await history(); await manualRefresh(); offlineHistoryActions(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

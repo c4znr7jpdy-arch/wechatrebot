@@ -274,6 +274,7 @@ def build_service_specs(
     node_bin = python_exe.parent / "Lib/site-packages/playwright/driver"
     inherited_path = os.environ.get("PATH", "")
     common_environment = {
+        "WECHATREBOT_INSTALL_ROOT": str(root),
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -404,6 +405,8 @@ class ProcessSupervisor:
             return
         services: list[dict[str, object]] = []
         for running in self.running:
+            if running.process.poll() is not None:
+                continue
             pid = int(getattr(running.process, "pid", 0) or 0)
             identity = self._identity_probe(pid)
             if identity is None:
@@ -422,7 +425,7 @@ class ProcessSupervisor:
             self._state_path,
             {
                 "schema_version": 1,
-                "complete": len(self.running) == len(self.specs),
+                "complete": len(services) == len(self.specs),
                 "services": services,
             },
         )
@@ -498,16 +501,31 @@ class ProcessSupervisor:
     def start(self) -> tuple[RunningService, ...]:
         if self.running:
             raise ServiceLaunchError("服务监督器已经启动。")
+        return self._start_specs(self.specs)
+
+    def start_missing(self, names: tuple[str, ...]) -> tuple[RunningService, ...]:
+        """Add selected services while preserving the existing WeChat connection."""
+        if set(names) - {spec.name for spec in self.specs}:
+            raise ServiceLaunchError("请求启动的服务不存在。")
+        exited = tuple(item.spec.name for item in self.running if item.process.poll() is not None)
+        if exited:
+            self.stop_names(exited)
+        owned = {item.spec.name for item in self.running}
+        selected = tuple(spec for spec in self.specs if spec.name in names and spec.name not in owned)
+        return self._start_specs(selected) if selected else tuple(self.running)
+
+    def _start_specs(self, specs: tuple[ServiceSpec, ...]) -> tuple[RunningService, ...]:
+        self._check_authorization(specs)
         validation_errors = [
             error
-            for spec in self.specs
+            for spec in specs
             for error in spec.validate()
         ]
         if validation_errors:
             raise ServiceLaunchError("；".join(validation_errors))
         occupied: list[str] = []
         checked_ports: set[tuple[str, int]] = set()
-        for spec in self.specs:
+        for spec in specs:
             ports = ((spec.label, spec.ready_port), *spec.required_free_ports)
             for label, port in ports:
                 address = (spec.ready_host, port)
@@ -524,7 +542,8 @@ class ProcessSupervisor:
         # bridge is designed to reconnect to that engine, so this opens WeChat
         # immediately instead of making a first-time user wait through the full
         # plugin startup sequence before a login window can appear.
-        for spec in self.specs:
+        names = tuple(spec.name for spec in specs)
+        for spec in specs:
             if self._progress_callback is not None:
                 self._progress_callback("starting", spec)
             spec.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -547,38 +566,71 @@ class ProcessSupervisor:
                 )
             except Exception as exc:
                 log_handle.close()
-                self.stop()
+                self.stop_names(names)
                 raise ServiceLaunchError(f"无法启动{spec.label}：{exc}") from exc
             running = RunningService(spec, process, log_handle)
             self.running.append(running)
             try:
                 self._persist_state()
             except (OSError, ServiceLaunchError) as exc:
-                self.stop()
+                self.stop_names(names)
                 raise ServiceLaunchError(str(exc)) from exc
         for running in tuple(self.running):
             spec = running.spec
+            if spec.name not in names:
+                continue
             process = running.process
             if not self._readiness_waiter(spec, process):
                 exit_code = process.poll()
-                self.stop()
+                self.stop_names(names)
                 raise ServiceLaunchError(
                     f"{spec.label}未在规定时间内就绪，退出码：{exit_code!r}。"
                 )
             if self._progress_callback is not None:
                 self._progress_callback("ready", spec)
-        self.adoption_complete = True
+        self.adoption_complete = len(self.running) == len(self.specs)
         try:
             self._persist_state()
         except (OSError, ServiceLaunchError) as exc:
-            self.stop()
+            self.stop_names(names)
             raise ServiceLaunchError(str(exc)) from exc
         return tuple(self.running)
 
+    def _check_authorization(self, specs: tuple[ServiceSpec, ...]) -> None:
+        # Also covers CLI and the legacy control centre, before any subprocess
+        # starts. Runtime guards remain authoritative after launch.
+        from .licensing.client import LicenseClient
+        from .runtime_status import probe_bridge_health
+
+        roots = {spec.environment.get("WECHATREBOT_INSTALL_ROOT") for spec in specs}
+        for root in roots - {None}:
+            selected = [spec for spec in specs if spec.environment.get("WECHATREBOT_INSTALL_ROOT") == root]
+            client = LicenseClient(root)
+            status = client.snapshot()
+            if not status["enabled"]:
+                continue
+            if any(spec.name == "astrbot" for spec in selected):
+                bridge = next((spec for spec in self.specs if spec.name == "new-hook-bridge"), None)
+                health = probe_bridge_health(port=bridge.ready_port if bridge else 5000)
+                account = health.wechat_identity if health.status_available and health.hook_ready else ""
+                status = client.snapshot(account)
+                permitted = status["can_run"]
+            else:
+                permitted = status["can_connect"]
+            if not permitted:
+                raise ServiceLaunchError(f"{status['message']} 请在管理器完成订阅与授权后启动。")
+
     def stop(self, timeout_seconds: float = 15) -> None:
+        self.stop_names(tuple(item.spec.name for item in self.running), timeout_seconds)
+
+    def stop_names(self, names: tuple[str, ...], timeout_seconds: float = 15) -> None:
+        """Stop only selected owned processes; preserve identity records for others."""
         remaining: list[RunningService] = []
         failures: list[RunningService] = []
         for running in reversed(self.running):
+            if running.spec.name not in names:
+                remaining.append(running)
+                continue
             process = running.process
             if process.poll() is None:
                 try:
@@ -605,7 +657,7 @@ class ProcessSupervisor:
             else:
                 running.log_handle.close()
         self.running = list(reversed(remaining))
-        self.adoption_complete = False
+        self.adoption_complete = len(self.running) == len(self.specs)
         if failures:
             try:
                 self._persist_state()
@@ -613,10 +665,14 @@ class ProcessSupervisor:
                 pass
             first = failures[0]
             raise ServiceStopError(first.spec.name, first.spec.label)
-        self._clear_state()
+        if self.running:
+            self._persist_state()
+        else:
+            self._clear_state()
 
     def force_stop(self) -> None:
         """Terminate every managed service immediately, without a grace period."""
+        remaining: list[RunningService] = []
         for running in reversed(self.running):
             process = running.process
             if process.poll() is None:
@@ -628,9 +684,16 @@ class ProcessSupervisor:
                     process.wait(timeout=5)
                 except Exception:
                     pass
-            running.log_handle.close()
-        self.running.clear()
+            if process.poll() is None:
+                remaining.append(running)
+            else:
+                running.log_handle.close()
+        self.running = list(reversed(remaining))
         self.adoption_complete = False
+        if self.running:
+            self._persist_state()
+            first = self.running[0]
+            raise ServiceStopError(first.spec.name, first.spec.label)
         self._clear_state()
 
     def wait(self) -> int:

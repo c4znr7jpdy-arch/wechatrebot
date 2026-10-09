@@ -86,6 +86,37 @@ def test_backup_refuses_destination_inside_customer_data(tmp_path: Path) -> None
         create_customer_backup(install, install / "data" / "backup.zip")
 
 
+def test_authorization_identity_and_policy_are_excluded_from_backups(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    _install(install)
+    private = install / "data/licensing"
+    private.mkdir()
+    (private / "device.json").write_bytes(b"private identity")
+    (private / "state.json").write_bytes(b"entitlement")
+    (install / "config/licensing.json").write_bytes(b"deployment policy")
+    target = tmp_path / "backup.zip"
+    create_customer_backup(install, target)
+    with zipfile.ZipFile(target) as archive:
+        assert not any("licensing" in name.casefold() for name in archive.namelist())
+
+
+@pytest.mark.parametrize("protected", ["data/licensing/device.json", "DATA/LICENSING/state.json", "config/licensing.json"])
+def test_restore_rejects_authorization_paths_even_with_valid_hash(tmp_path, protected):
+    import hashlib
+    install = tmp_path / "install"
+    _install(install)
+    target = tmp_path / "crafted.zip"
+    content = b"forged authorization state"
+    manifest = {"schema_version": 1, "product": "WeChat ReBot", "files": [
+        {"path": protected, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}]}
+    with zipfile.ZipFile(target, "w") as archive:
+        archive.writestr(protected, content)
+        archive.writestr("backup-manifest.json", json.dumps(manifest))
+    with pytest.raises(BackupError, match="不安全路径"):
+        restore_customer_backup(install, target)
+    assert not (install / protected).exists()
+
+
 def test_backup_refuses_links(tmp_path: Path) -> None:
     install = tmp_path / "install"
     _install(install)

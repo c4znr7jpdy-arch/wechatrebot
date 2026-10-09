@@ -232,6 +232,11 @@
     schemaMarkup, configFromForm, escapeHtml, confirmAction, toast, reportError, growTextarea,
   });
 
+  const subscription = window.createSubscriptionPage({
+    api, escapeHtml, confirmAction, copyText, navigate, refreshRuntime: refreshStatus,
+    openMaintenance: async () => { await navigate("settings"); setSettingsSection("system", true); },
+  });
+
   function safeImageUrl(value) {
     try {
       const parsed = new URL(String(value || "").trim());
@@ -375,7 +380,7 @@
   function reconcileStartPending(status) {
     if (!state.startPending) return status;
     const current = status?.state || "STOPPED";
-    if (current === "STOPPED" && status?.environment?.ready && !status?.error) {
+    if (["STOPPED", "LICENSE_READY"].includes(current) && status?.environment?.ready && !status?.error) {
       return startingStatus(status);
     }
     if (!STARTUP_STATES.has(current)) state.startPending = false;
@@ -386,20 +391,24 @@
     const wasOnline = Boolean(state.status?.online);
     const status = reconcileStartPending(rawStatus);
     state.status = status;
+    subscription.updateRuntime(status);
     const runtime = status.runtime || {};
     const environment = status.environment || {};
     const current = status.state || "STOPPED";
     const online = Boolean(status.online);
-    const waiting = ["WAITING_WECHAT", "VERIFYING_CONNECTION", "STOP_WAIT_WECHAT"].includes(current);
+    const licenseWaiting = ["LICENSE_READY", "LICENSE_PAUSED"].includes(current);
+    const waiting = licenseWaiting || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "STOP_WAIT_WECHAT"].includes(current);
     const problem = current === "ERROR";
-    const active = !["STOPPED", "ERROR"].includes(current);
+    const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
+      ? String(status.history_account || "").trim() : "";
     // A failed probe is not a logout. Keep the displayed account snapshot,
     // while the backend independently refuses unverified reads and mutations.
-    const historyAccount = accountStatusAvailable
-      ? String(runtime.wechat_identity || "").trim() : state.historyAccount;
+    const historyAccount = offlineHistory || (accountStatusAvailable
+      ? String(runtime.wechat_identity || "").trim() : state.historyAccount);
 
     if (historyAccount !== state.historyAccount) {
       state.historyAccount = historyAccount;
@@ -410,7 +419,7 @@
       }
     }
     setHistoryActionsEnabled(
-      wechatLoggedIn && state.historyReadyAccount === historyAccount
+      (wechatLoggedIn || Boolean(offlineHistory)) && state.historyReadyAccount === historyAccount
     );
 
     // Details prefetched while the engine is starting can carry a stale
@@ -453,7 +462,7 @@
       homeStatusIcon.textContent = online ? "✓" : problem ? "!" : waiting ? "!" : "…";
     }
     const primary = $("#primaryAction");
-    const stopMode = status.can_stop || online;
+    const stopMode = !status.can_start && (status.can_stop || online);
     const primaryLabel = starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止运行") : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
@@ -463,7 +472,7 @@
       || (state.mandatoryUpdate && !stopMode);
     primary.setAttribute("aria-busy", String(Boolean(status.busy)));
     primary.setAttribute("aria-label", primaryLabel);
-    primary.title = online ? "安全停止机器人" : primaryLabel;
+    primary.title = stopMode ? "安全停止机器人" : primaryLabel;
 
     const alert = $("#environmentAlert");
     alert.hidden = Boolean(environment.ready);
@@ -522,6 +531,7 @@
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
     button.disabled = true;
+    if (action === "start" && !await subscription.beforeStart()) { renderStatus(state.status); return; }
     if (action === "start") {
       state.startPending = true;
       renderStatus(startingStatus(state.status));
@@ -568,7 +578,7 @@
 
   const PAGE_TITLES = {
     home: "运行中心", features: "功能中心", groups: "群聊&私聊管理", history: "消息中心",
-    schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助",
+    schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助", subscription: "订阅与授权",
   };
 
   const SETTINGS_SECTIONS = new Set(["model", "core", "system"]);
@@ -714,6 +724,7 @@
       content.classList.toggle("history-active", page === "history");
       content.scrollTop = 0;
     }
+    await subscription.onNavigate(page);
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
     if (page === "features" && state.imageServiceChoicesStale) {
       state.imageServiceChoicesStale = false;
@@ -2206,7 +2217,7 @@
       state.historyConversationSnapshot = {query, data};
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
-      setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
+      setHistoryActionsEnabled(data.offline === true || state.status?.history_offline === true || state.status?.runtime?.account_status_available !== false);
       if (state.selectedConversation) {
         const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
         state.selectedConversation = refreshed || null;
@@ -2214,7 +2225,7 @@
       const summary = data.summary || {};
       const visible = state.conversations.length;
       const visibleMessages = state.conversations.reduce((sum, item) => sum + (item.message_count || 0), 0);
-      $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
+      $("#historySummary").textContent = `${data.offline ? "离线记录 · " : ""}${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
       if (state.selectedConversation) {
         await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
@@ -2242,14 +2253,23 @@
     }
   }
 
+  function canEditHistory(accountId = state.historyAccount) {
+    const runtime = state.status?.runtime || {};
+    return Boolean(accountId && accountId === state.historyAccount && accountId === state.historyReadyAccount
+      && state.status?.history_offline !== true && runtime.account_status_available !== false
+      && String(runtime.wechat_identity || "").trim() === accountId);
+  }
+
   function setHistoryActionsEnabled(enabled) {
     const exportButton = $("#exportHistory");
-    const cleanButton = $("#cleanHistory");
     if (exportButton) exportButton.disabled = !enabled;
-    if (cleanButton) cleanButton.disabled = !enabled;
+    for (const id of ["#cleanHistory", "#deleteConversation"]) {
+      const button = $(id);
+      if (button) button.disabled = !enabled || !canEditHistory();
+    }
     const refreshButton = $("#refreshHistory");
     if (refreshButton) {
-      refreshButton.disabled = !state.historyAccount || state.status?.runtime?.account_status_available === false || state.historyManualRefresh;
+      refreshButton.disabled = !state.historyAccount || (state.status?.runtime?.account_status_available === false && !state.status?.history_offline) || state.historyManualRefresh;
       refreshButton.textContent = state.historyManualRefresh ? "刷新中…" : "刷新";
     }
   }
@@ -2821,11 +2841,14 @@
     $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>该发送者消息</dt><dd>${Number.isInteger(currentSender?.sender_message_count) ? `${currentSender.sender_message_count} 条` : "未统计"}</dd></div><div><dt>该发送者最近消息</dt><dd>${escapeHtml(fullTime(currentSender?.sender_last_timestamp))}</dd></div><div><dt>本会话消息</dt><dd>${item.message_count} 条</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
+    if ($("#deleteConversation")) $("#deleteConversation").disabled = !canEditHistory();
     $("#deleteConversation")?.addEventListener("click", () => {
       const accountId = state.historyAccount;
+      if (!canEditHistory(accountId)) return;
       confirmAction({
         title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
         onConfirm: async () => {
+          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
           const result = await api("delete_conversation", item.conversation_id, accountId);
           if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
             invalidateHistoryState();
@@ -5119,12 +5142,14 @@
     $("#openOnboarding").addEventListener("click", () => { showOnboarding(true); });
     $("#cleanHistory").addEventListener("click", () => {
       const accountId = state.historyAccount;
+      if (!canEditHistory(accountId)) return;
       confirmAction({
         title: "按日期清理聊天记录",
         message: "将删除所选日期以前的本机记录副本，此操作无法撤销。",
         confirmText: "开始清理",
         field: {label: "保留此日期及之后的记录", type: "date", value: ""},
         onConfirm: async (value) => {
+          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
           const result = await api("delete_history_before", value, accountId);
           if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
             invalidateHistoryState();
@@ -5185,8 +5210,11 @@
       state.bootstrap = await api("bootstrap");
       fillSettings(state.bootstrap);
       renderStatus(state.bootstrap.status);
+      await subscription.initialize();
       const previewParams = new URLSearchParams(window.location.search);
-      if (previewParams.has("preview") && (previewParams.get("demo") === "model-services" || previewParams.get("demo") === "thinking-mode")) {
+      if (subscription.needsEntry() || (previewParams.has("preview") && previewParams.get("demo") === "subscription")) {
+        await navigate("subscription");
+      } else if (previewParams.has("preview") && (previewParams.get("demo") === "model-services" || previewParams.get("demo") === "thinking-mode")) {
         state.bootstrap.experience.onboarding_complete = true;
         await navigate("settings");
       } else {
@@ -5536,9 +5564,94 @@
       status.runtime = {...status.runtime, engine_ready: running, connection_ready: running, upstream_connected: running, heartbeat_fresh: running};
       status.environment = {...status.environment, process_running: running};
     };
+    // Only instantiated by the existing ?preview entry point; no live API uses these fixtures.
+    const licenseParams = new URLSearchParams(window.location.search);
+    const licenseDemo = licenseParams.get("demo") === "subscription" || licenseParams.has("license");
+    const previewLicensePlans = [
+      {id: "trial", name: "1 小时试用", price_fen: 0, duration_seconds: 3600},
+      {id: "monthly", name: "月付", price_fen: 6900, duration_seconds: 30 * 86400},
+      {id: "yearly", name: "年付", price_fen: 69900, duration_seconds: 365 * 86400},
+    ];
+    let previewLicenseState = licenseDemo ? licenseParams.get("license") || "unactivated" : "disabled";
+    const previewLicense = {license_id: ["pending", "active", "expired", "offline"].includes(previewLicenseState) ? "lic_preview" : "",
+      device_id: ["pending", "active", "expired", "offline"].includes(previewLicenseState) ? "a".repeat(64) : "", plan: "monthly", account: ["active", "expired", "offline"].includes(previewLicenseState) ? "wxid_demo_account" : "",
+      valid_until: previewLicenseState === "expired" ? Math.floor(Date.now() / 1000) - 60 : Math.floor(Date.now() / 1000) + 30 * 86400, can_run: false};
+    const previewCodes = new Map();
+    const redeemedPreviewCodes = new Set();
+    if (licenseDemo) {
+      setPreviewRuntime(false);
+      if (!["active", "expired", "offline"].includes(previewLicenseState)) status.runtime.wechat_identity = "";
+    }
+    const licenseError = (code, message) => Promise.resolve({ok: false, error: {code, message}});
+    const licenseSnapshot = () => {
+      const enabled = previewLicenseState !== "disabled";
+      const configured = !["disabled", "unconfigured"].includes(previewLicenseState);
+      const canConnect = configured && Boolean(previewLicense.license_id) && previewLicense.valid_until > Date.now() / 1000;
+      const authorized = canConnect && Boolean(previewLicense.account) && previewLicense.account === status.runtime.wechat_identity;
+      const messages = {
+        disabled: "此安装尚未启用商业授权，现有功能可按原方式使用。",
+        unconfigured: "授权服务和 QQ 群尚未配置，请联系软件提供者。",
+        unactivated: "加入 QQ 群领取激活码，查看并确认兑换后绑定微信。",
+        pending: "激活码已兑换，请连接微信并确认实际登录账号。",
+        active: "授权已生效，由你确认启动机器人。",
+        expired: "自动化已暂停。可兑换续期码，微信与本机数据保留。",
+        offline: "暂时无法连接授权服务，现有授权仍在离线有效期内。",
+      };
+      return {...previewLicense, enabled, configured, state: previewLicenseState, authorized, can_connect: canConnect,
+        current_account: status.runtime.wechat_identity || "", remaining_seconds: previewLicense.license_id ? Math.max(0, Math.floor(previewLicense.valid_until - Date.now() / 1000)) : 0,
+        valid_until: previewLicense.license_id ? previewLicense.valid_until : 0, plan: previewLicense.license_id ? previewLicense.plan : "",
+        message: messages[previewLicenseState], qq_group: "", qq_url: "", plans: structuredClone(previewLicensePlans)};
+    };
+    const previewLicenseApi = {
+      get_license_status: () => ok(licenseSnapshot()),
+      prepare_license_device: () => { previewLicense.device_id = "a".repeat(64); return ok(licenseSnapshot()); },
+      refresh_license: () => { if (previewLicenseState === "offline") previewLicenseState = "active"; return ok(licenseSnapshot()); },
+      preview_activation_code: (code) => {
+        if (!licenseSnapshot().configured) return licenseError("NOT_CONFIGURED", "授权服务尚未配置。");
+        previewLicense.device_id = "a".repeat(64);
+        const plan = previewLicensePlans.find((item) => code.trim().toUpperCase() === `WRB-${item.id.toUpperCase()}-DEMO`);
+        if (!plan) return licenseError("INVALID_CODE", "激活码无效，请检查后重试。");
+        const already = redeemedPreviewCodes.has(code);
+        if (plan.id === "trial" && previewLicense.license_id && !already) return licenseError("TRIAL_USED", "当前设备已有授权，请使用月付或年付续期码。");
+        const preview = {preview_id: `preview_${previewCodes.size + 1}`, plan: plan.id, mode: previewLicense.license_id ? "renewal" : "activation",
+          valid_until: already ? previewLicense.valid_until : Math.floor(Math.max(Date.now() / 1000, previewLicense.license_id ? previewLicense.valid_until : 0)) + plan.duration_seconds,
+          license_id: previewLicense.license_id, already_redeemed: already, message: "预览演示：确认后仅改变此页面的演示状态。"};
+        previewCodes.set(preview.preview_id, {code, data: preview});
+        return ok(preview);
+      },
+      redeem_activation_code: (code, previewId) => {
+        const preview = previewCodes.get(previewId);
+        if (!preview || preview.code !== code) return licenseError("PREVIEW_EXPIRED", "请重新查看激活码，再确认兑换。");
+        const plan = previewLicensePlans.find((item) => item.id === preview.data.plan);
+        const validUntil = redeemedPreviewCodes.has(code) ? previewLicense.valid_until
+          : Math.floor(Math.max(Date.now() / 1000, previewLicense.license_id ? previewLicense.valid_until : 0)) + plan.duration_seconds;
+        Object.assign(previewLicense, {license_id: "lic_preview", valid_until: validUntil, plan: preview.data.plan, can_run: false});
+        redeemedPreviewCodes.add(code);
+        previewLicenseState = previewLicense.account ? "active" : "pending";
+        return ok(licenseSnapshot());
+      },
+      connect_license_wechat: () => {
+        if (!licenseSnapshot().can_connect) return licenseError("NOT_AUTHORIZED", "请先激活授权。");
+        status.runtime.wechat_identity = "wxid_demo_account";
+        return ok(licenseSnapshot());
+      },
+      bind_license_account: (expectedAccount) => {
+        if (!licenseSnapshot().can_connect || expectedAccount !== status.runtime.wechat_identity) return licenseError("ACCOUNT_CHANGED", "微信账号已变化，请重新确认。");
+        previewLicense.account = expectedAccount; previewLicenseState = "active";
+        return ok(licenseSnapshot());
+      },
+      open_license_group: () => licenseError("GROUP_NOT_CONFIGURED", "QQ 群尚未配置。"),
+    };
     return {
+      ...previewLicenseApi,
       bootstrap: () => ok({version: "0.9.2", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: previewOnboardingReadiness(), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
-      get_status: () => ok(status), check_environment: () => ok(status), start_robot: () => { setPreviewRuntime(true); return ok({accepted: true}); }, stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, force_stop_robot: () => { setPreviewRuntime(false); return ok({accepted: true}); }, select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
+      get_status: () => ok(status), check_environment: () => ok(status),
+      start_robot: () => {
+        if (licenseSnapshot().enabled && !licenseSnapshot().authorized) return licenseError("NOT_AUTHORIZED", "请完成授权后再启动。");
+        previewLicense.can_run = true; setPreviewRuntime(true); return ok({accepted: true});
+      },
+      stop_robot: () => { previewLicense.can_run = false; setPreviewRuntime(false); return ok({accepted: true}); },
+      force_stop_robot: () => { previewLicense.can_run = false; setPreviewRuntime(false); return ok({accepted: true}); }, select_wechat: () => ok(status), open_wechat_download: () => ok({opened: true}),
       get_features: () => ok({plugins: features, engine_online: true}),
       get_robot_core: () => ok(corePreviewDetail()),
       save_robot_core: (config, _revision, identity) => {

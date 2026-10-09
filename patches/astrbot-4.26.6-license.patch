@@ -1,0 +1,92 @@
+diff --git a/official/astrbot/core/core_lifecycle.py b/expected/astrbot/core/core_lifecycle.py
+--- a/official/astrbot/core/core_lifecycle.py
++++ b/expected/astrbot/core/core_lifecycle.py
+@@ -10,6 +10,10 @@
+ """
+ 
+ import asyncio
++
++from wechatrebot_manager.licensing.runtime_guard import (
++    finish_core_watch, runtime_guard, watch_core,
++)
+ import os
+ import threading
+ import time
+@@ -147,6 +151,7 @@
+ 
+         负责初始化各个组件, 包括 ProviderManager、PlatformManager、ConversationManager、PluginManager、PipelineScheduler、EventBus、AstrBotUpdator等。
+         """
++        runtime_guard().claim_core_session()
+         # 初始化日志代理
+         logger.info("AstrBot v" + VERSION)
+         if os.environ.get("TESTING", ""):
+@@ -345,7 +350,9 @@
+ 
+         用load加载事件总线和任务并初始化, 执行启动完成事件钩子
+         """
++        runtime_guard().require_core()
+         self._load()
++        license_watch = asyncio.create_task(watch_core(self), name="license-expiry")
+         logger.info("AstrBot started.")
+ 
+         # 执行启动完成事件钩子
+@@ -362,7 +369,10 @@
+                 logger.error(traceback.format_exc())
+ 
+         # 同时运行curr_tasks中的所有任务
+-        await asyncio.gather(*self.curr_tasks, return_exceptions=True)
++        try:
++            await asyncio.gather(*self.curr_tasks, return_exceptions=True)
++        finally:
++            await finish_core_watch(self, license_watch)
+ 
+     async def stop(self) -> None:
+         """停止 AstrBot 核心生命周期管理类, 取消所有当前任务并终止各个管理器."""
+diff --git a/official/astrbot/core/pipeline/scheduler.py b/expected/astrbot/core/pipeline/scheduler.py
+--- a/official/astrbot/core/pipeline/scheduler.py
++++ b/expected/astrbot/core/pipeline/scheduler.py
+@@ -1,4 +1,6 @@
+ from collections.abc import AsyncGenerator
++
++from wechatrebot_manager.licensing.runtime_guard import runtime_guard
+ 
+ from astrbot.core import logger
+ from astrbot.core.platform import AstrMessageEvent
+@@ -41,6 +43,7 @@
+ 
+         """
+         for i in range(from_stage, len(self.stages)):
++            runtime_guard().require_core(str(event.get_self_id() or ""))
+             stage = self.stages[i]  # 获取当前要执行的阶段
+             # logger.debug(f"执行阶段 {stage.__class__.__name__}")
+             coroutine = stage.process(
+@@ -84,6 +87,7 @@
+         """
+         active_event_registry.register(event)
+         try:
++            runtime_guard().require_core(str(event.get_self_id() or ""))
+             await self._process_stages(event)
+ 
+             # 发送一个空消息, 以便于后续的处理
+diff --git a/official/astrbot/core/provider/provider.py b/expected/astrbot/core/provider/provider.py
+--- a/official/astrbot/core/provider/provider.py
++++ b/expected/astrbot/core/provider/provider.py
+@@ -1,5 +1,7 @@
+ import abc
+ import asyncio
++
++from wechatrebot_manager.licensing.runtime_guard import guard_provider_class
+ import os
+ from collections.abc import AsyncGenerator
+ from typing import Literal, TypeAlias, Union
+@@ -26,6 +28,10 @@
+ 
+ class AbstractProvider(abc.ABC):
+     """Provider Abstract Class"""
++
++    def __init_subclass__(cls, **kwargs) -> None:
++        super().__init_subclass__(**kwargs)
++        guard_provider_class(cls)
+ 
+     def __init__(self, provider_config: dict) -> None:
+         super().__init__()

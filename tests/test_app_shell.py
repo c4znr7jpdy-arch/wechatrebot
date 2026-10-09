@@ -1368,12 +1368,12 @@ def test_install_update_surfaces_background_verification_failure(
 
 
 def test_public_api_allowlist_matches_frontend_calls() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    webui = Path(app_shell.__file__).with_name("app_webui")
+    script = "\n".join((webui / name).read_text(encoding="utf-8")
+                       for name in ("app.js", "subscription.js"))
     called = {
-        match.split('"', 2)[1]
-        for match in __import__("re").findall(r'api\("[a-z_]+"', script)
+        match for match in __import__("re").findall(
+            r'(?:api|runtimeAction)\("([a-z_]+)"', script)
     }
 
     assert called | {"start_robot", "stop_robot", "force_stop_robot"} == set(
@@ -1804,7 +1804,7 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     ]
 
     assert handler.index("state.startPending = true") < handler.index("await api(")
-    assert 'current === "STOPPED" && status?.environment?.ready' in script
+    assert '["STOPPED", "LICENSE_READY"].includes(current) && status?.environment?.ready' in script
     assert '"启动中…"' in script
     assert "const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);" in script
     assert 'wechatLoggedIn ? "已登录"' in script
@@ -2019,7 +2019,7 @@ def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert '"停止运行"' in script
-    assert 'primary.title = online ? "安全停止机器人" : primaryLabel;' in script
+    assert 'primary.title = stopMode ? "安全停止机器人" : primaryLabel;' in script
     assert '.status-orbit[data-state="online"] .power-button:hover:not(:disabled)' in styles
 
 

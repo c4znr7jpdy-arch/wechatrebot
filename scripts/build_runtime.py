@@ -13,6 +13,8 @@ import tempfile
 import urllib.request
 import zipfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from wechatrebot_manager.licensing.bundle import install_runtime_bundle
 
 PYTHON_VERSION = "3.13.9"
 PYTHON_ARCHIVE = f"python-{PYTHON_VERSION}-embed-amd64.zip"
@@ -336,6 +338,7 @@ def _apply_astrbot_patch(commercial_root: Path, site_packages: Path) -> None:
     patches = (
         commercial_root / "patches" / "astrbot-4.26.6-wechat.patch",
         commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch",
+        commercial_root / "patches" / "astrbot-4.26.6-license.patch",
     )
     site_relative = site_packages.relative_to(commercial_root).as_posix()
     for patch in patches:
@@ -456,6 +459,7 @@ def main(argv: list[str] | None = None) -> int:
         commercial_root=commercial_root,
     )
     _apply_astrbot_patch(commercial_root, site_packages)
+    licensing_fingerprint = install_runtime_bundle(commercial_root, site_packages)
     _assert_runtime_boundary(site_packages)
     _validate_runtime(python_root / "python.exe", output)
     ffmpeg_root = output / "ffmpeg"
@@ -481,6 +485,10 @@ def main(argv: list[str] | None = None) -> int:
         "astrbot_outbound_policy_patch_sha256": sha256_file(
             commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch"
         ),
+        "astrbot_license_patch_sha256": sha256_file(
+            commercial_root / "patches" / "astrbot-4.26.6-license.patch"
+        ),
+        "licensing_bundle_sha256": licensing_fingerprint,
         "wheelhouse": {
             key: value
             for key, value in wheelhouse_verification.items()
