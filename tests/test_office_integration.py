@@ -21,7 +21,7 @@ MODULE = "astrbot_plugin_office_assistant"
 @pytest.fixture(scope="module")
 def office_bridge(tmp_path_factory):
     checkout = tmp_path_factory.mktemp("office-bridge")
-    source = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge"
+    source = ROOT / "vendor/hook_41827_astrbot_bridge"
     shutil.copytree(source / "src", checkout / "src")
     shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py", checkout / "src/hook_bridge/task_store.py")
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)

@@ -14,7 +14,7 @@ from wechatrebot_manager.plugin_guides import get_plugin_guide
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT_PLUGINS = ROOT / "tests/fixtures/patch_sources/data/plugins"
+PROJECT_PLUGINS = ROOT / "vendor/data/plugins"
 
 
 def _apply_plugin_patches(tmp_path: Path, module: str) -> Path:

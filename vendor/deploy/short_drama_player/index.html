@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>短剧播放</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui,-apple-system,"Microsoft YaHei",sans-serif; --accent: #19b89b; --player-viewport-height: 100vh; }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; background: #0b0c0f; color: #f3f5f7; }
+    body.sheet-open { overflow: hidden; }
+    button { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    main { width: min(100%, 980px); margin: 0 auto; padding: 12px 12px max(22px, env(safe-area-inset-bottom)); }
+    .watch-stage { display: flex; min-height: calc(var(--player-viewport-height) - 24px); flex-direction: column; justify-content: center; }
+    .watch-stage[hidden], .recommendations-page[hidden] { display: none !important; }
+    .heading { margin: 1px 2px 10px; }
+    h1 { display: -webkit-box; overflow: hidden; margin: 0 0 3px; font-size: clamp(17px, 4.4vw, 21px); font-weight: 650; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    #meta { color: #8f949d; font-size: 13px; overflow-wrap: anywhere; }
+    .video-shell { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16/9; margin: 0 auto; overflow: hidden; border-radius: 12px; background: #000; box-shadow: 0 8px 30px rgba(0,0,0,.28); }
+    video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; background: #000; object-fit: contain; }
+    .video-actions { position: absolute; inset: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: space-between; padding: 10px; opacity: 1; transition: opacity 220ms ease; pointer-events: none; }
+    .video-actions.controls-hidden { opacity: 0; pointer-events: none; }
+    .video-actions.controls-hidden, .video-actions.controls-hidden * { pointer-events: none !important; }
+    .icon-button, .pill-button, .actions button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.16); color: #fff; background: rgba(10,12,15,.66); box-shadow: 0 2px 10px rgba(0,0,0,.22); backdrop-filter: blur(7px); pointer-events: auto; }
+    .icon-button { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 18px; }
+    .icon-button svg { width: 20px; height: 20px; fill: currentColor; }
+    .pill-button { min-height: 31px; padding: 0 10px; border-radius: 16px; font-size: 12px; }
+    .mobile-episode-button, .mobile-tool-button { pointer-events: auto; }
+    #mobileEpisodeButtonTop { display: none; }
+    .mobile-control-panel #mobileEpisodeButton { display: none !important; }
+    .video-actions .top-left { display: flex; gap: 6px; align-items: center; }
+    .video-actions .top-right { display: flex; gap: 6px; align-items: center; }
+    .video-actions .topbar { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; justify-content: space-between; }
+    .video-actions .center-nav { display: flex; width: 100%; justify-content: space-between; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 38px; padding: 8px 2px 0; }
+    .actions button { min-height: 28px; padding: 0 9px; border-color: #3a3e46; border-radius: 7px; color: #dce0e6; background: #202329; font-size: 12px; }
+    .actions button:disabled { visibility: hidden; }
+    .actions a { margin-left: auto; color: #8ca9ce; font-size: 12px; text-decoration: none; }
+    #status { flex: 1 1 auto; min-width: 0; margin: 0; color: #e4ae59; font-size: 12px; text-align: center; }
+    #status.error { color: #ff9f96; }
+    .episodes { display: none; margin: 14px 0 2px; }
+    .episodes h2 { margin: 0; padding: 0 2px 10px; font-size: 18px; font-weight: 650; }
+    .episode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .episode-grid button { min-height: 46px; overflow: hidden; padding: 0 4px; border: 1px solid #343840; border-radius: 8px; color: #d7dbe1; background: #22252b; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .episode-grid button.active { border-color: var(--accent); color: #071512; background: var(--accent); font-weight: 650; }
+    @media (max-width: 560px) { main { padding: 12px 12px max(20px, env(safe-area-inset-bottom)); } .watch-stage { min-height: auto; justify-content: flex-start; padding-top: 36px; } .heading { margin: 0 4px 14px; } h1 { margin-bottom: 5px; font-size: 22px; } .video-shell { border: 1px solid #2d3138; border-radius: 8px; box-shadow: none; } .actions { margin-top: 10px; min-height: 58px; padding: 8px 14px; border: 1px solid #292d34; border-radius: 8px; background: #17191e; } .actions button { min-height: 40px; } #status { font-size: 11px; } .episode-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; } .episode-grid button { min-height: 46px; } }
+    body.sheet-open { overflow: hidden; }
+    .video-shell:fullscreen, .video-shell:-webkit-full-screen, .video-shell.pseudo-fullscreen { position: fixed; z-index: 100; inset: 0; width: 100vw !important; height: 100vh !important; border-radius: 0; }
+    .video-shell:fullscreen video, .video-shell:-webkit-full-screen video { width: 100%; height: 100%; }
+    .video-shell:fullscreen .mobile-control-panel, .video-shell:-webkit-full-screen .mobile-control-panel, .video-shell.pseudo-fullscreen .mobile-control-panel, .video-shell:fullscreen #mobileEpisodeButtonTop, .video-shell:-webkit-full-screen #mobileEpisodeButtonTop, .video-shell.pseudo-fullscreen #mobileEpisodeButtonTop { display: none !important; }
+    .video-shell .video-actions { align-items: stretch; padding: 0; }
+    .topbar { position: absolute; z-index: 3; top: 8px; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; }
+    .top-left, .top-right { display: flex; align-items: center; gap: 6px; }
+    .top-right .pill-button { min-width: 52px; }
+    .center-nav { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; }
+    .center-nav .icon-button { border-color: rgba(255,255,255,.16); background: rgba(10,12,15,.66); }
+    .center-nav .icon-button:disabled { visibility: hidden; }
+    .video-shell .icon-button { pointer-events: auto; }
+    #playbackOverlay { position: absolute; z-index: 4; top: 50%; left: 50%; display: none; width: 60px; height: 60px; padding: 0; place-items: center; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; color: #fff; background: rgba(8,10,13,.48); opacity: 1; transform: translate(-50%,-50%) scale(1); transition: opacity 220ms ease-in, transform 220ms ease-in; cursor: pointer; pointer-events: auto; }
+    #playbackOverlay.is-entering { animation: playback-overlay-in 220ms ease-out both; }
+    #playbackOverlay.is-fading { opacity: 0; transform: translate(-50%,-50%) scale(.92); }
+    #playbackOverlay[hidden] { display: none !important; }
+    #playbackOverlay svg { width: 27px; height: 27px; fill: currentColor; }
+    #playbackOverlay .pause-mark { display: none; }
+    #playbackOverlay.is-playing .play-mark { display: none; }
+    #playbackOverlay.is-playing .pause-mark { display: block; }
+    @keyframes playback-overlay-in { from { opacity: 0; transform: translate(-50%,-50%) scale(.88); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+    .mobile-control-panel { display: none; }
+    .mobile-episode-button { display: none; }
+    .below-player { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px 2px 0; }
+    .switch-label { display: inline-flex; align-items: center; gap: 7px; color: #aeb3bc; font-size: 13px; cursor: pointer; }
+    .switch-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .switch { position: relative; width: 32px; height: 18px; border-radius: 10px; background: #383c44; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+    .switch-label input:checked + .switch { background: var(--accent); }
+    .switch-label input:checked + .switch::after { transform: translateX(14px); }
+    .below-player #status { flex: 1 1 auto; }
+    .below-player #retry { min-height: 28px; padding: 0 9px; border: 1px solid #3a3e46; border-radius: 7px; color: #dce0e6; background: #202329; font-size: 12px; }
+    .below-player #retry[hidden] { display: none; }
+    .sheet { position: fixed; z-index: 20; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding-top: 48px; }
+    .sheet[hidden] { display: none; }
+    .sheet-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(0,0,0,.58); }
+    .sheet-panel { position: relative; width: min(100%, 720px); max-height: min(68vh, 620px); overflow: hidden; border: 1px solid #30333a; border-bottom: 0; border-radius: 16px 16px 0 0; background: #17191e; box-shadow: 0 -12px 38px rgba(0,0,0,.36); }
+    .sheet-header { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 14px; border-bottom: 1px solid #292c32; }
+    .sheet-close { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; color: #bfc4cc; background: transparent; font-size: 25px; }
+    .sheet .episode-grid { max-height: calc(min(68vh, 620px) - 53px); overflow-y: auto; padding: 12px 12px 18px; }
+    .inline-episodes { margin: 14px 0 2px; }
+    .inline-episodes-header { display: flex; align-items: baseline; justify-content: space-between; padding: 0 2px 10px; }
+    .inline-episodes-title { font-size: 18px; font-weight: 650; }
+    #episodeCount { color: #8f949d; font-size: 13px; }
+    .inline-episode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .inline-episode-grid .episode-item { min-height: 46px; }
+    .inline-episode-grid button { min-height: 46px; padding: 0 4px; border: 1px solid #343840; border-radius: 8px; color: #d7dbe1; background: #22252b; font-size: 13px; }
+    .inline-episode-grid button.active { border-color: var(--accent); color: #071512; background: var(--accent); font-weight: 650; }
+    .recommendations-page { width: min(100%, 920px); margin: 0 auto; padding: 18px 12px 28px; }
+    .recommendations-page header { margin: 0 2px 16px; }
+    .recommendations-page header h2 { margin: 0 0 6px; font-size: clamp(24px, 6vw, 34px); line-height: 1.25; }
+    .recommendations-page header p { margin: 0; color: #9298a2; font-size: 14px; }
+    .recommendation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .recommend-card { display: grid; grid-template-columns: 112px minmax(0, 1fr); min-height: 158px; overflow: hidden; padding: 0; border: 1px solid #292d34; border-radius: 15px; color: inherit; background: #17191e; text-align: left; text-decoration: none; box-shadow: 0 8px 24px rgba(0,0,0,.18); cursor: pointer; transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
+    .recommend-card .cover { position: relative; min-height: 158px; overflow: hidden; display: flex; align-items: center; justify-content: center; color: #68717d; background: linear-gradient(145deg,#232a33,#111419); font-size: 40px; font-weight: 750; }
+    .recommend-card .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .recommend-card .cover b { position: absolute; top: 8px; left: 8px; min-width: 27px; height: 27px; padding: 0 7px; border-radius: 9px; color: #061813; background: var(--accent); font-size: 13px; line-height: 27px; text-align: center; }
+    .recommend-card .info { display: flex; min-width: 0; flex-direction: column; padding: 13px 12px 11px; }
+    .recommend-card .info strong { display: -webkit-box; overflow: hidden; font-size: 17px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .recommend-card .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+    .recommend-card .tags span { padding: 3px 7px; border: 1px solid #343943; border-radius: 7px; color: #c8cdd4; background: #202329; font-size: 11px; }
+    .recommend-card .meta { overflow: hidden; margin-top: 8px; color: #9399a3; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .recommend-card .source { overflow: hidden; margin-top: 8px; color: #777f8a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .recommend-card .play { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 9px; color: var(--accent); font-size: 13px; font-weight: 700; }
+    .recommend-card .play span { font-size: 23px; line-height: 14px; }
+    .recommendation-tip { margin: 16px 2px 0; color: #717883; font-size: 12px; text-align: center; }
+    @media (max-width: 680px) { .recommendations-page { padding: 16px 10px 24px; } .recommendation-grid { grid-template-columns: 1fr; gap: 10px; } .recommend-card { grid-template-columns: 108px minmax(0, 1fr); min-height: 154px; border-radius: 13px; } .recommend-card .cover { min-height: 154px; } }
+    @media (hover: hover) { .recommend-card:hover { border-color: rgba(32,197,165,.7); transform: translateY(-1px); } }
+    .recommend-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    @media (max-width: 560px) { .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { display: grid; } .watch-stage { padding-top: 36px; } .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .desktop-video-control { display: none !important; } .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .topbar { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); } .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .top-right { display: flex; } .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .top-right #fullscreenButton { display: none; } .center-nav .icon-button { width: 44px; height: 44px; } .mobile-control-panel { position: absolute; z-index: 5; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 26px max(12px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-right)); overflow: hidden; border: 0; border-radius: 0; background: linear-gradient(to bottom, transparent 0%, rgba(8,10,13,.2) 35%, rgba(8,10,13,.68) 100%); pointer-events: auto; } .mobile-episode-button { display: inline-flex; min-width: 0; min-height: 38px; align-items: center; gap: 5px; max-width: min(72vw, 220px); padding: 0 11px; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 18px; color: #f2f4f6; background: rgba(10,12,15,.52); font-size: 13px; text-align: left; backdrop-filter: blur(5px); } .mobile-episode-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mobile-episode-button .episode-chevron { flex: 0 0 auto; font-size: 17px; } .mobile-time-row { display: flex; order: 2; justify-content: space-between; color: #f3f5f7; font-size: 12px; text-shadow: 0 1px 3px #000; } .mobile-seek-wrap { display: flex; order: 3; height: 24px; align-items: center; } #mobileSeek { width: 100%; } .mobile-action-row { display: flex; order: 1; width: 100%; max-width: 100%; align-items: center; justify-content: flex-end; gap: 8px; } .mobile-tool-button { display: inline-flex; flex: 0 0 40px; width: 40px; min-width: 40px; height: 40px; align-items: center; justify-content: center; padding: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 50%; color: #f2f4f6; background: rgba(10,12,15,.5); backdrop-filter: blur(5px); } .mobile-tool-button svg { width: 20px; height: 20px; fill: currentColor; } .mobile-tool-button .muted-icon { display: none; } .mobile-tool-button.is-muted .volume-icon { display: none; } .mobile-tool-button.is-muted .muted-icon { display: block; } .mobile-more-menu { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: 48px; min-width: 132px; overflow: hidden; padding: 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: rgba(22,24,29,.96); box-shadow: 0 10px 24px rgba(0,0,0,.4); pointer-events: auto; } .mobile-more-menu[hidden] { display: none; } .mobile-more-menu button { display: block; width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-radius: 6px; color: #e2e5e9; background: transparent; text-align: left; } .mobile-more-menu button.active { color: #071512; background: var(--accent); font-weight: 650; } .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; } .inline-episodes { margin-top: 18px; } }
+    @media (max-width: 560px) { #mobileEpisodeButtonTop { display: inline-flex; position: absolute; top: 8px; left: max(12px, env(safe-area-inset-left)); z-index: 6; min-height: 38px; max-width: min(72vw, 220px); padding: 0 11px; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 18px; color: #f2f4f6; background: rgba(10,12,15,.52); font-size: 13px; text-align: left; backdrop-filter: blur(5px); } #mobileEpisodeButtonTop > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #mobileEpisodeButtonTop .episode-chevron { flex: 0 0 auto; margin-left: 4px; font-size: 17px; } }
+    @media (max-width: 560px) { #mobileSeek { height: 24px; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; touch-action: none; } #mobileSeek::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right,var(--accent) 0,var(--accent) var(--seek-progress, 0%),#50545b var(--seek-progress, 0%),#50545b 100%); } #mobileSeek::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; appearance: none; -webkit-appearance: none; border: 2px solid #fff; border-radius: 50%; background: var(--accent); box-shadow: 0 1px 5px rgba(0,0,0,.45); } #mobileSeek::-moz-range-track { height: 4px; border: 0; border-radius: 2px; background: #50545b; } #mobileSeek::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); } #mobileSeek::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: var(--accent); box-shadow: 0 1px 5px rgba(0,0,0,.45); } }
+    @media (prefers-reduced-motion: reduce) { #playbackOverlay { transition: none; } #playbackOverlay.is-entering { animation: none; } }
+
+    /* Inline mobile player: keep the content clear until the viewer asks for controls. */
+    .video-actions button, .video-actions .pill-button, .mobile-control-panel input { touch-action: manipulation; }
+    .video-actions button, .video-actions .pill-button { cursor: pointer; }
+    .video-actions .topbar { top: 12px; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); }
+    .video-actions .top-right { gap: 8px; }
+    #qualityButton { min-height: 38px; }
+    #qualityButton:disabled { cursor: default; opacity: .72; }
+    .quality-menu { position: absolute; z-index: 7; top: 56px; right: max(12px, env(safe-area-inset-right)); display: grid; grid-template-columns: repeat(2, minmax(70px, 1fr)); gap: 4px; min-width: 156px; max-height: calc(100% - 66px); overflow-y: auto; padding: 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: rgba(22,24,29,.96); box-shadow: 0 10px 28px rgba(0,0,0,.42); pointer-events: auto; }
+    .quality-menu[hidden] { display: none; }
+    .quality-menu button { min-height: 40px; padding: 0 8px; border: 0; border-radius: 7px; color: #dfe3e8; background: transparent; font-size: 12px; cursor: pointer; }
+    .quality-menu button.active { color: #071512; background: var(--accent); font-weight: 650; }
+    .center-nav { padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right)); pointer-events: none; }
+    .center-nav .icon-button { width: 44px; height: 44px; opacity: .84; }
+    .mobile-control-panel { padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
+    .mobile-tool-button { width: 44px; min-width: 44px; height: 44px; cursor: pointer; }
+    .mobile-more-menu { right: max(12px, env(safe-area-inset-right)); bottom: 52px; }
+    .mobile-episode-button { cursor: pointer; }
+    .mobile-episode-button .episode-list-icon { flex: 0 0 auto; width: 18px; height: 18px; fill: currentColor; }
+    .video-shell.player--cinema, .video-shell.player--landscape { aspect-ratio: 16 / 9; }
+    .video-shell.player--square, .video-shell.player--portrait { width: min(100%, var(--inline-stage-width, 100%)); max-height: 68svh; aspect-ratio: var(--video-aspect, 1); }
+    @media (max-width: 560px) {
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop { position: static; top: auto; left: auto; z-index: auto; min-height: 40px; align-items: center; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .top-right { align-items: center; }
+      /* Keep tools in the bottom progress band, with their own calm action row. */
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #previous,
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #next { display: none !important; }
+      /* Leave a clear visual lane between the centered play control and the bottom tool row. */
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { top: 34%; }
+      .mobile-control-panel {
+        display: grid;
+        grid-template-columns: max-content minmax(20px, 1fr) max-content;
+        grid-template-rows: 44px max-content 28px;
+        grid-template-areas: "actions actions actions" "time . duration" "seek seek seek";
+        align-items: center;
+        column-gap: 8px;
+        row-gap: 2px;
+        padding-top: 18px;
+      }
+      .mobile-time-row { display: contents; }
+      #mobileCurrentTime { grid-area: time; }
+      #mobileDuration { grid-area: duration; }
+      .mobile-seek-wrap { grid-area: seek; min-width: 0; height: 28px; }
+      #mobileSeek { height: 28px; }
+      .mobile-action-row {
+        display: flex;
+        grid-area: actions;
+        width: auto;
+        max-width: none;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .mobile-action-row .mobile-episode-button { display: none !important; }
+      .mobile-actions-right, .mobile-action-row > .mobile-tool-wrap { display: flex; align-items: center; gap: 8px; }
+      .mobile-tool-button {
+        flex: 0 0 44px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 12px;
+        background: rgba(10,12,15,.58);
+      }
+      .mobile-tool-button svg { width: 19px; height: 19px; }
+    }
+    @media (max-width: 350px) {
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop { max-width: 105px; padding-right: 7px; padding-left: 7px; gap: 3px; font-size: 11.5px; white-space: nowrap; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop .episode-list-icon { width: 14px; height: 14px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { top: 23%; width: 44px; height: 44px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay svg { width: 20px; height: 20px; }
+    }
+
+    /* Reference composition: one calm, dark player surface with a strict control hierarchy. */
+    :root { --accent: #18c4aa; --canvas: #090b0e; --surface: #111419; --surface-2: #191d23; --line: rgba(255,255,255,.14); --muted: #8b929d; }
+    html, body { background: var(--canvas); }
+    body { background-image: radial-gradient(circle at 50% -10%, rgba(28,45,48,.2), transparent 42%); }
+    main { width: min(100%, 680px); padding: 18px 14px max(32px, env(safe-area-inset-bottom)); }
+    .watch-stage { justify-content: center; }
+    .page-heading { display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; align-items: center; min-height: 64px; margin: 0 -2px 4px; }
+    .page-nav-button { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 12px; color: #f5f7f8; background: transparent; cursor: pointer; transition: background-color .18s ease, color .18s ease; }
+    .page-nav-button svg { width: 25px; height: 25px; fill: currentColor; }
+    .page-nav-button:hover, .page-nav-button:focus-visible { color: var(--accent); background: rgba(255,255,255,.08); }
+    .heading-copy { min-width: 0; text-align: center; }
+    .heading-copy h1 { margin: 0; overflow: hidden; color: #f4f6f7; font-size: clamp(20px, 5.3vw, 26px); font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+    .heading-subtitle { display: block; margin-top: 3px; color: #777f89; font-size: 12px; line-height: 1.2; }
+    .episode-meta { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0 4px 12px; color: #aeb4bd; font-size: 15px; }
+    .episode-meta-label { color: #8b929d; }
+    .episode-meta #meta { overflow: hidden; color: #aeb4bd; text-overflow: ellipsis; white-space: nowrap; }
+    .video-shell { border: 1px solid var(--line); border-radius: 14px; background: #000; box-shadow: 0 12px 34px rgba(0,0,0,.28); }
+    .video-actions { padding: 0 !important; }
+    .video-actions .topbar { top: 14px; left: 14px; right: 14px; z-index: 6; }
+    .top-left, .top-right, .top-right-actions { align-items: center; gap: 8px; }
+    .top-right-actions { position: absolute; top: 14px; right: 14px; z-index: 6; display: flex; pointer-events: auto; }
+    .icon-button, .pill-button { border-color: rgba(255,255,255,.18); color: #f5f7f8; background: rgba(10,12,15,.58); box-shadow: 0 4px 16px rgba(0,0,0,.2); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
+    .pill-button { min-height: 40px; padding: 0 14px; border-radius: 20px; font-size: 14px; }
+    .top-left #currentEpisode { position: static; min-height: 40px; padding: 0 14px; line-height: 40px; }
+    .video-actions > #currentEpisode { top: 14px; min-height: 40px; line-height: 40px; }
+    #mobileEpisodeButtonTop { display: none; }
+    .mobile-episode-button { min-height: 40px; padding: 0 13px; border: 1px solid rgba(255,255,255,.18); border-radius: 20px; color: #f5f7f8; background: rgba(10,12,15,.58); font-size: 14px; white-space: nowrap; backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
+    .mobile-episode-button .episode-list-icon { width: 18px; height: 18px; fill: currentColor; }
+    .center-nav { z-index: 3; padding: 0 14px; }
+    .center-nav .icon-button { width: 44px; height: 44px; border-radius: 12px; }
+    #playbackOverlay { width: 72px; height: 72px; border-color: rgba(255,255,255,.25); background: rgba(8,10,13,.5); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+    #playbackOverlay svg { width: 30px; height: 30px; }
+    .mobile-control-panel { display: none; }
+    .below-player { display: flex; align-items: center; gap: 12px; min-height: 66px; margin-top: 12px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(120deg, rgba(25,30,36,.82), rgba(14,18,22,.92)); }
+    .switch-label { display: inline-flex; flex: 0 0 auto; min-height: 44px; align-items: center; gap: 9px; color: #edf0f3; font-size: 15px; cursor: pointer; }
+    .switch { position: relative; width: 50px; height: 28px; border-radius: 16px; background: #3a414a; transition: background-color .18s ease; }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.2); transition: transform .18s ease; }
+    .switch-label input:checked + .switch { background: var(--accent); }
+    .switch-label input:checked + .switch::after { transform: translateX(22px); }
+    #status { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; color: var(--accent); font-size: 14px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+    #status.error { color: #f0a19c; }
+    #direct { display: inline-flex; flex: 0 0 auto; min-height: 44px; align-items: center; color: #82b9ee; font-size: 15px; text-decoration: none; }
+    #direct::after { content: "›"; margin-left: 6px; font-size: 23px; line-height: 1; }
+    .inline-episodes { margin: 22px 0 2px; }
+    .inline-episodes-header { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 12px; }
+    .inline-episodes-title { color: #f4f6f7; font-size: 21px; font-weight: 700; }
+    .inline-episodes-tools { display: inline-flex; align-items: center; gap: 8px; }
+    #episodeCount { color: var(--muted); font-size: 13px; }
+    .episode-expand-button { display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 10px; color: #edf0f3; background: transparent; cursor: pointer; transition: background-color .18s ease, transform .18s ease; }
+    .episode-expand-button svg { width: 22px; height: 22px; fill: currentColor; }
+    .episode-expand-button:hover, .episode-expand-button:focus-visible { background: rgba(255,255,255,.08); }
+    .inline-episodes.is-expanded .episode-expand-button { transform: rotate(180deg); }
+    .inline-episodes.is-collapsed .inline-episode-grid .episode-item:nth-child(n+11) { display: none; }
+    .inline-episode-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; }
+    .inline-episode-grid .episode-item { min-height: 58px; overflow: hidden; padding: 0 4px; border: 1px solid #353b44; border-radius: 11px; color: #d6dbe1; background: var(--surface-2); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: border-color .18s ease, background-color .18s ease, color .18s ease; }
+    .inline-episode-grid .episode-item:hover, .inline-episode-grid .episode-item:focus-visible { border-color: rgba(24,196,170,.78); }
+    .inline-episode-grid .episode-item.active { border-color: var(--accent); color: #061713; background: var(--accent); font-weight: 700; }
+    .sheet { z-index: 20; }
+    .sheet-panel { border-color: #343a43; border-radius: 18px 18px 0 0; background: #15191e; }
+    .sheet-header { min-height: 58px; }
+    .sheet-title { font-size: 17px; font-weight: 700; }
+    .sheet-close { width: 40px; height: 40px; }
+    .episode-grid { gap: 9px; }
+    .episode-item { min-height: 48px; border-radius: 10px; }
+    @media (max-width: 560px) {
+      main { width: 100%; padding: 10px 14px max(28px, env(safe-area-inset-bottom)); }
+      .watch-stage { min-height: auto; justify-content: flex-start; padding-top: 4px; }
+      .page-heading { min-height: 62px; margin-bottom: 1px; }
+      .heading-copy h1 { font-size: 23px; }
+      .heading-subtitle { display: none; }
+      .episode-meta { margin: 0 4px 12px; font-size: 15px; }
+      .video-shell { border-radius: 13px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .desktop-video-control { display: none !important; }
+      .video-actions .topbar { top: 13px; left: 13px; right: 13px; }
+      .video-actions .top-right { display: flex; }
+      .video-actions .top-right #fullscreenButton { display: none; }
+      #mobileEpisodeButtonTop { display: inline-flex; position: static; min-height: 40px; max-width: min(72vw, 230px); align-items: center; gap: 6px; }
+      .top-right-actions { top: 13px; right: 13px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { display: grid; top: 50%; width: 60px; height: 60px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay svg { width: 27px; height: 27px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #previous, .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #next { display: none !important; }
+      .mobile-control-panel { position: absolute; z-index: 5; right: 0; bottom: 0; left: 0; display: grid !important; grid-template-columns: max-content minmax(40px,1fr) max-content max-content; grid-template-rows: 44px; grid-template-areas: "time seek duration actions"; align-items: center; column-gap: 8px; row-gap: 0; padding: 8px max(13px, env(safe-area-inset-left)) max(9px, env(safe-area-inset-bottom)) max(13px, env(safe-area-inset-right)); border: 0; border-radius: 0; background: linear-gradient(to bottom, transparent 0%, rgba(8,10,13,.24) 20%, rgba(8,10,13,.82) 100%); }
+      .mobile-time-row { display: contents; color: #f3f5f7; font-size: 13px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 4px #000; }
+      #mobileCurrentTime { grid-area: time; }
+      #mobileDuration { grid-area: duration; }
+      .mobile-seek-wrap { display: flex; grid-area: seek; min-width: 0; height: 28px; align-items: center; }
+      #mobileSeek { width: 100%; height: 28px; margin: 0; }
+      .mobile-action-row { display: flex; grid-area: actions; width: auto; max-width: none; align-items: center; justify-content: flex-end; gap: 6px; }
+      .mobile-action-row .mobile-episode-button, #mobileQualityButton { display: none !important; }
+      .mobile-actions-right, .mobile-action-row > .mobile-tool-wrap { display: flex; align-items: center; gap: 6px; margin-left: 0; }
+      .mobile-tool-button { display: inline-flex; flex: 0 0 40px; width: 40px; min-width: 40px; height: 40px; align-items: center; justify-content: center; padding: 0; border: 1px solid rgba(255,255,255,.16); border-radius: 10px; color: #f2f4f6; background: rgba(10,12,15,.58); cursor: pointer; }
+      .mobile-tool-button svg { width: 18px; height: 18px; fill: currentColor; }
+      .below-player { min-height: 68px; margin-top: 10px; padding: 10px 14px; border-radius: 13px; }
+      .switch-label { gap: 8px; font-size: 14px; }
+      #status { font-size: 13px; }
+      #direct { font-size: 14px; }
+      .inline-episodes { margin-top: 21px; }
+      .inline-episodes-header { padding-right: 2px; padding-left: 2px; }
+      .inline-episodes-title { font-size: 21px; }
+      #episodeCount { display: none; }
+      .inline-episode-grid { gap: 8px; }
+      .inline-episode-grid .episode-item { min-height: 58px; border-radius: 11px; font-size: 15px; }
+    }
+    @media (max-width: 350px) {
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop { max-width: 105px; padding-right: 7px; padding-left: 7px; gap: 3px; font-size: 11.5px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop .episode-list-icon { width: 14px; height: 14px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { top: 50%; width: 44px; height: 44px; }
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay svg { width: 20px; height: 20px; }
+    }
+    /* Mobile uses the browser/OS video controls. Keep only episode and quality overlays. */
+    @media (max-width: 560px) {
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) .mobile-control-panel,
+      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #playbackOverlay { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="watch-stage">
+      <header class="heading page-heading">
+        <button id="pageBackButton" class="page-nav-button" type="button" aria-label="返回">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.7 5.3-1.4-1.4L5.2 12l8.1 8.1 1.4-1.4L8 12l6.7-6.7Z"/></svg>
+        </button>
+        <div class="heading-copy"><h1 id="title">短剧播放</h1><span class="heading-subtitle">短剧播放器</span></div>
+        <button id="pageMoreButton" class="page-nav-button" type="button" aria-label="更多选项">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
+        </button>
+      </header>
+      <div class="episode-meta"><span class="episode-meta-label">当前：</span><span id="meta">正在载入剧集…</span></div>
+      <div id="videoShell" class="video-shell">
+        <video id="video" aria-label="视频播放区域" controls playsinline webkit-playsinline preload="metadata" crossorigin="anonymous"></video>
+        <div class="video-actions">
+          <button id="playbackOverlay" type="button" aria-label="播放或暂停"><svg class="play-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg><svg class="pause-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z"/></svg></button>
+          <div class="topbar"><div class="top-left"><button id="episodeOpen" class="pill-button desktop-video-control" type="button" aria-label="选择剧集">选集</button><span id="currentEpisode" class="pill-button desktop-video-control">第01集</span><button id="mobileEpisodeButtonTop" class="mobile-episode-button" type="button" aria-label="选择剧集"><svg class="episode-list-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h2v2H4V5Zm4 0h12v2H8V5ZM4 11h2v2H4v-2Zm4 0h12v2H8v-2ZM4 17h2v2H4v-2Zm4 0h12v2H8v-2Z"/></svg>选集 · <span id="mobileEpisodeLabelTop">第01集</span><span class="episode-chevron">›</span></button></div><div class="top-right"><button id="qualityButton" class="pill-button" type="button" aria-label="选择清晰度" disabled><span id="qualityLabel">原画</span></button><button id="fullscreenButton" class="pill-button desktop-video-control" type="button" aria-label="全屏播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H3v4h2V5h2V3Zm14 4V3h-4v2h2v2h2ZM5 17H3v4h4v-2H5v-2Zm16 0h-2v2h-2v2h2v-4Z"/></svg></button></div></div>
+          <div id="qualityMenu" class="quality-menu" role="menu" hidden></div>
+          <div class="center-nav"><button id="previous" class="icon-button" type="button" aria-label="上一集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 7.4 10.8 12l4.6 4.6L14 18l-6-6 6-6 1.4 1.4Z"/></svg></button><button id="next" class="icon-button" type="button" aria-label="下一集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.6 16.6 4.6-4.6-4.6-4.6L10 6l6 6-6 6-1.4-1.4Z"/></svg></button></div>
+          <section class="mobile-control-panel" aria-label="播放控制"><div class="mobile-time-row"><span id="mobileCurrentTime">0:00</span><span id="mobileDuration">0:00</span></div><div class="mobile-seek-wrap"><input id="mobileSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度"></div><div class="mobile-action-row"><button id="mobileEpisodeButton" class="mobile-episode-button" type="button" aria-label="选择剧集">选集 · <span id="mobileEpisodeLabel">第01集</span><span class="episode-chevron">›</span></button><button id="mobileMuteButton" class="mobile-tool-button" type="button" aria-label="静音"><svg class="volume-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z"/></svg><svg class="muted-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7 4.7 14.6 14.6-1.4-1.4-3.1-3.1L13 19V5L8 9H4v6h4l1.2.96L7.7 17.5 4.7 14.5 6.1 13.1l1.4 1.4V9.5L4.7 6.1 4.7 4.7Z"/></svg><span class="sr-only">静音</span></button><button id="mobileFullscreenButton" class="mobile-tool-button" type="button" aria-label="全屏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H3v4h2V5h2V3Zm14 4V3h-4v2h2v2h2ZM5 17H3v4h4v-2H5v-2Zm16 0h-2v2h-2v2h4v-4Z"/></svg><span class="sr-only">全屏</span></button><div class="mobile-tool-wrap"><button id="mobileMoreButton" class="mobile-tool-button" type="button" aria-label="更多播放设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></button><div id="mobileMoreMenu" class="mobile-more-menu" hidden><button type="button" data-rate="0.75">0.75 倍速</button><button type="button" data-rate="1" class="active">正常速度</button><button type="button" data-rate="1.25">1.25 倍速</button><button type="button" data-rate="1.5">1.5 倍速</button><button type="button" data-rate="2">2 倍速</button></div></div></div></section>
+        </div>
+      </div>
+      <div class="below-player"><label class="switch-label"><input id="autoNext" type="checkbox" checked><span class="switch"></span><span>自动连播</span></label><p id="status">正在连接资源站……</p><button id="retry" type="button" hidden>重试</button><a id="direct" target="_blank" rel="noreferrer">线路</a></div>
+      <div id="episodeSheet" class="sheet" hidden><button id="sheetBackdrop" class="sheet-backdrop" type="button" aria-label="关闭选集"></button><section class="sheet-panel"><header class="sheet-header"><span>选择剧集</span><button id="sheetClose" class="sheet-close" type="button">×</button></header><div id="sheetEpisodeGrid" class="episode-grid"></div></section></div>
+    </section>
+    <section id="recommendations" class="recommendations-page" hidden><header><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary"></p></header><section id="recommendationGrid" class="recommendation-grid"></section><p class="recommendation-tip">点击任一作品即可进入播放器；推荐结果会随资源站更新。</p></section>
+    <section id="episodes" class="inline-episodes"><header class="inline-episodes-header"><span class="inline-episodes-title">选集</span><span class="inline-episodes-tools"><span id="episodeCount"></span><button id="episodeExpand" class="episode-expand-button" type="button" aria-label="展开选集" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z"/></svg></button></span></header><div id="episodeGrid" class="inline-episode-grid"></div></section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako_inflate.min.js"></script>
+  <script>
+      (async () => {
+      const params = new URLSearchParams(location.search);
+      const fragment = new URLSearchParams(location.hash.slice(1));
+      const titleNode = document.getElementById('title');
+      const episodeNode = document.getElementById('meta');
+      const watchStage = document.querySelector('.watch-stage');
+      const statusNode = document.getElementById('status');
+      const video = document.getElementById('video');
+      const videoShell = document.getElementById('videoShell');
+      const fallback = document.getElementById('direct');
+      const retry = document.getElementById('retry');
+      const previous = document.getElementById('previous');
+      const next = document.getElementById('next');
+      const episodeOpen = document.getElementById('episodeOpen');
+      const episodeSheet = document.getElementById('episodeSheet');
+      const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
+      const sheetBackdrop = document.getElementById('sheetBackdrop');
+      const sheetClose = document.getElementById('sheetClose');
+      const fullscreenButton = document.getElementById('fullscreenButton');
+      const mobileFullscreenButton = document.getElementById('mobileFullscreenButton');
+      const mobileMuteButton = document.getElementById('mobileMuteButton');
+      const mobileMoreButton = document.getElementById('mobileMoreButton');
+      const mobileMoreMenu = document.getElementById('mobileMoreMenu');
+      const mobileEpisodeButton = document.getElementById('mobileEpisodeButton');
+      const mobileEpisodeLabel = document.getElementById('mobileEpisodeLabel');
+      const mobileEpisodeButtonTop = document.getElementById('mobileEpisodeButtonTop');
+      const mobileEpisodeLabelTop = document.getElementById('mobileEpisodeLabelTop');
+      const mobileSeek = document.getElementById('mobileSeek');
+      const mobileCurrentTime = document.getElementById('mobileCurrentTime');
+      const mobileDuration = document.getElementById('mobileDuration');
+      const autoNext = document.getElementById('autoNext');
+      const currentEpisode = document.getElementById('currentEpisode');
+      const playbackOverlay = document.getElementById('playbackOverlay');
+      const videoActions = document.querySelector('.video-actions');
+      const mobileControls = document.querySelector('.mobile-control-panel');
+      const qualityButton = document.getElementById('qualityButton');
+      const qualityLabel = document.getElementById('qualityLabel');
+      const qualityMenu = document.getElementById('qualityMenu');
+      const episodesNode = document.getElementById('episodes');
+      const episodeGrid = document.getElementById('episodeGrid');
+      const recommendationsNode = document.getElementById('recommendations');
+      const recommendationsTitle = document.getElementById('recommendationsTitle');
+      const recommendationsSummary = document.getElementById('recommendationsSummary');
+      const recommendationGrid = document.getElementById('recommendationGrid');
+      const pageBackButton = document.getElementById('pageBackButton');
+      const pageMoreButton = document.getElementById('pageMoreButton');
+      const episodeExpand = document.getElementById('episodeExpand');
+      let hls = null;
+      let current = 0;
+      let playlist = null;
+      let recommendationItems = [];
+      let selectionKind = 'recommendations';
+      let loadTimer = null;
+      let playbackOverlayTimer = null;
+      let controlsHideTimer = null;
+      let controlsPointerActive = false;
+      let episodesExpanded = false;
+      const mobileLayoutQuery = window.matchMedia('(max-width: 560px)');
+      const VIDEO_ASPECT_CLASSES = ['player--cinema', 'player--landscape', 'player--square', 'player--portrait'];
+
+      const fail = (message) => {
+        statusNode.textContent = message;
+        statusNode.classList.add('error');
+      };
+
+      const decodePlaylist = (token) => {
+        if (!window.pako) throw new Error('缺少解压组件');
+        const normalized = token.replace(/-/g, '+').replace(/_/g, '/');
+        const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4));
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        return JSON.parse(pako.inflate(bytes, { to: 'string' }));
+      };
+
+      const expandSelectionItem = (rawItem) => {
+        const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+        const pattern = item.episode_name_pattern;
+        let episodeNames = Array.isArray(item.episode_names)
+          ? item.episode_names
+          : [];
+        if (!episodeNames.length && pattern && typeof pattern === 'object') {
+          const start = Number(pattern.start);
+          const count = Number(pattern.count);
+          const pad = Math.max(0, Number(pattern.pad) || 0);
+          if (Number.isInteger(start) && Number.isInteger(count) && count > 0 && count <= 2000) {
+            episodeNames = Array.from({ length: count }, (_unused, index) => {
+              const number = String(start + index).padStart(pad, '0');
+              return `${String(pattern.prefix || '')}${number}${String(pattern.suffix || '')}`;
+            });
+          }
+        }
+        if (!Array.isArray(item.episodes)
+          && item.episode_template
+          && episodeNames.length) {
+          const template = String(item.episode_template);
+          item.episodes = episodeNames.map((name) => ({
+            name: String(name || ''),
+            url: template.replaceAll('{name}', String(name || '')),
+          }));
+        }
+        if (!Array.isArray(item.episodes)
+          && item.episode_url_template
+          && Array.isArray(item.episode_url_values)) {
+          const template = String(item.episode_url_template);
+          item.episodes = item.episode_url_values.map((value, index) => ({
+            name: String(episodeNames[index] || `第${index + 1}集`),
+            url: template.replaceAll('{value}', String(value || '')),
+          }));
+        }
+        if (!Array.isArray(item.episodes)) item.episodes = [];
+        const declaredCount = Number(item.episode_count);
+        item.episodeCount = Number.isFinite(declaredCount) && declaredCount > 0
+          ? declaredCount
+          : item.episodes.length;
+        return item;
+      };
+
+      try {
+        if (params.get('s')) {
+          const response = await fetch(`/short-drama/api/selections/${encodeURIComponent(params.get('s'))}`, { cache: 'no-store', credentials: 'omit' });
+          const payload = await response.json();
+          if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
+          recommendationItems = Array.isArray(payload.items)
+            ? payload.items.map(expandSelectionItem).filter((item) => item.episodes.length)
+            : [];
+          selectionKind = String(payload.kind || 'recommendations');
+          recommendationsTitle.textContent = String(payload.heading || '选择作品');
+          document.title = recommendationsTitle.textContent;
+          watchStage.hidden = true;
+        } else if (fragment.get('r')) {
+          const payload = decodePlaylist(fragment.get('r'));
+          recommendationItems = Array.isArray(payload.items)
+            ? payload.items.map(expandSelectionItem).filter((item) => item.episodes.length)
+            : [];
+          selectionKind = String(payload.kind || 'recommendations');
+          recommendationsTitle.textContent = String(payload.heading || '选择作品');
+          document.title = recommendationsTitle.textContent;
+          watchStage.hidden = true;
+        } else if (fragment.get('p')) {
+          playlist = decodePlaylist(fragment.get('p'));
+        } else {
+          playlist = {
+            v: 1,
+            title: (params.get('title') || '短剧播放').trim(),
+            source: '',
+            episodes: [{
+              name: (params.get('episode') || '正片').trim(),
+              url: (params.get('url') || '').trim()
+            }]
+          };
+        }
+      } catch (_error) {
+        fail('分集数据已损坏，请回到微信重新搜索。');
+        return;
+      }
+
+      if (!recommendationItems.length && (!playlist || !Array.isArray(playlist.episodes) || !playlist.episodes.length)) {
+        fail('没有可播放的分集，请回到微信重新搜索。');
+        return;
+      }
+      if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
+
+      const updateButtons = () => {
+        if (!playlist) {
+          previous.disabled = true;
+          next.disabled = true;
+          return;
+        }
+        previous.disabled = current <= 0;
+        next.disabled = current >= playlist.episodes.length - 1;
+        const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
+        currentEpisode.textContent = label;
+        mobileEpisodeLabel.textContent = label;
+        mobileEpisodeLabelTop.textContent = label;
+        episodeGrid.querySelectorAll('button').forEach((button, index) => {
+          button.classList.toggle('active', index === current);
+        });
+        sheetEpisodeGrid.querySelectorAll('button').forEach((button, index) => {
+          button.classList.toggle('active', index === current);
+        });
+      };
+
+      const videoAspectMode = (width, height) => {
+        const ratio = Number(width) / Number(height);
+        if (!Number.isFinite(ratio) || ratio <= 0) return 'landscape';
+        if (ratio >= 1.9) return 'cinema';
+        if (ratio >= 1.2) return 'landscape';
+        if (ratio >= 0.8) return 'square';
+        return 'portrait';
+      };
+
+      const resetVideoAspect = () => {
+        videoShell.classList.remove(...VIDEO_ASPECT_CLASSES);
+        videoShell.classList.add('player--landscape');
+        videoShell.style.removeProperty('--video-aspect');
+        videoShell.style.removeProperty('--inline-stage-width');
+      };
+
+      const applyVideoAspect = () => {
+        if (document.fullscreenElement === videoShell || videoShell.classList.contains('pseudo-fullscreen')) return;
+        if (!video.videoWidth || !video.videoHeight) return;
+        const ratio = video.videoWidth / video.videoHeight;
+        const mode = videoAspectMode(video.videoWidth, video.videoHeight);
+        videoShell.classList.remove(...VIDEO_ASPECT_CLASSES);
+        videoShell.classList.add(`player--${mode}`);
+        videoShell.style.removeProperty('--video-aspect');
+        videoShell.style.removeProperty('--inline-stage-width');
+        if (mode === 'cinema' || mode === 'landscape') return;
+        const viewportHeight = window.visualViewport?.height || window.innerHeight;
+        const maxHeight = Math.max(1, viewportHeight * .68);
+        const availableWidth = Math.max(1, videoShell.parentElement?.clientWidth || 0);
+        const stageWidth = Math.min(availableWidth, maxHeight * ratio);
+        videoShell.style.setProperty('--video-aspect', String(ratio));
+        videoShell.style.setProperty('--inline-stage-width', `${stageWidth}px`);
+      };
+
+      const syncNativeControls = () => {
+        video.controls = true;
+        clearControlsHideTimer();
+        videoActions.classList.remove('controls-hidden');
+      };
+
+      const formatTime = (seconds) => {
+        if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+        const value = Math.floor(seconds);
+        const hours = Math.floor(value / 3600);
+        const minutes = Math.floor((value % 3600) / 60);
+        const rest = String(value % 60).padStart(2, '0');
+        return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+      };
+
+      const updateMobileProgress = () => {
+        const duration = Number.isFinite(video.duration) ? video.duration : 0;
+        const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+        mobileCurrentTime.textContent = formatTime(currentTime);
+        mobileDuration.textContent = formatTime(duration);
+        const ratio = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
+        mobileSeek.value = String(Math.round(ratio * 1000));
+        mobileSeek.style.setProperty('--seek-progress', `${ratio * 100}%`);
+      };
+
+      const levelName = (level) => {
+        if (level?.height) return `${level.height}P`;
+        if (level?.bitrate) return `${Math.round(level.bitrate / 1000)}K`;
+        return '清晰度';
+      };
+
+      const updateQualityActive = (forcedLevel = null) => {
+        const manualLevel = hls && !hls.autoLevelEnabled
+          ? (hls.currentLevel >= 0 ? hls.currentLevel : forcedLevel)
+          : null;
+        qualityMenu.querySelectorAll('button').forEach((button) => {
+          const autoActive = button.dataset.level === 'auto' && hls?.autoLevelEnabled;
+          const levelActive = button.dataset.level !== 'auto'
+            && !hls?.autoLevelEnabled
+            && Number(button.dataset.level) === manualLevel;
+          button.classList.toggle('active', Boolean(autoActive || levelActive));
+        });
+        const selectedLevel = manualLevel ?? hls?.currentLevel;
+        const selected = Number.isInteger(selectedLevel) && selectedLevel >= 0
+          ? hls?.levels[selectedLevel]
+          : null;
+        qualityLabel.textContent = hls && hls.levels.length > 1
+          ? (hls.autoLevelEnabled ? '自动' : levelName(selected))
+          : '原画';
+      };
+
+      const chooseQuality = (value) => {
+        if (!hls) return;
+        if (value === 'auto') hls.currentLevel = -1;
+        else if (hls.levels[Number(value)]) hls.currentLevel = Number(value);
+        else return;
+        qualityMenu.hidden = true;
+        updateQualityActive(value === 'auto' ? null : Number(value));
+        showControls();
+      };
+
+      const setupQualityMenu = () => {
+        qualityMenu.replaceChildren();
+        const levels = hls?.levels || [];
+        qualityButton.disabled = levels.length <= 1;
+        if (levels.length <= 1) {
+          qualityLabel.textContent = '原画';
+          return;
+        }
+        const entries = [
+          { index: 'auto', label: '自动' },
+          ...levels.map((level, index) => ({ index: String(index), label: levelName(level) })).reverse(),
+        ];
+        entries.forEach((entry) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.dataset.level = entry.index;
+          button.textContent = entry.label;
+          button.addEventListener('click', () => chooseQuality(entry.index));
+          qualityMenu.appendChild(button);
+        });
+        hls.currentLevel = -1;
+        updateQualityActive();
+      };
+
+      const isInlineMobile = () => mobileLayoutQuery.matches
+        && !document.fullscreenElement
+        && !videoShell.classList.contains('pseudo-fullscreen');
+
+      const clearControlsHideTimer = () => {
+        if (controlsHideTimer) {
+          clearTimeout(controlsHideTimer);
+          controlsHideTimer = null;
+        }
+      };
+
+      const scheduleControlsHide = () => {
+        clearControlsHideTimer();
+        if (!isInlineMobile() || video.paused || controlsPointerActive || !mobileMoreMenu.hidden || !qualityMenu.hidden) return;
+        controlsHideTimer = setTimeout(() => {
+          if (!video.paused && !controlsPointerActive && mobileMoreMenu.hidden && qualityMenu.hidden) {
+            videoActions.classList.add('controls-hidden');
+          }
+          controlsHideTimer = null;
+        }, 2800);
+      };
+
+      const showControls = () => {
+        videoActions.classList.remove('controls-hidden');
+        scheduleControlsHide();
+      };
+
+      const hideControls = () => {
+        clearControlsHideTimer();
+        if (isInlineMobile() && !video.paused && !controlsPointerActive && mobileMoreMenu.hidden && qualityMenu.hidden) {
+          videoActions.classList.add('controls-hidden');
+        }
+      };
+
+      const updatePlaybackOverlay = () => {
+        if (playbackOverlayTimer) {
+          clearTimeout(playbackOverlayTimer);
+          playbackOverlayTimer = null;
+        }
+        playbackOverlay.hidden = false;
+        playbackOverlay.classList.toggle('is-playing', !video.paused);
+        if (video.paused) showControls();
+        else scheduleControlsHide();
+      };
+
+      const openEpisodeSheet = () => {
+        if (!playlist || playlist.episodes.length < 2) return;
+        qualityMenu.hidden = true;
+        mobileMoreMenu.hidden = true;
+        episodeSheet.hidden = false;
+        document.body.classList.add('sheet-open');
+      };
+
+      const closeEpisodeSheet = () => {
+        episodeSheet.hidden = true;
+        document.body.classList.remove('sheet-open');
+      };
+
+      const toggleFullscreen = async () => {
+        const shell = videoShell;
+        try {
+          if (document.fullscreenElement) await document.exitFullscreen();
+          else if (shell.classList.contains('pseudo-fullscreen')) shell.classList.remove('pseudo-fullscreen');
+          else if (shell.requestFullscreen) await shell.requestFullscreen();
+          else shell.classList.add('pseudo-fullscreen');
+        } catch (_error) { /* 微信内置浏览器可能不允许原生全屏 */ }
+        applyVideoAspect();
+        syncNativeControls();
+      };
+
+      const loadEpisode = (index) => {
+        if (!playlist) return;
+        if (index < 0 || index >= playlist.episodes.length) return;
+        current = index;
+        const item = playlist.episodes[current] || {};
+        const source = String(item.url || '').trim();
+        episodeNode.textContent = String(item.name || `第${current + 1}集`);
+        fallback.href = `https://m3u8-player.cc/player?url=${encodeURIComponent(source)}`;
+        statusNode.classList.remove('error');
+        statusNode.textContent = '正在连接资源站……';
+        if (loadTimer) clearTimeout(loadTimer);
+        loadTimer = setTimeout(() => {
+          fail('资源站响应超时，可能不允许浏览器直连。请点击“线路”使用备用播放器。');
+        }, 15000);
+        if (hls) { hls.destroy(); hls = null; }
+        qualityMenu.hidden = true;
+        qualityMenu.replaceChildren();
+        qualityButton.disabled = true;
+        qualityLabel.textContent = '原画';
+        resetVideoAspect();
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        syncNativeControls();
+        updateMobileProgress();
+        updatePlaybackOverlay();
+        if (!/^https?:\/\//i.test(source)) {
+          fail('播放地址无效，请回到微信重新搜索。');
+          fallback.removeAttribute('href');
+          return;
+        }
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = source;
+          video.addEventListener('loadedmetadata', () => {
+            if (loadTimer) clearTimeout(loadTimer);
+            statusNode.textContent = '已连接，点击播放。';
+            applyVideoAspect();
+          }, { once: true });
+        } else if (window.Hls && Hls.isSupported()) {
+          hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
+          hls.loadSource(source);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (loadTimer) clearTimeout(loadTimer);
+            statusNode.textContent = '已连接，点击播放。';
+            setupQualityMenu();
+          });
+          hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data && data.fatal) {
+              if (loadTimer) clearTimeout(loadTimer);
+              fail('资源站拒绝了浏览器直连，请点击“线路”使用备用播放器。');
+            }
+          });
+        } else {
+          fail('当前浏览器不支持 HLS，请使用备用播放器打开。');
+        }
+        fragment.set('ep', String(current + 1));
+        history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
+        updateButtons();
+      };
+
+      const renderEpisodes = () => {
+        if (!playlist || playlist.episodes.length <= 1) {
+          episodesNode.style.display = 'none';
+          episodesNode.classList.remove('is-collapsed', 'is-expanded');
+          episodeExpand.hidden = true;
+          episodeGrid.replaceChildren();
+          sheetEpisodeGrid.replaceChildren();
+          return;
+        }
+        episodesNode.style.display = 'block';
+        episodesExpanded = false;
+        const canExpand = playlist.episodes.length > 10;
+        episodesNode.classList.toggle('is-collapsed', canExpand);
+        episodesNode.classList.remove('is-expanded');
+        episodeExpand.hidden = !canExpand;
+        episodeExpand.setAttribute('aria-expanded', 'false');
+        episodeExpand.setAttribute('aria-label', canExpand ? '展开选集' : '展开选集');
+        episodeGrid.replaceChildren();
+        sheetEpisodeGrid.replaceChildren();
+        playlist.episodes.forEach((item, index) => {
+          [episodeGrid, sheetEpisodeGrid].forEach((grid) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'episode-item';
+            button.textContent = String(item.name || `第${index + 1}集`);
+            button.addEventListener('click', () => { closeEpisodeSheet(); loadEpisode(index); });
+            grid.appendChild(button);
+          });
+        });
+        updateButtons();
+      };
+
+      const selectRecommendation = (index) => {
+        const selected = recommendationItems[index];
+        if (!selected || !Array.isArray(selected.episodes) || !selected.episodes.length) return;
+        playlist = selected;
+        titleNode.textContent = String(playlist.title || '短剧播放');
+        document.title = String(playlist.title || '短剧播放');
+        watchStage.hidden = false;
+        recommendationsNode.style.display = 'none';
+        fragment.set('i', String(index));
+        fragment.delete('ep');
+        renderEpisodes();
+        loadEpisode(0);
+      };
+
+      if (recommendationItems.length) {
+        recommendationsNode.removeAttribute('hidden');
+        recommendationsNode.style.display = 'block';
+        const hasCompactEpisodes = recommendationItems.some(
+          (item) => item.episodeCount > item.episodes.length,
+        );
+        const compactNotice = hasCompactEpisodes ? ' · 长剧点击后默认第1集' : '';
+        recommendationsSummary.textContent = selectionKind === 'search'
+          ? `共 ${recommendationItems.length} 个结果，按相关性排序${compactNotice}`
+          : `共 ${recommendationItems.length} 部，按资源站更新时间排序${compactNotice}`;
+        recommendationItems.forEach((item, index) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'recommend-card';
+          const cover = document.createElement('div');
+          cover.className = 'cover';
+          cover.textContent = String(item.title || '剧').slice(0, 1);
+          const coverUrl = String(item.cover || '').trim();
+          if (/^https?:\/\//i.test(coverUrl)) {
+            const image = document.createElement('img');
+            image.src = coverUrl;
+            image.alt = `${item.title || '短剧'}封面`;
+            image.loading = 'lazy';
+            image.referrerPolicy = 'no-referrer';
+            cover.appendChild(image);
+          }
+          const badge = document.createElement('b');
+          badge.textContent = String(index + 1);
+          cover.appendChild(badge);
+          const info = document.createElement('div');
+          info.className = 'info';
+          const name = document.createElement('strong');
+          name.textContent = String(item.title || `作品${index + 1}`);
+          const tags = document.createElement('div');
+          tags.className = 'tags';
+          [item.year, item.category, item.episodeCount > 1 ? `${item.episodeCount}集` : '完整版']
+            .filter(Boolean)
+            .forEach((value) => { const tag = document.createElement('span'); tag.textContent = String(value); tags.appendChild(tag); });
+          const actor = String(item.actor || '').split(/[,，、/]+/).filter(Boolean).slice(0, 2).join('、');
+          if (actor) {
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = `主演：${actor}`;
+            info.appendChild(meta);
+          }
+          const source = document.createElement('div');
+          source.className = 'source';
+          source.textContent = String(item.source || '未知来源');
+          const play = document.createElement('div');
+          play.className = 'play';
+          play.innerHTML = `${selectionKind === 'search' ? '进入播放页' : '点击播放'} <span>›</span>`;
+          info.append(name, tags, source, play);
+          button.append(cover, info);
+          button.addEventListener('click', () => selectRecommendation(index));
+          recommendationGrid.appendChild(button);
+        });
+        statusNode.classList.remove('error');
+        statusNode.textContent = '请选择要播放的作品。';
+      }
+      renderEpisodes();
+      previous.addEventListener('click', () => loadEpisode(current - 1));
+      next.addEventListener('click', () => loadEpisode(current + 1));
+      retry.addEventListener('click', () => loadEpisode(current));
+      episodeOpen.addEventListener('click', openEpisodeSheet);
+      mobileEpisodeButton.addEventListener('click', openEpisodeSheet);
+      mobileEpisodeButtonTop.addEventListener('click', openEpisodeSheet);
+      pageBackButton.addEventListener('click', () => {
+        if (history.length > 1) history.back();
+      });
+      pageMoreButton.addEventListener('click', () => mobileMoreButton.click());
+      episodeExpand.addEventListener('click', () => {
+        episodesExpanded = !episodesExpanded;
+        episodesNode.classList.toggle('is-collapsed', !episodesExpanded);
+        episodesNode.classList.toggle('is-expanded', episodesExpanded);
+        episodeExpand.setAttribute('aria-expanded', String(episodesExpanded));
+        episodeExpand.setAttribute('aria-label', episodesExpanded ? '收起选集' : '展开选集');
+      });
+      sheetBackdrop.addEventListener('click', closeEpisodeSheet);
+      sheetClose.addEventListener('click', closeEpisodeSheet);
+      qualityButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (qualityButton.disabled) return;
+        mobileMoreMenu.hidden = true;
+        qualityMenu.hidden = !qualityMenu.hidden;
+        showControls();
+        if (!qualityMenu.hidden) clearControlsHideTimer();
+      });
+      fullscreenButton.addEventListener('click', toggleFullscreen);
+      mobileFullscreenButton.addEventListener('click', toggleFullscreen);
+      mobileMuteButton.addEventListener('click', () => { video.muted = !video.muted; mobileMuteButton.classList.toggle('is-muted', video.muted); mobileMuteButton.setAttribute('aria-label', video.muted ? '取消静音' : '静音'); showControls(); });
+      mobileMoreButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        qualityMenu.hidden = true;
+        mobileMoreMenu.hidden = !mobileMoreMenu.hidden;
+        showControls();
+        if (!mobileMoreMenu.hidden) clearControlsHideTimer();
+      });
+      mobileMoreMenu.querySelectorAll('[data-rate]').forEach((button) => {
+        button.addEventListener('click', () => {
+          video.playbackRate = Number(button.dataset.rate) || 1;
+          mobileMoreMenu.querySelectorAll('[data-rate]').forEach((item) => item.classList.toggle('active', item === button));
+          mobileMoreMenu.hidden = true;
+          showControls();
+        });
+      });
+      mobileSeek.addEventListener('input', () => { if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = (Number(mobileSeek.value) / 1000) * video.duration; });
+      video.addEventListener('timeupdate', updateMobileProgress);
+      video.addEventListener('durationchange', updateMobileProgress);
+      video.addEventListener('play', updatePlaybackOverlay);
+      video.addEventListener('pause', updatePlaybackOverlay);
+      const beginControlsInteraction = () => {
+        controlsPointerActive = true;
+        clearControlsHideTimer();
+        showControls();
+      };
+      const endControlsInteraction = () => {
+        controlsPointerActive = false;
+        scheduleControlsHide();
+      };
+      mobileMoreMenu.addEventListener('pointerdown', beginControlsInteraction);
+      mobileControls.addEventListener('pointerdown', beginControlsInteraction);
+      window.addEventListener('pointerup', endControlsInteraction);
+      window.addEventListener('pointercancel', endControlsInteraction);
+      videoActions.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('button, input, .mobile-more-menu, .quality-menu')) beginControlsInteraction();
+      }, true);
+      document.addEventListener('click', (event) => {
+        if (!qualityMenu.contains(event.target) && event.target !== qualityButton) {
+          const wasOpen = !qualityMenu.hidden;
+          qualityMenu.hidden = true;
+          if (wasOpen) scheduleControlsHide();
+        }
+        if (!mobileMoreMenu.contains(event.target) && event.target !== mobileMoreButton) {
+          const wasOpen = !mobileMoreMenu.hidden;
+          mobileMoreMenu.hidden = true;
+          if (wasOpen) scheduleControlsHide();
+        }
+      });
+      video.addEventListener('click', (event) => {
+        const fullscreen = document.fullscreenElement === videoShell || videoShell.classList.contains('pseudo-fullscreen');
+        if (!mobileLayoutQuery.matches || fullscreen) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (videoActions.classList.contains('controls-hidden')) {
+          showControls();
+          return;
+        }
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+      }, true);
+      playbackOverlay.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+        showControls();
+      });
+      document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
+      window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
+      video.addEventListener('loadedmetadata', applyVideoAspect);
+      video.addEventListener('ended', () => {
+        if (autoNext.checked && playlist && current < playlist.episodes.length - 1) loadEpisode(current + 1);
+      });
+      syncNativeControls();
+      updatePlaybackOverlay();
+      if (playlist) {
+        const initial = Math.max(0, Math.min(
+          playlist.episodes.length - 1,
+          Number.parseInt(fragment.get('ep') || '1', 10) - 1
+        ));
+        loadEpisode(Number.isFinite(initial) ? initial : 0);
+      }
+    })();
+  </script>
+</body>
+</html>

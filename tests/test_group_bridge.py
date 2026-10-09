@@ -17,7 +17,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).parent / "fixtures" / "patch_sources"
+PROJECT_ROOT = Path(__file__).resolve().parents[1] / "vendor"
 BRIDGE_ROOT = PROJECT_ROOT / "hook_41827_astrbot_bridge"
 PATCH_PATHS = tuple(
     Path(__file__).resolve().parents[1] / "patches" / name

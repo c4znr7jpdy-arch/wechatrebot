@@ -22,8 +22,10 @@ jobs:
         run: python -m pip install -e ".[test]"
       - name: Compile
         run: python -m compileall -q src scripts tests
+      - name: Verify independent source inputs
+        run: python scripts/source_inputs.py
       - name: Test
-        run: python -m pytest -q
+        run: python -m pytest -q -ra
       - name: Validate release metadata
         run: python scripts/validate_release_metadata.py
       - name: Build and self-test frozen Windows manager

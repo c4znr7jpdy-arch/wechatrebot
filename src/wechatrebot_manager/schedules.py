@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any
+from typing import Any, Callable
+
+from .runtime_status import runtime_snapshot
 from urllib.parse import quote
 
 from .customer_logs import sanitize_log_text
@@ -149,18 +151,44 @@ class ScheduleItem:
 
 
 class ScheduleService:
-    def __init__(self, install_root: str | Path) -> None:
+    def __init__(self, install_root: str | Path, *, account_hint: Callable[[], str] | None = None) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
         self.data_root = self.install_root / "app" / "astrbot" / "data"
         self.database = self.data_root / "data_v4.db"
         self.engine = EngineApiClient(self.install_root)
+        self._account_hint = account_hint or self._runtime_account
+
+    def _runtime_account(self) -> str:
+        snapshot = runtime_snapshot()
+        return snapshot.wechat_identity if snapshot.account_status_available else ""
+
+    @staticmethod
+    def _owner(row: sqlite3.Row) -> str:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            return ""
+        return str(payload.get("account_id") or "").strip() if isinstance(payload, dict) else ""
+
+    def _authorize_job(self, row: sqlite3.Row) -> None:
+        account = self._account_hint()
+        if not account:
+            raise ValueError("尚未确认当前微信账号，请连接后刷新任务。")
+        owner = self._owner(row)
+        if not owner:
+            raise ValueError("旧任务缺少账号归属，已保留原数据并禁止修改。")
+        if owner != account:
+            raise ValueError("任务不属于当前微信账号，请刷新任务列表。")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database, timeout=5)
         connection.row_factory = sqlite3.Row
         return connection
 
-    def list(self) -> dict[str, object]:
+    def list(self, account_id: str | None = None) -> dict[str, object]:
+        account = self._account_hint()
+        if not account or (account_id is not None and account_id != account):
+            return {"items": [], "running": 0, "paused": 0, "account_id": "", "requires_login": True}
         if not self.database.is_file():
             return {"items": [], "running": 0, "paused": 0}
         with self._connect() as connection:
@@ -178,7 +206,14 @@ class ScheduleService:
                 """
             ).fetchall()
         items: list[ScheduleItem] = []
+        unassigned = 0
         for row in rows:
+            owner = self._owner(row)
+            if not owner:
+                unassigned += 1
+                continue
+            if owner != account:
+                continue
             raw_name = str(row["name"] or "")
             if raw_name in _REMOVED_TASK_NAMES or any(
                 marker in raw_name.casefold() for marker in _INTERNAL_MARKERS
@@ -215,10 +250,15 @@ class ScheduleService:
                     last_error=sanitize_log_text(str(row["last_error"] or "")),
                 )
             )
+        if self._account_hint() != account:
+            return {"items": [], "running": 0, "paused": 0, "account_id": "", "requires_login": True}
         return {
             "items": [item.to_dict() for item in items],
             "running": sum(1 for item in items if item.enabled),
             "paused": sum(1 for item in items if not item.enabled),
+            "account_id": account,
+            "unassigned_count": unassigned,
+            "message": "部分旧任务缺少账号归属，已保留原数据并限制操作。" if unassigned else "",
         }
 
     def _remove_obsolete_default_checkins(self) -> None:
@@ -228,8 +268,10 @@ class ScheduleService:
                 "SELECT job_id, name, payload FROM cron_jobs "
                 "WHERE name IN ('checkin_', 'checkin_default')"
             ).fetchall()
-        obsolete = [row for row in rows if _is_obsolete_default_checkin(row)]
+        account = self._account_hint()
+        obsolete = [row for row in rows if account and self._owner(row) == account and _is_obsolete_default_checkin(row)]
         for row in obsolete:
+            self._authorize_job(row)
             job_id = str(row["job_id"])
             name = str(row["name"] or "")
             self._validate_source(name)
@@ -254,11 +296,13 @@ class ScheduleService:
             ).fetchone()
         if row is None:
             raise ValueError("没有找到这个定时任务。")
+        self._authorize_job(row)
         return row
 
     def _engine_update(self, job_id: str, payload: dict[str, object]) -> bool:
         if not self.engine.is_available():
             return False
+        self._job(job_id)
         self.engine.request(
             "PATCH", f"/api/v1/cron/jobs/{quote(job_id, safe='')}", payload
         )
@@ -271,6 +315,10 @@ class ScheduleService:
             return
         assignment = ", ".join(f"{key} = ?" for key in updates)
         with self._connect() as connection:
+            row = connection.execute("SELECT payload FROM cron_jobs WHERE job_id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise ValueError("没有找到这个定时任务。")
+            self._authorize_job(row)
             connection.execute(
                 f"UPDATE cron_jobs SET {assignment} WHERE job_id = ?",
                 (*updates.values(), job_id),
@@ -421,6 +469,7 @@ class ScheduleService:
         row = self._job(job_id)
         self._validate_source(str(row["name"]))
         online = self._engine_update(job_id, {"enabled": enabled})
+        self._job(job_id)
         self._update_source(str(row["name"]), enabled=enabled)
         if not online:
             self._offline_update(
@@ -446,6 +495,7 @@ class ScheduleService:
         expression = " ".join((str(minute), str(hour), *parts[2:]))
         self._validate_source(str(row["name"]))
         online = self._engine_update(job_id, {"cron_expression": expression})
+        self._job(job_id)
         self._update_source(str(row["name"]), clock=(hour, minute))
         if not online:
             self._offline_update(job_id, cron_expression=expression, next_run_time=None)
@@ -456,6 +506,7 @@ class ScheduleService:
         row = self._job(job_id)
         self._validate_source(str(row["name"]))
         deleted_online = self.engine.is_available()
+        self._authorize_job(row)
         if deleted_online:
             self.engine.request("DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}")
         self._update_source(str(row["name"]), delete=True)

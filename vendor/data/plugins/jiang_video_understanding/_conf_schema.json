@@ -1,0 +1,87 @@
+{
+  "max_duration_seconds": {
+    "description": "允许解析的视频最大时长（秒）",
+    "type": "int",
+    "default": 300
+  },
+  "max_file_size_mb": {
+    "description": "允许解析的视频最大文件大小（MB）",
+    "type": "int",
+    "default": 100
+  },
+  "frame_count": {
+    "description": "每个视频均匀抽取的关键帧数量",
+    "type": "int",
+    "default": 10
+  },
+  "frame_max_width": {
+    "description": "关键帧最大宽度，较小可降低视觉模型耗时",
+    "type": "int",
+    "default": 1280
+  },
+  "pending_video_ttl_seconds": {
+    "description": "群聊视频等待 /总结视频 或 @触发的有效时间",
+    "type": "int",
+    "default": 600
+  },
+  "cache_hours": {
+    "description": "视频解析结果与临时帧缓存时长（小时）",
+    "type": "int",
+    "default": 6
+  },
+  "max_concurrent_jobs": {
+    "description": "同时解析的视频任务数",
+    "type": "int",
+    "default": 2
+  },
+  "ffmpeg_timeout_seconds": {
+    "description": "FFmpeg 单阶段处理超时（秒）",
+    "type": "int",
+    "default": 120
+  },
+  "vision_timeout_seconds": {
+    "description": "视觉模型分析关键帧的超时（秒）",
+    "type": "int",
+    "default": 45
+  },
+  "audio_timeout_seconds": {
+    "description": "音频转写的超时（秒），超时后自动降级为纯画面分析",
+    "type": "int",
+    "default": 30
+  },
+  "synthesis_timeout_seconds": {
+    "description": "最终综合回答模型的超时（秒）",
+    "type": "int",
+    "default": 45
+  },
+  "total_timeout_seconds": {
+    "description": "单个视频从预处理到回答的总超时（秒）",
+    "type": "int",
+    "default": 90
+  },
+  "ffmpeg_path": {
+    "description": "FFmpeg 可执行文件路径，留空使用 PATH",
+    "type": "string",
+    "default": ""
+  },
+  "ffprobe_path": {
+    "description": "FFprobe 可执行文件路径，留空使用 PATH",
+    "type": "string",
+    "default": ""
+  },
+  "vision_provider_id": {
+    "description": "视觉模型 Provider ID；留空使用 AstrBot 图片描述模型",
+    "type": "string",
+    "default": ""
+  },
+  "audio_provider_id": {
+    "description": "音频理解 Provider ID；留空优先使用 STT，再自动寻找支持 audio 的聊天模型",
+    "type": "string",
+    "default": ""
+  },
+  "semantic_fallback_provider_id": {
+    "description": "人物/语境识别不足或主模型失败时使用的兜底模型 Provider ID",
+    "type": "string",
+    "default": "jyjapi/grok-4.6"
+  }
+}

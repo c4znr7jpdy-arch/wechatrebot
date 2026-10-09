@@ -1,4 +1,4 @@
-param([string]$SourceRoot = 'E:\Project', [switch]$Plan)
+param([string]$SourceRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'vendor'), [switch]$Plan)
 $ErrorActionPreference = 'Stop'
 $buildExitCode = 1
 try {

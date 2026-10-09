@@ -1,0 +1,78 @@
+{
+  "request_timeout_seconds": {
+    "description": "单个资源站请求超时（秒）",
+    "type": "float",
+    "default": 10
+  },
+  "max_concurrent_sources": {
+    "description": "同时查询的资源站数量，建议 3-5",
+    "type": "int",
+    "default": 4
+  },
+  "cache_ttl_minutes": {
+    "description": "搜索结果内存缓存时间（分钟），0 表示不缓存",
+    "type": "int",
+    "default": 360
+  },
+  "full_version_min_minutes": {
+    "description": "单线路达到该时长才识别为完整版（分钟）",
+    "type": "float",
+    "default": 30
+  },
+  "min_fuzzy_score": {
+    "description": "精准同名无结果时启用模糊匹配的最低分，建议保持 3000",
+    "type": "int",
+    "default": 3000
+  },
+  "player_url_template": {
+    "description": "播放器地址模板；支持 {url}、{title}、{episode}。留空使用微信兼容播放页，填 direct 才直达 m3u8",
+    "type": "string",
+    "default": "https://m3u8-player.cc/player?url={url}"
+  },
+  "stateless_player_url": {
+    "description": "无状态多集播放器 HTTPS 地址；播放列表压缩到 URL 片段，VPS 不接收或代理视频流",
+    "type": "string",
+    "default": ""
+  },
+  "selection_store_api_url": {
+    "description": "短链接播放清单写入接口，例如 https://player.example/short-drama/api/selections；留空则仅使用 URL 片段",
+    "type": "string",
+    "default": ""
+  },
+  "selection_store_api_token": {
+    "description": "短链接播放清单写入接口令牌；仅在 AstrBot 配置中使用，不要发送到群聊",
+    "hint": "敏感配置，不会显示在播放卡片或页面中",
+    "type": "string",
+    "default": ""
+  },
+  "selection_store_timeout_seconds": {
+    "description": "短链接播放清单写入超时时间（秒）",
+    "type": "float",
+    "default": 8
+  },
+  "episode_player_public_base_url": {
+    "description": "分集播放器对外地址，例如 https://player.example；留空时继续使用单集公共播放器",
+    "type": "string",
+    "default": ""
+  },
+  "episode_player_bind_host": {
+    "description": "分集播放器本机监听地址；使用 Nginx/SSH 反代时建议保持 127.0.0.1",
+    "type": "string",
+    "default": "127.0.0.1"
+  },
+  "episode_player_port": {
+    "description": "分集播放器本机监听端口",
+    "type": "int",
+    "default": 6197
+  },
+  "episode_player_token_ttl_minutes": {
+    "description": "卡片分集播放令牌有效期（分钟）",
+    "type": "int",
+    "default": 360
+  },
+  "episode_player_max_playlists": {
+    "description": "内存中最多保留的分集播放列表数量",
+    "type": "int",
+    "default": 200
+  }
+}

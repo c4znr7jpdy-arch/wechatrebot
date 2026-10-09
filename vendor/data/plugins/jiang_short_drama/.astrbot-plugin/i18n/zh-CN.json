@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "display_name": "姜小妹影视资源",
+    "short_desc": "分类影视搜索、播放器与定时推荐",
+    "desc": "分类影视、体育资源搜索、微信播放卡片与群聊定时推荐"
+  },
+  "pages": {
+    "recommendation-schedules": {
+      "title": "影视定时推荐",
+      "description": "为指定群聊配置影视、动漫、综艺和体育定时推荐"
+    }
+  }
+}

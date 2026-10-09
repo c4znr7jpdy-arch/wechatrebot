@@ -1,0 +1,32 @@
+{
+  "enabled": {
+    "description": "启用表情包触发语音替换",
+    "type": "bool",
+    "default": true
+  },
+  "max_text_chars": {
+    "description": "触发表情语音时允许朗读的最大字符数，超过后保留原文字",
+    "type": "int",
+    "default": 120
+  },
+  "min_text_chars": {
+    "description": "触发表情语音时允许朗读的最小字符数",
+    "type": "int",
+    "default": 1
+  },
+  "use_style_director": {
+    "description": "是否为表情语音额外调用一次 AI 语音导演；首版建议关闭",
+    "type": "bool",
+    "default": false
+  },
+  "ffmpeg_path": {
+    "description": "WAV 转 PCM 使用的 ffmpeg 路径；留空时从系统 PATH 查找，随后由 pilk 编码为 SILK",
+    "type": "string",
+    "default": ""
+  },
+  "keep_meme": {
+    "description": "语音替换文字时是否保留表情包；当前版本仅支持保留",
+    "type": "bool",
+    "default": true
+  }
+}

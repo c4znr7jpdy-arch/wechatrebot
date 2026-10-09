@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="module")
 def bridge(tmp_path_factory):
     target = tmp_path_factory.mktemp("emotion-bridge")
-    source = ROOT / "tests/fixtures/patch_sources/hook_41827_astrbot_bridge"
+    source = ROOT / "vendor/hook_41827_astrbot_bridge"
     shutil.copytree(source, target / "hook_41827_astrbot_bridge")
     subprocess.run(["git", "init", "--quiet"], cwd=target, check=True)
     # Exercise the complete bridge patch stack, including new-file delivery.

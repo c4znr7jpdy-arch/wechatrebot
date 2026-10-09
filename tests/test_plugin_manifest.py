@@ -4,9 +4,8 @@ from pathlib import Path
 
 def test_plugin_manifest_accounts_for_every_project_plugin() -> None:
     commercial_root = Path(__file__).parents[1]
-    project_plugins = Path("E:/Project/data/plugins")
-    if not project_plugins.is_dir():
-        return
+    project_plugins = Path(__file__).parents[1] / "vendor/data/plugins"
+    assert project_plugins.is_dir(), "Repository vendor sources are required"
     payload = json.loads(
         (commercial_root / "release" / "plugin-manifest.json").read_text(
             encoding="utf-8"
@@ -19,7 +18,13 @@ def test_plugin_manifest_accounts_for_every_project_plugin() -> None:
     declared = {item["name"] for item in payload["plugins"]}
     native = json.loads((commercial_root / "release/native-plugin-sources.json").read_text("utf-8"))
     native_modules = {item["module"] for item in native["plugins"]}
-    assert actual | native_modules == declared
+    entries = json.loads((commercial_root / "release/source-manifest.json").read_text("utf-8"))["entries"]
+    native_modules.update(Path(item["target"]).name for item in entries
+                          if item["origin"] == "commercial"
+                          and item["target"].startswith("app/astrbot/data/plugins/")
+                          and len(Path(item["target"]).parts) == 5)
+    excluded = {item["name"] for item in payload["plugins"] if item.get("ownership") == "excluded"}
+    assert actual | native_modules == declared - excluded
     assert all("gate" not in item for item in payload["plugins"])
 
 
@@ -143,9 +148,8 @@ def test_source_manifest_excludes_development_and_local_config_artifacts() -> No
 
 
 def test_project_video_plugin_follows_grok() -> None:
-    project_plugins = Path("E:/Project/data/plugins")
-    if not project_plugins.is_dir():
-        return
+    project_plugins = Path(__file__).parents[1] / "vendor/data/plugins"
+    assert project_plugins.is_dir(), "Repository vendor sources are required"
 
     video_main = (
         project_plugins / "jiang_video_understanding" / "main.py"

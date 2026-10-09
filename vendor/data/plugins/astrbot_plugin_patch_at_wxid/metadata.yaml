@@ -1,0 +1,6 @@
+{
+  "name": "astrbot_plugin_patch_at_wxid",
+  "desc": "兼容微信 wxid 形态的 at 段，避免 aiocqhttp 适配器 int() 报错日志",
+  "version": "0.1.0",
+  "author": "fch"
+}

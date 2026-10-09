@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).parents[1]
-PROJECT = Path("E:/Project")
+PROJECT = Path(__file__).parents[1] / "vendor"
 
 
 def _copy_runtime_package(tmp_path: Path):
@@ -321,8 +321,7 @@ def test_short_drama_does_not_depend_on_commands_configuration(tmp_path: Path) -
 
 
 def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
-    if not (PROJECT / "data/plugins/jiang_schedule/main.py").is_file():
-        return
+    assert (PROJECT / "data/plugins/jiang_schedule/main.py").is_file()
     checkout = tmp_path / "schedule-plugin"
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
@@ -344,8 +343,7 @@ def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
 
 def test_manual_weather_patch_reuses_the_scheduled_card_renderer(tmp_path: Path) -> None:
     source = PROJECT / "data/plugins/jiang_commands/main.py"
-    if not source.is_file():
-        return
+    assert source.is_file(), source
     checkout = tmp_path / "commands-plugin"
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
@@ -362,8 +360,7 @@ def test_manual_weather_patch_reuses_the_scheduled_card_renderer(tmp_path: Path)
 
 def test_short_drama_patch_exposes_unified_content_adapter(tmp_path: Path) -> None:
     source = PROJECT / "data/plugins/jiang_short_drama/main.py"
-    if not source.is_file():
-        return
+    assert source.is_file(), source
     checkout = tmp_path / "short-drama-plugin"
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)

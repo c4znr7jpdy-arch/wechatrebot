@@ -12,7 +12,7 @@ from wechatrebot_manager.core_reply_identity import apply_reply_identity
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path('E:/Project/data/plugins/astrbot_plugin_angel_heart')
+SOURCE = ROOT / 'vendor/data/plugins/astrbot_plugin_angel_heart'
 PATCH = ROOT / 'patches/astrbot-plugin-astrbot_plugin_angel_heart.patch'
 
 
@@ -44,7 +44,7 @@ def _module(path, name):
 @pytest.fixture
 def patched_core(tmp_path):
     if not (SOURCE / 'main.py').is_file():
-        pytest.skip('Conversation core source checkout is unavailable')
+        pytest.fail('Conversation core source checkout is unavailable')
     repository = tmp_path / 'patched-core'
     (repository / 'web_api').mkdir(parents=True)
     for relative in ('main.py', 'web_api/__init__.py'):

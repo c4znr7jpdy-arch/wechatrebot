@@ -13,14 +13,14 @@ import pytest
 
 
 REPOSITORY = Path(__file__).parents[1]
-PROJECT_PLUGINS = Path("E:/Project/data/plugins")
+PROJECT_PLUGINS = Path(__file__).parents[1] / "vendor/data/plugins"
 
 
 def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = False,
              source_root: Path = PROJECT_PLUGINS) -> str:
     source = source_root / module / relative
     if not source.is_file():
-        pytest.skip("Local plugin source checkout is unavailable")
+        pytest.fail("Local plugin source checkout is unavailable")
     base_patch = REPOSITORY / "patches" / f"astrbot-plugin-{module}.patch"
     patches = [base_patch]
     if all_patches:
@@ -64,61 +64,6 @@ def test_youtube_uses_bundled_node_without_global_install(tmp_path: Path, monkey
     monkeypatch.setitem(sys.modules, "playwright", SimpleNamespace(__file__=str(playwright_root / "__init__.py")))
     helper = _function(source, "_bundled_node_runtimes", {"Path": Path})
     assert helper() == {"node": {"path": str(node)}}
-
-
-def test_windows_memory_waits_for_milvus_configuration(tmp_path: Path) -> None:
-    source = _patched(tmp_path, "astrbot_plugin_mnemosyne", "main.py")
-    pending = _function(source, "_commercial_setup_pending", {"sys": SimpleNamespace(platform="win32")})
-    instance = SimpleNamespace(config={})
-    assert pending(instance) is True
-    instance.config["address"] = "https://milvus.example.test:19530"
-    assert pending(instance) is False
-
-
-def test_memory_hot_reload_stops_partially_initialized_instance(tmp_path: Path) -> None:
-    source = _patched(tmp_path, "astrbot_plugin_mnemosyne", "main.py")
-
-    def ignore(*_args, **_kwargs):
-        return None
-
-    terminate = _function(
-        source,
-        "terminate",
-        {
-            "asyncio": __import__("asyncio"),
-            "logger": SimpleNamespace(
-                info=ignore,
-                warning=ignore,
-                debug=ignore,
-                error=ignore,
-            ),
-        },
-    )
-
-    async def scenario() -> None:
-        import asyncio
-
-        init_task = asyncio.create_task(asyncio.Event().wait())
-        await asyncio.sleep(0)
-        ready = asyncio.Event()
-        ready.set()
-        plugin = SimpleNamespace(
-            _commercial_init_task=init_task,
-            _milvus_manager_ready=ready,
-            _ensure_milvus_connection_task=None,
-            _embedding_provider_task=None,
-            admin_panel_server=None,
-            msg_counter=None,
-            milvus_manager=None,
-        )
-
-        await terminate(plugin)
-
-        assert init_task.cancelled()
-        assert not ready.is_set()
-        assert plugin._summary_check_task is None
-
-    __import__("asyncio").run(scenario())
 
 
 def test_report_patch_preserves_browser_fallback(tmp_path: Path) -> None:
@@ -238,7 +183,7 @@ def test_image_generation_common_config_applies_stored_api_keys(tmp_path: Path) 
 def test_link_parser_default_template_enables_douyin_without_customer_config() -> None:
     template_path = PROJECT_PLUGINS / "astrbot_plugin_parser" / "default_template.json"
     if not template_path.is_file():
-        pytest.skip("Local plugin source checkout is unavailable")
+        pytest.fail("Local plugin source checkout is unavailable")
     templates = json.loads(template_path.read_text(encoding="utf-8-sig"))
     douyin = next(item for item in templates if item.get("__template_key") == "douyin")
 

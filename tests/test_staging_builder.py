@@ -227,14 +227,13 @@ def test_runtime_root_validation_rejects_unrecorded_ffmpeg_file(tmp_path: Path) 
 
 
 def test_staging_copies_bundled_ffmpeg_and_records_it(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, vendor_inputs
 ) -> None:
     module = _builder()
     commercial = tmp_path / "commercial"
-    source = tmp_path / "source"
+    source = vendor_inputs(commercial)
     output = commercial / "artifacts" / "staging"
     runtime = tmp_path / "runtime"
-    source.mkdir()
     (commercial / "release").mkdir(parents=True)
     (commercial / "release" / "source-manifest.json").write_text(
         json.dumps({"entries": []}), encoding="utf-8"

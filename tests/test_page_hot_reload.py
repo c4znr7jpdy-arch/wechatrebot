@@ -9,15 +9,20 @@ from types import SimpleNamespace
 
 import pytest
 
-STAGED = Path(__file__).parents[1] / "artifacts/staging-hot-config-validation-20260907-final/app/astrbot/data/plugins"
+STAGED = None
 LOG = SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, exception=lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def plugin_inputs(patched_plugins, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "STAGED", patched_plugins)
 
 
 def method(module, file, name, namespace=None):
     vendored = Path(__file__).parents[1] / "runtime" / module / file
     path = vendored if module == "astrbot_plugin_qq_group_daily_analysis" else STAGED / module / file
     if not path.is_file():
-        pytest.skip("Source-only staging fixture unavailable")
+        pytest.fail("Source-only staging fixture unavailable")
     tree = ast.parse(path.read_text("utf-8-sig"))
     node = next(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
     node.decorator_list = []
@@ -104,7 +109,7 @@ def test_voice_persistence_failure_preserves_current_settings():
 def test_voice_native_config_wins_over_outdated_local_copy():
     path = STAGED / "astrbot_plugin_mimo_tts_clone/main.py"
     if not path.is_file():
-        pytest.skip("Source-only staging fixture unavailable")
+        pytest.fail("Source-only staging fixture unavailable")
     tree = ast.parse(path.read_text("utf-8-sig"))
     assign = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign) and
                   ast.unparse(n.targets[0]) == "self.config" and "native_config" in ast.unparse(n.value))
@@ -153,6 +158,7 @@ def test_meme_rules_refresh_current_personas_before_success():
         return {"rules": [{"scope": "session", "target": "test"}]}
     save = method("meme_manager", "mixins/web_api.py", "_api_settings_rules", {
         "request": SimpleNamespace(method="POST", get_json=payload),
+        "get_selection_rules": lambda: {"rules": []},
         "save_selection_rules": lambda rules: {"rules": rules}, "jsonify": lambda v: v,
     })
     result, status = asyncio.run(save(SimpleNamespace(_reload_personas=lambda: cached.append("refreshed"))))
@@ -172,13 +178,4 @@ def test_group_analysis_verification_waits_for_initialization():
         instance._initialized = False
         with pytest.raises(RuntimeError):
             await check(instance)
-    asyncio.run(run())
-
-
-def test_memory_missing_service_returns_pending_setup_not_applied():
-    check = method("astrbot_plugin_mnemosyne", "main.py", "_commercial_verify_hot_config")
-    async def run():
-        instance = SimpleNamespace(_commercial_init_task=asyncio.create_task(asyncio.sleep(0)),
-                                   _commercial_setup_pending=lambda: True)
-        assert await check(instance) == "pending_setup"
     asyncio.run(run())

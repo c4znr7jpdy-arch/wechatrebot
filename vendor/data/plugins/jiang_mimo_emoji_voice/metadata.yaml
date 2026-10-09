@@ -1,0 +1,14 @@
+name: jiang_mimo_emoji_voice
+display_name: 姜小妹表情语音桥
+desc: 当 meme_manager 选中机器人表情包时，使用 MiMo TTS 音色克隆插件把本轮文字替换为语音条。
+author: fch
+version: 0.1.0
+repo: https://github.com/Justice-ocr/astrbot_plugin_mimo_tts_clone
+astrbot_version: ">=4.16.0,<5"
+support_platforms:
+  - aiocqhttp
+tags:
+  - tts
+  - mimo
+  - meme
+  - emotion

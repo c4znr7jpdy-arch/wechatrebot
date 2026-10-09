@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_retired_checkin_has_no_api_import_or_command_and_removes_old_jobs(tmp_path):
     source = _patched(tmp_path, "jiang_schedule", "main.py", all_patches=True,
-                      source_root=ROOT / "tests/fixtures/patch_sources/data/plugins")
+                      source_root=ROOT / "vendor/data/plugins")
     tree = ast.parse(source)
     names = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     assert "_cb_checkin" not in names
