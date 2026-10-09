@@ -315,8 +315,13 @@ def _validated_plan(plan_path: str | Path) -> tuple[dict[str, object], Path]:
     return payload, root
 
 
-def _iter_windows_process_ids() -> tuple[int, ...]:
+def _iter_windows_process_ids(
+    *, executable_names: frozenset[str] | None = None, strict: bool = False,
+) -> tuple[int, ...]:
+    """Enumerate processes, optionally requiring a complete filtered snapshot."""
     if os.name != "nt":
+        if strict:
+            raise OSError("当前平台无法确认 Windows 进程状态。")
         return ()
     import ctypes
     from ctypes import wintypes
@@ -352,17 +357,25 @@ def _iter_windows_process_ids() -> tuple[int, ...]:
     kernel32.CloseHandle.restype = wintypes.BOOL
     invalid_handle = ctypes.c_void_p(-1).value
     snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
-    if snapshot == invalid_handle:
+    if not snapshot or snapshot == invalid_handle:
+        if strict:
+            raise OSError(ctypes.get_last_error(), "无法读取进程列表。")
         return ()
+    names = None if executable_names is None else {name.casefold() for name in executable_names}
     entry = PROCESSENTRY32W()
     entry.dwSize = ctypes.sizeof(entry)
     values: list[int] = []
     try:
         if kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
             while True:
-                values.append(int(entry.th32ProcessID))
+                if names is None or entry.szExeFile.casefold() in names:
+                    values.append(int(entry.th32ProcessID))
                 if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                    if strict and ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                        raise OSError(ctypes.get_last_error(), "进程列表未能完整读取。")
                     break
+        elif strict and ctypes.get_last_error() != 18:
+            raise OSError(ctypes.get_last_error(), "无法读取进程列表。")
     finally:
         kernel32.CloseHandle(snapshot)
     return tuple(values)

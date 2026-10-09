@@ -198,11 +198,17 @@ class AdoptedProcess:
         os.kill(self.pid, sig)
 
 
-def port_accepting(host: str, port: int, timeout_seconds: float = 0.3) -> bool:
+def port_accepting(
+    host: str, port: int, timeout_seconds: float = 0.3, *, strict: bool = False,
+) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout_seconds):
             return True
+    except ConnectionRefusedError:
+        return False
     except OSError:
+        if strict:
+            raise
         return False
 
 
@@ -334,6 +340,33 @@ def build_service_specs(
         display_name="微信连接",
     )
     return astrbot, bridge
+
+
+def installation_services_stopped(install_root: str | Path) -> bool:
+    """Confirm process and port absence; unknown state never permits maintenance.
+
+    Scan independently of service-state.json so a manager restart or an offline
+    API cannot hide an unadopted Python process from this installation.
+    """
+    from .uninstaller import _iter_windows_process_ids
+
+    try:
+        specs = build_service_specs(install_root)
+        executables = {_normalized_executable(spec.argv[0]) for spec in specs}
+        if not executables:
+            return False
+        names = frozenset(Path(executable).name.casefold() for executable in executables)
+        for pid in _iter_windows_process_ids(executable_names=names, strict=True):
+            identity = process_identity(pid)
+            # None also means access denied/query failed, not just PID exit.
+            if identity is None or not identity.executable:
+                return False
+            if _normalized_executable(identity.executable) in executables:
+                return False
+        addresses = {(spec.ready_host, spec.ready_port) for spec in specs}
+        return all(not port_accepting(host, port, strict=True) for host, port in addresses)
+    except (OSError, ValueError, ServiceLaunchError):
+        return False
 
 
 class ProcessSupervisor:

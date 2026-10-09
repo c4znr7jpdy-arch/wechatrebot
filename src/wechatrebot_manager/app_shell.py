@@ -19,6 +19,7 @@ from .chat_history import ChatHistoryService
 from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
+    ProviderService,
     delete_provider_profile,
     delete_provider_thinking_preference,
     apply_web_search_values,
@@ -76,6 +77,7 @@ from .response_trace import ResponseTraceService
 from .runtime_config import bind_missing_analysis_model
 from .retired_plugins import purge_retired_plugins
 from .schedules import ScheduleService
+from .legacy_task_migration import LegacyTaskMigration, has_pending_migrations
 from .scheduled_task_service import ScheduledTaskService
 from .task_store import inspect_scheduled_command, next_occurrences, schedule_text
 from .updates import (
@@ -144,6 +146,10 @@ PUBLIC_API_METHODS = (
     "set_schedule_enabled",
     "update_schedule_time",
     "delete_schedule",
+    "get_legacy_schedule_migrations",
+    "preview_legacy_schedule_migration",
+    "migrate_legacy_schedule",
+    "cancel_legacy_schedule_migration",
     "get_scheduled_task_context",
     "save_scheduled_task",
     "set_scheduled_task_enabled",
@@ -436,15 +442,15 @@ class ApplicationApi:
         try:
             started = time.perf_counter()
             settings = load_robot_settings(self._install_root)
-            provider = load_provider_profile(self._install_root)
             providers = load_provider_services(self._install_root)
+            provider = load_provider_profile(self._install_root, services=providers)
             channel = self._load_update_channel()
             configured = time.perf_counter()
             status = self._lifecycle.refresh().to_dict()
             checked = time.perf_counter()
             experience = self._experience_service().snapshot()
             experienced = time.perf_counter()
-            readiness = self._onboarding_readiness(view=status)
+            readiness = self._onboarding_readiness(view=status, provider_services=providers)
             ready = time.perf_counter()
             return self._ok(
                 {
@@ -511,6 +517,13 @@ class ApplicationApi:
             )
         if not self._action_lock.acquire(blocking=False):
             return self._ok({"accepted": False}, message="正在处理上一个操作。")
+        try:
+            if has_pending_migrations(self._install_root):
+                self._action_lock.release()
+                return self._ok({"accepted": False}, message="请先在定时任务页完成中断的旧任务迁移，再启动机器人。")
+        except (OSError, ValueError, PayloadError):
+            self._action_lock.release()
+            return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
 
         def worker() -> None:
             try:
@@ -1161,12 +1174,43 @@ class ApplicationApi:
             self._scheduled_tasks = service
         return service
 
+    def _legacy_migration_service(self) -> LegacyTaskMigration:
+        service = getattr(self, "_legacy_migrations", None)
+        if service is None:
+            service = LegacyTaskMigration(
+                self._schedules, self._scheduled_task_service().store,
+                stop=self._lifecycle.stop_for_maintenance,
+                stopped=self._lifecycle.maintenance_stopped,
+            )
+            self._legacy_migrations = service
+        return service
+
+    def get_legacy_schedule_migrations(self) -> dict[str, object]:
+        return self._scheduled_call(lambda: {"items": self._legacy_migration_service().pending()})
+
+    def preview_legacy_schedule_migration(self, job_id: str, recovery_key: str = "") -> dict[str, object]:
+        return self._scheduled_call(self._legacy_migration_service().preview, job_id, recovery_key)
+
+    def _legacy_write(self, operation: Callable, *args: Any) -> dict[str, object]:
+        if not self._action_lock.acquire(blocking=False):
+            return {"ok": False, "error": {"title": "操作进行中", "message": "请等待当前启动、停止或任务操作完成。"}}
+        try:
+            return self._scheduled_call(operation, *args)
+        finally:
+            self._action_lock.release()
+
+    def migrate_legacy_schedule(self, token: str) -> dict[str, object]:
+        return self._legacy_write(self._legacy_migration_service().commit, token)
+
+    def cancel_legacy_schedule_migration(self, key: str) -> dict[str, object]:
+        return self._legacy_write(self._legacy_migration_service().cancel, key)
+
     def _scheduled_call(self, operation: Callable, *args: Any) -> dict[str, object]:
         try:
             return self._ok(operation(*args))
         except ValueError as exc:
             return {"ok": False, "error": {"title": "任务尚未完成配置", "message": str(exc)}}
-        except (OSError, sqlite3.Error, PluginCenterError, GroupDirectoryError):
+        except (OSError, sqlite3.Error, PluginCenterError, GroupDirectoryError, PayloadError):
             # Transport exceptions may include upstream addresses or credentials.
             return {"ok": False, "error": {"title": "定时任务操作未完成", "message": "连接或保存未完成，请检查机器人状态后刷新核对；你的编辑内容仍保留。"}}
 
@@ -1198,22 +1242,13 @@ class ApplicationApi:
         return self._scheduled_call(lambda: {"items": next_occurrences(schedule), "text": schedule_text(schedule)})
 
     def set_schedule_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
-        try:
-            return self._ok(self._schedules.set_enabled(job_id, bool(enabled)))
-        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
-            return self._failed(exc, "15001")
+        return self._legacy_write(self._schedules.set_enabled, job_id, bool(enabled))
 
     def update_schedule_time(self, job_id: str, value: str) -> dict[str, object]:
-        try:
-            return self._ok(self._schedules.update_time(job_id, value))
-        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
-            return self._failed(exc, "15001")
+        return self._legacy_write(self._schedules.update_time, job_id, value)
 
     def delete_schedule(self, job_id: str) -> dict[str, object]:
-        try:
-            return self._ok(self._schedules.delete(job_id))
-        except (OSError, ValueError, sqlite3.Error, PluginCenterError) as exc:
-            return self._failed(exc, "15001")
+        return self._legacy_write(self._schedules.delete, job_id)
 
     def get_activity(self) -> dict[str, object]:
         names = {
@@ -1252,7 +1287,10 @@ class ApplicationApi:
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def _onboarding_readiness(self, *, view: dict[str, object] | None = None) -> dict[str, object]:
+    def _onboarding_readiness(
+        self, *, view: dict[str, object] | None = None,
+        provider_services: tuple[ProviderService, ...] | None = None,
+    ) -> dict[str, object]:
         """Build a read-only first-use checklist from current local state."""
         if view is None:
             view = self._lifecycle.refresh().to_dict()
@@ -1260,7 +1298,7 @@ class ApplicationApi:
         runtime = view.get("runtime") if isinstance(view, dict) else {}
         environment = environment if isinstance(environment, dict) else {}
         runtime = runtime if isinstance(runtime, dict) else {}
-        provider = load_provider_profile(self._install_root)
+        provider = load_provider_profile(self._install_root, services=provider_services)
         account_id = str(runtime.get("wechat_identity") or "").strip()
         if runtime.get("account_status_available") is False:
             account_id = ""
