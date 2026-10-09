@@ -24,6 +24,7 @@ PATCH_PATHS = tuple(
     for name in (
         "hook-bridge-group-directory.patch",
         "hook-bridge-message-history-identity.patch",
+        "hook-bridge-private-account-filter.patch",
     )
 )
 
@@ -413,6 +414,45 @@ def test_private_sender_profile_avatar_is_saved_on_normalized_event(
     )
 
     assert event.member_avatar == "https://example.invalid/friend-avatar"
+
+
+@pytest.mark.parametrize("envelope", ["私聊消息", 2000, 2004])
+@pytest.mark.parametrize("contact", ["gh_3dfda90e39d6", "gh_other_service", " GH_TEST ", "weixin"])
+@pytest.mark.parametrize("message_type, content", [
+    (49, "<msg><appmsg><title>收款通知</title></appmsg></msg>"),
+    (1, "为了更好地协助您，能否请您详细描述一下所遇到的问题？"),
+])
+def test_official_private_messages_do_not_enter_bot_pipeline(
+    patched_bridge, envelope, contact, message_type, content,
+):
+    event = patched_bridge["event_normalizer"].normalize_event({
+        "messageType": envelope,
+        "account_wxid": "wxid_bot",
+        "fromUserName": {"String": contact},
+        "toUserName": {"String": "wxid_bot"},
+        "sender_nick": "微信支付",
+        "content": {"String": content},
+        "msgType": message_type,
+        "newMsgId": "official-message-1",
+    })
+
+    assert event.kind == "ignored"
+
+
+@pytest.mark.parametrize("contact", ["wxid_friend", "custom_wechat_id", "filehelper", "gh_room@chatroom"])
+def test_official_account_filter_preserves_people_groups_and_filehelper(patched_bridge, contact):
+    event = patched_bridge["event_normalizer"].normalize_event({
+        "event_type": 2004,
+        "account_wxid": "wxid_bot",
+        "fromUserName": {"String": contact},
+        "toUserName": {"String": "wxid_bot"},
+        "sender_nick": "微信支付",
+        "content": {"String": "转发公众号 gh_3dfda90e39d6 的内容"},
+        "msgType": 1,
+        "newMsgId": "normal-message-1",
+    })
+
+    assert event.kind == "message"
 
 
 def test_group_identity_and_avatar_are_available_to_plugins(
