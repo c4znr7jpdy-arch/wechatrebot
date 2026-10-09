@@ -132,6 +132,8 @@ class Main(star.Star):
             "当用户要求实际获取、查询、生成或发送机器人已有功能时，"
             "优先使用本轮已提供的专用工具；不清楚入口时先查询 capability_catalog，不要假装已经执行。\n"
             "可用范围以 capability_catalog 返回的当前会话目录为准，不使用记忆里的旧插件名单。\n"
+            "目录支持日常语句及多个关键词；检索无匹配不等于没有功能。"
+            "无匹配时根据已授权插件简介，缩短关键词或用空 query 重查一次，再判断是否有入口。\n"
             "专用工具优先直接调用；目录中自然能力使用 capability_invoke，声明或标准命令使用 "
             "capability_execute。没有执行入口的后台功能只能说明用途和配置位置。\n"
             "用户说‘再来一个、继续、换一个、再查一次’等续调表达时，"
@@ -164,7 +166,7 @@ class Main(star.Star):
         """查询姜小妹当前实际拥有的自然调用能力和命令型插件能力。当用户明确查询功能，或要求执行功能但需要查找入口和参数时使用；不得因历史消息、召回记忆、单独@、称呼或打招呼而调用。
 
         Args:
-            query(string): 可选关键词，例如 天气、群分析、模板、音乐；为空时列出完整能力目录。
+            query(string): 可选日常语句或多个关键词，例如 推特 订阅 卡片、帮我找部短剧、查成都天气；为空时列出完整能力目录。无匹配时缩短关键词或留空重查一次，不能直接断言没有功能。
         """
         try:
             snapshot = await discover(self.context, event, await list_commands())
@@ -174,7 +176,7 @@ class Main(star.Star):
         available = [item for item in CAPABILITIES if natural_available(
             item, snapshot["stars"], snapshot["registered_commands"], event.is_admin()
         )]
-        natural = catalog_text(query, capabilities=available)
+        natural = catalog_text(query, capabilities=available, empty_message=False)
         return render_catalog(snapshot, natural, query, event.get_extra("capability_native_tools", []))
 
     @filter.llm_tool(name="capability_execute")
