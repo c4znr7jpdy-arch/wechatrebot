@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from wechatrebot_manager import app_shell
+from wechatrebot_manager.events import EventStore
 from wechatrebot_manager.payload import PayloadError
 
 
@@ -17,7 +18,9 @@ def api(tmp_path):
     value._install_root = tmp_path
     value._mandatory_update = False
     value._action_lock = threading.Lock()
-    value._lifecycle = SimpleNamespace(start=lambda: pytest.fail("unexpected startup"))
+    value._lifecycle = SimpleNamespace(
+        start=lambda: pytest.fail("unexpected startup"), events=EventStore(tmp_path),
+    )
     return value
 
 

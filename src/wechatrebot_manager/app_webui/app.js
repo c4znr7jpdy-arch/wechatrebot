@@ -277,6 +277,8 @@
       ? `${title}${detail && detail !== title ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
       : (error?.message || "操作未完成，请稍后重试。 ");
     toast(message, "error");
+    if (!product) window.managerErrorReporter?.capture(error, state.activePage);
+    else if (product.recorded === false) toast("错误记录未能保存，请截图联系技术支持。", "error");
   }
 
   function debounce(fn, wait = 280) {
@@ -622,11 +624,13 @@
       input.style.opacity = "0";
       document.body.append(input);
       input.select();
-      const copied = document.execCommand("copy");
-      input.remove();
-      if (!copied) { toast("复制失败，请选中群标识后手动复制。", "error"); return; }
+      let copied = false;
+      try { copied = document.execCommand("copy"); } catch (_copyError) { copied = false; }
+      finally { input.remove(); }
+      if (!copied) { toast(`复制失败，请手动选择${label}复制。`, "error"); return false; }
     }
     toast(`${label}已复制。`);
+    return true;
   }
 
   async function pollGroups() {
@@ -832,8 +836,6 @@
     initializeTheme();
     window.initializePanelLayout();
     window.initializeHistoryDateRange(() => loadConversations({latest: true}));
-    $("#activityPrev").addEventListener("click", () => { state.activityPage--; renderActivity(); });
-    $("#activityNext").addEventListener("click", () => { state.activityPage++; renderActivity(); });
     // Keep the browser-native calendar/clock as the single source of truth,
     // while making the whole field open it on a direct click.
     document.addEventListener("click", (event) => {
@@ -1273,9 +1275,10 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { generateResponseTrace, loadActivity, renderActivity } = createPageController("createActivityView", {
+  const { generateResponseTrace, loadActivity } = createPageController("createActivityView", {
     $,
     api: (...args) => api(...args),
+    copyText: (...args) => copyText(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
     reportError: (...args) => reportError(...args),

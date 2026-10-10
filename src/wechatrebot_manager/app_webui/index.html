@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
   <link rel="stylesheet" href="subscription.css?v=20261009">
+  <link rel="stylesheet" href="activity.css?v=20261010">
+  <script src="activity-errors.js"></script>
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -354,9 +356,16 @@
         </section>
 
         <section class="page" id="page-activity" aria-labelledby="activityHeading">
-          <div class="page-heading compact"><div><h1 id="activityHeading">运行记录</h1></div><button class="button ghost" id="refreshActivity" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div>
-          <section class="trace-panel panel"><div class="panel-heading"><div><h2>发送耗时</h2><p>测试会向微信团队发送“发送路径测试”。</p></div><div class="trace-actions"><button class="button secondary small" id="generateResponseTrace" data-action-bound disabled type="button">发送测试</button><span class="status-badge" id="traceStatus" aria-live="polite"><span></span>等待生成</span></div></div><div class="trace-list" id="responseTraceList"></div></section>
-          <section class="activity-panel panel"><div class="activity-list" id="activityList"><div class="loading-row">正在读取运行记录…</div></div><nav class="activity-pagination" aria-label="运行记录分页"><button id="activityPrev" class="button secondary small" type="button">上一页</button><span id="activityPage" aria-live="polite"></span><button id="activityNext" class="button secondary small" type="button">下一页</button></nav></section>
+          <div class="page-heading compact"><div><h1 id="activityHeading">运行记录</h1><p>查看具体错误，复制问题信息给技术支持。</p></div><div class="activity-toolbar"><button class="button secondary" id="copyLatestActivity" type="button" disabled>复制最近问题</button><button class="button secondary" id="exportActivity" type="button">导出诊断文件</button><button class="button ghost" id="refreshActivity" data-action-bound disabled><svg><use href="#i-refresh"/></svg>刷新</button></div></div>
+          <section class="activity-panel panel">
+            <div class="activity-filters"><label>级别<select id="activityLevel"><option value="issues">错误和警告</option><option value="error">仅错误</option><option value="warning">仅警告</option><option value="all">全部记录</option></select></label><label>来源<select id="activitySource"><option value="">全部来源</option></select></label><label>时间<select id="activityRange"><option value="0">最近片段（全部时间）</option><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></label><label class="activity-search">搜索<input id="activitySearch" type="search" placeholder="错误码、错误内容、操作" autocomplete="off"></label></div>
+            <p id="activitySummary" class="activity-summary" aria-live="polite">正在读取最近日志片段…</p>
+            <p id="activityReadError" class="activity-read-error" role="alert" hidden></p>
+            <p id="activityFeedback" class="activity-feedback" role="status"></p>
+            <div class="activity-list" id="activityList"><div class="loading-row">正在读取运行记录…</div></div>
+            <nav class="activity-pagination" aria-label="运行记录分页"><button id="activityPrev" class="button secondary small" type="button" disabled>上一页</button><span id="activityPage" aria-live="polite"></span><button id="activityNext" class="button secondary small" type="button" disabled>下一页</button></nav>
+          </section>
+          <details class="activity-tools"><summary>诊断工具</summary><section class="trace-panel panel"><div class="panel-heading"><div><h2>发送耗时</h2><p>测试会向微信团队发送“发送路径测试”。</p></div><div class="trace-actions"><button class="button secondary small" id="generateResponseTrace" data-action-bound disabled type="button">发送测试</button><span class="status-badge" id="traceStatus" aria-live="polite"><span></span>等待生成</span></div></div><div class="trace-list" id="responseTraceList"></div></section></details>
         </section>
 
         <section class="page" id="page-help" aria-labelledby="helpHeading">

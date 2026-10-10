@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from wechatrebot_manager import app_shell
+from wechatrebot_manager.events import EventStore
 from wechatrebot_manager.licensing import api as licensing_api
 from wechatrebot_manager.licensing.contact import create_contact
 from wechatrebot_manager.licensing.contact_client import ContactClient
@@ -22,7 +23,7 @@ def make_api(client, *, account=""):
     api._install_root = client.root
     api._mandatory_update = False
     runtime = SimpleNamespace(wechat_identity=account, account_status_available=True)
-    api._lifecycle = SimpleNamespace(licenses=client, refresh=lambda: SimpleNamespace(runtime=runtime))
+    api._lifecycle = SimpleNamespace(licenses=client, events=EventStore(client.root), refresh=lambda: SimpleNamespace(runtime=runtime))
     actions = []
 
     def queue(action, _message, _error_code="19000"):

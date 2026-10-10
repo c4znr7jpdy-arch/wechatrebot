@@ -113,7 +113,7 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
     failure = api.save_scheduled_task({"name": ""})
     assert failure == {
         "ok": False,
-        "error": {"title": "任务尚未完成配置", "message": "请填写任务名称。"},
+        "error": {"code": "18001", "title": "任务尚未完成配置", "message": "请填写任务名称。", "event_id": "", "recorded": True},
     }
     parsed = api.parse_scheduled_command("青岛天气 明天")
     assert parsed["data"]["arguments"]["output"] == "image"
@@ -157,7 +157,7 @@ def test_policy_errors_expose_user_validation_but_not_raw_io_failures(tmp_path):
     for error, code in [
         (app_shell.GroupPolicyError('安静时段的时区不可用。'), '15001'),
         (app_shell.PrivatePolicyError('联系人规则已在其他窗口修改，请刷新后重试。'), '15002'),
-        (app_shell.ConfigConflictError('同一项设置已在其他窗口修改。'), '15001'),
+        (app_shell.ConfigConflictError('同一项设置已在其他窗口修改。'), '15005'),
     ]:
         result = api._failed(error, code)
         assert result['error']['code'] == code
@@ -1376,10 +1376,10 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
     script = manager_script()
     called = {
         match for match in __import__("re").findall(
-            r'(?:api|runtimeAction)\("([a-z_]+)"', script)
+            r'(?:api|runtimeAction|boundedRequest)\("([a-z_]+)"', script)
     }
 
-    assert called | {"start_robot", "stop_robot", "force_stop_robot"} == set(
+    assert called | {"start_robot", "stop_robot", "force_stop_robot", "record_ui_error"} == set(
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
@@ -2036,7 +2036,7 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert '手账风（示例样式）' in script
     assert '渲染、重试、并发和提示词等专业参数继续使用推荐值' in script
     assert 'name: "每日签到"' not in script
-    assert 'version: "0.9.2"' in script
+    assert 'version: "0.9.9"' in script
 
 
 def test_run_application_uses_explicit_webview_api_allowlist(
