@@ -7,7 +7,6 @@ window.createPreviewApi = function (helpers) {
     SCHEDULED_ACTIONS,
     api,
     inferProviderModalities,
-    previewExperience,
     providerCapabilityLabel,
     providerThinkingSupported,
     scheduledTimeText,

@@ -99,7 +99,6 @@
     updateChecking: false,
     updateCheckTimer: 0,
     settingsSection: "model",
-    coreSettingsTab: "search",
     webSearch: null,
     webSearchDirty: false,
     providerScreen: "overview",
@@ -186,8 +185,6 @@
     coreSettings = window.createRobotCoreSettings({
       read: () => api("get_robot_core"),
       request: (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload),
-      getGroups: (refresh = false) => api("get_groups", refresh),
-      getContacts: (refresh = false) => api("get_contacts", refresh),
       save: (config, revision, identity) => api("save_robot_core", config, revision, identity),
       applyBrand: (brand) => {
         state.bootstrap.brand = brand;
@@ -548,7 +545,7 @@
     schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助", subscription: "订阅与授权",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "core", "system"]);
+  const SETTINGS_SECTIONS = new Set(["model", "core", "search", "system"]);
 
   async function navigate(page) {
     if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
@@ -946,14 +943,16 @@
     $("#generateResponseTrace").addEventListener("click", generateResponseTrace);
     $$("#settingsTabs [data-settings-tab]").forEach((button) => button.addEventListener("click", () => selectSettingsSection(button.dataset.settingsTab)));
     coreSettings.init();
-    $$('[data-core-settings-tab]').forEach((button) => button.addEventListener("click", () => setCoreSettingsTab(button.dataset.coreSettingsTab, true)));
+    $("#openChatRules").addEventListener("click", () => navigate("groups"));
     $("#webSearchForm").addEventListener("submit", saveWebSearchSettings);
     $("#webSearchProvider").addEventListener("change", () => {
       $("#webSearchKey").value = "";
       state.webSearchClearKey = false;
       updateWebSearchProviderCopy();
     });
+    $("#webSearchForm").addEventListener("input", () => { state.webSearchDirty = true; });
     $("#webSearchForm").addEventListener("change", (event) => {
+      state.webSearchDirty = true;
       if (event.target.name === "enabled") {
         updateToggleCopy({currentTarget: event.target});
         $("#webSearchDetails").hidden = !event.target.checked;
@@ -970,11 +969,9 @@
     $("#clearWebSearchKey").addEventListener("click", () => {
       $("#webSearchKey").value = "";
       state.webSearchClearKey = true;
+      state.webSearchDirty = true;
       $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
     });
-    $("#memoryForm").addEventListener("submit", saveMemoryExperience);
-    $("#emotionForm").addEventListener("submit", saveEmotionExperience);
-    $("#previewExperience").addEventListener("click", previewExperience);
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
     $("#providerForm").addEventListener("input", updateProviderDirty);
@@ -1192,6 +1189,14 @@
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
     icon: (...args) => icon(...args),
+    openCoreTemplates: async () => {
+      await navigate("settings");
+      if (state.activePage !== "settings") return;
+      selectSettingsSection("core");
+      if (state.settingsSection !== "core") return;
+      $("#coreTemplates").open = true;
+      $("#coreTemplates").scrollIntoView({block: "nearest"});
+    },
     openScheduledForChat: (...args) => openScheduledForChat(...args),
     readHomeSetupAlertDismissals: (...args) => readHomeSetupAlertDismissals(...args),
     reportError: (...args) => reportError(...args),
@@ -1252,7 +1257,7 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, loadMaintenance, openMemoryManager, previewExperience, saveEmotionExperience, saveMemoryExperience, saveWebSearchSettings, selectSettingsSection, setCoreSettingsTab, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
+  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, loadMaintenance, openMemoryManager, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
     $,
     $$,
     SETTINGS_SECTIONS,
@@ -1302,7 +1307,6 @@
     SCHEDULED_ACTIONS,
     api: (...args) => api(...args),
     inferProviderModalities: (...args) => inferProviderModalities(...args),
-    previewExperience: (...args) => previewExperience(...args),
     providerCapabilityLabel: (...args) => providerCapabilityLabel(...args),
     providerThinkingSupported: (...args) => providerThinkingSupported(...args),
     scheduledTimeText: (...args) => scheduledTimeText(...args),

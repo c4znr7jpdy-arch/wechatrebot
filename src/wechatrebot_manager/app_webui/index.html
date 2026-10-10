@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="subscription.css?v=20261009">
   <link rel="stylesheet" href="activity.css?v=20261010">
   <script src="activity-errors.js"></script>
+  <link rel="stylesheet" href="settings-layout.css">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -383,11 +384,13 @@
 
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
           <div class="page-heading compact"><div><h1 id="settingsHeading">设置</h1></div></div>
-          <div class="settings-tabs" id="settingsTabs" aria-label="设置分类">
-            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled>全局模型配置</button>
-            <button type="button" data-settings-tab="core" data-action-bound disabled>机器人核心</button>
-            <button type="button" data-settings-tab="system" data-action-bound disabled>系统信息</button>
-          </div>
+          <div class="settings-layout">
+          <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
+            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong><small>回复、识图与其他模型</small></button>
+            <button type="button" data-settings-tab="core" data-action-bound disabled><strong>对话规则</strong><small>机器人默认如何回复</small></button>
+            <button type="button" data-settings-tab="search" data-action-bound disabled><strong>联网搜索</strong><small>搜索服务与密钥</small></button>
+            <button type="button" data-settings-tab="system" data-action-bound disabled><strong>系统与更新</strong><small>安装、数据与版本</small></button>
+          </nav>
           <div class="settings-grid">
             <section class="provider-workspace" data-settings-section="model">
               <section class="provider-overview-card panel" id="providerOverview" aria-labelledby="providerOverviewTitle">
@@ -418,14 +421,12 @@
               </section>
             </section>
 
-            <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="机器人核心配置">
-              <div class="core-heading panel"><div><h2>机器人核心</h2></div><div class="button-row"><span class="status-badge" id="coreStatus">等待读取</span><button class="button secondary small" id="refreshCore" type="button" data-action-bound disabled>重新读取</button></div></div>
-              <div class="core-subtabs" id="coreSettingsTabs" role="tablist" aria-label="机器人核心分类">
-                <button class="active" type="button" data-action-bound disabled data-core-settings-tab="search" role="tab" aria-selected="true">联网搜索</button>
-                <button type="button" data-action-bound disabled data-core-settings-tab="conversation" role="tab" aria-selected="false">对话配置</button>
-                <button type="button" data-action-bound disabled data-core-settings-tab="memory" role="tab" aria-selected="false">记忆和情感</button>
-              </div>
-              <form class="settings-card panel web-search-settings-card" id="webSearchForm" data-core-subsection="search" novalidate>
+            <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="对话规则">
+              <div class="core-heading"><span class="status-badge" id="coreStatus">等待读取</span><div class="button-row"><button class="row-action" id="openChatRules" type="button" data-action-bound disabled>单独设置某个聊天</button><button class="button ghost small" id="refreshCore" type="button" data-action-bound disabled>重新读取</button></div></div>
+              <section class="core-detail" id="coreDetail"><div class="loading-row">正在读取对话规则…</div></section>
+              <details class="core-template-tools" id="coreTemplates"><summary>配置模板</summary><div class="core-template-toolbar"><label for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><button class="button secondary small" id="newCoreTemplate" type="button" data-action-bound disabled>新增模板</button></div><div id="coreTemplateList"></div></details>
+            </section>
+              <form class="settings-card panel web-search-settings-card" id="webSearchForm" data-settings-section="search" hidden novalidate>
                 <div class="panel-heading"><div><h2>联网搜索</h2></div><span class="toggle"><input id="webSearchEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="webSearchEnabled" aria-label="切换联网搜索"></label><span id="webSearchStatus">等待读取</span></span></div>
                 <div id="webSearchDetails">
                 <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select></label></div>
@@ -433,25 +434,6 @@
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" data-action-bound disabled aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
                 </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
-              <div class="core-layout" data-core-subsection="conversation" hidden><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-action-bound disabled data-core-view="global">全局配置</button><button class="core-nav" type="button" data-action-bound disabled data-core-view="monitor">聊天状态与配置</button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button" data-action-bound disabled>新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取对话配置…</div></section></div>
-            </section>
-
-            <form class="settings-card panel" id="memoryForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
-              <div class="panel-heading"><div><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
-              <div class="toggle-line"><span><strong>使用长期记忆</strong></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
-              <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select></label>
-              <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
-              <input name="casual_query_max_chars" type="hidden" value="24">
-              <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="previewExperience" type="button" data-action-bound disabled>预览回复</button><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
-            </form>
-
-            <form class="settings-card panel" id="emotionForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
-              <div class="panel-heading"><div><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
-
-              <div class="toggle-line"><span><strong>使用情感成长</strong></span><span class="toggle"><input id="emotionEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="emotionEnabled" aria-label="切换情感成长"></label><span>已启用</span></span></div>
-              <div class="option-grid compact-options"><label class="option-check"><input name="daily_mood" type="checkbox"><span>每天自然更换心情</span></label><label class="option-check"><input name="include_affection" type="checkbox"><span>回复时参考好感度</span></label><label class="option-check"><input name="include_mood" type="checkbox"><span>回复时参考当前心情</span></label></div>
-              <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
-            </form>
 
             <div class="settings-system-stack system-maintenance" data-settings-section="system">
             <section class="settings-card panel">
@@ -468,11 +450,13 @@
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
               <div class="maintenance-row"><div><strong>使用帮助</strong></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
+              <div class="maintenance-row"><div><strong>记忆数据</strong><span>查看和删除已保存的记忆</span></div><button class="button ghost small" id="manageMemories" data-action-bound disabled>管理记忆</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
               <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、日志、备份及本机残留，聊天记录会保留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
             </section>
             </div>
+          </div>
           </div>
         </section>
       </div>
@@ -504,6 +488,7 @@
   <script src="panel-layout.js"></script>
   <script src="subscription.js?v=20261009"></script>
   <script src="features.js"></script>
+  <script src="chat-profiles.js"></script>
   <script src="chat-management.js"></script>
   <script src="message-history.js"></script>
   <script src="scheduled-tasks.js"></script>

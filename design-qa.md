@@ -1,121 +1,48 @@
-# 设计还原 QA
+# Settings and chat configuration visual QA
 
-- 日期：2026-09-10
-- 设计来源：`机器人界面设计稿/screens/`、`机器人界面设计稿/prototype/`
-- 实现入口：`src/wechatrebot_manager/app_webui/index.html`
-- 本地预览：`http://127.0.0.1:4173/?preview=1&demo=model-services`（直达模型服务空态）
-- 目标环境：Windows Edge WebView2，简体中文
+Target: 0.9.9, manager incremental update. Source preview only; no installed robot was started or updated.
 
-## 视觉对照
+## Evidence
 
-| 工作流 | 对照设计稿 | 1600×1000 | 1080×680 | 结果 |
-|---|---|---:|---:|---|
-| 运行中心 | `01`、`37` | 已检查 | 已检查 | 通过 |
-| 功能中心 | `04`、`05`、`38` | 已检查 | 已检查 | 通过 |
-| 群聊管理 | `07`、`08`、`09` | 已检查 | 已检查 | 通过 |
-| 消息中心 | `10`、`11` | 已检查 | 布局检查 | 通过 |
-| 定时任务 | `12` | 已检查 | 布局检查 | 通过 |
-| 运行记录 | `13` | 已检查 | 布局检查 | 通过 |
-| 设置 | `14`—`17` | 已检查 | 已检查 | 通过 |
-| 模型服务空态与新建 | 本次交互重设计 | 已检查 | 已检查 | 通过 |
-| 首次使用引导 | `18` | 已检查 | 已检查 | 通过 |
+Local evidence directory: `C:/Users/Administrator/.codex/visualizations/2026/10/10/01a12503-0585-73f1-9dac-1c02f8985d86/`.
 
-## 交互与状态
+- Approved visual truth: `settings-concept-1.png`, `settings-chat-avatar-layout.png`.
+- Browser-rendered implementation: `settings-core-implementation.png`, `settings-implementation.png`, `chat-implementation.png`, `private-small-dark.png`.
+- Full comparisons: `settings-comparison.png`, `chat-comparison.png` (approved and implemented views in the same image).
+- Focused right-panel comparison: `chat-focused-comparison.png`.
+- Preview URL during review: `http://127.0.0.1:52157/?preview`.
+- Desktop viewport and source images: 1440 × 1024. Implementation capture: 1440 × 1024 pixels, 1 pixel per CSS pixel. Full comparisons preserve each image's dimensions; the focused comparison normalizes the corresponding right-panel regions to equal panels for alignment review, not pixel-difference scoring.
+- Narrow viewport: 1080 × 680, light and dark themes. Additional 800-pixel browser observation confirmed the chat panels stack instead of forcing the desktop columns.
 
-- 七项主导航均可用，页面标题与文档标题同步更新。
-- 功能中心默认选中首项，左侧目录与右侧详情保持同一滚动框架。
-- 群聊规则与群成员可在同一详情面板内切换，保存栏固定在面板底部。
-- 消息中心默认打开最近会话，消息、发送者身份和本机副本操作同时可见。
-- 设置四个任务分区互斥显示；原生下拉获得可见焦点，平台拥有弹层几何。
-- 模型服务为空时只显示空态和单一新建入口；点击后进入独立配置页，取消或保存后返回列表。
-- 配置草稿改动后显示“有未保存修改”，返回或切换页面前使用应用自有确认层；保存后列表标记当前回复模型。
-- 必填项失败会保留输入、聚焦缺失字段并显示中文 Toast。
-- 1080×680 下页面无横向溢出，复杂任务仍保持可用双栏；880px 以下回落为单栏。
-- 浏览器控制台无 warning/error；全局滚动条、焦点环和减少动态效果规则存在。
+The approved images contain a concept-title strip and a simplified application shell. The implementation retains the existing product navigation, status header, directory feedback and resize behavior. Comparisons prioritize the setting hierarchy and right-panel control alignment. Mock conversations differ from preview fixtures. Preview avatars use the existing fallback when no image URL is supplied; production still uses the original avatar renderer and image URLs. Private avatar images from the concept are not copied into product assets.
 
-## 自动检查
+## Findings and comparison history
 
-- `node --check`：通过。
-- 前端严格审计：0 finding，见 `premium-audit.json`。
-- UI/群聊相关测试：36 passed。
-- 全量测试：401 passed，26 failed；失败由当前 Python 3.11 32 位环境缺少 `os.path.isreserved`，以及正式发布测试要求 Python 3.13 x64 导致，与本次 Web UI 改动无关。
-
-结论：设计还原与关键交互验收通过。
-
----
-
-# 定时任务页面重设计 QA（2026-09-16）
-
-- source visual truth path: `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-1ccff770-7b0f-4112-a747-7f5ed63c7c61.png`
-- implementation screenshot path: `E:\wechatrebot\output\design-qa\schedule-main-1266x713.png`
-- responsive evidence: `E:\wechatrebot\output\design-qa\schedule-desktop.png`、`E:\wechatrebot\output\design-qa\schedule-mobile.png`
-- viewport: 主内容对照 1266×713；桌面 1440×960；窄屏 430×932；device scale factor 1
-- normalization: 参考图与主内容截图均为 1266×713；实现截图从 1502×713 视口裁去 236px 产品侧栏后对照。
-- state: 已登录账号、零任务、默认筛选、浅色主题。
-
-## Findings
-
-- 无剩余 P0/P1/P2。产品侧栏、底部聊天规则属于现有应用结构，参考图仅定义内容区，因此作为预期差异保留；时钟图标符合“日历/时钟”要求。
+1. Initial rendered inspection found a startup error in the newly extracted profile controller and missing registration of its delivered asset routes. Fixed the function signature and registered both new assets. Startup and asset-route regressions pass.
+2. Initial desktop comparison found inherited horizontal-tab underline styling and excess space around the chat header. Removed that underline for the vertical settings navigation, aligned the header actions, and normalized row spacing. Re-captured desktop implementation and compared both full views and the right-panel crop.
+3. Narrow dark inspection (`chat-small-dark.png`) found low-contrast chat identifiers. Private-chat inspection also exposed an unstyled native profile selector. Applied existing semantic foreground/surface tokens and shared select dimensions; rechecked in `private-small-dark.png`. Low-frequency private rules and feature lists now collapse consistently with group rules.
+4. Post-fix comparison found no remaining actionable P0/P1/P2 layout differences within the approved scope. Existing admin identity, schema-backed fields, revision protection and template override controls remain available. The mock's abbreviated, non-schema fields were not invented as new backend settings. These intentional content differences make the real settings page longer than the concept.
 
 ## Fidelity surfaces
 
-- 字体：沿用产品既有数黑标题与微软雅黑正文，标题、统计数字和辅助文案层级清楚，无截断。
-- 间距：48px 单排统计条、列表内筛选顶栏、空态中心线和 CTA 间距与参考意图一致。
-- 色彩：沿用 `#2F6BFF`、浅蓝底板、白色表面与灰蓝边框，状态色语义未改变。
-- 图像与图标：页面无位图资产；复用产品时钟图标库，36px 图标置于 64px 浅蓝底板。
-- 文案：使用“暂无定时任务”及天气、资讯、提醒场景引导；筛选无结果使用独立文案。
-- 无障碍：筛选均有关联标签，计数使用 live region，按钮焦点规则沿用全局样式。
+- Typography: retains the product's existing bundled fonts and hierarchy; names truncate in the left list, identifiers wrap in the right panel. No substitute font or logo introduced.
+- Spacing: vertical settings navigation, aligned label/control tracks, one profile selector, consistent toggle alignment and one policy save action. Automated geometry assertions verify equal select edges at both desktop widths.
+- Colors: existing warm surface/green accent tokens in light mode, existing dark tokens in dark mode. Identifier contrast corrected.
+- Images: existing group/contact avatar rendering retained, displayed alongside group name and member count. Unknown counts remain loading/failure states rather than fabricated zeroes.
+- Copy: four direct setting categories; memory/emotion parameter forms removed; data maintenance retains memory management. A profile switch clearly confirms and verifies its separate application.
 
-## Comparison history
+## Interaction and regression evidence
 
-1. 首轮发现顶部“控制台”、预览提示和空表头增加噪音；已隐藏重复上下文、清除正常空态提示并在零任务时隐藏表头。复查证据：`schedule-desktop.png`。
-2. 430px 首轮发现空态继承 810px 表格宽度而横向偏移；已为零任务表格切换 `is-empty` 并恢复 100% 宽度。复查证据：`schedule-mobile.png`，document/content 均无横向溢出。
-3. 最终同尺寸主内容对照通过；关键文字、控件和图标在完整截图中可读，无需额外局部放大。
+Ran:
 
-## Interaction and console
+```text
+PYTHONPATH=src python -m pytest tests/test_settings_webui.py tests/test_manager_startup.py tests/test_core_settings.py tests/test_app_shell.py tests/test_feature_scope_ui.py tests/test_plugin_center.py -q
+200 passed
+git diff --check
+```
 
-- 已验证空态 CTA 进入新建任务编辑器并可返回；刷新与内容筛选生效。
-- 1440×960 与 430×932 均无横向溢出；浏览器控制台 0 warning/error。
+The focused browser tests cover navigation, unsaved core draft cancellation, search draft preservation, unique schema fields, group member counts, template-management entry and control alignment. Profile tests cover confirmed application, cancellation, changed account/chat, concurrent binding change, failed readback, exact private origins, absent/ambiguous origins and offline failure. Startup tests exercise delivered resource routes and missing-controller handling. Browser console inspection found only the earlier fixed syntax error; current reloads and page-error assertions are clean.
 
-final result: passed
-
----
-
-# 深色主题与侧栏底栏 QA（2026-09-22）
-
-- source visual truth paths:
-  - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-232070b2-c226-48e9-b059-fd65cde10399.png`
-  - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-0ac2a411-75c6-4003-8b76-6892bac42379.png`
-  - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-654d557e-ae38-429b-b79b-73cd9b694f22.png`
-- implementation screenshot path: Codex 内置浏览器对 `http://127.0.0.1:52157/?preview` 的内联截图；当前浏览器截图接口不提供可持久化的本地文件路径。
-- combined comparison evidence: 在同源临时对照板中，将三张源图分别与对应的本地实现并排渲染后检查；对照板在 QA 完成后删除，避免把用户截图留在源码目录。
-- viewport and normalization: 源图与实现截图均为 2424×1442 像素，CSS 视口 2424×1442，device scale factor 1；并排检查时双方仅等比缩放至 50%，未裁切。
-- state: 预览数据、深色主题、对应主导航页面；群聊&私聊管理、消息中心、运行记录逐页匹配。
-
-## Findings
-
-- 无剩余 P0/P1/P2。浅色提示条、表头、日期框、消息画布和运行时间轴已经全部切换到深色语义表面；机器人在线、版本号和主题按钮已经固定在侧栏底边。
-- 临时并排对照板的 iframe 加载记录过一条仅限 QA 容器的 `MutationObserver` 错误；独立产品预览不可复现，主预览控制台为 0 warning/error，因此不属于产品缺陷。
-
-## Fidelity surfaces
-
-- 字体与层级：保留现有数黑标题和普惠体正文，字号、字重、行高与修复前一致；本次没有改变信息层级或造成截断。
-- 间距与布局：主内容栅格、卡片尺寸和表格密度保持不变；侧栏底栏在 2424×1442、1600×1000 和 1080×680 下均与视口底边重合。
-- 色彩与令牌：新增浅色/深色共用的表面、控件、消息画布和时间轴令牌；深色可见区域未检出接近白色的大面积背景。聊天日期框对比度为 8.60:1，普通消息气泡为 14.88:1，机器人消息气泡为 10.78:1，复制按钮为 10.04:1。
-- 图像与图标：未新增或替换图标资产；帮助页现有实况图在深色主题下降低亮度和饱和度，避免形成高亮白块，同时保持内容可辨认。
-- 文案与内容：导航、状态、群聊、消息和运行记录文案均保持原意；主题按钮的 `aria-pressed` 与“切换到浅色模式/深色模式”文案随主题同步。
-
-## Comparison history
-
-1. 首轮源图发现两项问题：P1，三个业务页残留大面积浅色画布；P2，侧栏底栏被后置样式覆盖，停在“帮助”下方而非窗口底部。
-2. 修复将群聊提示与表头、日期输入与消息画布、运行时间轴和帮助图像统一映射到主题语义表面，并恢复 `.sidebar-foot` 的自动顶距。
-3. 修复后将三张源图与 2424×1442 本地实现逐一并排复查；三处浅色残留均消失，底栏落到视口底边。随后扫描 8 个主页面，在 1600×1000 与 1080×680 下均为 0 个可见浅色大面积背景、0 横向溢出。
-4. 非默认状态复查又发现 P2 级残留：群规则输入、功能选项网格、机器人核心子页、身份卡、保存栏和系统路径框仍使用浅色背景。已统一接入控件、次级表面和内嵌表面令牌；群聊详情、私聊详情、机器人核心三个子页、系统信息、新建模型服务、定时任务编辑器和强制停止确认层复查均为 0 个浅色大面积背景。
-
-## Interaction and console
-
-- 已验证 8 个主导航页面、深浅主题双向切换、主题按钮标签与按压状态。
-- 已验证 2424×1442、1600×1000、1080×680；正文区与页面均无横向溢出。
-- 独立产品预览控制台 0 warning/error。
+Remaining acceptance boundary: installed-runtime behavior and real WeChat data are not claimed from preview fixtures. No configuration migration or memory/emotion reset was performed.
 
 final result: passed

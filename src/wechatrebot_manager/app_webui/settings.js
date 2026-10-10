@@ -37,8 +37,7 @@ window.createManagerSettings = function (helpers) {
     page.dataset.settingsSection = section;
     $$('[data-settings-section]', page).forEach((item) => {
       const matches = item.dataset.settingsSection === section;
-      const coreMemory = section === "core" && item.dataset.settingsSection === "core" && item.dataset.coreSubsection === "memory";
-      item.hidden = !matches || (coreMemory && state.coreSettingsTab !== "memory");
+      item.hidden = !matches;
     });
     $$("#settingsTabs [data-settings-tab]").forEach((button) => {
       const active = button.dataset.settingsTab === section;
@@ -51,57 +50,7 @@ window.createManagerSettings = function (helpers) {
       $("#providerEditorPage").hidden = state.providerScreen !== "editor";
     }
     if (section === "core") void getCoreSettings().load();
-    if (section === "core") {
-      setCoreSettingsTab(state.coreSettingsTab, false);
-      void loadWebSearchSettings();
-    }
-  }
-
-  function setCoreSettingsTab(tab, focus = false) {
-    if (!["search", "conversation", "memory"].includes(tab)) return;
-    state.coreSettingsTab = tab;
-    const page = $("#page-settings");
-    $$('[data-core-settings-tab]', page).forEach((button) => {
-      const active = button.dataset.coreSettingsTab === tab;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-      if (focus && active) button.focus();
-    });
-    $$('[data-core-subsection]', page).forEach((item) => {
-      item.hidden = item.dataset.coreSubsection !== tab;
-    });
-    if (tab === "memory") {
-      const experience = state.experience;
-      if (experience) fillExperience(experience);
-    }
-    if (tab === "conversation") void getCoreSettings().load();
-  }
-
-  function fillExperience(experience) {
-    state.experience = experience || {};
-    const capabilities = state.experience.capabilities || {};
-    const memory = state.experience.memory || {};
-    const readiness = state.experience.readiness || {};
-    const memoryForm = $("#memoryForm");
-    memoryForm.elements.enabled.checked = Boolean(memory.enabled);
-    memoryForm.elements.recall_mode.value = memory.recall_mode || "smart";
-    memoryForm.elements.casual_query_max_chars.value = memory.casual_query_max_chars || 24;
-    memoryForm.elements.top_k.value = memory.top_k || 3;
-    memoryForm.elements.summary_trigger_rounds.value = memory.summary_trigger_rounds || 10;
-    $("#memoryStatus").textContent = capabilities.memory
-      ? (readiness.memory ? "主记忆 · 保存后热更新" : "主记忆 · 还需文本向量模型")
-      : "需要完整更新";
-    memoryForm.querySelector("button[type='submit']").disabled = !capabilities.memory;
-
-    const emotion = state.experience.emotion || {};
-    const emotionForm = $("#emotionForm");
-    for (const key of ["enabled", "daily_mood", "include_affection", "include_mood"]) emotionForm.elements[key].checked = Boolean(emotion[key]);
-    $("#emotionStatus").textContent = capabilities.emotion ? "精简上下文" : "需要完整更新";
-    emotionForm.querySelector("button[type='submit']").disabled = !capabilities.emotion;
-    $$(".toggle input", $("#page-settings")).forEach((input) => {
-      input.removeEventListener("change", updateToggleCopy);
-      input.addEventListener("change", updateToggleCopy);
-    });
+    if (section === "search" && !state.webSearchDirty) void loadWebSearchSettings();
   }
 
   function renderWebSearch(settings) {
@@ -142,7 +91,8 @@ window.createManagerSettings = function (helpers) {
 
   async function loadWebSearchSettings() {
     try {
-      renderWebSearch(await api("get_web_search_settings"));
+      const settings = await api("get_web_search_settings");
+      if (!state.webSearchDirty) renderWebSearch(settings);
     } catch (error) {
       $("#webSearchNote").textContent = error.message || "联网搜索设置读取失败。";
       reportError(error);
@@ -176,46 +126,6 @@ window.createManagerSettings = function (helpers) {
       button.disabled = false;
       button.textContent = "保存联网搜索";
     }
-  }
-
-  async function saveExperience(event, save, section, noteSelector) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = $("button[type='submit']", form);
-    const note = $(noteSelector);
-    button.disabled = true;
-    button.textContent = "正在保存…";
-    note.textContent = "正在更新机器人设置…";
-    try {
-      const values = Object.fromEntries(new FormData(form));
-      $$("input[type='checkbox']", form).forEach((input) => { values[input.name] = input.checked; });
-      for (const key of ["top_k", "summary_trigger_rounds", "casual_query_max_chars"]) if (key in values) values[key] = Number(values[key]);
-      const saved = await save(values);
-      state.experience[section] = saved;
-      note.textContent = saved.apply_state === "applied" ? "已热更新，下一条消息生效。" : "已保存，机器人下次启动时生效。";
-    } catch (error) {
-      note.textContent = error.message || "保存失败";
-      reportError(error);
-    } finally {
-      button.disabled = false;
-      button.textContent = section === "memory" ? "保存记忆设置" : "保存情感设置";
-    }
-  }
-
-  const saveMemoryExperience = (event) => saveExperience(event, (values) => api("save_memory_settings", values), "memory", "#memoryNote");
-  const saveEmotionExperience = (event) => saveExperience(event, (values) => api("save_emotion_settings", values), "emotion", "#emotionNote");
-
-  async function previewExperience() {
-    try {
-      const preview = await api("preview_experience", {uses_recent_context: true});
-      confirmAction({
-        title: "本机回复预览",
-        message: (preview.text || "暂无预览内容") + " " + (preview.message || "") + " 使用长期记忆：" + (preview.uses_long_term_memory ? "是" : "否") + "；使用情感：" + (preview.uses_emotion ? "是" : "否") + "。",
-        confirmText: "关闭",
-        intent: "secondary",
-        onConfirm: async () => {},
-      });
-    } catch (error) { reportError(error); }
   }
 
   async function openMemoryManager() {
@@ -330,7 +240,7 @@ window.createManagerSettings = function (helpers) {
 
   function fillSettings(data) {
     applyBrand(data.brand);
-    fillExperience(data.experience);
+    state.experience = data.experience || {};
     renderOnboardingReadiness(data.readiness);
     const presetSelect = $("#providerPreset");
     if (presetSelect && Array.isArray(data.provider_presets)) {
@@ -369,12 +279,8 @@ window.createManagerSettings = function (helpers) {
     formatBytes,
     loadMaintenance,
     openMemoryManager,
-    previewExperience,
-    saveEmotionExperience,
-    saveMemoryExperience,
     saveWebSearchSettings,
     selectSettingsSection,
-    setCoreSettingsTab,
     setSettingsSection,
     showOnboarding,
     updateWebSearchProviderCopy,
