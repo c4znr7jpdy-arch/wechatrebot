@@ -8,7 +8,10 @@ function element() {
   return {value: '', hidden: true, textContent: '', innerHTML: '', scrollTop: 900,
     scrollHeight: 1000, clientHeight: 100, listeners: {},
     classList: {toggle() {}}, addEventListener(type, fn) { this.listeners[type] = fn; },
-    removeAttribute() {}, focus() {}, close() {}, showModal() {},
+    attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+    removeAttribute(name) { delete this.attributes[name]; },
+    insertAdjacentHTML(position, html) { assert.equal(position, 'afterbegin'); this.innerHTML = html + this.innerHTML; this.scrollHeight += 200; },
+    focus() {}, close() {}, showModal() {},
     click() { this.listeners.click({}); }};
 }
 
@@ -59,6 +62,8 @@ function historyContext() {
     window: {setTimeout, clearTimeout},
     api: async (method, id, filters) => { calls.push({method, id, filters}); return context.response(id); },
     renderConversations() {}, renderConversationHeader() {}, renderConversationInspector() {},
+    bindAvatarFallbacks() {}, bindMessageSenderSelection() {}, updateSelectedSenderButtons() {},
+    messageMarkup(message) { return `${message.content}|`; },
     reportError(error) { throw error; },
     renderMessages(messages, options = {}) {
       state.selectedMessages = messages;
@@ -70,7 +75,8 @@ function historyContext() {
     'historyFilters', 'pagedHistoryFilters', 'normalizeMessagePage', 'mergeMessages',
     'historyMessageCacheKey', 'getHistoryMessageCacheEntry', 'setHistoryMessageCacheEntry',
     'saveSelectedHistoryMessages', 'clearHistoryMessageCache', 'requestHistoryMessagePage',
-    'showHistoryNewerMessages', 'messagesSignature', 'selectConversation'];
+    'showHistoryNewerMessages', 'messagesSignature', 'selectConversation', 'prependOlderMessages', 'loadOlderMessages',
+    'invalidateHistoryState'];
   for (const name of names) {
     const start = script.search(new RegExp(`^  (?:async )?function ${name}\\(`, 'm'));
     assert.ok(start >= 0, name);
@@ -81,7 +87,8 @@ function historyContext() {
   vm.runInContext(script.match(/  const HISTORY_PAGE_SIZE = .*;/)[0] + '\n'
     + script.match(/  const HISTORY_MESSAGE_CACHE_LIMIT = .*;/)[0] + '\n'
     + script.match(/  const HISTORY_MESSAGE_WINDOW_LIMIT = .*;/)[0] + '\n'
-    + script.match(/  const HISTORY_MESSAGE_CACHE_TTL_MS = .*;/)[0], context);
+    + script.match(/  const HISTORY_MESSAGE_CACHE_TTL_MS = .*;/)[0] + '\n'
+    + script.match(/  const HISTORY_PRELOAD_THRESHOLD = .*;/)[0], context);
   return {context, state, calls, $};
 }
 
@@ -147,6 +154,87 @@ async function history() {
   assert.equal(s.historyMessageCache.size, 32);
 }
 
+async function olderMessagesDuringRefresh() {
+  const {context: c, state: s, calls, $} = historyContext();
+  const conversation = {conversation_id: 'a', message_count: 60, last_timestamp: 60};
+  s.conversations = [conversation];
+  c.response = () => ({account_id: 'account-a', items: messages(41, 60), has_more: true});
+  await c.selectConversation('a');
+  let resolveDirectory;
+  c.response = () => new Promise(resolve => { resolveDirectory = resolve; });
+  const refreshing = c.loadConversations({silent: true, forceRefresh: true});
+  let resolveOlder;
+  c.response = () => new Promise(resolve => { resolveOlder = resolve; });
+  $('#messageList').scrollTop = 0;
+  const older = c.loadOlderMessages();
+  const olderCount = calls.length;
+  assert.equal(calls.at(-1).filters.before.id, 41);
+  await c.loadOlderMessages();
+  assert.equal(calls.length, olderCount, 'repeated scroll events must not duplicate the page request');
+  c.response = () => ({account_id: 'account-a', items: messages(41, 60), has_more: true});
+  resolveDirectory({account_id: 'account-a', items: [conversation], summary: {}});
+  await refreshing;
+  resolveOlder({account_id: 'account-a', items: messages(21, 40), has_more: true});
+  await older;
+  assert.equal(s.selectedMessages[0].id, 21, 'a background directory refresh must not discard the older page');
+  assert.equal(s.selectedMessages.length, 40);
+  assert.equal($('#messageList').scrollTop, 200, 'prepending must preserve the visible message position');
+  assert.equal(s.historyLoadingOlder, false);
+  assert.equal($('#olderMessagesStatus').hidden, true);
+  assert.equal($('#messageList').attributes['aria-busy'], undefined);
+  $('#messageList').scrollTop = 0;
+  c.response = () => ({account_id: 'account-a', items: messages(1, 20), has_more: false});
+  await c.loadOlderMessages();
+  assert.equal(s.selectedMessages.length, 60, 'the next upward scroll must load the next page');
+  assert.equal(s.historyHasMore, false);
+}
+
+async function olderMessagesRecovery() {
+  const {context: c, state: s, $} = historyContext();
+  s.conversations = ['a', 'b'].map(id => ({conversation_id: id, message_count: 40, last_timestamp: 40}));
+  c.response = () => ({account_id: 'account-a', items: messages(21, 40), has_more: true});
+  await c.selectConversation('a');
+  const timers = new Map();
+  c.window.setTimeout = (callback, delay) => { timers.set(delay, callback); return delay; };
+  c.window.clearTimeout = id => timers.delete(id);
+  const errors = [];
+  c.reportError = error => errors.push(error.message);
+  let resolveTimedOut;
+  c.response = () => new Promise(resolve => { resolveTimedOut = resolve; });
+  $('#messageList').scrollTop = 0;
+  const timedOut = c.loadOlderMessages();
+  timers.get(300)();
+  assert.equal($('#olderMessagesStatus').hidden, false);
+  timers.get(20000)();
+  await timedOut;
+  assert.equal(s.historyLoadingOlder, false);
+  assert.equal($('#olderMessagesStatus').hidden, true);
+  assert.equal($('#messageList').attributes['aria-busy'], undefined);
+  assert.equal(s.selectedMessages.length, 20, 'a timeout must retain existing messages');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /读取记录超时/);
+  c.response = () => ({account_id: 'account-a', items: messages(1, 20), has_more: false});
+  await c.loadOlderMessages();
+  assert.equal(s.selectedMessages.length, 40, 'paging must recover after a timeout');
+  resolveTimedOut({account_id: 'account-a', items: messages(1, 20), has_more: false});
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(s.selectedMessages.length, 40, 'late timed-out responses must not duplicate messages');
+
+  s.historyHasMore = true;
+  $('#messageList').scrollTop = 0;
+  let resolveStale;
+  c.response = () => new Promise(resolve => { resolveStale = resolve; });
+  const stale = c.loadOlderMessages();
+  c.response = () => ({account_id: 'account-a', items: messages(81, 100), has_more: true});
+  await c.selectConversation('b');
+  resolveStale({account_id: 'account-a', items: messages(-19, 0), has_more: false});
+  await stale;
+  assert.equal(s.selectedMessages[0].id, 81, 'switching chats must still reject the previous chat page');
+  assert.equal(s.historyHasMore, true);
+  assert.equal(s.historyLoadingOlder, false);
+  assert.equal($('#olderMessagesStatus').hidden, true);
+}
+
 async function manualRefresh() {
   const {context: c, state: s, calls, $} = historyContext();
   s.conversations = [{conversation_id: 'a', message_count: 1, last_timestamp: 1}];
@@ -198,5 +286,5 @@ function offlineHistoryActions() {
   assert.equal($('#deleteConversation').disabled, true, 'a previously rendered delete button must become read-only');
 }
 
-(async () => { dates(); await history(); await manualRefresh(); offlineHistoryActions(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+(async () => { dates(); await history(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });
