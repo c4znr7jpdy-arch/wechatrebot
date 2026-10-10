@@ -379,8 +379,13 @@ class CustomerMaintenanceService:
     def diagnostic_summary(self) -> dict[str, object]:
         return customer_diagnostic_summary(collect_diagnostics(self.install_root))
 
-    def export_diagnostics(self) -> dict[str, object]:
+    def export_diagnostics(self, *, include_activity: bool = False, activity_build: int = 0) -> dict[str, object]:
         report = self.diagnostic_summary()
+        if include_activity:
+            from .activity_service import ActivityService
+            report["activity"] = ActivityService(self.install_root, build=activity_build).recent()
+            report["privacy"]["contains_logs"] = True
+            report["privacy"]["logs_redacted"] = True
         self.diagnostic_root.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         target = self.diagnostic_root / f"robot-diagnostics-{timestamp}.json"

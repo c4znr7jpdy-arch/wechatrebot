@@ -4,9 +4,35 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Mapping
+from urllib.error import HTTPError, URLError
+import sqlite3
 
 
 DEFAULT_ERROR_CODE = "19000"
+
+
+def classify_error(exc: BaseException, fallback: str, operation: str) -> str:
+    """Classify evidence from typed exceptions, never guess from arbitrary prose."""
+    if type(exc).__name__ == "ConfigConflictError":
+        return "15005"
+    if operation in {"test_provider", "discover_provider_models"}:
+        cause: BaseException | None = exc
+        seen: set[int] = set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, HTTPError):
+                return {401: "16002", 403: "16003", 404: "16009", 429: "16004"}.get(cause.code, "16008" if cause.code >= 500 else "16010")
+            if isinstance(cause, TimeoutError):
+                return "16007"
+            if isinstance(cause, URLError):
+                return "16007" if isinstance(cause.reason, TimeoutError) else "16006"
+            cause = cause.__cause__ or cause.__context__
+        return "19000"
+    if isinstance(exc, sqlite3.Error):
+        return "15007"
+    if fallback == "15001" and operation.startswith("get_"):
+        return "15003"
+    return {"create_backup": "15009", "restore_backup": "15010", "export_diagnostics": "19004", "get_diagnostics": "19003"}.get(operation, fallback)
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +42,7 @@ class ErrorDefinition:
     message: str
     solutions: tuple[str, ...]
     retryable: bool = True
+    level: str = "error"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -24,6 +51,7 @@ class ErrorDefinition:
             "message": self.message,
             "solutions": list(self.solutions),
             "retryable": self.retryable,
+            "level": self.level,
         }
 
 
@@ -63,6 +91,7 @@ def _read_catalog(path: Path) -> dict[str, ErrorDefinition]:
                 str(item).strip() for item in solutions if str(item).strip()
             ),
             retryable=bool(raw.get("retryable", True)),
+            level=str(raw.get("level", "error")) if raw.get("level", "error") in {"info", "warning", "error"} else "error",
         )
     return values
 

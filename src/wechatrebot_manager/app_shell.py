@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 from . import __version__
 from .chat_api import ChatApiMixin
+from .activity_api import ActivityApiMixin
 from .schedule_api import ScheduleApiMixin
 from .model_api import AnalysisModelBindingError, ModelApiMixin
 from .update_api import UpdateApiMixin
@@ -30,7 +31,7 @@ from .customer_config import (
 )
 from .customer_maintenance import CustomerMaintenanceService, MaintenanceError
 from .environment import WECHAT_DOWNLOAD_URL
-from .error_catalog import load_error_catalog
+from .error_catalog import load_error_catalog, classify_error
 from .experience import ExperienceError, ExperienceService
 from .core_settings import RobotCoreSettingsService
 from .group_policy import GroupPolicyError, GroupPolicyService
@@ -131,6 +132,8 @@ PUBLIC_API_METHODS = (
     "parse_scheduled_command",
     "preview_scheduled_times",
     "get_activity",
+    "record_ui_error",
+    "export_activity_diagnostics",
     "get_onboarding_readiness",
     "preview_experience",
     "save_memory_settings",
@@ -173,7 +176,7 @@ def _asset_root() -> Path:
     raise FileNotFoundError("主界面资源缺失，请重新安装软件。")
 
 
-class ApplicationApi(LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApiMixin, UpdateApiMixin):
+class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApiMixin, UpdateApiMixin):
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
@@ -209,6 +212,8 @@ class ApplicationApi(LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApi
         self._feature_page_thread: threading.Thread | None = None
         self._history_group_members: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
         self._action_lock = threading.Lock()
+        self._ui_error_lock = threading.Lock()
+        self._ui_error_times: list[float] = []
         self._update_lock = threading.Lock()
         self._update_status_lock = threading.Lock()
         self._update_status: dict[str, object] = {
@@ -383,6 +388,8 @@ class ApplicationApi(LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApi
         return {"ok": True, "data": data, "message": message}
 
     def _failed(self, exc: BaseException, code: str = "19000") -> dict[str, object]:
+        operation = sys._getframe(1).f_code.co_name
+        code = classify_error(exc, code, operation)
         definition = self._catalog.get(code)
         error = definition.to_dict()
         # Policy validation errors are written for users. Never expose raw
@@ -391,12 +398,8 @@ class ApplicationApi(LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApi
             error["detail"] = str(exc)
         if isinstance(exc, AnalysisModelBindingError):
             error["message"] = str(exc)
-        self._lifecycle.events.emit(
-            "APP_ERROR",
-            "failed",
-            code=definition.code,
-            message=str(exc),
-        )
+        event_id, saved = self._record_error(exc, definition.code, operation=operation)
+        error.update(event_id=event_id, recorded=saved)
         return {
             "ok": False,
             "error": error,
@@ -648,34 +651,6 @@ class ApplicationApi(LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApi
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 
-
-    def get_activity(self) -> dict[str, object]:
-        names = {
-            "APP_START": "软件已打开",
-            "CHECK_WECHAT": "正在检查微信环境",
-            "WECHAT_READY": "微信环境检查通过",
-            "CORE_START": "开始启动机器人功能",
-            "CORE_READY": "机器人功能已就绪",
-            "CONNECTION_START": "开始连接微信",
-            "CONNECTION_CONNECTED": "微信连接成功",
-            "FUNCTION_LOADED": "全部功能加载完成",
-            "WECHAT_CLOSED": "检测到微信已关闭",
-            "CONNECTION_STOP": "微信连接已停止",
-            "CORE_STOP": "机器人已停止",
-            "APP_ERROR": "操作未完成",
-        }
-        items = []
-        for event in reversed(self._lifecycle.events.recent(300)):
-            items.append(
-                {
-                    "time": event.get("time", ""),
-                    "event": event.get("event", ""),
-                    "title": names.get(str(event.get("event")), "运行记录"),
-                    "status": event.get("status", ""),
-                    "code": event.get("code", ""),
-                }
-            )
-        return self._ok(items)
 
     def get_response_traces(self) -> dict[str, object]:
         try:

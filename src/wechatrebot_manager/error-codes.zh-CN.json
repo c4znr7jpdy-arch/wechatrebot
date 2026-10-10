@@ -5,109 +5,594 @@
       "title": "系统正常",
       "message": "机器人运行环境正常。",
       "solutions": [],
-      "retryable": false
+      "retryable": false,
+      "level": "info"
     },
     "11001": {
       "title": "未检测到微信",
       "message": "这台电脑尚未安装可用的微信客户端。",
-      "solutions": ["下载安装微信客户端", "安装完成后点击“重新检测”"],
+      "solutions": [
+        "下载安装微信客户端",
+        "安装完成后点击“重新检测”"
+      ],
       "retryable": true
     },
     "11002": {
       "title": "微信版本暂不支持",
       "message": "当前微信版本无法使用机器人功能。",
-      "solutions": ["安装软件提示的兼容版本", "完成后点击“重新检测”", "自动检测失败时手动选择 Weixin.exe"],
+      "solutions": [
+        "安装软件提示的兼容版本",
+        "完成后点击“重新检测”",
+        "自动检测失败时手动选择 Weixin.exe"
+      ],
       "retryable": true
     },
     "11003": {
       "title": "等待登录微信",
       "message": "微信已经打开，但尚未检测到已登录账号。",
-      "solutions": ["在微信窗口完成登录", "登录后等待几秒或点击“重新检测”"],
-      "retryable": true
+      "solutions": [
+        "在微信窗口完成登录",
+        "登录后等待几秒或点击“重新检测”"
+      ],
+      "retryable": true,
+      "level": "info"
     },
     "11004": {
       "title": "微信运行异常",
       "message": "微信进程存在，但暂时无法建立稳定连接。",
-      "solutions": ["完全退出微信后重新打开", "确认微信没有卡在升级或登录页面", "再次启动机器人"],
+      "solutions": [
+        "完全退出微信后重新打开",
+        "确认微信没有卡在升级或登录页面",
+        "再次启动机器人"
+      ],
       "retryable": true
     },
     "12001": {
       "title": "微信连接启动失败",
       "message": "机器人未能启动微信连接服务。",
-      "solutions": ["确认微信路径和版本正确", "关闭残留的微信窗口后重试", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "确认微信路径和版本正确",
+        "关闭残留的微信窗口后重试",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "12002": {
       "title": "微信服务连接失败",
       "message": "机器人未能与微信建立完整通信。",
-      "solutions": ["确认微信已经登录", "完全退出微信后重新启动机器人", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "确认微信已经登录",
+        "完全退出微信后重新启动机器人",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "12003": {
       "title": "请先关闭微信",
       "message": "为避免消息或数据异常，需要先手动关闭微信客户端。",
-      "solutions": ["在微信中选择退出", "检测到微信关闭后，软件会自动继续停止"],
-      "retryable": true
+      "solutions": [
+        "在微信中选择退出",
+        "检测到微信关闭后，软件会自动继续停止"
+      ],
+      "retryable": true,
+      "level": "info"
     },
     "13001": {
       "title": "机器人服务启动失败",
       "message": "机器人核心服务未能正常启动。",
-      "solutions": ["点击“重新启动”", "确认安装目录文件完整", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "点击“重新启动”",
+        "确认安装目录文件完整",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "13002": {
       "title": "机器人通信失败",
       "message": "机器人内部服务没有建立完整通信。",
-      "solutions": ["等待片刻后重新检测", "重新启动机器人", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "等待片刻后重新检测",
+        "重新启动机器人",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "13003": {
       "title": "功能加载失败",
       "message": "一个或多个机器人功能未能正常加载。",
-      "solutions": ["重新启动机器人", "在功能中心检查最近修改的设置", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "重新启动机器人",
+        "在功能中心检查最近修改的设置",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "14001": {
       "title": "检查更新失败",
       "message": "暂时无法获取最新版本信息。",
-      "solutions": ["检查网络连接后重试", "稍后再次检查更新"],
+      "solutions": [
+        "检查网络连接后重试",
+        "稍后再次检查更新"
+      ],
       "retryable": true
     },
     "14002": {
       "title": "更新下载失败",
       "message": "新版本未能完整下载。",
-      "solutions": ["检查网络和磁盘空间后重试", "稍后再次下载"],
+      "solutions": [
+        "检查网络和磁盘空间后重试",
+        "稍后再次下载"
+      ],
       "retryable": true
     },
     "14003": {
       "title": "更新安装失败",
       "message": "新版本未能完成安装，当前版本仍可继续使用。",
-      "solutions": ["重新启动软件后再次更新", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "重新启动软件后再次更新",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
     },
     "14004": {
       "title": "请先停止机器人",
       "message": "机器人正在运行，请先在运行中心停止机器人，再进行更新。",
-      "solutions": ["打开运行中心并停止机器人", "确认状态变为“当前未运行”后再次更新"],
-      "retryable": true
+      "solutions": [
+        "打开运行中心并停止机器人",
+        "确认状态变为“当前未运行”后再次更新"
+      ],
+      "retryable": true,
+      "level": "info"
     },
     "15001": {
       "title": "配置保存失败",
       "message": "本次设置没有保存成功。",
-      "solutions": ["检查安装目录是否可写", "重新打开软件后再试"],
+      "solutions": [
+        "检查安装目录是否可写",
+        "重新打开软件后再试"
+      ],
       "retryable": true
     },
     "15002": {
       "title": "联系人功能范围保存失败",
       "message": "这位联系人的可用功能没有保存成功。",
-      "solutions": ["刷新联系人后重新选择", "检查安装目录是否可写后再试"],
+      "solutions": [
+        "刷新联系人后重新选择",
+        "检查安装目录是否可写后再试"
+      ],
       "retryable": true
     },
     "19000": {
       "title": "暂时无法完成操作",
       "message": "软件遇到了未识别的问题。",
-      "solutions": ["重新尝试刚才的操作", "仍失败时将错误码发给技术支持"],
+      "solutions": [
+        "重新尝试刚才的操作",
+        "仍失败时将错误码发给技术支持"
+      ],
       "retryable": true
+    },
+    "11005": {
+      "title": "微信登录状态丢失",
+      "message": "请重新登录微信后检查连接。",
+      "solutions": [
+        "请重新登录微信后检查连接。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "11006": {
+      "title": "微信账号已变化",
+      "message": "请刷新并确认当前操作所属的微信账号。",
+      "solutions": [
+        "请刷新并确认当前操作所属的微信账号。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "12004": {
+      "title": "微信连接中断",
+      "message": "已建立的微信连接意外断开，请检查连接状态。",
+      "solutions": [
+        "已建立的微信连接意外断开，请检查连接状态。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "12005": {
+      "title": "微信接口响应超时",
+      "message": "读取微信信息超过等待时间，请检查连接状态。",
+      "solutions": [
+        "读取微信信息超过等待时间，请检查连接状态。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "13004": {
+      "title": "机器人服务意外退出",
+      "message": "机器人服务意外结束，请复制问题信息联系技术支持。",
+      "solutions": [
+        "机器人服务意外结束，请复制问题信息联系技术支持。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "13005": {
+      "title": "功能执行失败",
+      "message": "功能处理请求时发生异常，请查看具体错误。",
+      "solutions": [
+        "功能处理请求时发生异常，请查看具体错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "13006": {
+      "title": "功能依赖未就绪",
+      "message": "所需模型、服务或功能尚未就绪，请完成配置后重试。",
+      "solutions": [
+        "所需模型、服务或功能尚未就绪，请完成配置后重试。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "13007": {
+      "title": "内部响应格式异常",
+      "message": "内部服务返回的数据无法识别，请复制问题信息联系技术支持。",
+      "solutions": [
+        "内部服务返回的数据无法识别，请复制问题信息联系技术支持。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "15003": {
+      "title": "配置读取失败",
+      "message": "无法读取配置，请查看具体错误。",
+      "solutions": [
+        "无法读取配置，请查看具体错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "15004": {
+      "title": "配置内容无效",
+      "message": "请检查提示的配置字段后重新提交。",
+      "solutions": [
+        "请检查提示的配置字段后重新提交。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "15005": {
+      "title": "配置已被其他操作修改",
+      "message": "请重新读取最新配置后修改。",
+      "solutions": [
+        "请重新读取最新配置后修改。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "15006": {
+      "title": "配置生效结果待确认",
+      "message": "设置已提交，请重新读取核对，不要连续重复提交。",
+      "solutions": [
+        "设置已提交，请重新读取核对，不要连续重复提交。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "15007": {
+      "title": "数据库操作失败",
+      "message": "数据库操作未完成，请查看具体错误。",
+      "solutions": [
+        "数据库操作未完成，请查看具体错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "15008": {
+      "title": "文件操作失败",
+      "message": "文件操作未完成，请检查具体原因及目录权限。",
+      "solutions": [
+        "文件操作未完成，请检查具体原因及目录权限。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "15009": {
+      "title": "备份失败",
+      "message": "备份未完成，请核对备份文件是否可用。",
+      "solutions": [
+        "备份未完成，请核对备份文件是否可用。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "15010": {
+      "title": "恢复失败",
+      "message": "恢复未完成，请核对数据及回滚状态后联系技术支持。",
+      "solutions": [
+        "恢复未完成，请核对数据及回滚状态后联系技术支持。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16001": {
+      "title": "模型未配置",
+      "message": "请为该功能选择已配置的模型服务。",
+      "solutions": [
+        "请为该功能选择已配置的模型服务。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "16002": {
+      "title": "模型身份验证失败",
+      "message": "请检查该模型服务的 API Key。",
+      "solutions": [
+        "请检查该模型服务的 API Key。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16003": {
+      "title": "模型访问被拒绝",
+      "message": "请检查模型账号权限和服务访问限制。",
+      "solutions": [
+        "请检查模型账号权限和服务访问限制。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16004": {
+      "title": "模型请求被限流",
+      "message": "模型请求过于频繁，请稍后重试。",
+      "solutions": [
+        "模型请求过于频繁，请稍后重试。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "16005": {
+      "title": "模型额度不足",
+      "message": "模型服务明确返回额度不足，请检查账号额度。",
+      "solutions": [
+        "模型服务明确返回额度不足，请检查账号额度。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16006": {
+      "title": "模型服务连接失败",
+      "message": "请检查模型接口地址、网络和代理设置。",
+      "solutions": [
+        "请检查模型接口地址、网络和代理设置。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16007": {
+      "title": "模型响应超时",
+      "message": "未在等待时间内收到完整响应，请稍后核对结果。",
+      "solutions": [
+        "未在等待时间内收到完整响应，请稍后核对结果。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "16008": {
+      "title": "模型服务端异常",
+      "message": "模型服务返回服务端错误，请稍后重试。",
+      "solutions": [
+        "模型服务返回服务端错误，请稍后重试。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16009": {
+      "title": "模型或接口不存在",
+      "message": "请核对模型名称和接口地址。",
+      "solutions": [
+        "请核对模型名称和接口地址。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16010": {
+      "title": "模型请求参数不被接受",
+      "message": "请根据服务返回内容检查参数和模型能力。",
+      "solutions": [
+        "请根据服务返回内容检查参数和模型能力。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16011": {
+      "title": "输入超出模型限制",
+      "message": "请减少输入内容或调整模型配置后重试。",
+      "solutions": [
+        "请减少输入内容或调整模型配置后重试。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16012": {
+      "title": "模型返回内容异常",
+      "message": "模型返回内容为空或格式无法识别。",
+      "solutions": [
+        "模型返回内容为空或格式无法识别。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "16013": {
+      "title": "模型安全策略拒绝",
+      "message": "本次请求被模型服务的安全策略拒绝处理。",
+      "solutions": [
+        "本次请求被模型服务的安全策略拒绝处理。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "16014": {
+      "title": "外部服务请求失败",
+      "message": "外部服务请求未完成，请查看实际错误。",
+      "solutions": [
+        "外部服务请求未完成，请查看实际错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "17001": {
+      "title": "消息发送失败",
+      "message": "微信接口明确返回发送失败，请查看实际返回信息。",
+      "solutions": [
+        "微信接口明确返回发送失败，请查看实际返回信息。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "17002": {
+      "title": "消息发送结果待确认",
+      "message": "请先检查聊天记录，避免重复发送。",
+      "solutions": [
+        "请先检查聊天记录，避免重复发送。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "17003": {
+      "title": "发送对象不可用",
+      "message": "请刷新并确认当前账号能够访问发送对象。",
+      "solutions": [
+        "请刷新并确认当前账号能够访问发送对象。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "17004": {
+      "title": "消息附件准备失败",
+      "message": "请检查附件的读取、下载或转换错误。",
+      "solutions": [
+        "请检查附件的读取、下载或转换错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "17005": {
+      "title": "消息类型或大小不支持",
+      "message": "请根据接口限制调整消息类型或附件大小。",
+      "solutions": [
+        "请根据接口限制调整消息类型或附件大小。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "17006": {
+      "title": "消息按规则未发送",
+      "message": "本次消息按聊天规则跳过，请查看命中的规则。",
+      "solutions": [
+        "本次消息按聊天规则跳过，请查看命中的规则。"
+      ],
+      "retryable": false,
+      "level": "info"
+    },
+    "18001": {
+      "title": "定时任务配置无效",
+      "message": "请检查任务时间、时区、目标和动作参数。",
+      "solutions": [
+        "请检查任务时间、时区、目标和动作参数。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "18002": {
+      "title": "定时任务保存失败",
+      "message": "任务未能保存，请查看实际错误。",
+      "solutions": [
+        "任务未能保存，请查看实际错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "18003": {
+      "title": "定时任务保存结果待确认",
+      "message": "任务已提交，请刷新核对，避免重复创建。",
+      "solutions": [
+        "任务已提交，请刷新核对，避免重复创建。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "18004": {
+      "title": "定时任务执行异常",
+      "message": "任务执行发生异常，请查看任务记录与具体原因。",
+      "solutions": [
+        "任务执行发生异常，请查看任务记录与具体原因。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "18005": {
+      "title": "定时任务已跳过",
+      "message": "任务因规则或依赖条件未满足而跳过。",
+      "solutions": [
+        "任务因规则或依赖条件未满足而跳过。"
+      ],
+      "retryable": false,
+      "level": "info"
+    },
+    "19001": {
+      "title": "页面运行异常",
+      "message": "页面操作未完成，请复制问题信息联系技术支持。",
+      "solutions": [
+        "页面操作未完成，请复制问题信息联系技术支持。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "19002": {
+      "title": "管理器接口调用失败",
+      "message": "页面无法调用管理器接口，请稍后重试。",
+      "solutions": [
+        "页面无法调用管理器接口，请稍后重试。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "19003": {
+      "title": "运行日志读取失败",
+      "message": "日志无法读取，请检查文件权限后刷新。",
+      "solutions": [
+        "日志无法读取，请检查文件权限后刷新。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "19004": {
+      "title": "诊断文件导出失败",
+      "message": "诊断收集或保存失败，请查看具体错误。",
+      "solutions": [
+        "诊断收集或保存失败，请查看具体错误。"
+      ],
+      "retryable": false,
+      "level": "error"
+    },
+    "19005": {
+      "title": "问题信息复制失败",
+      "message": "请展开问题报告，手动选择复制或导出文件。",
+      "solutions": [
+        "请展开问题报告，手动选择复制或导出文件。"
+      ],
+      "retryable": false,
+      "level": "warning"
+    },
+    "19006": {
+      "title": "管理器启动失败",
+      "message": "管理器未能正常打开，请查看启动错误记录。",
+      "solutions": [
+        "管理器未能正常打开，请查看启动错误记录。"
+      ],
+      "retryable": false,
+      "level": "error"
     }
   }
 }

@@ -75,10 +75,12 @@ class ScheduleApiMixin:
         try:
             return self._ok(operation(*args))
         except ValueError as exc:
-            return {"ok": False, "error": {"title": "任务尚未完成配置", "message": str(exc)}}
-        except (OSError, sqlite3.Error, PluginCenterError, GroupDirectoryError, PayloadError):
+            event_id, saved = self._record_error(exc, "18001", operation=getattr(operation, "__name__", "scheduled_task"))
+            return {"ok": False, "error": {"code": "18001", "title": "任务尚未完成配置", "message": str(exc), "event_id": event_id, "recorded": saved}}
+        except (OSError, sqlite3.Error, PluginCenterError, GroupDirectoryError, PayloadError) as exc:
+            event_id, saved = self._record_error(exc, "18004", operation=getattr(operation, "__name__", "scheduled_task"))
             # Transport exceptions may include upstream addresses or credentials.
-            return {"ok": False, "error": {"title": "定时任务操作未完成", "message": "连接或保存未完成，请检查机器人状态后刷新核对；你的编辑内容仍保留。"}}
+            return {"ok": False, "error": {"code": "18004", "title": "定时任务操作未完成", "message": "连接或保存未完成，请检查机器人状态后刷新核对；你的编辑内容仍保留。", "event_id": event_id, "recorded": saved}}
 
     def get_scheduled_task_context(self) -> dict[str, object]:
         return self._scheduled_call(self._scheduled_task_service().context)
@@ -96,7 +98,12 @@ class ScheduleApiMixin:
         return self._scheduled_call(self._scheduled_task_service().preview, payload)
 
     def test_scheduled_task(self, payload: dict[str, Any]) -> dict[str, object]:
-        return self._scheduled_call(self._scheduled_task_service().test, payload)
+        result = self._scheduled_call(self._scheduled_task_service().test, payload)
+        data = result.get("data") if result.get("ok") else None
+        if isinstance(data, dict) and data.get("status") in {"failed", "unknown", "skipped"}:
+            code = {"failed": "17001", "unknown": "17002", "skipped": "17006"}[data["status"]]
+            self._record_error(RuntimeError(str(data.get("message") or "发送未完成")), code, operation="test_scheduled_task")
+        return result
 
     def get_scheduled_task_runs(self, account_id: str, task_id: str) -> dict[str, object]:
         return self._scheduled_call(self._scheduled_task_service().runs, account_id, task_id)

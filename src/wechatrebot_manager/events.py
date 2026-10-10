@@ -6,9 +6,10 @@ import json
 from pathlib import Path
 import re
 import threading
+from uuid import uuid4
 from typing import Mapping
 
-from .customer_logs import sanitize_log_text
+from .customer_logs import sanitize_log_text, read_log_tail
 
 
 EVENT_TYPES = frozenset(
@@ -32,7 +33,7 @@ _SENSITIVE_KEY = re.compile(r"(?i)(api.?key|token|authorization|secret|password)
 
 def _safe_value(value: object) -> object:
     if isinstance(value, str):
-        return sanitize_log_text(value)[:500]
+        return sanitize_log_text(value)[:12000]
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     if isinstance(value, list):
@@ -53,17 +54,19 @@ class EventRecord:
     code: str = ""
     message: str = ""
     details: Mapping[str, object] | None = None
+    event_id: str = ""
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "time": self.time,
             "event": self.event,
             "status": self.status,
+            "event_id": self.event_id,
         }
         if self.code:
             payload["code"] = self.code
         if self.message:
-            payload["message"] = sanitize_log_text(self.message)[:500]
+            payload["message"] = sanitize_log_text(self.message)[:4000]
         if self.details:
             payload["details"] = _safe_value(self.details)
         return payload
@@ -93,10 +96,13 @@ class EventStore:
             code=str(code),
             message=message,
             details=details,
+            event_id=uuid4().hex,
         )
         line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.exists() and self.path.stat().st_size >= 2 * 1024 * 1024:
+                self.path.replace(self.path.with_suffix(".jsonl.1"))
             with self.path.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line + "\n")
         return record
@@ -105,7 +111,8 @@ class EventStore:
         if limit <= 0:
             return ()
         try:
-            lines = self.path.read_text(encoding="utf-8").splitlines()
+            text, _ = read_log_tail(self.path, max_bytes=2 * 1024 * 1024, max_lines=limit)
+            lines = text.splitlines()
         except (FileNotFoundError, OSError):
             return ()
         records: list[dict[str, object]] = []
