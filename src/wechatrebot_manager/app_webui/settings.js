@@ -13,6 +13,7 @@ window.createManagerSettings = function (helpers) {
     guardProviderDraft,
     loadFeatures,
     navigate,
+    openFeature,
     renderProviderServices,
     reportError,
     safeImageUrl,
@@ -87,7 +88,6 @@ window.createManagerSettings = function (helpers) {
     memoryForm.elements.casual_query_max_chars.value = memory.casual_query_max_chars || 24;
     memoryForm.elements.top_k.value = memory.top_k || 3;
     memoryForm.elements.summary_trigger_rounds.value = memory.summary_trigger_rounds || 10;
-    $("#memoryExplanation").textContent = state.experience.memory_explanation || "明确问起上次内容时优先回忆，普通寒暄不查询。";
     $("#memoryStatus").textContent = capabilities.memory
       ? (readiness.memory ? "主记忆 · 保存后热更新" : "主记忆 · 还需文本向量模型")
       : "需要完整更新";
@@ -133,12 +133,11 @@ window.createManagerSettings = function (helpers) {
     if (!form || !state.webSearch) return;
     const id = form.elements.provider.value;
     const item = state.webSearch.providers?.[id] || {};
-    $("#webSearchProviderHint").textContent = item.description || "选择后使用对应服务商的密钥。";
     $("#webSearchKeyHint").textContent = item.configured
       ? `当前服务商已保存 ${item.key_count || 1} 个密钥；输入新密钥会替换当前服务商密钥。`
       : "当前服务商尚未配置密钥；密钥仅保存在本机。";
     const website = safeImageUrl(item.website_url) || (String(item.website_url || "").startsWith("https://") ? item.website_url : "");
-    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${escapeHtml(item.description || "请先选择一个搜索服务商。")}${website ? ` <a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">注册 / 获取密钥</a>` : ""}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
+    $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${website ? ` <a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">注册 / 获取密钥</a>` : ""}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
   }
 
   async function loadWebSearchSettings() {
@@ -220,11 +219,13 @@ window.createManagerSettings = function (helpers) {
   }
 
   async function openMemoryManager() {
+    if (getCoreSettings().guard(openMemoryManager)) return;
     try {
       if (!state.featuresLoaded) await loadFeatures();
       const memory = state.features.find((item) => item.display_name === "长期记忆");
-      if (!memory) throw new Error("长期记忆管理页尚未安装，请先安装完整软件更新。 ");
-      await api("open_feature_center", memory.id);
+      if (!memory) throw new Error("未找到长期记忆插件。");
+      await navigate("features");
+      if (state.activePage === "features") await openFeature(memory.id);
     } catch (error) { reportError(error); }
   }
 
