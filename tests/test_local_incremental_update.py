@@ -233,6 +233,109 @@ def test_manager_only_plan_does_not_access_plugin_or_base_inputs(tmp_path, monke
     assert not install.exists()
 
 
+@pytest.fixture
+def office_staging(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("office-stage")
+    source, install = tmp_path / "source", tmp_path / "install"
+    plugin = f"{PLUGINS}/astrbot_plugin_office_assistant"
+    plugins = {"plugins": [{"name": "astrbot_plugin_office_assistant", "ownership": "owner"}]}
+    _files(source, {
+        "office/main.py": "# updated plugin\n",
+        "office/word_renderer_js/src/index.ts": "renderer source",
+        "manager/main.py": "manager source",
+        "core.patch": "runtime patch",
+        "release/source-manifest.json": json.dumps({"entries": [
+            {"origin": "commercial", "source": "office", "target": plugin},
+            {"origin": "commercial", "source": "manager", "target": "manager/src/wechatrebot_manager"},
+            {"origin": "commercial", "source": "core.patch", "target": "legal/corresponding-source/core.patch"},
+        ]}),
+        "release/plugin-manifest.json": json.dumps(plugins),
+    })
+    _baseline(install, {
+        f"{plugin}/main.py": "# old plugin\n",
+        f"{plugin}/word_renderer_js/src/index.ts": "renderer source",
+        f"{plugin}/word_renderer_js/dist/cli.js": "compiled renderer",
+        f"{plugin}/word_renderer_js/node_modules/docx/index.js": "production dependency",
+        "legal/plugin-manifest.json": json.dumps(plugins),
+        "legal/corresponding-source/core.patch": "runtime patch",
+        "manager/src/wechatrebot_manager/main.py": "manager source",
+    })
+    return source, install, plugin
+
+
+@pytest.mark.parametrize("compiled", ["compiled renderer", "updated compiled renderer"])
+def test_staged_office_delta_preserves_dependencies_and_updates_compiled_code(
+    office_staging, tmp_path, monkeypatch, compiled,
+):
+    local = _script("update_local_incremental")
+    builder = _script("build_incremental_update")
+    import build_office_renderer
+
+    source, install, plugin = office_staging
+    candidate = tmp_path / "candidate"
+
+    def compile_renderer(staged_plugin):
+        assert staged_plugin == candidate / plugin
+        assert (staged_plugin / "word_renderer_js/src/index.ts").read_text() == "renderer source"
+        _files(staged_plugin, {
+            "word_renderer_js/dist/cli.js": compiled,
+            "word_renderer_js/node_modules/docx/index.js": "production dependency",
+        })
+
+    monkeypatch.setattr(build_office_renderer, "build_office_renderer", compile_renderer)
+    scopes = local.stage_sources(source, source, install, candidate)
+    report = builder.build_incremental_update(
+        candidate, install, tmp_path / "incremental.zip", managed_roots=scopes, version="0.9.9",
+    )
+    assert report["removed_count"] == 0
+    assert report["added_count"] == 0
+    assert report["changed_count"] == (1 if compiled == "compiled renderer" else 2)
+    assert (install / plugin / "word_renderer_js/dist/cli.js").read_text() == "compiled renderer"
+
+
+def test_office_build_failure_aborts_local_update_before_packaging(office_staging, monkeypatch, capsys):
+    local = _script("update_local_incremental")
+    import build_office_renderer
+    import build_incremental_update
+
+    source, install, _plugin = office_staging
+    monkeypatch.setattr(local, "ROOT", source)
+    monkeypatch.setattr(local, "verify_source_inputs", lambda *_args: None)
+    monkeypatch.setattr(local, "require_master", lambda *_args: None)
+    monkeypatch.setattr(local, "verify_base_inputs", lambda *_args: None)
+    monkeypatch.setattr(local, "manager_changed", lambda *_args: False)
+
+    def failed_build(_plugin):
+        raise RuntimeError("renderer build failed")
+
+    def forbidden_write(*_args, **_kwargs):
+        pytest.fail("A failed renderer build must not package or apply an update")
+
+    monkeypatch.setattr(build_office_renderer, "build_office_renderer", failed_build)
+    monkeypatch.setattr(build_incremental_update, "build_incremental_update", forbidden_write)
+    monkeypatch.setattr(local, "apply_local", forbidden_write)
+    assert local.main(["--install-root", str(install)]) == 1
+    assert "renderer build failed" in capsys.readouterr().err
+    assert not (install / "updates").exists()
+
+
+def test_manager_only_staging_does_not_build_office_renderer(office_staging, tmp_path, monkeypatch):
+    local = _script("update_local_incremental")
+    import build_office_renderer
+
+    source, install, plugin = office_staging
+
+    def forbidden_build(_plugin):
+        pytest.fail("Manager-only updates must not build the Office renderer")
+
+    monkeypatch.setattr(build_office_renderer, "build_office_renderer", forbidden_build)
+    candidate = tmp_path / "candidate"
+    scopes = local.stage_sources(source, source, install, candidate, manager_only=True)
+    assert scopes == ["manager/src/wechatrebot_manager"]
+    assert not (candidate / plugin).exists()
+    assert (candidate / "manager/src/wechatrebot_manager/main.py").read_text() == "manager source"
+
+
 @pytest.mark.parametrize("enabled_at,problem", [
     ("source", None), ("source", "runtime_guard"),
     ("installed_manager", "runtime_guard"), ("installed_runtime", "runtime_guard"),

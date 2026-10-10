@@ -184,11 +184,16 @@ def stage_sources(root: Path, source: Path, install: Path, output: Path, *, mana
             raise RuntimeError(f"构建输入缺失：{entry['source']}")
         _copy_source_entry(path, output / entry["target"], entry)
     if not manager_only:
+        from build_office_renderer import build_office_renderer
+
         _remove_embedded_checkin_accounts(output)
         _sanitize_project_source_credentials(output)
         if (output / "app/bridge").is_dir():
             _apply_bridge_patch(root, output)
         _apply_plugin_patches(root, output)
+        office_plugin = output / "app/astrbot/data/plugins/astrbot_plugin_office_assistant"
+        if office_plugin.is_dir():
+            build_office_renderer(office_plugin)
         for scope in scopes:
             if scope.startswith("app/astrbot/data/plugins/") and not (output / scope).exists():
                 (output / scope).mkdir(parents=True)  # Explicit retired-plugin scope.
