@@ -29,12 +29,14 @@ class Engine:
         if method == "GET":
             return {"version": 1, "runtime_ready": True, "account_id": ACCOUNT,
                     "capabilities": [{"id": action, "ready": True} for action in
-                                     ("weather", "news", "oilprice", "kfc", "short_drama", "text")]}
+                                     ("weather", "news", "oilprice", "kfc", "short_drama", "group_analysis", "text")]}
         if path.endswith("save"):
             return {"item": self.service.store.save(payload), "message": "任务已保存并启用。"}
         if path.endswith("test"):
             return {"status": "submitted", "message": "测试消息已提交微信发送。",
                     "target": payload["test_target"]}
+        if path.endswith("preview"):
+            return {"kind": "text", "text": payload["preview_target"]["id"]}
         raise AssertionError((method, path))
 
 
@@ -44,7 +46,31 @@ def service(tmp_path: Path) -> ScheduledTaskService:
         account_hint=lambda: ACCOUNT,
     )
     value.engine = Engine(value)
+    value.report_engine = value.engine
     return value
+
+
+def test_group_analysis_drafts_and_preview_share_the_standard_service_contract(tmp_path):
+    value = service(tmp_path)
+    task = {**payload(draft=True), "action": "group_analysis", "arguments": {"days": 3},
+            "targets": [{"type": "group", "id": GROUP}]}
+    saved = value.save(task)["item"]
+    assert saved["action"] == "group_analysis"
+    assert value.context()["legacy_group_analysis"]["state"] == "none"
+    assert value.preview(task)["text"] == GROUP
+    result = value.test({**task, "test_target": {"type": "group", "id": GROUP}})
+    assert result["status"] == "submitted"
+    assert value.delete(ACCOUNT, saved["id"], saved["revision"])["deleted"]
+
+
+def test_group_analysis_service_never_routes_a_report_to_a_private_recipient(tmp_path):
+    value = service(tmp_path)
+    task = {**payload(draft=True), "action": "group_analysis", "arguments": {"days": 1},
+            "targets": [{"type": "private", "id": "wxid_friend"}]}
+    with pytest.raises(ValueError, match="被分析的群聊"):
+        value.preview(task)
+    with pytest.raises(ValueError, match="被分析的群聊"):
+        value.test({**task, "test_target": task["targets"][0]})
 
 
 def payload(*, draft=False):

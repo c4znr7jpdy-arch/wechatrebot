@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from ....group_analysis_schedule import legacy_analysis_retired
 from ...shared.constants import AnalysisStage
 from ...shared.trace_context import TraceContext
 from ...utils.logger import logger
@@ -79,6 +80,10 @@ class ReportDispatcher:
         platform_id: str | None = None,
     ) -> bool:
         """分发分析报告，并返回至少一种格式是否实际发送成功。"""
+        trace = TraceContext.current()
+        if trace and trace.trigger_type != "manual" and legacy_analysis_retired(__file__):
+            logger.info("旧自动报告发送已停止，由统一任务管理。")
+            return False
         trace_id = TraceContext.get()
         output_formats = self.config_manager.get_output_format()
         if isinstance(output_formats, str):

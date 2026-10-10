@@ -11,8 +11,13 @@ import re
 from urllib.parse import urlsplit
 
 from .task_store import ACTION_FEATURES, ACTION_NAMES
+from .group_feature_runtime import group_plugins
 
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+class ContentSkipped(ValueError):
+    """A valid request had no eligible content; do not retry or send a placeholder."""
 
 
 @dataclass(frozen=True)
@@ -27,7 +32,7 @@ class Content:
             raise ValueError("内容必须是一段文字、一张图片或一张链接卡片")
         if self.image and (self.mime not in {"image/png", "image/jpeg", "image/webp"}
                            or len(self.image) > MAX_IMAGE_BYTES):
-            raise ValueError("天气卡片格式或大小不支持")
+            raise ValueError("图片报告格式或大小不支持")
         if self.card is not None:
             if not isinstance(self.card, dict):
                 raise ValueError("影视推荐卡片格式不正确")
@@ -135,10 +140,17 @@ def _hosted_player_url(value, base_url) -> bool:
         return False
 
 
-def _image_content(path: str) -> Content:
+def _image_content(path: str | bytes) -> Content:
     # Only a trusted renderer returns this path; never accept a path from a task.
-    with Path(path).open("rb") as handle:
-        data = handle.read(MAX_IMAGE_BYTES + 1)
+    if isinstance(path, bytes):
+        data = path
+    elif path.startswith("base64://"):
+        if len(path) > MAX_IMAGE_BYTES * 4 // 3 + 32:
+            raise ValueError("图片报告超过大小限制")
+        data = base64.b64decode(path[9:], validate=True)
+    else:
+        with Path(path).open("rb") as handle:
+            data = handle.read(MAX_IMAGE_BYTES + 1)
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         mime = "image/png"
     elif data.startswith(b"\xff\xd8\xff"):
@@ -146,7 +158,7 @@ def _image_content(path: str) -> Content:
     elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         mime = "image/webp"
     else:
-        raise ValueError("天气服务未生成有效图片卡片")
+        raise ValueError("内容服务未生成有效图片报告")
     return Content(image=data, mime=mime)
 
 
@@ -196,12 +208,17 @@ class ContentService:
         try:
             config = json.loads((self.root / "app/astrbot/data/cmd_config.json").read_text("utf-8-sig"))
             enabled = config.get("plugin_set", ["*"])
-            label = "短剧" if feature == "jiang_short_drama" else "常用命令"
+            label = {"jiang_short_drama": "短剧", "astrbot_plugin_qq_group_daily_analysis": "群聊分析"}.get(feature, "常用命令")
             if not isinstance(enabled, list) or not ("*" in enabled or feature in enabled):
                 return {"ready": False, "message": f"请先在功能中心启用{label}"}
             plugin = self._active_plugin(feature)
             if plugin is None:
                 return {"ready": False, "message": f"{label}尚未加载，请先在功能中心启用"}
+            if action == "group_analysis":
+                if not callable(getattr(plugin, "build_unified_report", None)):
+                    return {"ready": False, "message": "群聊分析版本过旧，请更新后使用统一任务"}
+                ready = getattr(plugin, "unified_report_ready", None)
+                return ready() if callable(ready) else {"ready": False, "message": "群聊分析尚未就绪"}
             if action == "short_drama" and not callable(getattr(plugin, "build_unified_recommendation", None)):
                 return {"ready": False, "message": "短剧功能版本过旧，请更新后使用统一任务"}
             if action == "short_drama" and not _hosted_player_base(
@@ -228,6 +245,8 @@ class ContentService:
         args = task["arguments"]
         if action == "text":
             return Content(text=args["text"])
+        if action == "group_analysis":
+            return await self._group_report(task)
         if action != "short_drama":
             config = self._configuration()
             for key, env in (("content_api_id", "JIANG_CONTENT_API_ID"),
@@ -277,3 +296,30 @@ class ContentService:
                 "image_url": result.get("image_url"),
             })
         raise ValueError("该内容尚不支持定时发送")
+
+    def _group_report_plugin(self, account: str, group_id: str):
+        self.require_ready("group_analysis")
+        feature = ACTION_FEATURES["group_analysis"]
+        allowed = group_plugins(self.root / "data/manager/group-policies.json", account,
+                                group_id, None, self.context.get_all_stars())
+        if not allowed or feature not in allowed:
+            raise ValueError("所选群聊尚未允许群聊分析功能")
+        return self._active_plugin(feature)
+
+    async def _group_report(self, task: dict) -> Content:
+        targets = task.get("targets", [])
+        if len(targets) != 1 or targets[0].get("type") != "group":
+            raise ValueError("每份群聊分析报告必须绑定一个明确的群聊")
+        target, account = targets[0], task.get("account_id", "")
+        plugin = self._group_report_plugin(account, target["id"])
+        result = await plugin.build_unified_report(account, target["id"], task["arguments"]["days"])
+        self._group_report_plugin(account, target["id"])
+        if not isinstance(result, dict):
+            raise ValueError("群聊分析未返回有效报告")
+        if result.get("type") == "skipped":
+            raise ContentSkipped(str(result.get("message") or "本次没有可分析的群聊记录。"))
+        if result.get("type") == "text":
+            return Content(text=str(result.get("text") or ""))
+        if result.get("type") == "image":
+            return _image_content(result["image"])
+        raise ValueError("群聊分析返回了不支持的报告格式")

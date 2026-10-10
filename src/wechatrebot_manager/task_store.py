@@ -23,6 +23,7 @@ ACTION_NAMES = {
     "oilprice": "油价提醒",
     "kfc": "星期四文案",
     "short_drama": "影视推荐",
+    "group_analysis": "群聊分析",
     "text": "文字提醒",
 }
 ACTION_FEATURES = {
@@ -31,6 +32,7 @@ ACTION_FEATURES = {
     "oilprice": "jiang_commands",
     "kfc": "jiang_commands",
     "short_drama": "jiang_short_drama",
+    "group_analysis": "astrbot_plugin_qq_group_daily_analysis",
     "text": "",
 }
 
@@ -80,6 +82,14 @@ SCHEDULED_COMMANDS = (
         "parameters": ("推荐分类", "数量"), "dependencies": ("影视内容服务", "托管播放页"),
         "recipient_types": ("group", "private"), "external_write": False,
         "result": "影视链接卡片或安全文字", "failure_policy": "按发送对象分别记录失败",
+        "reason": "", "alternative": "",
+    },
+    {
+        "id": "group_analysis", "display_name": "群聊分析", "action": "group_analysis",
+        "status": "supported", "aliases": ("群分析", "群聊分析", "群日报", "group_analysis"),
+        "parameters": ("分析天数",), "dependencies": ("群聊分析功能", "文本模型", "群消息记录"),
+        "recipient_types": ("group",), "external_write": False,
+        "result": "各群独立的分析报告", "failure_policy": "按群分别生成并记录结果",
         "reason": "", "alternative": "",
     },
     {
@@ -283,6 +293,11 @@ def normalize_arguments(action: str, arguments: Any, *, draft: bool = False) -> 
         if type(limit) is not int or not 1 <= limit <= 20:
             raise ValueError("影视推荐数量应为 1 到 20。")
         return {"media_type": media_type, "limit": limit}
+    if action == "group_analysis":
+        days = arguments.get("days", 1)
+        if type(days) is not int or not 1 <= days <= 7:
+            raise ValueError("群聊分析天数应为 1 到 7。")
+        return {"days": days}
     if action == "text":
         text = arguments.get("text")
         text = "" if text is None and draft else text
@@ -325,6 +340,8 @@ def normalize_task(raw: Any, *, now: datetime | None = None, _allow_test: bool =
             raise ValueError("请从当前账号的群聊或联系人列表选择发送对象。")
         if (kind == "group") != identity.endswith("@chatroom"):
             raise ValueError("发送对象与聊天类型不一致。")
+        if action == "group_analysis" and kind != "group":
+            raise ValueError("群聊分析只能发送到被分析的群聊。")
         key = (kind, identity)
         if key not in seen:
             # Names are resolved from the current account's directory, not stored
@@ -358,9 +375,12 @@ def parse_command(command: str) -> dict[str, Any]:
         return {"action": "kfc", "arguments": {}}
     if text == "短剧推荐":
         return {"action": "short_drama", "arguments": {"media_type": "短剧", "limit": 12}}
+    for alias in _command_definition(action="group_analysis")["aliases"]:
+        if match := re.fullmatch(re.escape(alias) + r"(?:\s+(\d{1,2}))?", text):
+            return {"action": "group_analysis", "arguments": normalize_arguments("group_analysis", {"days": int(match[1] or 1)})}
     if match := re.fullmatch(r"(?:提醒|文字提醒)\s+(.+)", text, re.DOTALL):
         return {"action": "text", "arguments": normalize_arguments("text", {"text": match[1]})}
-    raise ValueError("当前支持天气、新闻、油价、星期四文案和短剧推荐命令；也可以直接选择内容。")
+    raise ValueError("当前支持天气、新闻、油价、星期四文案、短剧推荐和群聊分析命令；也可以直接选择内容。")
 
 
 def inspect_scheduled_command(command: str) -> dict[str, Any]:
@@ -455,6 +475,10 @@ class TaskStore:
                 target_id TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(run_id, target_type, target_id)
             );
+            CREATE TABLE IF NOT EXISTS scheduled_task_owners (
+                action TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                phase TEXT NOT NULL, plan TEXT NOT NULL
+            );
         """)
         try:
             with connection:
@@ -497,34 +521,131 @@ class TaskStore:
     def save(self, payload: dict[str, Any], *, now: datetime | None = None, _allow_test: bool = False) -> dict[str, Any]:
         current = _aware(now)
         task = normalize_task(payload, now=current, _allow_test=_allow_test)
-        serialized = _json(task)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            previous = connection.execute("SELECT * FROM scheduled_tasks WHERE id=?", (task["id"],)).fetchone()
-            expected = payload.get("revision", 0)
-            if type(expected) is not int or expected < 0:
-                raise ValueError("任务版本无效，请刷新后重试。")
-            if previous:
-                if previous["account_id"] != task["account_id"] or previous["deleted"]:
-                    raise ValueError("任务已删除或不属于当前机器人账号。")
-                if expected == 0 and previous["payload"] == serialized:
-                    return self._public(previous)  # repeated create acknowledgement
-                if expected != previous["revision"]:
-                    raise ValueError("任务已在其他窗口修改，请重新读取后保存。")
-                if previous["payload"] == serialized:
-                    return self._public(previous)
-            elif expected:
-                raise ValueError("任务已不存在，请重新读取列表。")
-            revision = previous["revision"] + 1 if previous else 1
-            future = next_occurrences(task["schedule"], current, 1) if task["enabled"] else []
-            next_due = datetime.fromisoformat(future[0]).astimezone(timezone.utc).isoformat() if future else None
-            status = "draft" if task["draft"] else "enabled" if task["enabled"] else "paused"
-            connection.execute("""INSERT INTO scheduled_tasks(id,account_id,revision,payload,enabled,next_due,status,updated_at)
-                VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,
-                payload=excluded.payload,enabled=excluded.enabled,next_due=excluded.next_due,status=excluded.status,updated_at=excluded.updated_at""",
-                (task["id"], task["account_id"], revision, serialized, int(task["enabled"]), next_due, status, current.isoformat()))
-            self._cancel_pending(connection, task["id"], "任务配置已改变，本次尚未发送的对象已取消。")
+            for owner in connection.execute("SELECT plan FROM scheduled_task_owners WHERE phase='prepared'"):
+                if any(item.get("id") == task["id"] for item in json.loads(owner["plan"]).get("items", [])):
+                    raise ValueError("该任务标识正在迁移，请等待迁移完成后再编辑。")
+            self._save_task(connection, task, payload.get("revision", 0), current)
         return self.get(task["account_id"], task["id"])
+
+    def _save_task(self, connection: sqlite3.Connection, task: dict, expected: int, current: datetime) -> None:
+        """Save one normalized task inside the caller's transaction."""
+        serialized = _json(task)
+        previous = connection.execute("SELECT * FROM scheduled_tasks WHERE id=?", (task["id"],)).fetchone()
+        if type(expected) is not int or expected < 0:
+            raise ValueError("任务版本无效，请刷新后重试。")
+        if previous:
+            if previous["account_id"] != task["account_id"] or previous["deleted"]:
+                raise ValueError("任务已删除或不属于当前机器人账号。")
+            if expected == 0 and previous["payload"] == serialized:
+                return  # repeated create acknowledgement
+            if expected != previous["revision"]:
+                raise ValueError("任务已在其他窗口修改，请重新读取后保存。")
+            if previous["payload"] == serialized:
+                return
+        elif expected:
+            raise ValueError("任务已不存在，请重新读取列表。")
+        revision = previous["revision"] + 1 if previous else 1
+        future = next_occurrences(task["schedule"], current, 1) if task["enabled"] else []
+        next_due = datetime.fromisoformat(future[0]).astimezone(timezone.utc).isoformat() if future else None
+        status = "draft" if task["draft"] else "enabled" if task["enabled"] else "paused"
+        connection.execute("""INSERT INTO scheduled_tasks(id,account_id,revision,payload,enabled,next_due,status,updated_at)
+            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,
+            payload=excluded.payload,enabled=excluded.enabled,next_due=excluded.next_due,status=excluded.status,updated_at=excluded.updated_at""",
+            (task["id"], task["account_id"], revision, serialized, int(task["enabled"]), next_due, status, current.isoformat()))
+        self._cancel_pending(connection, task["id"], "任务配置已改变，本次尚未发送的对象已取消。")
+
+    def action_owner(self, action: str) -> dict[str, Any] | None:
+        """Read permanent scheduler ownership without creating or upgrading a store."""
+        if not self.path.is_file():
+            return None
+        connection = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_task_owners'").fetchone():
+                return None
+            row = connection.execute("SELECT account_id,phase,plan FROM scheduled_task_owners WHERE action=?", (action,)).fetchone()
+            if row is None:
+                return None
+            plan = json.loads(row[2])
+            if row[1] not in {"confirmed", "prepared", "complete"} or not isinstance(plan, dict):
+                raise ValueError("任务迁移记录不完整，请保留数据并检查后重试。")
+            return {"account_id": row[0], "phase": row[1], "plan": plan}
+        finally:
+            connection.close()
+
+    def claim_action(self, action: str, account_id: str, plan: dict, *, phase: str = "complete",
+                     expected_plan: dict | None = None) -> dict:
+        """Retire a legacy producer independently of later edits or deleted tasks."""
+        validate_account(account_id)
+        if action not in ACTION_NAMES or not isinstance(plan, dict) or phase not in {"confirmed", "prepared", "complete"}:
+            raise ValueError("任务迁移内容无效。")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if phase == "prepared":
+                for item in plan.get("items", []):
+                    if connection.execute("SELECT 1 FROM scheduled_tasks WHERE id=?", (item["id"],)).fetchone():
+                        raise ValueError("迁移目标任务标识已被使用；旧配置尚未修改，请重新预览迁移。")
+            previous = connection.execute("SELECT * FROM scheduled_task_owners WHERE action=?", (action,)).fetchone()
+            if previous:
+                replacing = (previous["phase"] == phase == "confirmed" and previous["account_id"] == account_id
+                             and expected_plan is not None and previous["plan"] == _json(expected_plan))
+                if replacing:
+                    connection.execute("UPDATE scheduled_task_owners SET plan=? WHERE action=?", (_json(plan), action))
+                elif (previous["phase"] != "complete" or phase != "complete") and (
+                        previous["account_id"] != account_id or previous["plan"] != _json(plan)):
+                    raise ValueError("已有另一项任务迁移待处理，请刷新后继续。")
+                elif previous["phase"] == "confirmed" and phase == "prepared":
+                    connection.execute("UPDATE scheduled_task_owners SET phase='prepared' WHERE action=?", (action,))
+                elif previous["phase"] != "complete" and phase == "complete":
+                    raise ValueError("请先完成已经确认的旧任务迁移。")
+            else:
+                connection.execute("INSERT INTO scheduled_task_owners VALUES (?,?,?,?)",
+                                   (action, account_id, phase, _json(plan)))
+        return self.action_owner(action)
+
+    def migration_conflicts(self, plan: dict) -> bool:
+        if not self.path.is_file():
+            return False
+        connection = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_tasks'").fetchone():
+                return False
+            return any(connection.execute("SELECT 1 FROM scheduled_tasks WHERE id=?", (item["id"],)).fetchone()
+                       for item in plan.get("items", []))
+        finally:
+            connection.close()
+
+    def cancel_action_migration(self, action: str, account_id: str, plan: dict) -> None:
+        validate_account(account_id)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = connection.execute(
+                "DELETE FROM scheduled_task_owners WHERE action=? AND account_id=? AND phase='confirmed' AND plan=?",
+                (action, account_id, _json(plan)),
+            ).rowcount
+            if changed != 1:
+                raise ValueError("迁移已经开始写入或状态已变化，不能撤销，请继续迁移。")
+
+    def complete_action_migration(self, action: str, account_id: str, plan: dict) -> None:
+        """Commit all paused drafts and retirement together; a retry never recreates a deleted task."""
+        current = _now()
+        tasks = [normalize_task(item, now=current) for item in plan.get("items", [])]
+        if not tasks or any(item["action"] != action or item["account_id"] != account_id
+                            or not item["draft"] or item["enabled"] for item in tasks):
+            raise ValueError("旧任务只能迁入所属账号的暂停草稿。")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            owner = connection.execute("SELECT * FROM scheduled_task_owners WHERE action=?", (action,)).fetchone()
+            if not owner or owner["account_id"] != account_id or owner["plan"] != _json(plan):
+                raise ValueError("迁移记录已变化，请重新读取。")
+            if owner["phase"] == "complete":
+                return
+            if owner["phase"] != "prepared":
+                raise ValueError("迁移记录状态不正确。")
+            for task in tasks:
+                self._save_task(connection, task, 0, current)
+            connection.execute("UPDATE scheduled_task_owners SET phase='complete' WHERE action=?", (action,))
 
     @staticmethod
     def _cancel_pending(connection: sqlite3.Connection, task_id: str, message: str) -> None:

@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 import importlib
 import ipaddress
+import json
 from pathlib import Path
 import re
 import shutil
@@ -11,6 +12,8 @@ import sys
 import textwrap
 from types import SimpleNamespace
 from urllib.parse import urlsplit
+
+import pytest
 
 
 ROOT = Path(__file__).parents[1]
@@ -23,7 +26,8 @@ def _copy_runtime_package(tmp_path: Path):
     (package / "__init__.py").write_text("", encoding="utf-8")
     for name in ("content.py", "unified_runtime.py"):
         shutil.copy2(ROOT / "runtime/jiang_schedule" / name, package / name)
-    shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py", package / "task_store.py")
+    for name in ("task_store.py", "group_analysis_schedule.py", "group_feature_runtime.py"):
+        shutil.copy2(ROOT / "src/wechatrebot_manager" / name, package / name)
     sys.path.insert(0, str(tmp_path))
     try:
         return importlib.import_module("jiang_schedule_runtime.unified_runtime")
@@ -70,6 +74,166 @@ def _task():
         "schedule": {"kind": "daily", "time": "08:30", "timezone": "Asia/Shanghai"},
         "enabled": True, "draft": False,
     }
+
+
+def _analysis_runtime(tmp_path: Path):
+    module = _copy_runtime_package(tmp_path)
+    client = FakeClient()
+    account = {"id": "wxid_robot"}
+    calls, sent = [], []
+
+    class Analysis:
+        def unified_report_ready(self):
+            return {"ready": True, "message": ""}
+
+        async def build_unified_report(self, account_id, group_id, days):
+            calls.append((account_id, group_id, days))
+            return {"type": "text", "text": "仅属于 " + group_id}
+
+    plugin = Analysis()
+    star = SimpleNamespace(root_dir_name="astrbot_plugin_qq_group_daily_analysis", name="analysis",
+                           activated=True, star_cls=plugin)
+    context = SimpleNamespace(get_all_stars=lambda: [star])
+    configuration = tmp_path / "app/astrbot/data/cmd_config.json"
+    configuration.parent.mkdir(parents=True)
+    configuration.write_text('{"plugin_set":["*"]}', encoding="utf-8")
+
+    async def connection():
+        return account["id"], client
+
+    async def sender(_client, run, target, content):
+        sent.append((target["id"], content.segments()))
+        return {"message_id": target["id"]}
+
+    now = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)
+    runtime = module.UnifiedRuntime(context, install_root=tmp_path, connection=connection,
+                                    sender=sender, clock=lambda: now)
+    runtime._active = True
+    task = {**_task(), "action": "group_analysis", "arguments": {"days": 2}, "targets": [
+        {"type": "group", "id": "123456@chatroom"}, {"type": "group", "id": "987654@chatroom"},
+    ]}
+    return runtime, task, plugin, calls, sent, account, client
+
+
+def _run_analysis_due(runtime, task):
+    saved = asyncio.run(runtime.save(task))
+    runtime.clock = lambda: datetime.fromisoformat(saved["next_run_time"])
+    asyncio.run(runtime.run_once())
+    return runtime.store.runs(task["account_id"], task["id"])[0]
+
+
+def test_group_reports_are_generated_independently_for_each_recipient(tmp_path):
+    runtime, task, _plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+
+    run = _run_analysis_due(runtime, task)
+
+    assert calls == [("wxid_robot", "123456@chatroom", 2), ("wxid_robot", "987654@chatroom", 2)]
+    assert sent == [(group, [{"type": "text", "data": {"text": "仅属于 " + group}}])
+                    for group in ("123456@chatroom", "987654@chatroom")]
+    assert run["status"] == "submitted"
+    assert runtime.store.action_owner("group_analysis")["phase"] == "complete"
+
+
+def test_a_failed_group_does_not_send_its_content_to_another_group(tmp_path):
+    runtime, task, plugin, _calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    original = plugin.build_unified_report
+
+    async def generate(account, group, days):
+        if group == "123456@chatroom":
+            raise ValueError("sensitive upstream details")
+        return await original(account, group, days)
+
+    plugin.build_unified_report = generate
+    run = _run_analysis_due(runtime, task)
+    assert [target["status"] for target in run["deliveries"]] == ["failed", "submitted"]
+    assert "sensitive" not in run["deliveries"][0]["message"]
+    assert [target for target, _content in sent] == ["987654@chatroom"]
+
+
+@pytest.mark.parametrize("change", ["pause", "delete", "account", "recipient"])
+def test_analysis_rechecks_mutable_authorization_after_generation(tmp_path, change):
+    runtime, task, plugin, _calls, sent, account, client = _analysis_runtime(tmp_path)
+    original = plugin.build_unified_report
+
+    async def generate(*args):
+        result = await original(*args)
+        current = runtime.store.get(task["account_id"], task["id"])
+        if change == "pause":
+            runtime.store.set_enabled(task["account_id"], task["id"], False, current["revision"])
+        elif change == "delete":
+            runtime.store.delete(task["account_id"], task["id"], current["revision"])
+        elif change == "account":
+            account["id"] = "wxid_other"
+        else:
+            client.group_exists = False
+        return result
+
+    plugin.build_unified_report = generate
+    saved = asyncio.run(runtime.save(task))
+    runtime.clock = lambda: datetime.fromisoformat(saved["next_run_time"])
+    asyncio.run(runtime.run_once())
+    assert sent == []
+    assert runtime.store.action_owner("group_analysis")["phase"] == "complete"
+
+
+def test_group_preview_requires_one_group_and_never_sends_or_claims_a_schedule(tmp_path):
+    runtime, task, _plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    with pytest.raises(ValueError, match="请选择一个"):
+        asyncio.run(runtime.preview(task))
+    result = asyncio.run(runtime.preview({**task, "preview_target": task["targets"][1]}))
+    assert result["kind"] == "text"
+    assert result["text"] == "仅属于 987654@chatroom"
+    assert calls == [("wxid_robot", "987654@chatroom", 2)]
+    assert sent == []
+    assert runtime.store.list("wxid_robot") == []
+    assert runtime.store.action_owner("group_analysis") is None
+
+
+def test_group_analysis_respects_group_feature_permission_before_generating(tmp_path):
+    runtime, task, _plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    path = tmp_path / "data/manager/group-policies.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"schema_version": 1, "accounts": {"wxid_robot": {"groups": {
+        "123456@chatroom": {"allowed_features": []},
+    }}}}))
+
+    with pytest.raises(ValueError, match="尚未允许"):
+        asyncio.run(runtime.preview({**task, "preview_target": task["targets"][0]}))
+    assert calls == sent == []
+
+
+def test_group_analysis_without_messages_is_recorded_as_skipped(tmp_path):
+    runtime, task, plugin, _calls, sent, _account, _client = _analysis_runtime(tmp_path)
+
+    async def no_messages(*_args):
+        return {"type": "skipped", "message": "没有符合条件的消息"}
+
+    plugin.build_unified_report = no_messages
+    run = _run_analysis_due(runtime, task)
+    assert [item["status"] for item in run["deliveries"]] == ["skipped", "skipped"]
+    assert sent == []
+
+
+def test_group_analysis_test_send_uses_only_the_explicit_group(tmp_path):
+    runtime, task, _plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    result = asyncio.run(runtime.test({**task, "test_target": task["targets"][1]}))
+    assert result["status"] == "submitted"
+    assert [group for group, _ in sent] == ["987654@chatroom"]
+    assert calls == [("wxid_robot", "987654@chatroom", 2)]
+    assert runtime.store.list("wxid_robot") == []
+
+
+def test_legacy_analysis_schedule_must_be_migrated_before_a_new_task_is_enabled(tmp_path):
+    runtime, task, _plugin, _calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    config = tmp_path / "app/astrbot/data/config/astrbot_plugin_qq_group_daily_analysis_config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"auto_analysis": {"scheduled_group_list": ["123456@chatroom"]}}))
+
+    with pytest.raises(ValueError, match="先预览并确认迁移"):
+        asyncio.run(runtime.save(task))
+    assert runtime.store.list("wxid_robot") == []
+    assert runtime.store.action_owner("group_analysis") is None
+    assert sent == []
 
 
 def test_runtime_health_exposes_command_scheduling_contract(tmp_path: Path) -> None:
