@@ -278,11 +278,11 @@
     },
     {
       "path": "ai_plugin/ai_plugin/weather.py",
-      "sha256": "692d96759644e9e556f759b1dbb5221b4ac96763fe88b08959e16f3856834547"
+      "sha256": "291f884329503a20f8cafdef3a16204d7f6a6d13a568ca342e332db014fe804f"
     },
     {
       "path": "ai_plugin/ai_plugin/weather_card.html",
-      "sha256": "f18a7a6b9a83249271468e84d1ce63bfa9f8a6dcdb9ce7df6f216a95f7a87fef"
+      "sha256": "5c7b8b9142e621cc46723164a144657236f25c8658ed2d29457f90c6a5b75655"
     },
     {
       "path": "ai_plugin/ai_plugin/weather_icons.py",
@@ -290,7 +290,7 @@
     },
     {
       "path": "ai_plugin/ai_plugin/weather_image.py",
-      "sha256": "31929ddb57f146c92b6ab94767ff23791fb08c2995877dadb3062a0dcc34ac59"
+      "sha256": "2ddafc6d0b10b5e12e2157ec28fb95dd4b759093a6a19b533bb81012e67355ed"
     },
     {
       "path": "ai_plugin/ai_plugin/weather_svg.py",

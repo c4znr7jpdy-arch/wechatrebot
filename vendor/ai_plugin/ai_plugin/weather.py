@@ -8,6 +8,7 @@ import os
 import random
 import re
 import time
+from bisect import bisect_right
 from datetime import datetime, timedelta
 from math import acos, asin, atan, cos, degrees, radians, sin, tan
 
@@ -421,7 +422,7 @@ def _wmo_condition(code: object) -> tuple[str, str]:
     try:
         value = int(code)
     except (TypeError, ValueError):
-        return "多云", "duoyun"
+        return "", ""
     if value == 0:
         return "晴", "qing"
     if value == 1:
@@ -442,7 +443,7 @@ def _wmo_condition(code: object) -> tuple[str, str]:
         return "阵雨", "zhenyu"
     if value in (95, 96, 99):
         return "雷阵雨", "lei"
-    return "多云", "duoyun"
+    return "", ""
 
 
 def _wind_direction_label(value: object) -> str:
@@ -622,6 +623,42 @@ async def fetch_weather_target_date(
         return None
 
 
+def _supplement_failure_reason(exc: Exception) -> str:
+    # HTTP exception strings include request URLs, which may contain API tokens.
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return type(exc).__name__
+
+
+def _open_meteo_hours(current: dict, hourly: dict) -> list[dict]:
+    current_time = str(current.get("time") or "")
+    if not current_time:
+        raise ValueError("Open-Meteo 未返回实况时间")
+    times = hourly.get("time") or []
+    temperatures = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    weather_text, weather_code = _wmo_condition(current.get("weather_code"))
+    items = [{
+        "time": current_time,
+        "temp": current.get("temperature_2m"),
+        "wea": weather_text,
+        "wea_code": weather_code,
+        "code_system": "normalized",
+    }]
+    # The first card is the observation, followed by four real future hours.
+    # At 09:30 this keeps 10:00, instead of relabeling 10:00 as "now".
+    start = bisect_right(times, current_time)
+    for index in range(start, min(start + 8, len(times), len(temperatures)), 2):
+        if temperatures[index] is None:
+            continue
+        text, code = _wmo_condition(codes[index] if index < len(codes) else None)
+        items.append({
+            "time": times[index], "temp": temperatures[index],
+            "wea": text, "wea_code": code, "code_system": "normalized",
+        })
+    return items
+
+
 async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
     """按气象局经纬度获取当前天气与逐小时预报。"""
     try:
@@ -635,7 +672,6 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
     if cached and time.monotonic() - cached[0] < _WEATHER_CACHE_TTL:
         return cached[1]
 
-    client = await _get_cma_client()
     params = {
         "latitude": latitude,
         "longitude": longitude,
@@ -652,6 +688,7 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
         "daily": "temperature_2m_max,temperature_2m_min",
     }
     try:
+        client = await _get_cma_client()
         response = await client.get(_OPEN_METEO_URL, params=params)
         response.raise_for_status()
         payload = response.json()
@@ -660,38 +697,9 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
         weather_text, weather_code = _wmo_condition(current.get("weather_code"))
         times = hourly.get("time") or []
         temperatures = hourly.get("temperature_2m") or []
-        weather_codes = hourly.get("weather_code") or []
         visibility_values = hourly.get("visibility") or []
         current_time = str(current.get("time") or "")
-        try:
-            current_index = times.index(current_time)
-        except ValueError:
-            current_index = next(
-                (index for index, value in enumerate(times) if str(value) >= current_time),
-                0,
-            )
-        hour_items = []
-        for index in (
-            current_index,
-            current_index + 2,
-            current_index + 4,
-            current_index + 6,
-            current_index + 8,
-        ):
-            if index >= len(times) or index >= len(temperatures):
-                continue
-            hour_text, hour_code = _wmo_condition(
-                weather_codes[index] if index < len(weather_codes) else None
-            )
-            hour_items.append(
-                {
-                    "time": times[index],
-                    "temp": temperatures[index],
-                    "wea": hour_text,
-                    "wea_code": hour_code,
-                    "code_system": "normalized",
-                }
-            )
+        hour_items = _open_meteo_hours(current, hourly)
 
         daily = payload.get("daily") or {}
         daily_times = daily.get("time") or []
@@ -715,8 +723,9 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
             )
 
         visibility = current.get("visibility")
-        if visibility in (None, "") and visibility_values:
-            visibility = visibility_values[0]
+        current_index = max(0, bisect_right(times, current_time) - 1)
+        if visibility in (None, "") and current_index < len(visibility_values):
+            visibility = visibility_values[current_index]
         try:
             # Open-Meteo 能见度单位固定为米；提前转成带单位的 km 文本，
             # 避免渲染层把低于 100 米的浓雾误判成几十公里。
@@ -740,7 +749,7 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
         _open_meteo_cache[cache_key] = (time.monotonic(), result)
         return result
     except Exception as exc:
-        logger.warning("Open-Meteo 实况/小时天气获取失败: %s", exc)
+        logger.warning("Open-Meteo 实况/小时天气获取失败: %s", _supplement_failure_reason(exc))
         return None
 
 
@@ -755,18 +764,18 @@ async def fetch_weather_alapi(city: str) -> dict | None:
         return cached[1]
     try:
         url = "https://v3.alapi.cn/api/tianqi"
-        params = {"token": token, "city": city, "hour": "1"}
         client = await _get_cma_client()
-        resp = await client.get(url, params=params)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
+        response = await client.post(
+            url, json={"token": token, "city": city, "hour": True},
+        )
+        response.raise_for_status()
+        data = response.json()
         if data.get("success") and isinstance(data.get("data"), dict):
             result = data["data"]
             _alapi_cache[cache_key] = (time.monotonic(), result)
             return result
     except Exception as exc:
-        logger.warning("ALAPI 实况补充数据获取失败: %s", exc)
+        logger.warning("ALAPI 实况补充数据获取失败: %s", _supplement_failure_reason(exc))
     return None
 
 
