@@ -440,18 +440,20 @@ class LifecycleController:
                 self.state = LifecycleState.LICENSE_PAUSED
                 self._running_events_emitted = False
                 return self.view()
-            if self._supervisor is None or not self._supervisor.running:
-                self.state = LifecycleState.STOPPED
-                self._error = None
-                return self.view()
-            self._runtime = self._snapshotter()
-            wechat_active = self._bot_wechat_active()
-            if wechat_active:
-                self.state = LifecycleState.STOP_WAIT_WECHAT
-                self._error = self.catalog.get("12003")
-                self._wechat_closed_confirmations = 0
-                return self.view()
-            return self._finish_stop()
+            return self._request_full_stop()
+
+    def _request_full_stop(self) -> LifecycleView:
+        if self._supervisor is None or not self._supervisor.running:
+            self.state = LifecycleState.STOPPED
+            self._error = None
+            return self.view()
+        self._runtime = self._snapshotter()
+        if self._bot_wechat_active():
+            self.state = LifecycleState.STOP_WAIT_WECHAT
+            self._error = self.catalog.get("12003")
+            self._wechat_closed_confirmations = 0
+            return self.view()
+        return self._finish_stop()
 
     def stop_for_maintenance(self) -> bool:
         """Request normal shutdown and only confirm a provably stopped runtime."""
@@ -465,6 +467,10 @@ class LifecycleController:
                         if not any(process is known for known in self._maintenance_processes):
                             self._maintenance_processes.append(process)
                 self.request_stop()
+                if self.state == LifecycleState.LICENSE_PAUSED:
+                    # A licensed user stop preserves the bridge. Maintenance
+                    # must also stop it, using the normal WeChat-close boundary.
+                    self._request_full_stop()
                 return self.maintenance_stopped()
             except Exception:
                 # Failure leaves the caller's maintenance transaction pending.
@@ -474,7 +480,11 @@ class LifecycleController:
     def maintenance_stopped(self) -> bool:
         """Read-only maintenance gate; False includes unavailable probe results."""
         with self._lock:
-            if self._start_in_progress or self.state != LifecycleState.STOPPED:
+            # License polling also labels an entirely stopped installation as
+            # paused. Neither UI state is proof: all probes below must pass.
+            if self._start_in_progress or self.state not in {
+                LifecycleState.STOPPED, LifecycleState.LICENSE_PAUSED,
+            }:
                 return False
             try:
                 if self._supervisor is not None and self._supervisor.running:
