@@ -21,7 +21,8 @@ The approved images contain a concept-title strip and a simplified application s
 1. Initial rendered inspection found a startup error in the newly extracted profile controller and missing registration of its delivered asset routes. Fixed the function signature and registered both new assets. Startup and asset-route regressions pass.
 2. Initial desktop comparison found inherited horizontal-tab underline styling and excess space around the chat header. Removed that underline for the vertical settings navigation, aligned the header actions, and normalized row spacing. Re-captured desktop implementation and compared both full views and the right-panel crop.
 3. Narrow dark inspection (`chat-small-dark.png`) found low-contrast chat identifiers. Private-chat inspection also exposed an unstyled native profile selector. Applied existing semantic foreground/surface tokens and shared select dimensions; rechecked in `private-small-dark.png`. Low-frequency private rules and feature lists now collapse consistently with group rules.
-4. Post-fix comparison found no remaining actionable P0/P1/P2 layout differences within the approved scope. Existing admin identity, schema-backed fields, revision protection and template override controls remain available. The mock's abbreviated, non-schema fields were not invented as new backend settings. These intentional content differences make the real settings page longer than the concept.
+4. Follow-up review found the new column rule bypassed saved panel widths. Restored the existing resize CSS variable, updated group/private column minimums for the narrower list, and retained internal detail scrolling. Added keyboard resize/reset assertions; the 12 settings/profile regressions passed again.
+5. Post-fix comparison found no remaining actionable P0/P1/P2 layout differences within the approved scope. Existing admin identity, schema-backed fields, revision protection and template override controls remain available. The mock's abbreviated, non-schema fields were not invented as new backend settings. These intentional content differences make the real settings page longer than the concept.
 
 ## Fidelity surfaces
 
@@ -38,6 +39,8 @@ Ran:
 ```text
 PYTHONPATH=src python -m pytest tests/test_settings_webui.py tests/test_manager_startup.py tests/test_core_settings.py tests/test_app_shell.py tests/test_feature_scope_ui.py tests/test_plugin_center.py -q
 200 passed
+PYTHONPATH=src python -m pytest tests/test_settings_webui.py -q
+12 passed after resize compatibility fix
 git diff --check
 ```
 

@@ -3,8 +3,8 @@
   const STORAGE_KEY = "wechatrebot-panel-layout";
   const SPLITS = [
     {selector: ".feature-layout", flexible: 1, minimums: [220, 360]},
-    {selector: ".group-layout", flexible: 0, minimums: [420, 300]},
-    {selector: ".contact-layout", flexible: 0, minimums: [420, 300]},
+    {selector: ".group-layout", flexible: 0, minimums: [250, 400]},
+    {selector: ".contact-layout", flexible: 0, minimums: [250, 400]},
     {selector: ".history-layout", flexible: 1, minimums: [220, 360, 200]},
     {selector: ".core-layout", flexible: 1, minimums: [190, 360]},
   ];

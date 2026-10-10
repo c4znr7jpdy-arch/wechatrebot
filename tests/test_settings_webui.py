@@ -1,5 +1,6 @@
 """Focused settings/chat UI regressions; preview data only, no robot."""
 from pathlib import Path
+import re
 
 import pytest
 from playwright.sync_api import expect
@@ -45,6 +46,16 @@ def test_flat_settings_and_aligned_chat_details(browser, manager_url, width, hei
             "els => els.map(e => ({x:e.getBoundingClientRect().x, right:e.getBoundingClientRect().right}))")
         assert abs(controls[0]["x"] - controls[1]["x"]) <= 1
         assert abs(controls[0]["right"] - controls[1]["right"]) <= 1
+        if width > 1100:
+            inspector = page.locator("#groupInspector")
+            before = inspector.bounding_box()["width"]
+            handle = inspector.locator(".panel-resize-handle")
+            handle.press("ArrowLeft")
+            expect(inspector).to_have_class(re.compile("has-panel-size"))
+            assert inspector.bounding_box()["width"] < before
+            assert page.locator("#groupRows").bounding_box()["width"] >= 250
+            handle.press("Home")
+            assert abs(inspector.bounding_box()["width"] - before) <= 1
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.locator("#groupChatProfile select").select_option("__manage_templates__")
         expect(page.locator("#coreTemplates")).to_have_attribute("open", "")

@@ -107,6 +107,12 @@
 #page-groups .inspector-footer > span { font-size: 12px; color: var(--muted); }
 #page-groups .inspector-footer > button { flex-shrink: 0; }
 
+@media (min-width: 1101px) {
+  #page-groups .group-layout, #page-groups .contact-layout { grid-template-columns: minmax(250px, 1fr) var(--layout-track-1, minmax(400px, calc(69% - 24px))); }
+  #page-groups .group-inspector.has-panel-size, #page-groups .contact-inspector.has-panel-size { padding: 24px; }
+  #page-groups .has-panel-size .inspector-scroll { overflow: auto; }
+  #page-groups .has-panel-size .inspector-detail-actions { flex-shrink: 0; }
+}
 @media (max-width: 1120px) {
   #page-settings .settings-layout { grid-template-columns: 168px minmax(0, 1fr); gap: 22px; }
   #page-settings .core-form .form-field { grid-template-columns: minmax(120px, 1fr) minmax(180px, 48%); gap: 8px 16px; }
