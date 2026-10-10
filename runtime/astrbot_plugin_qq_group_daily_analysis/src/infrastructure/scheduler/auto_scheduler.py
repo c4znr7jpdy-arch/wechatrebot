@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from apscheduler.triggers.cron import CronTrigger
 
+from ....group_analysis_schedule import legacy_analysis_retired
 from ...application.services.analysis_application_service import DuplicateGroupTaskError
 from ...domain.repositories.platform_adapter_repository import PlatformAdapterProtocol
 from ...shared.constants import PLUGIN_NAME
@@ -153,6 +154,9 @@ class AutoScheduler:
         # 但 schedule_jobs 意味着插件仍在运行；因此需要重置此标志位
         self._terminating = False
 
+        if legacy_analysis_retired(__file__):
+            logger.info("群聊分析定时发送已由统一任务接管，不注册旧调度。")
+            return
         if not self.config_manager.is_auto_analysis_enabled():
             logger.info("定时分析名单为空且为白名单模式，不注册定时任务。")
             return
@@ -271,7 +275,7 @@ class AutoScheduler:
         - traditional: 执行全量拉取分析并发送报告
         - incremental: 执行增量最终报告阶段（合并并汇报）
         """
-        if self._terminating:
+        if self._terminating or legacy_analysis_retired(__file__):
             return
         try:
             logger.info("定时报告触发 — 开始解析调度目标")
@@ -649,6 +653,7 @@ class AutoScheduler:
         """合并同群即时报告请求，并在后台发送报告。"""
         if (
             self._terminating
+            or legacy_analysis_retired(__file__)
             or not self.config_manager.get_incremental_report_immediately()
         ):
             return
@@ -685,7 +690,7 @@ class AutoScheduler:
         """串行发送同群即时报告，并合并执行期间新增的批次。"""
         current_task = asyncio.current_task()
         try:
-            while not self._terminating:
+            while not self._terminating and not legacy_analysis_retired(__file__):
                 requested_version = self._immediate_report_versions.get(state_key, 0)
                 logger.debug(
                     "即时增量报告开始：platform=%s，group=%s，版本=%s",

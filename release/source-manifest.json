@@ -349,6 +349,26 @@
     },
     {
       "origin": "commercial",
+      "source": "src/wechatrebot_manager/group_analysis_schedule.py",
+      "target": "app/astrbot/data/plugins/jiang_schedule/group_analysis_schedule.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/group_feature_runtime.py",
+      "target": "app/astrbot/data/plugins/jiang_schedule/group_feature_runtime.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/group_analysis_schedule.py",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis/group_analysis_schedule.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "src/wechatrebot_manager/task_store.py",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_qq_group_daily_analysis/task_store.py"
+    },
+    {
+      "origin": "commercial",
       "source": "runtime/jiang_schedule/weather_content.py",
       "target": "app/astrbot/ai_plugin/ai_plugin/scheduled_weather.py"
     },

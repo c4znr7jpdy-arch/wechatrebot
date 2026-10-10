@@ -7,14 +7,18 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from wechatrebot_manager import legacy_task_migration as migration_module
+from wechatrebot_manager import lifecycle
+from wechatrebot_manager.environment import WechatEnvironment
 from wechatrebot_manager.legacy_task_migration import (
     LegacyTaskMigration,
     has_pending_migrations,
 )
+from wechatrebot_manager.runtime_status import RuntimeSnapshot
 from wechatrebot_manager.schedules import ScheduleService
 from wechatrebot_manager.task_store import TaskStore
 
@@ -519,6 +523,49 @@ def test_stop_acknowledgement_without_stopped_evidence_cannot_transfer(installat
 
     assert value.source_path.read_bytes() == source_before and value.read_jobs() == jobs_before
     assert not value.store.path.exists()
+
+
+def test_licensed_migration_resumes_offline_after_verified_stop(installation, monkeypatch):
+    value = installation
+    value.seed()
+    source_before, jobs_before = value.source_path.read_bytes(), value.read_jobs()
+
+    def snapshot():
+        active = not value.runtime.is_stopped
+        return RuntimeSnapshot(active, active, value.runtime.account, active, active, active)
+
+    controller = lifecycle.LifecycleController(
+        value.root, snapshotter=snapshot,
+        environment_checker=lambda root: WechatEnvironment(
+            ready=True, code="10000", title="Ready", message="Ready", solutions=(),
+            path=str(value.root / "Weixin.exe"), version="4.1.8.27", source="test",
+        ),
+        license_client=SimpleNamespace(
+            snapshot=lambda account: {"enabled": True, "authorized": True,
+                                      "can_run": False, "message": "Paused"},
+            pause=lambda: None,
+        ),
+        supervisor_factory=lambda progress: pytest.fail("Migration must not launch services"),
+    )
+    monkeypatch.setattr(lifecycle, "installation_services_stopped", lambda root: True)
+    migration = LegacyTaskMigration(
+        value.legacy, value.store, stop=controller.stop_for_maintenance,
+        stopped=controller.maintenance_stopped,
+    )
+    preview = migration.preview(value.job_id)
+    assert migration.commit(preview["token"])["pending"] is True
+    assert value.source_path.read_bytes() == source_before and value.read_jobs() == jobs_before
+    assert not value.store.path.exists()
+
+    # The user stops the formerly live runtime; account hints disappear and
+    # status polling presents the empty installation as a licensed pause.
+    value.runtime.stop()
+    assert controller.refresh().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    result = migration.commit(preview["token"])
+
+    assert_paused_once(value, result)
+    assert value.read_source()["tasks"] == [] and value.read_jobs() == []
+    assert controller.maintenance_stopped() is True
 
 
 @pytest.mark.parametrize("change", [{"name": "renamed_during_stop"}, {"job_id": "replaced-during-stop"}])

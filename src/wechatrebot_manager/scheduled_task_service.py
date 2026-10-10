@@ -4,11 +4,14 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
+import sqlite3
 from typing import Any, Callable
 
 from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService
 from .group_policy import GroupPolicyService
+from .group_analysis_schedule import require_analysis_ownership
+from .group_analysis_task_migration import GroupAnalysisTaskMigration
 from .private_policy import PrivateChatPolicyService
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
 from .task_store import (
@@ -27,13 +30,21 @@ _API = "/api/plug/jiang_schedule/page/unified/"
 
 
 class ScheduledTaskService:
-    def __init__(self, install_root: str | Path, *, groups=None, contacts=None, account_hint: Callable[[], str] | None = None):
+    def __init__(self, install_root: str | Path, *, groups=None, contacts=None,
+                 account_hint: Callable[[], str] | None = None,
+                 stop: Callable[[], bool] | None = None, stopped: Callable[[], bool] | None = None):
         self.root = Path(install_root).resolve()
         self.store = TaskStore(self.root / "data/manager/scheduled-tasks.db")
         self.engine = EngineApiClient(self.root)
+        self.report_engine = EngineApiClient(self.root, timeout=2100)
         self.groups = groups or GroupDirectoryService(self.root)
         self.contacts = contacts or ContactDirectoryService(self.root)
         self.account_hint = account_hint or (lambda: "")
+        self.analysis_migration = GroupAnalysisTaskMigration(
+            self.root, self.store, authorize=self._require_current_account,
+            stop=stop or (lambda: False), stopped=stopped or (lambda: False),
+            current_account=lambda: str(self.context().get("account_id") or ""),
+        )
 
     def health(self) -> dict[str, Any]:
         try:
@@ -74,6 +85,11 @@ class ScheduledTaskService:
         return item
 
     def _policy_issue(self, item: dict) -> str:
+        if item["action"] == "group_analysis":
+            try:
+                require_analysis_ownership(self.root, self.store, item["account_id"])
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                return str(exc) if isinstance(exc, ValueError) else "群分析计划状态无法确认，请稍后重试。"
         clock = item.get("schedule", {}).get("time", "")
         for target in item.get("targets", []):
             policy = (GroupPolicyService(self.root).get(item["account_id"], target["id"])
@@ -102,7 +118,10 @@ class ScheduledTaskService:
         if not account and len(fresh_accounts) == 1:
             account = next(iter(fresh_accounts))
         if not health["online"] and not account and not fresh_accounts:
-            account = str(self.account_hint() or "")
+            try:
+                account = str(self.account_hint() or "")
+            except OSError:
+                account = ""  # Stopping WeChat can make identity unavailable.
         if len(fresh_accounts) > 1 or (account and fresh_accounts and fresh_accounts != {account}):
             return {"account_id": "", "items": [], "groups": [], "contacts": [], "capabilities": [],
                     "command_catalog": scheduled_command_catalog(), "online": health["online"],
@@ -148,7 +167,9 @@ class ScheduledTaskService:
         return {"account_id": account, "items": items, "capabilities": capabilities,
                 "command_catalog": scheduled_command_catalog(), "groups": groups, "contacts": contacts,
                 "command_definition_version": SCHEDULED_COMMAND_VERSION,
-                "online": health["online"], "runtime_ready": health["runtime_ready"], "message": " ".join(filter(None, messages))}
+                "online": health["online"], "runtime_ready": health["runtime_ready"],
+                "legacy_group_analysis": self.analysis_migration.context(account),
+                "message": " ".join(filter(None, messages))}
 
     def _verify_live(self, task: dict, *, check_scheduled_time: bool = True) -> None:
         if task.get("definition_version", SCHEDULED_COMMAND_VERSION) != SCHEDULED_COMMAND_VERSION:
@@ -197,6 +218,8 @@ class ScheduledTaskService:
             item = self.store.save({**task, "revision": payload.get("revision", 0)})
             return {"item": item, "message": "任务草稿已保存，尚未启用。"}
         self._verify_live(task)
+        if task["action"] == "group_analysis" and task["enabled"]:
+            require_analysis_ownership(self.root, self.store, task["account_id"])
         result = self.engine.request("POST", _API + "save", {**task, "revision": payload.get("revision", 0)})
         if not isinstance(result, dict) or not isinstance(result.get("item"), dict):
             raise PluginCenterError("未收到任务保存确认，请刷新核对。")
@@ -228,15 +251,39 @@ class ScheduledTaskService:
         arguments = normalize_arguments(action, payload.get("arguments", {}))
         if action == "text":
             return {"kind": "text", "text": arguments["text"]}
+        if action == "group_analysis":
+            targets = payload.get("targets", [])
+            target = payload.get("preview_target")
+            if target is None and isinstance(targets, list) and len(targets) == 1:
+                target = targets[0]
+            if not isinstance(target, dict):
+                raise ValueError("请选择一个需要预览分析报告的群聊。")
+            candidate = normalize_task({**payload, "targets": [target], "arguments": arguments,
+                                        "schedule": {"kind": "daily", "time": "23:59"},
+                                        "enabled": True, "draft": False})
+            self._verify_live(candidate, check_scheduled_time=False)
+            payload = {**payload, "preview_target": candidate["targets"][0]}
         health = self.health()
         if not health["runtime_ready"]:
             raise ValueError(health.get("message") or "内容服务尚未就绪。")
         if not payload.get("account_id") or health.get("account_id") != payload["account_id"]:
             raise ValueError("微信账号已变化，请重新读取任务。")
-        result = self.engine.request("POST", _API + "preview", {**payload, "action": action, "arguments": arguments})
+        client = self.report_engine if action == "group_analysis" else self.engine
+        result = client.request("POST", _API + "preview", {**payload, "action": action, "arguments": arguments})
         if not isinstance(result, dict) or result.get("kind") not in {"text", "image", "link_card"}:
             raise PluginCenterError("内容预览暂时不可用。")
         return result
+
+    def preview_group_analysis_migration(self, payload: dict[str, Any]) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("群分析迁移参数格式不正确。")
+        return self.analysis_migration.preview(payload)
+
+    def migrate_group_analysis(self, token: str) -> dict:
+        return self.analysis_migration.commit(token)
+
+    def cancel_group_analysis_migration(self, account_id: str) -> dict:
+        return self.analysis_migration.cancel(account_id)
 
     def test(self, payload: dict[str, Any]) -> dict[str, Any]:
         target = payload.get("test_target")
@@ -251,7 +298,8 @@ class ScheduledTaskService:
         }
         task = normalize_task(candidate)
         self._verify_live(task, check_scheduled_time=False)
-        result = self.engine.request("POST", _API + "test", {**payload, "test_target": target})
+        client = self.report_engine if task["action"] == "group_analysis" else self.engine
+        result = client.request("POST", _API + "test", {**payload, "test_target": target})
         if not isinstance(result, dict) or result.get("status") not in {"submitted", "failed", "unknown", "skipped"}:
             raise PluginCenterError("未收到测试发送结果，请检查执行记录和微信聊天。")
         return result

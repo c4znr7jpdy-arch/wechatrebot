@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from wechatrebot_manager import plugin_center
+from wechatrebot_manager import engine_api, plugin_center, plugin_center_web
 
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.plugin_center import (
@@ -1192,7 +1192,7 @@ def test_meme_market_requests_wait_for_install_and_other_posts_keep_short_timeou
         timeouts.append(timeout)
         return Response()
 
-    monkeypatch.setattr(plugin_center, "urlopen", fake_urlopen)
+    monkeypatch.setattr(engine_api, "urlopen", fake_urlopen)
     client.raw_request("POST", "/api/plug/meme_manager/community/install", body=b"{}")
     client.raw_request("POST", "/api/plug/another_plugin/settings", body=b"{}")
     assert timeouts == [600, 60]
@@ -1882,7 +1882,7 @@ def test_dedicated_window_serves_shared_theme_dependencies(tmp_path: Path, monke
                     target = bundle / directory / relative
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(original.read_bytes())
-        monkeypatch.setattr(plugin_center.sys, "_MEIPASS", str(bundle.parent), raising=False)
+        monkeypatch.setattr(plugin_center_web.sys, "_MEIPASS", str(bundle.parent), raising=False)
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(object()))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1967,13 +1967,23 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
     if theme:
         from wechatrebot_manager.customer_config import save_ui_theme
         save_ui_theme(tmp_path, theme)
-    (assets / "app.css").write_text("body{}", encoding="utf-8")
-    (assets / "design-overrides.css").write_text(".design-ready{}", encoding="utf-8")
-    (assets / "app.js").write_text("window.loaded = true;", encoding="utf-8")
-    (assets / "report-preview.js").write_text("window.preview = true;", encoding="utf-8")
-    (assets / "panel-layout.js").write_text("window.layout = true;", encoding="utf-8")
-    (assets / "core-settings.js").write_text("window.core = true;", encoding="utf-8")
-    (assets / "assets" / "app-icon.png").write_bytes(b"PNG")
+    expected_assets = {
+        "app.css": b"body{}",
+        "design-overrides.css": b".design-ready{}",
+        "app.js": b"window.loaded = true;",
+        "report-preview.js": b"window.preview = true;",
+        "panel-layout.js": b"window.layout = true;",
+        "core-settings.js": b"window.core = true;",
+        "assets/app-icon.png": b"PNG",
+        **{f"{module}.js": f"window.{module.replace('-', '_')} = true;".encode()
+           for module in (
+               "scheduled-tasks", "model-services", "chat-management", "message-history",
+               "features", "preview", "updates", "settings", "activity",
+           )},
+    }
+    for relative, raw in expected_assets.items():
+        (assets / relative).write_bytes(raw)
+    (assets / "unregistered.js").write_bytes(b"window.private = true;")
 
     class FakeService:
         install_root = tmp_path
@@ -1999,18 +2009,16 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
                 "img-src 'self' data: blob: https://wx.qlogo.cn"
                 in content_security_policy
             )
-        for path, expected in (
-            ("/app.css", b"body{}"),
-            ("/design-overrides.css", b".design-ready{}"),
-            ("/app.js", b"window.loaded = true;"),
-            ("/core-settings.js", b"window.core = true;"),
-            ("/report-preview.js", b"window.preview = true;"),
-            ("/panel-layout.js", b"window.layout = true;"),
-            ("/assets/app-icon.png", b"PNG"),
-        ):
-            with urlopen(f"{base}{path}", timeout=2) as response:
+        for relative, expected in expected_assets.items():
+            with urlopen(f"{base}/{relative}", timeout=2) as response:
                 assert response.status == 200
+                assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+                if relative.endswith(".js"):
+                    assert response.headers.get_content_type() == "text/javascript"
                 assert response.read() == expected
+        with pytest.raises(HTTPError) as rejected:
+            urlopen(f"{base}/unregistered.js", timeout=2)
+        assert rejected.value.code == 404
         for path, marker in (
             ("/plugin-center?feature=example&embedded=1", b'id="plugin-frame"'),
             ("/assets/app.js", b"handlePluginPageRequest"),

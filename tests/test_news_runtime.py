@@ -159,10 +159,11 @@ def test_news_schedule_uses_same_credentials_and_adapter(tmp_path: Path) -> None
         (ROOT / "runtime/jiang_schedule/content.py").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    (package / "task_store.py").write_text(
-        (ROOT / "src/wechatrebot_manager/task_store.py").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    for name in ("task_store.py", "group_feature_runtime.py"):
+        (package / name).write_text(
+            (ROOT / "src/wechatrebot_manager" / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
     sys.path.insert(0, str(tmp_path))
     try:
         module = __import__("runtime.content", fromlist=["ContentService"])

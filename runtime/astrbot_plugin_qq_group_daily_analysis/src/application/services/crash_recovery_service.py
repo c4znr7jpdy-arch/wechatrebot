@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import TYPE_CHECKING, cast
 
+from ....group_analysis_schedule import legacy_analysis_retired
 from ...shared.constants import AnalysisStage, TaskStatus
 from ...utils.logger import logger
 
@@ -79,6 +80,19 @@ class CrashRecoveryService:
             group_id = str(trace_dict.get("group_id", "") or "")
             platform_id = str(trace_dict.get("platform", "") or "")
             trigger_type = str(trace_dict.get("trigger_type", "") or "manual")
+            extra = trace_dict.get("extra") or {}
+            unified = isinstance(extra, dict) and extra.get("delivery_owner") == "unified_schedule"
+            if unified or (trigger_type != "manual" and legacy_analysis_retired(__file__)):
+                # The task store owns retries and final delivery state. A second
+                # recovery path could send after a user pauses/deletes a task.
+                self.trace_store.save_trace({
+                    "trace_id": trace_id, "status": TaskStatus.ABORTED.value,
+                    "error_stage": "CRASH_RECOVERY",
+                    "error_message": "发送由统一任务记录管理，旧恢复流程不补发报告。",
+                    "completed_at": dt.datetime.now().timestamp(),
+                })
+                aborted_count += 1
+                continue
             started_at = trace_dict.get("started_at")
             started_at_ts = (
                 float(started_at) if isinstance(started_at, (int, float)) else None

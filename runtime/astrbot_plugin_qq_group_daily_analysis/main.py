@@ -27,6 +27,7 @@ from .src.application.services.analysis_application_service import (
     AnalysisApplicationService,
 )
 from .src.application.services.analysis_trigger_service import AnalysisTriggerService
+from .src.application.services.unified_report_service import UnifiedReportService
 from .src.application.services.comic_application_service import ComicApplicationService
 from .src.application.services.crash_recovery_service import CrashRecoveryService
 from .src.application.services.message_processing_service import (
@@ -118,6 +119,7 @@ class GroupDailyAnalysis(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+        self.unified_report_service = UnifiedReportService(self)
 
         # 1. 基础设施层
         self.config_manager = ConfigManager(config)
@@ -304,6 +306,12 @@ class GroupDailyAnalysis(Star):
             self._init_task.add_done_callback(self._background_tasks.discard)
         except RuntimeError:
             self._init_task = None
+
+    def unified_report_ready(self) -> dict:
+        return self.unified_report_service.readiness()
+
+    async def build_unified_report(self, account_id: str, group_id: str, days: int = 1) -> dict:
+        return await self.unified_report_service.generate(account_id, group_id, days)
 
     @filter.on_platform_loaded()
     async def on_platform_loaded(self):

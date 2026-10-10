@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from wechatrebot_manager import app_shell, launcher, runtime_status, uninstaller
+from wechatrebot_manager import app_shell, chat_api, launcher, runtime_status, uninstaller
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 from test_app_shell import _api
 from test_license_client import running, setup
@@ -12,7 +12,7 @@ from test_license_client import running, setup
 
 @pytest.fixture(autouse=True)
 def stopped_installation(monkeypatch):
-    monkeypatch.setattr(app_shell, "installation_services_stopped", lambda _root: True)
+    monkeypatch.setattr(chat_api, "installation_services_stopped", lambda _root: True)
 
 
 def offline_api(setup):
@@ -101,7 +101,7 @@ def test_unowned_bridge_or_unknown_port_state_cannot_enable_offline_history(setu
     monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_kw: runtime_status.BridgeHealth())
     view.runtime = runtime_status.runtime_snapshot()
     assert not view.runtime.connection_ready and not view.can_stop
-    monkeypatch.setattr(app_shell, "installation_services_stopped", launcher.installation_services_stopped)
+    monkeypatch.setattr(chat_api, "installation_services_stopped", launcher.installation_services_stopped)
     monkeypatch.setattr(launcher, "build_service_specs", lambda _root: (
         SimpleNamespace(argv=("python.exe",), ready_host="127.0.0.1", ready_port=5000),))
     monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_kwargs: iter(()))

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from webui_source import manager_script
 
 import importlib.util
 import io
@@ -21,9 +22,7 @@ def _publisher():
 
 
 def test_update_popup_describes_release_and_offers_later_action() -> None:
-    script = (
-        ROOT / "src" / "wechatrebot_manager" / "app_webui" / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert 'cancelText: mandatory ? "稍后更新" : "稍后提醒"' in script
     assert 'intent: "primary"' in script

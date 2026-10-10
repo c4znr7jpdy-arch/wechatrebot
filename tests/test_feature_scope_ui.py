@@ -1,4 +1,5 @@
 from __future__ import annotations
+from webui_source import manager_script
 
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from wechatrebot_manager import app_shell
 
 def test_global_feature_switches_are_not_exposed() -> None:
     root = Path(app_shell.__file__).resolve().parent
-    app = (root / "app_webui" / "app.js").read_text(encoding="utf-8")
+    app = manager_script()
     core = (root / "app_webui" / "core-settings.js").read_text(encoding="utf-8")
     plugin_html = (root / "plugin_webui" / "index.html").read_text(encoding="utf-8")
     plugin_app = (root / "plugin_webui" / "app.js").read_text(encoding="utf-8")
@@ -23,7 +24,7 @@ def test_global_feature_switches_are_not_exposed() -> None:
 def test_switch_text_and_rows_do_not_toggle_hidden_checkbox() -> None:
     root = Path(app_shell.__file__).resolve().parent
     html = (root / "app_webui" / "index.html").read_text(encoding="utf-8")
-    app = (root / "app_webui" / "app.js").read_text(encoding="utf-8")
+    app = manager_script()
     css = (root / "app_webui" / "app.css").read_text(encoding="utf-8")
 
     assert '<label class="toggle-line"' not in html + app

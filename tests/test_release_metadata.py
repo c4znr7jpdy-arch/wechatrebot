@@ -22,9 +22,11 @@ def _metadata_copy(tmp_path: Path) -> Path:
     shutil.copy2(source / "pyproject.toml", target / "pyproject.toml")
     package = target / "src" / "wechatrebot_manager"
     package.mkdir(parents=True)
-    shutil.copy2(source / "src" / "wechatrebot_manager" / "__init__.py", package)
-    shutil.copy2(source / "src" / "wechatrebot_manager" / "task_store.py", package)
-    shutil.copy2(source / "src" / "wechatrebot_manager" / "hook_recall_patch.py", package)
+    for name in (
+        "__init__.py", "task_store.py", "hook_recall_patch.py",
+        "group_analysis_schedule.py", "group_feature_runtime.py",
+    ):
+        shutil.copy2(source / "src" / "wechatrebot_manager" / name, package)
     shutil.copytree(source / "src/wechatrebot_manager/licensing", package / "licensing",
                     ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(source / "runtime", target / "runtime")

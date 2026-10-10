@@ -48,7 +48,7 @@ class _Process:
         self.signals.append("kill")
 
 
-def _controller(tmp_path, monkeypatch, *, process=None):
+def _controller(tmp_path, monkeypatch, *, process=None, licensed=False):
     snapshot = {"value": RuntimeSnapshot(False, False, "")}
     supervisor = launcher.ProcessSupervisor(_specs(tmp_path))
     if process is not None:
@@ -56,6 +56,11 @@ def _controller(tmp_path, monkeypatch, *, process=None):
     monkeypatch.setattr(supervisor, "force_stop", lambda: pytest.fail("Maintenance must not force-stop"))
     controller = lifecycle.LifecycleController(
         tmp_path, snapshotter=lambda: snapshot["value"],
+        license_client=SimpleNamespace(
+            snapshot=lambda account: {"enabled": True, "authorized": True,
+                                      "can_run": False, "message": "Paused"},
+            pause=Mock(),
+        ) if licensed else None,
         environment_checker=lambda root: WechatEnvironment(
             ready=True, code="10000", title="Ready", message="Ready", solutions=(),
             path=str(tmp_path / "Weixin.exe"), version="4.1.8.27", source="test",
@@ -87,9 +92,44 @@ def test_maintenance_waits_for_wechat_then_uses_normal_verified_stop(tmp_path, m
     assert controller.maintenance_stopped() is True
 
 
-def test_maintenance_retains_failed_stop_and_never_reports_success(tmp_path, monkeypatch):
+def test_licensed_maintenance_stops_core_and_waits_for_wechat_before_bridge(tmp_path, monkeypatch):
+    core, bridge = _Process(), _Process()
+    controller, supervisor, snapshot = _controller(tmp_path, monkeypatch, process=core, licensed=True)
+    supervisor.running.append(launcher.RunningService(supervisor.specs[1], bridge, io.BytesIO()))
+    snapshot["value"] = RuntimeSnapshot(True, True, "wxid_bot", True, True, True)
+    controller.state = lifecycle.LifecycleState.RUNNING
+
+    assert controller.stop_for_maintenance() is False
+    controller.licenses.pause.assert_called_once()
+    assert core.poll() == 0 and bridge.poll() is None
+    assert bridge.signals == []
+    assert controller.state == lifecycle.LifecycleState.STOP_WAIT_WECHAT
+    assert controller.maintenance_stopped() is False
+
+    snapshot["value"] = RuntimeSnapshot(False, False, "")
+    assert controller.refresh().state == lifecycle.LifecycleState.STOP_WAIT_WECHAT
+    assert controller.refresh().state == lifecycle.LifecycleState.STOPPED
+    assert bridge.poll() == 0 and supervisor.running == []
+    # Ordinary license status polling may relabel the stopped installation.
+    assert controller.refresh().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert controller.maintenance_stopped() is True
+
+
+def test_licensed_user_pause_preserves_bridge_and_cannot_pass_maintenance_gate(tmp_path, monkeypatch):
+    core, bridge = _Process(), _Process()
+    controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=core, licensed=True)
+    supervisor.running.append(launcher.RunningService(supervisor.specs[1], bridge, io.BytesIO()))
+
+    assert controller.request_stop().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert core.poll() == 0 and bridge.poll() is None
+    assert bridge.signals == []
+    assert controller.maintenance_stopped() is False
+
+
+@pytest.mark.parametrize("licensed", [False, True])
+def test_maintenance_retains_failed_stop_and_never_reports_success(tmp_path, monkeypatch, licensed):
     process = _Process(stubborn=True)
-    controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=process)
+    controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=process, licensed=licensed)
 
     assert controller.stop_for_maintenance() is False
     assert controller.maintenance_stopped() is False
@@ -98,13 +138,14 @@ def test_maintenance_retains_failed_stop_and_never_reports_success(tmp_path, mon
     assert "kill" in process.signals  # Normal stop's existing final retry.
 
 
-def test_cleared_supervisor_does_not_hide_survivors_across_maintenance_retries(tmp_path, monkeypatch):
+@pytest.mark.parametrize("licensed", [False, True])
+def test_cleared_supervisor_does_not_hide_survivors_across_maintenance_retries(tmp_path, monkeypatch, licensed):
     process = _Process()
-    controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=process)
-    monkeypatch.setattr(supervisor, "stop", lambda: supervisor.running.clear())
+    controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=process, licensed=licensed)
+    monkeypatch.setattr(supervisor, "stop_names", lambda *args, **kwargs: supervisor.running.clear())
 
     assert controller.stop_for_maintenance() is False
-    assert controller._supervisor is None
+    assert controller._supervisor is None or not controller._supervisor.running
     assert controller.stop_for_maintenance() is False
     assert controller.maintenance_stopped() is False
     process.code = 0
@@ -122,9 +163,11 @@ def test_start_in_progress_cannot_be_misreported_as_stopped(tmp_path, monkeypatc
     assert controller.state == lifecycle.LifecycleState.CONNECTION_STARTING
 
 
+@pytest.mark.parametrize("licensed", [False, True])
 @pytest.mark.parametrize("failure", ["poll", "snapshot", "probe", "missing_poll"])
-def test_maintenance_probe_errors_keep_the_gate_closed(tmp_path, monkeypatch, failure):
-    controller, _, _ = _controller(tmp_path, monkeypatch)
+def test_maintenance_probe_errors_keep_the_gate_closed(tmp_path, monkeypatch, failure, licensed):
+    controller, _, _ = _controller(tmp_path, monkeypatch, licensed=licensed)
+    controller.state = lifecycle.LifecycleState.LICENSE_PAUSED if licensed else lifecycle.LifecycleState.STOPPED
 
     def unavailable(*_args):
         raise OSError("synthetic unavailable state")
@@ -141,28 +184,32 @@ def test_maintenance_probe_errors_keep_the_gate_closed(tmp_path, monkeypatch, fa
     assert controller.stop_for_maintenance() is False
 
 
-def test_maintenance_checks_real_installation_probe_after_successful_stop(tmp_path, monkeypatch):
+@pytest.mark.parametrize("licensed", [False, True])
+def test_maintenance_checks_real_installation_probe_after_successful_stop(tmp_path, monkeypatch, licensed):
     process = _Process()
-    controller, _, _ = _controller(tmp_path, monkeypatch, process=process)
+    controller, _, _ = _controller(tmp_path, monkeypatch, process=process, licensed=licensed)
     monkeypatch.setattr(lifecycle, "installation_services_stopped", lambda root: False)
 
     assert controller.stop_for_maintenance() is False
     assert process.poll() == 0
+    controller.refresh()
     assert controller.maintenance_stopped() is False
     monkeypatch.setattr(lifecycle, "installation_services_stopped", lambda root: True)
     assert controller.maintenance_stopped() is True
 
 
-def test_online_runtime_cannot_pass_without_a_supervisor(tmp_path, monkeypatch):
-    controller, _, snapshot = _controller(tmp_path, monkeypatch)
+@pytest.mark.parametrize("licensed", [False, True])
+def test_online_runtime_cannot_pass_without_a_supervisor(tmp_path, monkeypatch, licensed):
+    controller, _, snapshot = _controller(tmp_path, monkeypatch, licensed=licensed)
     snapshot["value"] = RuntimeSnapshot(True, True, "wxid_bot", True, True, True)
 
     assert controller.stop_for_maintenance() is False
     assert controller.maintenance_stopped() is False
 
 
-def test_manager_restart_still_detects_an_unadopted_offline_runtime(tmp_path, monkeypatch):
-    controller, _, _ = _controller(tmp_path, monkeypatch)
+@pytest.mark.parametrize("licensed", [False, True])
+def test_manager_restart_still_detects_an_unadopted_offline_runtime(tmp_path, monkeypatch, licensed):
+    controller, _, _ = _controller(tmp_path, monkeypatch, licensed=licensed)
     specs = _specs(tmp_path)
     pids = [91]
     monkeypatch.setattr(lifecycle, "installation_services_stopped", launcher.installation_services_stopped)

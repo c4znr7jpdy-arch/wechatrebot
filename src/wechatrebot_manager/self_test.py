@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from html.parser import HTMLParser
 import importlib.util
 import importlib.resources
 import platform
 from pathlib import Path
 import struct
 import sys
+from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import __version__
@@ -25,14 +27,41 @@ def _timezone_data_ready() -> bool:
         return False
 
 
+class _EntryAssets(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.paths: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = dict(attrs)
+        if tag == "script" and values.get("src"):
+            self.paths.append(values["src"])
+        elif tag == "link" and values.get("rel") == "stylesheet" and values.get("href"):
+            self.paths.append(values["href"])
+
+
+def _app_assets_ready(root: Path) -> bool:
+    try:
+        root = root.resolve()
+        parser = _EntryAssets()
+        parser.feed((root / "index.html").read_text("utf-8"))
+        if not parser.paths:
+            return False
+        for value in parser.paths:
+            parsed = urlsplit(value)
+            path = (root / unquote(parsed.path).lstrip("/")).resolve()
+            if parsed.scheme or parsed.netloc or not path.is_relative_to(root) or not path.is_file():
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def manager_self_test(output: str | Path) -> dict[str, object]:
     import tkinter
 
     asset_root = _asset_root()
-    app_assets = all(
-        (asset_root / filename).is_file()
-        for filename in ("index.html", "app.css", "app.js")
-    )
+    app_assets = _app_assets_ready(asset_root)
     webview_ready = importlib.util.find_spec("webview.platforms.edgechromium") is not None
     try:
         error_codes_ready = load_error_catalog().get("19000").code == "19000"

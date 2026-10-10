@@ -9,7 +9,8 @@ from pathlib import Path
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 import uuid
 
-from .content import ACTION_NAMES, ContentService
+from .content import ACTION_NAMES, ContentService, ContentSkipped
+from .group_analysis_schedule import require_analysis_ownership
 from .task_store import (
     TaskStore,
     SCHEDULED_COMMAND_VERSION,
@@ -76,6 +77,9 @@ class UnifiedRuntime:
         self._poller = None
         self._active = False
         self._lease = RuntimeLease(self.root / "data/manager/scheduled-tasks.lock")
+        self._workers: dict[str, asyncio.Task] = {}
+        self._run_slots = asyncio.Semaphore(3)
+        self._analysis_slots = asyncio.Semaphore(1)
 
     def _bridge_health(self) -> dict:
         try:
@@ -173,6 +177,8 @@ class UnifiedRuntime:
         # Checking account again after readiness prevents a configuration read
         # from authorizing a task against a newly logged-in account.
         await self._require_account(task["account_id"])
+        if task["action"] == "group_analysis" and task["enabled"]:
+            require_analysis_ownership(self.root, self.store, task["account_id"], claim=True)
         return self.store.save(payload, now=self.clock())
 
     async def toggle(self, payload: dict) -> dict:
@@ -185,6 +191,8 @@ class UnifiedRuntime:
             if not self._active:
                 raise ValueError("定时任务服务尚未就绪，请稍后重试。")
             self._require_content(task)
+            if task["action"] == "group_analysis":
+                require_analysis_ownership(self.root, self.store, account, claim=True)
         return self.store.set_enabled(account, task["id"], payload["enabled"], payload.get("revision"))
 
     async def delete(self, payload: dict) -> dict:
@@ -194,12 +202,25 @@ class UnifiedRuntime:
 
     async def preview(self, payload: dict) -> dict:
         account = payload.get("account_id")
-        await self._require_account(account)
-        task = {"action": payload.get("action"),
+        client = await self._require_account(account)
+        task = {"action": payload.get("action"), "account_id": account,
                 "arguments": normalize_arguments(payload.get("action"), payload.get("arguments", {}))}
+        if task["action"] == "group_analysis":
+            targets = payload.get("targets", [])
+            target = payload.get("preview_target")
+            if target is None and isinstance(targets, list) and len(targets) == 1:
+                target = targets[0]
+            if not isinstance(target, dict):
+                raise ValueError("请选择一个需要预览分析报告的群聊。")
+            task = normalize_task({**task, "targets": [target], "draft": False,
+                                   "schedule": {"kind": "daily", "time": "23:59"}}, now=self.clock())
+            if not await self._target_exists(client, account, task["targets"][0]):
+                raise ValueError("该群已不在当前微信账号目录。")
         self._require_content(task)
-        content = await asyncio.wait_for(self.content.generate(task), timeout=120)
-        await self._require_account(account)
+        content = await asyncio.wait_for(self.content.generate(task), timeout=self._generation_timeout(task))
+        client = await self._require_account(account)
+        if task["action"] == "group_analysis" and not await self._target_exists(client, account, task["targets"][0]):
+            raise ValueError("该群已不在当前微信账号目录。")
         return content.preview()
 
     async def test(self, payload: dict) -> dict:
@@ -285,6 +306,17 @@ class UnifiedRuntime:
             self._poller.cancel()
             await asyncio.gather(self._poller, return_exceptions=True)
             self._poller = None
+        await self._stop_workers()
+
+    async def _stop_workers(self):
+        workers = list(self._workers.items())
+        for _run_id, task in workers:
+            task.cancel()
+        await asyncio.gather(*(task for _run_id, task in workers), return_exceptions=True)
+        # A worker cancelled before its coroutine starts cannot run finally.
+        for run_id, _task in workers:
+            self.store.finish_run(run_id)
+        self._workers.clear()
 
     async def _poll(self):
         try:
@@ -294,7 +326,7 @@ class UnifiedRuntime:
             self._active = True
             while True:
                 try:
-                    await self.run_once()
+                    await self._dispatch_due()
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -302,28 +334,44 @@ class UnifiedRuntime:
                 await asyncio.sleep(5)
         finally:
             self._active = False
-            self._lease.release()
+            try:
+                await self._stop_workers()
+            finally:
+                self._lease.release()
 
     async def run_once(self):
+        workers = await self._dispatch_due()
+        try:
+            await asyncio.gather(*workers.values(), return_exceptions=True)
+        finally:
+            for run_id in workers:
+                self.store.finish_run(run_id)
+
+    async def _dispatch_due(self) -> dict[str, asyncio.Task]:
+        """Claim quickly so a long report never blocks the next scheduler poll."""
         account, client = await self.connection()
         if not account or client is None:
-            return
+            return {}
         runs = self.store.claim_due(self.clock(), account)
-        semaphore = asyncio.Semaphore(3)
+        workers = {}
+        for run in runs:
+            task = asyncio.create_task(self._run_limited(run), name="unified-task-" + run["id"])
+            self._workers[run["id"]] = workers[run["id"]] = task
+            task.add_done_callback(lambda task, run_id=run["id"]: self._worker_finished(run_id, task))
+        return workers
 
-        async def run_limited(run):
-            async with semaphore:
-                await self.execute_run(run)
-
+    async def _run_limited(self, run: dict):
         try:
-            outcomes = await asyncio.gather(*(run_limited(run) for run in runs), return_exceptions=True)
-            for result in outcomes:
-                if isinstance(result, BaseException):
-                    logger.warning("本次定时任务未完成 (%s)", type(result).__name__)
+            slots = self._analysis_slots if run["task"]["action"] == "group_analysis" else self._run_slots
+            async with slots:
+                await self.execute_run(run)
         finally:
-            # Cancellation may happen before a queued run reaches its semaphore.
-            for run in runs:
-                self.store.finish_run(run["id"])
+            self.store.finish_run(run["id"])
+
+    def _worker_finished(self, run_id: str, task: asyncio.Task):
+        self._workers.pop(run_id, None)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.warning("本次定时任务未完成 (%s)", type(error).__name__)
 
     def _current(self, run: dict) -> bool:
         try:
@@ -340,14 +388,42 @@ class UnifiedRuntime:
             # Pause/delete can have atomically finalized the pending delivery.
             return False
 
+    @staticmethod
+    def _generation_timeout(task: dict) -> int:
+        return 1800 if task["action"] == "group_analysis" else 120
+
+    async def _delivery_client(self, run: dict, target: dict):
+        if not self._current(run):
+            self._mark(run, target, "skipped", "任务已暂停、删除或修改，本次未发送。")
+            return None
+        try:
+            client = await self._require_account(run["account_id"])
+            self._require_content(run["task"])
+        except ValueError:
+            self._mark(run, target, "skipped", "原账号未连接或所需功能已关闭，本次未发送。")
+            return None
+        if not await self._target_exists(client, run["account_id"], target):
+            self._mark(run, target, "skipped", "发送对象已不在当前账号目录，本次未发送。")
+            return None
+        try:
+            return await self._require_account(run["account_id"])
+        except ValueError:
+            self._mark(run, target, "skipped", "核对发送对象后账号发生变化，本次未发送。")
+            return None
+
     async def execute_run(self, run: dict):
         try:
             if not self._current(run):
                 return
+            per_target = run["task"]["action"] == "group_analysis"
+            content = None
             try:
                 await self._require_account(run["account_id"])
                 self._require_content(run["task"])
-                content = await asyncio.wait_for(self.content.generate(run["task"]), timeout=120)
+                if per_target and not run["task_id"].startswith("test_"):
+                    require_analysis_ownership(self.root, self.store, run["account_id"])
+                if not per_target:
+                    content = await asyncio.wait_for(self.content.generate(run["task"]), timeout=120)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -358,23 +434,27 @@ class UnifiedRuntime:
             for target in run["deliveries"]:
                 if target["status"] != "pending":
                     continue
-                if not self._current(run):
-                    self._mark(run, target, "skipped", "任务已暂停、删除或修改，本次未发送。")
+                client = await self._delivery_client(run, target)
+                if client is None:
                     continue
-                try:
-                    client = await self._require_account(run["account_id"])
-                    self._require_content(run["task"])
-                except ValueError:
-                    self._mark(run, target, "skipped", "原账号未连接或所需功能已关闭，本次未发送。")
-                    continue
-                if not await self._target_exists(client, run["account_id"], target):
-                    self._mark(run, target, "skipped", "发送对象已不在当前账号目录，本次未发送。")
-                    continue
-                try:
-                    client = await self._require_account(run["account_id"])
-                except ValueError:
-                    self._mark(run, target, "skipped", "核对发送对象后账号发生变化，本次未发送。")
-                    continue
+                if per_target:
+                    try:
+                        task = {**run["task"], "targets": [{"type": target["type"], "id": target["id"]}]}
+                        content = await asyncio.wait_for(self.content.generate(task), timeout=self._generation_timeout(task))
+                    except ContentSkipped as exc:
+                        self._mark(run, target, "skipped", str(exc))
+                        continue
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.warning("群分析内容生成失败 (%s)", type(exc).__name__)
+                        self._mark(run, target, "failed", "该群报告生成失败，请检查模型、群权限和消息记录。")
+                        continue
+                    # Analysis may take several minutes. Recheck identity,
+                    # directory and task revision after all generation awaits.
+                    client = await self._delivery_client(run, target)
+                    if client is None:
+                        continue
                 if not self._current(run) or not self._mark(run, target, "sending"):
                     continue
                 if not self.store.authorize_delivery(run["account_id"], run["task_id"], run["id"], target["type"], target["id"]):
