@@ -348,6 +348,23 @@ def test_real_service_hides_migration_details_from_a_different_live_account(tmp_
     assert path.read_bytes() == before
 
 
+def test_completed_retirement_allows_other_accounts_without_exposing_original_plan(tmp_path):
+    _config(tmp_path)
+    state = {"account": ACCOUNT, "stopped": False, "stops": 0, "results": [True]}
+    service = _service_with_live_probe(tmp_path, state)
+    preview = service.preview_group_analysis_migration({"account_id": ACCOUNT})
+    assert len(service.migrate_group_analysis(preview["token"])["items"]) == 2
+    state["account"] = "wxid_other"
+    context = service.context()
+    assert context["account_id"] == "wxid_other"
+    assert context["legacy_group_analysis"]["state"] == "complete"
+    assert not {"account_id", "target_ids", "times", "days"} & context["legacy_group_analysis"].keys()
+    assert context["items"] == []
+    from wechatrebot_manager.group_analysis_schedule import require_analysis_ownership
+    require_analysis_ownership(tmp_path, service.store, "wxid_other")
+    assert service.save(_task(account_id="wxid_other", draft=True))["item"]["account_id"] == "wxid_other"
+
+
 @pytest.mark.parametrize(("account", "stopped", "allowed"), [
     (ACCOUNT, False, True), ("", True, True), ("", False, False), ("wxid_other", True, False),
 ])

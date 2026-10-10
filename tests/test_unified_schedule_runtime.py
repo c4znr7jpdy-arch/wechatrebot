@@ -202,6 +202,32 @@ def test_group_analysis_respects_group_feature_permission_before_generating(tmp_
     assert calls == sent == []
 
 
+@pytest.mark.parametrize("change", ["group_policy", "recipient", "plugin"])
+def test_group_preview_rechecks_permission_and_membership_after_generation(tmp_path, change):
+    runtime, task, plugin, calls, sent, _account, client = _analysis_runtime(tmp_path)
+    original = plugin.build_unified_report
+
+    async def generate(*args):
+        result = await original(*args)
+        if change == "group_policy":
+            path = tmp_path / "data/manager/group-policies.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"schema_version": 1, "accounts": {"wxid_robot": {"groups": {
+                "123456@chatroom": {"allowed_features": []},
+            }}}}))
+        elif change == "recipient":
+            client.group_exists = False
+        else:
+            (tmp_path / "app/astrbot/data/cmd_config.json").write_text('{"plugin_set":[]}')
+        return result
+
+    plugin.build_unified_report = generate
+    with pytest.raises(ValueError):
+        asyncio.run(runtime.preview({**task, "preview_target": task["targets"][0]}))
+    assert len(calls) == 1 and sent == []
+    assert runtime.store.list("wxid_robot") == []
+
+
 def test_group_analysis_without_messages_is_recorded_as_skipped(tmp_path):
     runtime, task, plugin, _calls, sent, _account, _client = _analysis_runtime(tmp_path)
 
@@ -234,6 +260,97 @@ def test_legacy_analysis_schedule_must_be_migrated_before_a_new_task_is_enabled(
     assert runtime.store.list("wxid_robot") == []
     assert runtime.store.action_owner("group_analysis") is None
     assert sent == []
+
+
+def test_slow_group_report_does_not_block_a_later_normal_task(tmp_path):
+    runtime, task, plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    original = plugin.build_unified_report
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def slow_report(*args):
+            started.set()
+            await release.wait()
+            return await original(*args)
+
+        plugin.build_unified_report = slow_report
+        first = await runtime.save({**task, "id": "slow-analysis-a", "targets": task["targets"][:1]})
+        await runtime.save({**task, "id": "slow-analysis-b", "targets": task["targets"][:1]})
+        normal = await runtime.save({**_task(), "id": "ordinary-later", "schedule": {
+            "kind": "daily", "time": "08:31", "timezone": "Asia/Shanghai",
+        }})
+        runtime.clock = lambda: datetime.fromisoformat(first["next_run_time"])
+        reports = await runtime._dispatch_due()
+        assert len(reports) == 2
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            runtime.clock = lambda: datetime.fromisoformat(normal["next_run_time"])
+            ordinary = await runtime._dispatch_due()
+            await asyncio.wait_for(asyncio.gather(*ordinary.values()), timeout=2)
+            assert calls == []
+            assert sent == [("123456@chatroom", [{"type": "text", "data": {"text": "提醒"}}])]
+            assert runtime.store.runs("wxid_robot", normal["id"])[0]["status"] == "submitted"
+            assert runtime.store.runs("wxid_robot", first["id"])[0]["status"] == "running"
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*reports.values()), timeout=2)
+            assert len(calls) == 2 and len(sent) == 3
+        finally:
+            await runtime.stop()
+
+    asyncio.run(scenario())
+
+
+def test_stop_cancels_running_and_queued_reports_before_releasing_the_runtime_lease(tmp_path):
+    runtime, task, plugin, _calls, sent, _account, _client = _analysis_runtime(tmp_path)
+    cancelled = []
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def slow_report(*_args):
+            started.set()
+            try:
+                await release.wait()
+            finally:
+                cancelled.append(True)
+
+        plugin.build_unified_report = slow_report
+        first = await runtime.save({**task, "id": "slow-analysis-a", "targets": task["targets"][:1]})
+        await runtime.save({**task, "id": "slow-analysis-b", "targets": task["targets"][:1]})
+        runtime.clock = lambda: datetime.fromisoformat(first["next_run_time"])
+        runtime.start()
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            assert len(runtime._workers) == 2
+            assert runtime._lease.handle is not None
+        finally:
+            await runtime.stop()
+        assert runtime._workers == {} and runtime._lease.handle is None
+        assert runtime._poller is None and not runtime._active
+        assert cancelled == [True]
+        for identity in ("slow-analysis-a", "slow-analysis-b"):
+            run = runtime.store.runs("wxid_robot", identity)[0]
+            assert run["status"] == "skipped"
+            assert all(item["status"] == "skipped" for item in run["deliveries"])
+
+    asyncio.run(scenario())
+    assert sent == []
+
+
+def test_stop_finishes_claimed_runs_even_if_workers_have_not_started(tmp_path):
+    runtime, task, _plugin, calls, sent, _account, _client = _analysis_runtime(tmp_path)
+
+    async def scenario():
+        saved = await runtime.save(task)
+        runtime.clock = lambda: datetime.fromisoformat(saved["next_run_time"])
+        assert await runtime._dispatch_due()
+        await runtime.stop()
+        assert runtime._workers == {}
+        assert runtime.store.runs("wxid_robot", saved["id"])[0]["status"] == "skipped"
+
+    asyncio.run(scenario())
+    assert calls == sent == []
 
 
 def test_runtime_health_exposes_command_scheduling_contract(tmp_path: Path) -> None:

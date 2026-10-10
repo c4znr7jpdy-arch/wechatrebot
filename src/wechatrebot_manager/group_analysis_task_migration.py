@@ -49,6 +49,8 @@ class GroupAnalysisTaskMigration:
             if owner:
                 account = account if account is not None else str(self.current_account() or "") if self.current_account else owner["account_id"]
                 if account and account != owner["account_id"]:
+                    if owner["phase"] == "complete":
+                        return {"state": "complete", "message": "旧群分析调度已退役。"}
                     return {"state": "blocked", "message": "群分析迁移属于其他微信账号，请切回所属账号处理。"}
                 if owner["phase"] != "complete":
                     self._validate_plan(owner["plan"], owner["account_id"])
