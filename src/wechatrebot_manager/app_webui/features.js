@@ -193,11 +193,9 @@ window.createFeatureController = function (helpers) {
     const type = field.type || "string";
     const uiControl = field._ui_control || "";
     const label = field.description || field.title || key.replaceAll("_", " ");
-    const hint = field.hint || field.help || "";
     const encodedPath = escapeHtml(JSON.stringify(path));
     const encodedLabel = escapeHtml(label);
     const fieldId = namespace + "config-" + path.map((part) => encodeURIComponent(part)).join("--");
-    const helpId = fieldId + "-help";
     let control = "";
     if (type === "bool") {
       control = `<span class="toggle"><input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="bool" type="checkbox" ${value ? "checked" : ""}><label class="toggle-track" for="${fieldId}" aria-label="切换${encodedLabel}"></label><span>${value ? "已启用" : "已停用"}</span></span>`;
@@ -228,7 +226,7 @@ window.createFeatureController = function (helpers) {
       const secretRules = field.secret ? `autocomplete="new-password" placeholder="${field._secret_configured ? "已安全保存；留空保持不变" : "请输入后保存"}"` : "";
       control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(uiControl === "proxy-port" ? uiControl : type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
     }
-    control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" aria-describedby="' + helpId + '" ');
+    control = control.replace(/<(input|select|textarea) /, '<$1 id="' + fieldId + '" ');
     if (field._report_previews) {
       const preview = field._report_previews[String(value)] || "";
       control += `<figure class="report-style-preview" data-report-preview-for="${fieldId}" data-report-previews="${escapeHtml(JSON.stringify(field._report_previews))}"><button type="button" class="report-preview-trigger" aria-label="查看完整报告样式预览" ${preview ? "" : "hidden"}><img ${preview ? `src="${escapeHtml(preview)}"` : ""} alt="报告样式预览（示例数据）" loading="lazy"></button><figcaption>${preview ? "示例数据 · 点击查看完整长图" : "此自定义样式暂无预览"}</figcaption></figure>`;
@@ -239,7 +237,7 @@ window.createFeatureController = function (helpers) {
     const title = type === "bool"
       ? `<span class="field-label">${escapeHtml(label)}</span>`
       : `<label for="${fieldId}">${escapeHtml(label)}</label>`;
-    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${field._ui_disclosure ? "disclosure-controller" : ""} ${field._ui_full || ["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"${dependsOn}>${title}${control}<small id="${helpId}">${escapeHtml(hint)}</small><small class="field-error" role="alert" hidden></small></div>`;
+    return `<div class="form-field ${field._ui_tint ? "tinted-list" : ""} ${field._ui_disclosure ? "disclosure-controller" : ""} ${field._ui_full || ["text", "list", "template_list"].includes(type) || field.editor_mode ? "full" : ""}"${dependsOn}>${title}${control}<small class="field-error" role="alert" hidden></small></div>`;
   }
 
   function schemaMarkup(schema, config, prefix = [], namespace = "") {
@@ -251,7 +249,7 @@ window.createFeatureController = function (helpers) {
       if (!groupFields.length) return;
       const disclosure = groupDisclosure;
       const heading = disclosure
-        ? `<div class="optional-group-heading"><div><h3>${escapeHtml(groupTitle)}</h3><p>主模型不可用时才会尝试这一项。</p></div><button class="button secondary small" type="button" data-optional-group-toggle data-path="${escapeHtml(JSON.stringify(disclosure.path))}" aria-expanded="${disclosure.enabled}">${disclosure.enabled ? "不使用备用模型" : escapeHtml(disclosure.label)}</button></div>`
+        ? `<div class="optional-group-heading"><div><h3>${escapeHtml(groupTitle)}</h3></div><button class="button secondary small" type="button" data-optional-group-toggle data-path="${escapeHtml(JSON.stringify(disclosure.path))}" aria-expanded="${disclosure.enabled}">${disclosure.enabled ? "不使用备用模型" : escapeHtml(disclosure.label)}</button></div>`
         : `<h3>${escapeHtml(groupTitle)}</h3>`;
       markup.push(`<section class="config-section grouped ${disclosure ? "optional-model-group" : ""}">${heading}<div class="config-section-grid" ${disclosure && !disclosure.enabled ? "hidden" : ""}>${groupFields.join("")}</div></section>`);
       groupTitle = "";

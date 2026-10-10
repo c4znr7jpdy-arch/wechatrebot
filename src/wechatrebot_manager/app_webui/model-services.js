@@ -219,7 +219,6 @@ window.createModelServices = function (helpers) {
     const input = form.elements.thinking_enabled;
     if (initialValue !== null) input.checked = Boolean(initialValue);
     input.disabled = false;
-    $("#providerThinkingHint").textContent = "关闭后普通聊天通常更快；模型不支持切换时会自动忽略，不影响正常调用。";
     $("#providerThinkingValue").textContent = input.checked ? "已开启" : "已关闭";
   }
 
@@ -233,12 +232,7 @@ window.createModelServices = function (helpers) {
     form.elements.service_kind.disabled = false;
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
     clearProviderModels();
-    $("#providerModelHint").textContent = preset.model
-      ? `默认模型：${preset.model}；可手动修改或从服务端读取后选择`
-      : "请填写具体模型名称，也可从服务端读取后选择";
-    $("#providerPresetHint").textContent = preset.service_kind === "chat"
-      ? `${preset.description || "填写模型服务信息"} · 默认按多模态请求，不支持图片时显示接口错误`
-      : (preset.description || "填写模型服务信息");
+    $("#providerModelHint").textContent = "";
     syncProviderThinkingControl();
     renderProviderSaveIntent(
       providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
@@ -269,18 +263,10 @@ window.createModelServices = function (helpers) {
     if (serviceKind !== "chat") {
       const label = serviceKind === "image" ? "图片模型" : serviceKind === "voice" ? "语音模型" : "向量模型";
       $("#providerSaveIntentTitle").textContent = `保存为${label}`;
-      $("#providerSaveIntentDetail").textContent = serviceKind === "image"
-        ? "不会更改聊天回复模型；保存后可在图片生成功能中选择。"
-        : serviceKind === "voice"
-          ? "不会更改聊天回复模型；保存后可在语音功能中选择。"
-          : "不会更改聊天回复模型；保存后可在需要向量检索的功能中选择。";
       $("#saveProvider").textContent = `保存${label}`;
       return;
     }
     $("#providerSaveIntentTitle").textContent = makeDefault ? "保存后直接设为回复模型" : "保存为备用模型服务";
-    $("#providerSaveIntentDetail").textContent = makeDefault
-      ? "首个模型服务会自动用于机器人回复。"
-      : "不会更改当前回复模型；保存后可在服务列表中手动切换。";
     $("#saveProvider").textContent = makeDefault ? "保存并设为回复模型" : "保存模型服务";
   }
 
@@ -316,11 +302,8 @@ window.createModelServices = function (helpers) {
     form.elements.api_key.value = "";
     syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
-    $("#providerModelHint").textContent = service.model
-      ? `当前模型：${service.model}；可手动填写，也可从服务端读取后选择`
-      : "可手动填写，也可从服务端读取后选择";
+    $("#providerModelHint").textContent = "";
     $("#providerEditorTitle").textContent = service.name;
-    $("#providerPresetHint").textContent = service.service_kind === "image" ? "图片模型仅供生图功能选择" : service.service_kind === "embedding" ? "向量模型供长期记忆等功能选择" : service.service_kind === "voice" ? "语音模型供语音功能选择" : "此服务仅保存在当前设备；聊天模型默认按多模态请求";
     $("#apiKeyHint").textContent = service.api_key_configured ? "已安全保存；留空不会覆盖" : "尚未配置 API Key / Token Plan";
     $("#testProvider").hidden = !service.configured;
     $("#deleteProvider").hidden = false;

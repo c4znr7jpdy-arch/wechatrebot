@@ -1262,6 +1262,7 @@
     guardProviderDraft: (...args) => guardProviderDraft(...args),
     loadFeatures: (...args) => loadFeatures(...args),
     navigate: (...args) => navigate(...args),
+    openFeature: (...args) => openFeature(...args),
     renderProviderServices: (...args) => renderProviderServices(...args),
     reportError: (...args) => reportError(...args),
     safeImageUrl: (...args) => safeImageUrl(...args),

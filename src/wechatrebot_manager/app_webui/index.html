@@ -121,9 +121,9 @@
             <section class="startup-ledger panel">
               <div class="panel-heading"><div><h2>连接台账</h2></div></div>
               <ol class="stage-list">
-                <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong><small>安装路径与兼容版本</small></div><em>待检查</em></li>
-                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong><small>基础服务与功能加载</small></div><em>未启动</em></li>
-                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong><small>账号、通信与心跳</small></div><em>未连接</em></li>
+                <li id="stageEnvironment"><span class="stage-index">1</span><div><strong>微信环境</strong></div><em>待检查</em></li>
+                <li id="stageCore"><span class="stage-index">2</span><div><strong>机器人功能</strong></div><em>未启动</em></li>
+                <li id="stageConnection"><span class="stage-index">3</span><div><strong>消息连接</strong></div><em>未连接</em></li>
               </ol>
 
             </section>
@@ -140,12 +140,12 @@
             <div class="home-entry-grid">
               <button class="home-entry" type="button" data-home-page="settings" data-action-bound disabled>
                 <svg aria-hidden="true"><use href="#i-settings"/></svg>
-                <span><strong>配置模型与核心</strong><small>设置回复模型、图片能力和机器人基础信息</small></span>
+                <span><strong>配置模型与核心</strong></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
               <button class="home-entry" type="button" data-home-page="groups" data-action-bound disabled>
                 <svg aria-hidden="true"><use href="#i-users"/></svg>
-                <span><strong>管理群聊与私聊</strong><small>设置每个聊天的回复方式与可用功能</small></span>
+                <span><strong>管理群聊与私聊</strong></span>
                 <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
             </div>
@@ -398,11 +398,11 @@
                   <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
                     <div class="panel-heading"><div><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2></div></div>
                     <input name="provider_id" type="hidden">
-                    <div class="field-pair"><label><span>模型供应商</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select><small id="providerPresetHint">仅选择接口供应商；具体模型在下方填写</small></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select><small>图片、向量和语音模型不会替代当前聊天回复模型。</small></label></div>
-                    <div class="field-pair"><label><span>Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint">可手动填写，也可从服务端读取后选择</small></label></div>
+                    <div class="field-pair"><label><span>模型供应商</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select></label></div>
+                    <div class="field-pair"><label><span>Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint" role="status"></small></label></div>
                     <label><span>API Key / Token Plan</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="填写 API Key 或 Token Plan；已保存内容不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">API Key / Token Plan 只保存在本机</small></label>
-                    <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong><small id="providerThinkingHint">所有模型均可设置；模型不支持时会自动忽略，不影响正常调用。</small></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
-                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong><small id="providerSaveIntentDetail">首个模型服务会自动用于机器人回复。</small></p></div>
+                    <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
+                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong></p></div>
                     <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
                   </form>
                 </div>
@@ -419,19 +419,18 @@
               <form class="settings-card panel web-search-settings-card" id="webSearchForm" data-core-subsection="search" novalidate>
                 <div class="panel-heading"><div><h2>联网搜索</h2></div><span class="toggle"><input id="webSearchEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="webSearchEnabled" aria-label="切换联网搜索"></label><span id="webSearchStatus">等待读取</span></span></div>
                 <div id="webSearchDetails">
-                <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select><small id="webSearchProviderHint">选择后使用对应服务商的密钥。</small></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select><small>保留来源链接便于核验，但会增加回复长度。</small></label></div>
+                <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select></label></div>
                 <div class="web-search-provider-summary" id="webSearchProviderSummary" aria-live="polite" aria-atomic="true"></div>
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" data-action-bound disabled aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
                 </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
-              <div class="core-layout" data-core-subsection="conversation" hidden><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-action-bound disabled data-core-view="global">全局配置</button><button class="core-nav" type="button" data-action-bound disabled data-core-view="monitor">聊天状态与配置</button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button" data-action-bound disabled>新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div><p class="core-sidebar-note">未覆盖的参数跟随全局；删除模板后恢复全局配置。</p></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取对话配置…</div></section></div>
+              <div class="core-layout" data-core-subsection="conversation" hidden><aside class="core-sidebar panel"><button class="core-nav active" type="button" data-action-bound disabled data-core-view="global">全局配置</button><button class="core-nav" type="button" data-action-bound disabled data-core-view="monitor">聊天状态与配置</button><div class="core-template-heading"><strong>配置模板</strong><button class="button ghost small" id="newCoreTemplate" type="button" data-action-bound disabled>新增</button></div><label class="core-sidebar-note" for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><div id="coreTemplateList"></div></aside><section class="core-detail panel" id="coreDetail"><div class="loading-row">正在读取对话配置…</div></section></div>
             </section>
 
             <form class="settings-card panel" id="memoryForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
               <div class="panel-heading"><div><h2>记住重要的聊天</h2></div><span class="status-badge" id="memoryStatus">等待读取</span></div>
-              <p class="settings-copy" id="memoryExplanation">明确问起上次内容时优先回忆，普通寒暄不查询。</p>
-              <div class="toggle-line"><span><strong>使用长期记忆</strong><small>关闭后不自动检索往事</small></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
-              <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select><small>“在吗、你好”等短寒暄会直接回复，不等待记忆检索。</small></label>
+              <div class="toggle-line"><span><strong>使用长期记忆</strong></span><span class="toggle"><input id="memoryEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="memoryEnabled" aria-label="切换长期记忆"></label><span>已启用</span></span></div>
+              <label><span>自动回忆方式</span><select name="recall_mode"><option value="smart">智能（推荐）</option><option value="always">每条消息都查询</option><option value="manual">仅明确问起时查询</option></select></label>
               <div class="field-pair"><label><span>每次最多回忆</span><input name="top_k" type="number" min="1" max="10"></label><label><span>多少轮后整理记忆</span><input name="summary_trigger_rounds" type="number" min="2" max="100"></label></div>
               <input name="casual_query_max_chars" type="hidden" value="24">
               <div class="form-actions"><span class="form-note" id="memoryNote" role="status"></span><div class="button-row"><button class="button ghost" id="previewExperience" type="button" data-action-bound disabled>预览回复</button><button class="button ghost" id="manageMemories" type="button" data-action-bound disabled>查看和删除记忆</button><button class="button primary" type="submit">保存记忆设置</button></div></div>
@@ -440,7 +439,7 @@
             <form class="settings-card panel" id="emotionForm" data-settings-section="core" data-core-subsection="memory" hidden novalidate>
               <div class="panel-heading"><div><h2>好感度与每日心情</h2></div><span class="status-badge" id="emotionStatus">等待读取</span></div>
 
-              <div class="toggle-line"><span><strong>使用情感成长</strong><small>让相处方式随互动保持连续</small></span><span class="toggle"><input id="emotionEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="emotionEnabled" aria-label="切换情感成长"></label><span>已启用</span></span></div>
+              <div class="toggle-line"><span><strong>使用情感成长</strong></span><span class="toggle"><input id="emotionEnabled" name="enabled" type="checkbox"><label class="toggle-track" for="emotionEnabled" aria-label="切换情感成长"></label><span>已启用</span></span></div>
               <div class="option-grid compact-options"><label class="option-check"><input name="daily_mood" type="checkbox"><span>每天自然更换心情</span></label><label class="option-check"><input name="include_affection" type="checkbox"><span>回复时参考好感度</span></label><label class="option-check"><input name="include_mood" type="checkbox"><span>回复时参考当前心情</span></label></div>
               <div class="form-actions"><span class="form-note" id="emotionNote" role="status"></span><button class="button primary" type="submit">保存情感设置</button></div>
             </form>
@@ -459,7 +458,7 @@
               <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
-              <div class="maintenance-row"><div><strong>使用帮助</strong><span>查看功能用法</span></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
+              <div class="maintenance-row"><div><strong>使用帮助</strong></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
               <div class="maintenance-row"><div><strong>软件版本</strong><span><span id="settingsVersion">v0.0.0</span> · <span id="updateStatus">尚未检查</span></span></div><button class="button ghost small" id="checkUpdate" data-action-bound disabled>检查更新</button></div>
               <div class="maintenance-row"><div><strong>彻底卸载</strong><span>删除程序、配置、日志、备份及本机残留，聊天记录会保留</span></div><button class="button danger small" id="openUninstaller" data-action-bound disabled>打开卸载程序</button></div>
@@ -483,7 +482,7 @@
   <div class="onboarding-backdrop" id="onboardingBackdrop" hidden>
     <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
       <h2 id="onboardingTitle">先用推荐设置跑起来</h2><p>不用理解插件或命令。连接微信、确认回复模型，再按群设置机器人是否主动说话。</p>
-      <div class="onboarding-steps"><article><span>1</span><div><strong>连接微信</strong><small>软件会自动检查兼容版本</small></div></article><article><span>2</span><div><strong>选择回复模型</strong><small>从常用渠道或兼容接口添加聊天模型</small></div></article><article><span>3</span><div><strong>管理群聊</strong><small>默认只在被点名时回复，不主动打扰</small></div></article></div>
+      <div class="onboarding-steps"><article><span>1</span><div><strong>连接微信</strong></div></article><article><span>2</span><div><strong>选择回复模型</strong></div></article><article><span>3</span><div><strong>管理群聊</strong></div></article></div>
       <ol class="readiness-checklist" id="onboardingChecklist" aria-label="首次使用准备检查"><li>正在读取准备状态…</li></ol>
       <div class="onboarding-note">长期记忆会在明确问起往事时优先召回；普通寒暄走快速回复。检查只读，不会启动机器人、发送消息或修改群策略。</div>
       <div class="modal-actions"><button class="button ghost" id="onboardingRecommended" data-action-bound disabled>按推荐设置开始</button><button class="button primary" id="onboardingConfigure" data-action-bound disabled>逐项检查设置</button></div>
