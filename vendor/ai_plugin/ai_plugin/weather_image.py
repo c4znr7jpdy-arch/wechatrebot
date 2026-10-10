@@ -18,7 +18,7 @@ except ImportError:
 
 _HTML_PATH = os.path.join(os.path.dirname(__file__), "weather_card.html")
 _TARGET_HTML_PATH = os.path.join(os.path.dirname(__file__), "weather_target_card.html")
-_CARD_VERSION = "mobile-weather-v7-real-hourly-trends"
+_CARD_VERSION = "mobile-weather-v8-available-observations"
 _TARGET_CARD_VERSION = "target-weather-v2-cropped"
 _WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
@@ -46,18 +46,21 @@ def _icon_img_tag(weather_code: str, size: int = 64) -> str:
 
 
 def _clean_temp(value: object, fallback: str = "--") -> str:
-    text = str(value if value is not None else "").replace("℃", "").replace("°", "").strip()
-    match = re.search(r"-?\d+(?:\.\d+)?", text)
-    if not match:
-        return fallback
-    number = float(match.group(0))
-    return str(int(round(number)))
+    number = _number(value)
+    return str(int(round(number))) if number is not None else fallback
+
+
+def _missing_value(value: object) -> bool:
+    return value in (None, "", [], {}) or str(value).strip().lower() in {
+        "", "--", "null", "none", "nan", "9999", "9999.0",
+    }
 
 
 def _number(value: object) -> float | None:
     text = str(value if value is not None else "").replace("℃", "").replace("°", "")
     match = re.search(r"-?\d+(?:\.\d+)?", text)
-    return float(match.group(0)) if match else None
+    number = float(match.group(0)) if match else None
+    return None if _missing_value(number) else number
 
 
 def _first_value(data: dict | None, *keys: str, default: object = "") -> object:
@@ -65,15 +68,17 @@ def _first_value(data: dict | None, *keys: str, default: object = "") -> object:
         return default
     for key in keys:
         value = data.get(key)
-        if value not in (None, "", [], {}):
+        if not _missing_value(value):
             return value
     return default
 
 
 def _as_text(value: object) -> str:
+    if _missing_value(value):
+        return ""
     if isinstance(value, (list, tuple)):
         return "转".join(str(item).strip() for item in value if str(item).strip())
-    return str(value or "").strip()
+    return str(value).strip()
 
 
 def _city_label(value: object) -> str:
@@ -118,7 +123,7 @@ def _normalize_percent(value: object) -> str:
 def _normalize_visibility(value: object) -> str:
     text = _as_text(value)
     if not text:
-        return "--"
+        return "暂缺"
     lower = text.lower().replace(" ", "")
     if "km" in lower or "千米" in text or "公里" in text:
         return text.replace("千米", "km").replace("公里", "km").replace(" ", "")
@@ -274,42 +279,33 @@ def _build_hourly_items(card_data: dict) -> str:
     raw_hours = card_data.get("hour") or card_data.get("hours") or []
     hours = [item for item in raw_hours if isinstance(item, dict)][:5]
     current_hour = datetime.now().hour
-    current_code = card_data.get("weather_code", "duoyun")
-    current_weather = card_data.get("weather", "")
-    current_temp = card_data.get("temp", "--")
-
     items: list[dict] = []
-    if hours:
-        for index, item in enumerate(hours):
-            weather_text = _as_text(_first_value(item, "wea", "weather", "text"))
-            raw_code = _as_text(_first_value(item, "wea_code", "weather_code", "code"))
-            items.append(
-                {
-                    "time": "现在" if index == 0 else _hour_label(
-                        _first_value(item, "time", "datetime", "date"),
-                        current_hour + index * 2,
-                    ),
-                    "temp": _clean_temp(_first_value(item, "temp", "temperature")),
-                    "code": _map_apihz_code(raw_code, weather_text),
-                }
-            )
-
-    while len(items) < 5:
-        index = len(items)
+    for index, item in enumerate(hours):
+        temperature = _clean_temp(_first_value(item, "temp", "tem", "temperature"))
+        if temperature == "--":
+            continue
+        weather_text = _as_text(_first_value(item, "wea", "weather", "text"))
+        raw_code = _as_text(_first_value(item, "wea_code", "weather_code", "code"))
         items.append(
             {
-                "time": "现在" if index == 0 else f"{(current_hour + index * 2) % 24:02d}时",
-                "temp": _clean_temp(current_temp) if index == 0 else "--",
-                "code": current_code,
+                "time": "现在" if index == 0 else _hour_label(
+                    _first_value(item, "time", "datetime", "date"),
+                    current_hour + index * 2,
+                ),
+                "temp": temperature,
+                "code": _map_apihz_code(raw_code, weather_text) if raw_code or weather_text else "",
             }
         )
+
+    if len(items) < 2:
+        return '<div class="hourly-unavailable">逐小时天气暂不可用</div>'
 
     html_items = []
     for item in items[:5]:
         html_items.append(
             '<div class="hour-item">'
             f'<div class="hour-time">{html_lib.escape(item["time"])}</div>'
-            f'<div class="hour-icon">{_icon_img_tag(item["code"], 76)}</div>'
+            f'<div class="hour-icon">{_icon_img_tag(item["code"], 76) if item["code"] else ""}</div>'
             f'<div class="hour-temp">{html_lib.escape(item["temp"])}°</div>'
             "</div>"
         )
@@ -411,8 +407,9 @@ def _build_html(card_data: dict, apihz_data: dict | None) -> str:
     feels = _clean_temp(card_data.get("feelst") or card_data.get("temp"))
     high = _clean_temp(today.get("high"))
     low = _clean_temp(today.get("low"))
-    air_value = _as_text(card_data.get("air")) or "--"
-    air_level = _air_level(air_value, card_data.get("air_level"))
+    air_value = _as_text(card_data.get("air"))
+    air_level = _air_level(air_value, card_data.get("air_level")) if air_value else ""
+    air_value = air_value or "暂缺"
     humidity = _normalize_percent(card_data.get("humidity"))
     wind_direction = _as_text(card_data.get("wind_direction"))
     wind_scale = _as_text(card_data.get("wind_scale"))
@@ -734,6 +731,8 @@ def build_weather_card_data(
     """合并七日天气与可选实况数据，构造竖版卡片所需字段。"""
     supplemental = supplemental_data if isinstance(supplemental_data, dict) else {}
     nowinfo = apihz_data.get("nowinfo") or {}
+    aqi = supplemental.get("aqi")
+    air_data = aqi if isinstance(aqi, dict) and not _missing_value(aqi.get("air")) else supplemental
     weather_text = _as_text(
         _first_value(supplemental, "weather", "wea", default=apihz_data.get("weather1", ""))
     )
@@ -766,18 +765,18 @@ def build_weather_card_data(
             default=_first_value(nowinfo, "humidity", default=""),
         ),
         "wind_direction": _as_text(
-            _first_value(supplemental, "wind", "wind_direction", default=nowinfo.get("windDirection", ""))
+            _first_value(supplemental, "wind", "wind_direction", default=_first_value(nowinfo, "windDirection"))
         ),
         "wind_scale": _as_text(
-            _first_value(supplemental, "wind_power", "wind_scale", default=nowinfo.get("windScale", ""))
+            _first_value(supplemental, "wind_power", "wind_scale", default=_first_value(nowinfo, "windScale"))
         ),
         "visibility": _first_value(
             supplemental,
             "visibility",
             default=_first_value(nowinfo, "visibility", default=""),
         ),
-        "air": _first_value(supplemental, "air", "aqi", default=""),
-        "air_level": _first_value(supplemental, "air_level", default=""),
+        "air": _first_value(air_data, "air") if isinstance(aqi, dict) else _first_value(air_data, "air", "aqi"),
+        "air_level": _first_value(air_data, "air_level"),
         "update_time": _first_value(
             supplemental,
             "update_time",

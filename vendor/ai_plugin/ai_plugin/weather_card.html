@@ -358,7 +358,14 @@
     height: 184px;
     margin-top: 18px;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  }
+
+  .hourly-unavailable {
+    grid-column: 1 / -1;
+    align-self: center;
+    text-align: center;
+    font-size: 24px;
   }
 
   .hour-item {
