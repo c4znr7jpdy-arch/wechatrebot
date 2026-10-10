@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const script = fs.readFileSync(process.argv[2], 'utf8');
+const script = require('./webui_source.cjs').managerScript(require('node:path').dirname(process.argv[2]));
 
 function fixture() {
   const draft = {account_id: 'account-a', arguments: {text: 'unsaved reminder'}};
@@ -35,12 +35,12 @@ function fixture() {
       if (value instanceof Error) throw value;
       return typeof value === 'function' ? value(...args) : value;
     },
-    loadGroupAnalysisScheduleDetail: async () => ({id: 'group-report'}),
     renderSchedules() {
       $('#scheduleRows').innerHTML = [...state.schedules.map(item => item.id),
         ...state.legacyMigrations.map(item => item.key)].join('|');
     },
     renderScheduledTasks() { $('#taskRows').innerHTML = (state.scheduledContext?.items || []).map(item => item.id).join('|'); },
+    renderGroupAnalysisMigration() {},
     updateScheduledSummary() {},
     reportError(error) { errors.push(error); },
     scheduledName() { return '热点资讯'; },
@@ -48,7 +48,7 @@ function fixture() {
     confirmAction(options) { dialogs.push(options); $('#modalBackdrop').hidden = false; },
   });
   for (const [startMarker, endMarker] of [
-    ['  async function loadSchedules(', '  async function loadGroupAnalysisScheduleDetail('],
+    ['  async function loadSchedules(', '  function renderGroupAnalysisMigration('],
     ['  async function beginLegacyMigration(', '  async function scheduleAction('],
   ]) {
     const start = script.indexOf(startMarker), end = script.indexOf(endMarker, start);
@@ -72,7 +72,7 @@ const cases = {
     assert.equal(f.$('#scheduleRows').innerHTML, '');
     assert.equal(f.$('#taskRows').innerHTML, '');
     assert.match(f.$('#scheduleContextMessage').textContent, /请登录原微信账号/);
-    assert.equal(f.state.groupAnalysisSchedule, null);
+    assert.equal(f.state.scheduledContext.legacy_group_analysis, undefined);
     assert.equal(f.$('#refreshSchedules').disabled, false);
     assertDraftRetained(f);
   },

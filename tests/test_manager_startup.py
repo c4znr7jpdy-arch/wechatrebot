@@ -64,7 +64,7 @@ def test_manager_loads_all_resources_and_opens_subscription(browser, manager_url
         page.close()
 
 
-@pytest.mark.parametrize("missing_script", ["subscription.js", "core-settings.js", "panel-layout.js"])
+@pytest.mark.parametrize("missing_script", ["subscription.js", "core-settings.js", "panel-layout.js", "features.js", "scheduled-tasks.js", "preview.js"])
 def test_manager_reports_missing_startup_dependency(browser, manager_url, missing_script, tmp_path: Path):
     page = browser.new_page()
     errors = []

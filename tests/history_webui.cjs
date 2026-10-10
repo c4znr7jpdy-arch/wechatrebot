@@ -46,7 +46,7 @@ function dates() {
 }
 
 function historyContext() {
-  const script = fs.readFileSync(path.join(webui, 'app.js'), 'utf8');
+  const script = require('./js/webui_source.cjs').managerScript(webui);
   const elements = new Map();
   const $ = (id) => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const state = {historyAccount: 'account-a', conversations: [], selectedMessages: [],

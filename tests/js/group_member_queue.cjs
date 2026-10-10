@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(process.argv[2], "utf8");
+const source = require("./webui_source.cjs").managerScript(require("node:path").dirname(process.argv[2]));
 const start = source.indexOf("  function pumpGroupMemberRequestQueue() {");
 const end = source.indexOf("  async function loadGroupMembers(", start);
 assert.ok(start >= 0 && end > start);

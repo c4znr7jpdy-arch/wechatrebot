@@ -1,3 +1,4 @@
+from webui_source import manager_script
 import json
 from pathlib import Path
 
@@ -190,7 +191,7 @@ def test_customer_logs_and_diagnostics_do_not_expose_core_brand_or_author():
 def test_core_ui_replaces_persona_and_keeps_templates_and_monitor():
     webui = Path(app_shell.__file__).with_name('app_webui')
     html = (webui / 'index.html').read_text(encoding='utf-8')
-    app = (webui / 'app.js').read_text(encoding='utf-8')
+    app = manager_script()
     core = (webui / 'core-settings.js').read_text(encoding='utf-8')
     assert 'data-settings-tab="core"' in html
     assert '人格身份与维护' not in html

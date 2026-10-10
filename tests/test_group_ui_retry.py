@@ -1,3 +1,4 @@
+from webui_source import manager_script
 from pathlib import Path
 import subprocess
 
@@ -5,9 +6,7 @@ from wechatrebot_manager import app_shell
 
 
 def _script() -> str:
-    return (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    return manager_script()
 
 
 def test_group_directory_first_load_retries_without_manual_refresh() -> None:

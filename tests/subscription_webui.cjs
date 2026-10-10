@@ -386,7 +386,7 @@ async function validBundledFallbackShowsTheRefreshWarning() {
 }
 
 function runCenterCanStartWithBridgeConnected() {
-  const app = fs.readFileSync(path.join(__dirname, '../src/wechatrebot_manager/app_webui/app.js'), 'utf8');
+  const app = require('./js/webui_source.cjs').managerScript(path.join(__dirname, '../src/wechatrebot_manager/app_webui'));
   const start = app.indexOf('  function renderStatus(');
   const end = app.indexOf('  async function refreshStatus(', start);
   assert.ok(start >= 0 && end > start);

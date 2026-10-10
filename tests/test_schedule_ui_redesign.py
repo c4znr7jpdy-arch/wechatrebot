@@ -1,3 +1,4 @@
+from webui_source import manager_script
 from pathlib import Path
 import subprocess
 
@@ -23,7 +24,7 @@ def test_schedule_list_keeps_a_concise_heading_and_integrated_toolbar() -> None:
 
 
 def test_schedule_empty_state_has_scenario_guidance_and_a_real_create_action() -> None:
-    script = (WEBUI / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (WEBUI / "app.css").read_text(encoding="utf-8")
 
     assert '$("#scheduleTableTotal").textContent = total;' in script

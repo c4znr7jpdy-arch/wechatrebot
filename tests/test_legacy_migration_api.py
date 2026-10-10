@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +27,8 @@ def api(tmp_path):
     ("set_schedule_enabled", ("job", False), "set_enabled"),
     ("update_schedule_time", ("job", "09:00"), "update_time"),
     ("delete_schedule", ("job",), "delete"),
+    ("migrate_group_analysis", ("token",), "migrate_group_analysis"),
+    ("cancel_group_analysis_migration", ("wxid_robot",), "cancel_group_analysis_migration"),
 ])
 def test_start_and_all_legacy_writes_share_the_action_lock(api, method, args, service_method):
     calls = []
@@ -38,6 +41,7 @@ def test_start_and_all_legacy_writes_share_the_action_lock(api, method, args, se
 
     service = SimpleNamespace(**{service_method: write})
     api._legacy_migrations = service
+    api._scheduled_tasks = service
     api._schedules = service
     with api._action_lock:
         assert getattr(api, method)(*args)["ok"] is False
@@ -49,7 +53,11 @@ def test_start_and_all_legacy_writes_share_the_action_lock(api, method, args, se
     assert not api._action_lock.locked()
 
 
-def test_in_flight_migration_blocks_other_ui_actions_until_completion(api):
+@pytest.mark.parametrize("method,service_name,service_method", [
+    ("migrate_legacy_schedule", "_legacy_migrations", "commit"),
+    ("migrate_group_analysis", "_scheduled_tasks", "migrate_group_analysis"),
+])
+def test_in_flight_migration_blocks_other_ui_actions_until_completion(api, method, service_name, service_method):
     entered = threading.Event()
     release = threading.Event()
     results = []
@@ -59,8 +67,11 @@ def test_in_flight_migration_blocks_other_ui_actions_until_completion(api):
         assert release.wait(3)
         return {"pending": True}
 
-    api._legacy_migrations = SimpleNamespace(commit=commit, cancel=lambda _key: pytest.fail("cancel raced"))
-    worker = threading.Thread(target=lambda: results.append(api.migrate_legacy_schedule("token")))
+    api._legacy_migrations = SimpleNamespace(cancel=lambda _key: pytest.fail("cancel raced"))
+    service = getattr(api, service_name, SimpleNamespace())
+    setattr(service, service_method, commit)
+    setattr(api, service_name, service)
+    worker = threading.Thread(target=lambda: results.append(getattr(api, method)("token")))
     worker.start()
     try:
         assert entered.wait(3)
@@ -74,8 +85,9 @@ def test_in_flight_migration_blocks_other_ui_actions_until_completion(api):
     assert not api._action_lock.locked()
 
 
-@pytest.mark.parametrize("failure", [None, OSError("private path"), ValueError("corrupt journal"), PayloadError("unsafe path")])
-def test_pending_or_unreadable_journal_blocks_start_and_releases_lock(api, monkeypatch, failure):
+@pytest.mark.parametrize("gate", ["has_pending_migrations", "has_pending_group_analysis_migration"])
+@pytest.mark.parametrize("failure", [None, OSError("private path"), ValueError("corrupt journal"), PayloadError("unsafe path"), sqlite3.DatabaseError("private database")])
+def test_pending_or_unreadable_journal_blocks_start_and_releases_lock(api, monkeypatch, gate, failure):
     def pending(root):
         assert root == api._install_root
         assert api._action_lock.locked()
@@ -83,12 +95,23 @@ def test_pending_or_unreadable_journal_blocks_start_and_releases_lock(api, monke
             raise failure
         return True
 
-    monkeypatch.setattr(app_shell, "has_pending_migrations", pending)
+    monkeypatch.setattr(app_shell, gate, pending)
     result = api.start_robot()
     assert result["data"]["accepted"] is False
     assert "迁移" in result["message"]
     assert "private path" not in str(result)
     assert not api._action_lock.locked()
+
+
+def test_analysis_migration_uses_the_maintenance_lifecycle(api):
+    calls = []
+    api._lifecycle.stop_for_maintenance = lambda: calls.append("stop") or True
+    api._lifecycle.maintenance_stopped = lambda: calls.append("stopped") or True
+    service = api._scheduled_task_service()
+    assert service.analysis_migration.stop() is True
+    assert service.analysis_migration.stopped() is True
+    assert calls == ["stop", "stopped"]
+    assert api._scheduled_task_service() is service
 
 
 def test_completed_migration_gate_allows_normal_start_worker(api, monkeypatch):

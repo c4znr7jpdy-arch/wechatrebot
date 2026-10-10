@@ -1,3 +1,4 @@
+from webui_source import manager_script
 import copy
 import json
 from pathlib import Path
@@ -7,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from wechatrebot_manager import app_shell
+from wechatrebot_manager import app_shell, chat_api, model_api, schedule_api, update_api
+from wechatrebot_manager.customer_config import ProviderService
 from wechatrebot_manager.error_catalog import load_error_catalog
 from wechatrebot_manager.launcher import ServiceStopError
 from wechatrebot_manager.payload import PayloadError
@@ -62,7 +64,7 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
 
 def test_theme_preference_survives_new_api_instances_and_preserves_other_preferences(tmp_path: Path) -> None:
     path = tmp_path / "data/manager/ui-preferences.json"
-    app_shell.write_json_atomic(path, {"other": "keep"})
+    model_api.write_json_atomic(path, {"other": "keep"})
     assert app_shell.load_ui_theme(tmp_path) == ""
     for theme in ("dark", "light"):
         assert _api(tmp_path).save_theme(theme) == {"ok": True, "data": {"theme": theme}, "message": ""}
@@ -100,6 +102,8 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
         "set_scheduled_task_enabled", "delete_scheduled_task",
         "preview_scheduled_task", "get_scheduled_task_runs",
         "test_scheduled_task",
+        "preview_group_analysis_migration", "migrate_group_analysis",
+        "cancel_group_analysis_migration",
         "parse_scheduled_command", "preview_scheduled_times",
     }
 
@@ -121,7 +125,7 @@ def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: 
 
 def test_feature_command_reference_shows_scheduleability_status() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert "function featureCommandScheduleHint" in script
@@ -137,7 +141,7 @@ def test_feature_command_reference_shows_scheduleability_status() -> None:
     ("update_schedule_time", ("job", "09:00"), "update_time"),
     ("delete_schedule", ("job",), "delete"),
 ])
-@pytest.mark.parametrize("error", [app_shell.PluginCenterError("service unavailable"), app_shell.sqlite3.OperationalError("database is locked")])
+@pytest.mark.parametrize("error", [app_shell.PluginCenterError("service unavailable"), schedule_api.sqlite3.OperationalError("database is locked")])
 def test_legacy_schedule_errors_return_a_webui_error(tmp_path, operation, args, method, error):
     api = _api(tmp_path)
     def fail(*_args):
@@ -216,7 +220,7 @@ def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monk
     def services(_root):
         model = f"model-{len(loaded)}"
         loaded.append(model)
-        return (app_shell.ProviderService(
+        return (ProviderService(
             provider_id=f"example/{model}", source_id="example", display_name=model,
             api_base="https://example.test/v1", model=model, api_key="synthetic-key",
             is_default=True, is_recommended=False,
@@ -298,14 +302,14 @@ def test_first_provider_save_uses_jyjapi_grok_source(
 ) -> None:
     api = _api(tmp_path)
     captured = {}
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
 
     def fake_save(_root, profile, *, make_default=True):
         captured["profile"] = profile.normalized()
         captured["make_default"] = make_default
         return captured["profile"]
 
-    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+    monkeypatch.setattr(model_api, "save_provider_profile", fake_save)
 
     result = api.save_provider(
         {
@@ -324,15 +328,15 @@ def test_first_provider_save_uses_jyjapi_grok_source(
 def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     captured = {}
-    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: ())
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
 
     def fake_save(_root, profile, *, make_default=True):
         captured["profile"] = profile
         return profile.normalized()
 
-    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+    monkeypatch.setattr(model_api, "save_provider_profile", fake_save)
     result = api.save_provider({
         "api_key": "mimo-secret",
         "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
@@ -354,10 +358,10 @@ def test_custom_chat_service_save_preserves_declared_multimodal_input(
 ) -> None:
     api = _api(tmp_path)
     captured = {}
-    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: ())
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: ())
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "EngineApiClient",
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
@@ -366,7 +370,7 @@ def test_custom_chat_service_save_preserves_declared_multimodal_input(
         captured["profile"] = profile.normalized()
         return captured["profile"]
 
-    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+    monkeypatch.setattr(model_api, "save_provider_profile", fake_save)
 
     result = api.save_provider({
         "api_key": "multimodal-secret",
@@ -409,7 +413,7 @@ def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_pat
             config.update(copy.deepcopy(payload))
             return {}
 
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: HotClient())
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: HotClient())
     result = api.save_web_search_settings(
         {"enabled": True, "provider": "bocha", "link_enabled": True, "key": "bocha-key"}
     )
@@ -433,10 +437,10 @@ def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_pat
 
     captured = {}
     monkeypatch.setattr(
-        app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False)
+        model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False)
     )
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "save_web_search_settings",
         lambda _root, values: captured.setdefault("values", values) or {
             "enabled": False,
@@ -470,9 +474,9 @@ def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch
             state["enabled"] = enabled
             return True
 
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: FakeClient())
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: FakeClient())
     monkeypatch.setattr(
-        app_shell, "load_provider_services",
+        model_api, "load_provider_services",
         lambda _root: (SimpleNamespace(provider_id=provider_id, thinking_enabled=state["enabled"]),),
     )
     result = api.set_provider_thinking(provider_id, False)
@@ -494,9 +498,9 @@ def test_new_provider_keeps_the_existing_reply_model(
         is_default=True,
     )
     monkeypatch.setattr(
-        app_shell, "load_provider_services", lambda _root: (existing,)
+        model_api, "load_provider_services", lambda _root: (existing,)
     )
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
 
     class AvailableClient:
         @staticmethod
@@ -508,7 +512,7 @@ def test_new_provider_keeps_the_existing_reply_model(
             captured["profile"] = profile.normalized()
             captured.update(kwargs)
 
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: AvailableClient())
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: AvailableClient())
 
     result = api.save_provider(
         {
@@ -539,10 +543,10 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
         api_key="developer-key",
         is_default=False,
     )
-    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: (selected,))
-    monkeypatch.setattr(app_shell, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "EngineApiClient",
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
@@ -552,7 +556,7 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
         captured["make_default"] = make_default
         return captured["profile"]
 
-    monkeypatch.setattr(app_shell, "save_provider_profile", fake_save)
+    monkeypatch.setattr(model_api, "save_provider_profile", fake_save)
 
     result = api.save_provider(
         {
@@ -575,15 +579,15 @@ def test_model_settings_fill_only_empty_analysis_binding(
     monkeypatch, tmp_path: Path, online: bool, operation: str, binding: str,
 ) -> None:
     api = _api(tmp_path)
-    profile = app_shell.OpenAIProviderProfile(
+    profile = model_api.OpenAIProviderProfile(
         api_key="test-key", api_base="https://example.test/v1", model="chat-model",
     ).normalized()
-    app_shell.save_provider_profile(tmp_path, profile)
+    model_api.save_provider_profile(tmp_path, profile)
     data_root = tmp_path / "app" / "astrbot" / "data"
     (data_root / "plugins" / "astrbot_plugin_angel_heart").mkdir(parents=True)
     path = data_root / "config" / "astrbot_plugin_angel_heart_config.json"
     config = {"analyzer_model": binding, "wake_interaction": {"enter_on_mention_only": False}}
-    app_shell.write_json_atomic(path, config)
+    model_api.write_json_atomic(path, config)
     calls = []
 
     class Client:
@@ -606,7 +610,7 @@ def test_model_settings_fill_only_empty_analysis_binding(
             config.update(values)
             return {"verified": True, "state": "applied"}
 
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: Client())
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
     if operation == "save":
         result = api.save_provider({
             "provider_id": profile.model_id, "api_key": "",
@@ -625,15 +629,15 @@ def test_model_settings_fill_only_empty_analysis_binding(
 
 def test_analysis_binding_failure_reports_model_already_saved(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
-    profile = app_shell.OpenAIProviderProfile(
+    profile = model_api.OpenAIProviderProfile(
         api_key="test-key", api_base="https://example.test/v1", model="chat-model",
     ).normalized()
-    app_shell.save_provider_profile(tmp_path, profile)
+    model_api.save_provider_profile(tmp_path, profile)
     (tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart").mkdir(parents=True)
     calls = []
 
     def reject(*args):
-        raise app_shell.PluginCenterError("未收到生效确认")
+        raise model_api.PluginCenterError("未收到生效确认")
 
     client = SimpleNamespace(
         is_available=lambda: True,
@@ -641,7 +645,7 @@ def test_analysis_binding_failure_reports_model_already_saved(monkeypatch, tmp_p
         get_config=lambda module: {"config": {}, "revision": "before"},
         save_config=reject,
     )
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: client)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: client)
     result = api.set_default_provider(profile.model_id)
     assert result["ok"] is False
     assert calls == [profile.model_id]
@@ -653,11 +657,11 @@ def test_adding_extra_model_keeps_analysis_on_default_chat(
     monkeypatch, tmp_path: Path, kind: str,
 ) -> None:
     api = _api(tmp_path)
-    default = app_shell.save_provider_profile(tmp_path, app_shell.OpenAIProviderProfile(
+    default = model_api.save_provider_profile(tmp_path, model_api.OpenAIProviderProfile(
         api_key="test-key", api_base="https://example.test/v1", model="default-chat",
     ))
     (tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart").mkdir(parents=True)
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
     result = api.save_provider({
         "api_key": "test-key", "api_base": "https://example.test/v1",
         "model": "extra-model", "service_kind": kind,
@@ -677,13 +681,13 @@ def test_model_discovery_reuses_saved_key_without_exposing_it(
         api_key="saved-secret",
     )
     captured = {}
-    monkeypatch.setattr(app_shell, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
 
     def fake_discover(**values):
         captured.update(values)
         return ("deepseek-chat", "deepseek-reasoner")
 
-    monkeypatch.setattr(app_shell, "discover_openai_models", fake_discover)
+    monkeypatch.setattr(model_api, "discover_openai_models", fake_discover)
 
     result = api.discover_provider_models(
         {
@@ -716,20 +720,20 @@ def test_deleting_current_provider_requires_and_applies_replacement(
     )
     calls = []
     monkeypatch.setattr(
-        app_shell, "load_provider_services", lambda _root: (current, replacement)
+        model_api, "load_provider_services", lambda _root: (current, replacement)
     )
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "EngineApiClient",
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "set_default_provider",
         lambda _root, provider_id: calls.append(("default", provider_id)),
     )
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "delete_provider_profile",
         lambda _root, provider_id: calls.append(("delete", provider_id)),
     )
@@ -793,14 +797,14 @@ def test_deleting_referenced_provider_hot_migrates_feature_config(
             calls.append(("delete", provider_id, source_id))
 
     monkeypatch.setattr(
-        app_shell, "load_provider_services", lambda _root: (current, replacement)
+        model_api, "load_provider_services", lambda _root: (current, replacement)
     )
     monkeypatch.setattr(
-        app_shell,
+        model_api,
         "provider_reference_modules",
         lambda _root, _provider_id, strict=False: ("astrbot_plugin_livingmemory",),
     )
-    monkeypatch.setattr(app_shell, "EngineApiClient", lambda _root: FakeClient())
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: FakeClient())
 
     rejected = api.delete_provider(current.provider_id)
     assert rejected["ok"] is False
@@ -1094,7 +1098,7 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
         package_sha256="A" * 64,
         mandatory=False,
     )
-    monkeypatch.setattr(app_shell, "check_for_update", lambda *_args, **_kwargs: release)
+    monkeypatch.setattr(update_api, "check_for_update", lambda *_args, **_kwargs: release)
     api = _api(tmp_path)
 
     result = api.check_update()
@@ -1120,9 +1124,9 @@ def test_unavailable_mandatory_update_keeps_robot_start_blocked(
     api = _api(tmp_path)
 
     def unavailable(*_args, **_kwargs):
-        raise app_shell.MandatoryUpdateUnavailable("清单缺少可用更新。")
+        raise update_api.MandatoryUpdateUnavailable("清单缺少可用更新。")
 
-    monkeypatch.setattr(app_shell, "check_for_update", unavailable)
+    monkeypatch.setattr(update_api, "check_for_update", unavailable)
 
     result = api.check_update()
 
@@ -1163,19 +1167,19 @@ def test_install_update_runs_in_background_and_reports_progress(
     )
     stops = []
     api._lifecycle.request_stop = lambda: stops.append(True)
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
     launched = threading.Event()
     prepared = SimpleNamespace(payload_root=tmp_path / "payload")
-    monkeypatch.setattr(app_shell, "payload_requires_runtime_stop", lambda path: runtime_stop)
+    monkeypatch.setattr(update_api, "payload_requires_runtime_stop", lambda path: runtime_stop)
 
     def fake_prepare(*_args, progress_callback, **_kwargs):
         progress_callback("download", 50, 100)
         progress_callback("verify", 4, 4)
         return prepared
 
-    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
-    monkeypatch.setattr(app_shell, "create_update_plan", lambda *_args, **_kwargs: "plan")
-    monkeypatch.setattr(app_shell, "launch_update_helper", lambda _plan: launched.set())
+    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
+    monkeypatch.setattr(update_api, "create_update_plan", lambda *_args, **_kwargs: "plan")
+    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: launched.set())
 
     result = api.install_update("0.9.0")
 
@@ -1221,8 +1225,8 @@ def test_background_download_waits_for_owned_wechat_before_stopping_services(
         )
 
     api._lifecycle.refresh = refresh_lifecycle
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(app_shell.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_api.time, "sleep", lambda _seconds: None)
     launched = threading.Event()
     launch_states = []
     prepared = SimpleNamespace()
@@ -1231,14 +1235,14 @@ def test_background_download_waits_for_owned_wechat_before_stopping_services(
         progress_callback("download", 100, 100)
         return prepared
 
-    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
-    monkeypatch.setattr(app_shell, "create_update_plan", lambda *_args, **_kwargs: "plan")
+    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
+    monkeypatch.setattr(update_api, "create_update_plan", lambda *_args, **_kwargs: "plan")
 
     def fake_launch(_plan):
         launch_states.append(api._lifecycle.refresh().state.value)
         launched.set()
 
-    monkeypatch.setattr(app_shell, "launch_update_helper", fake_launch)
+    monkeypatch.setattr(update_api, "launch_update_helper", fake_launch)
     result = api.install_update("0.9.0")
 
     assert result["data"]["accepted"] is True
@@ -1263,7 +1267,7 @@ def test_optional_update_download_does_not_stop_running_robot(
     )
     api = _api(tmp_path)
     api._available_update = release
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
     prepared = SimpleNamespace(release=release)
     started = threading.Event()
 
@@ -1272,7 +1276,7 @@ def test_optional_update_download_does_not_stop_running_robot(
         started.set()
         return prepared
 
-    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
+    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
 
     result = api.download_update("0.9.0")
 
@@ -1309,10 +1313,10 @@ def test_update_maps_managed_service_stop_failures(
     api._lifecycle.request_stop = lambda: (_ for _ in ()).throw(
         ServiceStopError(service_name, service_name)
     )
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
     prepared = SimpleNamespace(release=release)
     monkeypatch.setattr(
-        app_shell,
+        update_api,
         "prepare_update",
         lambda *_args, **_kwargs: prepared,
     )
@@ -1345,7 +1349,7 @@ def test_install_update_surfaces_background_verification_failure(
     api._lifecycle.refresh = lambda: SimpleNamespace(
         state=SimpleNamespace(value="STOPPED"), online=False, can_stop=False
     )
-    monkeypatch.setattr(app_shell.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
     failed = threading.Event()
 
     def fake_prepare(*_args, **_kwargs):
@@ -1354,7 +1358,7 @@ def test_install_update_surfaces_background_verification_failure(
         finally:
             failed.set()
 
-    monkeypatch.setattr(app_shell, "prepare_update", fake_prepare)
+    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
 
     result = api.install_update("0.9.0")
 
@@ -1369,8 +1373,7 @@ def test_install_update_surfaces_background_verification_failure(
 
 def test_public_api_allowlist_matches_frontend_calls() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = "\n".join((webui / name).read_text(encoding="utf-8")
-                       for name in ("app.js", "subscription.js"))
+    script = manager_script()
     called = {
         match for match in __import__("re").findall(
             r'(?:api|runtimeAction)\("([a-z_]+)"', script)
@@ -1384,7 +1387,7 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
 
 def test_run_center_force_stop_control_is_single_and_secondary() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1398,7 +1401,7 @@ def test_run_center_force_stop_control_is_single_and_secondary() -> None:
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1410,9 +1413,7 @@ def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
 
 
 def test_cached_feature_switch_revalidates_and_model_discovery_keeps_selection() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
     feature_loader = script[
         script.index("async function openFeature") : script.index(
             "function getAtPath"
@@ -1431,9 +1432,7 @@ def test_cached_feature_switch_revalidates_and_model_discovery_keeps_selection()
 
 
 def test_feature_detail_guards_optional_model_bindings_without_a_form() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
     feature_renderer = script[
         script.index("function renderFeatureDetail") : script.index(
             "function helpAudienceMatch"
@@ -1447,9 +1446,7 @@ def test_feature_detail_guards_optional_model_bindings_without_a_form() -> None:
 
 
 def test_feature_details_are_warmed_but_revalidated_before_editing() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert "async function prefetchFeatureDetails(generation)" in script
     assert "void prefetchFeatureDetails(++state.featurePrefetch);" in script
@@ -1464,7 +1461,7 @@ def test_feature_details_are_warmed_but_revalidated_before_editing() -> None:
 
 def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     audience = markup[markup.index('id="featureAudience"'):markup.index('</div>', markup.index('id="featureAudience"'))]
 
@@ -1492,9 +1489,7 @@ def test_feature_save_actions_do_not_shift_with_status_copy() -> None:
 
 
 def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert "async function refreshVisibleFeatureState()" in script
     assert 'window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });' in script
@@ -1503,9 +1498,7 @@ def test_feature_center_refreshes_enabled_state_after_specialized_settings() -> 
 
 
 def test_feature_center_reloads_offline_cache_after_robot_becomes_online() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert "const wasOnline = Boolean(state.status?.online);" in script
     assert "state.featureDetails = {};" in script
@@ -1546,7 +1539,7 @@ def test_feature_page_opens_when_lifecycle_is_online_but_engine_probe_lags(tmp_p
 
 def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1565,7 +1558,7 @@ def test_response_trace_is_rendered_as_a_duration_scaled_gantt_chart() -> None:
 
 def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1592,7 +1585,7 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
 
 def test_chat_management_adds_private_directory_profile_and_feature_scope() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1619,7 +1612,7 @@ def test_chat_management_adds_private_directory_profile_and_feature_scope() -> N
 
 def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert "void hydrateGroupMemberCounts" in script
@@ -1643,7 +1636,7 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
 
 def test_message_center_clears_data_when_the_robot_account_changes() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
 
     assert 'historyAccount: ""' in script
     assert 'historyReadyAccount: ""' in script
@@ -1662,7 +1655,7 @@ def test_message_center_clears_data_when_the_robot_account_changes() -> None:
 
 def test_091_history_and_group_layout_regressions_are_covered() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -1690,7 +1683,7 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
 
 def test_history_message_avatars_select_sender_in_inspector() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert 'selectedSenderKey: ""' in script
@@ -1707,9 +1700,7 @@ def test_history_message_avatars_select_sender_in_inspector() -> None:
 
 
 def test_history_date_filters_remain_user_selected() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert "historyAutoDate" not in script
     assert "rollHistoryDatesForward" not in script
@@ -1755,7 +1746,7 @@ def test_history_messages_load_in_invisible_twenty_item_pages(tmp_path: Path) ->
     assert received["before_id"] == 50
 
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
     assert "const HISTORY_PAGE_SIZE = 20;" in script
@@ -1794,7 +1785,7 @@ def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -
 
 def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
     handler = script[
@@ -1814,9 +1805,7 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
 
 
 def test_webui_schedules_startup_and_recurring_update_checks() -> None:
-    script = (
-        Path(app_shell.__file__).with_name("app_webui") / "app.js"
-    ).read_text(encoding="utf-8")
+    script = manager_script()
 
     assert "function automaticUpdateIntervalMs()" in script
     assert "state.bootstrap?.update?.check_interval_seconds" in script
@@ -1827,7 +1816,7 @@ def test_webui_schedules_startup_and_recurring_update_checks() -> None:
 
 def test_webui_keeps_update_progress_and_errors_visible() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert 'api("get_update_status")' in script
@@ -1841,7 +1830,7 @@ def test_webui_keeps_update_progress_and_errors_visible() -> None:
 
 def test_model_service_starts_empty_and_opens_a_dedicated_editor() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert 'id="providerOverview"' in markup
@@ -1858,9 +1847,7 @@ def test_model_service_starts_empty_and_opens_a_dedicated_editor() -> None:
 
 def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() -> None:
     root = Path(app_shell.__file__).parents[2]
-    script = (Path(app_shell.__file__).with_name("app_webui") / "app.js").read_text(
-        encoding="utf-8"
-    )
+    script = manager_script()
     features = json.loads(
         (root / "release" / "feature-set.json").read_text(encoding="utf-8")
     )["features"]
@@ -1877,9 +1864,7 @@ def test_voice_clone_only_directs_users_to_its_dedicated_configuration_page() ->
 
 def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page() -> None:
     root = Path(app_shell.__file__).parents[2]
-    script = (Path(app_shell.__file__).with_name("app_webui") / "app.js").read_text(
-        encoding="utf-8"
-    )
+    script = manager_script()
     features = json.loads(
         (root / "release" / "feature-set.json").read_text(encoding="utf-8")
     )["features"]
@@ -1896,7 +1881,7 @@ def test_short_drama_uses_scheduled_tasks_without_a_dedicated_configuration_page
 
 def test_twitter_is_embedded_in_feature_center_without_generic_configuration() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     features = json.loads(
         (webui.parents[2] / "release" / "feature-set.json").read_text(encoding="utf-8")
     )["features"]
@@ -1921,7 +1906,7 @@ def test_feature_page_bridge_unwraps_plugin_page_success_and_error_envelopes() -
 
 def test_model_combobox_opens_the_complete_discovered_list_before_filtering() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert "providerModelFiltering: false" in script
@@ -1936,7 +1921,7 @@ def test_model_combobox_opens_the_complete_discovered_list_before_filtering() ->
 
 def test_model_editor_keeps_natural_height_and_explains_default_selection() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
@@ -1951,7 +1936,7 @@ def test_model_editor_keeps_natural_height_and_explains_default_selection() -> N
 
 def test_model_editor_defaults_chat_services_to_multimodal_input() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert '<span>模型供应商</span>' in markup
@@ -1969,7 +1954,7 @@ def test_model_editor_defaults_chat_services_to_multimodal_input() -> None:
 
 def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
@@ -1986,7 +1971,7 @@ def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> 
 
 def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    app_script = (webui / "app.js").read_text(encoding="utf-8")
+    app_script = manager_script()
     app_styles = (webui / "app.css").read_text(encoding="utf-8")
     plugin_webui = Path(app_shell.__file__).with_name("plugin_webui")
     plugin_script = (plugin_webui / "app.js").read_text(encoding="utf-8")
@@ -2002,7 +1987,7 @@ def test_image_settings_reveal_one_optional_fallback_in_both_shells() -> None:
 
 def test_web_search_settings_show_only_selected_provider() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
@@ -2015,7 +2000,7 @@ def test_web_search_settings_show_only_selected_provider() -> None:
 
 def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert '"停止运行"' in script
@@ -2025,7 +2010,7 @@ def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
 
 def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
-    script = (webui / "app.js").read_text(encoding="utf-8")
+    script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert 'previewFeature("feature-group-analysis", "群聊分析"' in script
@@ -2035,12 +2020,14 @@ def test_088_preview_lists_simplified_group_analysis_without_checkin_task() -> N
     assert '配置自动日报' in script
     assert 'id="groupAnalysisSchedulePanel"' not in markup
     assert '<option value="group_analysis">群聊分析</option>' in markup
-    assert 'groupAnalysisConfigFromEditor(state.scheduledEditor)' in script
-    assert 'data-remove-analysis-time' in script
-    assert '停用群分析自动日报？' in script
+    assert 'groupAnalysisConfigFromEditor' not in script
+    assert 'id="scheduledAnalysisDays"' in script
+    assert 'data-task-action="runs"' in script
+    assert 'preview_group_analysis_migration' in script
+    assert 'groupAnalysisScheduledTask' not in script
     assert 'data-config-section="${escapeHtml(path.join("."))}"' in script
-    assert 'if (action === "group_analysis")' in script
-    assert '已打开群聊分析自动日报设置' in script
+    assert 'if (editor.action === "group_analysis")' in script
+    assert '确认迁移为草稿' in script
     assert 'class="feature-quick-reference"' in script
     assert 'id="featureQuickReference"' in script
     assert 'detail.guide?.commands' in script

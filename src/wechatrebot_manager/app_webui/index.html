@@ -337,6 +337,7 @@
           </div>
           <div id="scheduleContextMessage" class="schedule-notice" role="status" hidden></div>
           <div id="scheduleListView">
+            <section id="groupAnalysisMigration" class="schedule-notice" aria-label="旧日报迁移" hidden></section>
             <div class="schedule-stat-pills" aria-label="任务统计"><article><span>全部</span><strong id="scheduleTotal">0</strong></article><article><span>已启用</span><strong id="scheduleRunning">0</strong></article><article><span>已暂停</span><strong id="schedulePaused">0</strong></article></div>
             <section class="table-panel panel" aria-label="任务列表">
               <div class="schedule-table-topbar">
@@ -494,7 +495,16 @@
   <script src="report-preview.js"></script>
   <script src="panel-layout.js"></script>
   <script src="subscription.js?v=20261009"></script>
-  <script src="app.js?v=20260922-force-stop-layout"></script>
+  <script src="features.js"></script>
+  <script src="chat-management.js"></script>
+  <script src="message-history.js"></script>
+  <script src="scheduled-tasks.js"></script>
+  <script src="model-services.js"></script>
+  <script src="settings.js"></script>
+  <script src="activity.js"></script>
+  <script src="updates.js"></script>
+  <script src="preview.js"></script>
+  <script src="app.js?v=20261010-modules"></script>
   <dialog id="historyDateDialog" class="date-range-dialog" aria-labelledby="rangeTitle">
     <div class="panel-heading"><h2 id="rangeTitle">选择日期范围</h2><button type="button" id="rangeWeek" class="button ghost small">最近一周</button></div>
     <p class="subtle">不选日期时显示最新消息，每次加载 20 条；向上滚动可查看更早消息。</p>
