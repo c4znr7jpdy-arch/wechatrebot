@@ -1,0 +1,50 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/inbound_image.py b/hook_41827_astrbot_bridge/src/hook_bridge/inbound_image.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/inbound_image.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/inbound_image.py
+@@ -245,6 +245,24 @@
+     return "".join(part.strip() for part in root.itertext()).strip()
+ 
+ 
++def _quoted_app_text(value: str) -> str:
++    """Read the immediate app title without following an older nested quote."""
++    unavailable = "[引用消息内容不可用]"
++    root = _parse_xml_layers(value)
++    if root is None:
++        return unavailable
++    appmsg = root if _local_name(root.tag) == "appmsg" else next(
++        (node for node in root if _local_name(node.tag) == "appmsg"), None
++    )
++    if appmsg is None:
++        return unavailable
++    fields = {_local_name(node.tag): (node.text or "").strip() for node in appmsg}
++    title = fields.get("title", "")
++    if not title:
++        return unavailable
++    return title if fields.get("type") == "57" else f"[引用的应用消息] {title}"
++
++
+ def parse_quoted_message(xml: str) -> QuotedMessage | None:
+     """Parse a WeChat type=57 appmsg and its refermsg payload.
+ 
+@@ -269,6 +287,8 @@
+         return None
+     content_node = _find_first(refermsg, "content")
+     content = (content_node.text or "").strip() if content_node is not None else ""
++    if quote_type_int == 49 and content_node is not None and len(content_node):
++        content = "".join(ET.tostring(node, encoding="unicode") for node in content_node)
+     user_text = _node_text(appmsg, "title")
+     sender_name = _node_text(refermsg, "displayname")
+     sender_id = _node_text(refermsg, "chatusr") or _node_text(refermsg, "fromusr")
+@@ -284,7 +304,11 @@
+     elif quote_type_int == 1:
+         content = _quoted_plain_text(content)
+     else:
+-        content = _decode_layers(content)
++        # App replies (including replies to replies) share WeChat type 49 with
++        # attachments. Represent their readable body through the existing text
++        # Reply path; unsupported quoted media must never download as a file.
++        content = _quoted_app_text(content) if quote_type_int == 49 else "[引用消息内容不可用]"
++        quote_type_int = 1
+     return QuotedMessage(
+         quote_type=quote_type_int,
+         user_text=user_text,
