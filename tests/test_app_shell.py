@@ -1379,7 +1379,9 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
             r'(?:api|runtimeAction|boundedRequest)\("([a-z_]+)"', script)
     }
 
-    assert called | {"start_robot", "stop_robot", "force_stop_robot", "record_ui_error"} == set(
+    # Compatibility APIs remain available but are no longer exposed as settings controls.
+    assert called | {"start_robot", "stop_robot", "force_stop_robot", "record_ui_error",
+                     "save_memory_settings", "save_emotion_settings", "preview_experience"} == set(
         app_shell.PUBLIC_API_METHODS
     )
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
@@ -1573,7 +1575,7 @@ def test_group_directory_page_is_silent_account_scoped_and_beginner_friendly() -
     assert 'item.wechat_id || "未提供"' in script
     assert 'item.user_id || "未提供"' in script
     assert 'previousAccount !== state.groupAccount' in script
-    assert "定时限额不影响普通回复；这里只修改机器人规则。" in script
+    assert "group-list-count" in script
     assert "从群聊列表添加" in script
     assert "无需在群里发送命令" in script
     assert "群聊数量暂不可用" in script

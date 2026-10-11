@@ -18,12 +18,15 @@ window.createChatManagement = function (helpers) {
     fullTime,
     icon,
     openScheduledForChat,
+    openCoreTemplates,
     readHomeSetupAlertDismissals,
     reportError,
     state,
     toast,
     updatePolicyToggle,
   } = helpers;
+
+  const chatProfiles = window.createChatProfiles({api, escapeHtml, confirmAction, openCoreTemplates, state});
 
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
@@ -243,13 +246,13 @@ window.createChatManagement = function (helpers) {
       const memberData = state.groupMembers[item.group_id];
       const cachedCount = hasGroupMemberCount(item.member_count) ? item.member_count : memberData?.total;
       const memberCount = hasGroupMemberCount(cachedCount)
-        ? escapeHtml(cachedCount)
+        ? `${escapeHtml(cachedCount)} 人`
         : memberData?.error
           ? '<span class="member-count-state error">读取失败</span>'
           : '<span class="member-count-state loading">读取中</span>';
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
-        <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small>${selected ? "机器人已启用" : "未单独设置"}</small></span></span></td>
+        <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small class="group-list-count">${memberCount}</small></span></span></td>
         <td><code class="group-id">${escapeHtml(item.group_id)}</code></td>
         <td>${memberCount}</td>
         <td><div class="row-actions"><button class="row-action copy-group" type="button" data-group-id="${escapeHtml(item.group_id)}">复制</button><button class="row-action inspect-group ${selected ? "active" : ""}" type="button" data-group-id="${escapeHtml(item.group_id)}">${selected ? "正在查看" : "查看"}</button></div></td>
@@ -307,10 +310,11 @@ window.createChatManagement = function (helpers) {
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><div class="member-identities"><small><span>微信号</span>${escapeHtml(item.wechat_id || "未提供")}</small><small><span>微信标识</span>${escapeHtml(item.user_id || "未提供")}</small></div></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
     const header = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
-    const tabs = `<div class="inspector-tabs" aria-label="群聊详情分类"><button type="button" data-inspector-view="policy" aria-pressed="${state.groupInspectorView === "policy"}" class="${state.groupInspectorView === "policy" ? "active" : ""}">群聊规则</button><button type="button" data-inspector-view="members" aria-pressed="${state.groupInspectorView === "members"}" class="${state.groupInspectorView === "members" ? "active" : ""}">群成员</button></div>`;
+    const tabs = `<div class="inspector-detail-actions"><button class="row-action" type="button" data-inspector-view="${state.groupInspectorView === "members" ? "policy" : "members"}">${state.groupInspectorView === "members" ? "返回群聊规则" : "查看群成员"}</button><button class="row-action copy-selected-group" type="button">复制群标识</button></div>`;
     const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
     const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">微信未提供的信息显示为“未知”。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
     panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
+    $(".copy-selected-group", panel)?.addEventListener("click", () => copyText(group.group_id, "群标识"));
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "group", id: group.group_id, name: group.name}, state.groupAccount));
     $$('[data-inspector-view]', panel).forEach((button) => button.addEventListener("click", () => {
       state.groupInspectorView = button.dataset.inspectorView;
@@ -323,6 +327,7 @@ window.createChatManagement = function (helpers) {
     bindAvatarFallbacks(panel);
     const policyForm = $("#groupPolicyForm");
     if (policyForm) {
+      void chatProfiles.mount($("#groupChatProfile"), group.group_id, "group", state.groupAccount);
       policyForm.addEventListener("submit", saveGroupPolicy);
       $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updatePolicyToggle));
     }
@@ -337,15 +342,15 @@ window.createChatManagement = function (helpers) {
     const allowed = new Set(policy.allowed_features || []);
     const featureChoices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span>${escapeHtml(feature.name)}</span></label>`).join("");
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
-      <h3>本群机器人规则</h3>
+      <div id="groupChatProfile" class="chat-profile"></div>
       <div class="toggle-line"><span><strong>在本群使用机器人</strong></span><span class="toggle"><input id="groupBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><label class="toggle-track" for="groupBotEnabled" aria-label="切换本群机器人"></label><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></div>
       <label><span>回复方式</span><select name="reply_mode"><option value="mention" ${policy.reply_mode === "mention" ? "selected" : ""}>仅在点名或引用时回复（推荐）</option><option value="natural" ${policy.reply_mode === "natural" ? "selected" : ""}>相关话题可自然参与</option><option value="off" ${policy.reply_mode === "off" ? "selected" : ""}>不回复</option></select></label>
       <details class="advanced-details"><summary>限制本群可以使用的功能</summary><div class="option-grid compact-options group-feature-options">${featureChoices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong></span><span class="toggle"><input id="groupScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="groupScheduledEnabled" aria-label="切换本群定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
-      <div class="toggle-line"><span><strong>定时任务安静时段</strong></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="groupQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
+      <details class="advanced-details"><summary>更多群规则</summary><div class="toggle-line"><span><strong>定时任务安静时段</strong></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="groupQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="groupQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label><span>每日定时任务上限（0 为暂停）</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"></label>
-      <div class="policy-summary">定时限额不影响普通回复；这里只修改机器人规则。</div>
+      </details>
     </form>`;
   }
 
@@ -671,15 +676,15 @@ window.createChatManagement = function (helpers) {
     const isWechatTeam = String(policy.contact_id || "").trim().toLowerCase() === "weixin";
     const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
-      <div class="toggle-line"><span><strong>在此私聊使用机器人</strong></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
+      <div id="privateChatProfile" class="chat-profile"></div><div class="toggle-line"><span><strong>在此私聊使用机器人</strong></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
       ${isWechatTeam ? '<div class="toggle-line"><span><strong>微信团队私聊的模型回复</strong></span><span class="toggle"><input id="privateModelReplyDisabled" type="checkbox" disabled><label class="toggle-track" for="privateModelReplyDisabled" aria-label="微信团队私聊模型回复已关闭"></label><span>已关闭</span></span></div>' : ""}
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong></span><span class="toggle"><input id="privateScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateScheduledEnabled" aria-label="切换此私聊定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
-      <div class="toggle-line"><span><strong>安静时段</strong></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="privateQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
+      <details class="advanced-details"><summary>更多私聊规则</summary><div class="toggle-line"><span><strong>安静时段</strong></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="privateQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="privateQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
       <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
-      <h3>可用功能</h3>
+      </details><details class="advanced-details"><summary>可用功能</summary>
       <p>勾选机器人在这段私聊中可以使用的功能。未单独配置的联系人沿用新安装默认启用范围。</p>
-      <div class="option-grid compact-options private-feature-options">${choices || "<span class='subtle'>当前没有可分配的功能</span>"}</div>
+      <div class="option-grid compact-options private-feature-options">${choices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
     </form>`;
   }
 
@@ -715,11 +720,12 @@ window.createChatManagement = function (helpers) {
     const policyData = state.privatePolicies[contact.user_id];
     const saveDisabled = !policyData || policyData.loading || policyData.error;
     panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></header>
-      <div class="inspector-scroll contact-detail-scroll"><section class="contact-profile"><div class="contact-section-heading"><h3>个人详情</h3><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</section>${privatePolicyMarkup(policyData)}</div>
+      <div class="inspector-scroll contact-detail-scroll"><details class="contact-profile"><summary>个人详情</summary><div class="contact-section-heading"><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</details>${privatePolicyMarkup(policyData)}</div>
       <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存私聊规则</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "private", id: contact.user_id, name: displayName}, state.contactAccount));
     bindAvatarFallbacks(panel);
+    void chatProfiles.mount($("#privateChatProfile"), contact.user_id, "private", state.contactAccount);
     $("#privatePolicyForm")?.addEventListener("submit", savePrivatePolicy);
     $$(".toggle input", panel).forEach((input) => input.addEventListener("change", updatePolicyToggle));
   }

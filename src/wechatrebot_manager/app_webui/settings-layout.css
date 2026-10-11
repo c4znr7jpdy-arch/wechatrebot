@@ -1,0 +1,140 @@
+/* Flat settings and aligned chat details share the existing semantic palette. */
+#page-settings .settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; }
+#page-settings .settings-tabs { display: flex; flex-direction: column; gap: 10px; padding: 0; margin: 0; border: 0; background: transparent; position: sticky; top: 0; }
+#page-settings .settings-tabs button { display: grid; gap: 8px; width: 100%; min-height: 78px; padding: 16px; text-align: left; border: 0; border-radius: 8px; background: transparent; color: var(--ink); }
+#page-settings .settings-tabs button.active { background: var(--blue-100); color: var(--blue-700); box-shadow: none; }
+#page-settings .settings-tabs button::after { display: none; }
+#page-settings .settings-tabs { align-items: stretch; }
+#page-settings .settings-tabs strong { font-size: 16px; }
+#page-settings .settings-tabs small { font-size: 12px; font-weight: 400; color: var(--muted); }
+#page-settings .settings-grid { display: block; min-width: 0; }
+#page-settings .core-workspace { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+#page-settings .core-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0; min-width: 0; }
+#page-settings .core-detail { padding: 0; border: 0; background: transparent; }
+#page-settings .core-detail-heading { margin-bottom: 24px; }
+#page-settings .core-detail-heading h2 { font-size: 24px; }
+#page-settings .core-form { display: block; }
+#page-settings .core-identity-card,
+#page-settings .core-form .config-section { padding: 20px 0; margin: 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+#page-settings .core-form .config-section-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+#page-settings .core-form .form-field { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 48%); gap: 8px 28px; align-items: center; padding: 16px 0; margin: 0; min-width: 0; }
+#page-settings .core-form .form-field > :first-child { grid-column: 1; font-weight: 600; }
+#page-settings .core-form .form-field > :not(:first-child) { grid-column: 2; min-width: 0; }
+#page-settings .core-form .form-field > .toggle { justify-self: end; }
+#page-settings .core-form .form-field > textarea { min-height: 90px; }
+#page-settings .core-form .form-field > .field-error { grid-column: 2; }
+#page-settings .core-form input:not([type=checkbox]),
+#page-settings .core-form select,
+#page-settings .core-form textarea { width: 100%; }
+#page-settings .core-advanced { border-bottom: 1px solid var(--line); padding: 20px 0; }
+#page-settings .core-advanced > summary,
+#page-settings .core-template-tools > summary { font-size: 16px; font-weight: 600; cursor: pointer; padding: 4px 0; }
+#page-settings .core-advanced .config-section:last-child { border-bottom: 0; }
+#page-settings .core-reset { margin: 10px 0 0; }
+#page-settings .core-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; border-top: 1px solid var(--line); padding: 16px 0; background: var(--surface); }
+#page-settings .core-template-tools { padding: 18px 0; border-top: 1px solid var(--line); }
+#page-settings .core-template-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+#page-settings .core-template-toolbar select { width: auto; max-width: 100%; }
+#page-settings #coreTemplateList { display: flex; flex-wrap: wrap; gap: 10px; }
+#page-settings #coreTemplateList .core-nav { width: auto; border: 1px solid var(--line); padding: 12px; }
+#page-settings .settings-system-stack { display: grid; gap: 20px; }
+#page-settings .provider-overview-grid { grid-template-columns: minmax(0, 1fr); }
+#page-settings .provider-editor-layout { display: block; }
+#page-settings .web-search-settings-card { padding: 24px; }
+
+#page-groups .group-layout,
+#page-groups .contact-layout { display: grid; grid-template-columns: minmax(250px, 31%) minmax(0, 1fr); gap: 24px; align-items: start; }
+#page-groups .group-table-panel,
+#page-groups .contact-table-panel { min-width: 0; overflow: hidden; }
+#page-groups .group-toolbar { display: block; padding: 16px; }
+#page-groups .group-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-top: 12px; flex-direction: row; align-items: center; min-width: 0; }
+#page-groups .group-meta span { font-size: 11px; }
+#page-groups .group-table,
+#page-groups .contact-table { min-width: 0; width: 100%; table-layout: fixed; }
+#page-groups .group-table thead,
+#page-groups .contact-table thead,
+#page-groups .group-table td:not(:first-child),
+#page-groups .contact-table td:not(:first-child) { display: none; }
+#page-groups .group-table td:first-child,
+#page-groups .contact-table td:first-child { padding: 18px 14px; width: 100%; }
+#page-groups .group-name-cell,
+#page-groups .contact-name-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+#page-groups .group-name-cell > span:last-child,
+#page-groups .contact-name-cell > span:last-child { min-width: 0; }
+#page-groups .group-avatar,
+#page-groups .contact-avatar { width: 44px; height: 44px; flex: 0 0 44px; }
+#page-groups .group-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#page-groups .group-name-cell .group-list-count { display: block; margin-top: 7px; color: var(--muted); font-size: 12px; }
+#page-groups .group-inspector,
+#page-groups .contact-inspector { min-width: 0; padding: 24px; border: 0; background: var(--surface); }
+#page-groups .inspector-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 0 0 16px; gap: 12px; }
+#page-groups .inspector-group-title { margin-top: 0; }
+#page-groups .inspector-detail-actions { min-height: 0; }
+#page-groups .inspector-group-title { min-width: 0; }
+#page-groups .inspector-group-title h2 { overflow-wrap: anywhere; }
+#page-groups .inspector-id { overflow-wrap: anywhere; color: var(--muted); }
+#page-groups .inspector-detail-actions { display: flex; justify-content: flex-end; gap: 18px; padding: 0 0 16px; border-bottom: 1px solid var(--line); }
+#page-groups .inspector-scroll { padding: 0; overflow: visible; }
+#page-groups .group-policy-form,
+#page-groups .private-feature-policy { display: flex; flex-direction: column; gap: 0; padding: 0; }
+#page-groups .group-policy-form > label,
+#page-groups .private-feature-policy > label,
+#page-groups .chat-profile-field { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 48%); align-items: center; gap: 8px 24px; padding: 16px 0; margin: 0; border-bottom: 1px solid var(--line); }
+#page-groups .group-policy-form > label > small,
+#page-groups .private-feature-policy > label > small { grid-column: 2; }
+#page-groups .group-policy-form > label > :first-child,
+#page-groups .private-feature-policy > label > :first-child,
+#page-groups .chat-profile-field > span { font-weight: 600; }
+#page-groups .group-policy-form .toggle-line,
+#page-groups .private-feature-policy .toggle-line { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 48%); align-items: center; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--line); margin: 0; }
+#page-groups .toggle-line > .toggle { justify-self: end; }
+#page-groups .toggle-line .toggle > span:last-child { min-width: 48px; text-align: right; }
+#page-groups .group-policy-form .advanced-details,
+#page-groups .private-feature-policy .advanced-details { margin: 0; padding: 18px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+#page-groups .advanced-details > summary { cursor: pointer; font-weight: 600; }
+#page-groups .advanced-details > label { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 48%); align-items: center; gap: 12px 24px; margin: 20px 0; }
+#page-groups .advanced-details > label > small { grid-column: 2; }
+#page-groups .chat-profile { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+#page-groups .chat-profile-field { border: 0; padding-bottom: 8px; }
+#page-groups .chat-profile-field select { width: 100%; min-height: 40px; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; }
+#page-groups .chat-profile-field select:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
+#page-groups .private-feature-policy { border-top: 0; margin-top: 0; }
+#page-groups .chat-profile-note,
+#page-groups .chat-decision { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 8px 0 0; }
+#page-groups .contact-profile { padding: 18px 0; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+#page-groups .contact-profile > summary { cursor: pointer; font-weight: 600; }
+#page-groups .inspector-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0 0; margin-top: 20px; border-top: 1px solid var(--line); }
+#page-groups .inspector-footer > span { font-size: 12px; color: var(--muted); }
+#page-groups .inspector-footer > button { flex-shrink: 0; }
+
+@media (min-width: 1101px) {
+  #page-groups .group-layout, #page-groups .contact-layout { grid-template-columns: minmax(250px, 1fr) var(--layout-track-1, minmax(400px, calc(69% - 24px))); }
+  #page-groups .group-inspector.has-panel-size, #page-groups .contact-inspector.has-panel-size { padding: 24px; }
+  #page-groups .has-panel-size .inspector-scroll { overflow: auto; }
+  #page-groups .has-panel-size .inspector-detail-actions { flex-shrink: 0; }
+}
+@media (max-width: 1120px) {
+  #page-settings .settings-layout { grid-template-columns: 168px minmax(0, 1fr); gap: 22px; }
+  #page-settings .core-form .form-field { grid-template-columns: minmax(120px, 1fr) minmax(180px, 48%); gap: 8px 16px; }
+  #page-groups .group-layout, #page-groups .contact-layout { gap: 16px; }
+  #page-groups .group-inspector, #page-groups .contact-inspector { padding: 18px; }
+}
+@media (max-width: 880px) {
+  #page-settings .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  #page-settings .settings-tabs { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #page-groups .group-layout, #page-groups .contact-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  #page-settings .core-form .form-field,
+  #page-groups .group-policy-form > label,
+  #page-groups .private-feature-policy > label,
+  #page-groups .chat-profile-field,
+  #page-groups .advanced-details > label { grid-template-columns: minmax(0, 1fr); }
+  #page-settings .core-form .form-field > :not(:first-child),
+  #page-groups .group-policy-form > label > small,
+  #page-groups .private-feature-policy > label > small,
+  #page-groups .advanced-details > label > small { grid-column: 1; }
+  #page-groups .group-policy-form .toggle-line,
+  #page-groups .private-feature-policy .toggle-line { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+  #page-settings .core-heading, #page-groups .inspector-footer { flex-wrap: wrap; }
+}

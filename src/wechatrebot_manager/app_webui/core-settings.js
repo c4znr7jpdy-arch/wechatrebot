@@ -3,15 +3,24 @@
   "use strict";
 
   window.createRobotCoreSettings = function (helpers) {
-    const {read, request, getGroups, getContacts, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
+    const {read, request, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-    const state = {detail: null, stale: false, view: "global", tab: "basic", templateId: null, templates: [], bindings: {}, chats: [], statuses: [], groups: [], contacts: [], config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", monitorBusy: false, feedback: "", kind: "all"};
+    const state = {detail: null, stale: false, view: "global", templateId: null, templates: [], config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", feedback: ""};
     const root = () => $("#coreDetail");
-    const visible = () => $("#page-settings").classList.contains("active") && !$("#coreWorkspace").hidden;
     const clone = (value) => structuredClone(value || {});
     const currentTemplate = () => state.templates.find((item) => item.id === state.templateId);
-    const schema = () => state.view === "template" ? state.detail.template_schema : ({basic: state.detail.basic_schema, models: state.detail.model_schema, advanced: state.detail.advanced_schema}[state.tab] || {});
+    const schema = () => state.view === "template" ? state.detail.template_schema : state.detail.advanced_schema;
+
+    function remainingSchema(source, ...displayed) {
+      return Object.fromEntries(Object.entries(source || {}).flatMap(([key, field]) => {
+        const prior = displayed.map((part) => part?.[key]).filter(Boolean);
+        if (!prior.length) return [[key, field]];
+        if (field.type !== "object") return [];
+        const items = remainingSchema(field.items, ...prior.map((part) => part.items));
+        return Object.keys(items).length ? [[key, {...field, items}]] : [];
+      }));
+    }
 
     function guard(next) {
       if (state.busy) return true;
@@ -35,14 +44,12 @@
       try {
         const detail = await read();
         state.detail = detail; state.stale = false;
-        if (!Object.keys(detail.basic_schema || {}).length) state.tab = "advanced";
         state.profilesAvailable = false; state.capabilityWarning = "";
         if (!detail.engine_online) { state.view = "global"; state.templateId = null; }
         if (detail.engine_online) await loadProfiles();
         if (!state.profilesAvailable) { state.view = "global"; state.templateId = null; }
         if (state.view === "template" && !currentTemplate()) { state.view = "global"; state.templateId = null; }
         resetDraft(); render();
-        if (state.view === "monitor") await refreshMonitor();
       } catch (error) {
         root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
         reportError(error);
@@ -53,7 +60,6 @@
       try {
         const profiles = await request("GET", "profiles");
         state.templates = profiles.templates || [];
-        state.bindings = profiles.bindings || {};
         state.profilesAvailable = true; state.capabilityWarning = "";
       } catch (error) {
         state.profilesAvailable = false;
@@ -61,26 +67,11 @@
         if (strict) throw error;
         return;
       }
-      try {
-        const results = await Promise.allSettled([
-          request("GET", "chats"),
-          typeof getGroups === "function" ? getGroups(false) : Promise.resolve({items: []}),
-          typeof getContacts === "function" ? getContacts(false) : Promise.resolve({items: []}),
-        ]);
-        state.chats = results[0].status === "fulfilled" && Array.isArray(results[0].value) ? results[0].value : [];
-        state.groups = results[1].status === "fulfilled" ? (results[1].value?.items || []) : [];
-        state.contacts = results[2].status === "fulfilled" ? (results[2].value?.items || []) : [];
-        if (results.slice(1).some((item) => item.status === "rejected")) {
-          state.capabilityWarning = "联系人目录暂未同步，已保留绑定关系；连接微信后刷新即可补齐名称。";
-        }
-      }
-      catch (error) { state.capabilityWarning = `聊天目录读取失败：${error.message}。模板与全局配置仍可编辑。`; }
     }
 
     function renderNavigation() {
       const online = state.detail?.engine_online && state.profilesAvailable;
       $("#coreStatus").textContent = state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
-      $$('[data-core-view]').forEach((button) => { button.classList.toggle("active", button.dataset.coreView === state.view); button.setAttribute("aria-pressed", String(button.dataset.coreView === state.view)); button.disabled = state.busy || (button.dataset.coreView === "monitor" && !online); });
       $("#newCoreTemplate").disabled = state.busy || !online || !Object.keys(state.detail?.template_schema || {}).length;
       $("#coreTemplateSource").disabled = $("#newCoreTemplate").disabled;
       $("#refreshCore").disabled = state.busy;
@@ -91,7 +82,6 @@
     async function selectView(view, templateId = null) {
       if (guard(() => selectView(view, templateId))) return;
       state.view = view; state.templateId = templateId; resetDraft(); render();
-      if (view === "monitor") await refreshMonitor();
     }
 
     function note() {
@@ -110,7 +100,7 @@
     }
 
     function draftFromForm() {
-      if (state.view === "global" && state.tab === "basic") {
+      if (state.view === "global") {
         const nameInput = $("#coreForm")?.elements.robot_name;
         const adminInput = $("#coreForm")?.elements.admin_id;
         if (nameInput) {
@@ -132,20 +122,15 @@
     function render() {
       if (!state.detail) return;
       renderNavigation();
-      if (state.view === "monitor") { renderMonitor(); return; }
       const template = currentTemplate();
       const schemas = {basic: state.detail.basic_schema || {}, models: state.detail.model_schema || {}, advanced: state.detail.advanced_schema || {}};
-      const identityMarkup = state.view === "global" && state.tab === "basic" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><h3 id="coreIdentityTitle">机器人名称与管理员</h3></div></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
-      root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "全局配置")}</h2></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : ""}</div>
-        ${state.view === "global" ? `<div class="config-tabs" aria-label="核心配置分类">${[["basic", "常用设置"], ["models", "模型设置"], ["advanced", "专业设置（全部）"]].filter(([key]) => Object.keys(schemas[key]).length).map(([key, label]) => `<button type="button" data-core-tab="${key}" aria-pressed="${state.tab === key}" class="${state.tab === key ? "active" : ""}">${label}</button>`).join("")}</div>${state.tab === "models" ? '<p class="feature-prerequisite">群聊分析需选择分析模型。</p>' : ''}` : ''}
-        <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<label class="form-field full">模板说明<textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>` : ''}${identityMarkup}${schemaMarkup(schema(), state.config, [], "core-")}</form>
+      const identityMarkup = state.view === "global" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><h3 id="coreIdentityTitle">机器人名称与管理员</h3></div></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
+      root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "对话规则")}</h2></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : ""}</div>
+        <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<button class="row-action" id="backCoreGlobal" type="button">返回全局对话规则</button><label class="form-field full"><span>模板说明</span><textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>${schemaMarkup(schema(), state.config, [], "core-")}` : `${identityMarkup}${schemaMarkup(schemas.basic, state.config, [], "core-")}<details class="core-advanced"><summary>模型设置</summary>${schemaMarkup(remainingSchema(schemas.models, schemas.basic), state.config, [], "core-")}</details><details class="core-advanced"><summary>高级设置</summary>${schemaMarkup(remainingSchema(schemas.advanced, schemas.basic, schemas.models), state.config, [], "core-")}</details>`}</form>
         <p class="form-note" id="coreNote" role="status">${esc(note())}</p><div class="core-savebar"><button class="button primary" id="saveCore" type="button">${state.view === "template" || state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
       if (state.view === "template") attachOverrides();
       else attachResets();
-      $$('[data-core-tab]', root()).forEach((button) => button.addEventListener("click", () => {
-        try { state.config = draftFromForm(); state.tab = button.dataset.coreTab; render(); $("[data-core-tab='" + state.tab + "']")?.focus(); }
-        catch (error) { showError(error); }
-      }));
+      $("#backCoreGlobal")?.addEventListener("click", () => selectView("global"));
       $("#coreForm").addEventListener("input", markDirty);
       $("#coreForm").addEventListener("change", markDirty);
       $("#coreForm").addEventListener("submit", (event) => { event.preventDefault(); saveCurrent(); });
@@ -196,7 +181,7 @@
     function showError(error) {
       reportError(error);
       $("#coreNote") && ($("#coreNote").textContent = error.message);
-      if (error.input) { error.input.setAttribute('aria-invalid', 'true'); const message = error.input.closest('.form-field').querySelector('.field-error'); message.textContent = error.message; message.hidden = false; error.input.focus(); }
+      if (error.input) { let ancestor = error.input.parentElement; while (ancestor) { if (ancestor.tagName === 'DETAILS') ancestor.open = true; ancestor = ancestor.parentElement; } error.input.setAttribute('aria-invalid', 'true'); const message = error.input.closest('.form-field').querySelector('.field-error'); message.textContent = error.message; message.hidden = false; error.input.focus(); }
     }
 
     async function busy(action) {
@@ -204,7 +189,7 @@
       state.busy = true; renderNavigation();
       $$('input, select, textarea, button', root()).forEach((input) => { input.dataset.coreDisabled = String(input.disabled); input.disabled = true; });
       try { await action(); }
-      catch (error) { if (state.view === 'monitor') { state.feedback = `操作失败：${error.message}；绑定仍按上次读取的配置显示。`; renderMonitor(); } showError(error); }
+      catch (error) { showError(error); }
       finally { state.busy = false; renderNavigation(); $$('[data-core-disabled]', root()).forEach((input) => { input.disabled = input.dataset.coreDisabled === 'true'; delete input.dataset.coreDisabled; }); }
     }
 
@@ -228,7 +213,7 @@
     function createTemplate() {
       if (guard(createTemplate)) return;
       const fromGlobal = $("#coreTemplateSource").value === 'global';
-      confirmAction({title: '新建配置模板', message: fromGlobal ? '从当前已保存的全局配置复制，创建后可编辑覆盖项，再到联系人监控中绑定。' : '创建空白模板，所有参数先跟随全局；勾选需要覆盖的项后再绑定聊天。', confirmText: '创建', intent: 'primary', field: {label: '模板名称', type: 'text', value: ''}, onConfirm: async (name) => {
+      confirmAction({title: '新建配置模板', message: fromGlobal ? '从当前已保存的全局配置复制，创建后可编辑覆盖项，再到群聊&私聊管理选择使用。' : '创建空白模板，所有参数先跟随全局；勾选需要覆盖的项后再绑定聊天。', confirmText: '创建', intent: 'primary', field: {label: '模板名称', type: 'text', value: ''}, onConfirm: async (name) => {
         if (!String(name || '').trim()) throw new Error('请填写模板名称。');
         await busy(async () => { const item = await request('POST', 'profiles/create', {name: name.trim(), from_global: fromGlobal}); await loadProfiles(true); state.view = 'template'; state.templateId = item.id; resetDraft(); render(); toast('模板已创建。'); });
       }});
@@ -249,69 +234,9 @@
       }});
     }
 
-    const privateOrigin = (id) => /:FriendMessage:|:PrivateMessage:/.test(id);
-    function bindingKey(id) {
-      if (Object.hasOwn(state.bindings, id) || privateOrigin(id)) return id;
-      const suffix = id.split(':').at(-1);
-      if (Object.hasOwn(state.bindings, suffix)) return suffix;
-      return Object.keys(state.bindings).find((key) => !privateOrigin(key) && key.split(':').at(-1) === suffix) || id;
-    }
-
-    function directoryChat(item) {
-      const rawId = String(item.chat_id || "");
-      const canonical = rawId.split(":").at(-1) || rawId;
-      const isPrivate = /:FriendMessage:|:PrivateMessage:/.test(rawId) || !canonical.endsWith("@chatroom") && item.kind === "private";
-      const directory = isPrivate
-        ? state.contacts.find((entry) => entry.user_id === canonical)
-        : state.groups.find((entry) => entry.group_id === canonical);
-      const technical = /^(?:N\/A|unknown|未命名联系人)$/i.test(String(item.display_name || "")) || /aiocqhttp|GroupMessage|FriendMessage|PrivateMessage/i.test(String(item.display_name || ""));
-      const name = directory?.name || directory?.nickname || (!technical ? item.display_name : "") || (isPrivate ? "私聊联系人（待同步）" : "群聊（待同步）");
-      return {...item, kind: isPrivate ? "private" : "group", display_name: name, directory_name: directory?.name || "", directory_ready: Boolean(directory)};
-    }
-
-    function renderMonitor() {
-      const byId = new Map(state.chats.map((item) => [item.chat_id, {...item, status: {current_status: 'Unknown'}}]));
-      state.statuses.forEach((item) => byId.set(item.chat_id, item));
-      Object.keys(state.bindings).forEach((id) => { if (![...byId.keys()].some((key) => bindingKey(key) === id)) byId.set(id, {chat_id: id, status: {current_status: 'Unknown'}}); });
-      const items = [...byId.values()].map(directoryChat).filter((item) => state.kind === 'all' || state.kind === item.kind);
-      root().innerHTML = `<div class="core-detail-heading"><div><h2>聊天状态与配置</h2></div><button class="button secondary small" id="refreshCoreMonitor" type="button" data-action-bound disabled>刷新状态</button></div><div class="config-tabs" aria-label="聊天类型">${[['all', '全部'], ['group', '群聊'], ['private', '私聊']].map(([kind, label]) => `<button type="button" data-action-bound disabled data-core-kind="${kind}" aria-pressed="${state.kind === kind}" class="${state.kind === kind ? 'active' : ''}">${label}</button>`).join('')}</div><div class="core-monitor-grid">${items.map((item) => {
-        const status = item.status?.current_status;
-        const patrol = item.patrol || {};
-        return `<article class="core-chat-card"><div class="core-chat-heading"><strong>${esc(item.display_name)}</strong><span class="status-badge ${status === 'OBSERVATION' ? 'online' : ''}">${status === 'OBSERVATION' ? '在场' : status === 'NOT_PRESENT' ? '离场' : '状态待确认'}</span></div><small class="core-chat-id">${item.directory_ready ? (item.kind === 'group' ? '群聊目录已同步' : '联系人目录已同步') : '等待微信目录同步'}</small><p>能量 ${item.energy == null ? '—' : Math.round(item.energy)} · ${esc({secretary: '巡检中', assistant: '点名等待', rest: '休息中'}[patrol.waiting] || '空闲')}${patrol.waiting ? ` ${Math.round(patrol.remaining || 0)}/${Math.round(patrol.total || 0)} 秒` : ''}</p><p>最近决策：${item.last_decision ? `${item.last_decision.should_reply ? '回复' : '不回复'} · ${esc(item.last_decision.summary || '无说明')}` : '暂无'}</p><label>绑定配置模板<select data-core-binding="${esc(item.chat_id)}"><option value="">全局配置（默认）</option>${state.templates.map((tpl) => `<option value="${esc(tpl.id)}" ${state.bindings[bindingKey(item.chat_id)] === tpl.id ? 'selected' : ''}>${esc(tpl.name)}</option>`).join('')}</select></label></article>`;
-      }).join('') || '<div class="empty-state compact"><p>暂无联系人；产生聊天消息后会显示，也会保留已有绑定关系。</p></div>'}</div><p class="form-note" id="coreMonitorNote" role="status">${esc(state.feedback)}</p>`;
-      $$('[data-core-kind]', root()).forEach((button) => button.addEventListener('click', () => { state.kind = button.dataset.coreKind; renderMonitor(); }));
-      $("#refreshCoreMonitor").addEventListener('click', () => refreshMonitor(true));
-      $$('[data-core-binding]', root()).forEach((select) => select.addEventListener('change', () => busy(async () => { await request('POST', 'bindings/set', {chat_id: bindingKey(select.dataset.coreBinding), template_id: select.value}); await loadProfiles(true); state.feedback = '绑定已生效，未向联系人发送消息。'; await refreshMonitor(true); renderMonitor(); })));
-      $$('[data-action-bound]', root()).forEach((button) => { button.disabled = false; });
-    }
-
-    async function refreshMonitor(force = false) {
-      if (!visible() || state.view !== 'monitor' || state.monitorBusy || !state.profilesAvailable || !force && (state.busy || root().contains(document.activeElement) && document.activeElement.tagName === 'SELECT')) return;
-      state.monitorBusy = true;
-      try {
-        const [profiles, statuses, groups, contacts] = await Promise.all([
-          request('GET', 'profiles'),
-          request('GET', 'chat_status'),
-          force && typeof getGroups === 'function' ? getGroups(true) : Promise.resolve(null),
-          force && typeof getContacts === 'function' ? getContacts(true) : Promise.resolve(null),
-        ]);
-        if (state.busy && !force) return;
-        state.templates = profiles.templates || []; state.bindings = profiles.bindings || {}; state.statuses = statuses || [];
-        if (groups) state.groups = groups.items || [];
-        if (contacts) state.contacts = contacts.items || [];
-        if (visible() && state.view === 'monitor') { renderNavigation(); renderMonitor(); }
-      }
-      catch (error) { state.feedback = `状态读取失败：${error.message}；当前显示上次读取的数据。`; if (state.view === 'monitor' && $("#coreMonitorNote")) $("#coreMonitorNote").textContent = state.feedback; }
-      finally { state.monitorBusy = false; }
-    }
-
     function init() {
-      const monitorNav = $('[data-core-view="monitor"]');
-      if (monitorNav) monitorNav.innerHTML = '聊天状态与配置<span>状态、能量与最近决策</span>';
-      $$('[data-core-view]').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.coreView)));
       $("#refreshCore").addEventListener('click', () => load(true));
       $("#newCoreTemplate").addEventListener('click', createTemplate);
-      window.setInterval(() => { if (!state.busy) void refreshMonitor(); }, 3000);
     }
     return {init, load, guard, invalidate() { state.stale = true; }, get dirty() { return state.dirty; }, get busy() { return state.busy || state.loading; }};
   };

@@ -298,6 +298,8 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/scheduled-tasks.js",
                     "/model-services.js",
                     "/chat-management.js",
+                    "/chat-profiles.js",
+                    "/settings-layout.css",
                     "/message-history.js",
                     "/features.js",
                     "/preview.js",

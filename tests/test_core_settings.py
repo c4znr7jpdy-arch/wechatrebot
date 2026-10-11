@@ -188,7 +188,7 @@ def test_customer_logs_and_diagnostics_do_not_expose_core_brand_or_author():
     assert 'secret' not in log
 
 
-def test_core_ui_replaces_persona_and_keeps_templates_and_monitor():
+def test_core_ui_flattens_settings_and_moves_chat_binding_to_chat_details():
     webui = Path(app_shell.__file__).with_name('app_webui')
     html = (webui / 'index.html').read_text(encoding='utf-8')
     app = manager_script()
@@ -201,23 +201,23 @@ def test_core_ui_replaces_persona_and_keeps_templates_and_monitor():
     assert {'get_robot_core', 'request_robot_core'} <= set(app_shell.PUBLIC_API_METHODS)
     assert 'data-settings-section="system"' in html
     assert 'id="createBackup"' in html and 'id="openUninstaller"' in html
-    assert '专业设置（全部）' in core
+    profiles = (webui / 'chat-profiles.js').read_text(encoding='utf-8')
     assert '机器人名称与管理员' in core
     assert 'name="robot_name"' in core and 'name="admin_id"' in core
     assert 'api("save_robot_core"' in app
-    for endpoint in ['profiles/create', 'profiles/update', 'profiles/delete', 'bindings/set', 'chat_status']:
+    for endpoint in ['profiles/create', 'profiles/update', 'profiles/delete']:
         assert endpoint in core
+    for endpoint in ['bindings/set', 'chat_status']:
+        assert endpoint in profiles
     assert '覆盖全局' in core and '恢复此组默认值' in core
     assert 'coreTemplateSource' in html and 'template_description' in core
-    assert 'bindingKey(select.dataset.coreBinding)' in core
     assert 'coreSettings.guard' in app and 'coreSettings.busy' in app
-    assert '聊天状态与配置' in html + core
-    assert '联系人监控与绑定' not in html + core
-    assert 'state.groups.find((entry) => entry.group_id === canonical)' in core
-    assert 'state.contacts.find((entry) => entry.user_id === canonical)' in core
-    assert '等待微信目录同步' in core
-    assert 'getGroups: (refresh = false) => api("get_groups", refresh)' in app
+    assert 'data-settings-tab="search"' in html
+    assert 'data-core-tab' not in html
+    assert 'id="memoryForm"' not in html and 'id="emotionForm"' not in html
+    assert 'id="manageMemories"' in html
     assert '天使之心' not in html + core and 'AngelHeart' not in html + core
+
 
 
 def test_runtime_sync_does_not_overwrite_core_wake_settings(tmp_path):

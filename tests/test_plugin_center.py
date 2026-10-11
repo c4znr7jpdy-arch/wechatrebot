@@ -1974,6 +1974,8 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
         "report-preview.js": b"window.preview = true;",
         "panel-layout.js": b"window.layout = true;",
         "core-settings.js": b"window.core = true;",
+        "chat-profiles.js": b"window.profiles = true;",
+        "settings-layout.css": b".settings-layout{}",
         "assets/app-icon.png": b"PNG",
         **{f"{module}.js": f"window.{module.replace('-', '_')} = true;".encode()
            for module in (
