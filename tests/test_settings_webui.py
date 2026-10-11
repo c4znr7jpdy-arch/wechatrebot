@@ -122,3 +122,160 @@ def test_chat_profile_selection_preserves_scope_and_confirms_readback(browser, s
                 assert result["error"]
     finally:
         page.close()
+
+
+def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#globalRefresh")).to_be_enabled()
+        page.evaluate("""() => {
+          window.policyReads = 0; window.forcedGroupReads = 0;
+          const api = window.pywebview.api;
+          const policy = api.get_group_policy;
+          api.get_group_policy = (...args) => { window.policyReads++; return policy(...args); };
+          const groups = api.get_groups;
+          api.get_groups = (...args) => { if(args[0]) window.forcedGroupReads++; return groups(...args); };
+        }""")
+        page.locator('.nav-item[data-page="groups"]').click()
+        rows = page.locator('#groupRows .group-row')
+        rows.nth(0).click()
+        mode = page.locator('#groupPolicyForm [name="reply_mode"]')
+        expect(mode).to_be_visible()
+        mode.select_option('off')
+        rows.nth(1).click()
+        expect(mode).to_be_visible()
+        rows.nth(0).click()
+        expect(mode).to_have_value('off')
+        page.locator('[data-chat-management-tab="private"]').click()
+        page.locator('[data-chat-management-tab="groups"]').click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('.nav-item[data-page="groups"]').click()
+        expect(mode).to_have_value('off')
+        assert page.evaluate('window.policyReads') == 2
+        assert page.evaluate('window.forcedGroupReads') == 1
+        page.locator('#refreshGroupPolicy').click()
+        expect(page.locator('#modalBackdrop')).to_be_visible()
+        page.locator('#modalCancel').click()
+        expect(mode).to_have_value('off')
+        page.locator('#refreshGroupPolicy').click()
+        page.locator('#modalConfirm').click()
+        expect(mode).not_to_have_value('off')
+        assert page.evaluate('window.policyReads') == 3
+        mode.select_option('off')
+        page.locator('button[form="groupPolicyForm"]').click()
+        page.locator('#modalConfirm').click()
+        expect(page.locator('#groupPolicyNote')).not_to_contain_text('未保存')
+        expect(mode).to_have_value('off')
+        assert page.evaluate('window.policyReads') == 4
+    finally:
+        page.close()
+
+
+def test_template_editor_inheritance_and_switch_guard(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1440, "height": 1024})
+    try:
+        page.goto(manager_url)
+        expect(page.locator('#globalRefresh')).to_be_enabled()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="core"]').click()
+        expect(page.locator('#activeCoreTemplate')).to_be_visible()
+        page.locator('.template-create > summary').click()
+        expect(page.locator('#coreTemplateSource')).to_have_value('empty')
+        page.locator('#newCoreTemplate').click()
+        page.locator('#modalInput').fill('测试差异模板')
+        page.locator('#modalConfirm').click()
+        expect(page.locator('#coreDetail h2')).to_have_text('测试差异模板')
+        control = page.locator('#core-config-personality--ai_self_identity')
+        expect(control).to_be_disabled()
+        row = page.locator('.form-field').filter(has=control)
+        row.locator('.core-override input').check()
+        control.fill('只在此模板中使用的身份')
+        page.locator('#activeCoreTemplate').select_option('')
+        page.locator('#modalCancel').click()
+        expect(control).to_have_value('只在此模板中使用的身份')
+        page.locator('#saveCore').click()
+        expect(page.locator('#coreNote')).to_contain_text('模板已保存')
+        page.locator('#refreshCore').click()
+        expect(control).to_have_value('只在此模板中使用的身份')
+        expect(row.locator('.core-override input')).to_be_checked()
+        row.locator('.core-override input').uncheck()
+        page.locator('#saveCore').click()
+        expect(control).to_be_disabled()
+        expect(control).not_to_have_value('只在此模板中使用的身份')
+        assert page.locator('#coreForm label label').count() == 0
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    finally:
+        page.close()
+
+
+def test_group_policy_old_account_response_is_discarded(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator('#globalRefresh')).to_be_enabled()
+        page.evaluate("""() => {
+          const api = window.pywebview.api;
+          const groups = api.get_groups, policy = api.get_group_policy;
+          window.changedAccount = false; window.policyReads = 0;
+          api.get_groups = async (...args) => {
+            const result = await groups(...args);
+            return {...result, data:{...result.data, account_id:window.changedAccount ? 'second-account' : 'first-account'}};
+          };
+          api.get_group_policy = async (...args) => {
+            window.policyReads++;
+            const result = await policy(...args);
+            const value = {...result, data:{...result.data, policy:{...result.data.policy, reply_mode:args[0] === 'first-account' ? 'off' : 'natural'}}};
+            if(args[0] === 'first-account') return new Promise(resolve => { window.finishOldPolicy = () => resolve(value); });
+            return value;
+          };
+        }""")
+        page.locator('.nav-item[data-page="groups"]').click()
+        page.locator('#groupRows .group-row').first.click()
+        expect(page.locator('#groupInspector')).to_contain_text('正在读取规则')
+        page.locator('#groupRows .group-row').first.click()
+        assert page.evaluate('window.policyReads') == 1
+        page.evaluate('window.changedAccount = true')
+        page.locator('#refreshGroups').click()
+        expect(page.locator('#groupInspector')).to_contain_text('选择一个群聊')
+        page.locator('#groupRows .group-row').first.click()
+        mode = page.locator('#groupPolicyForm [name="reply_mode"]')
+        expect(mode).to_have_value('natural')
+        page.evaluate('window.finishOldPolicy()')
+        expect(mode).to_have_value('natural')
+        assert page.evaluate('window.policyReads') == 2
+    finally:
+        page.close()
+
+
+def test_chat_profile_cache_is_shared_and_invalidated(browser):
+    page = browser.new_page()
+    try:
+        page.set_content('<div id="profile"></div>')
+        page.add_script_tag(path=str(Path(__file__).parents[1] / 'src/wechatrebot_manager/app_webui/chat-profiles.js'))
+        result = page.evaluate("""async () => {
+          let reads = 0;
+          const node = document.querySelector('#profile');
+          const state = {groupAccount:'a', selectedGroup:'one'};
+          const controller = window.createChatProfiles({state, escapeHtml:String, confirmAction:()=>{}, openCoreTemplates:()=>{},
+            api: async (_, method, endpoint) => {
+              if(endpoint === 'profiles') { reads++; return {templates:[], bindings:{}}; }
+              return [];
+            }});
+          await controller.mount(node, 'one', 'group', 'a');
+          state.selectedGroup = 'two';
+          await controller.mount(node, 'two', 'group', 'a');
+          const reused = reads;
+          state.groupAccount = 'b';
+          await controller.mount(node, 'two', 'group', 'b');
+          const isolated = reads;
+          window.dispatchEvent(new Event('chat-profiles-changed'));
+          await controller.mount(node, 'two', 'group', 'b');
+          const invalidated = reads;
+          controller.invalidate();
+          await controller.mount(node, 'two', 'group', 'b');
+          return {reused, isolated, invalidated, refreshed:reads};
+        }""")
+        assert result == {"reused": 1, "isolated": 2, "invalidated": 3, "refreshed": 4}
+    finally:
+        page.close()

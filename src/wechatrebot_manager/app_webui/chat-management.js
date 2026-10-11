@@ -28,6 +28,7 @@ window.createChatManagement = function (helpers) {
 
   const chatProfiles = window.createChatProfiles({api, escapeHtml, confirmAction, openCoreTemplates, state});
 
+  let groupDrafts = {};
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
@@ -83,7 +84,7 @@ window.createChatManagement = function (helpers) {
     $("#privateManagementPanel").hidden = tab !== "private";
     $("#refreshGroups").hidden = tab !== "groups";
     $("#refreshContacts").hidden = tab !== "private";
-    if (tab === "groups") await loadGroups(true, {background: state.groupsLoaded});
+    if (tab === "groups" && !state.groupsLoaded) await loadGroups(true);
     if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
   }
 
@@ -144,6 +145,7 @@ window.createChatManagement = function (helpers) {
         state.selectedGroup = null;
         state.groupMembers = {};
         state.groupPolicies = {};
+        groupDrafts = {};
         state.groupMemberCounts = readGroupMemberCounts(state.groupAccount);
       }
       let countsChanged = false;
@@ -271,23 +273,44 @@ window.createChatManagement = function (helpers) {
   }
 
   function selectGroup(groupId) {
+    if (state.selectedGroup === groupId) return;
     state.selectedGroup = groupId;
     state.groupInspectorView = "policy";
     renderGroups();
     loadGroupPolicy(groupId);
   }
 
-  async function loadGroupPolicy(groupId) {
+  async function loadGroupPolicy(groupId, force = false) {
     if (!state.groupAccount || !groupId) return;
-    state.groupPolicies[groupId] = {loading: true};
-    renderGroupInspector();
+    const account = state.groupAccount;
+    const policies = state.groupPolicies;
+    if (policies[groupId]?.loading || (!force && policies[groupId] && !policies[groupId].error)) return;
+    policies[groupId] = {loading: true};
+    if (state.selectedGroup === groupId) renderGroupInspector();
     try {
-      state.groupPolicies[groupId] = await api("get_group_policy", state.groupAccount, groupId);
+      const result = await api("get_group_policy", account, groupId);
+      if (state.groupAccount !== account || state.groupPolicies !== policies) return;
+      policies[groupId] = result;
     } catch (error) {
-      state.groupPolicies[groupId] = {error: error?.message || "群聊规则暂时无法读取。"};
+      if (state.groupAccount !== account || state.groupPolicies !== policies) return;
+      policies[groupId] = {error: error?.message || "群聊规则暂时无法读取。"};
       reportError(error);
     }
     if (state.selectedGroup === groupId) renderGroupInspector();
+    return !policies[groupId]?.error;
+  }
+
+  function refreshGroupPolicy(groupId) {
+    const account = state.groupAccount;
+    const policies = state.groupPolicies;
+    const refresh = () => {
+      if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
+      delete groupDrafts[groupId]; chatProfiles.invalidate();
+      return loadGroupPolicy(groupId, true);
+    };
+    if (groupDrafts[groupId]) {
+      confirmAction({title: "重新读取群规则？", message: "本群未保存的修改将被丢弃。", confirmText: "丢弃并重新读取", onConfirm: refresh});
+    } else void refresh();
   }
 
   function renderGroupInspector() {
@@ -300,7 +323,7 @@ window.createChatManagement = function (helpers) {
       return;
     }
     const memberData = state.groupMembers[group.group_id];
-    const policyData = state.groupPolicies[group.group_id];
+    const policyData = groupDrafts[group.group_id] || state.groupPolicies[group.group_id];
     const cachedCount = hasGroupMemberCount(group.member_count) ? group.member_count : memberData?.total;
     const memberCount = hasGroupMemberCount(cachedCount) ? `${cachedCount} 人`
       : memberData?.error ? "读取失败" : "读取中";
@@ -310,8 +333,8 @@ window.createChatManagement = function (helpers) {
       : memberData.items.length ? `<div class="member-list">${memberData.items.map((item) => `<article>${avatarMarkup("member-avatar", item.group_nickname || item.name || "群", item.avatar)}<div><strong>${escapeHtml(item.group_nickname || item.name || "未命名成员")}</strong><div class="member-identities"><small><span>微信号</span>${escapeHtml(item.wechat_id || "未提供")}</small><small><span>微信标识</span>${escapeHtml(item.user_id || "未提供")}</small></div></div></article>`).join("")}</div>${memberData.truncated ? '<p class="member-note">成员较多，本次仅显示前 500 人。</p>' : ""}`
       : '<div class="member-empty">当前接口没有返回成员。</div>';
     const header = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
-    const tabs = `<div class="inspector-detail-actions"><button class="row-action" type="button" data-inspector-view="${state.groupInspectorView === "members" ? "policy" : "members"}">${state.groupInspectorView === "members" ? "返回群聊规则" : "查看群成员"}</button><button class="row-action copy-selected-group" type="button">复制群标识</button></div>`;
-    const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span>在线保存会立即应用到当前群。</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
+    const tabs = `<div class="inspector-detail-actions"><button class="row-action" id="refreshGroupPolicy" type="button" ${state.groupPolicies[group.group_id]?.loading ? "disabled" : ""}>重新读取规则</button><button class="row-action" type="button" data-inspector-view="${state.groupInspectorView === "members" ? "policy" : "members"}">${state.groupInspectorView === "members" ? "返回群聊规则" : "查看群成员"}</button><button class="row-action copy-selected-group" type="button">复制群标识</button></div>`;
+    const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span id="groupPolicyNote">${groupDrafts[group.group_id] ? "有未保存修改，切换群聊会保留。" : "在线保存会立即应用到当前群。"}</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
     const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">微信未提供的信息显示为“未知”。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
     panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
     $(".copy-selected-group", panel)?.addEventListener("click", () => copyText(group.group_id, "群标识"));
@@ -324,11 +347,20 @@ window.createChatManagement = function (helpers) {
       }
     }));
     $("#loadGroupMembers")?.addEventListener("click", () => loadGroupMembers(group.group_id));
+    $("#refreshGroupPolicy")?.addEventListener("click", () => refreshGroupPolicy(group.group_id));
+    $("#loadGroupPolicy")?.addEventListener("click", () => loadGroupPolicy(group.group_id));
     bindAvatarFallbacks(panel);
     const policyForm = $("#groupPolicyForm");
     if (policyForm) {
       void chatProfiles.mount($("#groupChatProfile"), group.group_id, "group", state.groupAccount);
       policyForm.addEventListener("submit", saveGroupPolicy);
+      const rememberDraft = (event) => {
+        if (!event.target.name) return;
+        groupDrafts[group.group_id] = {...policyData, policy: {...policyData.policy, ...readGroupPolicyForm(policyForm), daily_limit: policyForm.elements.daily_limit.value}};
+        $("#groupPolicyNote").textContent = "有未保存修改，切换群聊会保留。";
+      };
+      policyForm.addEventListener("input", rememberDraft);
+      policyForm.addEventListener("change", rememberDraft);
       $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updatePolicyToggle));
     }
   }
@@ -354,28 +386,35 @@ window.createChatManagement = function (helpers) {
     </form>`;
   }
 
+  function readGroupPolicyForm(form) {
+    return {
+      bot_enabled: form.elements.bot_enabled.checked,
+      reply_mode: form.elements.reply_mode.value,
+      scheduled_enabled: form.elements.scheduled_enabled.checked,
+      allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
+      quiet_hours: {
+        enabled: form.elements.quiet_enabled.checked,
+        start: form.elements.quiet_start.value,
+        end: form.elements.quiet_end.value,
+        timezone: "Asia/Shanghai",
+      },
+      daily_limit: Number(form.elements.daily_limit.value),
+    };
+  }
+
   async function saveGroupPolicy(event) {
     event.preventDefault();
     const form = event.currentTarget;
     const button = $('button[form="groupPolicyForm"]');
     if (!button) return;
+    const groupId = state.selectedGroup;
+    const account = state.groupAccount;
+    const policies = state.groupPolicies;
     button.disabled = true;
     button.textContent = "正在检查影响…";
     try {
-      const values = {
-        bot_enabled: form.elements.bot_enabled.checked,
-        reply_mode: form.elements.reply_mode.value,
-        scheduled_enabled: form.elements.scheduled_enabled.checked,
-        allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
-        quiet_hours: {
-          enabled: form.elements.quiet_enabled.checked,
-          start: form.elements.quiet_start.value,
-          end: form.elements.quiet_end.value,
-          timezone: "Asia/Shanghai",
-        },
-        daily_limit: Number(form.elements.daily_limit.value),
-      };
-      const preview = await api("preview_group_policy", state.groupAccount, state.selectedGroup, values, form.dataset.revision || "");
+      const values = readGroupPolicyForm(form);
+      const preview = await api("preview_group_policy", account, groupId, values, form.dataset.revision || "");
       const impact = Array.isArray(preview.impact) ? preview.impact : ["本次修改只影响当前群的机器人规则。"];
       button.disabled = false;
       button.textContent = "保存群聊规则";
@@ -385,8 +424,11 @@ window.createChatManagement = function (helpers) {
         confirmText: "保存并回读",
         intent: "primary",
         onConfirm: async () => {
-          await api("save_group_policy", state.groupAccount, state.selectedGroup, values, form.dataset.revision || "");
-          await loadGroupPolicy(state.selectedGroup);
+          if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
+          await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
+          if (state.groupAccount !== account || state.groupPolicies !== policies) return;
+          delete groupDrafts[groupId];
+          if (!await loadGroupPolicy(groupId, true)) throw new Error("规则已保存，但未能重新读取，请重试后核对。");
           toast("群聊规则已保存并回读确认。");
         },
       });
@@ -762,6 +804,7 @@ window.createChatManagement = function (helpers) {
 
   return {
     clearPendingGroupMemberLoading,
+    hasGroupDrafts: () => Object.keys(groupDrafts).length > 0,
     loadContacts,
     loadGroups,
     renderContacts,

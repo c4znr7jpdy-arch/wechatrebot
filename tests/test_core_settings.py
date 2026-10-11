@@ -209,7 +209,7 @@ def test_core_ui_flattens_settings_and_moves_chat_binding_to_chat_details():
         assert endpoint in core
     for endpoint in ['bindings/set', 'chat_status']:
         assert endpoint in profiles
-    assert '覆盖全局' in core and '恢复此组默认值' in core
+    assert '单独设置' in core and '恢复此组默认值' in core
     assert 'coreTemplateSource' in html and 'template_description' in core
     assert 'coreSettings.guard' in app and 'coreSettings.busy' in app
     assert 'data-settings-tab="search"' in html

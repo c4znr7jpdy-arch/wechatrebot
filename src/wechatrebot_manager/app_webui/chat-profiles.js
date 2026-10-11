@@ -5,6 +5,23 @@ window.createChatProfiles = function (helpers) {
   const request = (method, endpoint, payload) => api("request_robot_core", method, endpoint, payload);
   const privateOrigin = (id) => /:FriendMessage:|:PrivateMessage:/.test(id);
 
+  let cache = new Map();
+  window.addEventListener("chat-profiles-changed", () => { cache = new Map(); });
+
+  function readProfiles(account) {
+    const stored = cache.get(account);
+    if (stored && (stored.pending || Date.now() - stored.at < 30000)) return stored.promise;
+    const entry = {at: Date.now(), pending: true};
+    entry.promise = Promise.all([
+      request("GET", "profiles"), request("GET", "chats"), request("GET", "chat_status").catch(() => null),
+    ]).then((result) => { entry.pending = false; return result; }).catch((error) => {
+      if (cache.get(account) === entry) cache.delete(account);
+      throw error;
+    });
+    cache.set(account, entry);
+    return entry.promise;
+  }
+
   function bindingKey(id, kind, profiles, chats) {
     const bindings = profiles.bindings || {};
     const candidates = [...new Set([...Object.keys(bindings), ...(chats || []).map((chat) => chat.chat_id)])]
@@ -21,9 +38,7 @@ window.createChatProfiles = function (helpers) {
       && id === (kind === "group" ? state.selectedGroup : state.selectedContact);
     container.innerHTML = '<p class="subtle" role="status">正在读取配置方案…</p>';
     try {
-      const [profiles, chats, statuses] = await Promise.all([
-        request("GET", "profiles"), request("GET", "chats"), request("GET", "chat_status").catch(() => null),
-      ]);
+      const [profiles, chats, statuses] = await readProfiles(account);
       if (!current()) return;
       const key = bindingKey(id, kind, profiles, chats);
       const saved = profiles.bindings?.[key] || "";
@@ -48,12 +63,14 @@ window.createChatProfiles = function (helpers) {
             if (!current()) throw new Error("聊天或微信账号已变化，请重新选择。");
             if ((latest.bindings?.[key] || "") !== binding) throw new Error("配置方案已被其他窗口修改，请重新选择聊天后重试。");
             await request("POST", "bindings/set", {chat_id: key, template_id: next});
+            window.dispatchEvent(new Event("chat-profiles-changed"));
             const verified = await request("GET", "profiles");
             if ((verified.bindings?.[key] || "") !== next) throw new Error("未确认方案生效，请重新读取后核对。");
             if (!current()) return;
             binding = next; select.value = binding;
             note.textContent = "配置方案已应用并回读确认。";
           } catch (error) {
+            cache.delete(account);
             if (current()) note.textContent = error.message || "应用失败，请重新读取后核对。";
             throw error;
           } finally { if (current()) select.disabled = false; }
@@ -65,5 +82,5 @@ window.createChatProfiles = function (helpers) {
     }
   }
 
-  return {mount};
+  return {mount, invalidate() { cache = new Map(); }};
 };
