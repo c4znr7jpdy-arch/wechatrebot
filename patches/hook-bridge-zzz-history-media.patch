@@ -1,0 +1,133 @@
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+@@ -8,6 +8,7 @@
+ import uuid
+ 
+ from .models import NormalizedEvent, OutboundCommand
++from .history_media import message_previews
+ 
+ 
+ def _event_timestamp(value: int | float | None) -> float:
+@@ -224,6 +225,7 @@
+                 "wechat_id": getattr(event, "wechat_id", ""),
+                 "avatar": getattr(event, "member_avatar", ""),
+                 **message_metadata,
++                "media_previews": message_previews([event.media_path]) if event.message_type in {3, 47} else [],
+             },
+             ensure_ascii=False,
+             separators=(",", ":"),
+@@ -257,6 +259,7 @@
+         create_time: int | float | None = None,
+         sender_id: str = "",
+         sender_name: str = "",
++        media_paths: Sequence[Path] = (),
+     ) -> bool:
+         dedup_key = (
+             f"out:{sender_id}:{target}:{message_id}"
+@@ -268,6 +271,7 @@
+                 "group_name": "",
+                 "group_nickname": "",
+                 "wechat_name": sender_name,
++                "media_previews": message_previews(media_paths),
+                 "avatar": "",
+             },
+             ensure_ascii=False,
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -339,8 +339,13 @@
+                                 event.conversation_id, ""
+                             ),
+                         )
+-                    await self._record_inbound_history(event)
+-                    event = await self._prepare_inbound_media(event)
++                    history_event = event
++                    try:
++                        event = await self._prepare_inbound_media(event)
++                    finally:
++                        await self._record_inbound_history(
++                            replace(history_event, media_path=event.media_path)
++                        )
+                     event = self._ensure_quoted_wake_mention(event, self_id)
+                     quoted_reply_id: int | None = None
+                     if event.quoted_message_type in {1, 3}:
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -3,6 +3,7 @@
+ from wechatrebot_manager.licensing.runtime_guard import guard_bridge_action, runtime_guard
+ 
+ import asyncio
++from dataclasses import replace
+ from collections import deque
+ from collections.abc import Mapping, Sequence
+ import json
+@@ -620,6 +621,7 @@
+                 return self._failed("auto_recall_delay must be a number", echo, 10003)
+ 
+         completed = 0
++        history_media_paths: list[Path] = []
+         latest_receipt: SendResult | None = None
+         pending_auto_recalls: list[
+             tuple[str, asyncio.Future[RecallRecord], float]
+@@ -635,6 +637,10 @@
+                     auto_recall_delay,
+                 )
+             try:
++                if command.kind in {"image", "emotion"}:
++                    media_path = await self.media.materialize(command.source)
++                    command = replace(command, source=str(media_path))
++                    history_media_paths.append(media_path)
+                 if scheduled:
+                     # Media preparation may await downloads; recheck the live
+                     # account and task after it and immediately before HOOK.
+@@ -738,6 +744,7 @@
+                     create_time=latest_receipt.create_time if latest_receipt else None,
+                     sender_id=self.state.bot_wxid,
+                     sender_name=self.state.bot_nickname,
++                    media_paths=history_media_paths,
+                 )
+             except Exception:
+                 logger.exception(
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_media.py
+@@ -0,0 +1,41 @@
++"""Bounded static history previews; never fetch media again for the journal."""
++from __future__ import annotations
++
++import base64
++import io
++import logging
++from pathlib import Path
++import warnings
++
++from PIL import Image, ImageOps
++
++logger = logging.getLogger(__name__)
++
++
++def image_preview(path: Path | None) -> str:
++    if path is None:
++        return ""
++    try:
++        if path.stat().st_size > 20 * 1024 * 1024:
++            return ""
++        with warnings.catch_warnings():
++            warnings.simplefilter("error", Image.DecompressionBombWarning)
++            with Image.open(path) as source:
++                if source.width * source.height > 20_000_000:
++                    return ""
++                source.seek(0)
++                frame = ImageOps.exif_transpose(source).convert("RGBA")
++                frame.thumbnail((320, 240))
++                output = io.BytesIO()
++                frame.save(output, format="WEBP", quality=75)
++        raw = output.getvalue()
++        if len(raw) > 64 * 1024:
++            return ""
++        return "data:image/webp;base64," + base64.b64encode(raw).decode("ascii")
++    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
++        logger.debug("History image preview unavailable", exc_info=False)
++        return ""
++
++
++def message_previews(paths) -> list[str]:
++    return [preview for path in list(paths)[:4] if (preview := image_preview(path))]

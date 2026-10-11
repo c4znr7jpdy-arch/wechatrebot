@@ -101,7 +101,7 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "model": "",
         "service_kind": "chat",
         "modalities": ("text", "image", "audio"),
-        "description": "填写 Sub2 兼容接口地址和模型名称；聊天模型默认按多模态请求。",
+        "description": "填写 Sub2 兼容接口地址和模型名称；按所选服务的实际能力使用。",
     },
     {
         "id": "embedding_custom",
@@ -533,6 +533,11 @@ def provider_display_name(source_id: str, model: str) -> str:
     return clean_model or "自定义模型"
 
 
+def provider_service_label(service_kind: str) -> str:
+    """Describe the service role, never infer capabilities from forwarding flags."""
+    return {"embedding": "向量", "image": "图片", "voice": "语音", "rerank": "重排序"}.get(service_kind, "对话")
+
+
 def normalize_service_kind(value: str | None) -> str:
     kind = str(value or "chat").strip().casefold()
     aliases = {
@@ -797,6 +802,7 @@ __all__ = [
     "PROVIDER_REQUEST_TIMEOUT_SECONDS",
     "discover_openai_models",
     "provider_display_name",
+    "provider_service_label",
     "normalize_service_kind",
     "infer_provider_modalities",
     "provider_source_id",

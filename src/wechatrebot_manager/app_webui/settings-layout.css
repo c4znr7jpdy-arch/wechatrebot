@@ -159,3 +159,29 @@
   #page-settings .core-template-toolbar { align-items: stretch; flex-direction: column; }
   #page-settings .core-template-toolbar select { width: 100%; }
 }
+
+/* Compact action capsules and clearly separated settings groups. */
+.top-actions .button, .page-heading .button,
+#page-groups .inspector-detail-actions .row-action,
+#page-groups .chat-scheduled-entry,
+#page-settings .core-heading .button, #page-settings .core-detail-heading .button {
+  border-radius: 999px; border: 1px solid var(--line-strong); padding: 8px 16px; min-height: 36px;
+}
+#page-groups .inspector-detail-actions { gap: 8px; flex-wrap: wrap; }
+#page-groups .inspector-detail-actions .row-action { background: var(--surface); text-decoration: none; }
+#page-groups .inspector-detail-actions .row-action:hover { background: var(--blue-100); }
+#page-settings .core-form .config-section,
+#page-settings .core-identity-card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; background: var(--surface); }
+#page-settings .core-form .form-field { padding: 14px 8px; }
+#page-settings .core-form .config-section-header { margin-bottom: 8px; }
+#page-settings .web-search-provider-summary { margin: 20px 0 24px; }
+#page-settings #webSearchDetails { padding-top: 8px; }
+.sidebar-meta .help-toggle { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; margin: 0 6px 0 auto; border-radius: 50%; display: inline-flex; justify-content: center; }
+.sidebar-meta .help-toggle svg { width: 20px; height: 20px; flex-shrink: 0; }
+.message-media { display: flex; flex-wrap: wrap; gap: 8px; }
+.message-media img { width: 200px; height: 160px; max-width: 100%; object-fit: contain; border-radius: 8px; background: var(--surface); }
+@media (max-width: 600px) {
+  #page-settings .core-form .config-section, #page-settings .core-identity-card { padding: 12px; }
+}
+
+#page-groups .group-policy-form > .advanced-details { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }

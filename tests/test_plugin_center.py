@@ -829,7 +829,7 @@ def test_image_service_can_select_a_configured_image_provider(tmp_path: Path) ->
 
     detail = service.detail(public_id)
     assert detail["image_providers"] == [
-        {"value": "image_vendor/image-v2", "label": "image-v2 · 支持图片 · 图片模型"}
+        {"value": "image_vendor/image-v2", "label": "image-v2 · 图片模型"}
     ]
     assert {item["value"] for item in detail["providers"]} == {
         "vision_vendor/vision-chat"

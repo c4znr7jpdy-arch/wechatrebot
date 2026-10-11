@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 from datetime import datetime, timezone
 from html import unescape
@@ -217,7 +219,7 @@ def _history_metadata(value: object) -> dict[str, str]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    return {
+    result = {
         key: str(payload.get(key) or "").strip()
         for key in (
             "group_name",
@@ -230,6 +232,30 @@ def _history_metadata(value: object) -> dict[str, str]:
             "quote_content",
         )
     }
+    result["media_previews"] = json.dumps(payload.get("media_previews", []))
+    return result
+
+
+def _media_previews(value: object) -> list[str]:
+    """Only accept the bridge's bounded inline WebP thumbnails, never paths/URLs."""
+    try:
+        items = json.loads(str(value or "[]"))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(items, list):
+        return []
+    result = []
+    prefix = "data:image/webp;base64,"
+    for item in items[:4]:
+        if not isinstance(item, str) or len(item) > 88_000 or not item.startswith(prefix):
+            continue
+        try:
+            raw = base64.b64decode(item[len(prefix):], validate=True)
+        except (ValueError, binascii.Error):
+            continue
+        if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+            result.append(item)
+    return result
 
 
 class ChatHistoryService:
@@ -336,6 +362,7 @@ class ChatHistoryService:
                     message_kind TEXT NOT NULL DEFAULT '',
                     quote_sender TEXT NOT NULL DEFAULT '',
                     quote_content TEXT NOT NULL DEFAULT '',
+                    media_previews TEXT NOT NULL DEFAULT '[]',
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
                     UNIQUE(source_key, source_message_id)
@@ -360,6 +387,7 @@ class ChatHistoryService:
                 "message_kind",
                 "quote_sender",
                 "quote_content",
+                "media_previews",
             ):
                 if column not in columns:
                     connection.execute(
@@ -469,8 +497,8 @@ class ChatHistoryService:
                         conversation_id, conversation_type, role, sender_id,
                         sender_name, group_id, group_name, group_nickname,
                         wechat_name, wechat_id, avatar, message_kind, quote_sender,
-                        quote_content, content, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        quote_content, media_previews, content, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_key,
@@ -491,6 +519,7 @@ class ChatHistoryService:
                         identity.get("message_kind", ""),
                         identity.get("quote_sender", ""),
                         identity.get("quote_content", ""),
+                        json.dumps(_media_previews(identity.get("media_previews"))),
                         str(item["content"]),
                         float(item["timestamp"]),
                     ),
@@ -690,7 +719,7 @@ class ChatHistoryService:
                 )
                 SELECT id, conversation_type, role, sender_id, sender_name,
                        group_id, group_name, group_nickname, wechat_name, wechat_id,
-                       avatar, message_kind, quote_sender, quote_content,
+                       avatar, message_kind, quote_sender, quote_content, media_previews,
                        content, timestamp, sender_message_count, sender_last_timestamp
                 FROM page JOIN sender_stats USING (role, sender_id)
                 ORDER BY timestamp DESC, id DESC
@@ -724,6 +753,7 @@ class ChatHistoryService:
                 "wechat_id": row["wechat_id"],
                 "avatar": row["avatar"],
                 **presentation,
+                "media_previews": _media_previews(row["media_previews"]),
                 "timestamp": row["timestamp"],
             })
         return tuple(messages)

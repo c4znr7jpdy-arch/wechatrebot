@@ -226,7 +226,7 @@ window.createPreviewApi = function (helpers) {
       {id: "volcengine", name: "火山引擎豆包", api_base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260215", service_kind: "chat", modalities: ["text", "image", "audio"], description: "火山方舟兼容接口；默认填入豆包 Seed 2.0。"},
       {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text", "image", "audio"], description: "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。"},
       {id: "gemini_proxy", name: "Gemini", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。"},
-      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；聊天模型默认按多模态请求。"},
+      {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；按所选服务的实际能力使用。"},
       {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
       {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
       {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
@@ -568,7 +568,7 @@ window.createPreviewApi = function (helpers) {
           .filter((item) => item.id !== values.provider_id && item.id !== id)
           .map((item) => makeDefault ? {...item, is_default: false} : item);
         const modalities = inferProviderModalities(serviceKind, values.model, values.modalities);
-        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities, modality_label: providerCapabilityLabel(serviceKind, modalities), configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
+        const saved = {id, name: preset?.name || values.model, api_base: values.api_base, model: values.model, service_kind: serviceKind, modalities, modality_label: providerCapabilityLabel(serviceKind), configured: true, api_key_configured: true, is_default: makeDefault, is_recommended: false, thinking_supported: providerThinkingSupported(values.api_base, values.model), thinking_enabled: values.thinking_enabled !== false, apply_state: "applied"};
         previewProviders.unshift(saved);
         return ok(saved, makeDefault ? "回复模型已热更新并立即生效。" : "模型服务已保存，当前回复模型保持不变。");
       },
