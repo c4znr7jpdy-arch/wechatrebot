@@ -233,7 +233,7 @@
     function createTemplate() {
       if (guard(createTemplate)) return;
       const fromGlobal = $("#coreTemplateSource").value === 'global';
-      confirmAction({title: '新建配置模板', message: fromGlobal ? '从当前已保存的全局配置复制，创建后可编辑覆盖项，再到群聊&私聊管理选择使用。' : '创建空白模板，所有参数先跟随全局；打开需要单独设置的项后，再到聊天中选择此模板。', confirmText: '创建', intent: 'primary', field: {label: '模板名称', type: 'text', value: ''}, onConfirm: async (name) => {
+      confirmAction({title: '新建配置模板', message: fromGlobal ? '从当前已保存的全局配置复制，创建后可编辑覆盖项，再到群聊&私聊管理选择使用。' : '创建空白模板，所有参数先跟随全局；打开需要单独设置的项后，再到聊天中选择此模板。', confirmText: '创建', intent: 'primary', field: {label: '模板名称', type: 'text', value: '默认模板'}, onConfirm: async (name) => {
         if (!String(name || '').trim()) throw new Error('请填写模板名称。');
         await busy(async () => { const item = await request('POST', 'profiles/create', {name: name.trim(), from_global: fromGlobal}); await loadProfiles(true); state.view = 'template'; state.templateId = item.id; resetDraft(); render(); $(".template-create").open = false; $("#coreDetail h2").setAttribute("tabindex", "-1"); $("#coreDetail h2").focus({preventScroll: true}); toast('模板已创建。'); });
       }});
