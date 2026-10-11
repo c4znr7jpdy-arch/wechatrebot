@@ -580,7 +580,7 @@
     }
     if (page === "groups") {
       if (state.chatManagementTab === "groups") {
-        await loadGroups(true, {background: state.groupsLoaded});
+        if (!state.groupsLoaded) await loadGroups(true);
         if (state.groupInspectorView === "members" && state.selectedGroup
             && !state.groupMembers[state.selectedGroup]) renderGroupInspector();
       }
@@ -1070,7 +1070,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
@@ -1173,7 +1173,7 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { clearPendingGroupMemberLoading, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasGroupDrafts, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,
