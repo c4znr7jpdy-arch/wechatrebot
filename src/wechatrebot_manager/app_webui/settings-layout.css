@@ -9,7 +9,7 @@
 #page-settings .settings-tabs small { font-size: 12px; font-weight: 400; color: var(--muted); }
 #page-settings .settings-grid { display: block; min-width: 0; }
 #page-settings .core-workspace { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-#page-settings .core-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0; min-width: 0; }
+#page-settings .core-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0; min-width: 0; background: transparent; }
 #page-settings .core-detail { padding: 0; border: 0; background: transparent; }
 #page-settings .core-detail-heading { margin-bottom: 12px; }
 #page-settings .core-detail-heading h2 { font-size: 24px; }
