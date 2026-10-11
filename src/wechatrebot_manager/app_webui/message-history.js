@@ -539,6 +539,12 @@ window.createMessageHistory = function (helpers) {
     }
     renderConversations();
     renderConversationHeader(item);
+    // A directory poll can finish after upward paging has already started.
+    // Keep that page's generation and reading position until it completes.
+    if (!changed && !latest && state.historyLoadingOlder) {
+      renderConversationInspector(item);
+      return;
+    }
     $("#newMessageButton").hidden = true;
     if (changed && cacheEntry) {
       renderMessages(state.selectedMessages, {restoreScrollTop: cacheEntry.scrollTop});
