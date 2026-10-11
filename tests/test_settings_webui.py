@@ -313,8 +313,10 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
         page.get_by_text("定时任务与安静时段", exact=True).click()
         page.screenshot(path=str(tmp_path / f"groups-{width}.png"))
         page.locator("#themeToggle").click()
-        page.screenshot(path=str(tmp_path / f"groups-dark-{width}.png"))
+        expect(page.locator("#themeToggle")).to_be_enabled()
+        page.screenshot(animations="disabled", path=str(tmp_path / f"groups-dark-{width}.png"))
         page.locator("#themeToggle").click()
+        expect(page.locator("#themeToggle")).to_be_enabled()
         page.locator('.nav-item[data-page="settings"]').click()
         expect(page.locator("#pageTitle")).to_have_text("机器人总设置")
         page.locator('[data-settings-tab="search"]').click()
@@ -348,7 +350,10 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         # Help loads the existing hidden feature iframe without src; Chromium
         # reports this pre-existing CSP warning. No external frame is loaded.
-        unexpected = [error for error in errors if not error.startswith("Refused to frame '' because it violates")]
+        unexpected = [error for error in errors if not (
+            error.startswith(("Refused to frame '' because it violates", "Framing '' violates"))
+            and '"frame-src \'self\'"' in error
+        )]
         assert not unexpected, unexpected
         print(f"UI evidence: {tmp_path}; existing blank-frame CSP warnings: {len(errors)}")
     finally:
