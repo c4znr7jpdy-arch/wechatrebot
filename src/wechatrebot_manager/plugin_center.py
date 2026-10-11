@@ -352,15 +352,7 @@ class PluginCenterService:
                 source_id if source_id in source_ids else "",
                 model_name or provider_id,
             )
-            provider_modalities = provider.get("modalities")
-            modality_label = ""
-            if isinstance(provider_modalities, list):
-                normalized_modalities = {str(value).casefold() for value in provider_modalities}
-                if "image" in normalized_modalities and "audio" in normalized_modalities:
-                    modality_label = " · 多模态"
-                elif "image" in normalized_modalities:
-                    modality_label = " · 支持图片"
-            choice = {"value": provider_id, "label": str(_white_label_schema(label + modality_label))}
+            choice = {"value": provider_id, "label": str(_white_label_schema(label))}
             provider_kind = _configured_provider_service_kind(provider)
             if provider_kind == "embedding":
                 embedding_providers.append(choice)

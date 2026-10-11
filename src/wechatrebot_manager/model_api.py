@@ -24,6 +24,7 @@ from .customer_config import (
 from .json_io import write_json_atomic
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
 from .provider import (
+    provider_service_label,
     DEFAULT_PROVIDER_MODEL,
     DEFAULT_PROVIDER_SOURCE_ID,
     OpenAIProviderProfile,
@@ -145,13 +146,7 @@ class ModelApiMixin:
                     ),
                     "service_kind": saved.service_kind,
                     "modalities": list(saved.modalities),
-                    "modality_label": (
-                        "向量" if saved.service_kind == "embedding"
-                        else "图片" if saved.service_kind == "image"
-                        else "语音" if saved.service_kind == "voice"
-                        else "多模态" if set(saved.modalities) & {"image", "audio"}
-                        else "文本"
-                    ),
+                    "modality_label": provider_service_label(saved.service_kind),
                     "thinking_supported": supports_thinking_toggle(saved.api_base, saved.model),
                     "thinking_enabled": profile.thinking_enabled,
                     "apply_state": "applied" if hot_applied else "saved_for_start",

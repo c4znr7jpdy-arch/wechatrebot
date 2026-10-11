@@ -279,3 +279,77 @@ def test_chat_profile_cache_is_shared_and_invalidated(browser):
         assert result == {"reused": 1, "isolated": 2, "invalidated": 3, "refreshed": 4}
     finally:
         page.close()
+
+@pytest.mark.parametrize("width", [1440, 600])
+def test_settings_navigation_capsules_spacing_and_history_images(browser, manager_url, tmp_path, width):
+    import base64
+    import io
+    from PIL import Image
+
+    output = io.BytesIO()
+    Image.new("RGB", (320, 240), "#6489bf").save(output, format="WEBP")
+    preview = "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode()
+    page = browser.new_page(viewport={"width": width, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#globalRefresh")).to_be_enabled()
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        assert page.locator('.main-nav [data-page]').evaluate_all("els => els.map(e => e.dataset.page)") == [
+            "home", "features", "history", "schedules", "activity", "subscription", "groups", "settings",
+        ]
+        page.locator('.sidebar-meta [data-page="help"]').click()
+        expect(page.locator("#page-help")).to_be_visible()
+        page.locator('.nav-item[data-page="groups"]').click()
+        page.locator("#groupRows tr").first.click()
+        expect(page.locator("#groupRows .group-list-count").first).to_have_text("128 人")
+        expect(page.locator("#groupScheduledEnabled")).not_to_be_visible()
+        page.get_by_text("定时任务与安静时段", exact=True).click()
+        expect(page.locator("#groupScheduledEnabled")).to_be_attached()
+        assert page.locator("#refreshGroupPolicy").evaluate("e => getComputedStyle(e).borderRadius") == "999px"
+        page.get_by_text("定时任务与安静时段", exact=True).click()
+        page.screenshot(path=str(tmp_path / f"groups-{width}.png"))
+        page.locator("#themeToggle").click()
+        page.screenshot(path=str(tmp_path / f"groups-dark-{width}.png"))
+        page.locator("#themeToggle").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        expect(page.locator("#pageTitle")).to_have_text("机器人总设置")
+        page.locator('[data-settings-tab="search"]').click()
+        page.locator('#webSearchForm [name="enabled"]').check(force=True)
+        expect(page.locator("#webSearchProviderSummary")).to_be_visible()
+        assert page.locator("#webSearchProviderSummary").evaluate("e => parseFloat(getComputedStyle(e).marginBottom)") >= 20
+        page.screenshot(path=str(tmp_path / f"search-{width}.png"))
+        page.locator('[data-settings-tab="core"]').click()
+        expect(page.locator("#coreForm")).to_be_visible()
+        page.screenshot(path=str(tmp_path / f"core-{width}.png"))
+        page.evaluate("""preview => {
+          const api = window.pywebview.api, read = api.get_messages;
+          api.get_messages = async (...args) => {
+            const result = await read(...args), messages = result.data.items || result.data;
+            messages[0].message_kind = ''; messages[0].content = '[表情]'; messages[0].media_previews = [preview];
+            messages[1].content = '[图片]'; messages[1].media_previews = ['https://invalid.test/private.gif'];
+            return result;
+          };
+        }""", preview)
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator(".message-media img")).to_have_count(1)
+        page.locator(".message-media img").scroll_into_view_if_needed()
+        expect(page.locator(".message-media img")).to_be_visible()
+        page.wait_for_function("document.querySelector('.message-media img')?.naturalWidth === 320")
+        expect(page.locator(".message-media img")).to_have_attribute("alt", "表情首帧")
+        assert not page.locator('img[src*="invalid.test"]').count()
+        page.screenshot(path=str(tmp_path / f"history-{width}.png"))
+        page.locator(".message-media img").dispatch_event("error")
+        expect(page.get_by_text("表情首帧暂不可用", exact=True)).to_be_visible()
+        assert page.url == manager_url and page.title().startswith("消息中心")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        # Help loads the existing hidden feature iframe without src; Chromium
+        # reports this pre-existing CSP warning. No external frame is loaded.
+        unexpected = [error for error in errors if not error.startswith("Refused to frame '' because it violates")]
+        assert not unexpected, unexpected
+        print(f"UI evidence: {tmp_path}; existing blank-frame CSP warnings: {len(errors)}")
+    finally:
+        page.close()

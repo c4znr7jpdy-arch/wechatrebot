@@ -36,7 +36,7 @@ def bridge(tmp_path_factory):
     spec.loader.exec_module(module)
     try:
         yield SimpleNamespace(**{part: importlib.import_module(f"{name}.{part}")
-                                 for part in ("media", "hook_client", "models", "emotion_media")})
+                                 for part in ("media", "hook_client", "models", "emotion_media", "history_media", "history_store")})
     finally:
         for key in list(sys.modules):
             if key == name or key.startswith(name + "."):

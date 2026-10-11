@@ -292,3 +292,19 @@ def test_blank_global_name_uses_wechat_nickname_and_custom_name_is_preserved(tmp
     detail = service.detail()
     service.save_global(detail['advanced_config'], detail['revision'], {'robot_name': '小妹', 'admin_id': ''})
     assert service.detail()['identity']['robot_name'] == '小妹'
+
+
+def test_internal_context_switch_is_hidden_but_saved_value_survives(tmp_path):
+    service = _service(tmp_path)
+    path = tmp_path / "app/astrbot/data/plugins/astrbot_plugin_angel_heart/_conf_schema.json"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    schema["access_control"] = {"type": "object", "items": {
+        "group_chat_enhancement": {"type": "bool", "default": False},
+    }}
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    detail = service.detail()
+    for key in ("basic_schema", "model_schema", "advanced_schema", "template_schema"):
+        assert "group_chat_enhancement" not in json.dumps(detail[key])
+    assert detail["advanced_config"]["access_control"]["group_chat_enhancement"] is False
+    service.save_global(detail["advanced_config"], detail["revision"], {"robot_name": "机器人"})
+    assert service.detail()["advanced_config"]["access_control"]["group_chat_enhancement"] is False

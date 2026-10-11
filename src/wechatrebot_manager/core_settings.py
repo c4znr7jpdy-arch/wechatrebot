@@ -41,6 +41,13 @@ class RobotCoreSettingsService:
         result["identity"]["wechat_nickname"] = str(robot.get("nickname") or robot.get("name") or "")
         if settings.profile.name_source == "wechat":
             result["identity"]["robot_name"] = ""
+        # Internal orchestration stays in advanced_config so saves preserve it.
+        for schema_key in ("basic_schema", "model_schema", "advanced_schema"):
+            schema = result.get(schema_key, {})
+            access = schema.get("access_control", {})
+            access.get("items", {}).pop("group_chat_enhancement", None)
+            if access and not access.get("items"):
+                schema.pop("access_control", None)
         self._normalize_identity(result, settings.profile.display_name)
         result["template_schema"] = self._template_schema(result["advanced_schema"])
         return result

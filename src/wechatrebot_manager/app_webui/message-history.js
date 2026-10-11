@@ -311,7 +311,7 @@ window.createMessageHistory = function (helpers) {
       message.id, message.timestamp, message.role, message.sender_id,
       message.sender_name, message.group_nickname, message.wechat_name, message.wechat_id,
       message.avatar, message.content, message.message_kind,
-      message.quote_sender, message.quote_content,
+      message.quote_sender, message.quote_content, message.media_previews,
     ]));
   }
 
@@ -424,7 +424,11 @@ window.createMessageHistory = function (helpers) {
       const detail = presentation.content === "消息已撤回" ? "" : `<span>${escapeHtml(presentation.content)}</span>`;
       return `<div class="message-bubble message-bubble-notice" role="note"><strong>消息已撤回</strong>${detail}</div>`;
     }
-    return `<div class="message-bubble">${escapeHtml(presentation.content)}</div>`;
+    const previews = (Array.isArray(message.media_previews) ? message.media_previews : [])
+      .slice(0, 4).filter((value) => typeof value === "string" && value.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value));
+    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" width="200" height="160" loading="lazy" decoding="async">`).join("")}</div>` : "";
+    const caption = media && /^\[(图片|表情)\](\n\[(图片|表情)\])*$/.test(presentation.content) ? "" : escapeHtml(presentation.content);
+    return `<div class="message-bubble">${media}${caption}</div>`;
   }
 
   function messageMarkup(message) {
@@ -458,6 +462,15 @@ window.createMessageHistory = function (helpers) {
   }
 
   function bindMessageSenderSelection(root = $("#messageList")) {
+    $$(".message-media img", root).forEach((image) => {
+      if (image.dataset.fallbackBound) return;
+      image.dataset.fallbackBound = "true";
+      image.addEventListener("error", () => {
+        const fallback = document.createElement("span");
+        fallback.textContent = `${image.alt}暂不可用`;
+        image.replaceWith(fallback);
+      }, {once: true});
+    });
     $$(".message-avatar-button", root).forEach((button) => {
       if (button.dataset.senderSelectionBound === "true") return;
       button.dataset.senderSelectionBound = "true";

@@ -350,3 +350,32 @@ def test_private_scheduled_controls_validate_without_changing_saved_policy(tmp_p
     with pytest.raises(PrivatePolicyError):
         service.save(ACCOUNT, CONTACT, values)
     assert service.path.read_bytes() == before
+
+
+def test_outbound_history_uses_materialized_image_without_refetch(bridge, tmp_path):
+    from PIL import Image
+    import importlib
+    from wechatrebot_manager.chat_history import ChatHistoryService
+
+    service = ChatHistoryService(tmp_path)
+    history = importlib.import_module(bridge.onebot.__package__ + ".history_store")
+    store = history.MessageHistoryStore(service.bridge_source)
+    router = _router(bridge, tmp_path)
+    router.history = store
+    image = tmp_path / "preview.png"
+    Image.new("RGB", (50, 50), "red").save(image)
+    sources = []
+
+    async def materialize(source):
+        sources.append(source)
+        return image
+
+    router.media.materialize = materialize
+    result = asyncio.run(router.handle({"action": "send_private_msg", "params": {
+        "user_id": CONTACT, "message": [{"type": "image", "data": {"file": "https://example.test/image.png"}}],
+    }}))
+    assert result["status"] == "ok"
+    assert sources == ["https://example.test/image.png", str(image)]
+    assert len(router.hook.calls) == 1
+    messages = service.messages(CONTACT, account_id=ACCOUNT)
+    assert len(messages) == 1 and len(messages[0]["media_previews"]) == 1

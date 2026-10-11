@@ -10,6 +10,7 @@ from .brand import BrandProfile
 from .feature_policy import RETIRED_PLUGIN_MODULES
 from .json_io import write_json_atomic
 from .provider import (
+    provider_service_label,
     DEFAULT_PROVIDER_MODEL,
     DEFAULT_PROVIDER_SOURCE_ID,
     OpenAIProviderProfile,
@@ -252,17 +253,7 @@ class ProviderService:
             "thinking_enabled": self.thinking_enabled,
             "service_kind": self.service_kind,
             "modalities": list(self.modalities),
-            "modality_label": (
-                "向量"
-                if self.service_kind == "embedding"
-                else "图片"
-                if self.service_kind == "image"
-                else "语音"
-                if self.service_kind == "voice"
-                else "多模态"
-                if len(set(self.modalities) & {"image", "audio"})
-                else "文本"
-            ),
+            "modality_label": provider_service_label(self.service_kind),
             "references": [
                 _plugin_display_name(module_name)
                 for module_name in self.reference_modules

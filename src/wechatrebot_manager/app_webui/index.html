@@ -48,18 +48,18 @@
       <nav class="main-nav" aria-label="主导航">
             <button class="nav-item active" data-page="home" data-action-bound disabled aria-label="运行中心" title="运行中心"><svg><use href="#i-home"/></svg><span>运行中心</span></button>
             <button class="nav-item" data-page="features" data-action-bound disabled aria-label="功能中心" title="功能中心"><svg><use href="#i-grid"/></svg><span>功能中心</span></button>
-            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="群聊与私聊管理" title="群聊&私聊管理"><svg><use href="#i-users"/></svg><span>群聊&amp;私聊管理</span></button>
             <button class="nav-item" data-page="history" data-action-bound disabled aria-label="消息中心" title="消息中心"><svg><use href="#i-chat"/></svg><span>消息中心</span></button>
             <button class="nav-item" data-page="schedules" data-action-bound disabled aria-label="定时任务" title="定时任务"><svg><use href="#i-clock"/></svg><span>定时任务</span></button>
             <button class="nav-item" data-page="activity" data-action-bound disabled aria-label="运行记录" title="运行记录"><svg><use href="#i-list"/></svg><span>运行记录</span></button>
             <button class="nav-item" data-page="subscription" data-action-bound disabled aria-label="订阅与授权" title="订阅与授权"><svg><use href="#i-key"/></svg><span>订阅与授权</span></button>
-            <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="设置" title="设置"><svg><use href="#i-settings"/></svg><span>设置</span></button>
-            <button class="nav-item" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg><span>帮助</span></button>
+            <button class="nav-item" data-page="groups" data-action-bound disabled aria-label="群聊与私聊配置" title="群聊&私聊配置"><svg><use href="#i-users"/></svg><span>群聊&amp;私聊配置</span></button>
+            <button class="nav-item" data-page="settings" data-action-bound disabled aria-label="机器人总设置" title="机器人总设置"><svg><use href="#i-settings"/></svg><span>机器人总设置</span></button>
       </nav>
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
         <div class="sidebar-meta">
           <span class="sidebar-version" id="versionText">v0.0.0</span>
+            <button class="nav-item help-toggle" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg></button>
           <button class="theme-toggle" id="themeToggle" type="button" data-action-bound disabled aria-pressed="false" aria-label="切换到深色模式" title="切换到深色模式">
             <svg aria-hidden="true"><use id="themeToggleIcon" href="#i-moon"/></svg>
             <span id="themeToggleText">深色模式</span>
@@ -251,13 +251,13 @@
 
         <section class="page" id="page-groups" aria-labelledby="groupHeading">
           <div class="page-heading compact">
-            <div><h1 id="groupHeading">群聊&amp;私聊管理</h1></div>
+            <div><h1 id="groupHeading">群聊&amp;私聊配置</h1></div>
             <div class="directory-actions">
               <button class="button secondary" id="refreshGroups" data-action-bound disabled><svg><use href="#i-refresh"/></svg><span>刷新群列表</span></button>
               <button class="button secondary" id="refreshContacts" data-action-bound disabled hidden><svg><use href="#i-refresh"/></svg><span>刷新联系人</span></button>
             </div>
           </div>
-          <div class="management-tabs" role="tablist" aria-label="群聊与私聊管理分类">
+          <div class="management-tabs" role="tablist" aria-label="群聊与私聊配置分类">
             <button type="button" id="groupManagementTab" role="tab" aria-controls="groupManagementPanel" aria-selected="true" tabindex="0" data-chat-management-tab="groups" class="active" data-action-bound disabled>群聊管理</button>
             <button type="button" id="privateManagementTab" role="tab" aria-controls="privateManagementPanel" aria-selected="false" tabindex="-1" data-chat-management-tab="private" data-action-bound disabled>私聊管理</button>
           </div>
@@ -376,14 +376,14 @@
           </div>
           <section class="help-start panel" aria-labelledby="helpStartTitle">
             <div class="help-start-copy"><h2 id="helpStartTitle">快速开始</h2><p>配置模型，再按聊天选择回复方式和功能。</p><div class="button-row"><button class="button secondary" type="button" data-help-target="home" disabled>检查运行状态</button><button class="button secondary" type="button" data-help-target="settings" disabled>配置模型与核心</button><button class="button secondary" type="button" data-help-target="groups" disabled>管理群聊与私聊</button></div></div>
-            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊管理中配置群聊规则的实况界面" loading="lazy"><figcaption>聊天规则</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>功能设置</figcaption></figure></div>
+            <div class="help-shot-grid" aria-label="管理界面实况图"><figure><img src="assets/help-message-management.webp" alt="群聊与私聊配置中配置群聊规则的实况界面" loading="lazy"><figcaption>聊天规则</figcaption></figure><figure><img src="assets/help-feature-center.webp" alt="功能中心配置功能参数的实况界面" loading="lazy"><figcaption>功能设置</figcaption></figure></div>
           </section>
           <div class="help-toolbar"><div><h2>全部功能用法</h2><p id="helpSummary">正在整理功能说明…</p></div><div class="segmented" id="helpAudience" aria-label="帮助分类"><button class="active" type="button" data-help-audience="all" disabled>全部</button><button type="button" data-help-audience="common" disabled>常用</button><button type="button" data-help-audience="advanced" disabled>进阶</button></div></div>
           <div class="help-feature-grid" id="helpFeatureGrid"><div class="loading-row panel">正在整理功能说明…</div></div>
         </section>
 
         <section class="page" id="page-settings" aria-labelledby="settingsHeading">
-          <div class="page-heading compact"><div><h1 id="settingsHeading">设置</h1></div></div>
+          <div class="page-heading compact"><div><h1 id="settingsHeading">机器人总设置</h1></div></div>
           <div class="settings-layout">
           <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
             <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong><small>回复、识图与其他模型</small></button>

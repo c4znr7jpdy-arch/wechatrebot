@@ -155,13 +155,8 @@ window.createModelServices = function (helpers) {
     return ["text", "image", "audio"].filter((item) => values.has(item)).join(",");
   }
 
-  function providerCapabilityLabel(serviceKind, modalities) {
-    if (serviceKind === "embedding") return "向量";
-    if (serviceKind === "image") return "图片";
-    if (serviceKind === "voice") return "语音";
-    const value = providerChatModalityValue(modalities);
-    if (!value) return "能力可选";
-    return value.includes("image") || value.includes("audio") ? "多模态" : "文本";
+  function providerCapabilityLabel(serviceKind) {
+    return {embedding: "向量", image: "图片", voice: "语音", rerank: "重排序"}[serviceKind] || "对话";
   }
 
   function inferProviderModalities(serviceKind, model, declared) {
@@ -361,7 +356,7 @@ window.createModelServices = function (helpers) {
           </header>
           <div class="provider-service-body">
             <div class="provider-card-tags">
-              <span>${escapeHtml(item.modality_label || (item.service_kind === "image" ? "图片" : item.service_kind === "embedding" ? "向量" : item.service_kind === "voice" ? "语音" : "文本"))}</span>
+              <span>${escapeHtml(item.modality_label || providerCapabilityLabel(item.service_kind))}</span>
               <span>${item.configured ? "已配置" : "缺少 API Key / Token Plan"}</span>
             </div>
             <p>${escapeHtml(description)}</p>

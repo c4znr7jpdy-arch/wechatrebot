@@ -541,8 +541,8 @@
   }
 
   const PAGE_TITLES = {
-    home: "运行中心", features: "功能中心", groups: "群聊&私聊管理", history: "消息中心",
-    schedules: "定时任务", activity: "运行记录", settings: "设置", help: "帮助", subscription: "订阅与授权",
+    home: "运行中心", features: "功能中心", groups: "群聊&私聊配置", history: "消息中心",
+    schedules: "定时任务", activity: "运行记录", settings: "机器人总设置", help: "帮助", subscription: "订阅与授权",
   };
 
   const SETTINGS_SECTIONS = new Set(["model", "core", "search", "system"]);
@@ -957,6 +957,7 @@
         updateToggleCopy({currentTarget: event.target});
         $("#webSearchDetails").hidden = !event.target.checked;
         $("#clearWebSearchKey").hidden = !event.target.checked;
+        $("#webSearchNote").textContent = "有修改尚未保存。";
       }
     });
     $("#revealWebSearchKey").addEventListener("click", (event) => {
