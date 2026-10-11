@@ -387,7 +387,7 @@
           <div class="settings-layout">
           <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
             <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong><small>回复、识图与其他模型</small></button>
-            <button type="button" data-settings-tab="core" data-action-bound disabled><strong>对话规则</strong><small>机器人默认如何回复</small></button>
+            <button type="button" data-settings-tab="core" data-action-bound disabled><strong>机器人配置</strong><small>机器人默认如何回复</small></button>
             <button type="button" data-settings-tab="search" data-action-bound disabled><strong>联网搜索</strong><small>搜索服务与密钥</small></button>
             <button type="button" data-settings-tab="system" data-action-bound disabled><strong>系统与更新</strong><small>安装、数据与版本</small></button>
           </nav>
@@ -421,9 +421,9 @@
               </section>
             </section>
 
-            <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="对话规则">
+            <section class="core-workspace" id="coreWorkspace" data-settings-section="core" hidden aria-label="机器人配置">
               <div class="core-heading"><span class="status-badge" id="coreStatus">等待读取</span><div class="button-row"><button class="row-action" id="openChatRules" type="button" data-action-bound disabled>单独设置某个聊天</button><button class="button ghost small" id="refreshCore" type="button" data-action-bound disabled>重新读取</button></div></div>
-              <section class="core-detail" id="coreDetail"><div class="loading-row">正在读取对话规则…</div></section>
+              <section class="core-detail" id="coreDetail"><div class="loading-row">正在读取机器人配置…</div></section>
               <details class="core-template-tools" id="coreTemplates"><summary>配置模板</summary><div class="core-template-toolbar"><label for="coreTemplateSource">新模板初始配置</label><select id="coreTemplateSource"><option value="global">复制已保存的全局配置</option><option value="empty">空白模板（跟随全局）</option></select><button class="button secondary small" id="newCoreTemplate" type="button" data-action-bound disabled>新增模板</button></div><div id="coreTemplateList"></div></details>
             </section>
               <form class="settings-card panel web-search-settings-card" id="webSearchForm" data-settings-section="search" hidden novalidate>
