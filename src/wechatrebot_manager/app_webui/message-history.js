@@ -426,7 +426,7 @@ window.createMessageHistory = function (helpers) {
     }
     const previews = (Array.isArray(message.media_previews) ? message.media_previews : [])
       .slice(0, 4).filter((value) => typeof value === "string" && value.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value));
-    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" loading="lazy" decoding="async">`).join("")}</div>` : "";
+    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<button class="message-image-preview" type="button" aria-label="放大查看${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}"><img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" loading="lazy" decoding="async"></button>`).join("")}</div>` : "";
     const caption = media && /^\[(图片|表情)\](\n\[(图片|表情)\])*$/.test(presentation.content) ? "" : escapeHtml(presentation.content);
     const bubble = caption || !media ? `<div class="message-bubble">${caption}</div>` : "";
     return `${media}${bubble}`;
@@ -466,10 +466,12 @@ window.createMessageHistory = function (helpers) {
     $$(".message-media img", root).forEach((image) => {
       if (image.dataset.fallbackBound) return;
       image.dataset.fallbackBound = "true";
+      const button = image.closest(".message-image-preview");
+      button.addEventListener("click", () => window.openMessageImagePreview(image.src, image.alt));
       image.addEventListener("error", () => {
         const fallback = document.createElement("span");
         fallback.textContent = `${image.alt}暂不可用`;
-        image.replaceWith(fallback);
+        button.replaceWith(fallback);
       }, {once: true});
     });
     $$(".message-avatar-button", root).forEach((button) => {

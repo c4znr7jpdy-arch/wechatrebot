@@ -319,14 +319,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #page-settings .panel-heading { border-color: var(--line); }
 #page-settings .provider-service,
 #page-settings .provider-add-card,
-#page-settings .provider-form-note,
 #page-settings .web-search-provider-summary { border-color: var(--line); background: var(--surface-inset); box-shadow: none; }
 #page-settings .provider-service.active { border-color: #9cab9d; background: var(--surface-selected); box-shadow: inset 3px 0 var(--blue-600); }
 #page-settings .provider-logo { background: var(--blue-600); }
 #page-settings .provider-logo.custom { color: var(--blue-700); background: var(--blue-100); }
 #page-settings .provider-card-tags span { color: var(--ink-2); background: var(--surface-muted); }
 #page-settings .provider-service-actions { border-top-color: var(--line); }
-#page-settings .provider-form-note { color: var(--blue-700); }
 #page-settings .core-heading,
 #page-settings .core-subtabs,
 #page-settings .core-sidebar,
@@ -604,7 +602,6 @@ html[data-theme="dark"] .scheduled-preview,
 html[data-theme="dark"] .schedule-next-times,
 html[data-theme="dark"] .scheduled-analysis-intro,
 html[data-theme="dark"] .scheduled-link-card,
-html[data-theme="dark"] .provider-form-note,
 html[data-theme="dark"] .settings-help-list article,
 html[data-theme="dark"] .settings-preview-card { color: var(--ink); background: var(--surface-2); border-color: var(--line); }
 html[data-theme="dark"] .feature-guide strong,
@@ -675,7 +672,6 @@ html[data-theme="dark"] .provider-service.active .provider-card-tags span { colo
 html[data-theme="dark"] .provider-thinking-control,
 html[data-theme="dark"] .provider-service-actions { border-top-color: var(--line); }
 html[data-theme="dark"] .provider-add-card:hover { background: #1c3048; border-color: var(--blue-600); }
-html[data-theme="dark"] .provider-form-note { color: #b5d0f5; }
 
 html[data-theme="dark"] .modal,
 html[data-theme="dark"] .onboarding-dialog { color: var(--ink); background: #151f2c; border-color: var(--line); }
@@ -767,15 +763,18 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 /* Shared panel sizing; saved desktop sizes never override the narrow layout. */
 .message-read-status { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .message-read-status small { color: var(--muted); font-size: 12px; }
-.panel-resize-handle { display: none; }
+.panel-resize-handle, .panel-resize-edge { display: none; }
 #resetPanelLayout { margin-left: auto; margin-right: 14px; }
 @media (min-width: 1101px) {
   .page { width: 100%; }
   .layout-adjustable { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; }
   .layout-adjustable.has-panel-size { width: var(--panel-user-width, 100%); height: var(--panel-user-height) !important; min-height: 160px !important; max-height: none !important; flex: none !important; overflow: auto; }
-  .panel-resize-handle { display: block; position: absolute; right: 3px; bottom: 3px; z-index: 12; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px; background: repeating-linear-gradient(135deg, transparent 0 3px, var(--muted) 3px 4px, transparent 4px 7px) bottom right / 14px 14px no-repeat; cursor: nwse-resize; touch-action: none; opacity: .65; }
-  .panel-resize-handle:hover, .panel-resize-handle:focus-visible { opacity: 1; outline: 2px solid var(--blue-600); outline-offset: 1px; }
-  .panel-resizing, .panel-resizing * { cursor: nwse-resize !important; user-select: none !important; }
+  .panel-resize-handle, .panel-resize-edge { display: block; position: absolute; right: 0; bottom: 0; z-index: 12; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; }
+  .panel-resize-handle { width: 12px; height: 12px; cursor: nwse-resize; z-index: 13; }
+  .panel-resize-edge[data-resize-axis="width"] { top: 0; width: 6px; cursor: ew-resize; }
+  .panel-resize-edge[data-resize-axis="height"] { left: 0; height: 6px; cursor: ns-resize; }
+  .panel-resize-handle:focus-visible { outline: 2px solid var(--blue-600); outline-offset: -2px; }
+  .panel-resizing, .panel-resizing * { cursor: var(--panel-resize-cursor, nwse-resize) !important; user-select: none !important; }
   .panel-resizing iframe { pointer-events: none; }
   #page-features .feature-layout { grid-template-columns: var(--layout-track-0, 300px) minmax(0,1fr); }
   #page-groups .group-layout, #page-groups .contact-layout { grid-template-columns: minmax(0,1fr) var(--layout-track-1, minmax(340px,.65fr)); }

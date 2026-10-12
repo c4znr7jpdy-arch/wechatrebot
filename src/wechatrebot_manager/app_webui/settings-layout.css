@@ -179,6 +179,7 @@
 .sidebar-meta .help-toggle { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; margin: 0 6px 0 auto; border-radius: 50%; display: inline-flex; justify-content: center; }
 .sidebar-meta .help-toggle svg { width: 20px; height: 20px; flex-shrink: 0; }
 .message-media { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.message-image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .message-media img { display: block; width: auto; height: auto; max-width: min(200px, 100%); max-height: 160px; }
 .message-media + .message-bubble { margin-top: 6px; }
 @media (max-width: 600px) {
@@ -186,3 +187,19 @@
 }
 
 #page-groups .group-policy-form > .advanced-details { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+
+/* Chat details use one body typeface and an explicit heading/control hierarchy. */
+#page-groups :is(.group-inspector, .contact-inspector) { font-family: var(--font-body); font-size: 14px; line-height: 1.6; }
+#page-groups .inspector-group-title h2 { font-family: var(--font-body); font-size: 20px; font-weight: 700; line-height: 1.4; margin: 0 0 4px; }
+#page-groups :is(.group-policy-form, .private-feature-policy) :is(label, select, input, .toggle-line),
+#page-groups .chat-profile-field > span { font-size: 14px; }
+#page-groups :is(.group-policy-form, .private-feature-policy) label > span { font-size: 14px; font-weight: 600; }
+#page-groups :is(.group-policy-form, .private-feature-policy) .toggle-line { display: grid !important; }
+#page-groups :is(.inspector-detail-actions .row-action, .chat-scheduled-entry, .inspector-footer .button) { font-size: 14px; font-weight: 600; }
+#page-groups :is(.inspector-id, .chat-profile-note, .chat-decision, .inspector-footer > span) { font-size: 13px; font-weight: 400; color: var(--muted); }
+#page-groups .advanced-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; list-style: none; font-size: 15px; font-weight: 600; color: var(--blue-700); border-radius: 4px; }
+#page-groups .advanced-details > summary::-webkit-details-marker { display: none; }
+#page-groups .advanced-details > summary::after { content: "⌄"; font-size: 18px; line-height: 1; transition: transform .15s; }
+#page-groups .advanced-details[open] > summary::after { transform: rotate(180deg); }
+#page-groups .advanced-details > summary:hover { color: var(--ink); background: var(--blue-100); }
+#page-groups .advanced-details > summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 4px; }
