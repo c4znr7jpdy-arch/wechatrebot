@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime
 import json
@@ -94,24 +95,34 @@ class EventStore:
         self._last_pruned = 0.0
 
     @staticmethod
-    def _read(path: Path) -> list[dict]:
-        try:
-            text, _ = read_log_tail(path, max_bytes=_MAX_LOG_BYTES, max_lines=20000)
-        except FileNotFoundError:
-            return []
-        records = []
-        for line in text.splitlines():
+    def _records(lines: Iterable[str]) -> Iterator[dict]:
+        for line in lines:
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
                 continue
             if isinstance(item, dict):
-                records.append(item)
-        return records
+                yield item
+
+    @classmethod
+    def _file_records(cls, path: Path) -> Iterator[dict]:
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                yield from cls._records(handle)
+        except FileNotFoundError:
+            return
+
+    @classmethod
+    def _read(cls, path: Path) -> list[dict]:
+        try:
+            text, _ = read_log_tail(path, max_bytes=_MAX_LOG_BYTES, max_lines=20000)
+        except FileNotFoundError:
+            return []
+        return list(cls._records(text.splitlines()))
 
     @staticmethod
-    def _write(path: Path, records: list[dict]) -> None:
-        write_text_atomic(path, "".join(
+    def _write(path: Path, records: Iterable[dict]) -> None:
+        write_text_atomic(path, (
             json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n"
             for item in records
         ))
@@ -142,16 +153,20 @@ class EventStore:
             for path in (self.path, self.path.with_suffix(".jsonl.1")):
                 if not path.exists():
                     continue
-                records = self._read(path)
-                retained = [current for item in records if (current := self._retained(item, cutoff)) is not None]
-                if retained != records:
-                    self._write(path, retained)
+                # A rotated file can exceed the size limit by its final record.
+                # Never replace a complete file with a truncated display tail.
+                if any(self._retained(item, cutoff) != item for item in self._file_records(path)):
+                    self._write(path, (
+                        current for item in self._file_records(path)
+                        if (current := self._retained(item, cutoff)) is not None
+                    ))
             self._last_pruned = now
 
     def _merge_error(self, record: EventRecord) -> EventRecord | None:
         if record.event != "APP_ERROR":
             return None
-        records = self._read(self.path)
+        # emit rotates before reaching this point, bounding this complete read.
+        records = list(self._file_records(self.path))
         current = record.to_dict()
         timestamp = log_timestamp(record.time)
         for index in range(len(records) - 1, -1, -1):
@@ -209,13 +224,13 @@ class EventStore:
         )
         line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
         with self._lock:
+            if self.path.exists() and self.path.stat().st_size >= _MAX_LOG_BYTES:
+                self.path.replace(self.path.with_suffix(".jsonl.1"))
             self.prune()
             self.path.parent.mkdir(parents=True, exist_ok=True)
             merged = self._merge_error(record)
             if merged is not None:
                 return merged
-            if self.path.exists() and self.path.stat().st_size >= _MAX_LOG_BYTES:
-                self.path.replace(self.path.with_suffix(".jsonl.1"))
             with self.path.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line + "\n")
         return record

@@ -131,3 +131,62 @@ def test_repeat_rewrite_failure_leaves_original_evidence(tmp_path, monkeypatch):
         store.emit("APP_ERROR", "failed", code="19001", message="same failure")
     assert store.path.read_bytes() == original
     assert list(store.path.parent.glob("*.tmp")) == []
+
+
+def test_oversized_log_rotates_before_repeat_rewrite(tmp_path, monkeypatch):
+    monkeypatch.setattr("wechatrebot_manager.events._MAX_LOG_BYTES", 1024)
+    store = EventStore(tmp_path)
+    repeated = store.emit("APP_ERROR", "failed", code="19001", message="same failure")
+    recent = {"time": repeated.time, "event": "APP_START", "status": "ok",
+              "event_id": "recent-evidence", "message": "x" * 1200}
+    store.path.write_text(json.dumps(recent) + "\n" + json.dumps(repeated.to_dict()) + "\n", encoding="utf-8")
+
+    store.emit("APP_ERROR", "failed", code="19001", message="same failure")
+
+    rotated = store.path.with_suffix(".jsonl.1")
+    assert rotated.exists()
+    rows = [json.loads(line) for line in rotated.read_text("utf-8").splitlines()]
+    assert rows == [recent, repeated.to_dict()]
+    assert len(store.path.read_text("utf-8").splitlines()) == 1
+
+
+@pytest.mark.parametrize("rotated", [False, True])
+def test_pruning_oversized_log_preserves_recent_prefix(tmp_path, monkeypatch, rotated):
+    monkeypatch.setattr("wechatrebot_manager.events._MAX_LOG_BYTES", 1024)
+    now = datetime.now(timezone.utc)
+    store = EventStore(tmp_path)
+    path = store.path.with_suffix(".jsonl.1") if rotated else store.path
+    path.parent.mkdir()
+    recent = {"time": now.isoformat(), "event": "APP_START", "status": "ok",
+              "event_id": "recent-evidence", "message": "x" * 1200}
+    expired = {"time": (now - timedelta(days=3)).isoformat(), "event": "APP_START", "status": "ok"}
+    path.write_text(json.dumps(recent) + "\n" + json.dumps(expired) + "\n", encoding="utf-8")
+
+    store.prune()
+
+    assert json.loads(path.read_text("utf-8")) == recent
+
+
+def test_streaming_prune_failure_preserves_original_log(tmp_path, monkeypatch):
+    store = EventStore(tmp_path)
+    recent = store.emit("APP_START", "success").to_dict()
+    expired = {**recent, "time": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}
+    store.path.write_text(json.dumps(recent) + "\n" + json.dumps(expired) + "\n", encoding="utf-8")
+    original = store.path.read_bytes()
+    read_records = store._file_records
+    passes = 0
+
+    def interrupted(path):
+        nonlocal passes
+        passes += 1
+        for index, row in enumerate(read_records(path)):
+            if passes == 2 and index == 1:
+                raise OSError("read interrupted")
+            yield row
+
+    store._last_pruned = 0
+    monkeypatch.setattr(store, "_file_records", interrupted)
+    with pytest.raises(OSError, match="read interrupted"):
+        store.prune()
+    assert store.path.read_bytes() == original
+    assert list(store.path.parent.glob("*.tmp")) == []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import os
 import tempfile
@@ -14,7 +15,7 @@ def write_json_atomic(path: Path, payload: Any) -> None:
     write_text_atomic(path, rendered)
 
 
-def write_text_atomic(path: Path, rendered: str) -> None:
+def write_text_atomic(path: Path, rendered: str | Iterable[str]) -> None:
     """Replace a UTF-8 file atomically, including structured line logs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -22,7 +23,10 @@ def write_text_atomic(path: Path, rendered: str) -> None:
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(rendered)
+            if isinstance(rendered, str):
+                handle.write(rendered)
+            else:
+                handle.writelines(rendered)
             handle.flush()
             os.fsync(handle.fileno())
         # Windows indexers and scanners can briefly deny replacement even
