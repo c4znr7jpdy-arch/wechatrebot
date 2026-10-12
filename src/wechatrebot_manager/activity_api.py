@@ -7,6 +7,7 @@ import time
 import traceback
 
 from .activity_service import ActivityService, diagnostic_text
+from .error_catalog import AccountStatusUnavailableError
 
 
 class ActivityApiMixin:
@@ -20,6 +21,10 @@ class ActivityApiMixin:
             return self._failed(exc, "19003")
 
     def _record_error(self, exc: BaseException, code: str, *, operation: str = "") -> tuple[str, bool]:
+        if isinstance(exc, AccountStatusUnavailableError):
+            # An unverified account is an expected polling state while offline
+            # or connecting. Keep the API error so existing data stays visible.
+            return "", False
         details = {
             "operation": operation, "exception_type": type(exc).__name__,
             "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),

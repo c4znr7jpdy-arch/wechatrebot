@@ -1,16 +1,20 @@
-"""Read-only, bounded diagnostic feed shared by display, copy and export."""
+"""Bounded diagnostic feed shared by display, copy and export."""
 from __future__ import annotations
 
-from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
 import re
+import time
 
 from . import __version__
-from .customer_logs import LogSource, log_sources, read_log_tail, sanitize_log_text
+from .customer_logs import (
+    ACTIVITY_RETENTION_SECONDS, ERROR_REPEAT_WINDOW_SECONDS,
+    LogSource, log_sources, log_timestamp, read_log_tail, sanitize_log_text,
+)
 from .diagnostics import redact_sensitive
 from .error_catalog import load_error_catalog
+from .events import EventStore
 from .update_errors import UPDATE_ERRORS
 
 
@@ -42,13 +46,6 @@ def diagnostic_text(value: object, root: Path, *, limit: int = 12000) -> str:
     text = re.sub(re.escape(root.as_posix()), "<安装目录>", text, flags=re.I)
     text = sanitize_log_text(text)
     return text if len(text) <= limit else text[:limit] + "\n[内容超出上限，已截断]"
-
-
-def _timestamp(text: str) -> float | None:
-    try:
-        return datetime.fromisoformat(text.replace(",", ".").replace("Z", "+00:00")).timestamp()
-    except (ValueError, OverflowError, OSError):
-        return None
 
 
 def _blocks(text: str):
@@ -123,49 +120,66 @@ class ActivityService:
             message = title
         detail = diagnostic_text(details.get("technical") or details if details else ({"event": event.get("event"), "message": message} if event else raw), self.root)
         summary = diagnostic_text(message, self.root, limit=1600)
-        fingerprint = hashlib.sha256(f"{source.key}|{code}|{level}|{_TIME.sub('', summary)}|{_TIME.sub('', detail)}".encode()).hexdigest()
+        fingerprint = hashlib.sha256(f"{source.key}|{code}|{level}|{details.get('operation', '')}|{_TIME.sub('', summary)}|{_TIME.sub('', detail)}".encode()).hexdigest()
         identity = diagnostic_text(str(event.get("event_id") or hashlib.sha256(f"{source.path.name}|{position}|{raw}".encode()).hexdigest()[:24]), self.root, limit=80)
+        count = event.get("count", 1)
+        first_time = str(event.get("first_time") or time)
         return {
-            "id": identity, "time": time, "timestamp": _timestamp(time),
+            "id": identity, "time": time, "timestamp": log_timestamp(time),
             "source": source.key, "source_name": source.display_name, "level": level,
             "status": status or level, "code": diagnostic_text(code, self.root, limit=80), "title": diagnostic_text(title, self.root, limit=200),
             "message": summary, "detail": detail, "suggestion": diagnostic_text(suggestion, self.root, limit=1000),
             "operation": diagnostic_text(details.get("operation", ""), self.root, limit=160),
-            "count": 1, "first_time": time, "fingerprint": fingerprint,
+            "count": count if isinstance(count, int) and count > 0 else 1,
+            "first_time": first_time if _TIME.fullmatch(first_time) else time, "fingerprint": fingerprint,
             "context": "", "event": diagnostic_text(event.get("event", ""), self.root, limit=100),
         }
 
     def recent(self) -> list[dict]:
         items: list[dict] = []
+        cutoff = time.time() - ACTIVITY_RETENTION_SECONDS
+        try:
+            EventStore(self.root).prune()
+        except OSError as exc:
+            items.append(self._read_failure(self.sources()[0], exc))
         for source in self.sources():
             try:
                 text, truncated = read_log_tail(source.path, max_bytes=256 * 1024, max_lines=1200)
+                modified = source.path.stat().st_mtime
             except FileNotFoundError:
                 continue
             except OSError as exc:
                 items.append(self._read_failure(source, exc))
                 continue
             blocks = text.splitlines() if source.key in {"manager", "update"} else list(_blocks(text))
+            current: list[tuple[dict, str]] = []
             for index, raw in enumerate(blocks):
                 if not raw.strip():
                     continue
                 item = self._item(source, raw, position=index)
+                if (item["timestamp"] if item["timestamp"] is not None else modified) < cutoff:
+                    continue
+                current.append((item, raw))
+            for index, (item, raw) in enumerate(current):
                 if item["level"] != "info" and source.key not in {"manager", "update"}:
-                    item["context"] = diagnostic_text("\n".join(blocks[max(0, index - 1):index + 2]), self.root, limit=6000)
+                    item["context"] = diagnostic_text("\n".join(raw for _, raw in current[max(0, index - 1):index + 2]), self.root, limit=6000)
                 item["truncated"] = truncated
                 items.append(item)
         items.sort(key=lambda item: item["timestamp"] if item["timestamp"] is not None else float("-inf"), reverse=True)
         grouped: dict[str, dict] = {}
+        previous_times: dict[str, float | None] = {}
         result: list[dict] = []
         for item in items:
             key = item.pop("fingerprint")
             latest = grouped.get(key)
-            if latest and item["timestamp"] is not None and latest["timestamp"] is not None and latest["timestamp"] - item["timestamp"] <= 300:
-                latest["count"] += 1
-                latest["first_time"] = item["time"]
+            previous = previous_times.get(key)
+            if latest and item["timestamp"] is not None and previous is not None and previous - item["timestamp"] <= ERROR_REPEAT_WINDOW_SECONDS:
+                latest["count"] += item["count"]
+                latest["first_time"] = item["first_time"]
             else:
                 grouped[key] = item
                 result.append(item)
+            previous_times[key] = log_timestamp(item["first_time"])
         # Prefer retaining actionable records within the bounded response.
         retained = [item for item in result if item["level"] != "info"][:300]
         retained += [item for item in result if item["level"] == "info"][:100]
@@ -192,7 +206,7 @@ class ActivityService:
             "当时运行状态：未记录；不使用当前状态推断", "具体错误：", item["message"],
             "技术详情：", item["detail"], "附近日志：", item["context"] or "无",
             "处理建议：", item["suggestion"] or "无需处理",
-            "采集范围：各日志最近 256 KiB / 1200 行，最多保留 300 条异常和 100 条普通记录；重复异常按 5 分钟合并。",
+            "采集范围：最近 48 小时，各日志最多读取 256 KiB / 1200 行，最多显示 300 条异常和 100 条普通记录；间隔不超过 5 分钟的持续同类异常合并并保留次数。无日期日志按文件修改时间判断保留范围。",
             "隐私处理：凭据、已识别聊天正文和个人标识已脱敏。",
         ]
         return "\n".join(lines)

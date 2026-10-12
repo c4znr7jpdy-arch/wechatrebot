@@ -1001,6 +1001,32 @@ def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_
     assert all(result["error"]["code"] == "11007" for result in results)
     assert all(result["error"]["level"] == "warning" for result in results)
     assert all("requires_login" not in result.get("data", {}) for result in results)
+    assert all(result["error"]["recorded"] is False for result in results)
+    assert api._lifecycle.events.items == []
+
+
+def test_schedule_polling_unknown_account_does_not_persist_warning(tmp_path):
+    api = _api(tmp_path)
+    api._lifecycle.fresh_runtime_snapshot = lambda: SimpleNamespace(
+        wechat_identity="", account_status_available=False,
+    )
+    api._schedules = app_shell.ScheduleService(tmp_path, account_hint=api._history_account_id)
+    for _ in range(20):
+        result = api.get_schedules()
+        assert result["ok"] is False
+        assert result["error"]["code"] == "11007"
+        assert result["error"]["recorded"] is False
+    assert api._lifecycle.events.items == []
+
+
+def test_scheduled_task_unknown_account_retains_specific_error_without_warning(tmp_path):
+    api = _api(tmp_path)
+    def unavailable():
+        raise chat_api.AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。")
+    result = api._scheduled_call(unavailable)
+    assert result["error"]["code"] == "11007"
+    assert result["error"]["recorded"] is False
+    assert api._lifecycle.events.items == []
 
 
 def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) -> None:

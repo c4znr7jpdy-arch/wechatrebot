@@ -10,8 +10,13 @@ from typing import Any
 
 def write_json_atomic(path: Path, payload: Any) -> None:
     """Write JSON without exposing readers to a partially written file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    write_text_atomic(path, rendered)
+
+
+def write_text_atomic(path: Path, rendered: str) -> None:
+    """Replace a UTF-8 file atomically, including structured line logs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
