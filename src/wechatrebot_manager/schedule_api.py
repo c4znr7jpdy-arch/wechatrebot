@@ -82,8 +82,11 @@ class ScheduleApiMixin:
             # Transport exceptions may include upstream addresses or credentials.
             return {"ok": False, "error": {"code": "18004", "title": "定时任务操作未完成", "message": "连接或保存未完成，请检查机器人状态后刷新核对；你的编辑内容仍保留。", "event_id": event_id, "recorded": saved}}
 
-    def get_scheduled_task_context(self) -> dict[str, object]:
-        return self._scheduled_call(self._scheduled_task_service().context)
+    def get_scheduled_task_context(self, lightweight: bool = False) -> dict[str, object]:
+        service = self._scheduled_task_service()
+        if lightweight is True:
+            return self._scheduled_call(service.context, True)
+        return self._scheduled_call(service.context)
 
     def save_scheduled_task(self, payload: dict[str, Any]) -> dict[str, object]:
         return self._scheduled_call(self._scheduled_task_service().save, payload)

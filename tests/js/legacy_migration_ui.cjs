@@ -65,6 +65,118 @@ function assertDraftRetained(f) {
 }
 
 const cases = {
+  async progressive_task_list() {
+    const f = fixture();
+    let finishFull, fullStarted;
+    const started = new Promise(resolve => { fullStarted = resolve; });
+    f.responses.get_scheduled_task_context = (lightweight) => lightweight
+      ? {account_id: 'account-a', items: [{id: 'local-a'}], loading: true}
+      : new Promise(resolve => { finishFull = resolve; fullStarted(); });
+    const pending = f.context.loadSchedules();
+    await started;
+    assert.equal(f.$('#taskRows').innerHTML, 'local-a', 'Local tasks render while directories are still pending');
+    assert.equal(f.state.scheduledContext.loading, true);
+    assert.equal(f.$('#refreshSchedules').disabled, true);
+    assertDraftRetained(f);
+    finishFull({account_id: 'account-a', items: [{id: 'verified-a'}]});
+    await pending;
+    assert.equal(f.$('#taskRows').innerHTML, 'verified-a');
+    assert.equal(f.state.scheduledContextRequest, null);
+    assertDraftRetained(f);
+  },
+  async progressive_account_change() {
+    for (const viaRuntime of [false, true]) {
+      const f = fixture();
+      let finishFull, fullStarted;
+      const started = new Promise(resolve => { fullStarted = resolve; });
+      f.state.historyAccount = 'account-a';
+      f.responses.get_scheduled_task_context = (lightweight) => lightweight
+        ? {account_id: 'account-a', items: [{id: 'local-a'}], loading: true}
+        : new Promise(resolve => { finishFull = resolve; fullStarted(); });
+      f.responses.get_legacy_schedule_migrations = {items: [{key: 'pending-a', account_id: 'account-a'}]};
+      const pending = f.context.loadSchedules();
+      await started;
+      if (viaRuntime) f.state.historyAccount = 'account-b';
+      finishFull({account_id: viaRuntime ? 'account-a' : 'account-b', items: [{id: 'stale-task'}]});
+      await pending;
+      assert.equal(f.$('#taskRows').innerHTML, '');
+      assert.equal(f.$('#scheduleRows').innerHTML, '', 'Account mismatch must also hide legacy migration records');
+      assert.match(f.$('#scheduleContextMessage').textContent, /账号已变化/);
+      assertDraftRetained(f);
+    }
+  },
+  async progressive_overlapping_refresh() {
+    const f = fixture();
+    let finishFirst, finishSecond;
+    let firstStarted, secondStarted;
+    const firstReady = new Promise(resolve => { firstStarted = resolve; });
+    const secondReady = new Promise(resolve => { secondStarted = resolve; });
+    f.responses.get_scheduled_task_context = (lightweight) => lightweight
+      ? {account_id: 'account-a', items: [{id: 'local-a'}], loading: true}
+      : new Promise(resolve => { finishFirst = resolve; firstStarted(); });
+    const first = f.context.loadSchedules();
+    await firstReady;
+    f.responses.get_scheduled_task_context = (lightweight) => lightweight
+      ? {account_id: 'account-b', items: [{id: 'local-b'}], loading: true}
+      : new Promise(resolve => { finishSecond = resolve; secondStarted(); });
+    const second = f.context.loadSchedules();
+    await secondReady;
+    const request = f.state.scheduledContextRequest;
+    finishFirst({account_id: 'account-a', items: [{id: 'old-a'}]});
+    await first;
+    assert.equal(f.$('#taskRows').innerHTML, 'local-b');
+    assert.equal(f.state.scheduledContextRequest, request, 'Old completion must not clear the current pending request');
+    assert.equal(f.$('#refreshSchedules').disabled, true);
+    finishSecond({account_id: 'account-b', items: [{id: 'verified-b'}]});
+    await second;
+    assert.equal(f.$('#taskRows').innerHTML, 'verified-b');
+    assertDraftRetained(f);
+  },
+  async invalidate_context_keeps_draft() {
+    const f = fixture();
+    let finishFull, fullStarted;
+    const started = new Promise(resolve => { fullStarted = resolve; });
+    f.responses.get_scheduled_task_context = (lightweight) => lightweight
+      ? {account_id: 'account-a', items: [{id: 'local-a'}], loading: true}
+      : new Promise(resolve => { finishFull = resolve; fullStarted(); });
+    const pending = f.context.loadSchedules();
+    await started;
+    f.context.invalidateScheduledContext();
+    assert.equal(f.$('#taskRows').innerHTML, '');
+    assert.equal(f.$('#scheduleRows').innerHTML, '');
+    assertDraftRetained(f);
+    finishFull({account_id: 'account-a', items: [{id: 'stale-a'}]});
+    await pending;
+    assert.equal(f.$('#taskRows').innerHTML, '');
+    assert.equal(f.state.scheduledContextRequest, null);
+    assertDraftRetained(f);
+  },
+  async editor_waits_for_full_context() {
+    const f = fixture();
+    f.state.scheduledDirty = false;
+    f.state.scheduledEditor = null;
+    Object.assign(f.context, {
+      structuredClone, crypto: require('node:crypto'),
+      SCHEDULED_DEFAULTS: {weather: {}},
+      guardScheduledDraft: () => false,
+      renderScheduledEditor() {},
+      scheduledTaskItems: () => f.state.scheduledContext?.items || [],
+    });
+    const start = script.indexOf('  async function openScheduledEditor(');
+    vm.runInContext(script.slice(start, script.indexOf('  function scheduledArgumentsMarkup(', start)), f.context);
+    let finishFull, fullStarted;
+    const started = new Promise(resolve => { fullStarted = resolve; });
+    f.responses.get_scheduled_task_context = (lightweight) => lightweight
+      ? {account_id: 'account-a', items: [], loading: true}
+      : new Promise(resolve => { finishFull = resolve; fullStarted(); });
+    const loading = f.context.loadSchedules();
+    await started;
+    const editing = f.context.openScheduledEditor();
+    assert.equal(f.state.scheduledEditor, null);
+    finishFull({account_id: 'account-a', items: []});
+    await Promise.all([loading, editing]);
+    assert.equal(f.state.scheduledEditor.account_id, 'account-a');
+  },
   async failed_context_keeps_draft() {
     const f = fixture();
     f.responses.get_scheduled_task_context = new Error('请登录原微信账号');

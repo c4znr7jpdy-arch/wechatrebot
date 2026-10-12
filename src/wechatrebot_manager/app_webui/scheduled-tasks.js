@@ -23,18 +23,81 @@ window.createScheduledTasks = function (helpers) {
     const button = $("#refreshSchedules");
     button.disabled = true;
     $$("button", $("#scheduleRows")).forEach((control) => { control.disabled = true; });
+    const request = loadScheduledData(generation);
+    state.scheduledContextRequest = request;
+    try { await request; }
+    finally {
+      if (generation === state.scheduledLoad) {
+        state.scheduledContextRequest = null;
+        button.disabled = false;
+      }
+    }
+  }
+
+  function scheduledAccountMatches(account) {
+    const runtime = state.status?.runtime;
+    return (!runtime || runtime.account_status_available !== false)
+      && (state.historyAccount === undefined || state.historyAccount === account);
+  }
+
+  function invalidateScheduledContext() {
+    state.scheduledLoad += 1;
+    state.scheduledContextRequest = null;
+    state.scheduledContext = null;
+    state.scheduledCommandCatalog = [];
+    state.schedules = [];
+    state.legacyMigrations = [];
+    $("#refreshSchedules").disabled = false;
+    $("#scheduleContextMessage").textContent = "微信账号已变化，请重新读取任务列表。";
+    $("#scheduleContextMessage").hidden = false;
+    renderSchedules();
+    renderGroupAnalysisMigration();
+    renderScheduledTasks();
+    if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+  }
+
+  async function loadScheduledData(generation) {
     try {
+      let initialAccount = "";
+      try {
+        const initial = await api("get_scheduled_task_context", true);
+        if (generation !== state.scheduledLoad) return;
+        initialAccount = initial.account_id || "";
+        state.scheduledContext = scheduledAccountMatches(initialAccount) ? initial : {account_id: "", items: [], loading: true};
+        state.schedules = [];
+        state.legacyMigrations = [];
+        $("#scheduleContextMessage").textContent = initial.message || "正在读取发送对象与运行状态…";
+        $("#scheduleContextMessage").hidden = false;
+        renderSchedules();
+        renderGroupAnalysisMigration();
+        renderScheduledTasks();
+        if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+      } catch (_error) {
+        if (generation !== state.scheduledLoad) return;
+        state.scheduledContext = {account_id: "", items: [], loading: true};
+        state.schedules = [];
+        state.legacyMigrations = [];
+        renderSchedules();
+        renderGroupAnalysisMigration();
+        renderScheduledTasks();
+        if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+      }
       const [context, legacy, migrations] = await Promise.allSettled([
         api("get_scheduled_task_context"),
         api("get_schedules"),
         api("get_legacy_schedule_migrations"),
       ]);
       if (generation !== state.scheduledLoad) return;
-      const contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
+      let contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
+      const accountChanged = Boolean(contextData.account_id && ((!scheduledAccountMatches(contextData.account_id))
+        || (initialAccount && contextData.account_id !== initialAccount)));
+      if (accountChanged) {
+        contextData = {account_id: "", items: [], message: "微信账号已变化，请刷新任务列表。"};
+      }
       state.scheduledContext = contextData;
       state.scheduledCommandCatalog = Array.isArray(contextData.command_catalog) ? contextData.command_catalog : [];
       const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
-      state.legacyMigrations = migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
+      state.legacyMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
       const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
       state.schedules = legacyAccountMatches && migrations.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action && !state.legacyMigrations.some((migration) => migration.job_id === item.id)) : [];
       const message = $("#scheduleContextMessage");
@@ -62,7 +125,7 @@ window.createScheduledTasks = function (helpers) {
       $("#scheduleContextMessage").textContent = error.message || "任务暂时无法读取，请刷新重试。";
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
       reportError(error);
-    } finally { if (generation === state.scheduledLoad) button.disabled = false; }
+    }
   }
 
   function groupAnalysisMigrationAccount(context = {}) {
@@ -216,7 +279,7 @@ window.createScheduledTasks = function (helpers) {
 
   function scheduledStatus(item) {
     if (item.draft || item.status === "draft") return "草稿";
-    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", blocked: "待处理", needs_review: "需要检查", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
+    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", checking: "正在确认", blocked: "待处理", needs_review: "需要检查", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
   }
 
   function scheduledResultText(value) {
@@ -253,7 +316,10 @@ window.createScheduledTasks = function (helpers) {
       <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(scheduledTime(item.next_run_time))}</small></td>
       <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "needs_review", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
       <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="schedule-empty-cell"><div class="schedule-empty-state"><div class="schedule-empty-icon" aria-hidden="true">${icon("i-clock")}</div><h2>${all.length ? "没有符合条件的任务" : "暂无定时任务"}</h2><p>${all.length ? "调整内容、发送对象或状态筛选，查看其他任务。" : "可创建群聊分析日报、每日天气预报、定时资讯或一句提醒，选择发送对象后自动触发。"}</p><button class="button secondary schedule-empty-cta" id="emptyNewScheduledTask">${all.length ? "+ 新建任务" : "+ 创建第一个定时任务"}</button></div></td></tr>`;
-    $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id)));
+    $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => {
+      button.disabled = state.scheduledContext?.loading === true;
+      button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id));
+    });
     $("#emptyNewScheduledTask")?.addEventListener("click", () => openScheduledEditor());
   }
 
@@ -274,7 +340,17 @@ window.createScheduledTasks = function (helpers) {
 
   async function openScheduledEditor(item = null, copy = false, action = "weather") {
     if (state.scheduledBusy || guardScheduledDraft(() => openScheduledEditor(item, copy, action))) return;
-    if (!state.scheduledContext) await loadSchedules();
+    const generation = state.scheduledLoad;
+    if (state.scheduledContextRequest) await state.scheduledContextRequest;
+    else if (!state.scheduledContext || state.scheduledContext.loading) await loadSchedules();
+    if (state.activePage !== "schedules" || !state.scheduledContext || state.scheduledContext.loading
+        || (generation !== state.scheduledLoad && state.scheduledContextRequest)
+        || (state.scheduledDirty && state.scheduledEditor)
+        || !scheduledAccountMatches(state.scheduledContext.account_id || "")) return;
+    if (item) {
+      item = scheduledTaskItems().find((current) => current.id === item.id && current.account_id === item.account_id);
+      if (!item || item.account_id !== state.scheduledContext.account_id) { toast("微信账号或任务已变化，请刷新后重试。", "error"); return; }
+    }
     const editor = item ? structuredClone(item) : {id: crypto.randomUUID(), account_id: state.scheduledContext?.account_id || "", action, arguments: structuredClone(SCHEDULED_DEFAULTS[action] || {}), targets: state.scheduledChatFilter ? [structuredClone(state.scheduledChatFilter)] : [], schedule: {kind: "daily", time: action === "group_analysis" ? "23:00" : "08:00", timezone: "Asia/Shanghai"}, enabled: false, draft: true, name: ""};
     if (copy) { editor.id = crypto.randomUUID(); delete editor.revision; editor.name = `${item.name || scheduledName(item)}（副本）`; editor.enabled = false; editor.draft = true; editor.status = "draft"; }
     editor.targets ||= [];
@@ -691,6 +767,7 @@ window.createScheduledTasks = function (helpers) {
   return {
     SCHEDULED_ACTIONS,
     guardScheduledDraft,
+    invalidateScheduledContext,
     loadSchedules,
     openScheduledEditor,
     openScheduledForChat,
