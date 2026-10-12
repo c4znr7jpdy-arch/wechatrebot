@@ -382,3 +382,55 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
         print(f"UI evidence: {tmp_path}; existing blank-frame CSP warnings: {len(errors)}")
     finally:
         page.close()
+
+
+def test_schedule_list_renders_before_slow_context_and_keeps_draft_on_account_change(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#globalRefresh")).to_be_enabled()
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_scheduled_task_context, status = api.get_status;
+          window.scheduleGate = new Promise(resolve => { window.releaseScheduleContext = resolve; });
+          api.get_scheduled_task_context = async lightweight => {
+            const result = await read();
+            result.data.items = [{id:'preview-reminder', account_id:result.data.account_id,
+              name:'本机提醒任务', action:'text', arguments:{text:'提醒'}, targets:[],
+              schedule:{kind:'daily', time:'08:00'}, enabled:false, draft:true, status:'draft'}];
+            if (lightweight) {
+              result.data = {...result.data, loading:true, groups:[], contacts:[], runtime_ready:false};
+              return result;
+            }
+            window.fullContextPending = true;
+            await window.scheduleGate;
+            return result;
+          };
+          api.get_status = async () => {
+            const result = await status();
+            if (window.changedAccount) result.data.runtime.wechat_identity = 'wxid_changed';
+            return result;
+          };
+        }""")
+        page.locator('.nav-item[data-page="schedules"]').click()
+        page.wait_for_function("window.fullContextPending === true")
+        expect(page.locator("#scheduledTaskRows [data-task-action=edit]").first).to_be_visible()
+        expect(page.locator("#scheduledTaskRows [data-task-action=edit]").first).to_be_disabled()
+        page.screenshot(path=str(tmp_path / "schedules-initial.png"))
+        page.locator("#newScheduledTask").click()
+        expect(page.locator("#scheduledTaskEditor")).to_be_hidden()
+        page.evaluate("window.releaseScheduleContext()")
+        expect(page.locator("#scheduledTaskEditor")).to_be_visible()
+        page.locator("#scheduledName").fill("保留我的未保存草稿")
+        page.evaluate("window.changedAccount = true")
+        expect(page.locator("#scheduledSaveDraft")).to_be_disabled()
+        expect(page.locator("#scheduledName")).to_have_value("保留我的未保存草稿")
+        expect(page.locator("#scheduledTaskRows [data-task-action]")).to_have_count(0)
+        page.screenshot(path=str(tmp_path / "schedules-account-change.png"))
+        assert page.url == manager_url and page.title().startswith("定时任务")
+        assert not errors, errors
+    finally:
+        page.close()

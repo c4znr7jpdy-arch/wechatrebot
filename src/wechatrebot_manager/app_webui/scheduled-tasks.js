@@ -524,7 +524,7 @@ window.createScheduledTasks = function (helpers) {
     const saveDraft = $("#scheduledSaveDraft");
     const previewButton = $("#scheduledPreviewButton");
     const testButton = $("#scheduledTestButton");
-    if (saveDraft) saveDraft.disabled = !editor.account_id || state.scheduledBusy;
+    if (saveDraft) saveDraft.disabled = !editor.account_id || editor.account_id !== state.scheduledContext?.account_id || state.scheduledBusy;
     if (previewButton) previewButton.disabled = state.scheduledBusy;
     if (testButton) testButton.disabled = !ready.ready || !editor.targets.length || state.scheduledBusy;
   }

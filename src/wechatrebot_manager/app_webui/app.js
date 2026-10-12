@@ -377,6 +377,8 @@
     if (historyAccount !== state.historyAccount) {
       state.historyAccount = historyAccount;
       invalidateHistoryState();
+      invalidateScheduledContext();
+      if (state.activePage === "schedules") void loadSchedules();
       if (state.activePage === "history") {
         renderHistoryAccountGate(historyAccount);
         if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
@@ -1227,7 +1229,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { SCHEDULED_ACTIONS, guardScheduledDraft, loadSchedules, openScheduledEditor, openScheduledForChat, openScheduledFromFeature, renderScheduledEditor, renderScheduledTasks, scheduledTimeText } = createPageController("createScheduledTasks", {
+  const { SCHEDULED_ACTIONS, guardScheduledDraft, invalidateScheduledContext, loadSchedules, openScheduledEditor, openScheduledForChat, openScheduledFromFeature, renderScheduledEditor, renderScheduledTasks, scheduledTimeText } = createPageController("createScheduledTasks", {
     $,
     $$,
     api: (...args) => api(...args),
