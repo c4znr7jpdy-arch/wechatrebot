@@ -30,7 +30,9 @@ def test_provider_icons_default_save_and_editor_navigation(browser, manager_url,
             page.locator("#providerPreset").select_option(preset)
             expect(page.locator("#providerPresetIcon")).to_have_attribute("data-preset", preset)
             expect(page.locator("#providerPresetIcon img")).to_be_visible()
-            page.wait_for_function("document.querySelector('#providerPresetIcon img')?.naturalWidth > 0")
+            # Visibility plus the response-failure guard below proves the
+            # bundled asset loaded without CSP-unsafe wait_for_function eval.
+            expect(page.locator("#providerPresetIcon img")).to_have_attribute("src", re.compile(r"assets/provider-"))
         page.locator('[name="api_base"]').fill("https://api.deepseek.com.relay.example/v1")
         expect(page.locator("#providerPresetIcon")).to_have_attribute("data-preset", "custom")
         expect(page.locator("#providerPresetIcon svg")).to_be_visible()
