@@ -27,6 +27,7 @@ def offline_api(setup):
             "wechat_identity", "account_status_available", "connection_ready", "engine_ready")}}
     api._lifecycle.licenses = client
     api._lifecycle.refresh = lambda: view
+    api._lifecycle.fresh_runtime_snapshot = lambda: view.runtime
     queries = []
     def conversations(**filters):
         queries.append(filters)

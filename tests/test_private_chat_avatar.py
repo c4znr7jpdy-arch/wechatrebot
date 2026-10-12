@@ -166,9 +166,7 @@ def test_private_profile_requires_current_directory_selection(
 def test_private_conversation_and_old_messages_use_current_contact_avatar() -> None:
     api = ApplicationApi.__new__(ApplicationApi)
     api._lifecycle = SimpleNamespace(
-        refresh=lambda: SimpleNamespace(
-            runtime=SimpleNamespace(wechat_identity="wxid_bot")
-        )
+        fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_bot")
     )
     api._history = SimpleNamespace(
         conversations=lambda **_filters: {
@@ -220,7 +218,7 @@ def test_private_conversation_and_old_messages_use_current_contact_avatar() -> N
 
 def test_group_messages_use_member_wechat_id_and_profile_fallback() -> None:
     api = ApplicationApi.__new__(ApplicationApi)
-    api._lifecycle = SimpleNamespace(refresh=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity="wxid_bot")))
+    api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_bot"))
     received: dict[str, object] = {}
 
     def messages(_conversation_id, **filters):
@@ -268,7 +266,7 @@ def test_group_messages_use_member_wechat_id_and_profile_fallback() -> None:
 def test_group_member_cache_never_crosses_accounts() -> None:
     api = ApplicationApi.__new__(ApplicationApi)
     account = ["wxid_first"]
-    api._lifecycle = SimpleNamespace(refresh=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity=account[0])))
+    api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity=account[0]))
     api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
     api._groups = SimpleNamespace(members=lambda _group_id: {"account_id": account[0], "items": [{"user_id": "wxid_member", "wechat_id": account[0] + "_alias"}]})
     assert api.get_messages("room@chatroom")["data"][0]["wechat_id"] == "wxid_first_alias"
@@ -279,7 +277,7 @@ def test_group_member_cache_never_crosses_accounts() -> None:
 
 def test_group_member_directory_for_different_account_is_not_used() -> None:
     api = ApplicationApi.__new__(ApplicationApi)
-    api._lifecycle = SimpleNamespace(refresh=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity="wxid_current")))
+    api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_current"))
     api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
     api._groups = SimpleNamespace(members=lambda _group_id: {"account_id": "wxid_other", "items": [{"user_id": "wxid_member", "wechat_id": "other_alias"}]})
     assert api.get_messages("room@chatroom")["data"][0]["wechat_id"] == "wxid_member"

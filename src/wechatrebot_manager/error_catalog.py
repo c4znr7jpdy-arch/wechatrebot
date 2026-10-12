@@ -11,8 +11,14 @@ import sqlite3
 DEFAULT_ERROR_CODE = "19000"
 
 
+class AccountStatusUnavailableError(OSError):
+    """The live account could not be verified; this is not a logout."""
+
+
 def classify_error(exc: BaseException, fallback: str, operation: str) -> str:
     """Classify evidence from typed exceptions, never guess from arbitrary prose."""
+    if isinstance(exc, AccountStatusUnavailableError):
+        return "11007"
     if type(exc).__name__ == "ConfigConflictError":
         return "15005"
     if operation in {"test_provider", "discover_provider_models"}:

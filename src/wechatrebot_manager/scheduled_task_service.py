@@ -111,7 +111,22 @@ class ScheduledTaskService:
                     return "执行时间落在发送对象的安静时段。"
         return ""
 
-    def context(self) -> dict[str, Any]:
+    def context(self, lightweight: bool = False) -> dict[str, Any]:
+        if lightweight:
+            try:
+                account = str(self.account_hint() or "")
+            except OSError:
+                account = ""
+            items = self.store.list(account) if account else []
+            for item in items:
+                if item["enabled"] and item["status"] != "completed":
+                    item["status"] = "checking"
+                    item["status_message"] = "正在确认运行状态…"
+            return {"account_id": account, "items": items, "groups": [], "contacts": [],
+                    "capabilities": [], "command_catalog": scheduled_command_catalog(),
+                    "command_definition_version": SCHEDULED_COMMAND_VERSION,
+                    "online": False, "runtime_ready": False, "loading": True,
+                    "message": "正在读取发送对象与运行状态…" if account else "请先确认机器人微信账号，再刷新任务列表。"}
         group, contact, health = self._snapshot()
         fresh_accounts = {str(data.get("account_id")) for data in (group, contact) if data.get("account_id") and not data.get("stale")}
         account = str(health.get("account_id") or "")

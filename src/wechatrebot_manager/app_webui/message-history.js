@@ -426,9 +426,10 @@ window.createMessageHistory = function (helpers) {
     }
     const previews = (Array.isArray(message.media_previews) ? message.media_previews : [])
       .slice(0, 4).filter((value) => typeof value === "string" && value.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value));
-    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" width="200" height="160" loading="lazy" decoding="async">`).join("")}</div>` : "";
+    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" loading="lazy" decoding="async">`).join("")}</div>` : "";
     const caption = media && /^\[(图片|表情)\](\n\[(图片|表情)\])*$/.test(presentation.content) ? "" : escapeHtml(presentation.content);
-    return `<div class="message-bubble">${media}${caption}</div>`;
+    const bubble = caption || !media ? `<div class="message-bubble">${caption}</div>` : "";
+    return `${media}${bubble}`;
   }
 
   function messageMarkup(message) {
@@ -683,7 +684,8 @@ window.createMessageHistory = function (helpers) {
 
   async function pollHistory() {
     if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
-        || state.historyConversationsLoading || state.historyMessagesLoading) return;
+        || state.historyConversationsLoading || state.historyMessagesLoading
+        || (state.status?.runtime?.account_status_available === false && !state.status?.history_offline)) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true});

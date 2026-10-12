@@ -62,6 +62,92 @@ def test_start_is_gated_when_wechat_is_missing(tmp_path: Path) -> None:
     assert view.error is not None and view.error.code == "11001"
 
 
+def test_refresh_reuses_environment_but_reads_each_runtime_snapshot(tmp_path: Path) -> None:
+    environment_calls = []
+    environments = iter((_environment(tmp_path), _environment(tmp_path, False)))
+    snapshots = iter((
+        RuntimeSnapshot(False, False, ""),
+        RuntimeSnapshot(True, True, "wxid_first", True, True, True),
+        RuntimeSnapshot(True, True, "wxid_second", True, True, True),
+    ))
+
+    def check_environment(root):
+        environment_calls.append(root)
+        return next(environments)
+
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=check_environment,
+        snapshotter=lambda: next(snapshots),
+        supervisor_factory=lambda progress: _Supervisor(progress),
+    )
+
+    first = controller.refresh()
+    second = controller.refresh()
+
+    assert first.runtime.wechat_identity == "wxid_first"
+    assert second.runtime.wechat_identity == "wxid_second"
+    assert first.environment.ready and second.environment.ready
+    assert environment_calls == [tmp_path]
+
+    checked = controller.check_environment()
+
+    assert checked.environment.ready is False
+    assert checked.error is not None and checked.error.code == "11001"
+    assert environment_calls == [tmp_path, tmp_path]
+
+
+def test_fresh_runtime_snapshot_bypasses_lifecycle_lock_without_state_changes(tmp_path: Path) -> None:
+    initial = RuntimeSnapshot(False, False, "")
+    first = RuntimeSnapshot(True, True, "wxid_first", True, True, True)
+    unknown = RuntimeSnapshot(True, True, "", account_status_available=False)
+    snapshots = iter((initial, first, unknown))
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: _environment(tmp_path),
+        snapshotter=lambda: next(snapshots),
+        supervisor_factory=lambda progress: _Supervisor(progress),
+    )
+    finished = threading.Event()
+    results = []
+
+    def probe():
+        results.append(controller.fresh_runtime_snapshot())
+        results.append(controller.fresh_runtime_snapshot())
+        finished.set()
+
+    worker = threading.Thread(target=probe)
+    with controller._lock:
+        worker.start()
+        completed_while_locked = finished.wait(1)
+    worker.join(1)
+
+    assert completed_while_locked
+    assert not worker.is_alive()
+    assert results == [first, unknown]
+    assert controller.view().runtime == initial
+    assert controller.state == LifecycleState.STOPPED
+
+
+def test_start_rechecks_environment_before_launch(tmp_path: Path) -> None:
+    environments = iter((_environment(tmp_path), _environment(tmp_path, False)))
+    launches = []
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: next(environments),
+        snapshotter=lambda: RuntimeSnapshot(False, False, ""),
+        supervisor_factory=lambda progress: launches.append(progress),
+    )
+    assert controller.view().environment.ready
+
+    view = controller.start()
+
+    assert view.state == LifecycleState.STOPPED
+    assert not view.can_start
+    assert view.error is not None and view.error.code == "11001"
+    assert launches == []
+
+
 def test_only_full_health_marks_robot_running(tmp_path: Path) -> None:
     snapshots = iter(
         (

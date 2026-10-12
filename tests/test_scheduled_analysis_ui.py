@@ -210,6 +210,6 @@ def test_analysis_migration_never_resumes_for_another_logged_in_account(browser,
           };
         }""")
         page.locator("#refreshSchedules").click()
-        expect(page.locator("#previewGroupAnalysisMigration")).to_be_disabled()
+        expect(page.locator("#previewGroupAnalysisMigration")).not_to_be_visible()
     finally:
         page.close()

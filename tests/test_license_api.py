@@ -23,7 +23,9 @@ def make_api(client, *, account=""):
     api._install_root = client.root
     api._mandatory_update = False
     runtime = SimpleNamespace(wechat_identity=account, account_status_available=True)
-    api._lifecycle = SimpleNamespace(licenses=client, events=EventStore(client.root), refresh=lambda: SimpleNamespace(runtime=runtime))
+    api._lifecycle = SimpleNamespace(licenses=client, events=EventStore(client.root),
+                                     refresh=lambda: SimpleNamespace(runtime=runtime),
+                                     fresh_runtime_snapshot=lambda: runtime)
     actions = []
 
     def queue(action, _message, _error_code="19000"):
@@ -160,6 +162,7 @@ def test_contact_api_reads_anonymous_data_without_license_or_runtime_side_effect
     api._license_contacts = ContactClient(client.root, clock=clock, transport=fetch)
     monkeypatch.setattr(api, "_license_client", lambda: pytest.fail("contact must not use licensing identity"))
     monkeypatch.setattr(api._lifecycle, "refresh", lambda: pytest.fail("contact must not probe WeChat"))
+    monkeypatch.setattr(api._lifecycle, "fresh_runtime_snapshot", lambda: pytest.fail("contact must not probe WeChat"))
     configuration = (client.root / "config/licensing.json").read_bytes()
     result = api.get_license_contact()
     assert result["ok"] and result["data"]["source"] == "remote"

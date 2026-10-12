@@ -254,7 +254,7 @@ def _service_with_live_probe(root, state):
                                                         online, online, online, online))
 
     facade = ApplicationApi.__new__(ApplicationApi)
-    facade._lifecycle = SimpleNamespace(refresh=snapshot)
+    facade._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: snapshot().runtime)
 
     def stop():
         state["stops"] += 1

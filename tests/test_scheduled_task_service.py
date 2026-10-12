@@ -95,6 +95,55 @@ def test_context_resolves_names_without_seeding(tmp_path: Path) -> None:
     assert context["groups"] == [{"id": GROUP, "name": "家人群", "type": "group"}]
 
 
+def test_lightweight_context_reads_current_account_without_waiting_for_directories(tmp_path):
+    value = service(tmp_path)
+    saved = value.store.save(payload())
+    value.store.save({**payload(draft=True), "id": "other-task", "account_id": "wxid_other"})
+    value._snapshot = lambda **_kwargs: pytest.fail("list must not wait for directories or engine")
+
+    context = value.context(True)
+
+    assert context["account_id"] == ACCOUNT
+    assert [item["id"] for item in context["items"]] == [saved["id"]]
+    assert context["items"][0]["status"] == "checking"
+    assert value.store.list(ACCOUNT)[0]["status"] == "enabled"
+    assert context["loading"] is True
+    assert context["runtime_ready"] is False
+    assert context["groups"] == context["contacts"] == []
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_lightweight_context_never_reads_store_without_verified_account(tmp_path, failure):
+    value = service(tmp_path)
+    def identity():
+        if failure:
+            raise OSError("account probe unavailable")
+        return ""
+    value.account_hint = identity
+    value.store.list = lambda _account: pytest.fail("unverified identity must not read history")
+    value._snapshot = lambda **_kwargs: pytest.fail("no directory fallback for unknown account")
+
+    context = value.context(True)
+
+    assert context["account_id"] == ""
+    assert context["items"] == []
+
+
+def test_schedule_context_api_preserves_default_full_contract():
+    from types import SimpleNamespace
+    from wechatrebot_manager.schedule_api import ScheduleApiMixin
+    calls = []
+    api = ScheduleApiMixin()
+    api._scheduled_tasks = SimpleNamespace(context=lambda *args: calls.append(args) or {})
+    api._scheduled_call = lambda operation, *args: operation(*args)
+
+    api.get_scheduled_task_context()
+    api.get_scheduled_task_context(True)
+    api.get_scheduled_task_context("true")
+
+    assert calls == [(), (True,), ()]
+
+
 def test_draft_and_active_task_share_one_authoritative_store(tmp_path: Path) -> None:
     value = service(tmp_path)
     draft = value.save(payload(draft=True))["item"]
