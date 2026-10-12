@@ -23,7 +23,9 @@ def make_api(client, *, account=""):
     api._install_root = client.root
     api._mandatory_update = False
     runtime = SimpleNamespace(wechat_identity=account, account_status_available=True)
-    api._lifecycle = SimpleNamespace(licenses=client, events=EventStore(client.root), refresh=lambda: SimpleNamespace(runtime=runtime))
+    api._lifecycle = SimpleNamespace(licenses=client, events=EventStore(client.root),
+                                     refresh=lambda: SimpleNamespace(runtime=runtime),
+                                     fresh_runtime_snapshot=lambda: runtime)
     actions = []
 
     def queue(action, _message, _error_code="19000"):
