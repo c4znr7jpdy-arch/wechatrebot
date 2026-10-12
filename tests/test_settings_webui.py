@@ -286,9 +286,11 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
     import io
     from PIL import Image
 
-    output = io.BytesIO()
-    Image.new("RGB", (320, 240), "#6489bf").save(output, format="WEBP")
-    preview = "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode()
+    previews = []
+    for size, color in [((320, 240), "#6489bf"), ((120, 320), "#649c82")]:
+        output = io.BytesIO()
+        Image.new("RGB", size, color).save(output, format="WEBP")
+        previews.append("data:image/webp;base64," + base64.b64encode(output.getvalue()).decode())
     page = browser.new_page(viewport={"width": width, "height": 1000})
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -327,24 +329,46 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
         page.locator('[data-settings-tab="core"]').click()
         expect(page.locator("#coreForm")).to_be_visible()
         page.screenshot(path=str(tmp_path / f"core-{width}.png"))
-        page.evaluate("""preview => {
+        page.evaluate("""previews => {
           const api = window.pywebview.api, read = api.get_messages;
           api.get_messages = async (...args) => {
             const result = await read(...args), messages = result.data.items || result.data;
-            messages[0].message_kind = ''; messages[0].content = '[表情]'; messages[0].media_previews = [preview];
-            messages[1].content = '[图片]'; messages[1].media_previews = ['https://invalid.test/private.gif'];
+            messages[0].message_kind = ''; messages[0].content = '[表情]'; messages[0].media_previews = [previews[0]];
+            messages[1].content = '[图片]'; messages[1].media_previews = [previews[1], 'https://invalid.test/private.gif'];
+            messages[2].content = '图片说明'; messages[2].media_previews = [previews[0]];
             return result;
           };
-        }""", preview)
+        }""", previews)
         page.locator('.nav-item[data-page="history"]').click()
-        expect(page.locator(".message-media img")).to_have_count(1)
-        page.locator(".message-media img").scroll_into_view_if_needed()
-        expect(page.locator(".message-media img")).to_be_visible()
-        page.wait_for_function("document.querySelector('.message-media img')?.naturalWidth === 320")
-        expect(page.locator(".message-media img")).to_have_attribute("alt", "表情首帧")
+        images = page.locator(".message-media img")
+        expect(images).to_have_count(3)
+        for image in images.all():
+            image.scroll_into_view_if_needed()
+            expect(image).to_be_visible()
+        page.wait_for_function("[...document.querySelectorAll('.message-media img')].every(image => image.complete && image.naturalWidth)")
+        expect(images.first).to_have_attribute("alt", "表情首帧")
+        messages = page.locator("#messageList .message")
+        expect(messages.nth(0).locator(".message-bubble")).to_have_count(0)
+        expect(messages.nth(1).locator(".message-bubble")).to_have_count(0)
+        expect(messages.nth(2).locator(".message-media + .message-bubble")).to_have_text("图片说明")
         assert not page.locator('img[src*="invalid.test"]').count()
-        page.screenshot(path=str(tmp_path / f"history-{width}.png"))
-        page.locator(".message-media img").dispatch_event("error")
+        for theme in ["light", "dark"]:
+            if theme == "dark":
+                page.locator("#themeToggle").click()
+            dimensions = images.evaluate_all("""images => images.map(image => {
+              const box = image.getBoundingClientRect(), style = getComputedStyle(image);
+              return {width: box.width, height: box.height, ratio: image.naturalWidth / image.naturalHeight,
+                bubble: Boolean(image.closest('.message-bubble')), border: style.borderWidth,
+                background: style.backgroundColor};
+            })""")
+            for image in dimensions:
+                assert image["width"] / image["height"] == pytest.approx(image["ratio"], abs=0.01)
+                assert 0 < image["width"] <= 200 and 0 < image["height"] <= 160
+                assert not image["bubble"] and image["border"] == "0px"
+                assert image["background"] == "rgba(0, 0, 0, 0)"
+            images.first.scroll_into_view_if_needed()
+            page.screenshot(animations="disabled", path=str(tmp_path / f"history-{theme}-{width}.png"))
+        images.first.dispatch_event("error")
         expect(page.get_by_text("表情首帧暂不可用", exact=True)).to_be_visible()
         assert page.url == manager_url and page.title().startswith("消息中心")
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
