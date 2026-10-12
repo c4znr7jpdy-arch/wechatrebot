@@ -275,7 +275,7 @@
       : (error?.message || "操作未完成，请稍后重试。 ");
     toast(message, "error");
     if (!product) window.managerErrorReporter?.capture(error, state.activePage);
-    else if (product.recorded === false) toast("错误记录未能保存，请截图联系技术支持。", "error");
+    else if (product.recorded === false && product.code !== "11007") toast("错误记录未能保存，请截图联系技术支持。", "error");
   }
 
   function debounce(fn, wait = 280) {
