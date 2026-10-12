@@ -76,7 +76,7 @@ function historyContext() {
     'historyMessageCacheKey', 'getHistoryMessageCacheEntry', 'setHistoryMessageCacheEntry',
     'saveSelectedHistoryMessages', 'clearHistoryMessageCache', 'requestHistoryMessagePage',
     'showHistoryNewerMessages', 'messagesSignature', 'selectConversation', 'prependOlderMessages', 'loadOlderMessages',
-    'invalidateHistoryState'];
+    'invalidateHistoryState', 'pollHistory'];
   for (const name of names) {
     const start = script.search(new RegExp(`^  (?:async )?function ${name}\\(`, 'm'));
     assert.ok(start >= 0, name);
@@ -286,5 +286,22 @@ function offlineHistoryActions() {
   assert.equal($('#deleteConversation').disabled, true, 'a previously rendered delete button must become read-only');
 }
 
-(async () => { dates(); await history(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+async function unknownAccountPolling() {
+  const {context: c, state: s} = historyContext();
+  s.activePage = 'history';
+  s.status = {runtime: {account_status_available: false}};
+  let reads = 0;
+  c.loadConversations = async () => { reads++; };
+  await c.pollHistory();
+  assert.equal(reads, 0, 'unknown identity must not generate repeated history failures');
+  s.status.runtime.account_status_available = true;
+  await c.pollHistory();
+  assert.equal(reads, 1, 'history polling resumes after the account probe recovers');
+  s.status.runtime.account_status_available = false;
+  s.status.history_offline = true;
+  await c.pollHistory();
+  assert.equal(reads, 2, 'verified offline history remains available');
+}
+
+(async () => { dates(); await history(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

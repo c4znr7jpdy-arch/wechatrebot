@@ -683,7 +683,8 @@ window.createMessageHistory = function (helpers) {
 
   async function pollHistory() {
     if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
-        || state.historyConversationsLoading || state.historyMessagesLoading) return;
+        || state.historyConversationsLoading || state.historyMessagesLoading
+        || (state.status?.runtime?.account_status_available === false && !state.status?.history_offline)) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true});

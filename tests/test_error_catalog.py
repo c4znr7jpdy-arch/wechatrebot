@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from wechatrebot_manager.error_catalog import load_error_catalog
+from wechatrebot_manager.error_catalog import AccountStatusUnavailableError, classify_error, load_error_catalog
 
 
 def test_error_catalog_loads_default_and_customer_override(tmp_path: Path) -> None:
@@ -30,3 +30,11 @@ def test_error_catalog_loads_default_and_customer_override(tmp_path: Path) -> No
     assert catalog.get("11001").title == "未检测到微信"
     assert catalog.get("12002").title == "定制连接提示"
     assert catalog.get("99999").code == "19000"
+
+
+def test_unavailable_account_is_retryable_without_guessing_logout():
+    code = classify_error(AccountStatusUnavailableError("temporary"), "19000", "get_messages")
+    definition = load_error_catalog().get(code)
+    assert code == "11007"
+    assert definition.retryable and definition.level == "warning"
+    assert classify_error(OSError("微信账号状态暂时不可用"), "19000", "get_messages") == "19000"

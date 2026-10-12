@@ -977,9 +977,8 @@ def test_history_account_uses_a_fresh_runtime_identity(tmp_path: Path) -> None:
         view=lambda: SimpleNamespace(
             runtime=SimpleNamespace(wechat_identity="wxid_cached")
         ),
-        refresh=lambda: SimpleNamespace(
-            runtime=SimpleNamespace(wechat_identity="wxid_current")
-        ),
+        fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_current"),
+        refresh=lambda: pytest.fail("History reads must not wait for lifecycle refresh"),
     )
 
     assert api._history_account_id() == "wxid_current"
@@ -987,9 +986,9 @@ def test_history_account_uses_a_fresh_runtime_identity(tmp_path: Path) -> None:
 
 def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_path):
     api = _api(tmp_path)
-    api._lifecycle.refresh = lambda: SimpleNamespace(runtime=SimpleNamespace(
+    api._lifecycle.fresh_runtime_snapshot = lambda: SimpleNamespace(
         wechat_identity="wxid_cached", account_status_available=False,
-    ))
+    )
     # No repositories are installed: touching history while unverified must fail.
     results = [
         api.get_conversations({"account_id": "wxid_cached"}),
@@ -999,6 +998,8 @@ def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_
         api.export_history("csv", "wxid_cached"),
     ]
     assert all(result["ok"] is False for result in results)
+    assert all(result["error"]["code"] == "11007" for result in results)
+    assert all(result["error"]["level"] == "warning" for result in results)
     assert all("requires_login" not in result.get("data", {}) for result in results)
 
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from .group_directory import GroupDirectoryError
+from .error_catalog import AccountStatusUnavailableError
 from .customer_config import load_robot_settings
 from .group_policy import GroupPolicyError
 from .launcher import installation_services_stopped
@@ -25,12 +26,11 @@ class ChatApiMixin:
     def _history_account_id(self) -> str:
         """Return the bot account verified by a fresh runtime probe."""
         try:
-            view = self._lifecycle.refresh()
-            runtime = getattr(view, "runtime", None)
+            runtime = self._lifecycle.fresh_runtime_snapshot()
         except (AttributeError, OSError, ValueError) as exc:
-            raise OSError("微信账号状态暂时不可用，请稍后重试。") from exc
+            raise AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。") from exc
         if runtime is None or getattr(runtime, "account_status_available", True) is False:
-            raise OSError("微信账号状态暂时不可用，请稍后重试。")
+            raise AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。")
         return str(getattr(runtime, "wechat_identity", "") or "").strip()
 
     def _offline_history_account(self, view) -> str:

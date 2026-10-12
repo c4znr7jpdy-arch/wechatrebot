@@ -38,7 +38,7 @@ def test_avatar_download_does_not_fetch_untrusted_hosts():
 def test_assistant_avatar_never_reuses_peer_avatar(tmp_path):
     api = ApplicationApi.__new__(ApplicationApi)
     api._install_root = tmp_path
-    api._lifecycle = SimpleNamespace(refresh=lambda: SimpleNamespace(runtime=SimpleNamespace(wechat_identity="wxid_bot")))
+    api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_bot"))
     api._history = SimpleNamespace(messages=lambda *args, **kw: [{"role": "assistant", "avatar": "peer.jpg", "sender_id": "wxid_peer"}])
     api._contacts = SimpleNamespace(self_profile=lambda: {"avatar": "robot.jpg"})
     (tmp_path / "config").mkdir()
