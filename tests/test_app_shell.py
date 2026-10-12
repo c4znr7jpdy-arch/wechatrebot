@@ -1948,14 +1948,14 @@ def test_model_combobox_opens_the_complete_discovered_list_before_filtering() ->
     assert '"grok-4.6"' not in script[script.index("discover_provider_models: () => ok("):]
 
 
-def test_model_editor_keeps_natural_height_and_explains_default_selection() -> None:
+def test_model_editor_keeps_natural_height_and_default_save_action() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert "#page-settings .provider-editor-layout { flex: none; min-height: auto; align-items: start; }" in styles
-    assert 'id="providerSaveIntentTitle"' in markup
+    assert 'id="providerSaveIntentTitle"' not in markup
     assert 'id="saveProvider"' in markup
     assert 'providerWillBeDefault(form.elements.service_kind.value, "")' in script
     assert 'if (serviceKind !== "chat") return false;' in script

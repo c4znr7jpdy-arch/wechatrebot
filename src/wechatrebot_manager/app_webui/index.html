@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
+  <link rel="stylesheet" href="provider-settings.css?v=20261012">
   <link rel="stylesheet" href="subscription.css?v=20261009">
   <link rel="stylesheet" href="activity.css?v=20261010">
   <script src="activity-errors.js"></script>
@@ -386,10 +387,10 @@
           <div class="page-heading compact"><div><h1 id="settingsHeading">机器人总设置</h1></div></div>
           <div class="settings-layout">
           <nav class="settings-tabs" id="settingsTabs" aria-label="设置分类">
-            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong><small>回复、识图与其他模型</small></button>
-            <button type="button" data-settings-tab="core" data-action-bound disabled><strong>机器人配置</strong><small>机器人默认如何回复</small></button>
-            <button type="button" data-settings-tab="search" data-action-bound disabled><strong>联网搜索</strong><small>搜索服务与密钥</small></button>
-            <button type="button" data-settings-tab="system" data-action-bound disabled><strong>系统与更新</strong><small>安装、数据与版本</small></button>
+            <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong></button>
+            <button type="button" data-settings-tab="core" data-action-bound disabled><strong>机器人配置</strong></button>
+            <button type="button" data-settings-tab="search" data-action-bound disabled><strong>联网搜索</strong></button>
+            <button type="button" data-settings-tab="system" data-action-bound disabled><strong>系统与更新</strong></button>
           </nav>
           <div class="settings-grid">
             <section class="provider-workspace" data-settings-section="model">
@@ -410,11 +411,10 @@
                   <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
                     <div class="panel-heading"><div><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2></div></div>
                     <input name="provider_id" type="hidden">
-                    <div class="field-pair"><label><span>模型供应商</span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select></label></div>
+                    <div class="field-pair"><label><span>模型供应商</span><span class="provider-preset-control"><span class="provider-preset-icon" id="providerPresetIcon" aria-hidden="true"></span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select></span></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select></label></div>
                     <div class="field-pair"><label><span>Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint" role="status"></small></label></div>
                     <label><span>API Key / Token Plan</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="填写 API Key 或 Token Plan；已保存内容不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">API Key / Token Plan 只保存在本机</small></label>
                     <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
-                    <div class="provider-form-note"><span aria-hidden="true">✓</span><p><strong id="providerSaveIntentTitle">保存后直接设为回复模型</strong></p></div>
                     <div class="form-actions provider-actions"><span class="form-note" id="providerNote" role="status"></span><div class="button-row"><button class="button ghost" id="testProvider" type="button" data-action-bound disabled hidden>测试连接</button><button class="button danger" id="deleteProvider" type="button" data-action-bound disabled hidden>删除服务</button><button class="button ghost" id="cancelProviderEdit" type="button" data-action-bound disabled>取消</button><button class="button primary" id="saveProvider" type="submit">保存并设为回复模型</button></div></div>
                   </form>
                 </div>

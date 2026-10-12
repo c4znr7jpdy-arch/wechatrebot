@@ -282,6 +282,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/feature-page-theme.js",
                     "/feature-page-overrides.css",
                     "/design-overrides.css",
+                    "/provider-settings.css",
                     "/assets/AlimamaShuHeiTi-Bold.woff2",
                 }:
                     suffix = Path(split.path).suffix
