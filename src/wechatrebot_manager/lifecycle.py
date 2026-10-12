@@ -352,9 +352,14 @@ class LifecycleController:
             self.events.emit("FUNCTION_LOADED", "success")
             self._running_events_emitted = True
 
+    def fresh_runtime_snapshot(self) -> RuntimeSnapshot:
+        """Probe account state without waiting for lifecycle actions or changing them."""
+        return self._snapshotter()
+
     def refresh(self) -> LifecycleView:
         with self._lock:
-            self._environment = self._environment_checker(self.install_root)
+            # Environment discovery is expensive and belongs to the explicit
+            # check/start paths. Polling still probes runtime and account state.
             self._runtime = self._snapshotter()
             if self._start_in_progress:
                 if self._runtime.online:
