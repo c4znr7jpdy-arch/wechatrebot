@@ -1056,19 +1056,11 @@
             return;
           }
           toast(`已清理 ${result.deleted} 条记录。 `);
-          clearHistoryMessageCache();
-          state.messageLoad += 1;
-          state.historyMessagesLoading = false;
-          state.historyOlderLoad += 1;
-          state.historyHasMore = false;
-          state.historyLoadingOlder = false;
-          state.historyMessageQuery = "";
-          state.selectedMessages = [];
-          state.selectedSenderKey = "";
-          if (state.activePage === "history") {
-            $("#messageList").innerHTML = '<div class="loading-row message-read-status"><span>正在读取消息…</span><small>若长时间未读到记录，点击刷新。</small></div>';
-            await loadConversations();
-          }
+          // Cleanup is opened from settings: refresh the retained records even
+          // while the history page is hidden, including its directory snapshot.
+          invalidateHistoryState();
+          $("#messageList").innerHTML = '<div class="loading-row message-read-status"><span>正在读取消息…</span><small>若长时间未读到记录，点击刷新。</small></div>';
+          await loadConversations({latest: true, forceRefresh: true});
         },
       });
     });
@@ -1209,7 +1201,7 @@
     updatePolicyToggle: (...args) => updatePolicyToggle(...args),
   });
 
-  const { canEditHistory, clearHistoryMessageCache, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
+  const { canEditHistory, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
     $,
     $$,
     HISTORY_MESSAGE_CACHE_LIMIT,
