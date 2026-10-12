@@ -473,7 +473,8 @@
     }
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
-    $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${environment.process_running ? "检测到微信进程" : "尚未运行"}` : "请安装或重新选择微信";
+    const wechatConnection = !accountStatusAvailable ? "状态待确认" : runtime.hook_ready || wechatLoggedIn ? "已连接" : "待连接";
+    $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${wechatConnection}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : active ? "正在启动" : "未启动";
     $("#signalMessage").textContent = online ? "通信正常" : wechatLoggedIn ? "已登录，功能启动中" : runtime.connection_ready ? "正在确认" : "未连接";
     $("#wechatPath").textContent = environment.path || "尚未选择";

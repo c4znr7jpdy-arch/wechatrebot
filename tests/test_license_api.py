@@ -162,6 +162,7 @@ def test_contact_api_reads_anonymous_data_without_license_or_runtime_side_effect
     api._license_contacts = ContactClient(client.root, clock=clock, transport=fetch)
     monkeypatch.setattr(api, "_license_client", lambda: pytest.fail("contact must not use licensing identity"))
     monkeypatch.setattr(api._lifecycle, "refresh", lambda: pytest.fail("contact must not probe WeChat"))
+    monkeypatch.setattr(api._lifecycle, "fresh_runtime_snapshot", lambda: pytest.fail("contact must not probe WeChat"))
     configuration = (client.root / "config/licensing.json").read_bytes()
     result = api.get_license_contact()
     assert result["ok"] and result["data"]["source"] == "remote"

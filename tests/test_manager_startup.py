@@ -74,6 +74,34 @@ def test_manager_loads_all_resources_and_opens_subscription(browser, manager_url
         page.close()
 
 
+def test_wechat_signal_uses_live_connection_instead_of_last_environment_scan(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#globalRefresh")).to_be_enabled()
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_status;
+          window.testConnection = 'connected';
+          api.get_status = async () => {
+            const result = await read();
+            result.data.environment.process_running = window.testConnection !== 'connected';
+            result.data.runtime = {...result.data.runtime,
+              account_status_available: window.testConnection !== 'unknown',
+              hook_ready: window.testConnection === 'connected',
+              wechat_identity: window.testConnection === 'connected' ? 'wxid_current' : ''};
+            return result;
+          };
+        }""")
+        for state, label in [("connected", "已连接"), ("disconnected", "待连接"), ("unknown", "状态待确认")]:
+            page.evaluate("state => { window.testConnection = state; }", state)
+            page.locator("#globalRefresh").click()
+            expect(page.locator("#signalWechatDetail")).to_have_text(f"4.1.8.27 · {label}")
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("missing_script", ["subscription.js", "core-settings.js", "chat-profiles.js", "panel-layout.js", "features.js", "scheduled-tasks.js", "preview.js"])
 def test_manager_reports_missing_startup_dependency(browser, manager_url, missing_script, tmp_path: Path):
     page = browser.new_page()
