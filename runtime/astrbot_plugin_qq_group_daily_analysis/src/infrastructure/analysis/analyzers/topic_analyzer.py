@@ -5,14 +5,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 
 from ....domain.value_objects import SummaryTopic, TokenUsage
+from ....shared.report_status import TOPIC_WAITING_MESSAGE
 from ....utils.logger import logger
 from ....utils.template_utils import render_template
 from ..utils import InfoUtils
 from ..utils.json_utils import extract_topics_with_regex
+from ..utils.llm_utils import (
+    ProviderMetadata,
+    get_provider_id_with_fallback,
+    resolve_analysis_timeout,
+)
 from ..utils.response_validation import validate_topic_items
 from ..utils.structured_output_schema import JSONObject, build_topics_schema
 from .base_analyzer import BaseAnalyzer
@@ -219,7 +226,7 @@ class TopicAnalyzer(BaseAnalyzer[SummaryTopic, list[dict]]):
 
                     # 验证必要字段
                     if not topic_name or not detail:
-                        logger.warning(f"话题数据格式不完整，跳过: {topic_data}")
+                        logger.info("话题数据字段尚未完整生成，跳过本条")
                         continue
 
                     # 确保参与者列表有效
@@ -339,7 +346,16 @@ class TopicAnalyzer(BaseAnalyzer[SummaryTopic, list[dict]]):
                     id_to_nickname[user_id] = sender
 
             # 直接传入原始消息，让 build_prompt 方法处理
-            topics, usage = await self.analyze(messages, umo)
+            provider_id = await get_provider_id_with_fallback(
+                self.context, self.config_manager, self.get_provider_id_key(), umo,
+            )
+            timeout, _ = resolve_analysis_timeout(
+                self.config_manager,
+                ProviderMetadata.from_provider_id(self.context, provider_id or ""),
+                self.get_provider_id_key(),
+            )
+            # 整个话题分析（含已有重试和格式修复）共享等待预算，避免重试叠加长等待。
+            topics, usage = await asyncio.wait_for(self.analyze(messages, umo), timeout)
 
             # 后处理：contributors 此时包含的是 ID，需要映射回昵称
             for topic in topics:
@@ -371,5 +387,6 @@ class TopicAnalyzer(BaseAnalyzer[SummaryTopic, list[dict]]):
             return topics, usage
 
         except Exception as e:
-            logger.error(f"话题分析失败: {e}", exc_info=True)
-            raise
+            logger.info(TOPIC_WAITING_MESSAGE)
+            logger.debug(f"话题分析尚未获得内容: {type(e).__name__}: {e}")
+            return [], TokenUsage()

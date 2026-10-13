@@ -18,7 +18,7 @@ from astrbot.api.provider import LLMResponse
 
 from ....shared.constants import AnalysisStage
 from ....shared.report_language import apply_report_language
-from ....shared.report_status import ANALYSIS_TIMEOUT_MESSAGE
+from ....shared.report_status import ANALYSIS_TIMEOUT_MESSAGE, TOPIC_WAITING_MESSAGE
 from ....shared.trace_context import TraceContext
 from ....utils.logger import logger
 from ....utils.resilience import CircuitBreaker, GlobalRateLimiter
@@ -50,6 +50,7 @@ __all__ = [
     "extract_token_usage",
     "format_task_await_chain",
     "get_provider_id_with_fallback",
+    "resolve_analysis_timeout",
 ]
 
 _circuit_breakers: dict[str, CircuitBreaker] = {}
@@ -58,6 +59,10 @@ _LLM_LIMITER_WARN_SECONDS = 15.0
 _LLM_REQUEST_WARN_SECONDS = 120.0
 _LLM_REQUEST_STACK_DUMP_SECONDS = 120.0
 _DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
+
+
+class AnalysisContentUnavailable(RuntimeError):
+    """The model has not produced usable analysis content."""
 
 # 向后兼容内部私有别名
 _extract_task_await_frames = extract_task_await_frames
@@ -166,6 +171,24 @@ _PROVIDER_KEY_GETTERS: dict[str, Callable[[ConfigManager], str]] = {
 }
 
 
+def resolve_analysis_timeout(
+    config_manager: ConfigManager, meta: ProviderMetadata, provider_id_key: str | None,
+) -> tuple[float, str]:
+    """Resolve the shared request limit and the whole-topic waiting budget."""
+    configured = (
+        config_manager.get_llm_hard_timeout()
+        if hasattr(config_manager, "get_llm_hard_timeout") else 0
+    )
+    if configured > 0:
+        return float(configured), f"插件配置 (llm_hard_timeout={configured}s)"
+    if provider_id_key == "topic_provider_id":
+        timeout = max(_DEFAULT_LLM_HARD_TIMEOUT_SECONDS, meta.timeout or 0)
+        return timeout, "热门话题等待预算 (至少 300s，保留 Provider 更长等待时间)"
+    if meta.timeout is not None:
+        return meta.timeout, f"Provider 配置 (timeout={meta.timeout:g}s)"
+    return _DEFAULT_LLM_HARD_TIMEOUT_SECONDS, "默认安全兜底 (未检测到 Provider timeout 配置)"
+
+
 def _is_response_format_unsupported_error(error: Exception) -> bool:
     """
     判断是否为 Provider/网关不支持 response_format 的兼容性错误。
@@ -242,6 +265,10 @@ def _is_request_timeout(error: BaseException | None) -> bool:
         seen.add(id(error))
         error = error.__cause__
     return False
+
+
+def is_analysis_incomplete(error: BaseException | None) -> bool:
+    return isinstance(error, AnalysisContentUnavailable) or _is_request_timeout(error)
 
 
 async def _call_provider_stream(
@@ -511,7 +538,7 @@ async def call_provider_with_retry(
     Raises:
         TimeoutError: 请求重试耗尽且最后一次为超时，携带可展示的安全说明。
     """
-    # 显式的分析超时同时约束单次 Provider 请求和外层监控；0 保留 Provider 默认值。
+    # 热门话题使用独立等待预算；其他板块在未显式设置时保留 Provider 默认值。
     # 报告语言：显式配置时给提示词追加语言指令（auto 时原样返回，保持历史行为）
     prompt = apply_report_language(prompt, config_manager)
     retries = config_manager.get_llm_retries()
@@ -526,6 +553,8 @@ async def call_provider_with_retry(
         or "unknown"
     )
     observation_area = observation_label or provider_id_key or "未标注"
+    topic_request = provider_id_key == "topic_provider_id"
+    waiting_log = logger.info if topic_request else logger.warning
 
     # 1. 确定我们要尝试的 Provider 队列
     attempt_queue = []
@@ -575,7 +604,7 @@ async def call_provider_with_retry(
                     )
                     break
                 except TimeoutError:
-                    logger.warning(
+                    waiting_log(
                         f"[LLM 限流观测] 等待全局 Provider 槽位超过 "
                         f"{time.monotonic() - wait_started_at:.0f}s: "
                         f"group={observation_group}, stage={observation_stage}, "
@@ -612,20 +641,9 @@ async def call_provider_with_retry(
                     if hasattr(config_manager, "get_llm_hard_timeout")
                     else 0
                 )
-                if configured_hard_timeout > 0:
-                    effective_timeout = float(configured_hard_timeout)
-                    timeout_source = (
-                        f"插件配置 (llm_hard_timeout={configured_hard_timeout}s)"
-                    )
-                elif meta.timeout is not None:
-                    effective_timeout = meta.timeout
-                    timeout_source = f"Provider 配置 (timeout={meta.timeout:g}s)"
-                else:
-                    effective_timeout = _DEFAULT_LLM_HARD_TIMEOUT_SECONDS
-                    timeout_source = (
-                        f"默认安全兜底 ({_DEFAULT_LLM_HARD_TIMEOUT_SECONDS:.0f}s, "
-                        "未检测到 Provider timeout 配置)"
-                    )
+                effective_timeout, timeout_source = resolve_analysis_timeout(
+                    config_manager, meta, provider_id_key,
+                )
 
                 logger.info(
                     f"[LLM 超时配置] 本次请求硬超时上限: {effective_timeout:.1f}s | "
@@ -658,7 +676,7 @@ async def call_provider_with_retry(
                     llm_kwargs["response_format"] = r_format
                 if extra_generate_kwargs:
                     llm_kwargs.update(extra_generate_kwargs)
-                if configured_hard_timeout > 0:
+                if configured_hard_timeout > 0 or provider_id_key == "topic_provider_id":
                     llm_kwargs["timeout"] = effective_timeout
 
                 call_path = (
@@ -697,7 +715,7 @@ async def call_provider_with_retry(
                                 default_block_point=call_path,
                                 is_timeout_aborted=True,
                             )
-                            logger.error(
+                            (logger.info if topic_request else logger.error)(
                                 f"[LLM 硬超时截断] {diagnosis.status_title}: "
                                 f"group={observation_group}, stage={observation_stage}, "
                                 f"area={observation_area}, attempt={attempt_num}, "
@@ -738,7 +756,7 @@ async def call_provider_with_retry(
                                 elapsed_seconds,
                                 default_block_point=call_path,
                             )
-                            logger.warning(
+                            waiting_log(
                                 f"[LLM 阻塞诊断] {diagnosis.status_title}: "
                                 f"group={observation_group}, "
                                 f"stage={observation_stage}, area={observation_area}, "
@@ -749,7 +767,7 @@ async def call_provider_with_retry(
                                 f"提示: {diagnosis.guidance_hint}"
                             )
                             if not diagnosis.is_known:
-                                logger.warning(
+                                waiting_log(
                                     f"[LLM 栈观测] Provider 请求 await 链: "
                                     f"group={observation_group}, "
                                     f"stage={observation_stage}, "
@@ -771,6 +789,10 @@ async def call_provider_with_retry(
                 except asyncio.CancelledError:
                     if not request_task.done():
                         request_task.cancel()
+                        try:
+                            await request_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
                     raise
 
                 logger.info(
@@ -792,7 +814,7 @@ async def call_provider_with_retry(
                     f"available={limiter.available_slots}/{limiter.max_concurrency}"
                 )
             if not extract_response_text(resp).strip():
-                raise RuntimeError("分析模型返回空内容，请检查模型设置或稍后重试。")
+                raise AnalysisContentUnavailable("分析模型返回空内容，请检查模型设置或稍后重试。")
             cb.record_success()
             duration_ms = (time.monotonic() - request_started_at) * 1000
             if trace:
@@ -845,6 +867,8 @@ async def call_provider_with_retry(
                 logger.debug(
                     f"[LLM 熔断保护] 请求命中了上游内容风控拦截，不计入 Provider[{pid}] 熔断器失败计数。"
                 )
+                raise err
+            if topic_request and is_analysis_incomplete(err):
                 raise err
             cb.record_failure()
             raise err
@@ -953,7 +977,11 @@ async def call_provider_with_retry(
                 queue_index += 1
                 continue
 
-            logger.warning(f"{prefix}请求失败: {last_exc}")
+            if topic_request and is_analysis_incomplete(last_exc):
+                logger.info(TOPIC_WAITING_MESSAGE)
+                logger.debug(f"{prefix}本次未产出: {last_exc}")
+            else:
+                logger.warning(f"{prefix}请求失败: {last_exc}")
             # 惰性降级：仅当所有 primary provider 的重试都耗尽后才 resolve 并注入 fallback
             if not is_fallback and queue_index == retries - 1 and needs_fallback:
                 fallback_provider_id = await get_provider_id_with_fallback(
@@ -975,7 +1003,10 @@ async def call_provider_with_retry(
 
             queue_index += 1
 
-    logger.error(f"LLM请求队列全部耗尽，最终失败: {last_exc}")
+    if topic_request and is_analysis_incomplete(last_exc):
+        logger.info(TOPIC_WAITING_MESSAGE)
+    else:
+        logger.error(f"LLM请求队列全部耗尽，最终失败: {last_exc}")
     if _is_request_timeout(last_exc):
         raise TimeoutError(ANALYSIS_TIMEOUT_MESSAGE) from last_exc
     return None

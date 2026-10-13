@@ -130,7 +130,7 @@ def test_incremental_timeout_survives_batch_storage_merge_and_final_report(modul
     assert stored[0].timeout_sections == ["topic"]
     analysis = final_result["analysis_result"]
     assert analysis["timeout_sections"] == ["topic"]
-    assert deps.status.section_unavailable_reason(analysis, "topic", True) == deps.status.ANALYSIS_TIMEOUT_MESSAGE
+    assert deps.status.section_unavailable_reason(analysis, "topic", True) == deps.status.TOPIC_WAITING_MESSAGE
     assert "upstream private response" not in str(stored[0].to_dict())
     assert "upstream private response" not in str(analysis)
 
@@ -142,3 +142,57 @@ def test_legacy_or_invalid_batch_status_is_safe(modules, raw):
     batch = batch_type.from_dict({"timeout_sections": raw})
     expected = ["topic"] if isinstance(raw, list) else []
     assert batch.timeout_sections == batch.to_dict()["timeout_sections"] == expected
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+@pytest.mark.parametrize("topic_success", [False, True])
+@pytest.mark.parametrize("quote_state", ["disabled", "success", "failure"])
+def test_topic_placeholder_can_complete_without_changing_other_section_failures(modules, dependencies, recovery, topic_success, quote_state):
+    deps = dependencies
+    deps.config.values["golden_quote_analysis_enabled"] = quote_state != "disabled"
+    deps.config.values["llm_max_concurrent"] = 2
+    serializer = modules("application.services.analysis_serializer").AnalysisResultSerializer
+    cached = serializer.serialize({
+        "statistics": deps.stats, "topics": [], "user_titles": [], "user_analysis": {},
+        "chat_quality_review": None,
+    })
+    checkpoints = SimpleNamespace(
+        get_checkpoint=lambda _group, _date, stage, **_kwargs: (
+            cached if stage == deps.stage.LLM_ANALYSIS.value else
+            {"statistics": deps.stats.to_dict(), "unified_messages": [deps.message]}
+        ),
+        save_checkpoint=Mock(),
+    )
+
+    async def analyze(*_args, **_kwargs):
+        topics = [deps.values.SummaryTopic("有效话题", ["群友"], "一起讨论测试方法")] if topic_success else []
+        quotes = [deps.values.GoldenQuote("一起讨论测试方法", "群友", "有用的建议")] if quote_state == "success" else []
+        return topics, [], quotes, deps.values.TokenUsage(), None
+
+    if recovery:
+        service = modules("application.services.analysis_recovery_service").AnalysisRecoveryService(
+            deps.config, deps.bot_manager, deps.history, None,
+            SimpleNamespace(analyze_all_concurrent=analyze), deps.statistics, deps.guard,
+            checkpoint_store=checkpoints,
+        )
+    else:
+        service = modules("application.services.analysis_application_service").AnalysisApplicationService(
+            deps.config, deps.bot_manager, deps.history, None,
+            SimpleNamespace(analyze_all_concurrent=analyze), deps.statistics,
+            SimpleNamespace(analyze_user_activity=lambda *_args: {}, get_top_users=lambda *_args, **_kwargs: []),
+        )
+        service._task_guard = deps.guard
+
+    with deps.trace_type() as trace:
+        call = (service.resume_analysis(trace.trace_id, "test-group", "wechat") if recovery
+                else service.execute_daily_analysis("test-group", "wechat", manual=True))
+        result = asyncio.run(call)
+        trace.finish()
+    expected_success = topic_success or quote_state != "failure"
+    assert result["success"] is expected_success
+    if expected_success:
+        assert trace.status == ("warning" if quote_state == "failure" else "succeeded")
+        if not topic_success:
+            assert deps.status.section_unavailable_reason(result["analysis_result"], "topic", True) == "模型等待未生成"
+    else:
+        assert result["reason"] == "llm_analysis_failed"

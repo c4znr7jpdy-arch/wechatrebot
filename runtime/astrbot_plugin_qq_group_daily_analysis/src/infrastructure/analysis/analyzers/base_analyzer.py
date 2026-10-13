@@ -13,10 +13,12 @@ from ....domain.value_objects import TokenUsage
 from ....utils.logger import logger
 from ..utils.json_utils import parse_json_response
 from ..utils.llm_utils import (
+    AnalysisContentUnavailable,
     call_provider_with_retry,
     extract_response_text,
     extract_token_usage,
     get_provider_id_with_fallback,
+    is_analysis_incomplete,
 )
 from ..utils.structured_output_schema import JSONObject, build_response_format
 
@@ -419,8 +421,7 @@ class BaseAnalyzer(ABC, Generic[TDataObject, TInputData]):
 
             if response is None:
                 err_text = f"{self.get_data_type()}分析调用LLM失败: Provider 返回空响应或重试耗尽"
-                logger.error(err_text)
-                raise RuntimeError(err_text)
+                raise AnalysisContentUnavailable(err_text)
 
             # 3. 提取token使用统计
             token_usage_dict = extract_token_usage(response)
@@ -464,7 +465,7 @@ class BaseAnalyzer(ABC, Generic[TDataObject, TInputData]):
                         parse_error=error_msg,
                         attempt_index=idx,
                     )
-                    logger.warning(
+                    (logger.info if provider_id_key == "topic_provider_id" else logger.warning)(
                         f"{self.get_data_type()}结构化解析失败，触发 schema 修复重试 "
                         f"(attempt={idx}, temperature={temperature:.1f})"
                     )
@@ -520,11 +521,13 @@ class BaseAnalyzer(ABC, Generic[TDataObject, TInputData]):
 
             # 6. 全部尝试失败
             err_text = f"{self.get_data_type()}分析失败: JSON解析与正则降级均未成功 ({error_msg or '未产出有效内容'})"
-            logger.error(err_text)
-            raise RuntimeError(err_text)
+            raise AnalysisContentUnavailable(err_text)
 
         except Exception as e:
-            logger.error(f"{self.get_data_type()}分析失败: {e}", exc_info=True)
+            if self.get_provider_id_key() == "topic_provider_id" and is_analysis_incomplete(e):
+                logger.debug(f"话题分析尚未获得内容: {e}")
+            else:
+                logger.error(f"{self.get_data_type()}分析失败: {e}", exc_info=True)
             raise
 
     async def _build_system_prompt(

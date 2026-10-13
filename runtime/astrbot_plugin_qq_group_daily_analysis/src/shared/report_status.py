@@ -9,6 +9,7 @@ ANALYSIS_TIMEOUT_MESSAGE = (
     "或选择响应更快的分析模型。"
 )
 _SECTIONS = ("topic", "user_title", "golden_quote", "chat_quality")
+TOPIC_WAITING_MESSAGE = "模型等待未生成"
 
 
 def normalize_timeout_sections(value: object) -> list[str]:
@@ -29,6 +30,8 @@ def section_unavailable_reason(
 ) -> str:
     if not enabled:
         return "此板块未启用，可在群聊分析的常用设置中开启。"
+    if section == "topic":
+        return TOPIC_WAITING_MESSAGE
     if section in normalize_timeout_sections(analysis_result.get("timeout_sections")):
         return ANALYSIS_TIMEOUT_MESSAGE
     return "本次未获得有效分析内容。可能是消息不足或模型调用失败，请检查分析模型后重试。"

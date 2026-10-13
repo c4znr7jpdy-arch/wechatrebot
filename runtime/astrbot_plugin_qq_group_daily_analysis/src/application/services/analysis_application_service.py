@@ -525,9 +525,10 @@ class AnalysisApplicationService:
                     timeout_sections = timeout_sections_from_errors(
                         step.payload.get("subtask_errors")
                     )
+                    # 热门话题未生成时可正常展示占位；其他板块仍保留原失败规则。
                     enabled_count = sum(
                         [
-                            bool(topic_enabled),
+                            bool(topic_enabled and topics),
                             bool(user_title_enabled),
                             bool(golden_quote_enabled),
                             bool(chat_quality_enabled),

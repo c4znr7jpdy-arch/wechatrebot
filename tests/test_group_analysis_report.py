@@ -302,14 +302,15 @@ def test_topic_timeout_survives_snapshot_in_image_and_text_reports(modules, them
     text = render_text_report(modules, analysis, disabled=state == "disabled")
     assert analysis["timeout_sections"] == ["topic"]
     for output in (rendered, text):
-        assert ("模型请求超时" in output) is (state == "timeout")
+        assert ("模型等待未生成" in output) is (state == "timeout")
+        assert "模型请求超时" not in output
         assert "upstream private response" not in output
         if state == "disabled":
             assert "此板块未启用" in output
         elif state == "success":
             assert "插件更新讨论" in output
     if state == "timeout":
-        assert rendered.count("模型请求超时") == 1
+        assert rendered.count("模型等待未生成") == 1
         assert "热门话题" in rendered
 
 
@@ -322,7 +323,8 @@ def test_partial_analysis_extracts_only_safe_timeout_status(modules):
     method = next(node for node in ast.walk(ast.parse(source))
                   if isinstance(node, ast.AsyncFunctionDef) and node.name == "analyze_all_concurrent")
     scope = {"asyncio": asyncio, "TokenUsage": values.TokenUsage, "TraceContext": trace_type,
-             "AnalysisStage": stage, "logger": modules("utils.logger").logger}
+             "AnalysisStage": stage, "logger": modules("utils.logger").logger,
+             "TOPIC_WAITING_MESSAGE": status.TOPIC_WAITING_MESSAGE}
     exec(compile(ast.Module(body=[method], type_ignores=[]), "concurrent-analysis", "exec",
                  flags=__future__.annotations.compiler_flag), scope)
 
@@ -341,4 +343,6 @@ def test_partial_analysis_extracts_only_safe_timeout_status(modules):
             analyzer, [], {}, user_title_enabled=False, chat_quality_enabled=False,
         ))
         errors = span["payload"]["subtask_errors"]
-    assert status.timeout_sections_from_errors(errors) == ["topic"]
+        assert span["payload"]["topic_status"] == status.TOPIC_WAITING_MESSAGE
+    assert status.timeout_sections_from_errors(errors) == []
+    assert errors == ["golden_quote: upstream private response"]

@@ -543,9 +543,10 @@ class AnalysisRecoveryService:
                         [name for name in timeout_sections if name not in attempted_sections]
                         + timeout_sections_from_errors(step.payload.get("subtask_errors"))
                     )
+                    # 热门话题未生成时可正常展示占位；其他板块仍保留原失败规则。
                     enabled_count = sum(
                         [
-                            bool(run_topic),
+                            bool(run_topic and new_topics),
                             bool(run_user_title),
                             bool(run_golden_quote),
                             bool(run_chat_quality),
