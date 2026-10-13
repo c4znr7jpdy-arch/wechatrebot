@@ -397,18 +397,45 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             expect(dialog.locator("h2")).to_have_text("表情首帧")
             expect(dialog.locator("img")).to_be_visible()
             expect(dialog.locator("img")).to_have_attribute("src", previews[0])
-            dialog.locator('[data-action="original"]').click()
+            expect(dialog.locator("button")).to_have_count(3)
+            close = dialog.get_by_role("button", name="关闭预览")
+            expect(close).to_have_text("")
+            expect(close.locator("svg")).to_be_visible()
             expect(dialog.locator("output")).to_have_text("100%")
+            viewport = dialog.locator(".report-preview-viewport")
+            geometry = dialog.evaluate("""dialog => {
+              const image = dialog.querySelector('img').getBoundingClientRect();
+              const viewport = dialog.querySelector('.report-preview-viewport').getBoundingClientRect();
+              const tools = dialog.querySelector('.report-preview-tools').getBoundingClientRect();
+              const controls = [...dialog.querySelectorAll('.report-preview-tools button')].map(e => e.getBoundingClientRect());
+              return {dx:image.x + image.width / 2 - viewport.x - viewport.width / 2,
+                dy:image.y + image.height / 2 - viewport.y - viewport.height / 2,
+                toolsBelow:tools.y >= viewport.bottom,
+                controlsCenter:(controls[0].x + controls[1].right) / 2 - tools.x - tools.width / 2};
+            }""")
+            assert abs(geometry["dx"]) <= 1 and abs(geometry["dy"]) <= 1
+            assert geometry["toolsBelow"] and abs(geometry["controlsCenter"]) <= 1
             dialog.locator('[data-action="in"]').click()
             expect(dialog.locator("output")).to_have_text("125%")
             dialog.locator('[data-action="out"]').click()
             expect(dialog.locator("output")).to_have_text("100%")
-            dialog.locator('[data-action="fit"]').click()
+            viewport.hover()
+            before_scroll = page.evaluate("scrollY")
+            page.mouse.wheel(0, -100)
+            expect(dialog.locator("output")).to_have_text("125%")
+            page.mouse.wheel(0, 100)
+            expect(dialog.locator("output")).to_have_text("100%")
+            assert page.evaluate("scrollY") == before_scroll
             page.screenshot(animations="disabled", path=str(tmp_path / f"message-preview-{theme}-{width}.png"))
             page.keyboard.press("Escape")
             expect(dialog).not_to_be_visible()
             expect(trigger).to_be_focused()
             expect(dialog.locator("img")).not_to_have_attribute("src", previews[0])
+            trigger.click()
+            expect(dialog.locator("output")).to_have_text("100%")
+            close.click()
+            expect(dialog).not_to_be_visible()
+            expect(trigger).to_be_focused()
         images.first.dispatch_event("error")
         expect(page.get_by_text("表情首帧暂不可用", exact=True)).to_be_visible()
         assert page.url == manager_url and page.title().startswith("消息中心")
