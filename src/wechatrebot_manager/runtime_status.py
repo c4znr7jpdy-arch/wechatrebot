@@ -37,8 +37,11 @@ def probe_bridge_health(
     host: str = "127.0.0.1",
     port: int = 5000,
     *,
-    timeout_seconds: float = 0.5,
+    timeout_seconds: float = 2.0,
 ) -> BridgeHealth:
+    # The bridge checks HOOK connectivity before replying. A subsecond budget
+    # can expire during a brief busy period even while the account is online.
+    # Wait for this single fresh response; never substitute a cached identity.
     request = Request(f"http://{host}:{port}/api/health", method="GET")
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
