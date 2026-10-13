@@ -18,6 +18,7 @@ from ...domain.value_objects import (
     UserTitle,
 )
 from ...shared.constants import AnalysisStage
+from ...shared.report_status import TOPIC_WAITING_MESSAGE
 from ...shared.trace_context import TraceContext
 from ...utils.logger import logger
 from .analyzers.chat_quality_analyzer import ChatQualityAnalyzer
@@ -274,7 +275,12 @@ class LLMAnalyzer(IAnalysisProvider):
 
             for i, result in enumerate(results):
                 name = task_names[i]
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
                 if isinstance(result, Exception):
+                    if name == "topic":
+                        logger.info(TOPIC_WAITING_MESSAGE)
+                        continue
                     logger.error(f"分析任务 {name} 失败: {result}")
                     subtask_errors.append(f"{name}: {result!s}")
                     continue
@@ -307,14 +313,6 @@ class LLMAnalyzer(IAnalysisProvider):
             )
 
             # 校验并补全未成功产出内容的子任务说明
-            if (
-                topic_enabled
-                and not topics
-                and not any(e.startswith("topic") for e in subtask_errors)
-            ):
-                subtask_errors.append(
-                    "topic: 未能提取出有效话题（有效文本过少或模型未返回话题）"
-                )
             if (
                 user_title_enabled
                 and not user_titles
@@ -391,6 +389,8 @@ class LLMAnalyzer(IAnalysisProvider):
                         )
                         if subtask_errors:
                             s["payload"]["subtask_errors"] = subtask_errors
+                        if topic_enabled and not topics:
+                            s["payload"]["topic_status"] = TOPIC_WAITING_MESSAGE
                         break
 
             logger.info(
@@ -490,7 +490,12 @@ class LLMAnalyzer(IAnalysisProvider):
 
                 for i, result in enumerate(results):
                     name = task_names[i]
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
                     if isinstance(result, Exception):
+                        if name == "topic":
+                            logger.info(TOPIC_WAITING_MESSAGE)
+                            continue
                         logger.error(f"增量{name}分析失败: {result}")
                         subtask_errors.append(f"{name}: {result!s}")
                         continue
@@ -505,14 +510,6 @@ class LLMAnalyzer(IAnalysisProvider):
                             quality_usage = TokenUsage()
 
                 # 校验并补全增量子任务未产出说明
-                if (
-                    topic_enabled
-                    and not topics
-                    and not any(e.startswith("topic") for e in subtask_errors)
-                ):
-                    subtask_errors.append(
-                        "topic: 未能提取出增量话题（可能有效文本过少或模型未返回）"
-                    )
                 if (
                     golden_quote_enabled
                     and not golden_quotes
@@ -588,6 +585,8 @@ class LLMAnalyzer(IAnalysisProvider):
                             )
                             if subtask_errors:
                                 s["payload"]["subtask_errors"] = subtask_errors
+                            if topic_enabled and not topics:
+                                s["payload"]["topic_status"] = TOPIC_WAITING_MESSAGE
                             break
 
                 logger.info(

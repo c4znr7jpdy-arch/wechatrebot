@@ -555,6 +555,23 @@ diff --git a/official/astrbot/core/provider/sources/openai_source.py b/expected/
 +                max_retries=0,
                  http_client=self._create_http_client(provider_config),
              )
+@@ -984,6 +986,16 @@
+         model = model or self.get_model()
+ 
+         payloads = {"messages": context_query, "model": model}
++        request_timeout = kwargs.get("timeout")
++        if request_timeout is not None:
++            if (
++                isinstance(request_timeout, bool)
++                or not isinstance(request_timeout, (int, float))
++                or not 0 < request_timeout < float("inf")
++            ):
++                raise ValueError("请求超时必须为有限正数。")
++            # Override this request only; keep the shared Provider timeout unchanged.
++            payloads["timeout"] = float(request_timeout)
+ 
+         self._finally_convert_payload(payloads)
+ 
 
 diff --git a/official/astrbot/core/provider/sources/request_retry.py b/expected/astrbot/core/provider/sources/request_retry.py
 --- a/official/astrbot/core/provider/sources/request_retry.py

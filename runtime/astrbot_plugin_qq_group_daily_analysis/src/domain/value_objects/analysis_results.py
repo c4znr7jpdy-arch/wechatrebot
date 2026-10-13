@@ -696,6 +696,7 @@ class ComicTopic:
 class _AnalysisResultOptional(TypedDict, total=False):
     timestamp: str
     report_period: dict[str, object] | None
+    timeout_sections: list[str]
 
 
 class AnalysisResultPayload(_AnalysisResultOptional):

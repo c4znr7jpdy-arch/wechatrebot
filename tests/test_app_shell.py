@@ -1,5 +1,6 @@
 from webui_source import manager_script
 import copy
+from io import BytesIO
 import json
 from pathlib import Path
 import sys
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from wechatrebot_manager import app_shell, chat_api, model_api, schedule_api, update_api
+from wechatrebot_manager import app_shell, chat_api, group_directory, model_api, schedule_api, update_api
 from wechatrebot_manager.customer_config import ProviderService
 from wechatrebot_manager.error_catalog import load_error_catalog
 from wechatrebot_manager.launcher import ServiceStopError
@@ -1002,6 +1003,72 @@ def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_
     assert all(result["error"]["level"] == "warning" for result in results)
     assert all("requires_login" not in result.get("data", {}) for result in results)
     assert all(result["error"]["recorded"] is False for result in results)
+    assert api._lifecycle.events.items == []
+
+
+@pytest.mark.parametrize("operation", ["get_conversations", "get_groups"])
+@pytest.mark.parametrize("unavailable_probe", [0, 1], ids=["before_request", "after_request"])
+def test_directory_account_verification_race_retains_retryable_state(
+    tmp_path, monkeypatch, operation, unavailable_probe,
+):
+    api = _api(tmp_path)
+    api._lifecycle.fresh_runtime_snapshot = lambda: SimpleNamespace(
+        wechat_identity="wxid_current", account_status_available=True,
+    )
+    config = tmp_path / "app/bridge/config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({
+        "callback_port": 5000, "manager_query_token": "a" * 40,
+    }), encoding="utf-8")
+    api._groups = group_directory.GroupDirectoryService(tmp_path)
+    api._groups._account = "wxid_current"
+    original = {"account_id": "wxid_current", "items": [{"group_id": "cached@chatroom"}], "total": 1}
+    api._groups._snapshot = copy.deepcopy(original)
+    monkeypatch.setattr(api._groups._portraits, "enrich", lambda _account, item, *_args, **_kw: item)
+    probes = []
+
+    def health(**_kwargs):
+        available = len(probes) != unavailable_probe
+        probes.append(available)
+        return SimpleNamespace(
+            status_available=available, wechat_logged_in=available,
+            wechat_identity="wxid_current" if available else "",
+        )
+
+    monkeypatch.setattr(group_directory, "probe_bridge_health", health)
+    requests = []
+    fresh = {"account_id": "wxid_current", "items": [{"group_id": "fresh@chatroom"}], "total": 1}
+
+    def open_request(request, **_kwargs):
+        requests.append(request)
+        return BytesIO(json.dumps({"ok": True, "data": fresh}).encode("utf-8"))
+
+    monkeypatch.setattr(group_directory, "build_opener", lambda *_args: SimpleNamespace(open=open_request))
+    history_reads = []
+
+    def conversations(**filters):
+        history_reads.append(filters)
+        return {"items": [], "summary": {"messages": 0}}
+
+    api._history = SimpleNamespace(conversations=conversations)
+    args = ({"kind": "group", "refresh_groups": True},) if operation == "get_conversations" else (True,)
+    result = getattr(api, operation)(*args)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "11007"
+    assert result["error"]["level"] == "warning"
+    assert result["error"]["recorded"] is False
+    assert "data" not in result
+    assert api._lifecycle.events.items == []
+    assert history_reads == []
+    assert len(requests) == unavailable_probe
+    assert api._groups._snapshot == original
+
+    recovered = getattr(api, operation)(*args)
+    assert recovered["ok"] is True
+    assert recovered["data"]["account_id"] == "wxid_current"
+    assert api._groups._snapshot["items"] == fresh["items"]
+    assert all(item["account_id"] == "wxid_current" for item in history_reads)
     assert api._lifecycle.events.items == []
 
 

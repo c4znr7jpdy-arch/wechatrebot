@@ -20,6 +20,10 @@ from ...domain.value_objects import (
     TokenUsage,
 )
 from ...shared.constants import PLUGIN_NAME, AnalysisStage
+from ...shared.report_status import (
+    normalize_timeout_sections,
+    timeout_sections_from_errors,
+)
 from ...shared.trace_context import TraceContext
 from ...utils.logger import logger
 from .analysis_serializer import AnalysisResultSerializer
@@ -463,6 +467,9 @@ class AnalysisRecoveryService:
             user_titles = raw_user_titles if isinstance(raw_user_titles, list) else []
             cached_stats = cached_result.get("statistics")
             chat_quality_review = cached_result.get("chat_quality_review")
+            timeout_sections = normalize_timeout_sections(
+                cached_result.get("timeout_sections")
+            )
             if isinstance(cached_stats, GroupStatistics):
                 golden_quotes = cached_stats.golden_quotes
                 total_token_usage = cached_stats.token_usage
@@ -522,9 +529,24 @@ class AnalysisRecoveryService:
                             + new_tokens.total_tokens,
                         )
 
+                    attempted_sections = {
+                        name
+                        for name, enabled in (
+                            ("topic", run_topic),
+                            ("user_title", run_user_title),
+                            ("golden_quote", run_golden_quote),
+                            ("chat_quality", run_chat_quality),
+                        )
+                        if enabled
+                    }
+                    timeout_sections = normalize_timeout_sections(
+                        [name for name in timeout_sections if name not in attempted_sections]
+                        + timeout_sections_from_errors(step.payload.get("subtask_errors"))
+                    )
+                    # 热门话题未生成时可正常展示占位；其他板块仍保留原失败规则。
                     enabled_count = sum(
                         [
-                            bool(run_topic),
+                            bool(run_topic and new_topics),
                             bool(run_user_title),
                             bool(run_golden_quote),
                             bool(run_chat_quality),
@@ -564,6 +586,7 @@ class AnalysisRecoveryService:
             statistics.token_usage = total_token_usage
 
             analysis_result = {
+                "timeout_sections": timeout_sections,
                 "statistics": statistics,
                 "topics": topics,
                 "user_titles": user_titles,

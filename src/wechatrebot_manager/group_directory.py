@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
+from .error_catalog import AccountStatusUnavailableError
 from .runtime_status import probe_bridge_health
 from .portrait_cache import PortraitCache
 
@@ -20,7 +21,7 @@ class GroupDirectoryError(ValueError):
     pass
 
 
-class GroupDirectoryUnavailable(GroupDirectoryError):
+class GroupDirectoryUnavailable(GroupDirectoryError, AccountStatusUnavailableError):
     """Account verification failed; never return an unverified cached directory."""
 
 

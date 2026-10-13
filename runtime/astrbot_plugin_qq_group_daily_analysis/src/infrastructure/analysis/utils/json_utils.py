@@ -90,6 +90,7 @@ def _parse_json_with_pattern(
     通用内部 JSON 解析逻辑，包含提取、直接解析、修复后重试。
     """
     fixed_json_text = None
+    incomplete_log = logger.info if data_type == "话题" else logger.warning
     try:
         # 1. 基础清理：去除 markdown 代码块标记
         clean_text = result_text.strip()
@@ -100,7 +101,7 @@ def _parse_json_with_pattern(
         json_match = re.search(pattern, clean_text, re.DOTALL)
         if not json_match:
             error_msg = f"{data_type}响应中未找到JSON{expected_type_name}"
-            logger.warning(error_msg)
+            incomplete_log(error_msg)
             return False, None, error_msg
 
         json_text = json_match.group()
@@ -129,7 +130,7 @@ def _parse_json_with_pattern(
                 return True, data, None
             except json.JSONDecodeError as e:
                 error_msg = f"{data_type}JSON修复后解析仍失败: {e}"
-                logger.warning(error_msg)
+                incomplete_log(error_msg)
                 return False, None, error_msg
 
         error_msg = f"{data_type}修复后未找到JSON{expected_type_name}"

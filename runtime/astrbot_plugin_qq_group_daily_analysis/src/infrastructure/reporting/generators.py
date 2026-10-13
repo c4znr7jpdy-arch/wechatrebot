@@ -26,6 +26,7 @@ from ...shared.constants import (
 )
 from ...shared.trace_context import TraceContext
 from ...shared.report_period import normalize_report_period
+from ...shared.report_status import section_unavailable_reason
 from ...utils.logger import logger
 from ..visualization.activity_charts import ActivityVisualizer
 from .avatar_service import (
@@ -908,6 +909,10 @@ class ReportGenerator(IReportGenerator):
 💬 热门话题
 """
         max_topics = self.config_manager.get_max_topics()
+        if not topics:
+            report += section_unavailable_reason(
+                analysis_result, "topic", self.config_manager.get_topic_analysis_enabled()
+            ) + "\n\n"
         for i, topic in enumerate(topics[:max_topics], 1):
             contributors_str = "、".join(topic.contributors)
             report += f"{i}. {topic.topic}\n"

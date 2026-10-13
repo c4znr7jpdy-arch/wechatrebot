@@ -472,9 +472,9 @@
             },
             "llm_hard_timeout": {
                 "type": "int",
-                "description": "LLM 请求硬超时上限 (秒)",
+                "description": "LLM 分析等待上限 (秒)",
                 "default": 0,
-                "hint": "单次大模型请求的最大等待耗时（秒）。设为 0 时自动遵循 Provider 配置的 timeout（未配置时默认兜底 300 秒）。超过此时间将主动截断请求并触发重试/降级。"
+                "hint": "分析请求等待上限（秒），正数同时覆盖本次模型请求的超时，不改变普通聊天的模型超时。热门话题在同一等待预算内完成已有重试和格式修复；设为 0 时至少等待 300 秒，Provider 配置更长时沿用更长时间，仍未获得内容则显示“模型等待未生成”。其他板块设为 0 时遵循 Provider 的 timeout（未配置时兜底 300 秒），保留已有重试和回退。"
             },
             "enable_streaming_llm_call": {
                 "type": "bool",

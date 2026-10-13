@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from wechatrebot_manager.error_catalog import AccountStatusUnavailableError, classify_error, load_error_catalog
+from wechatrebot_manager.group_directory import GroupDirectoryUnavailable
 
 
 def test_error_catalog_loads_default_and_customer_override(tmp_path: Path) -> None:
@@ -32,8 +35,9 @@ def test_error_catalog_loads_default_and_customer_override(tmp_path: Path) -> No
     assert catalog.get("99999").code == "19000"
 
 
-def test_unavailable_account_is_retryable_without_guessing_logout():
-    code = classify_error(AccountStatusUnavailableError("temporary"), "19000", "get_messages")
+@pytest.mark.parametrize("error_type", [AccountStatusUnavailableError, GroupDirectoryUnavailable])
+def test_unavailable_account_is_retryable_without_guessing_logout(error_type):
+    code = classify_error(error_type("temporary"), "19000", "get_messages")
     definition = load_error_catalog().get(code)
     assert code == "11007"
     assert definition.retryable and definition.level == "warning"

@@ -21,6 +21,7 @@ from ...shared.report_language import apply_auto_language_detection
 from ...shared.trace_context import TraceContext
 from ...utils.logger import logger
 from ...shared.report_period import build_report_period
+from ...shared.report_status import timeout_sections_from_errors
 from .analysis_recovery_service import AnalysisRecoveryService
 from .analysis_serializer import AnalysisResultSerializer
 from .incremental_analysis_service import IncrementalAnalysisService
@@ -481,6 +482,7 @@ class AnalysisApplicationService:
             golden_quotes = []
             chat_quality_review = None
             total_token_usage = TokenUsage()
+            timeout_sections: list[str] = []
 
             legacy_messages = self.statistics_service._convert_to_legacy_dict(
                 unified_messages
@@ -520,9 +522,13 @@ class AnalysisApplicationService:
                             chat_quality_enabled=chat_quality_enabled,
                         )
 
+                    timeout_sections = timeout_sections_from_errors(
+                        step.payload.get("subtask_errors")
+                    )
+                    # 热门话题未生成时可正常展示占位；其他板块仍保留原失败规则。
                     enabled_count = sum(
                         [
-                            bool(topic_enabled),
+                            bool(topic_enabled and topics),
                             bool(user_title_enabled),
                             bool(golden_quote_enabled),
                             bool(chat_quality_enabled),
@@ -570,6 +576,7 @@ class AnalysisApplicationService:
                 "user_titles": user_titles,
                 "user_analysis": user_activity,
                 "chat_quality_review": chat_quality_review,
+                "timeout_sections": timeout_sections,
             }
 
             async with pipeline.step(

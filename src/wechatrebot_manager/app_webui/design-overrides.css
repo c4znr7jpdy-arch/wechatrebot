@@ -743,20 +743,22 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 .report-preview-dialog { width: min(1100px, calc(100vw - 32px)); height: calc(100dvh - 32px); max-width: none; max-height: none; padding: 0; overflow: hidden; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-sizing: border-box; }
 .report-preview-dialog[open] { display: flex; flex-direction: column; }
 .report-preview-dialog::backdrop { background: rgba(4, 12, 24, .75); }
-.report-preview-dialog.is-maximized { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
-.report-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
+.report-preview-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
 .report-preview-header h2 { margin: 0; font-size: 18px; }
 .report-preview-header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
-.report-preview-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 18px 12px; }
+.report-preview-close { width: 36px; height: 36px; padding: 0; flex: none; }
+.report-preview-tools { display: flex; flex: none; align-items: center; justify-content: center; gap: 8px; padding: 12px 18px; }
 .report-preview-tools output { min-width: 42px; text-align: center; }
 .report-preview-status { margin: 16px; }
 .report-preview-viewport { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; padding: 16px; background: var(--canvas); }
 .report-preview-viewport img { display: block; max-width: none; height: auto; margin: 0 auto; }
 .report-preview-viewport img[hidden] { display: none; }
+.is-message-preview .report-preview-viewport { display: flex; }
+.is-message-preview .report-preview-viewport img { flex: none; align-self: flex-start; margin: auto; }
 @media (max-width: 600px) {
   .report-preview-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
   .report-preview-header { padding: 10px; }
-  .report-preview-tools { padding: 0 10px 10px; gap: 5px; }
+  .report-preview-tools { padding: 10px; gap: 5px; }
 }
 
 
