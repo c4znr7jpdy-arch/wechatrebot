@@ -33,6 +33,7 @@ from ...shared.report_language import (
 )
 from ...utils.logger import logger
 from ...shared.report_period import normalize_report_period
+from ...shared.report_status import section_unavailable_reason
 from .profile_mappings import resolve_profile_info
 
 if TYPE_CHECKING:
@@ -518,16 +519,15 @@ class RenderDataPreparer:
 
         # 未启用、无有效结果都明确展示，避免残缺报告被误认为完整结果。
         sections = [
-            ("热门话题", topics_html, self.config_manager.get_topic_analysis_enabled()),
-            ("群友画像", titles_html, self.config_manager.get_user_title_analysis_enabled()),
-            ("群聊金句", quotes_html, self.config_manager.get_golden_quote_analysis_enabled()),
-            ("聊天质量点评", chat_quality_html, self.config_manager.get_chat_quality_analysis_enabled()),
+            ("topic", "热门话题", topics_html, self.config_manager.get_topic_analysis_enabled()),
+            ("user_title", "群友画像", titles_html, self.config_manager.get_user_title_analysis_enabled()),
+            ("golden_quote", "群聊金句", quotes_html, self.config_manager.get_golden_quote_analysis_enabled()),
+            ("chat_quality", "聊天质量点评", chat_quality_html, self.config_manager.get_chat_quality_analysis_enabled()),
         ]
         completed = []
-        for title, markup, enabled in sections:
+        for section, title, markup, enabled in sections:
             if not markup:
-                reason = ("本次未获得有效分析内容。可能是消息不足或模型调用失败，请检查分析模型后重试。"
-                          if enabled else "此板块未启用，可在群聊分析的常用设置中开启。")
+                reason = section_unavailable_reason(analysis_result, section, enabled)
                 markup = (f'<section class="analysis-section-status" style="grid-column:1/-1;padding:24px;'
                           f'margin:20px 0;border:1px solid #bbb;border-radius:12px;background:#fff;color:#333">'
                           f'<h3>{title}</h3><p>{reason}</p></section>')

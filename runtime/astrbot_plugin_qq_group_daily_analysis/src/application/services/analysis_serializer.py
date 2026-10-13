@@ -10,6 +10,8 @@ import dataclasses
 import enum
 from datetime import date, datetime, time
 
+from ...shared.report_status import normalize_timeout_sections
+
 from ...domain.value_objects import (
     AnalysisResultPayload,
     GroupStatistics,
@@ -69,6 +71,7 @@ class AnalysisResultSerializer:
         """
         return {
             "report_period": cls.to_json_friendly(analysis_result.get("report_period")),
+            "timeout_sections": normalize_timeout_sections(analysis_result.get("timeout_sections")),
             "statistics": cls.to_json_friendly(analysis_result.get("statistics")),
             "topics": cls.to_json_friendly(analysis_result.get("topics", [])),
             "user_titles": cls.to_json_friendly(analysis_result.get("user_titles", [])),
@@ -139,6 +142,7 @@ class AnalysisResultSerializer:
 
         return {
             "report_period": data.get("report_period"),
+            "timeout_sections": normalize_timeout_sections(data.get("timeout_sections")),
             "statistics": stats,
             "topics": topics,
             "user_titles": user_titles,

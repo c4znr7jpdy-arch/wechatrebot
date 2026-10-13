@@ -474,7 +474,7 @@
                 "type": "int",
                 "description": "LLM 请求硬超时上限 (秒)",
                 "default": 0,
-                "hint": "单次大模型请求的最大等待耗时（秒）。设为 0 时自动遵循 Provider 配置的 timeout（未配置时默认兜底 300 秒）。超过此时间将主动截断请求并触发重试/降级。"
+                "hint": "单次分析请求的最大等待耗时（秒）。正数同时覆盖本次模型请求的超时，不改变普通聊天的模型超时；设为 0 时遵循 Provider 的 timeout（未配置时兜底 300 秒）。超时后按已有重试和回退设置处理。"
             },
             "enable_streaming_llm_call": {
                 "type": "bool",

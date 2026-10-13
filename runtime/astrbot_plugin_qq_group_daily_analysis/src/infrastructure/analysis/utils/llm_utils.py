@@ -15,6 +15,7 @@ from astrbot.api.provider import LLMResponse
 
 from ....shared.constants import AnalysisStage
 from ....shared.report_language import apply_report_language
+from ....shared.report_status import ANALYSIS_TIMEOUT_MESSAGE
 from ....shared.trace_context import TraceContext
 from ....utils.logger import logger
 from ....utils.resilience import CircuitBreaker, GlobalRateLimiter
@@ -489,10 +490,12 @@ async def call_provider_with_retry(
         observation_label: 本次调用所属的业务区域标签，用于日志追踪具体分析器。
 
     Returns:
-        LLM生成的结果，失败时返回None
+        LLM生成的结果，非超时失败时返回None
+
+    Raises:
+        TimeoutError: 请求重试耗尽且最后一次为超时，携带可展示的安全说明。
     """
-    # 注意: 超时由 AstrBot Provider 内部配置控制，不再使用插件层 asyncio.wait_for
-    # 用户可在 AstrBot WebUI 中为每个 Provider 配置 timeout 参数
+    # 显式的分析超时同时约束单次 Provider 请求和外层监控；0 保留 Provider 默认值。
     # 报告语言：显式配置时给提示词追加语言指令（auto 时原样返回，保持历史行为）
     prompt = apply_report_language(prompt, config_manager)
     retries = config_manager.get_llm_retries()
@@ -639,6 +642,8 @@ async def call_provider_with_retry(
                     llm_kwargs["response_format"] = r_format
                 if extra_generate_kwargs:
                     llm_kwargs.update(extra_generate_kwargs)
+                if configured_hard_timeout > 0:
+                    llm_kwargs["timeout"] = effective_timeout
 
                 call_path = (
                     "provider.text_chat_stream"
@@ -660,18 +665,8 @@ async def call_provider_with_retry(
                         _call_provider_stream(context, pid, llm_kwargs)
                     )
                 else:
-                    llm_call_params: dict[str, object] = {
-                        "chat_provider_id": pid,
-                        "prompt": prompt,
-                        "system_prompt": system_prompt,
-                    }
-                    if r_format is not None:
-                        llm_call_params["response_format"] = r_format
-                    if extra_generate_kwargs:
-                        llm_call_params.update(extra_generate_kwargs)
-
                     request_task = asyncio.create_task(
-                        context.llm_generate(**llm_call_params)  # pyright: ignore[reportArgumentType]
+                        context.llm_generate(**llm_kwargs)  # pyright: ignore[reportArgumentType]
                     )
 
                 next_stack_dump_seconds = _LLM_REQUEST_STACK_DUMP_SECONDS
@@ -715,6 +710,9 @@ async def call_provider_with_retry(
                             )
                             break
                         except TimeoutError:
+                            if request_task.done():
+                                # Provider 自身超时不是监控等待片段到期；交给既有重试队列。
+                                raise
                             elapsed_seconds = time.monotonic() - request_started_at
                             if elapsed_seconds >= effective_timeout:
                                 continue
@@ -962,6 +960,8 @@ async def call_provider_with_retry(
             queue_index += 1
 
     logger.error(f"LLM请求队列全部耗尽，最终失败: {last_exc}")
+    if isinstance(last_exc, TimeoutError):
+        raise TimeoutError(ANALYSIS_TIMEOUT_MESSAGE) from last_exc
     return None
 
 
