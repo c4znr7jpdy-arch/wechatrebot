@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import re
+
+
+ACTIVITY_RETENTION_SECONDS = 48 * 60 * 60
+ERROR_REPEAT_WINDOW_SECONDS = 5 * 60
+
+
+def log_timestamp(value: object) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value).replace(",", ".").replace("Z", "+00:00")).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 @dataclass(frozen=True, slots=True)

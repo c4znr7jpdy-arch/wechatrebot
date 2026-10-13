@@ -1,13 +1,28 @@
 import json
+from datetime import datetime
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
+
+import pytest
 
 from wechatrebot_manager.activity_service import ActivityService, diagnostic_text, classify_log_code
 from wechatrebot_manager.app_shell import ApplicationApi
 from wechatrebot_manager.customer_logs import LogSource
 from wechatrebot_manager.error_catalog import classify_error, load_error_catalog
 from wechatrebot_manager.events import EventStore
+
+
+@pytest.fixture(autouse=True)
+def activity_clock(monkeypatch):
+    # The dated sample logs must stay inside the rolling retention window.
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 10, 12).astimezone(tz)
+    monkeypatch.setattr("wechatrebot_manager.events.datetime", FrozenDateTime)
+    monkeypatch.setattr("wechatrebot_manager.activity_service.time.time", lambda: datetime(2026, 10, 10, 12).timestamp())
 
 
 def test_feed_keeps_multiline_errors_context_and_legacy_states(tmp_path):
@@ -53,6 +68,43 @@ def test_duplicates_merge_only_within_five_minutes_and_ids_survive_refresh(tmp_p
     first = service.recent()
     assert [i["count"] for i in first] == [2, 1]
     assert first[0]["id"] == service.recent()[0]["id"]
+
+
+def test_continuous_duplicates_remain_one_record_across_multiple_windows(tmp_path):
+    path = tmp_path / "logs/astrbot-service.log"
+    path.parent.mkdir()
+    path.write_text("\n".join(f"2026-10-10 10:{minute:02d}:00 ERROR same failure" for minute in range(20)), encoding="utf-8")
+    items = ActivityService(tmp_path).recent()
+    assert len(items) == 1
+    assert items[0]["count"] == 20
+    assert items[0]["first_time"] == "2026-10-10 10:00:00"
+    assert items[0]["time"] == "2026-10-10 10:19:00"
+
+
+def test_activity_filters_old_sources_and_keeps_exact_retention_boundary(tmp_path):
+    log = tmp_path / "logs/astrbot-service.log"
+    log.parent.mkdir()
+    log.write_text("2026-10-08 11:59:59 ERROR expired\n2026-10-08 12:00:00 ERROR boundary\n2026-10-10 11:00:00 ERROR current", encoding="utf-8")
+    undated = tmp_path / "logs/astrbot-core.log"
+    undated.write_text("[12:00:00] ERROR expired undated", encoding="utf-8")
+    stale = datetime(2026, 10, 8, 11, 59).timestamp()
+    os.utime(undated, (stale, stale))
+    items = ActivityService(tmp_path).recent()
+    assert len(items) == 2
+    assert all("expired" not in item["report"] for item in items)
+    assert any("boundary" in item["message"] for item in items)
+
+
+def test_feed_preserves_persisted_repeat_evidence(tmp_path):
+    store = EventStore(tmp_path)
+    first = store.emit("APP_ERROR", "failed", code="19001", message="repeating error")
+    for _ in range(30):
+        store.emit("APP_ERROR", "failed", code="19001", message="repeating error")
+    item = ActivityService(tmp_path).recent()[0]
+    assert item["id"] == first.event_id
+    assert item["count"] == 31
+    assert item["first_time"] == first.time
+    assert "31 次" in item["report"]
 
 
 def test_missing_and_unreadable_sources_are_distinct(tmp_path, monkeypatch):

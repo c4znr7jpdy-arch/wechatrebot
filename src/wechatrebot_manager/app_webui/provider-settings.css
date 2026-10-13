@@ -1,0 +1,34 @@
+/* Model service controls share the active theme's readable action colors. */
+#page-settings .provider-back-button {
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--blue-700);
+}
+
+#page-settings .provider-back-button:hover,
+#page-settings .provider-back-button:focus-visible {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+.provider-preset-control { position: relative; display: block; }
+.provider-preset-control select { padding-left: 44px; }
+.provider-preset-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 12px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.provider-preset-icon img,
+.provider-brand-logo img { display: block; width: 24px; height: 24px; object-fit: contain; }
+.provider-preset-icon svg,
+.provider-brand-logo svg { width: 22px; height: 22px; }
+.provider-logo.provider-brand-logo { color: var(--muted); background: var(--surface-muted); }

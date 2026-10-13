@@ -16,6 +16,16 @@ window.createModelServices = function (helpers) {
     getCoreSettings,
   } = helpers;
 
+  const providerIconFiles = {
+    deepseek: "deepseek.ico",
+    glm: "glm.png",
+    xiaomi_mimo: "xiaomi_mimo.ico",
+    qwen: "qwen.png",
+    volcengine: "volcengine.png",
+    hunyuan: "hunyuan.png",
+    gemini_proxy: "gemini_proxy.png",
+  };
+
   function providerFormSnapshot() {
     const form = $("#providerForm");
     if (!form) return "";
@@ -37,6 +47,7 @@ window.createModelServices = function (helpers) {
 
   function updateProviderDirty() {
     if (state.providerScreen !== "editor") return;
+    syncProviderIcon();
     const form = $("#providerForm");
     const keyChanged = Boolean(form?.elements.api_key.value);
     state.providerDirty = keyChanged || providerFormSnapshot() !== state.providerBaseline;
@@ -127,26 +138,49 @@ window.createModelServices = function (helpers) {
     if (service.service_kind === "embedding") return "embedding_custom";
     if (service.service_kind === "image") return "image_custom";
     if (service.service_kind === "voice") return "voice_custom";
-    const model = String(service.model || "").toLowerCase();
-    if (model.startsWith("deepseek")) return "deepseek";
-    if (model.startsWith("glm-")) return "glm";
-    if (model.startsWith("mimo-")) return "xiaomi_mimo";
-    if (model.startsWith("qwen")) return "qwen";
-    if (model.startsWith("doubao-")) return "volcengine";
-    if (model.startsWith("hunyuan-")) return "hunyuan";
-    if (model.startsWith("gemini-")) return "gemini_proxy";
-    return "custom";
+    // Model names are also used by relays; only an official endpoint gets a brand.
+    const host = providerEndpointHost(service.api_base);
+    return (state.bootstrap?.provider_presets || []).find((preset) =>
+      host && providerIconFiles[preset.id] && providerEndpointHost(preset.api_base) === host,
+    )?.id || "custom";
+  }
+
+  function providerEndpointHost(apiBase) {
+    try {
+      const endpoint = new URL(String(apiBase || ""));
+      return endpoint.protocol === "https:" && !endpoint.username && !endpoint.password
+        ? endpoint.host.toLowerCase() : "";
+    } catch (_) { return ""; }
+  }
+
+  function providerIconMarkup(presetId) {
+    const file = providerIconFiles[presetId];
+    return file
+      ? `<img src="assets/provider-${file}" alt="" width="24" height="24">`
+      : icon("i-grid");
+  }
+
+  function syncProviderIcon() {
+    const form = $("#providerForm");
+    const target = $("#providerPresetIcon");
+    if (!form || !target) return;
+    const selected = form.elements.preset.value;
+    const actual = providerPresetFor({
+      api_base: form.elements.api_base.value,
+      service_kind: form.elements.service_kind.value,
+    });
+    const preset = selected === actual ? selected : "custom";
+    if (target.dataset.preset === preset) return;
+    target.dataset.preset = preset;
+    target.innerHTML = providerIconMarkup(preset);
   }
 
   function providerCardIdentity(service) {
     const preset = providerPresetFor(service);
-    if (service.service_kind === "embedding") return {mark: "V", label: "文本向量", className: "custom"};
-    if (service.service_kind === "image") return {mark: "IMG", label: "图片模型", className: "custom"};
-    if (service.service_kind === "voice") return {mark: "AUD", label: "语音模型", className: "custom"};
-    if (preset === "deepseek") return {mark: "D", label: "DeepSeek", className: "deepseek"};
-    if (preset === "glm") return {mark: "G", label: "GLM", className: "custom"};
-    if (preset === "xiaomi_mimo") return {mark: "M", label: "MiMo", className: "custom"};
-    return {mark: "AI", label: "兼容服务", className: "custom"};
+    const definition = (state.bootstrap?.provider_presets || []).find((item) => item.id === preset);
+    const label = {embedding: "文本向量", image: "图片模型", voice: "语音模型"}[service.service_kind]
+      || (providerIconFiles[preset] ? definition?.name : "兼容服务");
+    return {mark: providerIconMarkup(preset), label, className: "provider-brand-logo"};
   }
 
   function providerChatModalityValue(modalities) {
@@ -225,6 +259,7 @@ window.createModelServices = function (helpers) {
     form.elements.model.value = preset.model || "";
     form.elements.service_kind.value = preset.service_kind || "chat";
     form.elements.service_kind.disabled = false;
+    syncProviderIcon();
     $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
     clearProviderModels();
     $("#providerModelHint").textContent = "";
@@ -257,11 +292,9 @@ window.createModelServices = function (helpers) {
   function renderProviderSaveIntent(makeDefault, serviceKind = "chat") {
     if (serviceKind !== "chat") {
       const label = serviceKind === "image" ? "图片模型" : serviceKind === "voice" ? "语音模型" : "向量模型";
-      $("#providerSaveIntentTitle").textContent = `保存为${label}`;
       $("#saveProvider").textContent = `保存${label}`;
       return;
     }
-    $("#providerSaveIntentTitle").textContent = makeDefault ? "保存后直接设为回复模型" : "保存为备用模型服务";
     $("#saveProvider").textContent = makeDefault ? "保存并设为回复模型" : "保存模型服务";
   }
 
@@ -295,6 +328,7 @@ window.createModelServices = function (helpers) {
     form.elements.api_base.value = service.api_base || "";
     form.elements.model.value = service.model || "";
     form.elements.api_key.value = "";
+    syncProviderIcon();
     syncProviderThinkingControl(service.thinking_enabled !== false);
     clearProviderModels();
     $("#providerModelHint").textContent = "";

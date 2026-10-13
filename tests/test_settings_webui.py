@@ -8,6 +8,28 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+@pytest.mark.parametrize("code,save_failure", [("11007", False), ("19000", True)])
+def test_expected_account_state_does_not_claim_log_write_failure(browser, manager_url, code, save_failure):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#globalRefresh")).to_be_enabled()
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#messageList .message").first).to_be_visible()
+        page.evaluate("""code => {
+          window.pywebview.api.get_conversations = async () => ({ok:false,
+            error:{code, title:'测试读取状态', message:'请稍后刷新', recorded:false}});
+        }""", code)
+        page.locator("#refreshHistory").click()
+        expect(page.locator("#toastRegion")).to_contain_text("测试读取状态")
+        warning = page.get_by_text("错误记录未能保存，请截图联系技术支持。", exact=True)
+        expect(warning).to_have_count(1 if save_failure else 0)
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("width,height", [(1440, 1024), (1080, 680)])
 def test_flat_settings_and_aligned_chat_details(browser, manager_url, width, height):
     page = browser.new_page(viewport={"width": width, "height": height})
@@ -368,6 +390,25 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
                 assert image["background"] == "rgba(0, 0, 0, 0)"
             images.first.scroll_into_view_if_needed()
             page.screenshot(animations="disabled", path=str(tmp_path / f"history-{theme}-{width}.png"))
+            trigger = images.first.locator("..")
+            trigger.click()
+            dialog = page.locator(".report-preview-dialog")
+            expect(dialog).to_be_visible()
+            expect(dialog.locator("h2")).to_have_text("表情首帧")
+            expect(dialog.locator("img")).to_be_visible()
+            expect(dialog.locator("img")).to_have_attribute("src", previews[0])
+            dialog.locator('[data-action="original"]').click()
+            expect(dialog.locator("output")).to_have_text("100%")
+            dialog.locator('[data-action="in"]').click()
+            expect(dialog.locator("output")).to_have_text("125%")
+            dialog.locator('[data-action="out"]').click()
+            expect(dialog.locator("output")).to_have_text("100%")
+            dialog.locator('[data-action="fit"]').click()
+            page.screenshot(animations="disabled", path=str(tmp_path / f"message-preview-{theme}-{width}.png"))
+            page.keyboard.press("Escape")
+            expect(dialog).not_to_be_visible()
+            expect(trigger).to_be_focused()
+            expect(dialog.locator("img")).not_to_have_attribute("src", previews[0])
         images.first.dispatch_event("error")
         expect(page.get_by_text("表情首帧暂不可用", exact=True)).to_be_visible()
         assert page.url == manager_url and page.title().startswith("消息中心")

@@ -125,7 +125,7 @@ window.createActivityView = function (helpers) {
     $("#copyLatestActivity").disabled = !filtered.some((item) => item.level !== "info");
     const errors = state.activityItems.filter((item) => item.level === "error").length;
     const warnings = state.activityItems.filter((item) => item.level === "warning").length;
-    $("#activitySummary").textContent = `最近日志片段：${errors} 条错误 · ${warnings} 条警告。重复问题按 5 分钟合并；不代表全部历史记录。`;
+    $("#activitySummary").textContent = `最近 48 小时：${errors} 条错误 · ${warnings} 条警告。间隔不超过 5 分钟的同类异常合并，保留次数和首次、最近时间。`;
     $("#activityList").innerHTML = items.length ? items.map((item) => {
       const level = Object.hasOwn(labels, item.level) ? item.level : "info";
       return `<article class="diagnostic-card ${level}">

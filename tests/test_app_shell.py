@@ -1001,6 +1001,32 @@ def test_unknown_account_refuses_history_reads_and_mutations_without_logout(tmp_
     assert all(result["error"]["code"] == "11007" for result in results)
     assert all(result["error"]["level"] == "warning" for result in results)
     assert all("requires_login" not in result.get("data", {}) for result in results)
+    assert all(result["error"]["recorded"] is False for result in results)
+    assert api._lifecycle.events.items == []
+
+
+def test_schedule_polling_unknown_account_does_not_persist_warning(tmp_path):
+    api = _api(tmp_path)
+    api._lifecycle.fresh_runtime_snapshot = lambda: SimpleNamespace(
+        wechat_identity="", account_status_available=False,
+    )
+    api._schedules = app_shell.ScheduleService(tmp_path, account_hint=api._history_account_id)
+    for _ in range(20):
+        result = api.get_schedules()
+        assert result["ok"] is False
+        assert result["error"]["code"] == "11007"
+        assert result["error"]["recorded"] is False
+    assert api._lifecycle.events.items == []
+
+
+def test_scheduled_task_unknown_account_retains_specific_error_without_warning(tmp_path):
+    api = _api(tmp_path)
+    def unavailable():
+        raise chat_api.AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。")
+    result = api._scheduled_call(unavailable)
+    assert result["error"]["code"] == "11007"
+    assert result["error"]["recorded"] is False
+    assert api._lifecycle.events.items == []
 
 
 def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) -> None:
@@ -1922,14 +1948,14 @@ def test_model_combobox_opens_the_complete_discovered_list_before_filtering() ->
     assert '"grok-4.6"' not in script[script.index("discover_provider_models: () => ok("):]
 
 
-def test_model_editor_keeps_natural_height_and_explains_default_selection() -> None:
+def test_model_editor_keeps_natural_height_and_default_save_action() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = manager_script()
     styles = (webui / "app.css").read_text(encoding="utf-8")
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert "#page-settings .provider-editor-layout { flex: none; min-height: auto; align-items: start; }" in styles
-    assert 'id="providerSaveIntentTitle"' in markup
+    assert 'id="providerSaveIntentTitle"' not in markup
     assert 'id="saveProvider"' in markup
     assert 'providerWillBeDefault(form.elements.service_kind.value, "")' in script
     assert 'if (serviceKind !== "chat") return false;' in script

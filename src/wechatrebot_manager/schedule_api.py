@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any, Callable
 
 from .group_directory import GroupDirectoryError
+from .error_catalog import AccountStatusUnavailableError
 from .payload import PayloadError
 from .plugin_center import PluginCenterError
 from .legacy_task_migration import LegacyTaskMigration
@@ -74,6 +75,8 @@ class ScheduleApiMixin:
     def _scheduled_call(self, operation: Callable, *args: Any) -> dict[str, object]:
         try:
             return self._ok(operation(*args))
+        except AccountStatusUnavailableError as exc:
+            return self._failed(exc)
         except ValueError as exc:
             event_id, saved = self._record_error(exc, "18001", operation=getattr(operation, "__name__", "scheduled_task"))
             return {"ok": False, "error": {"code": "18001", "title": "任务尚未完成配置", "message": str(exc), "event_id": event_id, "recorded": saved}}

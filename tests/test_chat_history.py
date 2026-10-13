@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,46 @@ def _bridge_source(root: Path) -> Path:
             ),
         )
     return path
+
+
+def _dated_history(root: Path, account_id: str = "wxid_bot") -> ChatHistoryService:
+    source = _bridge_source(root)
+    cutoff = datetime(2026, 10, 12).astimezone().timestamp()
+    with sqlite3.connect(source) as connection:
+        connection.execute("DELETE FROM messages")
+        connection.executemany(
+            "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (index, account, "hook_bridge:GroupMessage:456@chatroom", "user",
+                 content, "wxid_member", "测试成员", "456@chatroom", "hook_bridge",
+                 timestamp, '{"group_name":"日期清理测试群"}', f"dated:{index}")
+                for index, (account, content, timestamp) in enumerate((
+                    (account_id, "清理日期之前的消息", cutoff - 1),
+                    (account_id, "保留日期零点的消息", cutoff),
+                    (account_id, "保留后续日期的消息", cutoff + 86400),
+                    ("wxid_other", "其他账号的消息", cutoff - 1),
+                    ("", "未分配账号的消息", cutoff - 1),
+                ), 1)
+            ),
+        )
+    service = ChatHistoryService(root)
+    service.sync()
+    return service
+
+
+def test_date_cleanup_preserves_boundary_other_accounts_and_source(tmp_path: Path) -> None:
+    service = _dated_history(tmp_path)
+    cutoff = datetime(2026, 10, 12).astimezone().timestamp()
+
+    assert service.delete_before(cutoff, account_id="wxid_bot") == 1
+    assert service.sync() == 0
+    assert [item["content"] for item in service.messages(
+        "456@chatroom", account_id="wxid_bot"
+    )] == ["保留日期零点的消息", "保留后续日期的消息"]
+    assert service.conversations(account_id="wxid_other")["summary"]["messages"] == 1
+    assert service.conversations(include_unassigned=True)["summary"]["messages"] == 1
+    with sqlite3.connect(service.bridge_source) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 5
 
 
 def test_history_import_search_delete_and_no_reimport(tmp_path: Path) -> None:

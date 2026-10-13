@@ -107,34 +107,36 @@
       persist();
     }
 
-    function bindHandle(panel, key) {
-      if (panel.querySelector(":scope > .panel-resize-handle")) return;
+    function finishDrag() {
+      const current = drag;
+      drag = null;
+      document.documentElement.classList.remove("panel-resizing");
+      document.documentElement.style.removeProperty("--panel-resize-cursor");
+      if (!current) return;
+      if (current.handle.hasPointerCapture(current.pointerId)) current.handle.releasePointerCapture(current.pointerId);
+      if (current.panel.isConnected && current.panel.getBoundingClientRect().width) remember(current.panel, current.key);
+    }
+
+    function bindHandle(panel, key, axis = "both") {
+      if (panel.querySelector(`:scope > [data-resize-axis="${axis}"]`)) return;
       const handle = document.createElement("button");
       handle.type = "button";
-      handle.className = "panel-resize-handle";
+      handle.className = axis === "both" ? "panel-resize-handle" : "panel-resize-edge";
+      handle.dataset.resizeAxis = axis;
+      if (axis !== "both") handle.tabIndex = -1;
       handle.title = "拖动调整大小；双击恢复";
       handle.setAttribute("aria-label", "调整面板大小，方向键调整，双击或按 Home 恢复");
       handle.addEventListener("pointerdown", (event) => {
         if (event.button !== 0 || !desktop.matches) return;
         event.preventDefault();
+        finishDrag();
         const rect = panel.getBoundingClientRect();
-        drag = {panel, key, handle, pointerId: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height};
+        drag = {panel, key, handle, axis, pointerId: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height};
         handle.setPointerCapture(event.pointerId);
+        document.documentElement.style.setProperty("--panel-resize-cursor", axis === "width" ? "ew-resize" : axis === "height" ? "ns-resize" : "nwse-resize");
         document.documentElement.classList.add("panel-resizing");
       });
-      handle.addEventListener("pointermove", (event) => {
-        if (!drag || drag.handle !== handle || event.pointerId !== drag.pointerId) return;
-        applySize(panel, [drag.width + event.clientX - drag.x, drag.height + event.clientY - drag.y]);
-      });
-      const finish = () => {
-        if (!drag || drag.handle !== handle) return;
-        remember(panel, key);
-        drag = null;
-        document.documentElement.classList.remove("panel-resizing");
-      };
-      handle.addEventListener("pointerup", finish);
-      handle.addEventListener("pointercancel", finish);
-      handle.addEventListener("lostpointercapture", finish);
+      handle.addEventListener("lostpointercapture", () => { if (drag?.handle === handle) finishDrag(); });
       const reset = () => {
         clearSize(panel);
         delete saved[key];
@@ -158,8 +160,21 @@
       panel.append(handle);
     }
 
+    window.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      if (!drag.handle.isConnected || !drag.panel.getClientRects().length || (event.pointerType === "mouse" && event.buttons === 0)) { finishDrag(); return; }
+      if (event.pointerId !== drag.pointerId) return;
+      applySize(drag.panel, [drag.width + (drag.axis === "height" ? 0 : event.clientX - drag.x), drag.height + (drag.axis === "width" ? 0 : event.clientY - drag.y)]);
+    });
+    for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, (event) => {
+      if (drag?.pointerId === event.pointerId) finishDrag();
+    }, true);
+    window.addEventListener("blur", finishDrag);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) finishDrag(); });
+
     function scan() {
       scanFrame = 0;
+      if (drag && (!drag.handle.isConnected || !drag.panel.getClientRects().length)) finishDrag();
       for (const [key, panel] of registered) if (!panel.isConnected) registered.delete(key);
       for (const page of root.querySelectorAll(".page")) {
         const panels = page.querySelectorAll(".panel, .conversation-list, .message-pane, .conversation-inspector");
@@ -174,6 +189,8 @@
           }
           if (!panel.classList.contains("has-panel-size")) applySize(panel, saved[key]);
           bindHandle(panel, key);
+          bindHandle(panel, key, "width");
+          bindHandle(panel, key, "height");
         }
       }
       resetButton.hidden = !Object.keys(saved).length;
@@ -184,6 +201,7 @@
     }
     new MutationObserver(scheduleScan).observe(root, {childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"]});
     const reflow = () => {
+      finishDrag();
       for (const panel of registered.values()) clearSize(panel);
       if (desktop.matches) for (const [key, panel] of registered) {
         if (panel.isConnected && panel.getBoundingClientRect().width) applySize(panel, saved[key]);

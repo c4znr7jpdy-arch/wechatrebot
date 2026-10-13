@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import os
 import tempfile
@@ -10,14 +11,22 @@ from typing import Any
 
 def write_json_atomic(path: Path, payload: Any) -> None:
     """Write JSON without exposing readers to a partially written file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    write_text_atomic(path, rendered)
+
+
+def write_text_atomic(path: Path, rendered: str | Iterable[str]) -> None:
+    """Replace a UTF-8 file atomically, including structured line logs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(rendered)
+            if isinstance(rendered, str):
+                handle.write(rendered)
+            else:
+                handle.writelines(rendered)
             handle.flush()
             os.fsync(handle.fileno())
         # Windows indexers and scanners can briefly deny replacement even

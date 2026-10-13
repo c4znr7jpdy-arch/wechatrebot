@@ -1,11 +1,13 @@
 "use strict";
 
 // Reuse the manager's native dialog pattern for Escape and focus restoration.
-window.openReportPreview = (() => {
-  let dialog, image, viewport, status, zoom, fit = true, scale = 1;
+const openImagePreview = (() => {
+  let dialog, image, viewport, status, zoom, fit = true, scale = 1, message = false;
   function layout() {
     if (!dialog.open || !image.naturalWidth) return;
-    const width = fit ? Math.min(image.naturalWidth, viewport.clientWidth - 32) : image.naturalWidth * scale;
+    const fitWidth = Math.min(image.naturalWidth, viewport.clientWidth - 32,
+      message ? (viewport.clientHeight - 32) * image.naturalWidth / image.naturalHeight : Infinity);
+    const width = fit ? fitWidth : image.naturalWidth * scale;
     image.style.width = `${Math.max(1, width)}px`;
     zoom.textContent = `${Math.round(width / image.naturalWidth * 100)}%`;
   }
@@ -14,7 +16,7 @@ window.openReportPreview = (() => {
     dialog.className = "report-preview-dialog";
     dialog.setAttribute("aria-labelledby", "reportPreviewTitle");
     dialog.innerHTML = `<header class="report-preview-header"><div><h2 id="reportPreviewTitle">报告样式预览</h2><p>示例数据 · 向下滚动查看完整报告</p></div><button type="button" class="button secondary" data-action="close" autofocus>关闭</button></header>
-      <div class="report-preview-tools" aria-label="图片显示控制"><button type="button" class="button ghost small" data-action="out" aria-label="缩小预览">−</button><output aria-live="polite">100%</output><button type="button" class="button ghost small" data-action="in" aria-label="放大预览">＋</button><button type="button" class="button secondary small" data-action="fit">适应宽度</button><button type="button" class="button secondary small" data-action="maximize" aria-pressed="false">铺满窗口</button></div>
+      <div class="report-preview-tools" aria-label="图片显示控制"><button type="button" class="button ghost small" data-action="out" aria-label="缩小预览">−</button><output aria-live="polite">100%</output><button type="button" class="button ghost small" data-action="in" aria-label="放大预览">＋</button><button type="button" class="button secondary small" data-action="fit">适应宽度</button><button type="button" class="button secondary small" data-action="original">原始尺寸</button><button type="button" class="button secondary small" data-action="maximize" aria-pressed="false">铺满窗口</button></div>
       <p class="report-preview-status" role="status"></p><div class="report-preview-viewport" tabindex="0" aria-label="完整报告，可滚动查看"><img alt="完整报告样式预览（示例数据）" hidden></div>`;
     document.body.append(dialog);
     image = dialog.querySelector("img");
@@ -46,6 +48,7 @@ window.openReportPreview = (() => {
       const action = event.target.closest("button")?.dataset.action;
       if (action === "close") dialog.close();
       if (action === "fit") fit = true;
+      if (action === "original") { fit = false; scale = 1; }
       if (action === "in" || action === "out") {
         scale = Math.max(.2, Math.min(3, image.getBoundingClientRect().width / (image.naturalWidth || 1) * (action === "in" ? 1.25 : .8)));
         fit = false;
@@ -67,15 +70,21 @@ window.openReportPreview = (() => {
     });
     new ResizeObserver(layout).observe(viewport);
   }
-  return (src, name) => {
-    if (!/^\/assets\/report-preview-[\w-]+\.webp$/.test(src)) return;
+  return (src, name, isMessage = false) => {
+    if (isMessage ? !(typeof src === "string" && src.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(src))
+      : !/^\/assets\/report-preview-[\w-]+\.webp$/.test(src)) return;
     if (!dialog) initialize();
+    message = isMessage;
     fit = true;
     dialog.classList.remove("is-maximized");
     const maximize = dialog.querySelector('[data-action="maximize"]');
     maximize.textContent = "铺满窗口";
     maximize.setAttribute("aria-pressed", "false");
-    dialog.querySelector("h2").textContent = `${name || "报告样式"} · 完整预览`;
+    dialog.querySelector("h2").textContent = message ? (name || "消息图片") : `${name || "报告样式"} · 完整预览`;
+    dialog.querySelector("header p").hidden = message;
+    dialog.querySelector('[data-action="fit"]').textContent = message ? "适应窗口" : "适应宽度";
+    viewport.setAttribute("aria-label", message ? "消息图片，可缩放和滚动查看" : "完整报告，可滚动查看");
+    image.alt = message ? (name || "消息图片") : "完整报告样式预览（示例数据）";
     status.textContent = "正在加载完整预览…";
     status.hidden = false;
     image.hidden = true;
@@ -84,3 +93,5 @@ window.openReportPreview = (() => {
     image.src = src;
   };
 })();
+window.openReportPreview = (src, name) => openImagePreview(src, name);
+window.openMessageImagePreview = (src, name) => openImagePreview(src, name, true);
