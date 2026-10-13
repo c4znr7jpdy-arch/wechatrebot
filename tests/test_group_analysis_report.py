@@ -10,6 +10,8 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 
+import httpx
+from openai import APITimeoutError
 import pytest
 
 ROOT = Path(__file__).parents[1]
@@ -137,6 +139,46 @@ def test_analysis_timeout_is_reported_and_request_is_finished(modules, provider_
         asyncio.run(run())
     assert "upstream private response" not in str(error.value)
     assert finished == [True]
+
+
+@pytest.mark.parametrize("kind", ["sdk", "httpx", "wrapped", "non_timeout", "cycle"])
+def test_provider_timeout_types_keep_safe_report_status(modules, kind):
+    llm = modules("infrastructure.analysis.utils.llm_utils")
+    llm._circuit_breakers.clear()
+    llm.GlobalRateLimiter._instance = None
+    request = httpx.Request("POST", "https://provider.invalid/chat/completions")
+    errors = {
+        "sdk": APITimeoutError(request=request),
+        "httpx": httpx.ReadTimeout("upstream private response", request=request),
+        "wrapped": RuntimeError("upstream private response"),
+        "non_timeout": RuntimeError("TimeoutError in upstream response text"),
+        "cycle": RuntimeError("cyclic exception"),
+    }
+    errors["wrapped"].__cause__ = errors["httpx"]
+    errors["cycle"].__cause__ = errors["cycle"]
+
+    class Context:
+        def get_provider_by_id(self, provider_id):
+            return SimpleNamespace(provider_config={"timeout": 35})
+
+        async def llm_generate(self, **_kwargs):
+            raise errors[kind]
+
+    config = SimpleNamespace(
+        get_llm_retries=lambda: 1, get_llm_backoff=lambda: 0,
+        get_llm_hard_timeout=lambda: 90, get_enable_streaming_llm_call=lambda: False,
+    )
+    call = llm.call_provider_with_retry(
+        Context(), config, "整理群聊话题", provider_id="analysis-model",
+    )
+    if kind in {"non_timeout", "cycle"}:
+        assert asyncio.run(call) is None
+    else:
+        status = modules("shared.report_status")
+        with pytest.raises(TimeoutError) as error:
+            asyncio.run(call)
+        assert str(error.value) == status.ANALYSIS_TIMEOUT_MESSAGE
+        assert status.timeout_sections_from_errors([f"topic: {error.value}"]) == ["topic"]
 
 
 class ReportConfig:

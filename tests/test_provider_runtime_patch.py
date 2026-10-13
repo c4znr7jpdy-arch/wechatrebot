@@ -2,11 +2,13 @@ import ast
 import asyncio
 import __future__
 import copy
+import inspect
 from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
 
+from openai.resources.chat.completions import AsyncCompletions
 import pytest
 
 
@@ -81,7 +83,7 @@ def provider_request(patched_provider_sources):
         _finally_convert_payload=lambda _payload: None,
         _apply_provider_specific_request_overrides=lambda *_args: None,
         _sanitize_assistant_messages=lambda _payload: None,
-        default_params={"messages", "model", "timeout"},
+        default_params=set(inspect.signature(AsyncCompletions.create).parameters),
         client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
         _parse_openai_completion=parse,
     )
@@ -101,6 +103,7 @@ def test_analysis_timeout_reaches_sdk_without_changing_shared_provider(provider_
 
     assert asyncio.run(run()) == ["generated report", "generated report"]
     assert requests[0]["timeout"] == 90.0
+    assert "timeout" not in requests[0]["extra_body"]
     assert "timeout" not in requests[1]
     assert provider.timeout == provider.provider_config["timeout"] == 35
 

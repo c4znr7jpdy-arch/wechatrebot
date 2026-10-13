@@ -11,6 +11,9 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+import httpx
+from openai import APITimeoutError
+
 from astrbot.api.provider import LLMResponse
 
 from ....shared.constants import AnalysisStage
@@ -226,6 +229,19 @@ def get_provider_circuit_breaker(provider_id: str) -> CircuitBreaker:
 
 
 _get_circuit_breaker = get_provider_circuit_breaker
+
+
+def _is_request_timeout(error: BaseException | None) -> bool:
+    """Recognize SDK/transport timeouts, including bounded explicit wrappers."""
+    seen: set[int] = set()
+    for _ in range(8):
+        if error is None or id(error) in seen:
+            return False
+        if isinstance(error, (TimeoutError, httpx.TimeoutException, APITimeoutError)):
+            return True
+        seen.add(id(error))
+        error = error.__cause__
+    return False
 
 
 async def _call_provider_stream(
@@ -960,7 +976,7 @@ async def call_provider_with_retry(
             queue_index += 1
 
     logger.error(f"LLM请求队列全部耗尽，最终失败: {last_exc}")
-    if isinstance(last_exc, TimeoutError):
+    if _is_request_timeout(last_exc):
         raise TimeoutError(ANALYSIS_TIMEOUT_MESSAGE) from last_exc
     return None
 
