@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 
+from ...shared.report_status import normalize_timeout_sections
 from ...utils.logger import logger
 from ..entities.incremental_state import IncrementalBatch, IncrementalState
 from ..value_objects import (
@@ -68,6 +69,9 @@ class IncrementalMergeService:
         )
 
         for batch in batches:
+            state.timeout_sections = normalize_timeout_sections(
+                state.timeout_sections + normalize_timeout_sections(batch.timeout_sections)
+            )
             # 累加消息和字符计数
             state.total_message_count += batch.messages_count
             state.total_character_count += batch.characters_count
@@ -370,6 +374,7 @@ class IncrementalMergeService:
         statistics.golden_quotes = golden_quotes
 
         analysis_result = {
+            "timeout_sections": normalize_timeout_sections(state.timeout_sections),
             "statistics": statistics,
             "topics": topics,
             "user_titles": user_titles or [],

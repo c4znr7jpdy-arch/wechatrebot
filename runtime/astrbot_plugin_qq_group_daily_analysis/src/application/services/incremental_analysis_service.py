@@ -15,6 +15,7 @@ from ...domain.entities.incremental_state import IncrementalBatch
 from ...domain.services.message_cleaner_service import MessageCleanerService
 from ...domain.value_objects import DailyAnalysisExecutionResult, TokenUsage
 from ...shared.constants import AnalysisStage
+from ...shared.report_status import timeout_sections_from_errors
 from ...shared.trace_context import TraceContext
 from ...utils.logger import logger
 from .incremental_batch_builder import (
@@ -302,6 +303,7 @@ class IncrementalAnalysisService:
             golden_quotes = []
             token_usage = TokenUsage()
             chat_quality_review = None
+            timeout_sections = []
 
             if topic_enabled or golden_quote_enabled or chat_quality_enabled:
                 async with pipeline.step(AnalysisStage.LLM_ANALYSIS) as step:
@@ -321,6 +323,9 @@ class IncrementalAnalysisService:
                             golden_quote_enabled=golden_quote_enabled,
                             chat_quality_enabled=chat_quality_enabled,
                         )
+                    timeout_sections = timeout_sections_from_errors(
+                        step.payload.get("subtask_errors")
+                    )
                     step.set_payload(
                         topics_count=len(topics),
                         quotes_count=len(golden_quotes),
@@ -406,6 +411,7 @@ class IncrementalAnalysisService:
                 golden_quotes=new_quotes,
                 token_usage=token_usage_dict,
                 chat_quality_review=chat_quality_dict,
+                timeout_sections=timeout_sections,
                 last_message_timestamp=last_message_timestamp,
                 participant_ids=participant_ids,
             )
