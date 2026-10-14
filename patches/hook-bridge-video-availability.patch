@@ -1,0 +1,120 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -133,6 +133,7 @@
+         # while a native download is running.  Keep the health watcher from
+         # treating that expected interval as a fatal hook failure.
+         self._active_video_downloads = 0
++        self._video_download_generation = 0
+         # Keep the query-derived baseline separate from BridgeState.  Direct
+         # callbacks can arrive before /api/get_room_members refreshes its
+         # cache; sharing the same map would turn that temporary stale result
+@@ -260,13 +261,20 @@
+         except OSError:
+             return False
+ 
++    def _hook_check_overlapped_video(self, generation: int) -> bool:
++        # A download can finish before an older request reports its failure.
++        return bool(self._active_video_downloads) or generation != self._video_download_generation
++
+     async def _health_snapshot(self) -> dict[str, object]:
+         onebot_connected = bool(getattr(self.onebot, "connected", False))
+         heartbeat_fresh = bool(getattr(self.onebot, "heartbeat_fresh", False))
+-        hook_ready = self._hook_ready and await self._hook_api_accepting_connections()
+-        if self._hook_ready and not hook_ready:
+-            logger.info("HOOK API is no longer accepting connections")
+-            self._hook_ready = False
++        generation = self._video_download_generation
++        hook_ready = self._hook_ready
++        if hook_ready and not self._hook_check_overlapped_video(generation):
++            accepting = await self._hook_api_accepting_connections()
++            if not accepting and not self._hook_check_overlapped_video(generation):
++                logger.info("HOOK API is no longer accepting connections")
++                self._hook_ready = hook_ready = False
+         wechat_identity = self.state.bot_wxid if hook_ready else ""
+         return {
+             "service_ready": True,
+@@ -925,9 +933,14 @@
+         if not self.state.bot_wxid:
+             return 0
+ 
++        generation = self._video_download_generation
++        if self._hook_check_overlapped_video(generation):
++            return 0
+         groups = await self.hook.get_groups()
+         emitted = 0
+         for raw_group in groups:
++            if self._hook_check_overlapped_video(generation):
++                break
+             if not isinstance(raw_group, Mapping):
+                 continue
+             room_id, group_name = self._group_identity(raw_group)
+@@ -938,11 +951,18 @@
+ 
+             try:
+                 members = await self.hook.get_group_members(room_id)
+-            except Exception:
++            except Exception as exc:
++                if (
++                    isinstance(exc, (ClientConnectionError, asyncio.TimeoutError))
++                    and self._hook_check_overlapped_video(generation)
++                ):
++                    raise
+                 logger.exception(
+                     "failed to poll HOOK group members room=%s", room_id
+                 )
+                 continue
++            if self._hook_check_overlapped_video(generation):
++                break
+             current = self._group_member_identities(members)
+             # A bot that belongs to the group cannot have a genuinely empty
+             # member list.  Treat empty as an unrefreshed/error response so a
+@@ -1018,11 +1038,17 @@
+         # not deliver its documented join/leave callbacks.
+         await asyncio.sleep(min(3.0, self.group_member_poll_interval_seconds))
+         while True:
++            generation = self._video_download_generation
+             try:
+                 await self._poll_group_member_changes_once()
+             except (HookApiError, ClientConnectionError, asyncio.TimeoutError) as exc:
+                 diagnostics = getattr(exc, "diagnostics", {})
+-                logger.warning(
++                overlapping_download = (
++                    isinstance(exc, (ClientConnectionError, asyncio.TimeoutError))
++                    and self._hook_check_overlapped_video(generation)
++                )
++                log = logger.debug if overlapping_download else logger.warning
++                log(
+                     "HOOK group member polling delayed; will retry: error=%s diagnostics=%s",
+                     exc,
+                     diagnostics,
+@@ -1555,6 +1581,7 @@
+                     }
+                     | {"media_name": destination.name},
+                 )
++                self._video_download_generation += 1
+                 self._active_video_downloads += 1
+                 try:
+                     try:
+@@ -1694,13 +1721,19 @@
+         consecutive_failures = 0
+         while True:
+             await asyncio.sleep(self.hook_health_interval_seconds)
+-            if self._active_video_downloads:
++            generation = self._video_download_generation
++            if self._hook_check_overlapped_video(generation):
++                consecutive_failures = 0
+                 logger.debug(
+                     "HOOK health check deferred while %s inbound video download(s) are active",
+                     self._active_video_downloads,
+                 )
+                 continue
+-            if await self._hook_api_accepting_connections():
++            accepting = await self._hook_api_accepting_connections()
++            if self._hook_check_overlapped_video(generation):
++                consecutive_failures = 0
++                continue
++            if accepting:
+                 consecutive_failures = 0
+                 self._hook_ready = True
+                 continue

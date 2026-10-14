@@ -46,6 +46,8 @@ def bridge(tmp_path):
         models = importlib.import_module(f"{name}.models")
         state_module = importlib.import_module(f"{name}.state")
         app = object.__new__(app_module.BridgeApplication)
+        app._active_video_downloads = 0
+        app._video_download_generation = 0
         app.state = state_module.BridgeState(600, 100)
         app.state.bot_wxid = BOT
         app._polled_group_members = {}
