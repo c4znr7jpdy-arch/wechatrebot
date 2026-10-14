@@ -2,7 +2,26 @@
 
 // Reuse the manager's native dialog pattern for Escape and focus restoration.
 const openImagePreview = (() => {
-  let dialog, image, viewport, status, zoom, fit = true, scale = 1, message = false;
+  let dialog, image, viewport, status, zoom, copyMenu, opener, fit = true, scale = 1, message = false;
+  async function copyImage() {
+    copyMenu.hidden = true;
+    const source = image.src;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext("2d").drawImage(image, 0, 0);
+      const png = new Promise((resolve, reject) => canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("无法转换图片")), "image/png"));
+      await navigator.clipboard.write([new ClipboardItem({"image/png": png})]);
+      if (!dialog.open || image.src !== source) return;
+      status.textContent = "图片已复制";
+    } catch (_error) {
+      if (!dialog.open || image.src !== source) return;
+      status.textContent = "复制失败，请检查剪贴板权限后重试。";
+    }
+    status.hidden = false;
+  }
   function layout() {
     if (!dialog.open || !image.naturalWidth) return;
     const fitWidth = Math.min(image.naturalWidth, viewport.clientWidth - 32,
@@ -52,7 +71,7 @@ const openImagePreview = (() => {
     }, { passive: false });
     dialog.addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const targets = [...dialog.querySelectorAll('button, [tabindex="0"]')];
+      const targets = [...dialog.querySelectorAll('button, [tabindex="0"]')].filter((node) => node.getClientRects().length);
       const first = targets[0], last = targets[targets.length - 1];
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault(); last.focus();
@@ -64,6 +83,8 @@ const openImagePreview = (() => {
       const action = event.target.closest("button")?.dataset.action;
       if (action === "close") dialog.close();
       if (action === "in" || action === "out") changeZoom(action === "in" ? 1.25 : .8);
+      if (action === "copy") copyImage();
+      copyMenu.hidden = true;
       if (event.target === dialog) {
         const rect = dialog.getBoundingClientRect();
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
@@ -71,18 +92,42 @@ const openImagePreview = (() => {
       layout();
     });
     dialog.addEventListener("close", () => {
+      copyMenu.hidden = true;
       image.removeAttribute("src");
       image.hidden = true;
+      // Polling may have replaced the QR button while the modal was open.
+      if (!opener?.isConnected && opener?.dataset.qrKey) {
+        const current = document.querySelector("#conversationInspector .group-qrcode");
+        if (current?.dataset.qrKey === opener.dataset.qrKey) current.focus();
+      }
+    });
+    copyMenu = document.createElement("button");
+    copyMenu.type = "button";
+    copyMenu.className = "preview-copy-menu";
+    copyMenu.dataset.action = "copy";
+    copyMenu.textContent = "复制图片";
+    copyMenu.hidden = true;
+    dialog.append(copyMenu);
+    image.addEventListener("contextmenu", (event) => {
+      if (!message || image.hidden) return;
+      event.preventDefault();
+      copyMenu.hidden = false;
+      copyMenu.style.left = `${Math.max(0, Math.min(event.clientX, innerWidth - copyMenu.offsetWidth - 8))}px`;
+      copyMenu.style.top = `${Math.max(0, Math.min(event.clientY, innerHeight - copyMenu.offsetHeight - 8))}px`;
+      copyMenu.focus();
     });
     new ResizeObserver(layout).observe(viewport);
   }
-  return (src, name, isMessage = false) => {
-    if (isMessage ? !(typeof src === "string" && src.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(src))
+  return (src, name, kind = "report") => {
+    const isMessage = kind !== "report";
+    const imagePattern = kind === "qrcode" ? /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/ : /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/;
+    if (isMessage ? !(typeof src === "string" && src.length <= (kind === "qrcode" ? 2 * 1024 * 1024 + 64 : 88000) && imagePattern.test(src))
       : !/^\/assets\/report-preview-[\w-]+\.webp$/.test(src)) return;
     if (!dialog) initialize();
     message = isMessage;
     fit = true;
     dialog.classList.toggle("is-message-preview", message);
+    dialog.setAttribute("aria-label", name || (message ? "消息图片" : "报告样式预览"));
     dialog.querySelector("h2").textContent = message ? (name || "消息图片") : `${name || "报告样式"} · 完整预览`;
     dialog.querySelector("header p").hidden = message;
     viewport.setAttribute("aria-label", message ? "消息图片，可缩放和滚动查看" : "完整报告，可滚动查看");
@@ -90,10 +135,14 @@ const openImagePreview = (() => {
     status.textContent = "正在加载完整预览…";
     status.hidden = false;
     image.hidden = true;
+    copyMenu.hidden = true;
     zoom.textContent = "—";
+    opener = document.activeElement;
     dialog.showModal();
     image.src = src;
   };
 })();
 window.openReportPreview = (src, name) => openImagePreview(src, name);
-window.openMessageImagePreview = (src, name) => openImagePreview(src, name, true);
+window.openMessageImagePreview = (src, name) => openImagePreview(src, name, "message");
+window.openGroupQrPreview = (src, name) => openImagePreview(src, name, "qrcode");
+window.closeMessageImagePreview = () => document.querySelector(".is-message-preview[open]")?.close();
