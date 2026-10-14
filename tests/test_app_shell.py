@@ -75,6 +75,27 @@ def test_theme_preference_survives_new_api_instances_and_preserves_other_prefere
     assert app_shell.load_ui_theme(tmp_path) == "light"
 
 
+def test_group_qrcode_api_preserves_account_scope_and_reports_errors(tmp_path):
+    api = _api(tmp_path)
+    expected = {"account_id": "wxid_bot", "group_id": "room@chatroom", "image_data_url": "data:image/png;base64,aQ=="}
+
+    def qrcode(account_id, group_id):
+        assert (account_id, group_id) == ("wxid_bot", "room@chatroom")
+        return expected
+
+    api._groups = SimpleNamespace(qrcode=qrcode)
+    assert "get_group_qrcode" in app_shell.PUBLIC_API_METHODS
+    assert api.get_group_qrcode("wxid_bot", "room@chatroom")["data"] == expected
+
+    def failed(*args):
+        raise group_directory.GroupDirectoryError("群二维码读取失败")
+
+    api._groups.qrcode = failed
+    result = api.get_group_qrcode("wxid_bot", "room@chatroom")
+    assert result["ok"] is False
+    assert "群二维码读取失败" in result["error"]["message"]
+
+
 def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
     def fail(*args):
         raise OSError("write failed")

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
+import copy
 import importlib
 import importlib.util
+from io import BytesIO
 import json
 from pathlib import Path
 import shutil
@@ -86,6 +89,105 @@ def patched_bridge(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.mark.parametrize("format,mime", [("JPEG", "jpeg"), ("PNG", "png")])
+def test_group_qrcode_preserves_image_and_exact_read_only_hook_contract(patched_bridge, format, mime):
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("RGB", (2, 2), "white").save(output, format=format)
+    image = output.getvalue()
+    encoded = base64.b64encode(image).decode("ascii")
+    client = patched_bridge["hook_client"].HookClient.__new__(patched_bridge["hook_client"].HookClient)
+
+    async def post(path, payload, **options):
+        assert path == "/api/get_my_qrocde"
+        assert payload == {"wxid": "room@chatroom", "opcode": "0", "style": "7", "info": ""}
+        assert options["retry_read"] is False
+        assert options["timeout"].total == 10
+        return {"baseResponse": {"ret": 0}, "qrcode": {"iLen": len(image), "buffer": encoded}}
+
+    client._post = post
+    assert _run(client.get_group_qrcode("room@chatroom")) == f"data:image/{mime};base64,{encoded}"
+
+
+@pytest.mark.parametrize("failure", ["ret", "bool-ret", "missing", "base64", "length", "format", "oversize"])
+def test_group_qrcode_rejects_failed_and_malformed_hook_responses(patched_bridge, failure):
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("RGB", (1, 1)).save(output, format="PNG")
+    image = output.getvalue()
+    response = {"baseResponse": {"ret": 0}, "qrcode": {
+        "iLen": len(image), "buffer": base64.b64encode(image).decode("ascii"),
+    }}
+    if failure == "ret":
+        response["baseResponse"]["ret"] = -2
+    elif failure == "bool-ret":
+        response["baseResponse"]["ret"] = False
+    elif failure == "missing":
+        response["qrcode"].pop("buffer")
+    elif failure == "base64":
+        response["qrcode"]["buffer"] = "not%base64"
+    elif failure == "length":
+        response["qrcode"]["iLen"] += 1
+    elif failure == "format":
+        response["qrcode"] = {"iLen": 4, "buffer": base64.b64encode(b"text").decode("ascii")}
+    else:
+        response["qrcode"]["buffer"] = "A" * (2 * 1024 * 1024 + 1)
+    module = patched_bridge["hook_client"]
+    client = module.HookClient.__new__(module.HookClient)
+
+    async def post(*args, **kwargs):
+        return copy.deepcopy(response)
+
+    client._post = post
+    with pytest.raises(module.HookApiError, match="QR code"):
+        _run(client.get_group_qrcode("room@chatroom"))
+
+
+def test_group_qrcode_route_checks_token_origin_membership_and_account_races(patched_bridge):
+    account = ["wxid_bot"]
+    calls = []
+
+    class Hook:
+        async def get_groups_strict(self):
+            return [{"wxid": "room@chatroom"}]
+
+        async def get_group_qrcode(self, group_id):
+            calls.append(group_id)
+            if len(calls) == 2:
+                account[0] = "wxid_other"
+            return "data:image/png;base64,aQ=="
+
+    app = patched_bridge["callback_server"].create_callback_app(
+        asyncio.Queue(), 1024, manager_hook=Hook(), manager_query_token="local-secret",
+        status_provider=lambda: {"wechat_identity": account[0]},
+    )
+
+    async def exercise(client):
+        path = "/api/manager/groups/room@chatroom/qrcode"
+        for headers, status in [({}, 401), ({**_headers(), "Origin": "https://example.invalid"}, 403),
+                                (_headers(account="wxid_other"), 409)]:
+            response = await client.get(path, headers=headers)
+            assert response.status == status
+            assert "data" not in await response.json()
+        for group, status in [("private", 400), ("unknown@chatroom", 404)]:
+            response = await client.get(f"/api/manager/groups/{group}/qrcode", headers=_headers())
+            assert response.status == status
+        assert not calls
+        response = await client.get(path, headers=_headers())
+        assert response.status == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert (await response.json())["data"]["items"] == [{
+            "group_id": "room@chatroom", "image_data_url": "data:image/png;base64,aQ==",
+        }]
+        changed = await client.get(path, headers=_headers())
+        assert changed.status == 409
+        assert "data" not in await changed.json()
+
+    _run(_with_client(app, exercise))
 
 
 def _headers(

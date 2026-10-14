@@ -101,7 +101,7 @@ index bed7bba7e9625e267ccb5f9b6e44d46343176668..72f85ab91d1dc5a56c83497c9c67983c
  
      async def _resolve_group_member_notice(self, event):
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
-index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b91548992c0c2500 100644
+index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..ad5894dcd3dc7bb1e9e16abc0b5b2f0e067f2a75 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
 @@ -1,15 +1,259 @@
@@ -364,7 +364,7 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b9154899
  
  
  def create_callback_app(
-@@ -18,9 +262,248 @@ def create_callback_app(
+@@ -18,9 +262,277 @@ def create_callback_app(
      callback_path: str = "/api/recvMsg",
      action_router: Any | None = None,
      status_provider: Any | None = None,
@@ -462,6 +462,35 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b9154899
 +                },
 +            }
 +        )
++
++    async def manager_group_qrcode(request: web.Request) -> web.Response:
++        account_id, denied = await authorize_manager(request)
++        if denied is not None:
++            return denied
++        group_id = _manager_text(request.match_info.get("group_id", ""))
++        if not _valid_group_id(group_id):
++            return _manager_error("群聊标识无效", 400)
++        if (manager_hook is None or not hasattr(manager_hook, "get_group_qrcode")
++                or not hasattr(manager_hook, "get_groups_strict")):
++            return _manager_error("群二维码暂不可用，请更新连接组件", 503)
++        try:
++            groups = await manager_hook.get_groups_strict()
++            if not any(item and item["group_id"] == group_id
++                       for raw in groups if (item := _normalize_group(raw))):
++                return _manager_error("当前账号的群目录中未找到此群", 404)
++            if not await account_still_current(account_id):
++                return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++            image = await manager_hook.get_group_qrcode(group_id)
++        except Exception:
++            logger.exception("manager group QR code read failed")
++            return _manager_error("群二维码读取失败，请稍后重试", 502)
++        if not await account_still_current(account_id):
++            return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        return _manager_response({"ok": True, "data": {
++            "account_id": account_id,
++            "items": [{"group_id": group_id, "image_data_url": image}],
++            "total": 1,
++        }})
 +
 +    async def manager_group_members(request: web.Request) -> web.Response:
 +        account_id, denied = await authorize_manager(request)
@@ -613,11 +642,12 @@ index a13ffb827173fac2b4902f54c41a6d6be8dc2d86..f32ed253259d04c15045af81b9154899
      async def receive(request: web.Request) -> web.Response:
          try:
              payload = await request.json()
-@@ -123,5 +599,11 @@ def create_callback_app(
+@@ -123,5 +635,12 @@ def create_callback_app(
      app.router.add_put(callback_path, receive)
      app.router.add_post(callback_path, receive)
      app.router.add_get("/api/health", health)
 +    app.router.add_get("/api/manager/groups", manager_groups)
++    app.router.add_get("/api/manager/groups/{group_id}/qrcode", manager_group_qrcode)
 +    app.router.add_get(
 +        "/api/manager/groups/{group_id}/members", manager_group_members
 +    )
@@ -914,10 +944,18 @@ index c8f6df12520216b0177ea9ca717ff51947801fca..3de631c6dba31c8e98c9f586635bec3a
                      role,
                      content,
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
-index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daeeb89e9363 100644
+index 372190f106f848035500d21ef09f4c5a6cd02906..dd56ebff19176d95f0e3be5b58363b3d56cc3e7e 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
-@@ -14,6 +14,10 @@ from aiohttp import ClientConnectionError, ClientResponse, ClientSession, Client
+@@ -2,6 +2,7 @@ from __future__ import annotations
+ 
+ import asyncio
+ import base64
++import binascii
+ import json
+ from pathlib import Path
+ import re
+@@ -14,6 +15,10 @@ from aiohttp import ClientConnectionError, ClientResponse, ClientSession, Client
  from .cgi_offsets import cgi_offset_summary
  from .models import SendResult, VideoUpload
  
@@ -928,7 +966,7 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
  
  class HookApiError(RuntimeError):
      def __init__(
-@@ -330,6 +334,9 @@ class HookClient:
+@@ -330,6 +335,9 @@ class HookClient:
          self.retry_delay = max(0.0, retry_delay)
          self.image_path_field = image_path_field
          self._friend_refresh_attempted = False
@@ -938,7 +976,7 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
  
      async def _response_json(
          self,
-@@ -734,7 +741,24 @@ class HookClient:
+@@ -734,7 +742,24 @@ class HookClient:
              },
          )
  
@@ -964,7 +1002,7 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
          data = await self._read_data("/api/get_frien_lists", {})
          if isinstance(data, Mapping):
              data = data.get("contact_list", [])
-@@ -756,12 +780,181 @@ class HookClient:
+@@ -756,12 +781,208 @@ class HookClient:
  
      async def get_groups(self) -> list[dict[str, Any]]:
          data = await self._read_data("/api/get_chatroom_list", {})
@@ -1122,6 +1160,33 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
          data = await self._read_data("/api/get_room_members", {"room_id": room_id})
          return _chatroom_members(data)
  
++    async def get_group_qrcode(self, room_id: str) -> str:
++        path = "/api/get_my_qrocde"
++        raw = await self._post(path, {
++            "wxid": room_id, "opcode": "0", "style": "7", "info": "",
++        }, retry_read=False, timeout=ClientTimeout(total=10))
++        data = _mapping(raw.get("data", raw))
++        ret = _mapping(data.get("baseResponse")).get("ret")
++        qrcode = _mapping(data.get("qrcode"))
++        encoded, length = qrcode.get("buffer"), qrcode.get("iLen")
++        if (type(ret) is not int or ret != 0 or not isinstance(encoded, str)
++                or not encoded or len(encoded) > 2 * 1024 * 1024
++                or type(length) is not int or length <= 0):
++            raise HookApiError(path, None, "QR code response is unavailable or invalid")
++        try:
++            image = base64.b64decode(encoded, validate=True)
++        except (binascii.Error, ValueError) as exc:
++            raise HookApiError(path, None, "QR code base64 is invalid") from exc
++        if len(image) != length:
++            raise HookApiError(path, None, "QR code image length is invalid")
++        if image.startswith(b"\x89PNG\r\n\x1a\n") and image.endswith(b"IEND\xaeB`\x82"):
++            mime = "image/png"
++        elif image.startswith(b"\xff\xd8\xff") and image.endswith(b"\xff\xd9"):
++            mime = "image/jpeg"
++        else:
++            raise HookApiError(path, None, "QR code image format is invalid")
++        return f"data:{mime};base64,{encoded}"
++
 +    async def get_group_members_strict(
 +        self, room_id: str
 +    ) -> list[dict[str, Any]]:
@@ -1147,12 +1212,8 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
      async def get_group_detail_members(self, room_id: str) -> list[dict[str, Any]]:
          data = await self._read_data(
              "/api/get_chatroom_detail_cache", {"room_id": room_id}
-@@ -771,10 +964,24 @@ class HookClient:
-     async def get_profile(self) -> dict[str, Any]:
-         data = await self._read_data("/api/get_profile_cache", {})
-         return dict(data) if isinstance(data, Mapping) else {}
--
-+
+@@ -774,7 +995,21 @@ class HookClient:
+ 
      async def get_contact(self, wxid: str) -> dict[str, Any]:
          data = await self._read_data("/api/get_contact", {"wxid": wxid})
 -        return dict(data) if isinstance(data, Mapping) else {}
@@ -1171,8 +1232,7 @@ index 372190f106f848035500d21ef09f4c5a6cd02906..a46dbdfd7d517e84f1cabdf735f2daee
 +                {},
 +            )
 +        return dict(data)
--
-+
+ 
      async def download_image(self, payload: Mapping[str, Any]) -> dict[str, Any]:
          return await self._post("/api/download_img", payload, retry_read=True)
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py b/hook_41827_astrbot_bridge/src/hook_bridge/message_codec.py

@@ -36,6 +36,7 @@ window.createMessageHistory = function (helpers) {
   async function refreshHistoryRecords() {
     if (!state.historyAccount || state.historyManualRefresh) return;
     state.historyManualRefresh = true;
+    state.historyQrCache?.clear();
     clearHistoryMessageCache();
     state.messageLoad += 1;
     state.historyOlderLoad += 1;
@@ -141,6 +142,8 @@ window.createMessageHistory = function (helpers) {
 
   function invalidateHistoryState() {
     clearHistoryMessageCache();
+    state.historyQrCache?.clear();
+    window.closeMessageImagePreview?.();
     state.historyLoad += 1;
     state.historyConversationsLoading = false;
     state.messageLoad += 1;
@@ -567,6 +570,7 @@ window.createMessageHistory = function (helpers) {
       renderConversationInspector(item);
     } else if (changed) {
       list.innerHTML = '<div class="loading-row message-read-status"><span>正在读取消息…</span><small>若长时间未读到记录，点击刷新。</small></div>';
+      renderConversationInspector(item);
     }
     const load = ++state.messageLoad;
     const revision = JSON.stringify([item.message_count, item.last_timestamp]);
@@ -694,7 +698,64 @@ window.createMessageHistory = function (helpers) {
     } finally { state.historyPolling = false; }
   }
 
+  async function loadGroupQrCode(item, button, {refresh = false, restoreFocus = false} = {}) {
+    const account = state.historyAccount;
+    const epoch = state.historyMessageCacheEpoch;
+    const key = JSON.stringify([account, item.conversation_id]);
+    button.dataset.qrKey = key;
+    const cache = state.historyQrCache ||= new Map();
+    button.disabled = true;
+    button.textContent = "加载中";
+    if (!account || state.status?.history_offline) {
+      button.textContent = "未连接";
+      button.title = "连接微信后可查看群二维码";
+      return;
+    }
+    let entry = cache.get(key);
+    if (refresh || !entry || entry.expires <= Date.now()) {
+      entry = {expires: Infinity};
+      entry.request = requestHistoryRead(api("get_group_qrcode", account, item.conversation_id)).then((data) => {
+        if (data.account_id !== account || data.group_id !== item.conversation_id) throw new Error("微信账号或群聊已变化，请重新选择。");
+        const src = data.image_data_url;
+        if (typeof src !== "string" || src.length > 2 * 1024 * 1024 + 64
+            || !/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(src)) throw new Error("群二维码图片格式不正确。");
+        entry.src = src;
+        entry.expires = Date.now() + 5 * 60 * 1000;
+      }).catch((error) => {
+        entry.error = error.message || "群二维码暂不可用";
+        entry.expires = Date.now() + 15000;
+      });
+      cache.set(key, entry);
+      while (cache.size > 32) cache.delete(cache.keys().next().value);
+    }
+    await entry.request;
+    if (!button.isConnected || account !== state.historyAccount || epoch !== state.historyMessageCacheEpoch
+        || state.selectedConversation?.conversation_id !== item.conversation_id) return;
+    button.disabled = false;
+    if (entry.src) {
+      button.innerHTML = `<img src="${escapeHtml(entry.src)}" alt="${escapeHtml(item.display_name)}的群二维码">`;
+      button.title = "点击放大群二维码，放大后右键复制图片";
+      button.setAttribute("aria-label", "放大查看群二维码");
+      button.onclick = () => window.openGroupQrPreview(entry.src, `${item.display_name} · 群二维码`);
+      button.querySelector("img").addEventListener("error", () => {
+        cache.delete(key);
+        button.textContent = "重试";
+        button.title = "群二维码图片加载失败，点击重试";
+        button.setAttribute("aria-label", "重新获取群二维码");
+        button.onclick = () => loadGroupQrCode(item, button, {refresh: true});
+      }, {once: true});
+    } else {
+      button.textContent = "重试";
+      button.title = entry.error;
+      button.setAttribute("aria-label", "重新获取群二维码");
+      button.onclick = () => loadGroupQrCode(item, button, {refresh: true});
+    }
+    if (restoreFocus && document.activeElement === document.body) button.focus();
+  }
+
   function renderConversationInspector(item) {
+    const focusedQr = document.activeElement?.classList.contains("group-qrcode")
+      ? document.activeElement.dataset.qrKey : "";
     const latestSender = [...state.selectedMessages].reverse().find((message) => message.role !== "assistant");
     const selectedSender = state.selectedSenderKey
       ? [...state.selectedMessages].reverse().find((message) => messageSenderKey(message) === state.selectedSenderKey)
@@ -706,6 +767,16 @@ window.createMessageHistory = function (helpers) {
       ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
       : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
     $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>该发送者消息</dt><dd>${Number.isInteger(currentSender?.sender_message_count) ? `${currentSender.sender_message_count} 条` : "未统计"}</dd></div><div><dt>该发送者最近消息</dt><dd>${escapeHtml(fullTime(currentSender?.sender_last_timestamp))}</dd></div><div><dt>本会话消息</dt><dd>${item.message_count} 条</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    const heading = $("#conversationInspector .inspector-conversation-title");
+    heading.querySelector("h2").title = item.display_name;
+    heading.querySelector("p").title = item.conversation_id;
+    heading.classList.toggle("has-group-qrcode", item.type === "group");
+    if (item.type === "group") {
+      heading.insertAdjacentHTML("beforeend", '<button class="group-qrcode" type="button" aria-label="群二维码" disabled>加载中</button>');
+      loadGroupQrCode(item, heading.querySelector(".group-qrcode"), {
+        restoreFocus: focusedQr === JSON.stringify([state.historyAccount, item.conversation_id]),
+      });
+    }
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
     bindAvatarFallbacks($("#conversationInspector"));
     if ($("#deleteConversation")) $("#deleteConversation").disabled = !canEditHistory();

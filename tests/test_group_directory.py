@@ -161,3 +161,83 @@ def test_query_credential_generated_once_and_preserved(tmp_path):
     assert len(first) >= 32
     write_runtime_configs(tmp_path)
     assert json.loads(path.read_text("utf-8"))["manager_query_token"] == first
+
+
+def test_qrcode_cache_expiry_and_account_isolation(tmp_path, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(directory.time, "monotonic", lambda: now[0])
+    obj, account, calls = service(tmp_path, monkeypatch)
+    obj.list()
+
+    def request(port, token, identity, path):
+        assert obj._lock.acquire(blocking=False)
+        obj._lock.release()
+        calls.append(path)
+        return {"account_id": identity, "items": [{
+            "group_id": "test@chatroom", "image_data_url": "data:image/png;base64,aQ==",
+        }]}
+
+    monkeypatch.setattr(obj, "_request", request)
+    expected = obj.qrcode(account[0], "test@chatroom")
+    assert expected["account_id"] == "test-account"
+    obj.qrcode(account[0], "test@chatroom")["image_data_url"] = "changed"
+    assert obj.qrcode(account[0], "test@chatroom") == expected
+    assert len(calls) == 2
+    now[0] += 300
+    assert obj.qrcode(account[0], "test@chatroom") == expected
+    assert len(calls) == 3
+    account[0] = "another-account"
+    with pytest.raises(directory.GroupDirectoryError, match="账号已变化"):
+        obj.qrcode("test-account", "test@chatroom")
+    assert not obj._qrcodes
+    assert len(calls) == 3
+
+
+def test_qrcode_requires_verified_account_and_current_group(tmp_path, monkeypatch):
+    obj, account, calls = service(tmp_path, monkeypatch)
+    for account_id, group_id in [(account[0], "../private"), ("", "test@chatroom"),
+                                  (account[0], "unknown@chatroom")]:
+        with pytest.raises(directory.GroupDirectoryError):
+            obj.qrcode(account_id, group_id)
+    assert calls == []
+    obj.list()
+    obj._qrcodes["test@chatroom"] = (float("inf"), {"image_data_url": "cached"})
+    monkeypatch.setattr(directory, "probe_bridge_health", lambda **kw: SimpleNamespace(
+        status_available=False, wechat_logged_in=False, wechat_identity="",
+    ))
+    with pytest.raises(directory.GroupDirectoryUnavailable):
+        obj.qrcode(account[0], "test@chatroom")
+    assert len(calls) == 1
+
+
+def test_qrcode_failures_never_cache_or_return_stale_data(tmp_path, monkeypatch):
+    obj, account, _ = service(tmp_path, monkeypatch)
+    obj.list()
+    calls = []
+
+    def request(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise directory.GroupDirectoryError("读取失败")
+        return {"items": [{"group_id": "another@chatroom", "image_data_url": "data:image/png;base64,aQ=="}]}
+
+    monkeypatch.setattr(obj, "_request", request)
+    for _ in range(2):
+        with pytest.raises(directory.GroupDirectoryError):
+            obj.qrcode(account[0], "test@chatroom")
+        assert not obj._qrcodes
+    assert len(calls) == 2
+
+
+def test_late_qrcode_response_cannot_populate_a_new_account_cache(tmp_path, monkeypatch):
+    obj, account, _ = service(tmp_path, monkeypatch)
+    obj.list()
+
+    def request(*args):
+        obj._account = "new-account"
+        return {"items": [{"group_id": "test@chatroom", "image_data_url": "data:image/png;base64,aQ=="}]}
+
+    monkeypatch.setattr(obj, "_request", request)
+    with pytest.raises(directory.GroupDirectoryError, match="账号已变化"):
+        obj.qrcode(account[0], "test@chatroom")
+    assert not obj._qrcodes

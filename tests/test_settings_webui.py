@@ -395,9 +395,13 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             dialog = page.locator(".report-preview-dialog")
             expect(dialog).to_be_visible()
             expect(dialog.locator("h2")).to_have_text("表情首帧")
+            expect(dialog.locator("h2")).not_to_be_visible()
             expect(dialog.locator("img")).to_be_visible()
             expect(dialog.locator("img")).to_have_attribute("src", previews[0])
-            expect(dialog.locator("button")).to_have_count(3)
+            expect(dialog.locator("button:visible")).to_have_count(3)
+            for surface in [dialog, dialog.locator(".report-preview-header"), dialog.locator(".report-preview-viewport")]:
+                assert surface.evaluate("e => getComputedStyle(e).backgroundColor") == "rgba(0, 0, 0, 0)"
+            assert dialog.evaluate("e => getComputedStyle(e, '::backdrop').backgroundColor") == "rgba(0, 0, 0, 0)"
             close = dialog.get_by_role("button", name="关闭预览")
             expect(close).to_have_text("")
             expect(close.locator("svg")).to_be_visible()

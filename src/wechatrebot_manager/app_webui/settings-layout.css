@@ -182,6 +182,13 @@
 .message-image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .message-media img { display: block; width: auto; height: auto; max-width: min(200px, 100%); max-height: 160px; }
 .message-media + .message-bubble { margin-top: 6px; }
+.inspector-conversation-title.has-group-qrcode { display: grid; grid-template-columns: 36px minmax(0, 1fr) 46px; }
+.inspector-conversation-title.has-group-qrcode h2 { line-height: 26px; }
+.inspector-conversation-title.has-group-qrcode p { line-height: 18px; }
+.inspector-conversation-title.has-group-qrcode :is(h2, p) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-qrcode { width: 46px; height: 46px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: zoom-in; }
+.group-qrcode:disabled { cursor: default; }
+.group-qrcode img { display: block; width: 100%; height: 100%; object-fit: contain; }
 @media (max-width: 600px) {
   #page-settings .core-form .config-section, #page-settings .core-identity-card { padding: 12px; }
 }
