@@ -33,6 +33,8 @@ class _NoRedirect(HTTPRedirectHandler):
 class GroupDirectoryService:
     _REFRESH_INTERVAL_SECONDS = 15.0
     _RETRY_INTERVAL_SECONDS = 15.0
+    _QRCODE_CACHE_SECONDS = 300.0
+    _QRCODE_CACHE_LIMIT = 32
 
     def __init__(self, install_root: str | Path):
         self.root = Path(install_root)
@@ -42,6 +44,7 @@ class GroupDirectoryService:
         self._next_refresh_at = 0.0
         self._last_error = ""
         self._portraits = PortraitCache(self.root)
+        self._qrcodes: dict[str, tuple[float, dict[str, str]]] = {}
 
     def _connection(self):
         try:
@@ -67,11 +70,13 @@ class GroupDirectoryService:
             self._account, self._snapshot = "", None
             self._next_refresh_at = 0.0
             self._last_error = ""
+            self._qrcodes.clear()
             raise GroupDirectoryError("尚未确认微信登录账号，请先连接微信，再刷新群列表。")
         if account != self._account:
             self._account, self._snapshot = account, None
             self._next_refresh_at = 0.0
             self._last_error = ""
+            self._qrcodes.clear()
         return port, token, account
 
     def _clear_current_account(self, account: str, *, state_locked: bool) -> None:
@@ -80,6 +85,7 @@ class GroupDirectoryService:
                 self._account, self._snapshot = "", None
                 self._next_refresh_at = 0.0
                 self._last_error = ""
+                self._qrcodes.clear()
 
         if state_locked:
             clear()
@@ -166,3 +172,33 @@ class GroupDirectoryService:
             if not self._snapshot or not any(item.get("group_id") == group_id for item in self._snapshot["items"]):
                 raise GroupDirectoryError("请先刷新群列表，再选择当前账号所在的群。")
         return self._request(port, token, account, f"/api/manager/groups/{quote(group_id, safe='')}/members")
+
+    def qrcode(self, account_id: str, group_id: str) -> dict[str, str]:
+        if not isinstance(group_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+@chatroom", group_id):
+            raise GroupDirectoryError("群标识格式不正确，请从群列表重新选择。")
+        with self._lock:
+            port, token, account = self._connection()
+            if not account_id or account_id != account:
+                raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
+            if not self._snapshot or not any(item.get("group_id") == group_id for item in self._snapshot["items"]):
+                raise GroupDirectoryError("请先刷新群列表，再选择当前账号所在的群。")
+            now = time.monotonic()
+            self._qrcodes = {key: cached for key, cached in self._qrcodes.items() if cached[0] > now}
+            if group_id in self._qrcodes:
+                return dict(self._qrcodes[group_id][1])
+        data = self._request(port, token, account, f"/api/manager/groups/{quote(group_id, safe='')}/qrcode")
+        item = data["items"][0] if len(data["items"]) == 1 else None
+        if not isinstance(item, dict) or item.get("group_id") != group_id:
+            raise GroupDirectoryError("未收到当前群聊的二维码，请稍后重试。")
+        image = item.get("image_data_url")
+        if (not isinstance(image, str) or len(image) > 2 * 1024 * 1024 + 23
+                or not re.fullmatch(r"data:image/(?:jpeg|png);base64,[A-Za-z0-9+/=]+", image)):
+            raise GroupDirectoryError("群二维码格式不正确，请稍后重试。")
+        result = {"account_id": account, "group_id": group_id, "image_data_url": image}
+        with self._lock:
+            if self._account != account:
+                raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
+            if len(self._qrcodes) >= self._QRCODE_CACHE_LIMIT:
+                self._qrcodes.pop(next(iter(self._qrcodes)))
+            self._qrcodes[group_id] = (time.monotonic() + self._QRCODE_CACHE_SECONDS, result)
+        return dict(result)

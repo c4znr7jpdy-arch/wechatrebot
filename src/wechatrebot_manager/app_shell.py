@@ -100,6 +100,7 @@ PUBLIC_API_METHODS = (
     "get_conversations",
     "get_groups",
     "get_group_members",
+    "get_group_qrcode",
     "get_group_policy",
     "preview_group_policy",
     "save_group_policy",
