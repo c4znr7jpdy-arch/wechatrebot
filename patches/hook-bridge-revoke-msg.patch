@@ -111,7 +111,7 @@
 -        # instead, so keep the latter as a compatibility fallback.  Both
 -        # routes ultimately need the real WeChat ``newMsgId`` and timestamp;
 -        # the image send endpoint does not manufacture those values for us.
-+        # Use the documented revoke endpoint once, with the exact send receipt.
++        # The pinned 4.1.8.27 DLL has only /api/revoke_msg; use it once with the exact receipt.
          try:
              numeric_message_id: int | str = int(message_id)
          except (TypeError, ValueError):
@@ -141,7 +141,7 @@
 +            "createTime": int(create_time),
 +            "toUserName": to_user_name,
 +        }
-+        return _recall_result(await self._write("/api/revoke_any", payload))
++        return _recall_result(await self._write("/api/revoke_msg", payload))
  
      async def get_friends(
          self, *, force_refresh: bool = False
