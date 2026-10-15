@@ -113,7 +113,7 @@ def recall_client(tmp_path):
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
     # The directory patch changes get_friends immediately after recall. Check
     # real staging order so its context cannot break the new recall patch.
-    for name in ("hook-bridge-group-directory.patch", "hook-bridge-revoke-any.patch"):
+    for name in ("hook-bridge-group-directory.patch", "hook-bridge-revoke-msg.patch"):
         subprocess.run(
             ["git", "apply", "--whitespace=error-all", "-p2", "--directory=app/bridge",
              str(ROOT / "patches" / name)],
@@ -146,7 +146,7 @@ def test_recall_uses_only_documented_endpoint_and_keeps_exact_receipt(recall_cli
     client._post = post
     result = asyncio.run(client.recall("1234567890123456789", 1790236882, "room@chatroom"))
     assert result.ok
-    assert calls == [("/api/revoke_any", {
+    assert calls == [("/api/revoke_msg", {
         "newMsgId": 1234567890123456789, "createTime": 1790236882,
         "toUserName": "room@chatroom",
     })]
@@ -170,7 +170,7 @@ def test_failed_or_ambiguous_recall_is_not_retried_or_reported_success(recall_cl
     client._post = post
     result = asyncio.run(client.recall("9007199254740993", 1790236882, "wxid_test"))
     assert not result.ok
-    assert calls == ["/api/revoke_any"]
+    assert calls == ["/api/revoke_msg"]
 
 
 @pytest.mark.parametrize("status", [401, 404, 405, 500, None])
@@ -185,7 +185,7 @@ def test_transport_and_server_errors_are_not_retried(recall_client, status):
     client._post = post
     with pytest.raises(recall_client.HookApiError):
         asyncio.run(client.recall("9007199254740993", 1790236882, "wxid_test"))
-    assert calls == ["/api/revoke_any"]
+    assert calls == ["/api/revoke_msg"]
 
 
 @pytest.mark.parametrize("payload", [
@@ -204,7 +204,7 @@ def test_recall_failure_reports_envelope_codes_without_private_content(recall_cl
     client._post = post
     result = asyncio.run(client.recall("9007199254740993", 1790236882, "wxid_fixture"))
     assert not result.ok
-    assert calls == ["/api/revoke_any"]
+    assert calls == ["/api/revoke_msg"]
     assert 'recall_response=[{"errCode":1' in result.error
     assert "private" not in result.error
     assert "wxid_fixture" not in result.error

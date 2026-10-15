@@ -6,11 +6,11 @@
 
 ## 撤回
 
-撤回只发送一次 POST /api/revoke_any，不调用 /api/revoke_msg，也不在失败后切换接口。HTTP 404/405、超时、服务端拒绝和不明确结果都按失败处理。
+撤回只发送一次 POST /api/revoke_msg，不调用 /api/revoke_any，也不在失败后切换接口。HTTP 404/405、超时、服务端拒绝和不明确结果都按失败处理。
 
-接口依据为维护者提供的 [Apifox 撤回任何消息](https://s.apifox.cn/1d27f9da-72ec-4981-ae95-deb20a0c1412/410194260e0.md)。请求包含发送回执中的 newMsgId、createTime、toUserName；64 位消息 ID 保持 Python 整数精度。
+2026-10-15：核对当前固定 DLL（微信 4.1.8.27）的路由表，只注册 `/api/revoke_msg`，没有 `/api/revoke_any`；此前仅调用 `revoke_any` 会让每次撤回都打到不存在的路由而必然失败，现改回真实存在的 `revoke_msg`。字段依据维护者提供的 [Apifox 撤回任何消息](https://s.apifox.cn/1d27f9da-72ec-4981-ae95-deb20a0c1412/410194260e0.md)：发送回执中的 newMsgId、createTime、toUserName；64 位消息 ID 保持 Python 整数精度。
 
-只有明确的 baseResponse.ret == 0 才确认成功；失败日志仅包含固定分类及数值码。之前优先调用另一接口的实现已移除，不能再将其作为当前接口依据。历史 DLL 适配记录见 setu-recall-0.9.9.md，该记录不代表当前调用路径或真实撤回已成功。
+只有明确的 baseResponse.ret == 0 才确认成功；失败日志仅包含固定分类及数值码。历史 DLL 适配记录见 setu-recall-0.9.9.md，该记录不代表真实撤回已成功。
 
 定向测试覆盖唯一 POST 路径、精确参数、成功结果、HTTP 404/405 不回退、超时及失败不重试。测试模拟 HOOK 响应，没有向微信发送或撤回真实消息；真实生图和撤回仍由维护者在更新后验收。
 
