@@ -123,9 +123,10 @@ window.createActivityView = function (helpers) {
     $("#activityPrev").disabled = state.activityPage <= 1;
     $("#activityNext").disabled = state.activityPage >= pages;
     $("#copyLatestActivity").disabled = !filtered.some((item) => item.level !== "info");
-    const errors = state.activityItems.filter((item) => item.level === "error").length;
-    const warnings = state.activityItems.filter((item) => item.level === "warning").length;
-    $("#activitySummary").textContent = `最近 48 小时：${errors} 条错误 · ${warnings} 条警告。间隔不超过 5 分钟的同类异常合并，保留次数和首次、最近时间。`;
+    const hours = Number($("#activityRange").value) || 48;
+    const errors = filtered.filter((item) => item.level === "error").length;
+    const warnings = filtered.filter((item) => item.level === "warning").length;
+    $("#activitySummary").textContent = `当前筛选（最近 ${hours} 小时）：${filtered.length} 条记录 · ${errors} 条错误 · ${warnings} 条警告。间隔不超过 5 分钟的同类异常合并，保留次数和首次、最近时间。`;
     $("#activityList").innerHTML = items.length ? items.map((item) => {
       const level = Object.hasOwn(labels, item.level) ? item.level : "info";
       return `<article class="diagnostic-card ${level}">

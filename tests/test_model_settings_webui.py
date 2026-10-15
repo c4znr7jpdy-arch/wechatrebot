@@ -18,7 +18,7 @@ def test_provider_icons_default_save_and_editor_navigation(browser, manager_url,
         page.add_init_script(f"localStorage.setItem('wechatrebot-theme', '{theme}')")
         page.goto(manager_url)
         expect(page).to_have_title(re.compile("机器人管理$"))
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.locator('.nav-item[data-page="settings"]').click()

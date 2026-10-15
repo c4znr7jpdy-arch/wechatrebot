@@ -7,7 +7,7 @@ from test_manager_startup import browser, manager_url
 
 def open_schedules(page, url):
     page.goto(url)
-    expect(page.locator("#globalRefresh")).to_be_enabled()
+    expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
     if page.locator("#onboardingRecommended").is_visible():
         page.locator("#onboardingRecommended").click()
     page.evaluate("""() => {

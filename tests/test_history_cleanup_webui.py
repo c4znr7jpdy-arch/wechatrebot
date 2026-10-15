@@ -35,7 +35,7 @@ def test_date_cleanup_refreshes_retained_messages_from_settings(
     })();""")
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.evaluate("""() => {

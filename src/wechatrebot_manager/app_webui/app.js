@@ -845,7 +845,6 @@
     });
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
     $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
-    $("#globalRefresh").addEventListener("click", refreshStatus);
     $("#themeToggle").addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;

@@ -45,7 +45,7 @@ def test_manager_loads_all_resources_and_opens_subscription(browser, manager_url
         page.goto(manager_url)
         expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         expect(page.locator("#stateTitle")).not_to_have_text("正在检查环境")
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#globalRefresh")).to_have_count(0)
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.locator('.nav-item[data-page="subscription"]').click()
@@ -63,7 +63,6 @@ def test_manager_loads_all_resources_and_opens_subscription(browser, manager_url
         page.screenshot(path=str(tmp_path / "activity.png"))
         page.locator('.nav-item[data-page="home"]').click()
         expect(page.locator("#page-home")).to_be_visible()
-        page.locator("#globalRefresh").click()
         expect(page.locator("#stateTitle")).to_have_text("机器人可用")
         page.screenshot(path=str(tmp_path / "home.png"))
         assert not failed_responses, failed_responses
@@ -78,7 +77,7 @@ def test_wechat_signal_uses_live_connection_instead_of_last_environment_scan(bro
     page = browser.new_page()
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.evaluate("""() => {
@@ -96,7 +95,7 @@ def test_wechat_signal_uses_live_connection_instead_of_last_environment_scan(bro
         }""")
         for state, label in [("connected", "已连接"), ("disconnected", "待连接"), ("unknown", "状态待确认")]:
             page.evaluate("state => { window.testConnection = state; }", state)
-            page.locator("#globalRefresh").click()
+            # The existing status poll must update the signal without a refresh button.
             expect(page.locator("#signalWechatDetail")).to_have_text(f"4.1.8.27 · {label}")
     finally:
         page.close()
