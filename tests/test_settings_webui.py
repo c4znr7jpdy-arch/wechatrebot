@@ -401,7 +401,8 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             expect(dialog.locator("button:visible")).to_have_count(3)
             for surface in [dialog, dialog.locator(".report-preview-header"), dialog.locator(".report-preview-viewport")]:
                 assert surface.evaluate("e => getComputedStyle(e).backgroundColor") == "rgba(0, 0, 0, 0)"
-            assert dialog.evaluate("e => getComputedStyle(e, '::backdrop').backgroundColor") == "rgba(0, 0, 0, 0)"
+            backdrop = dialog.evaluate("e => getComputedStyle(e, '::backdrop').backgroundColor")
+            assert 0 < float(backdrop.rsplit(",", 1)[1].rstrip(")")) < 1, backdrop
             close = dialog.get_by_role("button", name="关闭预览")
             expect(close).to_have_text("")
             expect(close.locator("svg")).to_be_visible()
@@ -419,6 +420,7 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             }""")
             assert abs(geometry["dx"]) <= 1 and abs(geometry["dy"]) <= 1
             assert geometry["toolsBelow"] and abs(geometry["controlsCenter"]) <= 1
+            assert abs(close.bounding_box()["height"] - dialog.locator(".report-preview-tools").bounding_box()["height"]) <= 1
             dialog.locator('[data-action="in"]').click()
             expect(dialog.locator("output")).to_have_text("125%")
             dialog.locator('[data-action="out"]').click()
