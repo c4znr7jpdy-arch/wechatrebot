@@ -1,0 +1,4503 @@
+/* Soft UI skin for the manager web UI — GENERATED, do not edit here.
+ *
+ * Sources: 柔和界面设计稿/layers/  (see 设计说明.md)
+ * Rebuild: python 柔和界面设计稿/build_skin.py
+ *
+ * Opt-in only. Activated by html[data-skin="soft"], which soft-theme.js sets from
+ * ?style=soft. The shipped look is unchanged while the attribute is absent.
+ * Native Date, Select and Listbox controls stay native (release/premium-ui.json).
+ *
+ * Layers: 00-core.css, 10-home.css, 20-features.css, 30-groups-history.css, 40-schedules-activity.css, 50-settings-subscription-help.css
+ */
+/* ==========================================================================
+   Soft UI skin — core layer
+   Tokens, application shell and shared primitives.
+   ========================================================================== */
+
+/* Everything is scoped to html[data-skin="soft"] (set by soft-theme.js). The
+   shipped look is untouched while that attribute is absent, and the prefix also
+   outranks the single-class rules in app.css and design-overrides.css.
+   Native Date, Select and Listbox controls stay native: only their box is styled.
+
+   Only CSS the repository already relies on is used here: backdrop-filter is
+   present in design-overrides.css, while colour blending is written as explicit
+   rgba and per-accent line tokens rather than color-mix(), so the skin adds no
+   new engine dependency to the WebView2 baseline. */
+
+html[data-skin="soft"] {
+  /* Surfaces: cool near-white instead of the warm grey canvas. */
+  --canvas: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --surface-muted: #f1f2f4;
+  --surface-inset: #f7f8fa;
+  --surface-hover: #f5f6f8;
+  --surface-selected: #eaf1ff;
+  --control-surface: #ffffff;
+  --message-canvas: #f7f8fa;
+  --chart-surface: #ffffff;
+  --chart-summary: #f7f8fa;
+  --chart-footer: #fbfbfc;
+  --chart-divider: #eef0f3;
+  --chart-track-border: #e7e9ee;
+  --chart-grid-a: #f7f8fa;
+  --chart-grid-b: #e9ecf1;
+
+  /* Text */
+  --ink: #14181f;
+  --ink-2: #333a45;
+  --muted: #5f6673;
+  --subtle: #8a92a0;
+
+  /* Hairlines */
+  --line: #e7e9ee;
+  --line-strong: #d5d9e0;
+
+  /* Accents. Primary keeps the shipped brand blue; the supporting tints are
+     the pastel set the reference uses for state chips and event blocks. */
+  --blue-700: #1f56d9;
+  --blue-600: #2f6bff;
+  --blue-100: #eaf1ff;
+  --green-700: #12805a;
+  --green-600: #17a673;
+  --green-100: #e4f7ef;
+  --amber-700: #b06a08;
+  --amber-100: #fdf0d9;
+  --red-700: #c5394c;
+  --red-100: #fdeaea;
+  --violet-700: #6a49e8;
+  --violet-600: #7c5cff;
+  --violet-100: #efebff;
+  --teal-600: #0f9d9d;
+  --teal-100: #e2f6f6;
+
+  /* Hairline tints that pair with each accent surface. */
+  --blue-line: #c9daff;
+  --green-line: #bfe6d3;
+  --amber-line: #f0d6a6;
+  --red-line: #f2c6cb;
+
+  /* Translucent surfaces: glass topbar, dimming veil, focus and error rings. */
+  --glass: rgba(255, 255, 255, .78);
+  --veil: rgba(11, 18, 32, .46);
+  --ring-soft: rgba(47, 107, 255, .18);
+  --ring-error: rgba(197, 57, 76, .16);
+
+  /* Elevation: the shipped light theme has no shadows at all, which is the
+     single biggest difference from the reference. Three soft, wide steps. */
+  --shadow: 0 6px 20px rgba(16, 24, 40, .06);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
+  --shadow-md: 0 10px 28px rgba(16, 24, 40, .09);
+  --shadow-lg: 0 18px 50px rgba(16, 24, 40, .14);
+  --glow-primary: rgba(47, 107, 255, .24);
+
+  /* Shape */
+  --radius: 20px;
+  --radius-sm: 10px;
+  --radius-control: 12px;
+  --radius-card: 18px;
+  --radius-pill: 999px;
+
+  /* Headings move off the heavy display face to the bundled rounded one, which
+     matches the reference's lighter geometric weight. No new font is added. */
+  --font-display: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+
+  color: var(--ink);
+}
+
+html[data-skin="soft"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0f1319;
+  --surface: #161b22;
+  --surface-2: #1b2129;
+  --surface-muted: #1b2129;
+  --surface-inset: #12171d;
+  --surface-hover: #1d242c;
+  --surface-selected: #1f2a3d;
+  --control-surface: #161b22;
+  --message-canvas: #12171d;
+  --chart-surface: #161b22;
+  --chart-summary: #1b2129;
+  --chart-footer: #12171d;
+  --chart-divider: #252c36;
+  --chart-track-border: #2c3542;
+  --chart-grid-a: #1a2129;
+  --chart-grid-b: #232c37;
+
+  --ink: #eef2f7;
+  --ink-2: #cfd6e0;
+  --muted: #a7b0bd;
+  --subtle: #7d8794;
+
+  --line: #252c36;
+  --line-strong: #39424f;
+
+  --blue-700: #8eb8ff;
+  --blue-600: #6ea8ff;
+  --blue-100: #1b2740;
+  --green-700: #7ee0b4;
+  --green-600: #4fcb96;
+  --green-100: #14312a;
+  --amber-700: #f0c580;
+  --amber-100: #3a2c17;
+  --red-700: #ff9aa7;
+  --red-100: #3d1f24;
+  --violet-700: #bda6ff;
+  --violet-600: #a68bff;
+  --violet-100: #241f42;
+  --teal-600: #5fd2d2;
+  --teal-100: #14302f;
+
+  --blue-line: #2b3f63;
+  --green-line: #1f5140;
+  --amber-line: #5a4526;
+  --red-line: #5c2b32;
+
+  --glass: rgba(22, 27, 34, .78);
+  --veil: rgba(2, 6, 12, .68);
+  --ring-soft: rgba(110, 168, 255, .24);
+  --ring-error: rgba(255, 154, 167, .18);
+
+  --shadow: 0 6px 20px rgba(0, 0, 0, .38);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .30);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, .55);
+  --glow-primary: rgba(0, 0, 0, .40);
+}
+
+/* ---------- base ---------- */
+
+html[data-skin="soft"] body {
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+html[data-skin="soft"] ::selection {
+  color: var(--ink);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] * {
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+html[data-skin="soft"] button:focus-visible,
+html[data-skin="soft"] input:focus-visible,
+html[data-skin="soft"] select:focus-visible,
+html[data-skin="soft"] textarea:focus-visible,
+html[data-skin="soft"] summary:focus-visible,
+html[data-skin="soft"] [tabindex]:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- shell ---------- */
+
+html[data-skin="soft"] .app-shell {
+  background: var(--canvas);
+}
+
+html[data-skin="soft"] .sidebar {
+  color: var(--ink-2);
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  box-shadow: 6px 0 24px rgba(16, 24, 40, .04);
+}
+
+html[data-skin="soft"][data-theme="dark"] .sidebar {
+  box-shadow: 6px 0 24px rgba(0, 0, 0, .35);
+}
+
+html[data-skin="soft"] .brand-block {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .brand-mark {
+  border-radius: 14px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
+}
+
+html[data-skin="soft"] .brand-mark img {
+  border-radius: 12px;
+}
+
+html[data-skin="soft"] .brand-copy strong {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .brand-copy span,
+html[data-skin="soft"] .nav-label {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1em;
+}
+
+html[data-skin="soft"] .nav-item {
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+html[data-skin="soft"] .nav-item:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .nav-item.active {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  font-weight: 600;
+}
+
+/* The shipped active row adds a marker bar; the soft skin uses the pill alone. */
+html[data-skin="soft"] .nav-item::before,
+html[data-skin="soft"] .nav-item.active::before {
+  content: none;
+  display: none;
+}
+
+html[data-skin="soft"] .sidebar-foot {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .sidebar-health,
+html[data-skin="soft"] .sidebar-version {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .health-dot.online {
+  background: var(--green-600);
+  box-shadow: 0 0 0 3px var(--green-100);
+}
+
+html[data-skin="soft"] .health-dot.warning {
+  background: var(--amber-700);
+  box-shadow: 0 0 0 3px var(--amber-100);
+}
+
+html[data-skin="soft"] .health-dot.error {
+  background: var(--red-700);
+  box-shadow: 0 0 0 3px var(--red-100);
+}
+
+html[data-skin="soft"] .theme-toggle {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .theme-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .main-area {
+  background: var(--canvas);
+}
+
+/* ---------- topbar: translucent, so content scrolling under it stays legible ---------- */
+
+html[data-skin="soft"] .topbar {
+  border-bottom: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: saturate(150%) blur(18px);
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+}
+
+html[data-skin="soft"] .topbar strong {
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+
+html[data-skin="soft"] .eyebrow {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .content-scroll {
+  background: var(--canvas);
+}
+
+/* ---------- page framing ---------- */
+
+html[data-skin="soft"] .page {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .page-heading h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+html[data-skin="soft"] .page-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .account-chip {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .account-chip span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .account-chip strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .section-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .section-heading p,
+html[data-skin="soft"] .microcopy,
+html[data-skin="soft"] .subtle {
+  color: var(--muted);
+}
+
+/* ---------- panels ---------- */
+
+html[data-skin="soft"] .panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .table-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- buttons: the pill shape is the reference's clearest control signal ---------- */
+
+html[data-skin="soft"] .button {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease,
+    color .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] .button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+html[data-skin="soft"] .button.primary {
+  color: #fff;
+  border: 1px solid transparent;
+  background: var(--blue-600);
+  box-shadow: 0 6px 16px var(--glow-primary);
+}
+
+html[data-skin="soft"] .button.primary:hover:not(:disabled) {
+  background: var(--blue-700);
+  box-shadow: 0 8px 22px var(--glow-primary);
+}
+
+html[data-skin="soft"][data-theme="dark"] .button.primary {
+  color: #0d1420;
+}
+
+html[data-skin="soft"] .button.secondary {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .button.secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .button.ghost {
+  color: var(--muted);
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+html[data-skin="soft"] .button.ghost:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .button.danger {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .button.danger:hover:not(:disabled) {
+  color: #fff;
+  border-color: transparent;
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] .button:disabled {
+  color: var(--subtle);
+  border-color: var(--line);
+  background: var(--surface-muted);
+  box-shadow: none;
+  opacity: 1;
+}
+
+html[data-skin="soft"] .row-action,
+html[data-skin="soft"] .inline-action {
+  color: var(--blue-700);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .row-action:hover:not(:disabled),
+html[data-skin="soft"] .inline-action:hover:not(:disabled) {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .field-label-action {
+  color: var(--subtle);
+}
+
+/* ---------- status badges: pastel pill plus a dot, never colour alone ---------- */
+
+html[data-skin="soft"] .status-badge {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .status-badge > span {
+  border-radius: 50%;
+}
+
+html[data-skin="soft"] .status-badge.online,
+html[data-skin="soft"] .status-badge.success {
+  color: var(--green-700);
+  border-color: var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .status-badge.online > span,
+html[data-skin="soft"] .status-badge.success > span {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] .status-badge.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .status-badge.warning > span {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] .status-badge.error {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .status-badge.error > span {
+  background: var(--red-700);
+}
+
+/* ---------- inputs ---------- */
+
+html[data-skin="soft"] .form-field input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .form-field select,
+html[data-skin="soft"] .form-field textarea,
+html[data-skin="soft"] .settings-card input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .settings-card select,
+html[data-skin="soft"] .settings-card textarea,
+html[data-skin="soft"] .modal input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .modal select,
+html[data-skin="soft"] .search-box input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .form-field input:not([type="checkbox"]):not([type="radio"]):hover:not(:disabled),
+html[data-skin="soft"] .form-field select:hover:not(:disabled),
+html[data-skin="soft"] .form-field textarea:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] .form-field input:focus-visible,
+html[data-skin="soft"] .form-field select:focus-visible,
+html[data-skin="soft"] .form-field textarea:focus-visible,
+html[data-skin="soft"] .settings-card input:focus-visible,
+html[data-skin="soft"] .settings-card select:focus-visible,
+html[data-skin="soft"] .settings-card textarea:focus-visible {
+  border-color: var(--blue-600);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .form-field input::placeholder,
+html[data-skin="soft"] .form-field textarea::placeholder,
+html[data-skin="soft"] .search-box input::placeholder {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .form-field > span,
+html[data-skin="soft"] .form-field > label:first-child {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .form-field small {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .form-field [aria-invalid="true"] {
+  border-color: var(--red-700);
+  box-shadow: 0 0 0 3px var(--ring-error);
+}
+
+html[data-skin="soft"] .form-field .field-error {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .form-field.tinted-list textarea {
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .path-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .path-box code {
+  color: var(--ink-2);
+}
+
+/* ---------- toggles ---------- */
+
+html[data-skin="soft"] .toggle-track {
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, .08);
+}
+
+html[data-skin="soft"] .toggle input:checked + .toggle-track {
+  background: var(--blue-600);
+  box-shadow: 0 4px 12px var(--glow-primary);
+}
+
+html[data-skin="soft"] .toggle-track::after {
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- segmented control and search box ---------- */
+
+html[data-skin="soft"] .segmented {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  padding: 3px;
+}
+
+html[data-skin="soft"] .segmented button {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .segmented button.active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .search-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .search-box:focus-within {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .search-box svg {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .search-box input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-skin="soft"] .clear-search {
+  color: var(--subtle);
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .clear-search:hover {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+/* ---------- tables ---------- */
+
+html[data-skin="soft"] table th {
+  color: var(--subtle);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] tbody tr.selected td {
+  background: var(--surface-selected);
+}
+
+html[data-skin="soft"] .table-empty {
+  color: var(--subtle);
+}
+
+/* ---------- feedback surfaces ---------- */
+
+html[data-skin="soft"] .toast {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .toast.error {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .loading-row {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .empty-symbol {
+  color: var(--blue-700);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .empty-state h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .empty-state p {
+  color: var(--muted);
+}
+
+/* ---------- modals and onboarding ---------- */
+
+html[data-skin="soft"] .modal-backdrop,
+html[data-skin="soft"] .onboarding-backdrop {
+  background: var(--veil);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] .modal,
+html[data-skin="soft"] .onboarding-dialog {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .modal-icon {
+  border-radius: var(--radius-card);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .modal-actions .button {
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .modal-progress {
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .modal-progress span {
+  border-radius: var(--radius-pill);
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] .onboarding-steps article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .onboarding-note,
+html[data-skin="soft"] .readiness-checklist li {
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+/* ---------- native dialogs: date range, report preview, copy menu ----------
+   These are separate <dialog> elements, not children of .modal-backdrop, so they
+   need their own treatment or they keep the shipped look under the skin. */
+
+html[data-skin="soft"] .date-range-dialog::backdrop,
+html[data-skin="soft"] .report-preview-dialog::backdrop {
+  background: var(--veil);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] .date-range-dialog,
+html[data-skin="soft"] .report-preview-dialog {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .date-range-dialog .panel-heading h2,
+html[data-skin="soft"] .report-preview-header h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields label,
+html[data-skin="soft"] .date-range-dialog .range-navigation span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields input.active {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-calendars h3 {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button {
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button:hover,
+html[data-skin="soft"] .date-range-dialog .range-days button:focus-visible {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button.in-range {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button.selected {
+  color: #fff;
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button:disabled {
+  color: var(--subtle);
+  background: transparent;
+}
+
+html[data-skin="soft"] .report-preview-header p,
+html[data-skin="soft"] .report-preview-status {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .report-preview-close {
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .report-preview-close:hover {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .report-preview-tools output {
+  color: var(--ink-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .report-preview-viewport {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .report-preview-viewport img {
+  border-radius: var(--radius-control);
+}
+
+html[data-skin="soft"] .preview-copy-menu {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .preview-copy-menu button {
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .preview-copy-menu button:hover,
+html[data-skin="soft"] .preview-copy-menu button:focus-visible {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] .button,
+  html[data-skin="soft"] .nav-item,
+  html[data-skin="soft"] .search-box,
+  html[data-skin="soft"] .panel {
+    transition: none;
+  }
+
+  html[data-skin="soft"] .button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+
+/* ==========================================================================
+   Soft UI skin — 运行中心 (run centre)
+   Status disc, three-stage ledger, entry cards, setup alerts, signal strip.
+   ========================================================================== */
+
+/* ---------- licence notice and environment alert become soft tinted cards ---------- */
+
+html[data-skin="soft"] .license-notice {
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-card);
+  background: var(--amber-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .license-notice strong {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] .license-notice p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .environment-alert {
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-card);
+  background: var(--red-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .alert-code {
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, .72);
+}
+
+html[data-skin="soft"] .alert-code span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .alert-code strong {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .alert-copy h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .alert-copy p,
+html[data-skin="soft"] .alert-copy ol {
+  color: var(--muted);
+}
+
+/* ---------- runtime control: the status disc is the page's focal point ---------- */
+
+html[data-skin="soft"] #page-home .runtime-control {
+  border-radius: var(--radius);
+}
+
+html[data-skin="soft"] #page-home .control-body {
+  gap: 28px;
+}
+
+html[data-skin="soft"] #page-home .home-status-icon {
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green-600);
+  box-shadow: 0 10px 26px rgba(23, 166, 115, .28);
+}
+
+html[data-skin="soft"] #page-home .home-status-icon.checking {
+  background: var(--blue-600);
+  box-shadow: 0 10px 26px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-home .home-status-icon.problem,
+html[data-skin="soft"] #page-home .home-status-icon.waiting {
+  background: var(--amber-700);
+  box-shadow: 0 10px 26px rgba(176, 106, 8, .26);
+}
+
+html[data-skin="soft"] #page-home .status-orbit .orbit-track {
+  stroke: var(--line);
+}
+
+html[data-skin="soft"] #page-home .status-orbit .orbit-progress {
+  stroke: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .orbit-progress {
+  stroke: var(--green-600);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="error"] .orbit-progress {
+  stroke: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .power-button {
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+html[data-skin="soft"] #page-home .power-button:hover:not(:disabled) {
+  border-color: var(--blue-line);
+  box-shadow: 0 14px 34px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-button {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .force-stop-action {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .control-copy h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+html[data-skin="soft"] #page-home .control-copy p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .state-kicker {
+  color: var(--subtle);
+  letter-spacing: .08em;
+}
+
+/* ---------- three-stage ledger: tinted step chips instead of a plain list ---------- */
+
+html[data-skin="soft"] #page-home .stage-list li {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-home .stage-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+/* The shipped connector line between stages no longer reads as a rail. */
+html[data-skin="soft"] #page-home .stage-list li:not(:last-child)::after {
+  background: var(--line);
+}
+
+html[data-skin="soft"] #page-home .stage-index {
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.done .stage-index {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.current .stage-index {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.problem .stage-index {
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-home .stage-list em,
+html[data-skin="soft"] #page-home .stage-list small {
+  color: var(--muted);
+}
+
+/* ---------- entry cards ---------- */
+
+html[data-skin="soft"] .home-entry {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] .home-entry:hover {
+  border-color: var(--blue-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+html[data-skin="soft"] .home-entry > svg:first-child {
+  color: var(--blue-700);
+  padding: 10px;
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .home-entry > svg:last-child {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .home-entry strong {
+  color: var(--ink);
+}
+
+/* ---------- setup reminders: pastel cards with a tinted icon chip ---------- */
+
+html[data-skin="soft"] .home-setup-alert {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="1"] {
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="2"] {
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="3"] {
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .home-setup-alert-icon {
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, .72);
+}
+
+html[data-skin="soft"] .home-setup-alert-copy strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .home-setup-alert-copy p {
+  color: var(--muted);
+}
+
+/* ---------- error panel ---------- */
+
+html[data-skin="soft"] #page-home .error-panel {
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-card);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .error-label {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .error-panel h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-home .error-panel p,
+html[data-skin="soft"] #page-home .error-panel ol {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .error-code {
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .72);
+}
+
+/* ---------- signal strip ---------- */
+
+html[data-skin="soft"] #page-home .signal-strip article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-home .signal-strip article + article {
+  border-left: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-home .signal-strip span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-home .signal-strip strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-home .signal-strip small {
+  color: var(--muted);
+}
+
+
+/* ==========================================================================
+   Soft UI skin — 功能中心 (feature centre)
+   Catalogue rail, detail frame, quick reference, config sections and callouts.
+   ========================================================================== */
+
+/* The page keeps the shipped grid geometry throughout: this layer only changes
+   surfaces, radii, type and state colour, so the catalogue rail, the sticky save
+   bar and the native feature-page iframe all stay laid out exactly as before. */
+
+/* ---------- catalogue rail: panel, muted summary, soft list rows ---------- */
+
+/* The rail is already a .panel, so core supplies the 20px card and soft shadow;
+   it only needs the roomier inner padding. */
+html[data-skin="soft"] #page-features .feature-layout {
+  gap: 18px;
+}
+
+html[data-skin="soft"] #page-features .feature-catalog {
+  padding: 18px;
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-features .feature-summary {
+  padding: 14px 2px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-features .feature-filters {
+  margin-top: 12px;
+}
+
+html[data-skin="soft"] .feature-list {
+  margin: 0 -8px;
+  padding: 2px 8px 10px;
+}
+
+/* Rows keep the shipped grid and hairline separators; only the fill changes.
+   Hover is a rounded tint and the active row is a soft blue wash — the shipped
+   inset marker bar is cleared, never redrawn. */
+html[data-skin="soft"] #page-features .feature-item {
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: transparent;
+  transition: background-color .16s ease, color .16s ease;
+}
+
+html[data-skin="soft"] #page-features .feature-item:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-features .feature-item.active {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-features .feature-item strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-features .feature-item.active strong {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-features .feature-item small {
+  color: var(--subtle);
+}
+
+/* Loaded state: the dot keeps its tint and gains a halo ring, so the state reads
+   from a ring-versus-fill shape change as well as the colour. */
+html[data-skin="soft"] .feature-state {
+  border: 2px solid var(--line-strong);
+  background: transparent;
+}
+
+html[data-skin="soft"] .feature-state.enabled {
+  border-color: var(--green-600);
+  background: var(--green-600);
+  box-shadow: 0 0 0 3px var(--green-100);
+}
+
+/* ---------- detail frame and headings ---------- */
+
+html[data-skin="soft"] #page-features .feature-detail {
+  background: var(--surface);
+}
+
+/* The compact heading holds only the readiness button; keep it right-aligned. */
+html[data-skin="soft"] #page-features .feature-page-heading {
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+html[data-skin="soft"] .feature-detail-head {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .feature-detail-head h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .feature-detail-head p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-features .feature-detail .panel-heading {
+  border-bottom-color: var(--line);
+}
+
+/* Legacy tab strip kept by some feature pages: hairline rail, soft active tint. */
+html[data-skin="soft"] #page-features .feature-tabs {
+  border-color: var(--line);
+}
+
+html[data-skin="soft"] #page-features .feature-tabs button {
+  color: var(--muted);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-features .feature-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+}
+
+/* ---------- quick reference: a collapsible inner card ---------- */
+
+html[data-skin="soft"] .feature-quick-reference {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .feature-quick-reference > summary {
+  padding: 15px 18px;
+  color: var(--ink);
+  border-radius: inherit;
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .feature-quick-reference > summary:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .reference-toggle-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .feature-reference-body {
+  padding: 0 18px 16px;
+}
+
+html[data-skin="soft"] .feature-reference-actions {
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* Command reference rows: hairline rules, mono command in the brand blue. */
+html[data-skin="soft"] .feature-command-groups {
+  gap: 14px 20px;
+}
+
+html[data-skin="soft"] .feature-command-group > strong {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] .feature-command-item {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .feature-command-item code {
+  color: var(--blue-700);
+  font: 600 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+html[data-skin="soft"] .feature-command-item span {
+  color: var(--muted);
+}
+
+/* Scheduling tag: the label text carries the meaning, the tint and its matching
+   hairline are a secondary cue. */
+html[data-skin="soft"] .command-schedule-status {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .command-schedule-status.supported {
+  color: var(--green-700);
+  border: 1px solid var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.needs-condition {
+  color: var(--amber-700);
+  border: 1px solid var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.unsupported {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+/* Migration note becomes a quiet inset strip. */
+html[data-skin="soft"] .feature-prerequisite {
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .feature-prerequisite strong {
+  color: var(--ink);
+}
+
+/* ---------- config tabs and sections ---------- */
+
+html[data-skin="soft"] .config-tabs {
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .config-tabs button {
+  color: var(--muted);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .config-tabs button:hover:not(:disabled) {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .config-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-features .config-section {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Grouped sections ship a 3px left accent bar; the skin drops the bar in favour
+   of a plain elevated card, so no section carries a marker stripe. */
+html[data-skin="soft"] #page-features .config-section.grouped {
+  border: 1px solid var(--blue-line);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-features .config-section > h3 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .config-section-grid {
+  gap: 16px 18px;
+}
+
+html[data-skin="soft"] .optional-group-heading h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .optional-group-heading p {
+  color: var(--muted);
+}
+
+/* The grid is display:grid, which overrides [hidden]; keep the shipped guard. */
+html[data-skin="soft"] .optional-model-group > .config-section-grid[hidden] {
+  display: none;
+}
+
+/* ---------- tinted list, checkbox grids and inline controls ---------- */
+
+/* The shipped diagonal hatch is replaced by a flat blue tint, which reads calmer
+   against the near-white cards. */
+html[data-skin="soft"] .form-field.tinted-list {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .form-field.tinted-list textarea {
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] .option-grid {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .option-check,
+html[data-skin="soft"] .secret-clear {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .option-check input,
+html[data-skin="soft"] .secret-clear input {
+  accent-color: var(--blue-600);
+}
+
+html[data-skin="soft"] .secret-clear {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .secret-reveal,
+html[data-skin="soft"] .group-field-button {
+  align-self: flex-start;
+}
+
+/* Collapsible advanced block (shared with the group pages). */
+html[data-skin="soft"] .advanced-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .advanced-details summary {
+  color: var(--blue-700);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .advanced-details[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .advanced-details > label > span {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- guidance and assessment callouts ---------- */
+
+/* The shipped guide cards carry a 4px left accent bar; the skin keeps a tinted
+   card with a full hairline instead, so no callout reads as a marker stripe. */
+html[data-skin="soft"] #page-features .feature-guide {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-features .feature-guide strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-features .feature-guide p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-features .feature-guide ol {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] .feature-assessment {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .feature-assessment p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .assessment-chip,
+html[data-skin="soft"] .assessment-state {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .assessment-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .assessment-state {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-features .assessment {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+/* ---------- legacy guide block: soft tinted card, no marker stripe ---------- */
+
+html[data-skin="soft"] #page-features .guide {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+/* ---------- sticky save bar and the native feature page panel ---------- */
+
+html[data-skin="soft"] .feature-savebar {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .feature-savebar #featureNote {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .feature-save-actions {
+  gap: 10px;
+}
+
+html[data-skin="soft"] .feature-page-panel {
+  gap: 12px;
+}
+
+html[data-skin="soft"] .feature-page-status {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+/* The native page frame keeps its full-bleed override in the shipped sheet; here
+   it only needs the soft card edge where it is not full bleed. */
+html[data-skin="soft"] .feature-page-panel iframe {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--control-surface);
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-features .feature-item {
+    transition: none;
+  }
+}
+
+
+/* ==========================================================================
+   Soft UI skin — 群聊&私聊配置 + 消息中心
+   目录页的表格/检查器，以及消息中心的会话列表、气泡与检查器。
+   ========================================================================== */
+
+/* Both pages already read their colours from the shared tokens, so this layer
+   only re-points surfaces, radii and shadows. Layout is left exactly as shipped:
+   the grid column templates and the resizable-panel tracks from panel-layout.js
+   are untouched, so saved panel sizes keep working.
+
+   Native <select>, <input type="date"> and listboxes stay native — only the box
+   (border, radius, padding, background) is styled, never their popup or arrow. */
+
+/* ---------- 群聊&私聊配置：页头操作与分类页签 ---------- */
+
+html[data-skin="soft"] #page-groups .directory-actions {
+  gap: 10px;
+}
+
+/* The category strip becomes a soft segmented control: muted track, and the
+   selected tab lifts out as a white pill instead of an ink block. */
+html[data-skin="soft"] #page-groups .management-tabs {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-weight: 600;
+  transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button.active {
+  color: var(--blue-700);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The shipped strip underlines the active tab; the pill fill is the signal here,
+   so the marker bar is neutralised the same way 10-home.css drops the nav bar. */
+html[data-skin="soft"] #page-groups .management-tabs button::after {
+  content: none;
+  display: none;
+}
+
+/* ---------- 目录状态提示 ---------- */
+
+html[data-skin="soft"] #page-groups .directory-status {
+  min-height: 56px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-groups .directory-status strong { color: var(--ink); }
+html[data-skin="soft"] #page-groups .directory-status span { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .directory-status.success {
+  border-color: var(--green-line);
+  border-left-color: var(--green-600);
+  background: var(--green-100);
+}
+html[data-skin="soft"] #page-groups .directory-status.success strong { color: var(--green-700); }
+
+html[data-skin="soft"] #page-groups .directory-status.warning {
+  border-color: var(--amber-line);
+  border-left-color: var(--amber-700);
+  background: var(--amber-100);
+}
+html[data-skin="soft"] #page-groups .directory-status.warning strong { color: var(--amber-700); }
+
+/* ---------- 双栏面板：表格盘与检查器统一成 20px 圆角与柔和阴影 ---------- */
+
+html[data-skin="soft"] #page-groups .group-table-panel,
+html[data-skin="soft"] #page-groups .contact-table-panel,
+html[data-skin="soft"] #page-groups .group-inspector,
+html[data-skin="soft"] #page-groups .contact-inspector {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-groups .group-toolbar {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-groups .group-meta span { color: var(--muted); }
+
+/* ---------- 表格：仅保留发丝行分隔线，表头为弱化小字 ---------- */
+
+html[data-skin="soft"] #page-groups .group-table,
+html[data-skin="soft"] #page-groups .contact-table {
+  background: transparent;
+}
+
+html[data-skin="soft"] #page-groups .group-table th,
+html[data-skin="soft"] #page-groups .contact-table th {
+  color: var(--subtle);
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-groups .group-table td,
+html[data-skin="soft"] #page-groups .contact-table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Rows: hover is a soft wash, selection is a pale blue fill with primary text
+   and no left marker bar (the shipped inset bar is neutralised). */
+html[data-skin="soft"] #page-groups .group-row,
+html[data-skin="soft"] #page-groups .contact-row {
+  transition: background-color .16s ease;
+}
+
+html[data-skin="soft"] #page-groups .group-row:hover,
+html[data-skin="soft"] #page-groups .contact-row:hover {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-skin="soft"] #page-groups .group-row:hover td,
+html[data-skin="soft"] #page-groups .contact-row:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-groups .group-row.selected,
+html[data-skin="soft"] #page-groups .contact-row.selected {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-skin="soft"] #page-groups .group-row.selected td,
+html[data-skin="soft"] #page-groups .contact-row.selected td {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-groups .group-row:focus-visible,
+html[data-skin="soft"] #page-groups .contact-row:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: -2px;
+}
+
+/* ---------- 头像：淡彩底 + 同色系深色字，取代原来的饱和实底 ---------- */
+
+html[data-skin="soft"] #page-groups .group-avatar,
+html[data-skin="soft"] #page-groups .contact-avatar {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-groups .group-avatar.tone-1 { color: var(--violet-700); background: var(--violet-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-2 { color: var(--teal-600); background: var(--teal-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-3 { color: var(--green-700); background: var(--green-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-4 { color: var(--amber-700); background: var(--amber-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-5 { color: var(--blue-700); background: var(--blue-100); }
+
+/* ---------- 检查器内部：空态、标题、页签、成员与页脚 ---------- */
+
+html[data-skin="soft"] #page-groups .group-inspector-empty { color: var(--muted); }
+html[data-skin="soft"] #page-groups .group-inspector-empty h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-groups .group-inspector-empty p { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .inspector-hero { border-bottom: 1px solid var(--line); }
+
+html[data-skin="soft"] #page-groups .inspector-group-title h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-groups .inspector-id { color: var(--subtle); }
+
+html[data-skin="soft"] #page-groups .inspector-tabs { border-bottom: 1px solid var(--line); }
+html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); font-weight: 600; }
+html[data-skin="soft"] #page-groups .inspector-tabs button:hover { color: var(--ink); }
+html[data-skin="soft"] #page-groups .inspector-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-groups .member-list article { border-top: 1px solid var(--line); }
+html[data-skin="soft"] #page-groups .member-list strong { color: var(--ink-2); }
+html[data-skin="soft"] #page-groups .member-list small { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .inspector-footer {
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+html[data-skin="soft"] #page-groups .inspector-footer span { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .contact-pagination {
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  background: var(--surface-inset);
+}
+html[data-skin="soft"] #page-groups .contact-pagination > div { gap: 8px; }
+
+/* ---------- 行内动作与目录文字 ---------- */
+
+html[data-skin="soft"] #page-groups .row-action {
+  color: var(--blue-700);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: background-color .16s ease, color .16s ease;
+}
+html[data-skin="soft"] #page-groups .row-action:hover:not(:disabled) { background: var(--blue-100); }
+html[data-skin="soft"] #page-groups .row-action.delete,
+html[data-skin="soft"] #page-groups .row-action.danger { color: var(--red-700); }
+
+html[data-skin="soft"] #page-groups .actions-column { text-align: right; color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .group-name { color: var(--ink); font-weight: 600; }
+html[data-skin="soft"] #page-groups .group-list-count { color: var(--muted); }
+html[data-skin="soft"] #page-groups .contact-account { color: var(--ink-2); }
+html[data-skin="soft"] #page-groups .contact-id { color: var(--subtle); }
+html[data-skin="soft"] #page-groups .contact-section-heading h3 { color: var(--ink); }
+
+/* ---------- 群/私聊规则表单：原生控件只改外壳 ---------- */
+
+html[data-skin="soft"] #page-groups .group-policy-form select,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"],
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"],
+html[data-skin="soft"] #page-groups .private-feature-policy select,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"],
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"],
+html[data-skin="soft"] #page-groups .chat-profile-field select {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form select:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy select:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"]:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form select:focus-visible,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"]:focus-visible,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"]:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy select:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"]:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"]:focus-visible,
+html[data-skin="soft"] #page-groups .chat-profile-field select:focus-visible {
+  border-color: var(--blue-600);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] #page-groups .policy-summary {
+  color: var(--muted);
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form .advanced-details,
+html[data-skin="soft"] #page-groups .private-feature-policy .advanced-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+html[data-skin="soft"] #page-groups .advanced-details > summary {
+  color: var(--blue-700);
+  border-radius: var(--radius-sm);
+}
+html[data-skin="soft"] #page-groups .advanced-details > summary:hover {
+  color: var(--ink);
+  background: var(--blue-100);
+}
+html[data-skin="soft"] #page-groups .group-feature-options { border-radius: var(--radius-control); }
+
+/* ==========================================================================
+   消息中心 (#page-history)
+   ========================================================================== */
+
+/* ---------- 工具栏、概要与会话布局 ---------- */
+
+html[data-skin="soft"] #page-history .history-toolbar {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-history .history-summary { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .history-layout {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ---------- 会话列表：柔和列表栏 + 圆角悬停/选中（去掉左侧色条） ---------- */
+
+html[data-skin="soft"] #page-history .conversation-list {
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-history .conversation-list button,
+html[data-skin="soft"] #page-history .conversation-list article {
+  border-bottom: 0;
+  background: transparent;
+}
+
+html[data-skin="soft"] #page-history .conversation-item {
+  width: auto;
+  margin: 3px 8px;
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease, color .16s ease;
+}
+
+html[data-skin="soft"] #page-history .conversation-item:hover,
+html[data-skin="soft"] #page-history .conversation-list article:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-history .conversation-item.active,
+html[data-skin="soft"] #page-history .conversation-list .selected {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-history .conversation-line strong { color: var(--ink); }
+html[data-skin="soft"] #page-history .conversation-item.active .conversation-line strong { color: var(--blue-700); }
+html[data-skin="soft"] #page-history .conversation-line time { color: var(--subtle); }
+html[data-skin="soft"] #page-history .conversation-main small { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .conversation-avatar {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+html[data-skin="soft"] #page-history .conversation-item[data-type="group"] .conversation-avatar {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+/* ---------- 消息面板与气泡 ---------- */
+
+html[data-skin="soft"] #page-history .message-pane { background: var(--surface); }
+
+html[data-skin="soft"] #page-history #conversationHeader {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-history #conversationHeader span { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .message-list { background: var(--message-canvas); }
+
+html[data-skin="soft"] #page-history .message-avatar {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+html[data-skin="soft"] #page-history .message.assistant .message-avatar {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-history .message-meta { color: var(--subtle); }
+html[data-skin="soft"] #page-history .message-author-name { color: var(--ink-2); }
+html[data-skin="soft"] #page-history .message-author-id { color: var(--subtle); }
+
+/* Incoming bubble: inset fill, ~16px radius, tightened on the tail (avatar) side.
+   Only the fill changes — the shipped left/right alignment is preserved. */
+html[data-skin="soft"] #page-history .message-bubble {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 6px 16px 16px 16px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Own bubble (the assistant/self side) keeps the primary tint + primary text. */
+html[data-skin="soft"] #page-history .message.assistant .message-bubble,
+html[data-skin="soft"] #page-history .message.mine .message-bubble {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  border-radius: 16px 6px 16px 16px;
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-history .message-bubble-quote blockquote { border-radius: var(--radius-sm); }
+
+html[data-skin="soft"] #page-history .message-bubble-notice {
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+html[data-skin="soft"] #page-history .message-bubble-notice strong { color: var(--ink); }
+
+html[data-skin="soft"] #page-history .message-read-status small { color: var(--muted); }
+
+/* ---------- 浮动提示：更早消息与新消息 ---------- */
+
+html[data-skin="soft"] #page-history .older-messages-status {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] #page-history .new-message-button {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+html[data-skin="soft"] #page-history .new-message-button:hover { background: var(--blue-100); }
+
+/* ---------- 会话检查器：分类信息、发送者卡片与危险动作 ---------- */
+
+html[data-skin="soft"] #page-history .conversation-inspector {
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history .conversation-inspector h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-history .conversation-inspector p { color: var(--muted); }
+html[data-skin="soft"] #page-history .conversation-inspector .eyebrow { color: var(--subtle); }
+html[data-skin="soft"] #page-history .inspector-conversation-title h2 { color: var(--ink); }
+
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list div { border-top: 1px solid var(--line); }
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list dt { color: var(--muted); }
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list dd { color: var(--ink-2); }
+
+html[data-skin="soft"] #page-history .current-sender > span { color: var(--subtle); }
+html[data-skin="soft"] #page-history .current-sender > div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+html[data-skin="soft"] #page-history .current-sender > div strong { color: var(--ink); }
+html[data-skin="soft"] #page-history .current-sender > div small { color: var(--subtle); }
+html[data-skin="soft"] #page-history .current-sender button {
+  color: var(--blue-700);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history .current-sender button:hover { background: var(--blue-100); }
+
+html[data-skin="soft"] #page-history .inspector-actions .danger-ghost {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+html[data-skin="soft"] #page-history .inspector-actions .danger-ghost:hover:not(:disabled) {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+/* ---------- 时间范围：原生日期框只改外壳 ---------- */
+
+html[data-skin="soft"] #page-history .date-field {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+html[data-skin="soft"] #page-history .date-field input {
+  color: var(--ink);
+  border: 0;
+  background: transparent;
+}
+
+/* ==========================================================================
+   可拖动面板手柄（两个页面共用）
+   ========================================================================== */
+
+/* The handle ships invisible; give it a soft visible affordance on hover/focus
+   so the resize target is discoverable, while staying out of the way at rest. */
+html[data-skin="soft"] .panel-resize-handle,
+html[data-skin="soft"] .panel-resize-edge {
+  background: transparent;
+}
+
+html[data-skin="soft"] .panel-resize-handle:hover,
+html[data-skin="soft"] .panel-resize-edge:hover,
+html[data-skin="soft"] .panel-resize-handle:focus-visible,
+html[data-skin="soft"] .panel-resize-edge:focus-visible {
+  background: var(--blue-100);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .panel-resize-handle:focus-visible,
+html[data-skin="soft"] .panel-resize-edge:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: -2px;
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-groups .management-tabs button,
+  html[data-skin="soft"] #page-groups .group-row,
+  html[data-skin="soft"] #page-groups .contact-row,
+  html[data-skin="soft"] #page-groups .row-action,
+  html[data-skin="soft"] #page-history .conversation-item {
+    transition: none;
+  }
+}
+
+
+/* ==========================================================================
+   Soft UI skin — 定时任务 (schedules) and 运行记录 (activity)
+   Stat tiles, task table and editor; diagnostic feed, trace panel and gantt.
+   ========================================================================== */
+
+/* Every rule keeps the page id its shipped counterpart already used, so it wins
+   on specificity as well as on order (soft-theme.css is the last stylesheet the
+   page loads). Only tokens from 00-core.css are referenced, so both themes come
+   for free and no dark override is needed. Native <select>, date and time inputs
+   keep their own popups and arrows: only the box changes here.
+
+   The row-state rules deliberately never lean on colour alone — every chip and
+   node pairs its tint with a label or a shape, and paused and draft share one
+   neutral chip that the text distinguishes. */
+
+/* ==========================================================================
+   定时任务 — heading, notices and the stat row
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-page-heading {
+  margin-bottom: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-page-heading p {
+  max-width: 720px;
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-notice {
+  color: var(--ink-2);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+  padding: 12px 14px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-notice.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+/* The shipped bordered chips become soft tinted tiles: label above, value below. */
+html[data-skin="soft"] #page-schedules .schedule-stat-pills {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  height: auto;
+  min-height: 84px;
+  padding: 16px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills strong {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(1) {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(1) strong {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(2) {
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(2) strong {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(3) {
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(3) strong {
+  color: var(--ink-2);
+}
+
+/* ==========================================================================
+   定时任务 — task table and filter bar
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .table-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-table-topbar {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-filters label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Native select: box only, never the popup or arrow. */
+html[data-skin="soft"] #page-schedules .schedule-filters select {
+  min-height: 40px;
+  padding: 8px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-filters select:hover {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-task-count {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-task-count strong {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-table-scroll {
+  scrollbar-gutter: stable;
+}
+
+/* Sticky header cells sit on the same tint as the topbar so rows never show through. */
+html[data-skin="soft"] #page-schedules .schedule-table-scroll thead {
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td:first-child {
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td:last-child {
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #scheduledTaskRows td small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #scheduledTaskRows .scheduled-name {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #scheduledTaskRows .scheduled-name:hover {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-names {
+  color: var(--subtle);
+}
+
+/* Task state chip: pastel pill with a dot plus the label. Enabled reads green,
+   attention reads amber, and paused or draft stay neutral so colour never has to
+   carry the state on its own. */
+html[data-skin="soft"] #page-schedules .task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .task-status::before {
+  content: "";
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--subtle);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.running {
+  color: var(--green-700);
+  border-color: var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.running::before {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.warning::before {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-icon {
+  color: var(--blue-700);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-cta {
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-policy-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy {
+  padding: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy > summary,
+html[data-skin="soft"] #page-schedules .schedule-command > summary {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy > p {
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   定时任务 — task editor
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-editor-layout {
+  gap: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-editor-heading h2,
+html[data-skin="soft"] #page-schedules .scheduled-form-section h3,
+html[data-skin="soft"] #page-schedules .schedule-summary h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-timezone-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--blue-100);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section,
+html[data-skin="soft"] #page-schedules .schedule-summary {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section h3 > span {
+  color: var(--blue-700);
+  border-radius: var(--radius-sm);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section .subtle,
+html[data-skin="soft"] #page-schedules .schedule-summary .subtle,
+html[data-skin="soft"] #page-schedules .schedule-summary > small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-summary > p {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+  margin-bottom: 16px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times strong {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times ol {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-selected,
+html[data-skin="soft"] #page-schedules .scheduled-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-selected > strong {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-preview p {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-preview img {
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-analysis-intro {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-analysis-intro strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-choices {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option {
+  border-bottom: 1px solid var(--line);
+  transition: background-color .16s ease, box-shadow .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:last-child {
+  border-bottom: 0;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:has(input:checked) {
+  background: var(--blue-100);
+  box-shadow: inset 3px 0 var(--blue-600);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option .scheduled-target-warning {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  transition: background-color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-chip:hover {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-weekdays label {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--control-surface);
+  transition: background-color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-weekdays label:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-command {
+  border-top: 1px solid var(--line);
+}
+
+/* Native command input: box only. */
+html[data-skin="soft"] #page-schedules .schedule-command input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-command > small,
+html[data-skin="soft"] #page-schedules .schedule-command-catalog {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card b {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card span {
+  color: var(--blue-700);
+}
+
+/* ==========================================================================
+   定时任务 — run history and the command-support chip
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading {
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run li {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run li small {
+  color: var(--muted);
+}
+
+/* Support chip shared with the feature catalogue; the label carries the state. */
+html[data-skin="soft"] .command-schedule-status {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .command-schedule-status.supported {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.needs-condition {
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.unsupported {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+/* ==========================================================================
+   运行记录 — heading, filter bar and feedback surfaces
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .page-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-panel {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-activity .activity-filters label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-activity .activity-toolbar {
+  gap: 8px;
+}
+
+html[data-skin="soft"] #page-activity .activity-search {
+  flex: 1 1 220px;
+  min-width: 190px;
+}
+
+/* Native select and search input: box only. */
+html[data-skin="soft"] #page-activity .activity-filters select,
+html[data-skin="soft"] #page-activity .activity-filters input {
+  min-height: 40px;
+  padding: 8px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-activity .activity-filters select:hover,
+html[data-skin="soft"] #page-activity .activity-filters input:hover {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-activity .activity-summary {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-read-error {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-control);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-activity .activity-feedback {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   运行记录 — activity list
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .activity-list {
+  position: relative;
+}
+
+html[data-skin="soft"] #page-activity .activity-item {
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease;
+}
+
+html[data-skin="soft"] #page-activity .activity-item + .activity-item {
+  border-top-color: var(--line);
+}
+
+html[data-skin="soft"] #page-activity .activity-item:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-activity .activity-time {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .activity-node {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-activity .activity-item.success .activity-node {
+  border-color: var(--green-600);
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] #page-activity .activity-item.failed .activity-node {
+  border-color: var(--red-700);
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .activity-title small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-code {
+  color: var(--red-700);
+  border-radius: var(--radius-pill);
+  background: var(--red-100);
+  padding: 2px 8px;
+}
+
+html[data-skin="soft"] #page-activity .activity-result {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-activity .activity-result i {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] .activity-pagination {
+  border-top: 1px solid var(--line);
+}
+
+/* ==========================================================================
+   运行记录 — diagnostic cards
+   ========================================================================== */
+
+html[data-skin="soft"] .diagnostic-card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .diagnostic-card.error {
+  border-left-color: var(--red-700);
+}
+
+html[data-skin="soft"] .diagnostic-card.warning {
+  border-left-color: var(--amber-700);
+}
+
+html[data-skin="soft"] .diagnostic-card header strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .diagnostic-card header code {
+  color: var(--muted);
+}
+
+/* Level pill: the tint plus its own outlined border, and the text says which. */
+html[data-skin="soft"] .diagnostic-level {
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .diagnostic-level.error {
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .diagnostic-level.warning {
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .diagnostic-level.info {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .diagnostic-meta,
+html[data-skin="soft"] .diagnostic-operation,
+html[data-skin="soft"] .diagnostic-suggestion,
+html[data-skin="soft"] .diagnostic-actions span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .diagnostic-message,
+html[data-skin="soft"] .diagnostic-report {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .diagnostic-card summary,
+html[data-skin="soft"] .activity-tools > summary {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .activity-tools {
+  margin-top: 18px;
+}
+
+/* ==========================================================================
+   运行记录 — trace panel and gantt
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .trace-panel {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .trace-stage {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-activity .trace-list {
+  margin-top: 14px;
+}
+
+html[data-skin="soft"] #page-activity .trace-actions {
+  gap: 8px;
+}
+
+html[data-skin="soft"] #page-activity .trace-gantt-card {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--chart-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chart-summary);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > time {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dl div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dt {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dd {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .trace-gantt-card > footer {
+  color: var(--subtle);
+  border-top: 1px solid var(--line);
+  background: var(--chart-footer);
+}
+
+/* Legend: each entry keeps its swatch AND its word, and the skipped swatch is a
+   dashed outline, so shape and text separate the states as well as colour. */
+html[data-skin="soft"] #page-activity .gantt-legend {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend span::before {
+  border-radius: var(--radius-sm);
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .pending::before {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .failed::before {
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .skipped::before {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-axis {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .gantt-axis > div::after {
+  background: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row {
+  border-top: 1px solid var(--chart-divider);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label > span {
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.skipped .gantt-label > span {
+  background: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.pending .gantt-label > span {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.failed .gantt-label > span {
+  background: var(--red-700);
+}
+
+/* Soft tinted track with the same quarter grid, rounded to match the cards. */
+html[data-skin="soft"] #page-activity .gantt-track {
+  border: 1px solid var(--chart-track-border);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--chart-grid-a) 0,
+    var(--chart-grid-a) calc(25% - 1px),
+    var(--chart-grid-b) calc(25% - 1px),
+    var(--chart-grid-b) 25%
+  );
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar {
+  border-radius: var(--radius-pill);
+  background: var(--blue-600);
+  box-shadow: 0 1px 2px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.pending {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--amber-700) 0,
+    var(--amber-700) 6px,
+    var(--amber-100) 6px,
+    var(--amber-100) 12px
+  );
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.skipped {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.failed {
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-duration {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.skipped .gantt-duration {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.pending .gantt-duration {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.failed .gantt-duration {
+  color: var(--red-700);
+}
+
+/* ==========================================================================
+   motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-schedules .scheduled-target-option,
+  html[data-skin="soft"] #page-schedules .schedule-target-chip,
+  html[data-skin="soft"] #page-schedules .schedule-weekdays label,
+  html[data-skin="soft"] #page-activity .activity-item {
+    transition: none;
+  }
+}
+
+
+/* ==========================================================================
+   Soft UI skin — 机器人总设置 / 订阅与授权 / 帮助
+   Settings rail, model-service workspace, core editor, web search, system
+   maintenance; subscription status and activation; help cards and shots.
+   ========================================================================== */
+
+/* The three pages this layer owns run the full width of the shipped card and
+   form stacks, so almost every rule below restates a shipped rule with the
+   html[data-skin="soft"] prefix and the original page id kept in place. That
+   keeps specificity above the single-class rules in app.css, provider-settings
+   .css and subscription.css, and above the #page-… rules in settings-layout
+   .css and design-overrides.css, without reaching for !important.
+
+   Native <select>, <input type="date"> and <datalist> keep their popups and
+   arrows; only their boxes are restyled. The provider model picker
+   (.model-combobox / .model-options) is a custom listbox and is treated as
+   such. Only tokens from 00-core.css are used; rgba() and the --*-line
+   hairlines replace any blending, and no page-local variable is introduced,
+   so no extra dark block is needed beyond the tones already defined there. */
+
+/* ---------- settings: page frame and the soft pill rail ---------- */
+
+/* The shipped rail is a bare column of tall rows. Here it becomes a light card
+   whose active row is a tinted pill, with no left marker bar. */
+html[data-skin="soft"] #page-settings .settings-layout {
+  grid-template-columns: 204px minmax(0, 1fr);
+  gap: 28px;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  top: 8px;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs button {
+  min-height: 0;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-weight: 600;
+  transition: background-color .16s ease, color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs button.active {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* The shipped underline marker is replaced by the pill alone. */
+html[data-skin="soft"] #page-settings .settings-tabs button::after,
+html[data-skin="soft"] #page-settings .settings-tabs button.active::after {
+  content: none;
+  display: none;
+}
+
+html[data-skin="soft"] #page-settings .settings-tabs > span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .settings-grid {
+  gap: 24px;
+}
+
+/* ---------- settings: model-service workspace ---------- */
+
+html[data-skin="soft"] #page-settings .provider-workspace {
+  min-height: 0;
+}
+
+html[data-skin="soft"] #page-settings .provider-overview-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .provider-overview-heading {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .provider-overview-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-settings .provider-list-toolbar {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .provider-list-toolbar span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-service-cards {
+  gap: 14px;
+}
+
+/* Service rows are soft cards with a hover lift instead of flat tiles. */
+html[data-skin="soft"] #page-settings .provider-service {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] #page-settings .provider-service:hover {
+  border-color: var(--blue-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* Active drops the shipped inset marker bar for a tinted card and a blue edge. */
+html[data-skin="soft"] #page-settings .provider-service.active {
+  border: 1px solid var(--blue-600);
+  background: var(--surface-selected);
+  box-shadow: var(--shadow-md);
+}
+
+html[data-skin="soft"] #page-settings .provider-service-copy strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-settings .provider-service-copy span {
+  color: var(--muted);
+}
+
+/* The logo mark becomes a tinted chip; brand image chips stay neutral. */
+html[data-skin="soft"] #page-settings .provider-logo {
+  border-radius: var(--radius-control);
+  color: var(--blue-700);
+  background: var(--blue-100);
+  font-weight: 800;
+}
+
+html[data-skin="soft"] #page-settings .provider-logo.custom {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-logo.provider-brand-logo {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-tags span {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-service.active .provider-card-tags span {
+  border-color: var(--blue-line);
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-service-body p {
+  color: var(--muted);
+}
+
+/* Status pills: green = in use, blue = configured standby, amber = incomplete. */
+html[data-skin="soft"] #page-settings .provider-card-status {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .provider-card-status.active,
+html[data-skin="soft"] #page-settings .provider-card-status.ready {
+  border-color: var(--green-line);
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-status.incomplete {
+  border-color: var(--amber-line);
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu summary {
+  border-radius: var(--radius-control);
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu summary:hover,
+html[data-skin="soft"] #page-settings .provider-card-menu[open] summary {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu-popover {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu-popover button {
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu-popover button:hover,
+html[data-skin="soft"] #page-settings .provider-card-menu-popover button:focus-visible {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu-popover button.danger {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-menu-popover button.danger:hover {
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-control {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-control small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-switch {
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-switch[aria-checked="true"] {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-switch > span {
+  background: #fff;
+}
+
+html[data-skin="soft"] #page-settings .provider-service-actions {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-action {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .provider-card-action:hover {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-action.primary {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-action.danger:hover {
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-card-current {
+  color: var(--green-700);
+}
+
+/* The add-provider row is a dashed soft placeholder. */
+html[data-skin="soft"] #page-settings .provider-add-card {
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  background: var(--surface-2);
+  transition: color .16s ease, border-color .16s ease, background-color .16s ease;
+}
+
+html[data-skin="soft"] #page-settings .provider-add-card:hover {
+  border-color: var(--blue-600);
+  color: var(--blue-700);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-settings .provider-add-card strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-settings .provider-add-card small {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .provider-add-icon {
+  border-radius: 50%;
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+/* Empty state keeps the connector motif, recoloured to the soft palette. */
+html[data-skin="soft"] #page-settings .provider-empty-state h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-settings .provider-empty-state > p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-empty-visual {
+  color: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-settings .provider-empty-visual::before {
+  background: var(--blue-line);
+}
+
+html[data-skin="soft"] #page-settings .provider-empty-visual span {
+  border-color: var(--surface);
+  box-shadow: 0 0 0 1px var(--blue-line), 0 8px 20px var(--ring-soft);
+}
+
+html[data-skin="soft"] #page-settings .provider-empty-visual i {
+  border-color: var(--surface);
+  background: var(--blue-600);
+  box-shadow: 0 0 0 1px var(--blue-line);
+}
+
+/* ---------- settings: provider editor ---------- */
+
+html[data-skin="soft"] #page-settings .provider-editor-nav {
+  align-items: center;
+}
+
+html[data-skin="soft"] #page-settings .provider-back-button {
+  border-radius: var(--radius-pill);
+  color: var(--blue-700);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .provider-back-button:hover,
+html[data-skin="soft"] #page-settings .provider-back-button:focus-visible {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .provider-settings-card {
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .field-pair {
+  gap: 16px;
+}
+
+html[data-skin="soft"] #page-settings .field-pair > label,
+html[data-skin="soft"] #page-settings .settings-card > label {
+  gap: 8px;
+}
+
+html[data-skin="soft"] #page-settings .field-pair label > span,
+html[data-skin="soft"] #page-settings .settings-card > label > span {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-settings .settings-card label small {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .field-label-action {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .provider-preset-icon {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-settings .secret-input {
+  gap: 10px;
+}
+
+html[data-skin="soft"] #page-settings .provider-thinking-row {
+  margin: 2px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .toggle-line {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .toggle-line strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-settings .toggle-line small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .provider-actions {
+  align-items: center;
+}
+
+html[data-skin="soft"] #page-settings .form-actions {
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .form-note {
+  color: var(--muted);
+}
+
+/* ---------- settings: shared cards ---------- */
+
+html[data-skin="soft"] #page-settings .settings-card,
+html[data-skin="soft"] #page-settings .assistant-settings-card {
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .settings-card .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-settings .settings-card .panel-heading p {
+  color: var(--muted);
+}
+
+/* ---------- settings: core workspace ---------- */
+
+html[data-skin="soft"] #page-settings .core-workspace {
+  gap: 22px;
+}
+
+html[data-skin="soft"] #page-settings .core-heading {
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-settings .core-detail {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .core-detail-heading h2,
+html[data-skin="soft"] #page-settings .core-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-settings .core-detail-heading p,
+html[data-skin="soft"] #page-settings .core-heading p,
+html[data-skin="soft"] #page-settings .core-heading small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .core-sidebar {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-settings .core-sidebar > select {
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-settings .core-nav {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: var(--surface);
+  font-weight: 700;
+  transition: background-color .16s ease, color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-settings .core-nav:hover:not(:disabled) {
+  border-color: var(--blue-line);
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .core-nav.active {
+  border-color: var(--blue-line);
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .core-nav span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .core-subtabs button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  background: var(--surface);
+  transition: border-color .16s ease, background-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+html[data-skin="soft"] #page-settings .core-subtabs button:hover {
+  border-color: var(--blue-line);
+  color: var(--blue-700);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-settings .core-subtabs button.active {
+  border-color: var(--blue-600);
+  color: var(--blue-700);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-settings .core-subtabs button span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .core-identity-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-settings .core-form .config-section,
+html[data-skin="soft"] #page-settings .core-form .core-identity-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-settings .core-form .form-field {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .core-form .form-field:focus-within {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .core-form .form-field > :first-child {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .core-form .inherited input:not([type="checkbox"]),
+html[data-skin="soft"] #page-settings .core-form .inherited textarea,
+html[data-skin="soft"] #page-settings .core-form .inherited select {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-settings .core-template-tools {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-settings .core-template-tools > summary,
+html[data-skin="soft"] #page-settings .core-advanced > summary {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .core-template-toolbar select,
+html[data-skin="soft"] #page-settings .template-picker select {
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-settings .core-template-heading {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .template-help {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .template-create {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .template-create > summary {
+  color: var(--blue-700);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-settings .core-chat-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-settings .core-chat-card select {
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-settings .core-chat-card p,
+html[data-skin="soft"] #page-settings .core-chat-id {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .core-savebar {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: saturate(150%) blur(12px);
+  -webkit-backdrop-filter: saturate(150%) blur(12px);
+}
+
+html[data-skin="soft"] #page-settings .core-savebar .form-note {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .core-override {
+  color: var(--blue-700);
+}
+
+/* ---------- settings: web search ---------- */
+
+html[data-skin="soft"] #page-settings .web-search-settings-card {
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .web-search-settings-card .panel-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .web-search-provider-summary {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .web-search-provider-summary-copy .eyebrow {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-settings .web-search-provider-summary-copy strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-settings .web-search-provider-summary-copy small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .web-search-provider-summary-copy a {
+  color: var(--blue-700);
+}
+
+/* ---------- settings: system and maintenance ---------- */
+
+html[data-skin="soft"] #page-settings .settings-system-stack,
+html[data-skin="soft"] #page-settings .system-maintenance {
+  gap: 20px;
+}
+
+html[data-skin="soft"] #page-settings .maintenance-row {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-settings .maintenance-row:first-of-type {
+  border-top: 0;
+}
+
+html[data-skin="soft"] #page-settings .maintenance-row strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-settings .maintenance-row span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .settings-copy {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .path-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-settings .path-box span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-settings .path-box code {
+  color: var(--ink-2);
+}
+
+/* ---------- settings: preview card and message bubbles ---------- */
+
+html[data-skin="soft"] #page-settings .settings-preview-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-settings .preview-note,
+html[data-skin="soft"] #page-settings .preview-summary {
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-settings .preview-message small {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .preview-message p {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-settings .preview-message.mine p {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .preview-avatar {
+  color: #fff;
+  background: var(--green-700);
+}
+
+html[data-skin="soft"] #page-settings .preview-avatar.blue {
+  background: var(--blue-600);
+}
+
+/* ---------- settings: provider model picker (custom listbox) ---------- */
+
+html[data-skin="soft"] #page-settings .model-combobox > input {
+  padding-right: 34px;
+}
+
+html[data-skin="soft"] #page-settings .model-combobox::after {
+  border-right-color: var(--subtle);
+  border-bottom-color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-settings .model-options {
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] #page-settings .model-option {
+  display: block;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--ink-2);
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+html[data-skin="soft"] #page-settings .model-option:hover,
+html[data-skin="soft"] #page-settings .model-option.focused {
+  color: var(--blue-700);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-settings .model-option[aria-selected="true"] {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings .model-option-empty {
+  display: block;
+  padding: 9px 11px;
+  color: var(--subtle);
+}
+
+/* ==========================================================================
+   订阅与授权 — subscription and activation
+   ========================================================================== */
+
+html[data-skin="soft"] #page-subscription {
+  max-width: 1180px;
+}
+
+/* Status card tints with its data-tone; the tag flips to a solid chip so it
+   stays legible on the tinted panel. */
+html[data-skin="soft"] #page-subscription .subscription-status {
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="neutral"] {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] {
+  border-color: var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="warning"] {
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger"] {
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-kicker {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-tag {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  background: var(--surface);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] .subscription-tag {
+  border-color: var(--green-line);
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="warning"] .subscription-tag {
+  border-color: var(--amber-line);
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger"] .subscription-tag {
+  border-color: var(--red-line);
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-subscription #licenseStateMessage {
+  color: var(--muted);
+}
+
+/* Fact list reads as label/value pairs with hairline separators. */
+html[data-skin="soft"] #page-subscription .subscription-facts {
+  gap: 22px;
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-facts > div + div {
+  padding-left: 22px;
+  border-left: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-facts dt {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-facts dd {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-facts small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] .subscription-facts small {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="warning"] .subscription-facts small {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger"] .subscription-facts small {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps li {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps span {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps .is-done {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps .is-done span {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps [aria-current="step"] {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-steps [aria-current="step"] span {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-account {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-account span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-account strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-pause-note {
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-control);
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-support {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-support summary {
+  color: var(--blue-700);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-support p,
+html[data-skin="soft"] #page-subscription .subscription-support > div > span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-support code {
+  color: var(--ink-2);
+}
+
+/* Plan cards are soft surfaces with a blue edge on the yearly option. */
+html[data-skin="soft"] #page-subscription .subscription-plan {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-plan:hover {
+  border-color: var(--blue-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-plan[data-plan="yearly"],
+html[data-skin="soft"] #page-subscription .subscription-plan[data-plan="year"] {
+  border-color: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-plan-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-plan-price strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-plan-price small,
+html[data-skin="soft"] #page-subscription .subscription-plan > p {
+  color: var(--muted);
+}
+
+/* Activation cards, headings and the step chips. */
+html[data-skin="soft"] #page-subscription .subscription-group,
+html[data-skin="soft"] #page-subscription .subscription-redeem {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-card-heading h2,
+html[data-skin="soft"] #page-subscription .subscription-card-heading h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-step-number {
+  border-radius: var(--radius-pill);
+  color: var(--blue-700);
+  background: var(--blue-100);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-group > p,
+html[data-skin="soft"] #page-subscription .subscription-contact-details p,
+html[data-skin="soft"] #page-subscription .subscription-contact-expiry {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-group-info > span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-group-info strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-subscription .subscription-qr {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: #fff;
+}
+
+/* Feedback, code preview and the data-access footer. */
+html[data-skin="soft"] #page-subscription .subscription-feedback {
+  border: 1px solid var(--green-line);
+  border-radius: var(--radius-control);
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-feedback[data-tone="error"] {
+  border-color: var(--red-line);
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-feedback[data-tone="neutral"] {
+  border-color: var(--line);
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-code-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-code-preview dt {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-code-preview dd {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-code-preview p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-data-access {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-data-access p {
+  color: var(--muted);
+}
+
+/* The activation-code field is a native text input: box only. */
+html[data-skin="soft"] #page-subscription #licenseCode {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-subscription #licenseCode:disabled {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-subscription #licenseCode:focus-visible {
+  border-color: var(--blue-600);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] #page-subscription .subscription-group .form-field > span {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+@media (max-width: 800px) {
+  html[data-skin="soft"] #page-subscription .subscription-facts > div + div {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* ==========================================================================
+   帮助 — help centre
+   ========================================================================== */
+
+html[data-skin="soft"] #page-help .help-search {
+  width: min(360px, 100%);
+}
+
+html[data-skin="soft"] #page-help .help-start {
+  gap: 28px;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-help .help-start-copy h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-help .help-start-copy p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-help .help-start-copy .button-row .button {
+  justify-content: flex-start;
+}
+
+html[data-skin="soft"] #page-help .help-shot-grid figure {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+html[data-skin="soft"] #page-help .help-shot-grid img {
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-help .help-shot-grid figcaption {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-help .help-toolbar {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+html[data-skin="soft"] #page-help .help-toolbar h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] #page-help .help-toolbar p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-help .help-feature-grid {
+  padding-bottom: 28px;
+}
+
+/* Help cards are soft cards with a hover lift and a tinted audience chip. */
+html[data-skin="soft"] #page-help .help-feature-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] #page-help .help-feature-card:hover {
+  border-color: var(--blue-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+html[data-skin="soft"] #page-help .help-feature-card h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+
+html[data-skin="soft"] #page-help .help-feature-card > p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-help .help-feature-card ol {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-help .help-audience-chip {
+  border-radius: var(--radius-pill);
+  color: var(--blue-700);
+  background: var(--blue-100);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-help .help-prerequisite {
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-control);
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+/* ==========================================================================
+   Motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-settings .settings-tabs button,
+  html[data-skin="soft"] #page-settings .provider-service,
+  html[data-skin="soft"] #page-settings .provider-add-card,
+  html[data-skin="soft"] #page-settings .core-nav,
+  html[data-skin="soft"] #page-settings .core-subtabs button,
+  html[data-skin="soft"] #page-subscription .subscription-plan,
+  html[data-skin="soft"] #page-help .help-feature-card {
+    transition: none;
+  }
+
+  html[data-skin="soft"] #page-settings .provider-service:hover,
+  html[data-skin="soft"] #page-subscription .subscription-plan:hover,
+  html[data-skin="soft"] #page-help .help-feature-card:hover {
+    transform: none;
+  }
+}

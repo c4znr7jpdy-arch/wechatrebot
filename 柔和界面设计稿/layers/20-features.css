@@ -1,0 +1,459 @@
+/* ==========================================================================
+   Soft UI skin — 功能中心 (feature centre)
+   Catalogue rail, detail frame, quick reference, config sections and callouts.
+   ========================================================================== */
+
+/* The page keeps the shipped grid geometry throughout: this layer only changes
+   surfaces, radii, type and state colour, so the catalogue rail, the sticky save
+   bar and the native feature-page iframe all stay laid out exactly as before. */
+
+/* ---------- catalogue rail: panel, muted summary, soft list rows ---------- */
+
+/* The rail is already a .panel, so core supplies the 20px card and soft shadow;
+   it only needs the roomier inner padding. */
+html[data-skin="soft"] #page-features .feature-layout {
+  gap: 18px;
+}
+
+html[data-skin="soft"] #page-features .feature-catalog {
+  padding: 18px;
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-features .feature-summary {
+  padding: 14px 2px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-features .feature-filters {
+  margin-top: 12px;
+}
+
+html[data-skin="soft"] .feature-list {
+  margin: 0 -8px;
+  padding: 2px 8px 10px;
+}
+
+/* Rows keep the shipped grid and hairline separators; only the fill changes.
+   Hover is a rounded tint and the active row is a soft blue wash — the shipped
+   inset marker bar is cleared, never redrawn. */
+html[data-skin="soft"] #page-features .feature-item {
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: transparent;
+  transition: background-color .16s ease, color .16s ease;
+}
+
+html[data-skin="soft"] #page-features .feature-item:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-features .feature-item.active {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-features .feature-item strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-features .feature-item.active strong {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-features .feature-item small {
+  color: var(--subtle);
+}
+
+/* Loaded state: the dot keeps its tint and gains a halo ring, so the state reads
+   from a ring-versus-fill shape change as well as the colour. */
+html[data-skin="soft"] .feature-state {
+  border: 2px solid var(--line-strong);
+  background: transparent;
+}
+
+html[data-skin="soft"] .feature-state.enabled {
+  border-color: var(--green-600);
+  background: var(--green-600);
+  box-shadow: 0 0 0 3px var(--green-100);
+}
+
+/* ---------- detail frame and headings ---------- */
+
+html[data-skin="soft"] #page-features .feature-detail {
+  background: var(--surface);
+}
+
+/* The compact heading holds only the readiness button; keep it right-aligned. */
+html[data-skin="soft"] #page-features .feature-page-heading {
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+html[data-skin="soft"] .feature-detail-head {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .feature-detail-head h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .feature-detail-head p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-features .feature-detail .panel-heading {
+  border-bottom-color: var(--line);
+}
+
+/* Legacy tab strip kept by some feature pages: hairline rail, soft active tint. */
+html[data-skin="soft"] #page-features .feature-tabs {
+  border-color: var(--line);
+}
+
+html[data-skin="soft"] #page-features .feature-tabs button {
+  color: var(--muted);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-features .feature-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+}
+
+/* ---------- quick reference: a collapsible inner card ---------- */
+
+html[data-skin="soft"] .feature-quick-reference {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .feature-quick-reference > summary {
+  padding: 15px 18px;
+  color: var(--ink);
+  border-radius: inherit;
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .feature-quick-reference > summary:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .reference-toggle-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .feature-reference-body {
+  padding: 0 18px 16px;
+}
+
+html[data-skin="soft"] .feature-reference-actions {
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* Command reference rows: hairline rules, mono command in the brand blue. */
+html[data-skin="soft"] .feature-command-groups {
+  gap: 14px 20px;
+}
+
+html[data-skin="soft"] .feature-command-group > strong {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] .feature-command-item {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .feature-command-item code {
+  color: var(--blue-700);
+  font: 600 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+html[data-skin="soft"] .feature-command-item span {
+  color: var(--muted);
+}
+
+/* Scheduling tag: the label text carries the meaning, the tint and its matching
+   hairline are a secondary cue. */
+html[data-skin="soft"] .command-schedule-status {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .command-schedule-status.supported {
+  color: var(--green-700);
+  border: 1px solid var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.needs-condition {
+  color: var(--amber-700);
+  border: 1px solid var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.unsupported {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+/* Migration note becomes a quiet inset strip. */
+html[data-skin="soft"] .feature-prerequisite {
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .feature-prerequisite strong {
+  color: var(--ink);
+}
+
+/* ---------- config tabs and sections ---------- */
+
+html[data-skin="soft"] .config-tabs {
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .config-tabs button {
+  color: var(--muted);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .config-tabs button:hover:not(:disabled) {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .config-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-features .config-section {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Grouped sections ship a 3px left accent bar; the skin drops the bar in favour
+   of a plain elevated card, so no section carries a marker stripe. */
+html[data-skin="soft"] #page-features .config-section.grouped {
+  border: 1px solid var(--blue-line);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-features .config-section > h3 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .config-section-grid {
+  gap: 16px 18px;
+}
+
+html[data-skin="soft"] .optional-group-heading h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .optional-group-heading p {
+  color: var(--muted);
+}
+
+/* The grid is display:grid, which overrides [hidden]; keep the shipped guard. */
+html[data-skin="soft"] .optional-model-group > .config-section-grid[hidden] {
+  display: none;
+}
+
+/* ---------- tinted list, checkbox grids and inline controls ---------- */
+
+/* The shipped diagonal hatch is replaced by a flat blue tint, which reads calmer
+   against the near-white cards. */
+html[data-skin="soft"] .form-field.tinted-list {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .form-field.tinted-list textarea {
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] .option-grid {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .option-check,
+html[data-skin="soft"] .secret-clear {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .option-check input,
+html[data-skin="soft"] .secret-clear input {
+  accent-color: var(--blue-600);
+}
+
+html[data-skin="soft"] .secret-clear {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .secret-reveal,
+html[data-skin="soft"] .group-field-button {
+  align-self: flex-start;
+}
+
+/* Collapsible advanced block (shared with the group pages). */
+html[data-skin="soft"] .advanced-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .advanced-details summary {
+  color: var(--blue-700);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .advanced-details[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .advanced-details > label > span {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- guidance and assessment callouts ---------- */
+
+/* The shipped guide cards carry a 4px left accent bar; the skin keeps a tinted
+   card with a full hairline instead, so no callout reads as a marker stripe. */
+html[data-skin="soft"] #page-features .feature-guide {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-features .feature-guide strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-features .feature-guide p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-features .feature-guide ol {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] .feature-assessment {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .feature-assessment p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .assessment-chip,
+html[data-skin="soft"] .assessment-state {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .assessment-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .assessment-state {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-features .assessment {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+/* ---------- legacy guide block: soft tinted card, no marker stripe ---------- */
+
+html[data-skin="soft"] #page-features .guide {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+/* ---------- sticky save bar and the native feature page panel ---------- */
+
+html[data-skin="soft"] .feature-savebar {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .feature-savebar #featureNote {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .feature-save-actions {
+  gap: 10px;
+}
+
+html[data-skin="soft"] .feature-page-panel {
+  gap: 12px;
+}
+
+html[data-skin="soft"] .feature-page-status {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+/* The native page frame keeps its full-bleed override in the shipped sheet; here
+   it only needs the soft card edge where it is not full bleed. */
+html[data-skin="soft"] .feature-page-panel iframe {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--control-surface);
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-features .feature-item {
+    transition: none;
+  }
+}

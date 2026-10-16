@@ -1,0 +1,552 @@
+/* ==========================================================================
+   Soft UI skin — 群聊&私聊配置 + 消息中心
+   目录页的表格/检查器，以及消息中心的会话列表、气泡与检查器。
+   ========================================================================== */
+
+/* Both pages already read their colours from the shared tokens, so this layer
+   only re-points surfaces, radii and shadows. Layout is left exactly as shipped:
+   the grid column templates and the resizable-panel tracks from panel-layout.js
+   are untouched, so saved panel sizes keep working.
+
+   Native <select>, <input type="date"> and listboxes stay native — only the box
+   (border, radius, padding, background) is styled, never their popup or arrow. */
+
+/* ---------- 群聊&私聊配置：页头操作与分类页签 ---------- */
+
+html[data-skin="soft"] #page-groups .directory-actions {
+  gap: 10px;
+}
+
+/* The category strip becomes a soft segmented control: muted track, and the
+   selected tab lifts out as a white pill instead of an ink block. */
+html[data-skin="soft"] #page-groups .management-tabs {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-weight: 600;
+  transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-groups .management-tabs button.active {
+  color: var(--blue-700);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The shipped strip underlines the active tab; the pill fill is the signal here,
+   so the marker bar is neutralised the same way 10-home.css drops the nav bar. */
+html[data-skin="soft"] #page-groups .management-tabs button::after {
+  content: none;
+  display: none;
+}
+
+/* ---------- 目录状态提示 ---------- */
+
+html[data-skin="soft"] #page-groups .directory-status {
+  min-height: 56px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-groups .directory-status strong { color: var(--ink); }
+html[data-skin="soft"] #page-groups .directory-status span { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .directory-status.success {
+  border-color: var(--green-line);
+  border-left-color: var(--green-600);
+  background: var(--green-100);
+}
+html[data-skin="soft"] #page-groups .directory-status.success strong { color: var(--green-700); }
+
+html[data-skin="soft"] #page-groups .directory-status.warning {
+  border-color: var(--amber-line);
+  border-left-color: var(--amber-700);
+  background: var(--amber-100);
+}
+html[data-skin="soft"] #page-groups .directory-status.warning strong { color: var(--amber-700); }
+
+/* ---------- 双栏面板：表格盘与检查器统一成 20px 圆角与柔和阴影 ---------- */
+
+html[data-skin="soft"] #page-groups .group-table-panel,
+html[data-skin="soft"] #page-groups .contact-table-panel,
+html[data-skin="soft"] #page-groups .group-inspector,
+html[data-skin="soft"] #page-groups .contact-inspector {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-groups .group-toolbar {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-groups .group-meta span { color: var(--muted); }
+
+/* ---------- 表格：仅保留发丝行分隔线，表头为弱化小字 ---------- */
+
+html[data-skin="soft"] #page-groups .group-table,
+html[data-skin="soft"] #page-groups .contact-table {
+  background: transparent;
+}
+
+html[data-skin="soft"] #page-groups .group-table th,
+html[data-skin="soft"] #page-groups .contact-table th {
+  color: var(--subtle);
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-groups .group-table td,
+html[data-skin="soft"] #page-groups .contact-table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Rows: hover is a soft wash, selection is a pale blue fill with primary text
+   and no left marker bar (the shipped inset bar is neutralised). */
+html[data-skin="soft"] #page-groups .group-row,
+html[data-skin="soft"] #page-groups .contact-row {
+  transition: background-color .16s ease;
+}
+
+html[data-skin="soft"] #page-groups .group-row:hover,
+html[data-skin="soft"] #page-groups .contact-row:hover {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-skin="soft"] #page-groups .group-row:hover td,
+html[data-skin="soft"] #page-groups .contact-row:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-groups .group-row.selected,
+html[data-skin="soft"] #page-groups .contact-row.selected {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-skin="soft"] #page-groups .group-row.selected td,
+html[data-skin="soft"] #page-groups .contact-row.selected td {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-groups .group-row:focus-visible,
+html[data-skin="soft"] #page-groups .contact-row:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: -2px;
+}
+
+/* ---------- 头像：淡彩底 + 同色系深色字，取代原来的饱和实底 ---------- */
+
+html[data-skin="soft"] #page-groups .group-avatar,
+html[data-skin="soft"] #page-groups .contact-avatar {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-groups .group-avatar.tone-1 { color: var(--violet-700); background: var(--violet-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-2 { color: var(--teal-600); background: var(--teal-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-3 { color: var(--green-700); background: var(--green-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-4 { color: var(--amber-700); background: var(--amber-100); }
+html[data-skin="soft"] #page-groups .group-avatar.tone-5 { color: var(--blue-700); background: var(--blue-100); }
+
+/* ---------- 检查器内部：空态、标题、页签、成员与页脚 ---------- */
+
+html[data-skin="soft"] #page-groups .group-inspector-empty { color: var(--muted); }
+html[data-skin="soft"] #page-groups .group-inspector-empty h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-groups .group-inspector-empty p { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .inspector-hero { border-bottom: 1px solid var(--line); }
+
+html[data-skin="soft"] #page-groups .inspector-group-title h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-groups .inspector-id { color: var(--subtle); }
+
+html[data-skin="soft"] #page-groups .inspector-tabs { border-bottom: 1px solid var(--line); }
+html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); font-weight: 600; }
+html[data-skin="soft"] #page-groups .inspector-tabs button:hover { color: var(--ink); }
+html[data-skin="soft"] #page-groups .inspector-tabs button.active {
+  color: var(--blue-700);
+  border-bottom-color: var(--blue-600);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-groups .member-list article { border-top: 1px solid var(--line); }
+html[data-skin="soft"] #page-groups .member-list strong { color: var(--ink-2); }
+html[data-skin="soft"] #page-groups .member-list small { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .inspector-footer {
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+html[data-skin="soft"] #page-groups .inspector-footer span { color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .contact-pagination {
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  background: var(--surface-inset);
+}
+html[data-skin="soft"] #page-groups .contact-pagination > div { gap: 8px; }
+
+/* ---------- 行内动作与目录文字 ---------- */
+
+html[data-skin="soft"] #page-groups .row-action {
+  color: var(--blue-700);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: background-color .16s ease, color .16s ease;
+}
+html[data-skin="soft"] #page-groups .row-action:hover:not(:disabled) { background: var(--blue-100); }
+html[data-skin="soft"] #page-groups .row-action.delete,
+html[data-skin="soft"] #page-groups .row-action.danger { color: var(--red-700); }
+
+html[data-skin="soft"] #page-groups .actions-column { text-align: right; color: var(--muted); }
+
+html[data-skin="soft"] #page-groups .group-name { color: var(--ink); font-weight: 600; }
+html[data-skin="soft"] #page-groups .group-list-count { color: var(--muted); }
+html[data-skin="soft"] #page-groups .contact-account { color: var(--ink-2); }
+html[data-skin="soft"] #page-groups .contact-id { color: var(--subtle); }
+html[data-skin="soft"] #page-groups .contact-section-heading h3 { color: var(--ink); }
+
+/* ---------- 群/私聊规则表单：原生控件只改外壳 ---------- */
+
+html[data-skin="soft"] #page-groups .group-policy-form select,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"],
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"],
+html[data-skin="soft"] #page-groups .private-feature-policy select,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"],
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"],
+html[data-skin="soft"] #page-groups .chat-profile-field select {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form select:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy select:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"]:hover:not(:disabled),
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"]:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form select:focus-visible,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="number"]:focus-visible,
+html[data-skin="soft"] #page-groups .group-policy-form input[type="time"]:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy select:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="number"]:focus-visible,
+html[data-skin="soft"] #page-groups .private-feature-policy input[type="time"]:focus-visible,
+html[data-skin="soft"] #page-groups .chat-profile-field select:focus-visible {
+  border-color: var(--blue-600);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] #page-groups .policy-summary {
+  color: var(--muted);
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] #page-groups .group-policy-form .advanced-details,
+html[data-skin="soft"] #page-groups .private-feature-policy .advanced-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+html[data-skin="soft"] #page-groups .advanced-details > summary {
+  color: var(--blue-700);
+  border-radius: var(--radius-sm);
+}
+html[data-skin="soft"] #page-groups .advanced-details > summary:hover {
+  color: var(--ink);
+  background: var(--blue-100);
+}
+html[data-skin="soft"] #page-groups .group-feature-options { border-radius: var(--radius-control); }
+
+/* ==========================================================================
+   消息中心 (#page-history)
+   ========================================================================== */
+
+/* ---------- 工具栏、概要与会话布局 ---------- */
+
+html[data-skin="soft"] #page-history .history-toolbar {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-history .history-summary { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .history-layout {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ---------- 会话列表：柔和列表栏 + 圆角悬停/选中（去掉左侧色条） ---------- */
+
+html[data-skin="soft"] #page-history .conversation-list {
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-history .conversation-list button,
+html[data-skin="soft"] #page-history .conversation-list article {
+  border-bottom: 0;
+  background: transparent;
+}
+
+html[data-skin="soft"] #page-history .conversation-item {
+  width: auto;
+  margin: 3px 8px;
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease, color .16s ease;
+}
+
+html[data-skin="soft"] #page-history .conversation-item:hover,
+html[data-skin="soft"] #page-history .conversation-list article:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-history .conversation-item.active,
+html[data-skin="soft"] #page-history .conversation-list .selected {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-history .conversation-line strong { color: var(--ink); }
+html[data-skin="soft"] #page-history .conversation-item.active .conversation-line strong { color: var(--blue-700); }
+html[data-skin="soft"] #page-history .conversation-line time { color: var(--subtle); }
+html[data-skin="soft"] #page-history .conversation-main small { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .conversation-avatar {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+html[data-skin="soft"] #page-history .conversation-item[data-type="group"] .conversation-avatar {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+/* ---------- 消息面板与气泡 ---------- */
+
+html[data-skin="soft"] #page-history .message-pane { background: var(--surface); }
+
+html[data-skin="soft"] #page-history #conversationHeader {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-history #conversationHeader span { color: var(--muted); }
+
+html[data-skin="soft"] #page-history .message-list { background: var(--message-canvas); }
+
+html[data-skin="soft"] #page-history .message-avatar {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+html[data-skin="soft"] #page-history .message.assistant .message-avatar {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-history .message-meta { color: var(--subtle); }
+html[data-skin="soft"] #page-history .message-author-name { color: var(--ink-2); }
+html[data-skin="soft"] #page-history .message-author-id { color: var(--subtle); }
+
+/* Incoming bubble: inset fill, ~16px radius, tightened on the tail (avatar) side.
+   Only the fill changes — the shipped left/right alignment is preserved. */
+html[data-skin="soft"] #page-history .message-bubble {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 6px 16px 16px 16px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Own bubble (the assistant/self side) keeps the primary tint + primary text. */
+html[data-skin="soft"] #page-history .message.assistant .message-bubble,
+html[data-skin="soft"] #page-history .message.mine .message-bubble {
+  color: var(--blue-700);
+  border-color: var(--blue-line);
+  border-radius: 16px 6px 16px 16px;
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-history .message-bubble-quote blockquote { border-radius: var(--radius-sm); }
+
+html[data-skin="soft"] #page-history .message-bubble-notice {
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+html[data-skin="soft"] #page-history .message-bubble-notice strong { color: var(--ink); }
+
+html[data-skin="soft"] #page-history .message-read-status small { color: var(--muted); }
+
+/* ---------- 浮动提示：更早消息与新消息 ---------- */
+
+html[data-skin="soft"] #page-history .older-messages-status {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] #page-history .new-message-button {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+html[data-skin="soft"] #page-history .new-message-button:hover { background: var(--blue-100); }
+
+/* ---------- 会话检查器：分类信息、发送者卡片与危险动作 ---------- */
+
+html[data-skin="soft"] #page-history .conversation-inspector {
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history .conversation-inspector h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+html[data-skin="soft"] #page-history .conversation-inspector p { color: var(--muted); }
+html[data-skin="soft"] #page-history .conversation-inspector .eyebrow { color: var(--subtle); }
+html[data-skin="soft"] #page-history .inspector-conversation-title h2 { color: var(--ink); }
+
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list div { border-top: 1px solid var(--line); }
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list dt { color: var(--muted); }
+html[data-skin="soft"] #page-history .conversation-inspector .inspector-list dd { color: var(--ink-2); }
+
+html[data-skin="soft"] #page-history .current-sender > span { color: var(--subtle); }
+html[data-skin="soft"] #page-history .current-sender > div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+html[data-skin="soft"] #page-history .current-sender > div strong { color: var(--ink); }
+html[data-skin="soft"] #page-history .current-sender > div small { color: var(--subtle); }
+html[data-skin="soft"] #page-history .current-sender button {
+  color: var(--blue-700);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+html[data-skin="soft"] #page-history .current-sender button:hover { background: var(--blue-100); }
+
+html[data-skin="soft"] #page-history .inspector-actions .danger-ghost {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+html[data-skin="soft"] #page-history .inspector-actions .danger-ghost:hover:not(:disabled) {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+/* ---------- 时间范围：原生日期框只改外壳 ---------- */
+
+html[data-skin="soft"] #page-history .date-field {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+html[data-skin="soft"] #page-history .date-field input {
+  color: var(--ink);
+  border: 0;
+  background: transparent;
+}
+
+/* ==========================================================================
+   可拖动面板手柄（两个页面共用）
+   ========================================================================== */
+
+/* The handle ships invisible; give it a soft visible affordance on hover/focus
+   so the resize target is discoverable, while staying out of the way at rest. */
+html[data-skin="soft"] .panel-resize-handle,
+html[data-skin="soft"] .panel-resize-edge {
+  background: transparent;
+}
+
+html[data-skin="soft"] .panel-resize-handle:hover,
+html[data-skin="soft"] .panel-resize-edge:hover,
+html[data-skin="soft"] .panel-resize-handle:focus-visible,
+html[data-skin="soft"] .panel-resize-edge:focus-visible {
+  background: var(--blue-100);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .panel-resize-handle:focus-visible,
+html[data-skin="soft"] .panel-resize-edge:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: -2px;
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-groups .management-tabs button,
+  html[data-skin="soft"] #page-groups .group-row,
+  html[data-skin="soft"] #page-groups .contact-row,
+  html[data-skin="soft"] #page-groups .row-action,
+  html[data-skin="soft"] #page-history .conversation-item {
+    transition: none;
+  }
+}

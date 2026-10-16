@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>柔和界面设计稿 · 总览</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;color:#14181f;background:#f4f5f7;font:14px/1.6 "Alibaba PuHuiTi 2","Microsoft YaHei UI","Segoe UI",sans-serif}
+    header{position:sticky;top:0;z-index:2;padding:24px 4vw;color:#fff;background:#0f172a;box-shadow:0 10px 30px rgba(16,24,40,.18)}
+    header h1{margin:0;font-size:25px;letter-spacing:-.01em}
+    header p{margin:5px 0 0;color:#a9b6c6}
+    main{padding:28px 4vw 56px}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+    .filters button{padding:8px 15px;border:1px solid #e7e9ee;border-radius:999px;background:#fff;color:#5f6673;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,.05)}
+    .filters button.active{color:#fff;border-color:#2f6bff;background:#2f6bff;box-shadow:0 6px 16px rgba(47,107,255,.24)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:18px}
+    .card{overflow:hidden;border:1px solid #e7e9ee;border-radius:20px;background:#fff;box-shadow:0 6px 20px rgba(16,24,40,.06)}
+    .card img{display:block;width:100%;height:auto;background:#f4f5f7}
+    .meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px}
+    .meta strong{font-size:13px}
+    .meta span{color:#8a92a0;font-size:11px}
+    .note{margin:0 0 22px;padding:14px 18px;border:1px solid #c9daff;border-radius:18px;background:#eaf1ff;color:#333a45}
+    @media(max-width:520px){.grid{grid-template-columns:1fr}header,main{padding-left:18px;padding-right:18px}}
+  </style>
+</head>
+<body>
+  <header><h1>柔和界面设计稿</h1><p>9 个页面、功能配置示例、3 个浮层状态、深色模式与最小窗口，共 25 张设计稿。</p></header>
+  <main>
+    <p class="note">皮肤为附加层，默认不生效：加 <code>?style=soft</code> 启用，<code>?style=default</code> 恢复出厂外观。以下为真实管理器界面在 <code>?preview</code> 夹具下的渲染结果。</p>
+    <div class="filters"><button class="active" data-filter="all">全部</button><button data-filter="page">主页面</button><button data-filter="modal">弹窗与浮层</button><button data-filter="dark">深色模式</button><button data-filter="narrow">最小窗口 1080×680</button></div>
+    <div class="grid" id="grid"></div>
+  </main>
+  <script>
+    const pages = [
+      ['01-运行中心.png','运行中心'],
+      ['02-功能中心.png','功能中心'],
+      ['02-功能中心-配置示例.png','功能中心 · 常用设置'],
+      ['03-群聊与私聊配置.png','群聊与私聊配置'],
+      ['04-消息中心.png','消息中心'],
+      ['05-定时任务.png','定时任务'],
+      ['06-运行记录.png','运行记录'],
+      ['07-订阅与授权.png','订阅与授权'],
+      ['08-帮助.png','帮助'],
+      ['09-机器人总设置.png','机器人总设置'],
+    ];
+    const modals = [
+      ['弹窗-首次使用引导.png','首次使用引导'],
+      ['弹窗-删除本机记录.png','删除本机记录确认'],
+      ['弹窗-日期范围.png','日期范围选择'],
+    ];
+    const files = [
+      ...pages.map(([f, t]) => [f, t, 'page']),
+      ...modals.map(([f, t]) => [f, t, 'modal']),
+      ...pages.map(([f, t]) => [`暗色-${f}`, `暗色 · ${t}`, 'dark']),
+      ...pages.slice(0, 2).concat(pages.slice(8)).map(([f, t]) => [`窄屏-${f}`, `1080×680 · ${t}`, 'narrow']),
+    ];
+    const grid = document.querySelector('#grid');
+    function render(filter = 'all') {
+      grid.innerHTML = files
+        .filter(x => filter === 'all' || x[2] === filter)
+        .map(x => `<article class="card"><img src="screens/${x[0]}" alt="${x[1]}" loading="lazy"><div class="meta"><strong>${x[1]}</strong><span>${x[0]}</span></div></article>`)
+        .join('');
+    }
+    document.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => {
+      document.querySelectorAll('[data-filter]').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      render(b.dataset.filter);
+    });
+    render();
+  </script>
+</body>
+</html>

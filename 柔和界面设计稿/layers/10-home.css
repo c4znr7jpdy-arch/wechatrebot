@@ -1,0 +1,299 @@
+/* ==========================================================================
+   Soft UI skin — 运行中心 (run centre)
+   Status disc, three-stage ledger, entry cards, setup alerts, signal strip.
+   ========================================================================== */
+
+/* ---------- licence notice and environment alert become soft tinted cards ---------- */
+
+html[data-skin="soft"] .license-notice {
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-card);
+  background: var(--amber-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .license-notice strong {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] .license-notice p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .environment-alert {
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-card);
+  background: var(--red-100);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .alert-code {
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, .72);
+}
+
+html[data-skin="soft"] .alert-code span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .alert-code strong {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .alert-copy h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .alert-copy p,
+html[data-skin="soft"] .alert-copy ol {
+  color: var(--muted);
+}
+
+/* ---------- runtime control: the status disc is the page's focal point ---------- */
+
+html[data-skin="soft"] #page-home .runtime-control {
+  border-radius: var(--radius);
+}
+
+html[data-skin="soft"] #page-home .control-body {
+  gap: 28px;
+}
+
+html[data-skin="soft"] #page-home .home-status-icon {
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green-600);
+  box-shadow: 0 10px 26px rgba(23, 166, 115, .28);
+}
+
+html[data-skin="soft"] #page-home .home-status-icon.checking {
+  background: var(--blue-600);
+  box-shadow: 0 10px 26px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-home .home-status-icon.problem,
+html[data-skin="soft"] #page-home .home-status-icon.waiting {
+  background: var(--amber-700);
+  box-shadow: 0 10px 26px rgba(176, 106, 8, .26);
+}
+
+html[data-skin="soft"] #page-home .status-orbit .orbit-track {
+  stroke: var(--line);
+}
+
+html[data-skin="soft"] #page-home .status-orbit .orbit-progress {
+  stroke: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .orbit-progress {
+  stroke: var(--green-600);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="error"] .orbit-progress {
+  stroke: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .power-button {
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+html[data-skin="soft"] #page-home .power-button:hover:not(:disabled) {
+  border-color: var(--blue-line);
+  box-shadow: 0 14px 34px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-button {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .force-stop-action {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .control-copy h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+html[data-skin="soft"] #page-home .control-copy p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .state-kicker {
+  color: var(--subtle);
+  letter-spacing: .08em;
+}
+
+/* ---------- three-stage ledger: tinted step chips instead of a plain list ---------- */
+
+html[data-skin="soft"] #page-home .stage-list li {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-home .stage-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+/* The shipped connector line between stages no longer reads as a rail. */
+html[data-skin="soft"] #page-home .stage-list li:not(:last-child)::after {
+  background: var(--line);
+}
+
+html[data-skin="soft"] #page-home .stage-index {
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.done .stage-index {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.current .stage-index {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list li.problem .stage-index {
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .stage-list strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-home .stage-list em,
+html[data-skin="soft"] #page-home .stage-list small {
+  color: var(--muted);
+}
+
+/* ---------- entry cards ---------- */
+
+html[data-skin="soft"] .home-entry {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] .home-entry:hover {
+  border-color: var(--blue-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+html[data-skin="soft"] .home-entry > svg:first-child {
+  color: var(--blue-700);
+  padding: 10px;
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .home-entry > svg:last-child {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .home-entry strong {
+  color: var(--ink);
+}
+
+/* ---------- setup reminders: pastel cards with a tinted icon chip ---------- */
+
+html[data-skin="soft"] .home-setup-alert {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="1"] {
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="2"] {
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .home-setup-alert[data-priority="3"] {
+  border-color: var(--blue-line);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .home-setup-alert-icon {
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, .72);
+}
+
+html[data-skin="soft"] .home-setup-alert-copy strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .home-setup-alert-copy p {
+  color: var(--muted);
+}
+
+/* ---------- error panel ---------- */
+
+html[data-skin="soft"] #page-home .error-panel {
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-card);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-home .error-label {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] #page-home .error-panel h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-home .error-panel p,
+html[data-skin="soft"] #page-home .error-panel ol {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .error-code {
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .72);
+}
+
+/* ---------- signal strip ---------- */
+
+html[data-skin="soft"] #page-home .signal-strip article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-home .signal-strip article + article {
+  border-left: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-home .signal-strip span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-home .signal-strip strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-home .signal-strip small {
+  color: var(--muted);
+}
