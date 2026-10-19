@@ -13,7 +13,7 @@ def test_expected_account_state_does_not_claim_log_write_failure(browser, manage
     page = browser.new_page()
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.locator('.nav-item[data-page="history"]').click()
@@ -37,7 +37,7 @@ def test_flat_settings_and_aligned_chat_details(browser, manager_url, width, hei
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.locator('.nav-item[data-page="settings"]').click()
@@ -150,7 +150,7 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
     page = browser.new_page()
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         page.evaluate("""() => {
           window.policyReads = 0; window.forcedGroupReads = 0;
           const api = window.pywebview.api;
@@ -198,7 +198,7 @@ def test_template_editor_inheritance_and_switch_guard(browser, manager_url):
     page = browser.new_page(viewport={"width": 1440, "height": 1024})
     try:
         page.goto(manager_url)
-        expect(page.locator('#globalRefresh')).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         page.locator('.nav-item[data-page="settings"]').click()
         page.locator('[data-settings-tab="core"]').click()
         expect(page.locator('#activeCoreTemplate')).to_be_visible()
@@ -235,7 +235,7 @@ def test_group_policy_old_account_response_is_discarded(browser, manager_url):
     page = browser.new_page()
     try:
         page.goto(manager_url)
-        expect(page.locator('#globalRefresh')).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         page.evaluate("""() => {
           const api = window.pywebview.api;
           const groups = api.get_groups, policy = api.get_group_policy;
@@ -319,7 +319,7 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         assert page.locator('.main-nav [data-page]').evaluate_all("els => els.map(e => e.dataset.page)") == [
@@ -464,7 +464,7 @@ def test_schedule_list_renders_before_slow_context_and_keeps_draft_on_account_ch
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
         page.goto(manager_url)
-        expect(page.locator("#globalRefresh")).to_be_enabled()
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.evaluate("""() => {

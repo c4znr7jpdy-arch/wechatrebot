@@ -23,7 +23,7 @@ def qr_image():
 
 def open_history(page, manager_url):
     page.goto(manager_url)
-    expect(page.locator("#globalRefresh")).to_be_enabled()
+    expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
     if page.locator("#onboardingRecommended").is_visible():
         page.locator("#onboardingRecommended").click()
 

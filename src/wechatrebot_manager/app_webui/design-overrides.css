@@ -183,6 +183,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #page-features .feature-item:hover { background: var(--surface-hover); }
 #page-features .feature-item.active { color: var(--blue-700); background: var(--blue-100); box-shadow: inset 3px 0 var(--blue-600); }
 #page-features .feature-detail { padding: 22px; background: var(--surface); }
+#page-features .feature-savebar { bottom: -22px; margin: 0 -22px -22px; padding: 13px 22px; }
 #page-features .feature-page-heading { justify-content: flex-end; min-height: 0; }
 .feature-quick-reference { margin: 14px 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .feature-quick-reference > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; cursor: pointer; list-style: none; font-weight: 700; }
