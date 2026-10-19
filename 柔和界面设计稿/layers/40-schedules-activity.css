@@ -1,0 +1,942 @@
+/* ==========================================================================
+   Soft UI skin — 定时任务 (schedules) and 运行记录 (activity)
+   Stat tiles, task table and editor; diagnostic feed, trace panel and gantt.
+   ========================================================================== */
+
+/* Every rule keeps the page id its shipped counterpart already used, so it wins
+   on specificity as well as on order (soft-theme.css is the last stylesheet the
+   page loads). Only tokens from 00-core.css are referenced, so both themes come
+   for free and no dark override is needed. Native <select>, date and time inputs
+   keep their own popups and arrows: only the box changes here.
+
+   The row-state rules deliberately never lean on colour alone — every chip and
+   node pairs its tint with a label or a shape, and paused and draft share one
+   neutral chip that the text distinguishes. */
+
+/* ==========================================================================
+   定时任务 — heading, notices and the stat row
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-page-heading {
+  margin-bottom: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-page-heading p {
+  max-width: 720px;
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-notice {
+  color: var(--ink-2);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+  padding: 12px 14px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-notice.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+/* The shipped bordered chips become soft tinted tiles: label above, value below. */
+html[data-skin="soft"] #page-schedules .schedule-stat-pills {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  height: auto;
+  min-height: 84px;
+  padding: 16px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills strong {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(1) {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(1) strong {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(2) {
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(2) strong {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(3) {
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-stat-pills article:nth-child(3) strong {
+  color: var(--ink-2);
+}
+
+/* ==========================================================================
+   定时任务 — task table and filter bar
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .table-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-table-topbar {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-filters label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Native select: box only, never the popup or arrow. */
+html[data-skin="soft"] #page-schedules .schedule-filters select {
+  min-height: 40px;
+  padding: 8px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-filters select:hover {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-task-count {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-task-count strong {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-table-scroll {
+  scrollbar-gutter: stable;
+}
+
+/* Sticky header cells sit on the same tint as the topbar so rows never show through. */
+html[data-skin="soft"] #page-schedules .schedule-table-scroll thead {
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td:first-child {
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #page-schedules tbody tr:hover td:last-child {
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #scheduledTaskRows td small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #scheduledTaskRows .scheduled-name {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #scheduledTaskRows .scheduled-name:hover {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-names {
+  color: var(--subtle);
+}
+
+/* Task state chip: pastel pill with a dot plus the label. Enabled reads green,
+   attention reads amber, and paused or draft stay neutral so colour never has to
+   carry the state on its own. */
+html[data-skin="soft"] #page-schedules .task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .task-status::before {
+  content: "";
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--subtle);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.running {
+  color: var(--green-700);
+  border-color: var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.running::before {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] #page-schedules .task-status.warning::before {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-icon {
+  color: var(--blue-700);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-state p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-empty-cta {
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-policy-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy {
+  padding: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy > summary,
+html[data-skin="soft"] #page-schedules .schedule-command > summary {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-legacy > p {
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   定时任务 — task editor
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-editor-layout {
+  gap: 18px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-editor-heading h2,
+html[data-skin="soft"] #page-schedules .scheduled-form-section h3,
+html[data-skin="soft"] #page-schedules .schedule-summary h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-timezone-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--blue-100);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section,
+html[data-skin="soft"] #page-schedules .schedule-summary {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section h3 > span {
+  color: var(--blue-700);
+  border-radius: var(--radius-sm);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-form-section .subtle,
+html[data-skin="soft"] #page-schedules .schedule-summary .subtle,
+html[data-skin="soft"] #page-schedules .schedule-summary > small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-summary > p {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+  margin-bottom: 16px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times strong {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-next-times ol {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-selected,
+html[data-skin="soft"] #page-schedules .scheduled-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-selected > strong {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-preview p {
+  color: var(--ink-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-preview img {
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-analysis-intro {
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-control);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-analysis-intro strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-choices {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option {
+  border-bottom: 1px solid var(--line);
+  transition: background-color .16s ease, box-shadow .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:last-child {
+  border-bottom: 0;
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option:has(input:checked) {
+  background: var(--blue-100);
+  box-shadow: inset 3px 0 var(--blue-600);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-target-option .scheduled-target-warning {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-chip {
+  color: var(--blue-700);
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  transition: background-color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-target-chip:hover {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-weekdays label {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--control-surface);
+  transition: background-color .16s ease, border-color .16s ease;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-weekdays label:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-command {
+  border-top: 1px solid var(--line);
+}
+
+/* Native command input: box only. */
+html[data-skin="soft"] #page-schedules .schedule-command input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-command > small,
+html[data-skin="soft"] #page-schedules .schedule-command-catalog {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card b {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .scheduled-link-card span {
+  color: var(--blue-700);
+}
+
+/* ==========================================================================
+   定时任务 — run history and the command-support chip
+   ========================================================================== */
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading {
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-schedules .schedule-runs-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run li {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-schedules .schedule-run li small {
+  color: var(--muted);
+}
+
+/* Support chip shared with the feature catalogue; the label carries the state. */
+html[data-skin="soft"] .command-schedule-status {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .command-schedule-status.supported {
+  color: var(--green-700);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.needs-condition {
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .command-schedule-status.unsupported {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+/* ==========================================================================
+   运行记录 — heading, filter bar and feedback surfaces
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .page-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-panel {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-activity .activity-filters label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html[data-skin="soft"] #page-activity .activity-toolbar {
+  gap: 8px;
+}
+
+html[data-skin="soft"] #page-activity .activity-search {
+  flex: 1 1 220px;
+  min-width: 190px;
+}
+
+/* Native select and search input: box only. */
+html[data-skin="soft"] #page-activity .activity-filters select,
+html[data-skin="soft"] #page-activity .activity-filters input {
+  min-height: 40px;
+  padding: 8px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-activity .activity-filters select:hover,
+html[data-skin="soft"] #page-activity .activity-filters input:hover {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-activity .activity-summary {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-read-error {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  border-radius: var(--radius-control);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] #page-activity .activity-feedback {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   运行记录 — activity list
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .activity-list {
+  position: relative;
+}
+
+html[data-skin="soft"] #page-activity .activity-item {
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease;
+}
+
+html[data-skin="soft"] #page-activity .activity-item + .activity-item {
+  border-top-color: var(--line);
+}
+
+html[data-skin="soft"] #page-activity .activity-item:hover {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] #page-activity .activity-time {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .activity-node {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+html[data-skin="soft"] #page-activity .activity-item.success .activity-node {
+  border-color: var(--green-600);
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] #page-activity .activity-item.failed .activity-node {
+  border-color: var(--red-700);
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .activity-title small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .activity-code {
+  color: var(--red-700);
+  border-radius: var(--radius-pill);
+  background: var(--red-100);
+  padding: 2px 8px;
+}
+
+html[data-skin="soft"] #page-activity .activity-result {
+  color: var(--green-700);
+}
+
+html[data-skin="soft"] #page-activity .activity-result i {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] .activity-pagination {
+  border-top: 1px solid var(--line);
+}
+
+/* ==========================================================================
+   运行记录 — diagnostic cards
+   ========================================================================== */
+
+html[data-skin="soft"] .diagnostic-card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .diagnostic-card.error {
+  border-left-color: var(--red-700);
+}
+
+html[data-skin="soft"] .diagnostic-card.warning {
+  border-left-color: var(--amber-700);
+}
+
+html[data-skin="soft"] .diagnostic-card header strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .diagnostic-card header code {
+  color: var(--muted);
+}
+
+/* Level pill: the tint plus its own outlined border, and the text says which. */
+html[data-skin="soft"] .diagnostic-level {
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .diagnostic-level.error {
+  color: var(--red-700);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .diagnostic-level.warning {
+  color: var(--amber-700);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .diagnostic-level.info {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .diagnostic-meta,
+html[data-skin="soft"] .diagnostic-operation,
+html[data-skin="soft"] .diagnostic-suggestion,
+html[data-skin="soft"] .diagnostic-actions span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .diagnostic-message,
+html[data-skin="soft"] .diagnostic-report {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .diagnostic-card summary,
+html[data-skin="soft"] .activity-tools > summary {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .activity-tools {
+  margin-top: 18px;
+}
+
+/* ==========================================================================
+   运行记录 — trace panel and gantt
+   ========================================================================== */
+
+html[data-skin="soft"] #page-activity .trace-panel {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] #page-activity .trace-panel .panel-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .trace-stage {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] #page-activity .trace-list {
+  margin-top: 14px;
+}
+
+html[data-skin="soft"] #page-activity .trace-actions {
+  gap: 8px;
+}
+
+html[data-skin="soft"] #page-activity .trace-gantt-card {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--chart-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chart-summary);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary > div > time {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dl div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--control-surface);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dt {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .trace-summary dd {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .trace-gantt-card > footer {
+  color: var(--subtle);
+  border-top: 1px solid var(--line);
+  background: var(--chart-footer);
+}
+
+/* Legend: each entry keeps its swatch AND its word, and the skipped swatch is a
+   dashed outline, so shape and text separate the states as well as colour. */
+html[data-skin="soft"] #page-activity .gantt-legend {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend span::before {
+  border-radius: var(--radius-sm);
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .pending::before {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .failed::before {
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-legend .skipped::before {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-axis {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .gantt-axis > div::after {
+  background: var(--line-strong);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row {
+  border-top: 1px solid var(--chart-divider);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label small {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-label > span {
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.skipped .gantt-label > span {
+  background: var(--subtle);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.pending .gantt-label > span {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.failed .gantt-label > span {
+  background: var(--red-700);
+}
+
+/* Soft tinted track with the same quarter grid, rounded to match the cards. */
+html[data-skin="soft"] #page-activity .gantt-track {
+  border: 1px solid var(--chart-track-border);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--chart-grid-a) 0,
+    var(--chart-grid-a) calc(25% - 1px),
+    var(--chart-grid-b) calc(25% - 1px),
+    var(--chart-grid-b) 25%
+  );
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar {
+  border-radius: var(--radius-pill);
+  background: var(--blue-600);
+  box-shadow: 0 1px 2px var(--glow-primary);
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.pending {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--amber-700) 0,
+    var(--amber-700) 6px,
+    var(--amber-100) 6px,
+    var(--amber-100) 12px
+  );
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.skipped {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-activity .gantt-bar.failed {
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-duration {
+  color: var(--blue-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.skipped .gantt-duration {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.pending .gantt-duration {
+  color: var(--amber-700);
+}
+
+html[data-skin="soft"] #page-activity .gantt-row.failed .gantt-duration {
+  color: var(--red-700);
+}
+
+/* ==========================================================================
+   motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] #page-schedules .scheduled-target-option,
+  html[data-skin="soft"] #page-schedules .schedule-target-chip,
+  html[data-skin="soft"] #page-schedules .schedule-weekdays label,
+  html[data-skin="soft"] #page-activity .activity-item {
+    transition: none;
+  }
+}

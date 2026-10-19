@@ -315,6 +315,9 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/panel-layout.js",
                     "/subscription.js",
                     "/subscription.css",
+                    # The opt-in soft skin, referenced unconditionally by index.html.
+                    "/soft-theme.css",
+                    "/soft-theme.js",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")

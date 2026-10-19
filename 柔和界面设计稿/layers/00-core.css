@@ -1,0 +1,909 @@
+/* ==========================================================================
+   Soft UI skin — core layer
+   Tokens, application shell and shared primitives.
+   ========================================================================== */
+
+/* Everything is scoped to html[data-skin="soft"] (set by soft-theme.js). The
+   shipped look is untouched while that attribute is absent, and the prefix also
+   outranks the single-class rules in app.css and design-overrides.css.
+   Native Date, Select and Listbox controls stay native: only their box is styled.
+
+   Only CSS the repository already relies on is used here: backdrop-filter is
+   present in design-overrides.css, while colour blending is written as explicit
+   rgba and per-accent line tokens rather than color-mix(), so the skin adds no
+   new engine dependency to the WebView2 baseline. */
+
+html[data-skin="soft"] {
+  /* Surfaces: cool near-white instead of the warm grey canvas. */
+  --canvas: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --surface-muted: #f1f2f4;
+  --surface-inset: #f7f8fa;
+  --surface-hover: #f5f6f8;
+  --surface-selected: #eaf1ff;
+  --control-surface: #ffffff;
+  --message-canvas: #f7f8fa;
+  --chart-surface: #ffffff;
+  --chart-summary: #f7f8fa;
+  --chart-footer: #fbfbfc;
+  --chart-divider: #eef0f3;
+  --chart-track-border: #e7e9ee;
+  --chart-grid-a: #f7f8fa;
+  --chart-grid-b: #e9ecf1;
+
+  /* Text */
+  --ink: #14181f;
+  --ink-2: #333a45;
+  --muted: #5f6673;
+  --subtle: #8a92a0;
+
+  /* Hairlines */
+  --line: #e7e9ee;
+  --line-strong: #d5d9e0;
+
+  /* Accents. Primary keeps the shipped brand blue; the supporting tints are
+     the pastel set the reference uses for state chips and event blocks. */
+  --blue-700: #1f56d9;
+  --blue-600: #2f6bff;
+  --blue-100: #eaf1ff;
+  --green-700: #12805a;
+  --green-600: #17a673;
+  --green-100: #e4f7ef;
+  --amber-700: #b06a08;
+  --amber-100: #fdf0d9;
+  --red-700: #c5394c;
+  --red-100: #fdeaea;
+  --violet-700: #6a49e8;
+  --violet-600: #7c5cff;
+  --violet-100: #efebff;
+  --teal-600: #0f9d9d;
+  --teal-100: #e2f6f6;
+
+  /* Hairline tints that pair with each accent surface. */
+  --blue-line: #c9daff;
+  --green-line: #bfe6d3;
+  --amber-line: #f0d6a6;
+  --red-line: #f2c6cb;
+
+  /* Translucent surfaces: glass topbar, dimming veil, focus and error rings. */
+  --glass: rgba(255, 255, 255, .78);
+  --veil: rgba(11, 18, 32, .46);
+  --ring-soft: rgba(47, 107, 255, .18);
+  --ring-error: rgba(197, 57, 76, .16);
+
+  /* Elevation: the shipped light theme has no shadows at all, which is the
+     single biggest difference from the reference. Three soft, wide steps. */
+  --shadow: 0 6px 20px rgba(16, 24, 40, .06);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
+  --shadow-md: 0 10px 28px rgba(16, 24, 40, .09);
+  --shadow-lg: 0 18px 50px rgba(16, 24, 40, .14);
+  --glow-primary: rgba(47, 107, 255, .24);
+
+  /* Shape */
+  --radius: 20px;
+  --radius-sm: 10px;
+  --radius-control: 12px;
+  --radius-card: 18px;
+  --radius-pill: 999px;
+
+  /* Headings move off the heavy display face to the bundled rounded one, which
+     matches the reference's lighter geometric weight. No new font is added. */
+  --font-display: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+
+  color: var(--ink);
+}
+
+html[data-skin="soft"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0f1319;
+  --surface: #161b22;
+  --surface-2: #1b2129;
+  --surface-muted: #1b2129;
+  --surface-inset: #12171d;
+  --surface-hover: #1d242c;
+  --surface-selected: #1f2a3d;
+  --control-surface: #161b22;
+  --message-canvas: #12171d;
+  --chart-surface: #161b22;
+  --chart-summary: #1b2129;
+  --chart-footer: #12171d;
+  --chart-divider: #252c36;
+  --chart-track-border: #2c3542;
+  --chart-grid-a: #1a2129;
+  --chart-grid-b: #232c37;
+
+  --ink: #eef2f7;
+  --ink-2: #cfd6e0;
+  --muted: #a7b0bd;
+  --subtle: #7d8794;
+
+  --line: #252c36;
+  --line-strong: #39424f;
+
+  --blue-700: #8eb8ff;
+  --blue-600: #6ea8ff;
+  --blue-100: #1b2740;
+  --green-700: #7ee0b4;
+  --green-600: #4fcb96;
+  --green-100: #14312a;
+  --amber-700: #f0c580;
+  --amber-100: #3a2c17;
+  --red-700: #ff9aa7;
+  --red-100: #3d1f24;
+  --violet-700: #bda6ff;
+  --violet-600: #a68bff;
+  --violet-100: #241f42;
+  --teal-600: #5fd2d2;
+  --teal-100: #14302f;
+
+  --blue-line: #2b3f63;
+  --green-line: #1f5140;
+  --amber-line: #5a4526;
+  --red-line: #5c2b32;
+
+  --glass: rgba(22, 27, 34, .78);
+  --veil: rgba(2, 6, 12, .68);
+  --ring-soft: rgba(110, 168, 255, .24);
+  --ring-error: rgba(255, 154, 167, .18);
+
+  --shadow: 0 6px 20px rgba(0, 0, 0, .38);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .30);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, .55);
+  --glow-primary: rgba(0, 0, 0, .40);
+}
+
+/* ---------- base ---------- */
+
+html[data-skin="soft"] body {
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+html[data-skin="soft"] ::selection {
+  color: var(--ink);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] * {
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+html[data-skin="soft"] button:focus-visible,
+html[data-skin="soft"] input:focus-visible,
+html[data-skin="soft"] select:focus-visible,
+html[data-skin="soft"] textarea:focus-visible,
+html[data-skin="soft"] summary:focus-visible,
+html[data-skin="soft"] [tabindex]:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- shell ---------- */
+
+html[data-skin="soft"] .app-shell {
+  background: var(--canvas);
+}
+
+html[data-skin="soft"] .sidebar {
+  color: var(--ink-2);
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  box-shadow: 6px 0 24px rgba(16, 24, 40, .04);
+}
+
+html[data-skin="soft"][data-theme="dark"] .sidebar {
+  box-shadow: 6px 0 24px rgba(0, 0, 0, .35);
+}
+
+html[data-skin="soft"] .brand-block {
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .brand-mark {
+  border-radius: 14px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
+}
+
+html[data-skin="soft"] .brand-mark img {
+  border-radius: 12px;
+}
+
+html[data-skin="soft"] .brand-copy strong {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .brand-copy span,
+html[data-skin="soft"] .nav-label {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1em;
+}
+
+html[data-skin="soft"] .nav-item {
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+html[data-skin="soft"] .nav-item:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .nav-item.active {
+  color: var(--blue-700);
+  background: var(--blue-100);
+  font-weight: 600;
+}
+
+/* The shipped active row adds a marker bar; the soft skin uses the pill alone. */
+html[data-skin="soft"] .nav-item::before,
+html[data-skin="soft"] .nav-item.active::before {
+  content: none;
+  display: none;
+}
+
+html[data-skin="soft"] .sidebar-foot {
+  border-top: 1px solid var(--line);
+}
+
+html[data-skin="soft"] .sidebar-health,
+html[data-skin="soft"] .sidebar-version {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .health-dot.online {
+  background: var(--green-600);
+  box-shadow: 0 0 0 3px var(--green-100);
+}
+
+html[data-skin="soft"] .health-dot.warning {
+  background: var(--amber-700);
+  box-shadow: 0 0 0 3px var(--amber-100);
+}
+
+html[data-skin="soft"] .health-dot.error {
+  background: var(--red-700);
+  box-shadow: 0 0 0 3px var(--red-100);
+}
+
+html[data-skin="soft"] .theme-toggle {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .theme-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .main-area {
+  background: var(--canvas);
+}
+
+/* ---------- topbar: translucent, so content scrolling under it stays legible ---------- */
+
+html[data-skin="soft"] .topbar {
+  border-bottom: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: saturate(150%) blur(18px);
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+}
+
+html[data-skin="soft"] .topbar strong {
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+
+html[data-skin="soft"] .eyebrow {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .content-scroll {
+  background: var(--canvas);
+}
+
+/* ---------- page framing ---------- */
+
+html[data-skin="soft"] .page {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .page-heading h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+html[data-skin="soft"] .page-heading p {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .account-chip {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .account-chip span {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .account-chip strong {
+  color: var(--ink);
+}
+
+html[data-skin="soft"] .section-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .section-heading p,
+html[data-skin="soft"] .microcopy,
+html[data-skin="soft"] .subtle {
+  color: var(--muted);
+}
+
+/* ---------- panels ---------- */
+
+html[data-skin="soft"] .panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+html[data-skin="soft"] .panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .table-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- buttons: the pill shape is the reference's clearest control signal ---------- */
+
+html[data-skin="soft"] .button {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease,
+    color .16s ease, transform .16s ease;
+}
+
+html[data-skin="soft"] .button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+html[data-skin="soft"] .button.primary {
+  color: #fff;
+  border: 1px solid transparent;
+  background: var(--blue-600);
+  box-shadow: 0 6px 16px var(--glow-primary);
+}
+
+html[data-skin="soft"] .button.primary:hover:not(:disabled) {
+  background: var(--blue-700);
+  box-shadow: 0 8px 22px var(--glow-primary);
+}
+
+html[data-skin="soft"][data-theme="dark"] .button.primary {
+  color: #0d1420;
+}
+
+html[data-skin="soft"] .button.secondary {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .button.secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .button.ghost {
+  color: var(--muted);
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+html[data-skin="soft"] .button.ghost:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .button.danger {
+  color: var(--red-700);
+  border: 1px solid var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .button.danger:hover:not(:disabled) {
+  color: #fff;
+  border-color: transparent;
+  background: var(--red-700);
+}
+
+html[data-skin="soft"] .button:disabled {
+  color: var(--subtle);
+  border-color: var(--line);
+  background: var(--surface-muted);
+  box-shadow: none;
+  opacity: 1;
+}
+
+html[data-skin="soft"] .row-action,
+html[data-skin="soft"] .inline-action {
+  color: var(--blue-700);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .row-action:hover:not(:disabled),
+html[data-skin="soft"] .inline-action:hover:not(:disabled) {
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .field-label-action {
+  color: var(--subtle);
+}
+
+/* ---------- status badges: pastel pill plus a dot, never colour alone ---------- */
+
+html[data-skin="soft"] .status-badge {
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .status-badge > span {
+  border-radius: 50%;
+}
+
+html[data-skin="soft"] .status-badge.online,
+html[data-skin="soft"] .status-badge.success {
+  color: var(--green-700);
+  border-color: var(--green-line);
+  background: var(--green-100);
+}
+
+html[data-skin="soft"] .status-badge.online > span,
+html[data-skin="soft"] .status-badge.success > span {
+  background: var(--green-600);
+}
+
+html[data-skin="soft"] .status-badge.warning {
+  color: var(--amber-700);
+  border-color: var(--amber-line);
+  background: var(--amber-100);
+}
+
+html[data-skin="soft"] .status-badge.warning > span {
+  background: var(--amber-700);
+}
+
+html[data-skin="soft"] .status-badge.error {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .status-badge.error > span {
+  background: var(--red-700);
+}
+
+/* ---------- inputs ---------- */
+
+html[data-skin="soft"] .form-field input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .form-field select,
+html[data-skin="soft"] .form-field textarea,
+html[data-skin="soft"] .settings-card input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .settings-card select,
+html[data-skin="soft"] .settings-card textarea,
+html[data-skin="soft"] .modal input:not([type="checkbox"]):not([type="radio"]),
+html[data-skin="soft"] .modal select,
+html[data-skin="soft"] .search-box input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .form-field input:not([type="checkbox"]):not([type="radio"]):hover:not(:disabled),
+html[data-skin="soft"] .form-field select:hover:not(:disabled),
+html[data-skin="soft"] .form-field textarea:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+html[data-skin="soft"] .form-field input:focus-visible,
+html[data-skin="soft"] .form-field select:focus-visible,
+html[data-skin="soft"] .form-field textarea:focus-visible,
+html[data-skin="soft"] .settings-card input:focus-visible,
+html[data-skin="soft"] .settings-card select:focus-visible,
+html[data-skin="soft"] .settings-card textarea:focus-visible {
+  border-color: var(--blue-600);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .form-field input::placeholder,
+html[data-skin="soft"] .form-field textarea::placeholder,
+html[data-skin="soft"] .search-box input::placeholder {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .form-field > span,
+html[data-skin="soft"] .form-field > label:first-child {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .form-field small {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .form-field [aria-invalid="true"] {
+  border-color: var(--red-700);
+  box-shadow: 0 0 0 3px var(--ring-error);
+}
+
+html[data-skin="soft"] .form-field .field-error {
+  color: var(--red-700);
+}
+
+html[data-skin="soft"] .form-field.tinted-list textarea {
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .path-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .path-box code {
+  color: var(--ink-2);
+}
+
+/* ---------- toggles ---------- */
+
+html[data-skin="soft"] .toggle-track {
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, .08);
+}
+
+html[data-skin="soft"] .toggle input:checked + .toggle-track {
+  background: var(--blue-600);
+  box-shadow: 0 4px 12px var(--glow-primary);
+}
+
+html[data-skin="soft"] .toggle-track::after {
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- segmented control and search box ---------- */
+
+html[data-skin="soft"] .segmented {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  padding: 3px;
+}
+
+html[data-skin="soft"] .segmented button {
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .segmented button.active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .search-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .search-box:focus-within {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .search-box svg {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .search-box input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-skin="soft"] .clear-search {
+  color: var(--subtle);
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .clear-search:hover {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+/* ---------- tables ---------- */
+
+html[data-skin="soft"] table th {
+  color: var(--subtle);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] table td {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-skin="soft"] tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] tbody tr.selected td {
+  background: var(--surface-selected);
+}
+
+html[data-skin="soft"] .table-empty {
+  color: var(--subtle);
+}
+
+/* ---------- feedback surfaces ---------- */
+
+html[data-skin="soft"] .toast {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .toast.error {
+  color: var(--red-700);
+  border-color: var(--red-line);
+  background: var(--red-100);
+}
+
+html[data-skin="soft"] .loading-row {
+  color: var(--subtle);
+}
+
+html[data-skin="soft"] .empty-symbol {
+  color: var(--blue-700);
+  border-radius: var(--radius-card);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .empty-state h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+html[data-skin="soft"] .empty-state p {
+  color: var(--muted);
+}
+
+/* ---------- modals and onboarding ---------- */
+
+html[data-skin="soft"] .modal-backdrop,
+html[data-skin="soft"] .onboarding-backdrop {
+  background: var(--veil);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] .modal,
+html[data-skin="soft"] .onboarding-dialog {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .modal-icon {
+  border-radius: var(--radius-card);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .modal-actions .button {
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .modal-progress {
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .modal-progress span {
+  border-radius: var(--radius-pill);
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] .onboarding-steps article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+html[data-skin="soft"] .onboarding-note,
+html[data-skin="soft"] .readiness-checklist li {
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+/* ---------- native dialogs: date range, report preview, copy menu ----------
+   These are separate <dialog> elements, not children of .modal-backdrop, so they
+   need their own treatment or they keep the shipped look under the skin. */
+
+html[data-skin="soft"] .date-range-dialog::backdrop,
+html[data-skin="soft"] .report-preview-dialog::backdrop {
+  background: var(--veil);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+html[data-skin="soft"] .date-range-dialog,
+html[data-skin="soft"] .report-preview-dialog {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .date-range-dialog .panel-heading h2,
+html[data-skin="soft"] .report-preview-header h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields label,
+html[data-skin="soft"] .date-range-dialog .range-navigation span {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields input {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--control-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-fields input.active {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px var(--ring-soft);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-calendars h3 {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button {
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button:hover,
+html[data-skin="soft"] .date-range-dialog .range-days button:focus-visible {
+  background: var(--surface-hover);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button.in-range {
+  color: var(--blue-700);
+  background: var(--blue-100);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button.selected {
+  color: #fff;
+  background: var(--blue-600);
+}
+
+html[data-skin="soft"] .date-range-dialog .range-days button:disabled {
+  color: var(--subtle);
+  background: transparent;
+}
+
+html[data-skin="soft"] .report-preview-header p,
+html[data-skin="soft"] .report-preview-status {
+  color: var(--muted);
+}
+
+html[data-skin="soft"] .report-preview-close {
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+}
+
+html[data-skin="soft"] .report-preview-close:hover {
+  color: var(--ink);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .report-preview-tools output {
+  color: var(--ink-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+html[data-skin="soft"] .report-preview-viewport {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-inset);
+}
+
+html[data-skin="soft"] .report-preview-viewport img {
+  border-radius: var(--radius-control);
+}
+
+html[data-skin="soft"] .preview-copy-menu {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-skin="soft"] .preview-copy-menu button {
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+}
+
+html[data-skin="soft"] .preview-copy-menu button:hover,
+html[data-skin="soft"] .preview-copy-menu button:focus-visible {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="soft"] .button,
+  html[data-skin="soft"] .nav-item,
+  html[data-skin="soft"] .search-box,
+  html[data-skin="soft"] .panel {
+    transition: none;
+  }
+
+  html[data-skin="soft"] .button:active:not(:disabled) {
+    transform: none;
+  }
+}
