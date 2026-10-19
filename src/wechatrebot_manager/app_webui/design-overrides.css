@@ -759,12 +759,12 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 .is-message-preview .report-preview-header { position: absolute; inset: 14px 14px auto auto; z-index: 2; padding: 0; background: transparent; }
 .is-message-preview .report-preview-header > div { display: none; }
 .is-message-preview .report-preview-close,
-.is-message-preview .report-preview-tools { display: inline-flex; align-items: center; justify-content: center; gap: 2px; box-sizing: border-box; height: 44px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: 0 6px 20px #0003; }
-.is-message-preview .report-preview-close { width: 44px; padding: 0; }
+.is-message-preview .report-preview-tools { height: 44px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: 0 6px 20px #0003; }
+.is-message-preview .report-preview-close { width: 44px; }
 .is-message-preview .report-preview-close svg { width: 20px; height: 20px; }
-.is-message-preview .report-preview-tools { align-self: center; margin: 0 0 18px; }
-.is-message-preview .report-preview-tools .button { width: 34px; height: 34px; min-height: 34px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 19px; font-weight: 600; line-height: 1; }
-.is-message-preview .report-preview-tools .button:hover { background: var(--canvas); color: var(--blue-700); }
+.is-message-preview .report-preview-tools { align-self: center; margin: 0 0 18px; gap: 2px; padding: 4px; }
+.is-message-preview .report-preview-tools .button { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 999px; background: transparent; font-size: 19px; font-weight: 600; line-height: 1; }
+.is-message-preview .report-preview-tools .button:hover { background: var(--canvas); }
 .is-message-preview .report-preview-tools output { display: none; }
 .is-message-preview .report-preview-viewport { display: flex; background: transparent; }
 .is-message-preview .report-preview-viewport img { flex: none; align-self: flex-start; margin: auto; box-shadow: 0 16px 48px #0006; }
