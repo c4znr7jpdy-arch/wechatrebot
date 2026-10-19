@@ -85,7 +85,9 @@ def test_hourly_selection_handles_exact_hours_and_midnight(weather, at, expected
 
 @pytest.mark.parametrize("provider", ["open_meteo", "alapi"])
 @pytest.mark.parametrize("failure, attempts, reason", [
-    ("timeout", 1, "ReadTimeout"), (503, 1, "HTTP 503"), (401, 1, "HTTP 401"),
+    ("timeout", {"open_meteo": 2, "alapi": 1}, "ReadTimeout"),
+    (503, {"open_meteo": 2, "alapi": 1}, "HTTP 503"),
+    (401, {"open_meteo": 1, "alapi": 1}, "HTTP 401"),
 ])
 def test_supplement_failures_are_bounded_and_diagnosable(weather, monkeypatch, caplog,
                                                        failure, attempts, reason, provider):
@@ -104,8 +106,32 @@ def test_supplement_failures_are_bounded_and_diagnosable(weather, monkeypatch, c
     result = fetch_with_client(monkeypatch, service, respond, method, query)
 
     assert result is None
-    assert len(requests) == attempts
+    assert len(requests) == attempts[provider]
     assert reason in caplog.text
+
+
+def test_open_meteo_transient_failure_is_retried_once(weather, monkeypatch):
+    service, _ = weather
+    requests = []
+    delays = []
+
+    def respond(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json=forecast())
+
+    async def fake_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr(service.asyncio, "sleep", fake_sleep)
+    result = fetch_with_client(monkeypatch, service, respond,
+                               service.fetch_weather_open_meteo, {"latitude": 31.23, "longitude": 121.47})
+
+    assert len(requests) == 2
+    assert delays == [service._OPEN_METEO_RETRY_DELAY]
+    assert [hour["time"][-5:] for hour in result["hour"]] == ["09:30", "10:00", "12:00", "14:00", "16:00"]
+    assert result["visibility"] == "0.4km"
 
 
 def test_alapi_uses_post_without_credentials_in_url(weather, monkeypatch):
