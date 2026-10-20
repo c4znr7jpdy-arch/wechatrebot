@@ -13,8 +13,8 @@
   <link rel="stylesheet" href="activity.css?v=20261010">
   <script src="activity-errors.js"></script>
   <link rel="stylesheet" href="settings-layout.css">
+  <!-- manager-skins -->
   <script src="soft-theme.js"></script>
-  <link rel="stylesheet" href="soft-theme.css">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -391,6 +391,7 @@
             <button class="active" type="button" data-settings-tab="model" data-action-bound disabled><strong>模型服务</strong></button>
             <button type="button" data-settings-tab="core" data-action-bound disabled><strong>机器人配置</strong></button>
             <button type="button" data-settings-tab="search" data-action-bound disabled><strong>联网搜索</strong></button>
+            <button type="button" data-settings-tab="skin" data-action-bound disabled><strong>皮肤</strong></button>
             <button type="button" data-settings-tab="system" data-action-bound disabled><strong>系统与更新</strong></button>
           </nav>
           <div class="settings-grid">
@@ -435,6 +436,13 @@
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" data-action-bound disabled aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
                 </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
+
+            <section class="settings-card panel skin-settings" data-settings-section="skin" hidden aria-labelledby="skinHeading">
+              <div class="panel-heading"><div><h2 id="skinHeading">皮肤</h2></div></div>
+              <p class="settings-copy">切换后立即生效，关闭管理器后仍会保留。皮肤支持侧栏的深浅模式切换。</p>
+              <fieldset class="skin-options" id="skinOptions"><legend class="visually-hidden">选择皮肤</legend></fieldset>
+              <p class="form-note" id="skinStatus" role="status" aria-live="polite"></p>
+            </section>
 
             <div class="settings-system-stack system-maintenance" data-settings-section="system">
             <section class="settings-card panel">

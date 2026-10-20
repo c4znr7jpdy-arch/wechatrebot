@@ -1,4 +1,13 @@
 /* Flat settings and aligned chat details share the existing semantic palette. */
+.skin-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin: 20px 0; padding: 0; border: 0; min-width: 0; }
+#page-settings .skin-option { display: flex; gap: 14px; align-items: flex-start; margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface); cursor: pointer; }
+#page-settings .skin-option:has(:checked) { border-color: var(--blue-600); background: var(--blue-100); }
+#page-settings .skin-option:focus-within { outline: 2px solid var(--blue-600); outline-offset: 3px; }
+#page-settings .skin-option:has(:disabled) { cursor: default; }
+#page-settings .skin-option input { flex: 0 0 18px; width: 18px; height: 18px; min-height: 0; margin: 3px 0 0; accent-color: var(--blue-600); }
+#page-settings .skin-option > span { display: grid; gap: 8px; min-width: 0; }
+#page-settings .skin-option strong { font-size: 16px; }
+#page-settings .skin-option small { color: var(--muted); line-height: 1.6; }
 #page-settings .settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; }
 #page-settings .settings-tabs { display: flex; flex-direction: column; gap: 10px; padding: 0; margin: 0; border: 0; background: transparent; position: sticky; top: 0; }
 #page-settings .settings-tabs button { display: grid; gap: 8px; width: 100%; min-height: 78px; padding: 16px; text-align: left; border: 0; border-radius: 8px; background: transparent; color: var(--ink); }
