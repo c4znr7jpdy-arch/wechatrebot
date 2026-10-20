@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath
 import re
-import sys
 
 from .customer_config import _object, save_ui_preference
 
@@ -13,19 +12,13 @@ _SKIN_ID = re.compile(r"^[a-z][a-z0-9_-]*$")
 _STYLESHEET_SEGMENT = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*$")
 
 
-def _catalog_root() -> Path:
-    candidates = [Path(__file__).with_name("app_webui")]
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    if bundle_root:
-        candidates.insert(0, Path(bundle_root) / "wechatrebot_manager" / "app_webui")
-    for candidate in candidates:
-        if (candidate / "index.html").is_file():
-            return candidate
-    raise FileNotFoundError("主界面资源缺失，请重新安装软件。")
-
-
 def load_skin_catalog(asset_root: Path | None = None) -> list[dict[str, str]]:
-    root = (asset_root if asset_root is not None else _catalog_root()).resolve()
+    if asset_root is None:
+        # Resolve lazily: the application API also imports skin preferences.
+        from .app_shell import _asset_root
+
+        asset_root = _asset_root()
+    root = asset_root.resolve()
     value = json.loads((root / "skins.json").read_text(encoding="utf-8-sig"))
     if not isinstance(value, list) or not value:
         raise ValueError("界面皮肤目录格式无效。")

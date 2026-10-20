@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 import re
+import sys
 import threading
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -81,7 +82,7 @@ def test_skin_catalog_uses_frozen_bundle_assets(monkeypatch, tmp_path):
     assets.rename(bundle_assets)
     catalog[1]["name"] = "打包皮肤"
     write_json_atomic(bundle_assets / "skins.json", catalog)
-    monkeypatch.setattr(ui_skins.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert ui_skins.load_skin_catalog()[1]["name"] == "打包皮肤"
 
 
