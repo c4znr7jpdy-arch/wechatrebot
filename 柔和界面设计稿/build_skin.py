@@ -21,8 +21,8 @@ HEADER = """/* Soft UI skin for the manager web UI — GENERATED, do not edit he
  * Sources: 柔和界面设计稿/layers/  (see 设计说明.md)
  * Rebuild: python 柔和界面设计稿/build_skin.py
  *
- * Opt-in only. Activated by html[data-skin="soft"], which soft-theme.js sets from
- * ?style=soft. The shipped look is unchanged while the attribute is absent.
+ * Activated by html[data-skin="soft"] through the manager's skin selector.
+ * The default skin is unchanged while the attribute is absent.
  * Native Date, Select and Listbox controls stay native (release/premium-ui.json).
  *
  * Layers: {layers}

@@ -793,7 +793,7 @@ html[data-skin="soft"] #page-settings .preview-message.mine p {
 }
 
 html[data-skin="soft"] #page-settings .preview-avatar {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--green-700);
 }
 

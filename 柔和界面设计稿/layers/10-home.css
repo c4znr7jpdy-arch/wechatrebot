@@ -29,7 +29,7 @@ html[data-skin="soft"] .environment-alert {
 
 html[data-skin="soft"] .alert-code {
   border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 html[data-skin="soft"] .alert-code span {
@@ -62,7 +62,7 @@ html[data-skin="soft"] #page-home .control-body {
 
 html[data-skin="soft"] #page-home .home-status-icon {
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--green-600);
   box-shadow: 0 10px 26px rgba(23, 166, 115, .28);
 }
@@ -235,7 +235,7 @@ html[data-skin="soft"] .home-setup-alert[data-priority="3"] {
 
 html[data-skin="soft"] .home-setup-alert-icon {
   border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 html[data-skin="soft"] .home-setup-alert-copy strong {
@@ -270,7 +270,7 @@ html[data-skin="soft"] #page-home .error-panel ol {
 
 html[data-skin="soft"] .error-code {
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 /* ---------- signal strip ---------- */
