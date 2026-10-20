@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from http.server import ThreadingHTTPServer
+import functools
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -13,6 +15,7 @@ import pytest
 
 from scripts import dev_manager as dev
 from wechatrebot_manager import app_shell
+from wechatrebot_manager.ui_skins import load_skin_catalog
 
 
 def test_preview_serves_current_files_and_changes_revision(tmp_path: Path):
@@ -53,6 +56,43 @@ def test_preflight_rejects_unfinished_install_without_writing(tmp_path: Path):
     marker.write_text(json.dumps({"state": "ready"}), encoding="utf-8")
     assert dev.resolve_install_root(tmp_path) == tmp_path.resolve()
     assert list(tmp_path.iterdir()) == [marker]
+
+
+@pytest.mark.parametrize("handler_type", ["development", "capture"])
+def test_preview_handlers_expand_skin_catalog(tmp_path, handler_type):
+    (tmp_path / "index.html").write_text(
+        '<html><head><!-- manager-skins --><script src="soft-theme.js"></script></head><body></body></html>',
+        encoding="utf-8",
+    )
+    (tmp_path / "skins.json").write_text(json.dumps(load_skin_catalog()), encoding="utf-8")
+    (tmp_path / "soft-theme.css").write_text("html[data-skin=soft]{}", encoding="utf-8")
+    if handler_type == "development":
+        handler = dev.preview_handler(tmp_path, watch=False)
+    else:
+        script = dev.ROOT / "柔和界面设计稿" / "capture_soft_skin.py"
+        spec = importlib.util.spec_from_file_location("capture_soft_skin", script)
+        capture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(capture)
+        handler = functools.partial(capture.Quiet, directory=str(tmp_path))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        for route in ("/?preview&style=soft", "/index.html?preview&style=soft"):
+            with urlopen(base + route, timeout=2) as response:
+                html = response.read().decode("utf-8")
+            assert '<!-- manager-skins -->' not in html
+            assert 'data-manager-skin="soft" href="soft-theme.css"' in html
+            assert html.index('id="managerSkinCatalog"') < html.index('src="soft-theme.js"')
+            assert ("源码预览 · 示例数据" in html) == (handler_type == "development")
+            assert "location.reload()" not in html
+        with urlopen(base + "/soft-theme.css", timeout=2) as response:
+            assert response.read() == b"html[data-skin=soft]{}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_contact_preview_exposes_only_fixed_public_file(tmp_path, monkeypatch):
