@@ -40,7 +40,7 @@ wechatrebot = "wechatrebot_manager.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-wechatrebot_manager = ["*.json", "plugin_webui/*.html", "plugin_webui/*.css", "plugin_webui/*.js", "app_webui/*.html", "app_webui/*.css", "app_webui/*.js", "app_webui/assets/report-preview-*.webp", "app_webui/assets/provider-*.png", "app_webui/assets/provider-*.ico"]
+wechatrebot_manager = ["*.json", "plugin_webui/*.html", "plugin_webui/*.css", "plugin_webui/*.js", "app_webui/*.html", "app_webui/*.css", "app_webui/*.js", "app_webui/*.json", "app_webui/assets/report-preview-*.webp", "app_webui/assets/provider-*.png", "app_webui/assets/provider-*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

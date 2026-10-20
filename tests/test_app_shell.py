@@ -16,6 +16,7 @@ from wechatrebot_manager.launcher import ServiceStopError
 from wechatrebot_manager.payload import PayloadError
 from wechatrebot_manager.updates import UpdateChannel, UpdateRelease
 from wechatrebot_manager.update_logger import UpdateLogger
+from wechatrebot_manager.ui_skins import load_ui_skin
 
 
 class _Events:
@@ -102,6 +103,29 @@ def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(app_shell, "save_ui_theme", fail)
     assert _api(tmp_path).save_theme("dark")["ok"] is False
+
+
+def test_skin_preference_survives_new_api_instances_and_preserves_theme(tmp_path: Path) -> None:
+    path = tmp_path / "data/manager/ui-preferences.json"
+    model_api.write_json_atomic(path, {"theme": "dark", "other": "keep"})
+    assert "save_skin" in app_shell.PUBLIC_API_METHODS
+    assert load_ui_skin(tmp_path) == ""
+    for skin in ("soft", "default"):
+        assert _api(tmp_path).save_skin(skin) == {"ok": True, "data": {"skin": skin}, "message": ""}
+        assert load_ui_skin(tmp_path) == skin
+        assert json.loads(path.read_text(encoding="utf-8")) == {"theme": "dark", "other": "keep", "skin": skin}
+    assert _api(tmp_path).save_theme("light")["ok"] is True
+    assert load_ui_skin(tmp_path) == "default"
+    assert _api(tmp_path).save_skin("invalid")["ok"] is False
+    assert load_ui_skin(tmp_path) == "default"
+
+
+def test_skin_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
+    def fail(*args):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(app_shell, "save_ui_skin", fail)
+    assert _api(tmp_path).save_skin("soft")["ok"] is False
 
 
 def test_unified_scheduled_task_api_is_explicit_and_keeps_user_errors(tmp_path: Path) -> None:

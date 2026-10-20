@@ -4,6 +4,7 @@ import copy
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import threading
 from typing import Any
 
 from .brand import BrandProfile
@@ -24,6 +25,9 @@ from .provider import (
     with_thinking_mode,
 )
 from .runtime_config import normalize_admin_id, write_runtime_configs
+
+
+_UI_PREFERENCES_LOCK = threading.Lock()
 
 
 WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
@@ -148,13 +152,19 @@ def load_ui_theme(root: str | Path) -> str:
     return theme if theme in ("light", "dark") else ""
 
 
+def save_ui_preference(root: str | Path, key: str, value: str) -> None:
+    """Preserve independent UI choices when requests arrive concurrently."""
+    path = Path(root) / "data/manager/ui-preferences.json"
+    with _UI_PREFERENCES_LOCK:
+        preferences = _object(path)
+        preferences[key] = value
+        write_json_atomic(path, preferences)
+
+
 def save_ui_theme(root: str | Path, theme: str) -> None:
     if theme not in ("light", "dark"):
         raise ValueError("界面主题只能选择浅色或深色。")
-    path = Path(root) / "data/manager/ui-preferences.json"
-    preferences = _object(path)
-    preferences["theme"] = theme
-    write_json_atomic(path, preferences)
+    save_ui_preference(root, "theme", theme)
 
 
 def _paths(root: str | Path) -> tuple[Path, Path, Path]:

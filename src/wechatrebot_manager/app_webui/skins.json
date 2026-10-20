@@ -1,0 +1,14 @@
+[
+  {
+    "id": "default",
+    "name": "默认",
+    "description": "保留管理器原有的界面样式。",
+    "stylesheet": ""
+  },
+  {
+    "id": "soft",
+    "name": "柔和",
+    "description": "柔和配色、圆角面板与轻盈阴影。",
+    "stylesheet": "soft-theme.css"
+  }
+]
