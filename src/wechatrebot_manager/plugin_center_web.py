@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
+from html import escape
 import json
 from pathlib import Path
 import re
@@ -13,6 +14,7 @@ from urllib.parse import unquote, urlsplit
 from .customer_config import load_ui_theme
 from .plugin_errors import PluginCenterError
 from .plugin_schema_profiles import _ANGEL_HEART_MODULE
+from .ui_skins import load_skin_catalog, load_ui_skin
 
 if TYPE_CHECKING:
     from .plugin_center import PluginCenterService
@@ -114,6 +116,19 @@ def _asset_root() -> Path:
     raise FileNotFoundError("功能配置中心资源缺失，请重新安装管理器。")
 
 
+def _skin_catalog_markup(catalog: list[dict[str, str]]) -> bytes:
+    serialized = json.dumps(catalog, ensure_ascii=False)
+    for character, escaped in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e")):
+        serialized = serialized.replace(character, escaped)
+    markup = [f'<script type="application/json" id="managerSkinCatalog">{serialized}</script>']
+    markup.extend(
+        f'<link rel="stylesheet" data-manager-skin="{escape(item["id"], quote=True)}" '
+        f'href="{escape(item["stylesheet"], quote=True)}">'
+        for item in catalog if item["stylesheet"]
+    )
+    return "\n  ".join(markup).encode("utf-8")
+
+
 def _handler(service: PluginCenterService, *, manager_assets: Path | None = None):
     assets = manager_assets if manager_assets is not None else _asset_root()
     manager_mode = manager_assets is not None
@@ -185,10 +200,17 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
             raw = target.read_bytes()
             if manager_mode and root is None and relative == "index.html":
                 theme = load_ui_theme(service.install_root)
+                attributes = ""
                 if theme:
-                    raw = raw.replace(b'<html lang="zh-CN">', (
-                        f'<html lang="zh-CN" data-saved-theme="{theme}" data-theme="{theme}">'
-                    ).encode("utf-8"), 1)
+                    attributes += f' data-saved-theme="{theme}" data-theme="{theme}"'
+                if b"<!-- manager-skins -->" in raw:
+                    catalog = load_skin_catalog(assets)
+                    skin = load_ui_skin(service.install_root, asset_root=assets)
+                    attributes += f' data-saved-skin="{escape(skin, quote=True)}"'
+                    raw = raw.replace(b"<!-- manager-skins -->", _skin_catalog_markup(catalog), 1)
+                raw = raw.replace(b'<html lang="zh-CN">', (
+                    f'<html lang="zh-CN"{attributes}>'
+                ).encode("utf-8"), 1)
             self.send_response(HTTPStatus.OK)
             self._security_headers()
             self.send_header(
@@ -315,13 +337,18 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/panel-layout.js",
                     "/subscription.js",
                     "/subscription.css",
-                    # The opt-in soft skin, referenced unconditionally by index.html.
-                    "/soft-theme.css",
                     "/soft-theme.js",
                 }:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
                     return
+                if manager_mode and split.path.endswith(".css") and (assets / "skins.json").is_file():
+                    if any(
+                        split.path == f'/{item["stylesheet"]}'
+                        for item in load_skin_catalog(assets) if item["stylesheet"]
+                    ):
+                        self._serve_asset(split.path.lstrip("/"), "text/css; charset=utf-8")
+                        return
                 if split.path == "/assets/app.css":
                     self._serve_asset("app.css", "text/css; charset=utf-8", root=_asset_root())
                     return

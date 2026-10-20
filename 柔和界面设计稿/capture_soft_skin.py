@@ -16,13 +16,16 @@ import argparse
 import functools
 import http.server
 import socketserver
+import sys
 import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-WEB = ROOT / "src" / "wechatrebot_manager" / "app_webui"
-CONTACT = ROOT / "src" / "wechatrebot_manager" / "licensing-contact.json"
+SOURCE = ROOT / "src"
+WEB = SOURCE / "wechatrebot_manager" / "app_webui"
+CONTACT = SOURCE / "wechatrebot_manager" / "licensing-contact.json"
+sys.path.insert(0, str(SOURCE))
 
 PAGES = [
     ("home", "运行中心", ""),
@@ -55,18 +58,31 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path.split("?")[0] == "/assets/preview/licensing-contact.json":
+        route = self.path.split("?")[0]
+        if route in {"/", "/index.html"}:
+            html = (Path(self.directory) / "index.html").read_text(encoding="utf-8")
+            if "<!-- manager-skins -->" in html:
+                from wechatrebot_manager.plugin_center_web import _skin_catalog_markup
+                from wechatrebot_manager.ui_skins import load_skin_catalog
+
+                skin_markup = _skin_catalog_markup(load_skin_catalog(Path(self.directory))).decode("utf-8")
+                html = html.replace("<!-- manager-skins -->", skin_markup, 1)
+            self._send(html.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if route == "/assets/preview/licensing-contact.json":
             if not CONTACT.is_file():
                 self.send_error(404)
                 return
-            body = CONTACT.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send(CONTACT.read_bytes(), "application/json; charset=utf-8")
             return
         super().do_GET()
+
+    def _send(self, body: bytes, content_type: str):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def serve() -> int:

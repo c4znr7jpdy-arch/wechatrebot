@@ -15,6 +15,7 @@ from . import __version__
 from .app_shell import _asset_root
 from .error_catalog import load_error_catalog
 from .json_io import write_json_atomic
+from .ui_skins import load_skin_catalog
 
 
 def _timezone_data_ready() -> bool:
@@ -47,6 +48,7 @@ def _app_assets_ready(root: Path) -> bool:
         parser.feed((root / "index.html").read_text("utf-8"))
         if not parser.paths:
             return False
+        parser.paths.extend(item["stylesheet"] for item in load_skin_catalog(root) if item["stylesheet"])
         for value in parser.paths:
             parsed = urlsplit(value)
             path = (root / unquote(parsed.path).lstrip("/")).resolve()

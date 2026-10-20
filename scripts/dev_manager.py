@@ -68,6 +68,12 @@ def preview_handler(root: Path, *, watch: bool = True):
                 return
             if route in {"/", "/index.html"}:
                 html = (root / "index.html").read_text(encoding="utf-8")
+                if "<!-- manager-skins -->" in html:
+                    from wechatrebot_manager.plugin_center_web import _skin_catalog_markup
+                    from wechatrebot_manager.ui_skins import load_skin_catalog
+
+                    skin_markup = _skin_catalog_markup(load_skin_catalog(root)).decode("utf-8")
+                    html = html.replace("<!-- manager-skins -->", skin_markup, 1)
                 badge = '<div style="position:fixed;bottom:4px;right:8px;z-index:99999;background:#fff3cd;color:#664d03;padding:4px 10px;font:12px sans-serif;pointer-events:none">源码预览 · 示例数据</div>'
                 reload_script = ""
                 if watch:

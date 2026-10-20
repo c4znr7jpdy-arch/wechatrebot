@@ -24,6 +24,47 @@ window.createManagerSettings = function (helpers) {
     getCoreSettings,
   } = helpers;
 
+  async function initializeSkins() {
+    const skins = window.managerSkins;
+    const options = $("#skinOptions");
+    const status = $("#skinStatus");
+    if (!skins) { status.textContent = "皮肤资源未能加载，请重新打开管理器。"; return; }
+    function renderSelection() {
+      $$("[data-skin-option]", options).forEach((input) => {
+        input.checked = input.value === skins.current;
+        input.disabled = !skins.available(input.value);
+      });
+      status.textContent = skins.failure || `已应用：${skins.entries.find((entry) => entry.id === skins.current).name}`;
+    }
+    options.insertAdjacentHTML("beforeend", skins.entries.map((entry) => `
+      <label class="skin-option"><input type="radio" name="manager-skin" data-skin-option disabled value="${escapeHtml(entry.id)}">
+        <span><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.description)}</small></span>
+      </label>`).join(""));
+    options.addEventListener("change", async (event) => {
+      if (!event.target.matches("[data-skin-option]")) return;
+      const id = event.target.value;
+      $$("[data-skin-option]", options).forEach((input) => { input.disabled = true; });
+      status.textContent = "正在保存皮肤…";
+      try {
+        await skins.save(id, (value) => api("save_skin", value));
+        renderSelection();
+      } catch (error) {
+        renderSelection();
+        status.textContent = "皮肤未能保存，请重试。";
+        reportError(error);
+      }
+    });
+    window.addEventListener("manager-skin-change", renderSelection);
+    try {
+      await skins.initialize((value) => api("save_skin", value));
+      renderSelection();
+    } catch (error) {
+      renderSelection();
+      status.textContent = "皮肤仅在本次窗口生效，未能保存。请重新选择后重试。";
+      reportError(error);
+    }
+  }
+
   function selectSettingsSection(section) {
     if (section !== state.settingsSection && getCoreSettings().guard(() => selectSettingsSection(section))) return;
     if (section !== "model" && guardProviderDraft(() => setSettingsSection(section, true))) return;
@@ -277,6 +318,7 @@ window.createManagerSettings = function (helpers) {
     exportDiagnostics,
     fillSettings,
     formatBytes,
+    initializeSkins,
     loadMaintenance,
     openMemoryManager,
     saveWebSearchSettings,

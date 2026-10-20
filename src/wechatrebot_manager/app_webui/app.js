@@ -548,7 +548,7 @@
     schedules: "定时任务", activity: "运行记录", settings: "机器人总设置", help: "帮助", subscription: "订阅与授权",
   };
 
-  const SETTINGS_SECTIONS = new Set(["model", "core", "search", "system"]);
+  const SETTINGS_SECTIONS = new Set(["model", "core", "search", "skin", "system"]);
 
   async function navigate(page) {
     if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
@@ -1122,6 +1122,7 @@
     try {
       initializeControllers();
       bindEvents();
+      await initializeSkins();
       setSettingsSection("model");
       state.bootstrap = await api("bootstrap");
       fillSettings(state.bootstrap);
@@ -1252,7 +1253,7 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, loadMaintenance, openMemoryManager, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
+  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, loadMaintenance, openMemoryManager, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
     $,
     $$,
     SETTINGS_SECTIONS,

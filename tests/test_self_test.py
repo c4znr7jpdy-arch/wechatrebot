@@ -30,7 +30,7 @@ def test_manager_self_test_rejects_missing_page_module(monkeypatch, tmp_path, mi
     assets = tmp_path / "webui"
     assets.mkdir()
     for path in source.iterdir():
-        if path.is_file() and path.suffix in {".html", ".js", ".css"}:
+        if path.is_file() and path.suffix in {".html", ".js", ".css", ".json"}:
             shutil.copy2(path, assets / path.name)
     monkeypatch.setattr(self_test, "_asset_root", lambda: assets)
     monkeypatch.setattr(self_test.importlib.util, "find_spec", lambda _name: object())

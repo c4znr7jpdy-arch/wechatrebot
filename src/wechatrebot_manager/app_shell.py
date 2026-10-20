@@ -67,11 +67,13 @@ from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .installed_entries import ensure_launcher_executable
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
+from .ui_skins import save_ui_skin
 
 
 PUBLIC_API_METHODS = (
     "bootstrap",
     "save_theme",
+    "save_skin",
     "get_status",
     "get_license_status",
     "prepare_license_device",
@@ -410,6 +412,13 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         try:
             save_ui_theme(self._install_root, theme)
             return self._ok({"theme": theme})
+        except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
+    def save_skin(self, skin: str) -> dict[str, object]:
+        try:
+            save_ui_skin(self._install_root, skin)
+            return self._ok({"skin": skin})
         except (OSError, ValueError) as exc:
             return self._failed(exc, "15001")
 

@@ -3,8 +3,8 @@
  * Sources: 柔和界面设计稿/layers/  (see 设计说明.md)
  * Rebuild: python 柔和界面设计稿/build_skin.py
  *
- * Opt-in only. Activated by html[data-skin="soft"], which soft-theme.js sets from
- * ?style=soft. The shipped look is unchanged while the attribute is absent.
+ * Activated by html[data-skin="soft"] through the manager's skin selector.
+ * The default skin is unchanged while the attribute is absent.
  * Native Date, Select and Listbox controls stay native (release/premium-ui.json).
  *
  * Layers: 00-core.css, 10-home.css, 20-features.css, 30-groups-history.css, 40-schedules-activity.css, 50-settings-subscription-help.css
@@ -14,7 +14,7 @@
    Tokens, application shell and shared primitives.
    ========================================================================== */
 
-/* Everything is scoped to html[data-skin="soft"] (set by soft-theme.js). The
+/* Everything is scoped to html[data-skin="soft"] (set by the skin selector). The
    shipped look is untouched while that attribute is absent, and the prefix also
    outranks the single-class rules in app.css and design-overrides.css.
    Native Date, Select and Listbox controls stay native: only their box is styled.
@@ -25,6 +25,7 @@
    new engine dependency to the WebView2 baseline. */
 
 html[data-skin="soft"] {
+  color-scheme: light;
   /* Surfaces: cool near-white instead of the warm grey canvas. */
   --canvas: #f4f5f7;
   --surface: #ffffff;
@@ -48,6 +49,7 @@ html[data-skin="soft"] {
   --ink-2: #333a45;
   --muted: #5f6673;
   --subtle: #8a92a0;
+  --on-accent: #ffffff;
 
   /* Hairlines */
   --line: #e7e9ee;
@@ -56,7 +58,7 @@ html[data-skin="soft"] {
   /* Accents. Primary keeps the shipped brand blue; the supporting tints are
      the pastel set the reference uses for state chips and event blocks. */
   --blue-700: #1f56d9;
-  --blue-600: #2f6bff;
+  --blue-600: #2f6aff;
   --blue-100: #eaf1ff;
   --green-700: #12805a;
   --green-600: #17a673;
@@ -128,6 +130,7 @@ html[data-skin="soft"][data-theme="dark"] {
   --ink-2: #cfd6e0;
   --muted: #a7b0bd;
   --subtle: #7d8794;
+  --on-accent: #0d1420;
 
   --line: #252c36;
   --line-strong: #39424f;
@@ -409,7 +412,7 @@ html[data-skin="soft"] .button:active:not(:disabled) {
 }
 
 html[data-skin="soft"] .button.primary {
-  color: #fff;
+  color: var(--on-accent);
   border: 1px solid transparent;
   background: var(--blue-600);
   box-shadow: 0 6px 16px var(--glow-primary);
@@ -418,10 +421,6 @@ html[data-skin="soft"] .button.primary {
 html[data-skin="soft"] .button.primary:hover:not(:disabled) {
   background: var(--blue-700);
   box-shadow: 0 8px 22px var(--glow-primary);
-}
-
-html[data-skin="soft"][data-theme="dark"] .button.primary {
-  color: #0d1420;
 }
 
 html[data-skin="soft"] .button.secondary {
@@ -454,12 +453,15 @@ html[data-skin="soft"] .button.danger {
 }
 
 html[data-skin="soft"] .button.danger:hover:not(:disabled) {
-  color: #fff;
+  color: var(--on-accent);
   border-color: transparent;
   background: var(--red-700);
 }
 
-html[data-skin="soft"] .button:disabled {
+html[data-skin="soft"] .button:disabled,
+html[data-skin="soft"] .button.primary:disabled,
+html[data-skin="soft"] .button.secondary:disabled,
+html[data-skin="soft"] .button.danger:disabled {
   color: var(--subtle);
   border-color: var(--line);
   background: var(--surface-muted);
@@ -846,7 +848,7 @@ html[data-skin="soft"] .date-range-dialog .range-days button.in-range {
 }
 
 html[data-skin="soft"] .date-range-dialog .range-days button.selected {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--blue-600);
 }
 
@@ -951,7 +953,7 @@ html[data-skin="soft"] .environment-alert {
 
 html[data-skin="soft"] .alert-code {
   border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 html[data-skin="soft"] .alert-code span {
@@ -984,7 +986,7 @@ html[data-skin="soft"] #page-home .control-body {
 
 html[data-skin="soft"] #page-home .home-status-icon {
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--green-600);
   box-shadow: 0 10px 26px rgba(23, 166, 115, .28);
 }
@@ -1157,7 +1159,7 @@ html[data-skin="soft"] .home-setup-alert[data-priority="3"] {
 
 html[data-skin="soft"] .home-setup-alert-icon {
   border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 html[data-skin="soft"] .home-setup-alert-copy strong {
@@ -1192,7 +1194,7 @@ html[data-skin="soft"] #page-home .error-panel ol {
 
 html[data-skin="soft"] .error-code {
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .72);
+  background: var(--glass);
 }
 
 /* ---------- signal strip ---------- */
@@ -3975,7 +3977,7 @@ html[data-skin="soft"] #page-settings .preview-message.mine p {
 }
 
 html[data-skin="soft"] #page-settings .preview-avatar {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--green-700);
 }
 
