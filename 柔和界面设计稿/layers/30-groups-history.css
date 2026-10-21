@@ -31,7 +31,6 @@ html[data-skin="soft"] #page-groups .management-tabs {
 html[data-skin="soft"] #page-groups .management-tabs button {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
 }
 
@@ -99,7 +98,7 @@ html[data-skin="soft"] #page-groups .group-toolbar {
   background: var(--surface-2);
 }
 
-html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); }
 html[data-skin="soft"] #page-groups .group-meta span { color: var(--muted); }
 
 /* ---------- 表格：仅保留发丝行分隔线，表头为弱化小字 ---------- */
@@ -115,7 +114,6 @@ html[data-skin="soft"] #page-groups .contact-table th {
   border-bottom: 1px solid var(--line);
   background: transparent;
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-groups .group-table td,
@@ -177,8 +175,6 @@ html[data-skin="soft"] #page-groups .group-avatar.tone-5 { color: var(--blue-700
 html[data-skin="soft"] #page-groups .group-inspector-empty { color: var(--muted); }
 html[data-skin="soft"] #page-groups .group-inspector-empty h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-groups .group-inspector-empty p { color: var(--muted); }
@@ -187,19 +183,16 @@ html[data-skin="soft"] #page-groups .inspector-hero { border-bottom: 1px solid v
 
 html[data-skin="soft"] #page-groups .inspector-group-title h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-groups .inspector-id { color: var(--subtle); }
 
 html[data-skin="soft"] #page-groups .inspector-tabs { border-bottom: 1px solid var(--line); }
-html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); font-weight: 600; }
+html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); }
 html[data-skin="soft"] #page-groups .inspector-tabs button:hover { color: var(--ink); }
 html[data-skin="soft"] #page-groups .inspector-tabs button.active {
   color: var(--blue-700);
   border-bottom-color: var(--blue-600);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-groups .member-list article { border-top: 1px solid var(--line); }
@@ -224,7 +217,6 @@ html[data-skin="soft"] #page-groups .contact-pagination > div { gap: 8px; }
 html[data-skin="soft"] #page-groups .row-action {
   color: var(--blue-700);
   border-radius: var(--radius-pill);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease;
 }
 html[data-skin="soft"] #page-groups .row-action:hover:not(:disabled) { background: var(--blue-100); }
@@ -233,7 +225,7 @@ html[data-skin="soft"] #page-groups .row-action.danger { color: var(--red-700); 
 
 html[data-skin="soft"] #page-groups .actions-column { text-align: right; color: var(--muted); }
 
-html[data-skin="soft"] #page-groups .group-name { color: var(--ink); font-weight: 600; }
+html[data-skin="soft"] #page-groups .group-name { color: var(--ink); }
 html[data-skin="soft"] #page-groups .group-list-count { color: var(--muted); }
 html[data-skin="soft"] #page-groups .contact-account { color: var(--ink-2); }
 html[data-skin="soft"] #page-groups .contact-id { color: var(--subtle); }
@@ -378,7 +370,7 @@ html[data-skin="soft"] #page-history #conversationHeader {
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
-html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); }
 html[data-skin="soft"] #page-history #conversationHeader span { color: var(--muted); }
 
 html[data-skin="soft"] #page-history .message-list { background: var(--message-canvas); }
@@ -458,8 +450,6 @@ html[data-skin="soft"] #page-history .conversation-inspector {
 }
 html[data-skin="soft"] #page-history .conversation-inspector h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-history .conversation-inspector p { color: var(--muted); }

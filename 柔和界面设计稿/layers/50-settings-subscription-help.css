@@ -45,7 +45,6 @@ html[data-skin="soft"] #page-settings .settings-tabs button {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   color: var(--muted);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease, border-color .16s ease;
 }
 
@@ -63,12 +62,10 @@ html[data-skin="soft"] #page-settings .settings-tabs button.active {
 
 html[data-skin="soft"] #page-settings .settings-tabs strong {
   font-size: 15px;
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .settings-tabs small {
   color: var(--muted);
-  font-weight: 400;
 }
 
 /* The shipped underline marker is replaced by the pill alone. */
@@ -104,8 +101,6 @@ html[data-skin="soft"] #page-settings .provider-overview-heading {
 }
 
 html[data-skin="soft"] #page-settings .provider-overview-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -157,7 +152,6 @@ html[data-skin="soft"] #page-settings .provider-logo {
   border-radius: var(--radius-control);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 800;
 }
 
 html[data-skin="soft"] #page-settings .provider-logo.custom {
@@ -193,7 +187,6 @@ html[data-skin="soft"] #page-settings .provider-card-status {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface-muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-card-status.active,
@@ -274,7 +267,6 @@ html[data-skin="soft"] #page-settings .provider-service-actions {
 html[data-skin="soft"] #page-settings .provider-card-action {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-card-action:hover {
@@ -326,8 +318,6 @@ html[data-skin="soft"] #page-settings .provider-add-icon {
 
 /* Empty state keeps the connector motif, recoloured to the soft palette. */
 html[data-skin="soft"] #page-settings .provider-empty-state h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -363,7 +353,6 @@ html[data-skin="soft"] #page-settings .provider-editor-nav {
 html[data-skin="soft"] #page-settings .provider-back-button {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-back-button:hover,
@@ -385,8 +374,6 @@ html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading {
 }
 
 html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -406,7 +393,6 @@ html[data-skin="soft"] #page-settings .settings-card > label {
 html[data-skin="soft"] #page-settings .field-pair label > span,
 html[data-skin="soft"] #page-settings .settings-card > label > span {
   color: var(--muted);
-  font-weight: 700;
   font-size: 12px;
 }
 
@@ -470,8 +456,6 @@ html[data-skin="soft"] #page-settings .assistant-settings-card {
 }
 
 html[data-skin="soft"] #page-settings .settings-card .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -503,8 +487,6 @@ html[data-skin="soft"] #page-settings .core-detail {
 
 html[data-skin="soft"] #page-settings .core-detail-heading h2,
 html[data-skin="soft"] #page-settings .core-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -533,7 +515,6 @@ html[data-skin="soft"] #page-settings .core-nav {
   border-radius: var(--radius-control);
   color: var(--ink);
   background: var(--surface);
-  font-weight: 700;
   transition: background-color .16s ease, color .16s ease, border-color .16s ease;
 }
 
@@ -619,7 +600,6 @@ html[data-skin="soft"] #page-settings .core-template-tools {
 html[data-skin="soft"] #page-settings .core-template-tools > summary,
 html[data-skin="soft"] #page-settings .core-advanced > summary {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .core-template-toolbar select,
@@ -644,7 +624,6 @@ html[data-skin="soft"] #page-settings .template-create {
 
 html[data-skin="soft"] #page-settings .template-create > summary {
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .core-chat-card {
@@ -829,7 +808,6 @@ html[data-skin="soft"] #page-settings .model-option {
   text-align: left;
   color: var(--ink-2);
   background: transparent;
-  font-weight: 600;
   cursor: pointer;
 }
 
@@ -889,8 +867,6 @@ html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -903,7 +879,6 @@ html[data-skin="soft"] #page-subscription .subscription-tag {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] .subscription-tag {
@@ -942,7 +917,6 @@ html[data-skin="soft"] #page-subscription .subscription-facts dt {
 
 html[data-skin="soft"] #page-subscription .subscription-facts dd {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-facts small {
@@ -973,7 +947,6 @@ html[data-skin="soft"] #page-subscription .subscription-steps span {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface-muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-steps .is-done {
@@ -1021,7 +994,6 @@ html[data-skin="soft"] #page-subscription .subscription-support {
 
 html[data-skin="soft"] #page-subscription .subscription-support summary {
   color: var(--blue-700);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-support p,
@@ -1053,11 +1025,6 @@ html[data-skin="soft"] #page-subscription .subscription-plan[data-plan="year"] {
   border-color: var(--blue-600);
 }
 
-html[data-skin="soft"] #page-subscription .subscription-plan-name {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-subscription .subscription-plan-price strong {
   color: var(--ink);
 }
@@ -1077,17 +1044,10 @@ html[data-skin="soft"] #page-subscription .subscription-redeem {
   box-shadow: var(--shadow);
 }
 
-html[data-skin="soft"] #page-subscription .subscription-card-heading h2,
-html[data-skin="soft"] #page-subscription .subscription-card-heading h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-subscription .subscription-step-number {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-group > p,
@@ -1102,7 +1062,6 @@ html[data-skin="soft"] #page-subscription .subscription-group-info > span {
 
 html[data-skin="soft"] #page-subscription .subscription-group-info strong {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-qr {
@@ -1179,7 +1138,6 @@ html[data-skin="soft"] #page-subscription #licenseCode:focus-visible {
 
 html[data-skin="soft"] #page-subscription .subscription-group .form-field > span {
   color: var(--muted);
-  font-weight: 600;
 }
 
 @media (max-width: 800px) {
@@ -1207,8 +1165,6 @@ html[data-skin="soft"] #page-help .help-start {
 }
 
 html[data-skin="soft"] #page-help .help-start-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -1242,8 +1198,6 @@ html[data-skin="soft"] #page-help .help-toolbar {
 }
 
 html[data-skin="soft"] #page-help .help-toolbar h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -1271,8 +1225,6 @@ html[data-skin="soft"] #page-help .help-feature-card:hover {
 }
 
 html[data-skin="soft"] #page-help .help-feature-card h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.005em;
 }
 
@@ -1288,7 +1240,6 @@ html[data-skin="soft"] #page-help .help-audience-chip {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-help .help-prerequisite {
