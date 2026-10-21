@@ -318,6 +318,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                 if manager_mode and split.path in {
                     "/app.css",
                     "/app.js",
+                    "/tab-motion.js",
                     "/scheduled-tasks.js",
                     "/model-services.js",
                     "/chat-management.js",

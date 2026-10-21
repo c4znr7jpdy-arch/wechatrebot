@@ -113,6 +113,9 @@ window.createMessageHistory = function (helpers) {
         $("#conversationInspector").innerHTML = '<span class="eyebrow">聊天信息</span><p class="subtle">当前筛选没有匹配的聊天。</p>';
         $("#newMessageButton").hidden = true;
       }
+      if (options.animate && load === state.historyLoad && requestAccount === state.historyAccount) {
+        window.managerMotion?.enter($(".history-layout"));
+      }
     } catch (error) { if (!silent) reportError(error); }
     finally {
       if (load === state.historyLoad) state.historyConversationsLoading = false;
