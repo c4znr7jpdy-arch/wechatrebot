@@ -411,7 +411,16 @@ window.createScheduledTasks = function (helpers) {
       state.scheduledDirty = true; renderScheduledEditor(); $("#scheduledAction").focus();
     });
     $$('[data-task-arg]', root).forEach((input) => input.addEventListener("input", () => { editor.arguments[input.dataset.taskArg] = input.type === "number" ? Number(input.value) : input.value; scheduledChanged(false); }));
-    $$('[data-scheduled-target-tab]', root).forEach((button) => button.addEventListener("click", () => { state.scheduledTargetTab = button.dataset.scheduledTargetTab; $$('[data-scheduled-target-tab]', root).forEach((tab) => { tab.classList.toggle("active", tab === button); tab.setAttribute("aria-pressed", String(tab === button)); }); renderScheduledTargets(); }));
+    $$('[data-scheduled-target-tab]', root).forEach((button) => button.addEventListener("click", () => {
+      const changed = state.scheduledTargetTab !== button.dataset.scheduledTargetTab;
+      state.scheduledTargetTab = button.dataset.scheduledTargetTab;
+      $$('[data-scheduled-target-tab]', root).forEach((tab) => {
+        tab.classList.toggle("active", tab === button);
+        tab.setAttribute("aria-pressed", String(tab === button));
+      });
+      renderScheduledTargets();
+      if (changed) window.managerMotion?.enter($("#scheduledTargetChoices"));
+    }));
     const search = $("#scheduledTargetSearch");
     const searchTargets = debounce(renderScheduledTargets);
     search.addEventListener("compositionstart", () => { search.dataset.composing = "true"; });

@@ -58,7 +58,6 @@ html[data-skin="soft"] #page-features .feature-item.active {
 
 html[data-skin="soft"] #page-features .feature-item strong {
   color: var(--ink);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-features .feature-item.active strong {
@@ -101,8 +100,6 @@ html[data-skin="soft"] .feature-detail-head {
 
 html[data-skin="soft"] .feature-detail-head h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -122,7 +119,6 @@ html[data-skin="soft"] #page-features .feature-tabs {
 html[data-skin="soft"] #page-features .feature-tabs button {
   color: var(--muted);
   border-radius: var(--radius-control) var(--radius-control) 0 0;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-features .feature-tabs button.active {
@@ -144,7 +140,6 @@ html[data-skin="soft"] .feature-quick-reference > summary {
   padding: 15px 18px;
   color: var(--ink);
   border-radius: inherit;
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .feature-quick-reference > summary:hover {
@@ -153,7 +148,6 @@ html[data-skin="soft"] .feature-quick-reference > summary:hover {
 
 html[data-skin="soft"] .reference-toggle-label {
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .feature-reference-body {
@@ -193,7 +187,6 @@ html[data-skin="soft"] .feature-command-item span {
    hairline are a secondary cue. */
 html[data-skin="soft"] .command-schedule-status {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .command-schedule-status.supported {
@@ -236,7 +229,6 @@ html[data-skin="soft"] .config-tabs {
 html[data-skin="soft"] .config-tabs button {
   color: var(--muted);
   border-radius: var(--radius-control) var(--radius-control) 0 0;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .config-tabs button:hover:not(:disabled) {
@@ -266,17 +258,10 @@ html[data-skin="soft"] #page-features .config-section.grouped {
 
 html[data-skin="soft"] #page-features .config-section > h3 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .config-section-grid {
   gap: 16px 18px;
-}
-
-html[data-skin="soft"] .optional-group-heading h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .optional-group-heading p {
@@ -336,7 +321,6 @@ html[data-skin="soft"] .advanced-details {
 
 html[data-skin="soft"] .advanced-details summary {
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .advanced-details[open] summary {
@@ -345,7 +329,6 @@ html[data-skin="soft"] .advanced-details[open] summary {
 
 html[data-skin="soft"] .advanced-details > label > span {
   color: var(--ink);
-  font-weight: 600;
 }
 
 /* ---------- guidance and assessment callouts ---------- */
@@ -361,8 +344,6 @@ html[data-skin="soft"] #page-features .feature-guide {
 
 html[data-skin="soft"] #page-features .feature-guide strong {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-features .feature-guide p {
@@ -386,7 +367,6 @@ html[data-skin="soft"] .feature-assessment p {
 html[data-skin="soft"] .assessment-chip,
 html[data-skin="soft"] .assessment-state {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .assessment-chip {

@@ -40,11 +40,6 @@ html[data-skin="soft"] .alert-code strong {
   color: var(--red-700);
 }
 
-html[data-skin="soft"] .alert-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] .alert-copy p,
 html[data-skin="soft"] .alert-copy ol {
   color: var(--muted);
@@ -96,7 +91,7 @@ html[data-skin="soft"] #page-home .status-orbit[data-state="error"] .orbit-progr
 
 html[data-skin="soft"] #page-home .power-button {
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: var(--radius-control);
   background: var(--surface);
   box-shadow: var(--shadow-md);
 }
@@ -111,14 +106,12 @@ html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-butt
 }
 
 html[data-skin="soft"] #page-home .force-stop-action {
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   border: 1px solid var(--red-line);
   background: var(--red-100);
 }
 
 html[data-skin="soft"] #page-home .control-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -256,11 +249,6 @@ html[data-skin="soft"] #page-home .error-panel {
 
 html[data-skin="soft"] #page-home .error-label {
   color: var(--red-700);
-}
-
-html[data-skin="soft"] #page-home .error-panel h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-home .error-panel p,

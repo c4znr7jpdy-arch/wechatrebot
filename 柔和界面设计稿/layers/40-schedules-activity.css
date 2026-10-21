@@ -63,14 +63,11 @@ html[data-skin="soft"] #page-schedules .schedule-stat-pills article {
 html[data-skin="soft"] #page-schedules .schedule-stat-pills span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .schedule-stat-pills strong {
   display: block;
   margin-top: 4px;
-  font-family: var(--font-display);
-  font-weight: 700;
   font-size: 26px;
   line-height: 1.1;
 }
@@ -142,12 +139,10 @@ html[data-skin="soft"] #page-schedules .schedule-task-count {
 
 html[data-skin="soft"] #page-schedules .schedule-task-count strong {
   color: var(--ink-2);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-schedules table th {
   color: var(--muted);
-  font-weight: 600;
   font-size: 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
@@ -187,7 +182,6 @@ html[data-skin="soft"] #scheduledTaskRows td small {
 
 html[data-skin="soft"] #scheduledTaskRows .scheduled-name {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #scheduledTaskRows .scheduled-name:hover {
@@ -211,7 +205,6 @@ html[data-skin="soft"] #page-schedules .task-status {
   border-radius: var(--radius-pill);
   background: var(--surface-muted);
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .task-status::before {
@@ -254,8 +247,6 @@ html[data-skin="soft"] #page-schedules .schedule-empty-icon {
 }
 
 html[data-skin="soft"] #page-schedules .schedule-empty-state h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   color: var(--ink);
 }
 
@@ -279,7 +270,6 @@ html[data-skin="soft"] #page-schedules .schedule-legacy {
 html[data-skin="soft"] #page-schedules .schedule-legacy > summary,
 html[data-skin="soft"] #page-schedules .schedule-command > summary {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-schedules .schedule-legacy > p {
@@ -294,19 +284,11 @@ html[data-skin="soft"] #page-schedules .schedule-editor-layout {
   gap: 18px;
 }
 
-html[data-skin="soft"] #page-schedules .schedule-editor-heading h2,
-html[data-skin="soft"] #page-schedules .scheduled-form-section h3,
-html[data-skin="soft"] #page-schedules .schedule-summary h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-schedules .schedule-timezone-chip {
   color: var(--blue-700);
   border: 1px solid var(--blue-line);
   border-radius: var(--radius-pill);
   background: var(--blue-100);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .scheduled-form-section,
@@ -484,11 +466,6 @@ html[data-skin="soft"] #page-schedules .schedule-runs-heading {
   border-bottom: 1px solid var(--line);
 }
 
-html[data-skin="soft"] #page-schedules .schedule-runs-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-schedules .schedule-runs-heading p {
   color: var(--muted);
 }
@@ -510,7 +487,6 @@ html[data-skin="soft"] #page-schedules .schedule-run li small {
 /* Support chip shared with the feature catalogue; the label carries the state. */
 html[data-skin="soft"] .command-schedule-status {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .command-schedule-status.supported {
@@ -685,7 +661,6 @@ html[data-skin="soft"] .diagnostic-card header code {
 html[data-skin="soft"] .diagnostic-level {
   border: 1px solid currentColor;
   border-radius: var(--radius-pill);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .diagnostic-level.error {
@@ -742,11 +717,6 @@ html[data-skin="soft"] #page-activity .trace-panel {
 html[data-skin="soft"] #page-activity .trace-panel .panel-heading {
   padding: 0 0 16px;
   border-bottom: 1px solid var(--line);
-}
-
-html[data-skin="soft"] #page-activity .trace-panel .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-activity .trace-panel .panel-heading p {

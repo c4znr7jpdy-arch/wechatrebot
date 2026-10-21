@@ -100,9 +100,7 @@ html[data-skin="soft"] {
   --radius-card: 18px;
   --radius-pill: 999px;
 
-  /* Headings move off the heavy display face to the bundled rounded one, which
-     matches the reference's lighter geometric weight. No new font is added. */
-  --font-display: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+  /* Font families and weights come from the default skin's shared typography. */
 
   color: var(--ink);
 }
@@ -230,7 +228,6 @@ html[data-skin="soft"] .brand-mark img {
 
 html[data-skin="soft"] .brand-copy strong {
   color: var(--ink);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -241,14 +238,12 @@ html[data-skin="soft"] .nav-label {
 
 html[data-skin="soft"] .nav-label {
   font-size: 11px;
-  font-weight: 600;
   letter-spacing: .1em;
 }
 
 html[data-skin="soft"] .nav-item {
   color: var(--muted);
   border-radius: var(--radius-sm);
-  font-weight: 500;
 }
 
 html[data-skin="soft"] .nav-item:hover {
@@ -259,7 +254,6 @@ html[data-skin="soft"] .nav-item:hover {
 html[data-skin="soft"] .nav-item.active {
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 600;
 }
 
 /* The shipped active row adds a marker bar; the soft skin uses the pill alone. */
@@ -321,7 +315,6 @@ html[data-skin="soft"] .topbar {
 
 html[data-skin="soft"] .topbar strong {
   color: var(--ink);
-  font-weight: 600;
   letter-spacing: -.005em;
 }
 
@@ -340,8 +333,6 @@ html[data-skin="soft"] .page {
 }
 
 html[data-skin="soft"] .page-heading h1 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -365,8 +356,6 @@ html[data-skin="soft"] .account-chip strong {
 }
 
 html[data-skin="soft"] .section-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -386,8 +375,6 @@ html[data-skin="soft"] .panel {
 }
 
 html[data-skin="soft"] .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -402,7 +389,6 @@ html[data-skin="soft"] .table-panel {
 
 html[data-skin="soft"] .button {
   border-radius: var(--radius-pill);
-  font-weight: 600;
   transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease,
     color .16s ease, transform .16s ease;
 }
@@ -423,14 +409,16 @@ html[data-skin="soft"] .button.primary:hover:not(:disabled) {
   box-shadow: 0 8px 22px var(--glow-primary);
 }
 
-html[data-skin="soft"] .button.secondary {
+html[data-skin="soft"] .button.secondary,
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button) {
   color: var(--ink);
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 
-html[data-skin="soft"] .button.secondary:hover:not(:disabled) {
+html[data-skin="soft"] .button.secondary:hover:not(:disabled),
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button):hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--surface-hover);
 }
@@ -459,6 +447,7 @@ html[data-skin="soft"] .button.danger:hover:not(:disabled) {
 }
 
 html[data-skin="soft"] .button:disabled,
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button):disabled,
 html[data-skin="soft"] .button.primary:disabled,
 html[data-skin="soft"] .button.secondary:disabled,
 html[data-skin="soft"] .button.danger:disabled {
@@ -473,12 +462,17 @@ html[data-skin="soft"] .row-action,
 html[data-skin="soft"] .inline-action {
   color: var(--blue-700);
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .row-action:hover:not(:disabled),
 html[data-skin="soft"] .inline-action:hover:not(:disabled) {
   background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings :is(.row-action, .inline-action, .provider-back-button) {
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  text-decoration: none;
 }
 
 html[data-skin="soft"] .field-label-action {
@@ -489,7 +483,6 @@ html[data-skin="soft"] .field-label-action {
 
 html[data-skin="soft"] .status-badge {
   border-radius: var(--radius-pill);
-  font-weight: 600;
   border: 1px solid var(--line);
   background: var(--surface-muted);
 }
@@ -574,7 +567,6 @@ html[data-skin="soft"] .search-box input::placeholder {
 html[data-skin="soft"] .form-field > span,
 html[data-skin="soft"] .form-field > label:first-child {
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .form-field small {
@@ -634,7 +626,6 @@ html[data-skin="soft"] .segmented {
 html[data-skin="soft"] .segmented button {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .segmented button.active {
@@ -679,7 +670,6 @@ html[data-skin="soft"] .clear-search:hover {
 
 html[data-skin="soft"] table th {
   color: var(--subtle);
-  font-weight: 600;
   border-bottom: 1px solid var(--line);
 }
 
@@ -723,11 +713,6 @@ html[data-skin="soft"] .empty-symbol {
   color: var(--blue-700);
   border-radius: var(--radius-card);
   background: var(--blue-100);
-}
-
-html[data-skin="soft"] .empty-state h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .empty-state p {
@@ -804,8 +789,6 @@ html[data-skin="soft"] .report-preview-dialog {
 
 html[data-skin="soft"] .date-range-dialog .panel-heading h2,
 html[data-skin="soft"] .report-preview-header h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -829,7 +812,6 @@ html[data-skin="soft"] .date-range-dialog .range-fields input.active {
 
 html[data-skin="soft"] .date-range-dialog .range-calendars h3 {
   color: var(--ink);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .date-range-dialog .range-days button {
@@ -964,11 +946,6 @@ html[data-skin="soft"] .alert-code strong {
   color: var(--red-700);
 }
 
-html[data-skin="soft"] .alert-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] .alert-copy p,
 html[data-skin="soft"] .alert-copy ol {
   color: var(--muted);
@@ -1020,7 +997,7 @@ html[data-skin="soft"] #page-home .status-orbit[data-state="error"] .orbit-progr
 
 html[data-skin="soft"] #page-home .power-button {
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: var(--radius-control);
   background: var(--surface);
   box-shadow: var(--shadow-md);
 }
@@ -1035,14 +1012,12 @@ html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-butt
 }
 
 html[data-skin="soft"] #page-home .force-stop-action {
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   border: 1px solid var(--red-line);
   background: var(--red-100);
 }
 
 html[data-skin="soft"] #page-home .control-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -1182,11 +1157,6 @@ html[data-skin="soft"] #page-home .error-label {
   color: var(--red-700);
 }
 
-html[data-skin="soft"] #page-home .error-panel h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-home .error-panel p,
 html[data-skin="soft"] #page-home .error-panel ol {
   color: var(--muted);
@@ -1283,7 +1253,6 @@ html[data-skin="soft"] #page-features .feature-item.active {
 
 html[data-skin="soft"] #page-features .feature-item strong {
   color: var(--ink);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-features .feature-item.active strong {
@@ -1326,8 +1295,6 @@ html[data-skin="soft"] .feature-detail-head {
 
 html[data-skin="soft"] .feature-detail-head h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -1347,7 +1314,6 @@ html[data-skin="soft"] #page-features .feature-tabs {
 html[data-skin="soft"] #page-features .feature-tabs button {
   color: var(--muted);
   border-radius: var(--radius-control) var(--radius-control) 0 0;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-features .feature-tabs button.active {
@@ -1369,7 +1335,6 @@ html[data-skin="soft"] .feature-quick-reference > summary {
   padding: 15px 18px;
   color: var(--ink);
   border-radius: inherit;
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .feature-quick-reference > summary:hover {
@@ -1378,7 +1343,6 @@ html[data-skin="soft"] .feature-quick-reference > summary:hover {
 
 html[data-skin="soft"] .reference-toggle-label {
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .feature-reference-body {
@@ -1418,7 +1382,6 @@ html[data-skin="soft"] .feature-command-item span {
    hairline are a secondary cue. */
 html[data-skin="soft"] .command-schedule-status {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .command-schedule-status.supported {
@@ -1461,7 +1424,6 @@ html[data-skin="soft"] .config-tabs {
 html[data-skin="soft"] .config-tabs button {
   color: var(--muted);
   border-radius: var(--radius-control) var(--radius-control) 0 0;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .config-tabs button:hover:not(:disabled) {
@@ -1491,17 +1453,10 @@ html[data-skin="soft"] #page-features .config-section.grouped {
 
 html[data-skin="soft"] #page-features .config-section > h3 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .config-section-grid {
   gap: 16px 18px;
-}
-
-html[data-skin="soft"] .optional-group-heading h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .optional-group-heading p {
@@ -1561,7 +1516,6 @@ html[data-skin="soft"] .advanced-details {
 
 html[data-skin="soft"] .advanced-details summary {
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .advanced-details[open] summary {
@@ -1570,7 +1524,6 @@ html[data-skin="soft"] .advanced-details[open] summary {
 
 html[data-skin="soft"] .advanced-details > label > span {
   color: var(--ink);
-  font-weight: 600;
 }
 
 /* ---------- guidance and assessment callouts ---------- */
@@ -1586,8 +1539,6 @@ html[data-skin="soft"] #page-features .feature-guide {
 
 html[data-skin="soft"] #page-features .feature-guide strong {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-features .feature-guide p {
@@ -1611,7 +1562,6 @@ html[data-skin="soft"] .feature-assessment p {
 html[data-skin="soft"] .assessment-chip,
 html[data-skin="soft"] .assessment-state {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .assessment-chip {
@@ -1717,7 +1667,6 @@ html[data-skin="soft"] #page-groups .management-tabs {
 html[data-skin="soft"] #page-groups .management-tabs button {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
 }
 
@@ -1785,7 +1734,7 @@ html[data-skin="soft"] #page-groups .group-toolbar {
   background: var(--surface-2);
 }
 
-html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-groups .group-meta strong { color: var(--ink); }
 html[data-skin="soft"] #page-groups .group-meta span { color: var(--muted); }
 
 /* ---------- 表格：仅保留发丝行分隔线，表头为弱化小字 ---------- */
@@ -1801,7 +1750,6 @@ html[data-skin="soft"] #page-groups .contact-table th {
   border-bottom: 1px solid var(--line);
   background: transparent;
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-groups .group-table td,
@@ -1863,8 +1811,6 @@ html[data-skin="soft"] #page-groups .group-avatar.tone-5 { color: var(--blue-700
 html[data-skin="soft"] #page-groups .group-inspector-empty { color: var(--muted); }
 html[data-skin="soft"] #page-groups .group-inspector-empty h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-groups .group-inspector-empty p { color: var(--muted); }
@@ -1873,19 +1819,16 @@ html[data-skin="soft"] #page-groups .inspector-hero { border-bottom: 1px solid v
 
 html[data-skin="soft"] #page-groups .inspector-group-title h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-groups .inspector-id { color: var(--subtle); }
 
 html[data-skin="soft"] #page-groups .inspector-tabs { border-bottom: 1px solid var(--line); }
-html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); font-weight: 600; }
+html[data-skin="soft"] #page-groups .inspector-tabs button { color: var(--muted); }
 html[data-skin="soft"] #page-groups .inspector-tabs button:hover { color: var(--ink); }
 html[data-skin="soft"] #page-groups .inspector-tabs button.active {
   color: var(--blue-700);
   border-bottom-color: var(--blue-600);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-groups .member-list article { border-top: 1px solid var(--line); }
@@ -1910,7 +1853,6 @@ html[data-skin="soft"] #page-groups .contact-pagination > div { gap: 8px; }
 html[data-skin="soft"] #page-groups .row-action {
   color: var(--blue-700);
   border-radius: var(--radius-pill);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease;
 }
 html[data-skin="soft"] #page-groups .row-action:hover:not(:disabled) { background: var(--blue-100); }
@@ -1919,7 +1861,7 @@ html[data-skin="soft"] #page-groups .row-action.danger { color: var(--red-700); 
 
 html[data-skin="soft"] #page-groups .actions-column { text-align: right; color: var(--muted); }
 
-html[data-skin="soft"] #page-groups .group-name { color: var(--ink); font-weight: 600; }
+html[data-skin="soft"] #page-groups .group-name { color: var(--ink); }
 html[data-skin="soft"] #page-groups .group-list-count { color: var(--muted); }
 html[data-skin="soft"] #page-groups .contact-account { color: var(--ink-2); }
 html[data-skin="soft"] #page-groups .contact-id { color: var(--subtle); }
@@ -2024,7 +1966,7 @@ html[data-skin="soft"] #page-history .conversation-list article {
 }
 
 html[data-skin="soft"] #page-history .conversation-item {
-  width: auto;
+  width: calc(100% - 16px);
   margin: 3px 8px;
   border-radius: var(--radius-sm);
   transition: background-color .16s ease, color .16s ease;
@@ -2064,7 +2006,7 @@ html[data-skin="soft"] #page-history #conversationHeader {
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
-html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); font-weight: 700; }
+html[data-skin="soft"] #page-history #conversationHeader strong { color: var(--ink); }
 html[data-skin="soft"] #page-history #conversationHeader span { color: var(--muted); }
 
 html[data-skin="soft"] #page-history .message-list { background: var(--message-canvas); }
@@ -2144,8 +2086,6 @@ html[data-skin="soft"] #page-history .conversation-inspector {
 }
 html[data-skin="soft"] #page-history .conversation-inspector h2 {
   color: var(--ink);
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 html[data-skin="soft"] #page-history .conversation-inspector p { color: var(--muted); }
@@ -2303,14 +2243,11 @@ html[data-skin="soft"] #page-schedules .schedule-stat-pills article {
 html[data-skin="soft"] #page-schedules .schedule-stat-pills span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .schedule-stat-pills strong {
   display: block;
   margin-top: 4px;
-  font-family: var(--font-display);
-  font-weight: 700;
   font-size: 26px;
   line-height: 1.1;
 }
@@ -2382,12 +2319,10 @@ html[data-skin="soft"] #page-schedules .schedule-task-count {
 
 html[data-skin="soft"] #page-schedules .schedule-task-count strong {
   color: var(--ink-2);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-schedules table th {
   color: var(--muted);
-  font-weight: 600;
   font-size: 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
@@ -2427,7 +2362,6 @@ html[data-skin="soft"] #scheduledTaskRows td small {
 
 html[data-skin="soft"] #scheduledTaskRows .scheduled-name {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #scheduledTaskRows .scheduled-name:hover {
@@ -2451,7 +2385,6 @@ html[data-skin="soft"] #page-schedules .task-status {
   border-radius: var(--radius-pill);
   background: var(--surface-muted);
   font-size: 12px;
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .task-status::before {
@@ -2494,8 +2427,6 @@ html[data-skin="soft"] #page-schedules .schedule-empty-icon {
 }
 
 html[data-skin="soft"] #page-schedules .schedule-empty-state h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   color: var(--ink);
 }
 
@@ -2519,7 +2450,6 @@ html[data-skin="soft"] #page-schedules .schedule-legacy {
 html[data-skin="soft"] #page-schedules .schedule-legacy > summary,
 html[data-skin="soft"] #page-schedules .schedule-command > summary {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-schedules .schedule-legacy > p {
@@ -2534,19 +2464,11 @@ html[data-skin="soft"] #page-schedules .schedule-editor-layout {
   gap: 18px;
 }
 
-html[data-skin="soft"] #page-schedules .schedule-editor-heading h2,
-html[data-skin="soft"] #page-schedules .scheduled-form-section h3,
-html[data-skin="soft"] #page-schedules .schedule-summary h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-schedules .schedule-timezone-chip {
   color: var(--blue-700);
   border: 1px solid var(--blue-line);
   border-radius: var(--radius-pill);
   background: var(--blue-100);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-schedules .scheduled-form-section,
@@ -2724,11 +2646,6 @@ html[data-skin="soft"] #page-schedules .schedule-runs-heading {
   border-bottom: 1px solid var(--line);
 }
 
-html[data-skin="soft"] #page-schedules .schedule-runs-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-schedules .schedule-runs-heading p {
   color: var(--muted);
 }
@@ -2750,7 +2667,6 @@ html[data-skin="soft"] #page-schedules .schedule-run li small {
 /* Support chip shared with the feature catalogue; the label carries the state. */
 html[data-skin="soft"] .command-schedule-status {
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .command-schedule-status.supported {
@@ -2925,7 +2841,6 @@ html[data-skin="soft"] .diagnostic-card header code {
 html[data-skin="soft"] .diagnostic-level {
   border: 1px solid currentColor;
   border-radius: var(--radius-pill);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .diagnostic-level.error {
@@ -2982,11 +2897,6 @@ html[data-skin="soft"] #page-activity .trace-panel {
 html[data-skin="soft"] #page-activity .trace-panel .panel-heading {
   padding: 0 0 16px;
   border-bottom: 1px solid var(--line);
-}
-
-html[data-skin="soft"] #page-activity .trace-panel .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-activity .trace-panel .panel-heading p {
@@ -3229,7 +3139,6 @@ html[data-skin="soft"] #page-settings .settings-tabs button {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   color: var(--muted);
-  font-weight: 600;
   transition: background-color .16s ease, color .16s ease, border-color .16s ease;
 }
 
@@ -3247,12 +3156,10 @@ html[data-skin="soft"] #page-settings .settings-tabs button.active {
 
 html[data-skin="soft"] #page-settings .settings-tabs strong {
   font-size: 15px;
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .settings-tabs small {
   color: var(--muted);
-  font-weight: 400;
 }
 
 /* The shipped underline marker is replaced by the pill alone. */
@@ -3288,8 +3195,6 @@ html[data-skin="soft"] #page-settings .provider-overview-heading {
 }
 
 html[data-skin="soft"] #page-settings .provider-overview-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -3341,7 +3246,6 @@ html[data-skin="soft"] #page-settings .provider-logo {
   border-radius: var(--radius-control);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 800;
 }
 
 html[data-skin="soft"] #page-settings .provider-logo.custom {
@@ -3377,7 +3281,6 @@ html[data-skin="soft"] #page-settings .provider-card-status {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface-muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-card-status.active,
@@ -3458,7 +3361,6 @@ html[data-skin="soft"] #page-settings .provider-service-actions {
 html[data-skin="soft"] #page-settings .provider-card-action {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-card-action:hover {
@@ -3510,8 +3412,6 @@ html[data-skin="soft"] #page-settings .provider-add-icon {
 
 /* Empty state keeps the connector motif, recoloured to the soft palette. */
 html[data-skin="soft"] #page-settings .provider-empty-state h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -3547,7 +3447,6 @@ html[data-skin="soft"] #page-settings .provider-editor-nav {
 html[data-skin="soft"] #page-settings .provider-back-button {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .provider-back-button:hover,
@@ -3569,8 +3468,6 @@ html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading {
 }
 
 html[data-skin="soft"] #page-settings .provider-settings-card .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -3590,7 +3487,6 @@ html[data-skin="soft"] #page-settings .settings-card > label {
 html[data-skin="soft"] #page-settings .field-pair label > span,
 html[data-skin="soft"] #page-settings .settings-card > label > span {
   color: var(--muted);
-  font-weight: 700;
   font-size: 12px;
 }
 
@@ -3654,8 +3550,6 @@ html[data-skin="soft"] #page-settings .assistant-settings-card {
 }
 
 html[data-skin="soft"] #page-settings .settings-card .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -3687,8 +3581,6 @@ html[data-skin="soft"] #page-settings .core-detail {
 
 html[data-skin="soft"] #page-settings .core-detail-heading h2,
 html[data-skin="soft"] #page-settings .core-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -3717,7 +3609,6 @@ html[data-skin="soft"] #page-settings .core-nav {
   border-radius: var(--radius-control);
   color: var(--ink);
   background: var(--surface);
-  font-weight: 700;
   transition: background-color .16s ease, color .16s ease, border-color .16s ease;
 }
 
@@ -3803,7 +3694,6 @@ html[data-skin="soft"] #page-settings .core-template-tools {
 html[data-skin="soft"] #page-settings .core-template-tools > summary,
 html[data-skin="soft"] #page-settings .core-advanced > summary {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .core-template-toolbar select,
@@ -3828,7 +3718,6 @@ html[data-skin="soft"] #page-settings .template-create {
 
 html[data-skin="soft"] #page-settings .template-create > summary {
   color: var(--blue-700);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-settings .core-chat-card {
@@ -4013,7 +3902,6 @@ html[data-skin="soft"] #page-settings .model-option {
   text-align: left;
   color: var(--ink-2);
   background: transparent;
-  font-weight: 600;
   cursor: pointer;
 }
 
@@ -4073,8 +3961,6 @@ html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -4087,7 +3973,6 @@ html[data-skin="soft"] #page-subscription .subscription-tag {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] .subscription-tag {
@@ -4126,7 +4011,6 @@ html[data-skin="soft"] #page-subscription .subscription-facts dt {
 
 html[data-skin="soft"] #page-subscription .subscription-facts dd {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-facts small {
@@ -4157,7 +4041,6 @@ html[data-skin="soft"] #page-subscription .subscription-steps span {
   border-radius: var(--radius-pill);
   color: var(--muted);
   background: var(--surface-muted);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-steps .is-done {
@@ -4205,7 +4088,6 @@ html[data-skin="soft"] #page-subscription .subscription-support {
 
 html[data-skin="soft"] #page-subscription .subscription-support summary {
   color: var(--blue-700);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-support p,
@@ -4237,11 +4119,6 @@ html[data-skin="soft"] #page-subscription .subscription-plan[data-plan="year"] {
   border-color: var(--blue-600);
 }
 
-html[data-skin="soft"] #page-subscription .subscription-plan-name {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-subscription .subscription-plan-price strong {
   color: var(--ink);
 }
@@ -4261,17 +4138,10 @@ html[data-skin="soft"] #page-subscription .subscription-redeem {
   box-shadow: var(--shadow);
 }
 
-html[data-skin="soft"] #page-subscription .subscription-card-heading h2,
-html[data-skin="soft"] #page-subscription .subscription-card-heading h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
 html[data-skin="soft"] #page-subscription .subscription-step-number {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-group > p,
@@ -4286,7 +4156,6 @@ html[data-skin="soft"] #page-subscription .subscription-group-info > span {
 
 html[data-skin="soft"] #page-subscription .subscription-group-info strong {
   color: var(--ink);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-qr {
@@ -4363,7 +4232,6 @@ html[data-skin="soft"] #page-subscription #licenseCode:focus-visible {
 
 html[data-skin="soft"] #page-subscription .subscription-group .form-field > span {
   color: var(--muted);
-  font-weight: 600;
 }
 
 @media (max-width: 800px) {
@@ -4391,8 +4259,6 @@ html[data-skin="soft"] #page-help .help-start {
 }
 
 html[data-skin="soft"] #page-help .help-start-copy h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -4426,8 +4292,6 @@ html[data-skin="soft"] #page-help .help-toolbar {
 }
 
 html[data-skin="soft"] #page-help .help-toolbar h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -4455,8 +4319,6 @@ html[data-skin="soft"] #page-help .help-feature-card:hover {
 }
 
 html[data-skin="soft"] #page-help .help-feature-card h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.005em;
 }
 
@@ -4472,7 +4334,6 @@ html[data-skin="soft"] #page-help .help-audience-chip {
   border-radius: var(--radius-pill);
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] #page-help .help-prerequisite {

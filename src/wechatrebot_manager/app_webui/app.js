@@ -868,9 +868,11 @@
     bindSearch("#featureSearchBox", "#featureSearch", renderFeatureList);
     $("#refreshFeatures").addEventListener("click", refreshFeatures);
     $$("#featureAudience button").forEach((button) => button.addEventListener("click", () => {
+      const changed = state.featureAudience !== button.dataset.audience;
       state.featureAudience = button.dataset.audience;
       $$("#featureAudience button").forEach((item) => item.classList.toggle("active", item === button));
       renderFeatureList();
+      if (changed) window.managerMotion?.enter($("#featureList"));
     }));
     bindSearch("#groupSearchBox", "#groupSearch", renderGroups);
     bindSearch("#contactSearchBox", "#contactSearch", () => { state.contactPage = 1; renderContacts(); });
@@ -878,9 +880,11 @@
     bindSearch("#helpSearchBox", "#helpSearch", renderHelp);
     $$("#helpAudience button").forEach((button) => {
       button.addEventListener("click", () => {
+        const changed = state.helpAudience !== button.dataset.helpAudience;
         state.helpAudience = button.dataset.helpAudience;
         $$("#helpAudience button").forEach((item) => item.classList.toggle("active", item === button));
         renderHelp();
+        if (changed) window.managerMotion?.enter($("#helpFeatureGrid"));
       });
       button.disabled = false;
     });
@@ -903,9 +907,10 @@
     $("#contactPrevious").addEventListener("click", () => { state.contactPage -= 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
     $("#contactNext").addEventListener("click", () => { state.contactPage += 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
     $$("#historyKinds button").forEach((button) => button.addEventListener("click", () => {
+      const changed = state.historyKind !== button.dataset.kind;
       state.historyKind = button.dataset.kind;
       $$("#historyKinds button").forEach((item) => item.classList.toggle("active", item === button));
-      loadConversations({localFilter: true});
+      loadConversations({localFilter: true, animate: changed});
     }));
     $("#historyFilter").addEventListener("click", () => loadConversations({forceRefresh: true}));
     $("#refreshHistory").addEventListener("click", refreshHistoryRecords);

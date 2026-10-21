@@ -89,9 +89,7 @@ html[data-skin="soft"] {
   --radius-card: 18px;
   --radius-pill: 999px;
 
-  /* Headings move off the heavy display face to the bundled rounded one, which
-     matches the reference's lighter geometric weight. No new font is added. */
-  --font-display: "Alibaba PuHuiTi 2", "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+  /* Font families and weights come from the default skin's shared typography. */
 
   color: var(--ink);
 }
@@ -219,7 +217,6 @@ html[data-skin="soft"] .brand-mark img {
 
 html[data-skin="soft"] .brand-copy strong {
   color: var(--ink);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -230,14 +227,12 @@ html[data-skin="soft"] .nav-label {
 
 html[data-skin="soft"] .nav-label {
   font-size: 11px;
-  font-weight: 600;
   letter-spacing: .1em;
 }
 
 html[data-skin="soft"] .nav-item {
   color: var(--muted);
   border-radius: var(--radius-sm);
-  font-weight: 500;
 }
 
 html[data-skin="soft"] .nav-item:hover {
@@ -248,7 +243,6 @@ html[data-skin="soft"] .nav-item:hover {
 html[data-skin="soft"] .nav-item.active {
   color: var(--blue-700);
   background: var(--blue-100);
-  font-weight: 600;
 }
 
 /* The shipped active row adds a marker bar; the soft skin uses the pill alone. */
@@ -310,7 +304,6 @@ html[data-skin="soft"] .topbar {
 
 html[data-skin="soft"] .topbar strong {
   color: var(--ink);
-  font-weight: 600;
   letter-spacing: -.005em;
 }
 
@@ -329,8 +322,6 @@ html[data-skin="soft"] .page {
 }
 
 html[data-skin="soft"] .page-heading h1 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.015em;
 }
 
@@ -354,8 +345,6 @@ html[data-skin="soft"] .account-chip strong {
 }
 
 html[data-skin="soft"] .section-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -375,8 +364,6 @@ html[data-skin="soft"] .panel {
 }
 
 html[data-skin="soft"] .panel-heading h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -391,7 +378,6 @@ html[data-skin="soft"] .table-panel {
 
 html[data-skin="soft"] .button {
   border-radius: var(--radius-pill);
-  font-weight: 600;
   transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease,
     color .16s ease, transform .16s ease;
 }
@@ -412,14 +398,16 @@ html[data-skin="soft"] .button.primary:hover:not(:disabled) {
   box-shadow: 0 8px 22px var(--glow-primary);
 }
 
-html[data-skin="soft"] .button.secondary {
+html[data-skin="soft"] .button.secondary,
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button) {
   color: var(--ink);
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 
-html[data-skin="soft"] .button.secondary:hover:not(:disabled) {
+html[data-skin="soft"] .button.secondary:hover:not(:disabled),
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button):hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--surface-hover);
 }
@@ -448,6 +436,7 @@ html[data-skin="soft"] .button.danger:hover:not(:disabled) {
 }
 
 html[data-skin="soft"] .button:disabled,
+html[data-skin="soft"] #page-settings :is(.button.ghost, .row-action, .inline-action, .provider-back-button):disabled,
 html[data-skin="soft"] .button.primary:disabled,
 html[data-skin="soft"] .button.secondary:disabled,
 html[data-skin="soft"] .button.danger:disabled {
@@ -462,12 +451,17 @@ html[data-skin="soft"] .row-action,
 html[data-skin="soft"] .inline-action {
   color: var(--blue-700);
   border-radius: var(--radius-pill);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .row-action:hover:not(:disabled),
 html[data-skin="soft"] .inline-action:hover:not(:disabled) {
   background: var(--blue-100);
+}
+
+html[data-skin="soft"] #page-settings :is(.row-action, .inline-action, .provider-back-button) {
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  text-decoration: none;
 }
 
 html[data-skin="soft"] .field-label-action {
@@ -478,7 +472,6 @@ html[data-skin="soft"] .field-label-action {
 
 html[data-skin="soft"] .status-badge {
   border-radius: var(--radius-pill);
-  font-weight: 600;
   border: 1px solid var(--line);
   background: var(--surface-muted);
 }
@@ -563,7 +556,6 @@ html[data-skin="soft"] .search-box input::placeholder {
 html[data-skin="soft"] .form-field > span,
 html[data-skin="soft"] .form-field > label:first-child {
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .form-field small {
@@ -623,7 +615,6 @@ html[data-skin="soft"] .segmented {
 html[data-skin="soft"] .segmented button {
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .segmented button.active {
@@ -668,7 +659,6 @@ html[data-skin="soft"] .clear-search:hover {
 
 html[data-skin="soft"] table th {
   color: var(--subtle);
-  font-weight: 600;
   border-bottom: 1px solid var(--line);
 }
 
@@ -712,11 +702,6 @@ html[data-skin="soft"] .empty-symbol {
   color: var(--blue-700);
   border-radius: var(--radius-card);
   background: var(--blue-100);
-}
-
-html[data-skin="soft"] .empty-state h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
 }
 
 html[data-skin="soft"] .empty-state p {
@@ -793,8 +778,6 @@ html[data-skin="soft"] .report-preview-dialog {
 
 html[data-skin="soft"] .date-range-dialog .panel-heading h2,
 html[data-skin="soft"] .report-preview-header h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
   letter-spacing: -.01em;
 }
 
@@ -818,7 +801,6 @@ html[data-skin="soft"] .date-range-dialog .range-fields input.active {
 
 html[data-skin="soft"] .date-range-dialog .range-calendars h3 {
   color: var(--ink);
-  font-weight: 600;
 }
 
 html[data-skin="soft"] .date-range-dialog .range-days button {

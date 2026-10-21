@@ -136,3 +136,91 @@ def test_skin_tab_preserves_core_unsaved_changes_guard(browser, manager_url):
         expect(page.locator("#skinOptions")).to_be_visible()
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_soft_controls_preserve_shared_behavior(browser, manager_url, tmp_path, theme):
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        open_skin_settings(page, manager_url)
+        page.locator('[data-skin-option][value="soft"]').check()
+        expect(page.locator("#skinStatus")).to_contain_text("已应用")
+        if page.locator("html").get_attribute("data-theme") != theme:
+            page.locator("#themeToggle").click()
+        page.locator('.nav-item[data-page="home"]').click()
+        for action in ("stop", "start"):
+            primary = page.locator("#primaryAction")
+            expect(primary).to_have_attribute("data-action", action)
+            for control in (primary, page.locator("#forceStopAction")):
+                if not control.is_visible():
+                    continue
+                shape = control.evaluate("""el => {
+                  const box = el.getBoundingClientRect(), css = getComputedStyle(el);
+                  return {width: box.width, height: box.height, radius: parseFloat(css.borderTopLeftRadius)};
+                }""")
+                assert shape["width"] > shape["height"]
+                assert 0 < shape["radius"] < shape["height"] / 2, shape
+            page.screenshot(path=str(tmp_path / f"soft-{theme}-{action}.png"), animations="disabled")
+            if action == "stop":
+                primary.click()  # Preview API only; no robot process is started or stopped.
+
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="system"]').click()
+        expect(page.locator("#createBackup")).to_be_enabled()
+        expect(page.locator("#exportDiagnostics")).to_be_enabled()
+        appearances = page.locator("#createBackup, #exportDiagnostics").evaluate_all("""buttons => buttons.map(el => {
+          const css = getComputedStyle(el);
+          return [css.borderRadius, css.borderColor, css.backgroundColor, css.color, css.boxShadow];
+        })""")
+        assert appearances[0] == appearances[1]
+        # Exercise the disabled appearance without altering the shared preview fixture.
+        page.locator("#restoreBackup").evaluate("el => { el.disabled = true; }")
+        for button in page.locator(".maintenance-row > .button").all():
+            capsule = button.evaluate("""el => {
+              const css = getComputedStyle(el);
+              return {radius: parseFloat(css.borderTopLeftRadius), height: el.getBoundingClientRect().height,
+                border: css.borderTopColor, background: css.backgroundColor};
+            }""")
+            assert capsule["radius"] >= capsule["height"] / 2
+            assert capsule["border"] != "rgba(0, 0, 0, 0)"
+            assert capsule["background"] != "rgba(0, 0, 0, 0)"
+        expect(page.locator("#restoreBackup")).to_be_disabled()
+        assert page.locator("#restoreBackup").evaluate("el => getComputedStyle(el).color") != appearances[0][3]
+
+        assert not errors, errors
+        page.screenshot(path=str(tmp_path / f"soft-{theme}-maintenance.png"), animations="disabled")
+    finally:
+        page.close()
+
+
+def test_soft_typography_matches_default_on_dynamic_pages(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    try:
+        open_skin_settings(page, manager_url)
+        page.locator('[data-skin-option][value="soft"]').check()
+        expect(page.locator("#skinStatus")).to_contain_text("已应用")
+        for section, detail in (("home", None), ("groups", "#groupRows tr"),
+                                ("features", '[data-feature-id="feature-group-analysis"]'),
+                                ("history", ".conversation-item"), ("settings", '[data-settings-tab="core"]')):
+            page.locator(f'.nav-item[data-page="{section}"]').click()
+            if detail:
+                page.locator(detail).first.click()
+            page.evaluate("document.fonts.ready")
+            differences = page.evaluate("""() => {
+              const elements = [...document.querySelectorAll('body *')].filter(el =>
+                [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
+              const font = el => { const css = getComputedStyle(el); return [css.fontFamily, css.fontWeight].join('|'); };
+              const soft = elements.map(font);
+              delete document.documentElement.dataset.skin;
+              const differences = elements.flatMap((el, index) => font(el) === soft[index] ? [] :
+                [{element: el.id || el.className || el.tagName, soft: soft[index], original: font(el)}]);
+              document.documentElement.dataset.skin = 'soft';
+              return differences;
+            }""")
+            assert not differences, differences
+            assert page.evaluate("document.fonts.check('700 16px \"Alimama ShuHei\"')")
+            assert page.evaluate("document.fonts.check('400 14px \"Alibaba PuHuiTi 2\"')")
+    finally:
+        page.close()

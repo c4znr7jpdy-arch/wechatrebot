@@ -72,6 +72,7 @@ window.createChatManagement = function (helpers) {
 
   async function selectChatManagementTab(tab, focus = false) {
     if (!new Set(["groups", "private"]).has(tab)) return;
+    const changed = state.chatManagementTab !== tab;
     state.chatManagementTab = tab;
     $$('[data-chat-management-tab]').forEach((button) => {
       const active = button.dataset.chatManagementTab === tab;
@@ -86,6 +87,9 @@ window.createChatManagement = function (helpers) {
     $("#refreshContacts").hidden = tab !== "private";
     if (tab === "groups" && !state.groupsLoaded) await loadGroups(true);
     if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
+    if (changed && state.chatManagementTab === tab) {
+      window.managerMotion?.enter($(tab === "groups" ? "#groupManagementPanel" : "#privateManagementPanel"));
+    }
   }
 
   function groupDirectoryStatus(data, failed = false) {

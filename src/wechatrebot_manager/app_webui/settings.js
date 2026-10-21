@@ -73,6 +73,7 @@ window.createManagerSettings = function (helpers) {
 
   function setSettingsSection(section, focus = false) {
     if (!SETTINGS_SECTIONS.has(section)) return;
+    const changed = state.settingsSection !== section;
     state.settingsSection = section;
     const page = $("#page-settings");
     page.dataset.settingsSection = section;
@@ -92,6 +93,7 @@ window.createManagerSettings = function (helpers) {
     }
     if (section === "core") void getCoreSettings().load();
     if (section === "search" && !state.webSearchDirty) void loadWebSearchSettings();
+    if (changed) window.managerMotion?.enter($(`[data-settings-section="${section}"]`, page));
   }
 
   function renderWebSearch(settings) {

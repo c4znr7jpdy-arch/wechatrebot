@@ -142,6 +142,7 @@ window.createFeatureController = function (helpers) {
     if (cached) {
       useFeatureDetail(cached, afterSave, preserveTab);
       renderFeatureDetail();
+      if (!preserveTab) window.managerMotion?.enter($("#featureDetail"));
       const note = $("#featureNote");
       if (note && (force || cacheNeedsRefresh)) note.textContent = "正在重新读取最新设置…";
       // Never expose a cached revision for edit when a fresh read is required.
@@ -158,6 +159,7 @@ window.createFeatureController = function (helpers) {
       if (cached && state.featureDirty) return;
       useFeatureDetail(detail, afterSave, preserveTab);
       renderFeatureDetail();
+      if (!preserveTab && !cached) window.managerMotion?.enter($("#featureDetail"));
     } catch (error) {
       if (load !== state.featureLoad) return;
       if (!cached) $("#featureDetail").innerHTML = '<div class="empty-state"><h2>设置暂时无法读取</h2><p>机器人未启动时仍可修改大部分基础设置，请稍后重试。</p></div>';
@@ -368,10 +370,12 @@ window.createFeatureController = function (helpers) {
     }
     $$(".config-tabs button").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled || state.featureSaving) return;
+      const changed = state.featureTab !== button.dataset.tab;
       try {
         detail.config = configFromForm();
         state.featureTab = button.dataset.tab;
         renderFeatureDetail();
+        if (changed) window.managerMotion?.enter($("#featureForm"));
         $(`.config-tabs button[data-tab="${state.featureTab}"]`)?.focus();
       } catch (error) { showFeatureError(error); }
     }));
