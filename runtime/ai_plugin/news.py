@@ -54,8 +54,8 @@ def format_news(items: list[dict]) -> str:
         return "暂无抖音热榜数据"
     now = datetime.now().strftime("%Y/%m/%d %H:%M")
     lines = [f"📰 抖音热榜 {now}"]
-    for index, item in enumerate(items, 1):
+    for item in items:
         title = str(item.get("title") or "").strip()
         if title:
-            lines.append(f"{index}. {title}")
+            lines.append(f"#{title}")
     return "\n".join(lines)
