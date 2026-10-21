@@ -160,6 +160,24 @@ class ContactDirectoryService(GroupDirectoryService):
                 for item in items
             ):
                 raise GroupDirectoryError("请先刷新联系人列表，再选择当前账号的联系人。")
+        return self._fetch_profile(port, token, account, contact_id)
+
+    def network_profile(self, account_id: str, user_id: str) -> dict[str, object]:
+        """Query a selected person without requiring the directory UI to load."""
+        requested = self._contact_ids([user_id])
+        if not isinstance(user_id, str) or not requested:
+            raise GroupDirectoryError("联系人标识格式不正确，请重新选择联系人。")
+        with self._lock:
+            port, token, account = self._connection()
+            if account != self._contact_account:
+                self._reset_contact_state(account)
+            if not account_id or account_id != account:
+                raise GroupDirectoryError("微信账号已变化，请重新选择联系人。")
+        # The bridge detail route calls HOOK /api/get_contact on every request.
+        # Never substitute directory/history portraits when the network query fails.
+        return self._fetch_profile(port, token, account, requested[0])
+
+    def _fetch_profile(self, port, token, account, contact_id) -> dict[str, object]:
         data = self._request(
             port,
             token,

@@ -14,10 +14,12 @@ window.createChatManagement = function (helpers) {
     bindAvatarFallbacks,
     confirmAction,
     copyText,
+    contactFactsMarkup,
     escapeHtml,
     fullTime,
     icon,
     openScheduledForChat,
+    openContactProfile,
     openCoreTemplates,
     readHomeSetupAlertDismissals,
     reportError,
@@ -708,13 +710,6 @@ window.createChatManagement = function (helpers) {
     if (state.selectedContact === contactId) renderContactInspector();
   }
 
-  function contactFact(label, value, options = {}) {
-    const text = String(value || "").trim();
-    if (!text) return "";
-    const rendered = options.code ? `<code>${escapeHtml(text)}</code>` : escapeHtml(text);
-    return `<div><dt>${escapeHtml(label)}</dt><dd>${rendered}</dd></div>`;
-  }
-
   function privatePolicyMarkup(data) {
     if (!data || data.loading) return '<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="loading-row">正在读取聊天规则…</div></section>';
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
@@ -749,16 +744,7 @@ window.createChatManagement = function (helpers) {
     const detailState = state.contactDetails[contact.user_id];
     const detail = detailState && !detailState.loading && !detailState.error ? {...contact, ...detailState} : contact;
     const displayName = contactDisplayName(detail);
-    const facts = [
-      contactFact("昵称", detail.nickname),
-      contactFact("备注", detail.remark),
-      contactFact("微信号", detail.alias, {code: true}),
-      contactFact("微信标识", detail.user_id, {code: true}),
-      contactFact("性别", detail.gender),
-      contactFact("地区", contactRegion(detail) === "未提供" ? "" : contactRegion(detail)),
-      contactFact("联系人类型", detail.contact_type),
-      contactFact("个性签名", detail.signature),
-    ].filter(Boolean).join("");
+    const facts = contactFactsMarkup(detail);
     const detailsMessage = detailState?.loading
       ? '<div class="profile-state">正在读取最新个人资料…</div>'
       : detailState?.error
@@ -766,10 +752,12 @@ window.createChatManagement = function (helpers) {
         : facts ? `<dl class="contact-facts">${facts}</dl>` : '<div class="profile-state">当前接口没有返回更多个人资料。</div>';
     const policyData = state.privatePolicies[contact.user_id];
     const saveDisabled = !policyData || policyData.loading || policyData.error;
-    panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></header>
+    panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><div class="contact-inspector-actions"><button class="row-action" type="button" data-contact-profile="${escapeHtml(contact.user_id)}">查询好友资料</button><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></div></header>
       <div class="inspector-scroll contact-detail-scroll"><details class="contact-profile"><summary>个人详情</summary><div class="contact-section-heading"><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</details>${privatePolicyMarkup(policyData)}</div>
       <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存私聊规则</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
+    const accountId = state.contactAccount;
+    $("[data-contact-profile]", panel)?.addEventListener("click", () => openContactProfile({accountId, contactId: contact.user_id, name: displayName}));
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "private", id: contact.user_id, name: displayName}, state.contactAccount));
     bindAvatarFallbacks(panel);
     void chatProfiles.mount($("#privateChatProfile"), contact.user_id, "private", state.contactAccount);

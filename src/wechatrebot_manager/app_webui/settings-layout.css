@@ -173,6 +173,7 @@
 .top-actions .button, .page-heading .button,
 #page-groups .inspector-detail-actions .row-action,
 #page-groups .chat-scheduled-entry,
+#page-groups .contact-inspector-actions [data-contact-profile],
 #page-settings .core-heading .button, #page-settings .core-detail-heading .button {
   border-radius: 999px; border: 1px solid var(--line-strong); padding: 8px 16px; min-height: 36px;
 }
@@ -209,7 +210,7 @@
 #page-groups .chat-profile-field > span { font-size: 14px; }
 #page-groups :is(.group-policy-form, .private-feature-policy) label > span { font-size: 14px; font-weight: 600; }
 #page-groups :is(.group-policy-form, .private-feature-policy) .toggle-line { display: grid !important; }
-#page-groups :is(.inspector-detail-actions .row-action, .chat-scheduled-entry, .inspector-footer .button) { font-size: 14px; font-weight: 600; }
+#page-groups :is(.inspector-detail-actions .row-action, .chat-scheduled-entry, .contact-inspector-actions [data-contact-profile], .inspector-footer .button) { font-size: 14px; font-weight: 600; }
 #page-groups :is(.inspector-id, .chat-profile-note, .chat-decision, .inspector-footer > span) { font-size: 13px; font-weight: 400; color: var(--muted); }
 #page-groups .advanced-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 10px 14px; list-style: none; font-size: 14px; font-weight: 600; color: var(--blue-700); border-radius: 7px; }
 #page-groups .advanced-details > summary::-webkit-details-marker { display: none; }

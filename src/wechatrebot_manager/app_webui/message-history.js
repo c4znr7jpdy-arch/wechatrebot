@@ -16,6 +16,7 @@ window.createMessageHistory = function (helpers) {
     copyText,
     escapeHtml,
     fullTime,
+    openContactProfile,
     reportError,
     state,
     toast,
@@ -781,6 +782,24 @@ window.createMessageHistory = function (helpers) {
       });
     }
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
+    const profileContactId = item.type === "private" ? item.conversation_id
+      : currentSender?.role !== "assistant" && currentSender?.sender_id
+        && !["bot", state.historyAccount].includes(currentSender.sender_id) ? currentSender.sender_id : "";
+    if (profileContactId) {
+      const copyButton = $("#copySenderId");
+      const actions = document.createElement("div");
+      actions.className = "sender-profile-actions";
+      copyButton.replaceWith(actions);
+      actions.append(copyButton);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "row-action";
+      button.dataset.contactProfile = profileContactId;
+      button.textContent = "查询好友资料";
+      const accountId = state.historyAccount;
+      button.addEventListener("click", () => openContactProfile({accountId, contactId: profileContactId, name: item.type === "private" ? item.display_name : senderName}));
+      actions.append(button);
+    }
     bindAvatarFallbacks($("#conversationInspector"));
     if ($("#deleteConversation")) $("#deleteConversation").disabled = !canEditHistory();
     $("#deleteConversation")?.addEventListener("click", () => {

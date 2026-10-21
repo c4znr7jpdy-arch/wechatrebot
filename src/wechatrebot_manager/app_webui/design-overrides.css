@@ -711,6 +711,26 @@ html[data-theme="dark"] .feature-page-panel iframe { background: var(--surface);
 #page-settings .core-savebar { width: fit-content; margin-left: auto; padding: 0; border: 0; background: transparent; bottom: 16px; }
 .core-savebar button { box-shadow: 0 5px 20px rgba(0,0,0,.18); }
 #coreNote { margin-top: 20px; padding-right: 150px; }
+.contact-inspector-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.contact-inspector-actions .chat-scheduled-entry { margin-top: 0; }
+.current-sender > div > .sender-profile-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.contact-profile-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 24px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-lg); }
+.contact-profile-dialog::backdrop { background: rgba(0,0,0,.35); }
+.contact-profile-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.contact-profile-heading h2 { margin: 0; font-size: 18px; }
+.contact-profile-person { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.contact-profile-person > div { min-width: 0; }
+.contact-profile-person strong { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
+.contact-profile-dialog .contact-facts code { color: var(--ink); }
+.contact-profile-dialog .contact-facts dd { white-space: pre-wrap; }
+.contact-profile-actions { display: flex; justify-content: flex-end; }
+.contact-profile-actions:has([hidden]) { display: none; }
+html[data-skin="soft"] .contact-profile-dialog { border-radius: 24px; }
+html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--veil); backdrop-filter: blur(6px); }
+@media (max-width: 600px) {
+  .contact-profile-dialog { padding: 20px; }
+  .contact-profile-dialog .contact-facts div { grid-template-columns: 72px minmax(0,1fr); gap: 8px; }
+}
 .date-range-dialog { width: min(660px, 94vw); padding: 24px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface); }
 .date-range-dialog::backdrop { background: rgba(0,0,0,.35); }
 .range-fields, .range-navigation { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
