@@ -330,7 +330,7 @@ html[data-skin="soft"] #page-history .conversation-list article {
 }
 
 html[data-skin="soft"] #page-history .conversation-item {
-  width: auto;
+  width: calc(100% - 16px);
   margin: 3px 8px;
   border-radius: var(--radius-sm);
   transition: background-color .16s ease, color .16s ease;
