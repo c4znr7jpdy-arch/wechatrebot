@@ -1,7 +1,15 @@
 diff --git a/main.py b/main.py
 --- a/main.py
 +++ b/main.py
-@@ -74,7 +74,7 @@
+@@ -46,6 +46,7 @@
+     merge_directed_context,
+ )
+ from .core.text_processing import clean_tts_text, split_tts_text
++from .core.tool_delivery import check_send_response, protect_request, speak_once
+ from .core.tts_jobs import TTSJob, TTSJobManager
+ from .core.tts_reliability import CircuitOpenError, ReliabilityController
+ from .core.wav_utils import merge_wav_files
+@@ -74,7 +75,7 @@
          self._config_file = pathlib.Path(self.data_dir) / "config.json"
          native_config = self._coerce_config(config)
          persisted_config = self._load_persisted_config()
@@ -10,7 +18,7 @@ diff --git a/main.py b/main.py
          self.plugin_config = build_plugin_config(self.config)
          self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
          self.voice_store = VoiceStore(self.data_dir)
-@@ -156,8 +156,33 @@
+@@ -156,8 +157,33 @@
                  if key == "api_key" and not str(changes[key] or "").strip():
                      continue
                  merged[key] = changes[key]
@@ -46,6 +54,105 @@ diff --git a/main.py b/main.py
          self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
          self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
          self._style_director_cache.clear()
+@@ -612,6 +638,12 @@
+         )
+         return str(output)
+ 
++    if hasattr(filter, "on_llm_request"):
++
++        @filter.on_llm_request()
++        async def protect_voice_delivery(self, event: AstrMessageEvent, req):
++            protect_request(req)
++
+     if hasattr(filter, "llm_tool"):
+ 
+         @filter.llm_tool(name="mimo_tts_speak")
+@@ -632,30 +664,13 @@
+                 style(string): Optional temporary style instruction.
+ 
+             Returns:
+-                string: Generated audio path or a short failure message.
++                string: JSON delivery receipt. This tool already sends the audio.
++                    A sent receipt means the platform send call completed, not that
++                    the recipient read it. Never send the audio a second time.
+             """
+-            content = str(text or "").strip()
+-            if not content:
+-                yield "empty text"
+-                return
+-            try:
+-                output = await self.synthesize_text(
+-                    content,
+-                    voice_name=str(voice or "").strip() or None,
+-                    emotion=emotion,
+-                    context=style,
+-                    user_id=str(getattr(event, "get_sender_id", lambda: "")() or "").strip(),
+-                    group_id=str(getattr(event, "unified_msg_origin", "") or "").strip()
+-                    or self._conversation_id(event),
+-                )
+-            except Exception as exc:
+-                yield f"tts failed: {exc}"
+-                return
+-            await self._send_audio_result(event, output)
+-            if hasattr(event, "clear_result"):
+-                event.clear_result()
+-            yield str(output)
+-            return
++            yield await speak_once(
++                self, event, text=text, emotion=emotion, voice=voice, style=style,
++            )
+ 
+     @staticmethod
+     def _conversation_id(event: AstrMessageEvent) -> str:
+@@ -1182,11 +1197,11 @@
+             params["self_id"] = self_id
+         method = getattr(bot, action, None)
+         if callable(method):
+-            await method(**params)
++            check_send_response(await method(**params))
+             return
+         call_action = getattr(bot, "call_action", None)
+         if callable(call_action):
+-            await call_action(action, **params)
++            check_send_response(await call_action(action, **params))
+             return
+         raise RuntimeError("aiocqhttp 客户端不支持 OneBot 消息发送接口。")
+ 
+@@ -1237,23 +1252,29 @@
+             source=source,
+         )
+ 
+-    async def _send_audio_result(self, event: AstrMessageEvent, audio_path: pathlib.Path) -> None:
++    async def _send_audio_result(
++        self, event: AstrMessageEvent, audio_path: pathlib.Path, *, retry_as_file: bool = True,
++    ) -> str:
+         source, _staged = self._transport_source(audio_path)
+         if self.plugin_config.audio_transport == "shared_path":
+             await self._send_shared_path_audio(source=source, event=event)
+-            return
++            return "record"
+         if Record is not None:
+             try:
+-                await event.send(event.chain_result([Record(file=source)]))
+-                return
++                check_send_response(await event.send(event.chain_result([Record(file=source)])))
++                return "record"
+             except Exception as exc:
++                if not retry_as_file:
++                    raise
+                 self.logger.warning(
+                     "[mimo-tts] Record send failed, fallback to file: %s", exc
+                 )
+         if self.plugin_config.audio_transport == "base64":
+             raise RuntimeError("NapCat 未接受 Base64 语音，已禁止回退为本地路径。")
+         if self.plugin_config.file_fallback_enabled:
+-            await event.send(event.chain_result([File(name=audio_path.name, file=source)]))
++            check_send_response(await event.send(event.chain_result([File(name=audio_path.name, file=source)])))
++            return "file"
++        raise RuntimeError("没有可用的音频发送方式，且文件回退未启用。")
+ 
+     def _background_manager(self) -> TTSJobManager:
+         if self._job_manager is None:
 diff --git a/pages_api.py b/pages_api.py
 --- a/pages_api.py
 +++ b/pages_api.py
@@ -61,3 +168,186 @@ diff --git a/pages_api.py b/pages_api.py
          if not persisted.get("local") and not persisted.get("native"):
              return jsonify(
                  {
+diff --git a/core/tool_delivery.py b/core/tool_delivery.py
+new file mode 100644
+--- /dev/null
++++ b/core/tool_delivery.py
+@@ -0,0 +1,178 @@
++"""Per-message voice receipts and request-local duplicate-send protection."""
++from __future__ import annotations
++
++import asyncio
++import copy
++import json
++import logging
++import ntpath
++from pathlib import Path, PureWindowsPath
++from urllib.parse import unquote, urlsplit
++
++
++logger = logging.getLogger(__name__)
++_STATE_KEY = "_mimo_tool_delivery"
++
++
++def _state(event) -> dict:
++    state = getattr(event, _STATE_KEY, None)
++    # Re-entered requests may share extras or shallow-copy the event. Keep the
++    # state on this instance, even when the platform omitted its message ID.
++    if not isinstance(state, dict) or state.get("owner") is not event:
++        state = {"owner": event, "operations": {}, "paths": {}}
++        setattr(event, _STATE_KEY, state)
++    return state
++
++
++def _path_key(value) -> str | None:
++    if not isinstance(value, str) or not value.strip():
++        return None
++    value = value.strip()
++    try:
++        if value.lower().startswith("file:"):
++            parsed = urlsplit(value)
++            value = unquote(parsed.path)
++            if parsed.netloc and parsed.netloc.lower() != "localhost":
++                value = "//" + parsed.netloc + value
++            elif len(value) > 2 and value[0] == "/" and value[2] == ":":
++                value = value[1:]
++        if PureWindowsPath(value).is_absolute():
++            return ntpath.normcase(ntpath.normpath(value))
++        path = Path(value)
++        return str(path.resolve()) if path.is_absolute() else None
++    except (ValueError, OSError):
++        return None  # Leave malformed paths to the original tool's validation.
++
++
++def _receipt(status: str, *, media_type: str = "", stage: str = "") -> dict:
++    messages = {
++        "sent": "发送接口已完成音频发送，无需再次调用发送工具；这不代表对方已读。",
++        "in_progress": "本条消息的语音仍在处理中，请勿重复调用或声称发送失败。",
++        "unknown": "已尝试发送，但结果未确认；请勿自动重发或断言发送失败。",
++        "failed": "语音合成失败，尚未开始发送。",
++    }
++    result = {"status": status, "message": messages[status]}
++    if media_type:
++        result["media_type"] = media_type
++    if stage:
++        result["stage"] = stage
++    return result
++
++
++def _json(value) -> str:
++    return json.dumps(value, ensure_ascii=False)
++
++
++def check_send_response(response) -> None:
++    """Adapters normally raise on failure; reject explicit negative receipts too."""
++    if response is False or (isinstance(response, dict) and (
++        response.get("status") not in (None, "ok", "success")
++        or response.get("retcode") not in (None, 0, "0")
++    )):
++        raise RuntimeError("音频发送接口未返回成功状态。")
++
++
++async def speak_once(plugin, event, *, text, emotion, voice, style) -> str:
++    """Reserve before awaiting; never serialize unrelated users or operations."""
++    text, emotion, voice, style = (str(value or "").strip() for value in (text, emotion, voice, style))
++    if not text:
++        return _json(_receipt("failed", stage="synthesis"))
++    operations = _state(event)["operations"]
++    key = (text, emotion or "neutral", voice, style)
++    if key in operations:
++        return _json(operations[key])
++    receipt = _receipt("in_progress")
++    operations[key] = receipt
++    try:
++        output = await plugin.synthesize_text(
++            text, voice_name=voice or None, emotion=key[1], context=style,
++            user_id=str(event.get_sender_id() or "").strip(),
++            group_id=str(event.unified_msg_origin or "").strip() or plugin._conversation_id(event),
++        )
++    except asyncio.CancelledError:
++        operations.pop(key, None)  # No send was attempted.
++        raise
++    except Exception:
++        operations.pop(key, None)
++        logger.exception("[mimo-tts] tool synthesis failed before delivery")
++        return _json(_receipt("failed", stage="synthesis"))
++
++    path_key = _path_key(str(output))
++    if path_key is not None:
++        _state(event)["paths"][path_key] = receipt
++    try:
++        # An exception may occur after a platform accepted a voice. Do not
++        # automatically send it again as a file in this tool execution.
++        media_type = await plugin._send_audio_result(event, output, retry_as_file=False)
++        if media_type not in {"record", "file"}:
++            raise RuntimeError("Audio sender returned no confirmed send branch")
++    except asyncio.CancelledError:
++        receipt.update(_receipt("unknown", stage="delivery"))
++        raise
++    except Exception:
++        receipt.update(_receipt("unknown", stage="delivery"))
++        logger.exception("[mimo-tts] tool delivery outcome is unconfirmed; automatic resend blocked")
++        return _json(receipt)
++    receipt.update(_receipt("sent", media_type=media_type))
++    try:
++        event.clear_result()
++    except Exception:
++        # Cleanup cannot turn an already completed send into a failure receipt.
++        logger.exception("[mimo-tts] post-send result cleanup failed")
++    return _json(receipt)
++
++
++async def _guarded_send(original, context, **kwargs):
++    event = context.context.event
++    session = kwargs.get("session")
++    messages = kwargs.get("messages")
++    if session not in (None, "", event.unified_msg_origin) or not isinstance(messages, list):
++        return await original(context, **kwargs)
++    paths = _state(event)["paths"]
++    remaining, previous = [], []
++    for message in messages:
++        receipt = None
++        if isinstance(message, dict) and str(message.get("type")).lower() in {"record", "file"}:
++            receipt = paths.get(_path_key(message.get("path") or message.get("url")))
++        if receipt is None:
++            remaining.append(message)
++        elif receipt not in previous:
++            previous.append(dict(receipt))
++    if not previous:
++        return await original(context, **kwargs)
++    if not remaining:
++        status = next((r["status"] for r in previous if r["status"] != "sent"), "sent")
++        result = _receipt(status)
++        result["duplicate_suppressed"] = True
++        return _json(result)
++    try:
++        result = await original(context, **{**kwargs, "messages": remaining})
++    except Exception:
++        logger.exception("[mimo-tts] other message send failed after suppressing duplicate audio")
++        result = {"status": "unknown", "message": "其他内容的发送结果未确认，不影响已记录的音频结果。"}
++    # Preserve the original result (including errors) for unrelated components.
++    if hasattr(result, "model_dump"):
++        result = result.model_dump(mode="json")
++    return _json({"previous_audio": previous, "other_messages_result": result})
++
++
++def protect_request(req) -> None:
++    """Copy the request toolset and builtin; never mutate shared cached tools."""
++    toolset = getattr(req, "func_tool", None)
++    if toolset is None:
++        return
++    tool = toolset.get_tool("send_message_to_user")
++    if tool is None or tool.handler is not None or getattr(tool.call, "_mimo_guard", False):
++        return
++    original = tool.call
++
++    async def guarded(context, **kwargs):
++        return await _guarded_send(original, context, **kwargs)
++
++    guarded._mimo_guard = True
++    wrapped = copy.copy(tool)
++    wrapped.call = guarded
++    copied = copy.copy(toolset)
++    copied.tools = list(toolset.tools)
++    copied.add_tool(wrapped)
++    req.func_tool = copied
