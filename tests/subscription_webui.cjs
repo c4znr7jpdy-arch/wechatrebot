@@ -392,7 +392,8 @@ function runCenterCanStartWithBridgeConnected() {
   assert.ok(start >= 0 && end > start);
   const h = harness();
   const context = vm.createContext({state: {historyAccount: 'wxid_a', historyReadyAccount: 'wxid_a', activePage: 'home', mandatoryUpdate: false},
-    $: h.element, subscription: {updateRuntime() {}}, reconcileStartPending: status => status,
+    $: h.element, subscription: {updateRuntime() {}}, contactProfile: {updateAccount() {}},
+    reconcileStartPending: status => status,
     escapeHtml, icon: id => id, setStage() {}, setHistoryActionsEnabled() {}, Date,
   });
   vm.runInContext(app.slice(start, end), context);

@@ -323,6 +323,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/model-services.js",
                     "/chat-management.js",
                     "/chat-profiles.js",
+                    "/contact-profile.js",
                     "/settings-layout.css",
                     "/message-history.js",
                     "/features.js",

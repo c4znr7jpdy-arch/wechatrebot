@@ -108,6 +108,7 @@ PUBLIC_API_METHODS = (
     "save_group_policy",
     "get_contacts",
     "get_contact_detail",
+    "get_contact_network_profile",
     "get_private_policy",
     "save_private_policy",
     "get_messages",

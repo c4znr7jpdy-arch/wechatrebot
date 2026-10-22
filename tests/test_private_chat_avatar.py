@@ -163,6 +163,99 @@ def test_private_profile_requires_current_directory_selection(
         service.profile("../private")
 
 
+def test_network_profile_queries_each_time_without_loading_directory(tmp_path, monkeypatch):
+    service, _, calls = _contact_service(tmp_path, monkeypatch)
+
+    def request(_port, _token, identity, path):
+        calls.append(path)
+        item = {"user_id": "wxid_friend", "nickname": f"昵称{len(calls)}",
+                "alias": "public_alias", "signature": "最新签名"}
+        return {"account_id": identity, "item": item, "items": [item], "total": 1}
+
+    monkeypatch.setattr(service, "_request", request)
+    first = service.network_profile("test-account", "wxid_friend")
+    second = service.network_profile("test-account", "wxid_friend")
+    assert first["item"]["nickname"] == "昵称1"
+    assert second["item"]["nickname"] == "昵称2"
+    assert second["item"]["signature"] == "最新签名"
+    assert calls == ["/api/manager/contacts/wxid_friend"] * 2
+    assert service._directory_snapshot is None
+    assert [path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*.json")] == ["app/bridge/config.json"]
+
+
+@pytest.mark.parametrize("user_id", ["", "../private", "room@chatroom", "a" * 129, None, {}])
+def test_network_profile_rejects_invalid_contact_before_request(tmp_path, monkeypatch, user_id):
+    service, _, _ = _contact_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "_request", lambda *_args: pytest.fail("unexpected request"))
+    with pytest.raises(group_directory.GroupDirectoryError, match="标识"):
+        service.network_profile("test-account", user_id)
+
+
+@pytest.mark.parametrize("expected_account", ["", "old-account", None])
+def test_network_profile_rejects_stale_account_before_request(tmp_path, monkeypatch, expected_account):
+    service, _, _ = _contact_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "_request", lambda *_args: pytest.fail("unexpected request"))
+    with pytest.raises(group_directory.GroupDirectoryError, match="账号已变化"):
+        service.network_profile(expected_account, "wxid_friend")
+
+
+@pytest.mark.parametrize("item", [None, {}, {"user_id": "wxid_other"}])
+def test_network_profile_rejects_missing_or_mismatched_peer(tmp_path, monkeypatch, item):
+    service, _, _ = _contact_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "_request", lambda *_args: {"item": item})
+    with pytest.raises(group_directory.GroupDirectoryError, match="详情格式"):
+        service.network_profile("test-account", "wxid_friend")
+    assert not service._contacts
+
+
+def test_network_profile_never_falls_back_to_cached_profile_on_error(tmp_path, monkeypatch):
+    service, _, _ = _contact_service(tmp_path, monkeypatch)
+    service._contact_account = "test-account"
+    service._contacts["wxid_friend"] = {"user_id": "wxid_friend", "nickname": "旧资料"}
+
+    def request(*_args):
+        raise group_directory.GroupDirectoryError("读取超时")
+
+    monkeypatch.setattr(service, "_request", request)
+    with pytest.raises(group_directory.GroupDirectoryError, match="超时"):
+        service.network_profile("test-account", "wxid_friend")
+
+
+def test_network_profile_discards_result_if_account_changes_during_query(tmp_path, monkeypatch):
+    service, account, _ = _contact_service(tmp_path, monkeypatch)
+
+    def request(*_args):
+        account[0] = "other-account"
+        service._connection()
+        return {"item": {"user_id": "wxid_friend", "nickname": "不可泄露"}}
+
+    monkeypatch.setattr(service, "_request", request)
+    with pytest.raises(group_directory.GroupDirectoryError, match="账号已变化"):
+        service.network_profile("test-account", "wxid_friend")
+    assert not service._contacts
+
+
+def test_network_profile_api_is_exposed_and_returns_actionable_failure():
+    from wechatrebot_manager.app_shell import PUBLIC_API_METHODS
+
+    api = ApplicationApi.__new__(ApplicationApi)
+    calls = []
+
+    def query(account, contact):
+        calls.append((account, contact))
+        if contact == "wxid_failed":
+            raise group_directory.GroupDirectoryError("联系人资料暂不可用，请稍后重试。")
+        return {"account_id": account, "item": {"user_id": contact}}
+
+    api._contacts = SimpleNamespace(network_profile=query)
+    assert "get_contact_network_profile" in PUBLIC_API_METHODS
+    assert api.get_contact_network_profile("test-account", "wxid_friend")["data"]["item"]["user_id"] == "wxid_friend"
+    failure = api.get_contact_network_profile("test-account", "wxid_failed")
+    assert failure["ok"] is False
+    assert "暂不可用" in failure["error"]["message"]
+    assert calls == [("test-account", "wxid_friend"), ("test-account", "wxid_failed")]
+
+
 def test_private_conversation_and_old_messages_use_current_contact_avatar() -> None:
     api = ApplicationApi.__new__(ApplicationApi)
     api._lifecycle = SimpleNamespace(

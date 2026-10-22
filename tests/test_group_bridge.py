@@ -963,6 +963,87 @@ def test_get_contact_keeps_legacy_direct_record_response(
     assert _run(client.get_contact("wxid_friend")) == contact
 
 
+def test_contact_detail_route_queries_hook_each_time_and_normalizes_profile(patched_bridge):
+    hook_module = patched_bridge["hook_client"]
+    hook = object.__new__(hook_module.HookClient)
+    calls = []
+
+    async def read(path, payload):
+        calls.append((path, payload))
+        return {
+            "baseResponse": {"ret": 0},
+            "contactCount": 1,
+            "contactList": [{
+                "userName": {"String": "wxid_friend"},
+                "nickName": {"String": f"好友{len(calls)}"},
+                "remark": {"String": "小张"},
+                "alias": "friend_88",
+                "sex": 2,
+                "province": "Zhejiang",
+                "city": "Hangzhou",
+                "country": "CN",
+                "signature": f"最新签名{len(calls)}",
+                "smallHeadImgUrl": "https://wx.qlogo.cn/friend-small",
+                "bigHeadImgUrl": "https://wx.qlogo.cn/friend-big",
+            }],
+        }
+
+    hook._read_data = read
+    app = patched_bridge["callback_server"].create_callback_app(
+        asyncio.Queue(), 1024, manager_hook=hook, manager_query_token="local-secret",
+        status_provider=lambda: {"wechat_identity": "wxid_bot"},
+    )
+
+    async def exercise(client):
+        for attempt in (1, 2):
+            response = await client.get("/api/manager/contacts/wxid_friend", headers=_headers())
+            assert response.status == 200
+            assert response.headers["Cache-Control"] == "no-store"
+            body = await response.json()
+            assert body["ok"] is True
+            assert body["data"]["account_id"] == "wxid_bot"
+            assert body["data"]["item"] == {
+                "user_id": "wxid_friend", "name": "小张", "nickname": f"好友{attempt}",
+                "remark": "小张", "alias": "friend_88", "gender": "女", "gender_code": 2,
+                "province": "Zhejiang", "city": "Hangzhou", "country": "CN",
+                "signature": f"最新签名{attempt}",
+                "avatar": "https://wx.qlogo.cn/friend-small", "contact_type": "微信好友",
+            }
+
+    _run(_with_client(app, exercise))
+    assert calls == [("/api/get_contact", {"wxid": "wxid_friend"})] * 2
+
+
+@pytest.mark.parametrize("failure", ["upstream", "empty", "different-contact"])
+def test_contact_detail_route_rejects_failed_or_empty_hook_profile(patched_bridge, failure):
+    hook_module = patched_bridge["hook_client"]
+    hook = object.__new__(hook_module.HookClient)
+    calls = []
+
+    async def read(path, payload):
+        calls.append((path, payload))
+        if failure == "upstream":
+            raise hook_module.HookApiError(path, 502, "contact lookup failed")
+        contacts = [] if failure == "empty" else [{"userName": {"String": "wxid_other"}}]
+        return {"baseResponse": {"ret": 0}, "contactList": contacts}
+
+    hook._read_data = read
+    app = patched_bridge["callback_server"].create_callback_app(
+        asyncio.Queue(), 1024, manager_hook=hook, manager_query_token="local-secret",
+        status_provider=lambda: {"wechat_identity": "wxid_bot"},
+    )
+
+    async def exercise(client):
+        response = await client.get("/api/manager/contacts/wxid_friend", headers=_headers())
+        assert response.status == 502
+        body = await response.json()
+        assert body["ok"] is False
+        assert "data" not in body
+
+    _run(_with_client(app, exercise))
+    assert calls == [("/api/get_contact", {"wxid": "wxid_friend"})]
+
+
 def test_explicit_group_refresh_is_never_permanently_locked_after_empty_result(
     patched_bridge: dict[str, Any]
 ) -> None:

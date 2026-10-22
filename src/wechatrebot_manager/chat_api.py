@@ -286,6 +286,17 @@ class ChatApiMixin:
                 "error": {"title": "联系人详情未更新", "message": str(exc)},
             }
 
+    def get_contact_network_profile(
+        self, account_id: str, contact_id: str
+    ) -> dict[str, object]:
+        try:
+            return self._ok(self._contacts.network_profile(account_id, contact_id))
+        except GroupDirectoryError as exc:
+            return {
+                "ok": False,
+                "error": {"title": "好友资料查询失败", "message": str(exc)},
+            }
+
     def get_private_policy(
         self, account_id: str, contact_id: str
     ) -> dict[str, object]:

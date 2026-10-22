@@ -366,6 +366,7 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
+    contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
     const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
       ? String(status.history_account || "").trim() : "";
@@ -1174,6 +1175,10 @@
     getCoreSettings: () => coreSettings,
   });
 
+  const contactProfile = createPageController("createContactProfile", {
+    api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
+  });
+
   const { clearPendingGroupMemberLoading, hasGroupDrafts, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
@@ -1182,6 +1187,8 @@
     GROUP_MEMBER_COUNTS_STORAGE_PREFIX,
     GROUP_MEMBER_REQUEST_CONCURRENCY,
     GROUP_MEMBER_RETRY_DELAYS_MS,
+    openContactProfile: (...args) => contactProfile.open(...args),
+    contactFactsMarkup: (...args) => contactProfile.factsMarkup(...args),
     api: (...args) => api(...args),
     avatarMarkup: (...args) => avatarMarkup(...args),
     bindAvatarFallbacks: (...args) => bindAvatarFallbacks(...args),
@@ -1214,6 +1221,7 @@
     HISTORY_MESSAGE_WINDOW_LIMIT,
     HISTORY_PAGE_SIZE,
     HISTORY_PRELOAD_THRESHOLD,
+    openContactProfile: (...args) => contactProfile.open(...args),
     api: (...args) => api(...args),
     avatarMarkup: (...args) => avatarMarkup(...args),
     bindAvatarFallbacks: (...args) => bindAvatarFallbacks(...args),
