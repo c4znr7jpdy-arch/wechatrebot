@@ -24,6 +24,7 @@ def open_preview(page, url):
       const animate = Element.prototype.animate;
       Element.prototype.animate = function(...args) {
         const animation = animate.apply(this, args);
+        if (window.pauseHistoryAnimations && this.matches('.history-layout')) animation.pause();
         window.tabAnimations.push(animation);
         return animation;
       };
@@ -31,17 +32,23 @@ def open_preview(page, url):
 
 
 def assert_content_motion(page, selector):
-    assert page.evaluate("selector => window.tabAnimations.some(a => a.effect.target.matches(selector))", selector)
-    sample = page.evaluate("""selector => {
-      const animation = window.tabAnimations.findLast(a => a.effect.target.matches(selector));
-      animation.pause();
-      animation.currentTime = animation.effect.getTiming().duration / 3;
-      const style = getComputedStyle(animation.effect.target);
-      const sample = {opacity: Number(style.opacity), transform: style.transform};
-      animation.finish();
-      window.tabAnimations = [];
-      return sample;
-    }""", selector)
+    # The tab becomes active before its awaited content read completes. Wait
+    # for that panel's real animation instead of sampling the active tab state.
+    animation = page.wait_for_function("""selector => window.tabAnimations.findLast(
+      a => a.id === 'manager-tab-enter' && a.effect.target.matches(selector)
+    ) || false""", arg=selector, timeout=5000)
+    try:
+        sample = animation.evaluate("""animation => {
+          animation.pause();
+          animation.currentTime = animation.effect.getTiming().duration / 3;
+          const style = getComputedStyle(animation.effect.target);
+          const sample = {opacity: Number(style.opacity), transform: style.transform};
+          animation.finish();
+          window.tabAnimations = [];
+          return sample;
+        }""")
+    finally:
+        animation.dispose()
     assert 0 < sample["opacity"] < 1, sample
     assert sample["transform"] != "none", sample
     expect(page.locator(selector)).to_have_css("transform", "none")
@@ -145,11 +152,15 @@ def test_reduced_motion_and_rapid_filters_finish_in_current_state(browser, manag
         open_preview(page, manager_url + "&style=soft")
         page.locator('.nav-item[data-page="history"]').click()
         expect(page.locator("#messageList .message").first).to_be_visible()
-        page.evaluate("""() => {
+        page.evaluate("""reduced => {
+          // Keep the final animation available until reduced-motion is toggled,
+          // regardless of how long browser assertions take on a busy CI runner.
+          window.pauseHistoryAnimations = !reduced;
+          window.tabAnimations = [];
           for (const kind of ['group', 'private', 'all', 'group']) {
             document.querySelector(`#historyKinds [data-kind="${kind}"]`).click();
           }
-        }""")
+        }""", reduced)
         expect(page.locator('#historyKinds [data-kind="group"]')).to_have_class("active")
         expect(page.locator('#conversationList .conversation-item:not([data-type="group"])')).to_have_count(0)
         if reduced:
@@ -159,11 +170,12 @@ def test_reduced_motion_and_rapid_filters_finish_in_current_state(browser, manag
             expect(page.locator("#skinOptions")).to_be_visible()
             assert page.evaluate("window.tabAnimations.length") == 0
         else:
-            assert page.evaluate("window.tabAnimations.length") > 0
+            page.wait_for_function("""() => window.tabAnimations.some(animation =>
+              animation.id === 'manager-tab-enter' && animation.playState === 'paused'
+              && animation.effect.target.matches('.history-layout'))""", timeout=5000)
             assert page.locator(".history-layout").evaluate("node => node.getAnimations().filter(a => a.id === 'manager-tab-enter').length <= 1")
             page.evaluate("""() => {
-              window.activeTabAnimations = window.tabAnimations.filter(animation => animation.playState === 'running');
-              window.activeTabAnimations.forEach(animation => animation.pause());
+              window.activeTabAnimations = window.tabAnimations.filter(animation => animation.playState === 'paused');
             }""")
             assert page.evaluate("window.activeTabAnimations.length") > 0
             page.emulate_media(reduced_motion="reduce")
