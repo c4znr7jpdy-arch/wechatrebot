@@ -1,0 +1,96 @@
+diff --git a/official/astrbot/core/platform/wechat_background_policy.py b/expected/astrbot/core/platform/wechat_background_policy.py
+new file mode 100644
+--- /dev/null
++++ b/expected/astrbot/core/platform/wechat_background_policy.py
+@@ -0,0 +1,91 @@
++"""Authorized background plugin delivery with an explicit WeChat account."""
++from __future__ import annotations
++
++import asyncio
++from types import SimpleNamespace
++
++from .wechat_group_policy import plugin_allowed, session_plugin_allowed
++
++
++async def background_event(context, session: str, module: str, *, account_id: str | None = None):
++    """Resolve current identity and authorization; never guess a platform or account."""
++    try:
++        platform_id, kind, target = session.split(":", 2)
++        if kind not in {"GroupMessage", "FriendMessage"} or not target:
++            raise ValueError("Invalid background target")
++        platform = context.get_platform_inst(platform_id)
++        if platform is None:
++            raise ValueError("Background platform unavailable")
++        platform_name = platform.meta().name
++        account = ""
++        if platform_name == "aiocqhttp":
++            login = await asyncio.wait_for(platform.bot.get_login_info(), timeout=5)
++            account = str(login.get("user_id") or "").strip()
++            if not account or (account_id is not None and account != account_id):
++                raise PermissionError("Background account changed or unconfirmed")
++            if kind == "GroupMessage":
++                if not target.endswith("@chatroom"):
++                    raise ValueError("Invalid WeChat group")
++        event = SimpleNamespace(unified_msg_origin=session, plugins_name=None,
++            get_platform_name=lambda: platform_name, get_self_id=lambda: account,
++            get_group_id=lambda: target if kind == "GroupMessage" else "",
++            get_sender_id=lambda: target, is_private_chat=lambda: kind == "FriendMessage")
++        if not await plugin_allowed(context, event, module):
++            raise PermissionError("Background plugin is not authorized for this chat")
++        return platform, event
++    except PermissionError:
++        raise
++    except Exception as exc:
++        raise PermissionError("Background permissions could not be verified") from exc
++
++
++class _AuthorizedBot:
++    """Check again after media conversion and bind every outbound action to its account."""
++    def __init__(self, context, platform, event, module):
++        self.context, self.platform, self.event, self.module = context, platform, event, module
++
++    async def _call(self, method, *args, **kwargs):
++        account = self.event.get_self_id()
++        if not await session_plugin_allowed(self.context, self.event.unified_msg_origin,
++                                             self.module, account_id=account):
++            raise PermissionError("Background permission revoked or account changed")
++        kwargs["self_id"] = account
++        result = await getattr(self.platform.bot, method)(*args, **kwargs)
++        if result is False or (isinstance(result, dict) and (
++                result.get("status") == "failed" or str(result.get("retcode", 0)) != "0")):
++            raise RuntimeError("Background send was rejected")
++        return result
++
++    async def send_group_msg(self, **kwargs):
++        return await self._call("send_group_msg", **kwargs)
++
++    async def send_private_msg(self, **kwargs):
++        return await self._call("send_private_msg", **kwargs)
++
++    async def call_action(self, action, **kwargs):
++        return await self._call("call_action", action, **kwargs)
++
++
++async def send_background_message(context, session: str, message_chain, module: str, *,
++                                  account_id: str | None = None, authorized=None) -> bool:
++    """Send only after current grants and identity pass; denial raises PermissionError."""
++    platform, event = authorized or await background_event(context, session, module,
++                                                          account_id=account_id)
++    if event.unified_msg_origin != session or (account_id is not None
++            and event.get_platform_name() == "aiocqhttp" and event.get_self_id() != account_id):
++        raise PermissionError("Background target does not match authorization")
++    if not await plugin_allowed(context, event, module):
++        raise PermissionError("Background plugin permission revoked")
++    if event.get_platform_name() == "aiocqhttp":
++        from aiocqhttp import Event
++        from .sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
++
++        await AiocqhttpMessageEvent.send_message(
++            bot=_AuthorizedBot(context, platform, event, module), message_chain=message_chain,
++            event=Event({"self_id": event.get_self_id()}),
++            is_group=not event.is_private_chat(),
++            session_id=event.get_group_id() or event.get_sender_id(),
++            delivery="proactive", wake=False,
++        )
++        return True
++    return await context.send_message(session, message_chain)

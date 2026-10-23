@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
+from wechatrebot_manager import group_feature_runtime
 
 import pytest
 
@@ -111,6 +112,7 @@ def engine(monkeypatch):
 
     stub(monkeypatch, "astrbot.core.star.session_plugin_manager",
          SessionPluginManager=NS(is_plugin_enabled_for_session=enabled))
+    monkeypatch.setitem(sys.modules, "astrbot.core.platform.wechat_group_policy", group_feature_runtime)
     registry = NS(get_handler_by_full_name=lambda name: None, get_handlers_by_module_name=lambda name: [])
     stub(monkeypatch, "astrbot.core.star.star_handler", star_handlers_registry=registry)
     return disabled
@@ -148,16 +150,39 @@ def test_global_and_event_scope_intersect(engine):
 
 def test_group_grants_are_rechecked_and_setu_does_not_grant_news(engine, monkeypatch):
     calls = []
-    def grants(*args, **kwargs):
+    async def grants(*args, **kwargs):
         calls.append(kwargs)
         return []
-    stub(monkeypatch, "astrbot.core.platform.wechat_group_policy", group_plugins=grants)
+    stub(monkeypatch, "astrbot.core.platform.wechat_group_policy", event_plugins=grants)
     event = Event()
     event.get_platform_name = lambda: "aiocqhttp"
     event.get_group_id = lambda: "group@chatroom"
     event.plugins_name = ["jiang_commands"]
     assert asyncio.run(discovery.available_plugins(context([plugin("jiang_commands")]), event)) == []
     assert calls == [{"command_handler": "capability_invoke"}]
+
+
+def test_discovery_rechecks_private_policy_after_catalog_was_opened(engine, monkeypatch, tmp_path):
+    runtime = tmp_path / "app/astrbot"
+    runtime.mkdir(parents=True)
+    monkeypatch.chdir(runtime)
+    policy = tmp_path / "data/manager/private-chat-policies.json"
+    policy.parent.mkdir(parents=True)
+    def save(**values):
+        policy.write_text(json.dumps({"schema_version": 1, "accounts": {
+            "bot": {"contacts": {"user": values}}
+        }}), encoding="utf-8")
+    event = Event()
+    event.get_platform_name = lambda: "aiocqhttp"
+    event.get_sender_id = lambda: "user"
+    event.plugins_name = ["sample"]
+    ctx = context([plugin()])
+    save(allowed_features=["sample"])
+    assert len(asyncio.run(discovery.available_plugins(ctx, event))) == 1
+    save(allowed_features=[])
+    assert asyncio.run(discovery.available_plugins(ctx, event)) == []
+    save(allowed_features=["sample"], bot_enabled=False)
+    assert asyncio.run(discovery.available_plugins(ctx, event)) == []
 
 
 def test_missing_bridge_is_not_advertised():

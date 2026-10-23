@@ -35,7 +35,8 @@ def patched_plugins():
 
     artifacts = ROOT / "artifacts"
     artifacts.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="test-plugin-inputs-", dir=artifacts) as directory:
+    # Keep deep plugin template paths below Windows' legacy 260-character limit.
+    with tempfile.TemporaryDirectory(prefix="p-", dir=artifacts) as directory:
         output = Path(directory)
         entries = json.loads((ROOT / "release/source-manifest.json").read_text("utf-8"))["entries"]
         for entry in entries:

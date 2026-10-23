@@ -1,0 +1,159 @@
+diff --git a/core/message_sender.py b/core/message_sender.py
+--- a/core/message_sender.py
++++ b/core/message_sender.py
+@@ -159,8 +159,16 @@
+ 
+         return random.uniform(interval[0], interval[1])
+ 
+-    async def _trigger_decorating_hooks(self, session_id: str, chain: list) -> list:
++    async def _trigger_decorating_hooks(self, session_id: str, chain: list, *, authorized=None) -> list:
+         """触发 OnDecoratingResultEvent 钩子。"""
++        from astrbot.core.platform.wechat_background_policy import background_event
++        from astrbot.core.platform.wechat_group_policy import event_plugins, plugin_allowed
++        from astrbot.core.star.star import star_map
++
++        authorized = authorized or await background_event(
++            self.context, session_id, "astrbot_plugin_proactive_chat",
++        )
++        permission_event = authorized[1]
+         parsed = self._parse_session_id(session_id)
+         if not parsed:
+             return chain
+@@ -196,9 +204,7 @@
+         # 构造最小可用消息对象，让装饰器可在统一事件结构上改写链
+         message_obj.session_id = target_id
+         message_obj.message = chain
+-        message_obj.self_id = self.session_data.get(session_id, {}).get(
+-            "self_id", "bot"
+-        )
++        message_obj.self_id = permission_event.get_self_id()
+         message_obj.sender = MessageMember(user_id=target_id)
+         message_obj.message_str = ""
+         message_obj.raw_message = None
+@@ -221,10 +227,19 @@
+         event.set_result(res)
+ 
+         # 顺序执行所有 OnDecoratingResultEvent 处理器
++        event.plugins_name = await event_plugins(
++            event, self.context.get_config(session_id).get("plugin_set", ["*"]),
++            self.context.get_all_stars(),
++        )
++        if event.plugins_name is None:
++            raise PermissionError("Background decoration permissions could not be verified")
+         handlers = star_handlers_registry.get_handlers_by_event_type(
+-            EventType.OnDecoratingResultEvent
++            EventType.OnDecoratingResultEvent, plugins_name=event.plugins_name,
+         )
+         for handler in handlers:
++            owner = star_map.get(handler.handler_module_path)
++            if owner is None or not await plugin_allowed(self.context, event, owner.root_dir_name or owner.name):
++                continue
+             try:
+                 logger.debug(
+                     f"[主动消息] 正在执行装饰钩子: {handler.handler_full_name} ({handler.handler_module_path}) 喵"
+@@ -309,69 +324,48 @@
+             logger.warning(f"[主动消息] 补写平台流水失败喵: {e}", exc_info=True)
+ 
+     async def _send_chain_with_hooks(self, session_id: str, components: list) -> None:
+-        """发送消息链（含装饰钩子）。"""
+-        processed_chain_list = await self._trigger_decorating_hooks(
+-            session_id, components
+-        )
+-        if not processed_chain_list:
+-            return
+-
+-        # 将处理后的组件列表封装为统一消息链对象
+-        chain = MessageChain(processed_chain_list)
+-        parsed = self._parse_session_id(session_id)
+-        if not parsed:
+-            # 无法解析则使用核心 API 兜底
+-            await self.context.send_message(session_id, chain)
+-            await self._persist_proactive_message_to_platform_history(session_id, chain)
+-            return
+-
+-        p_id, m_type_str, t_id = parsed
+-        m_type = (
+-            MessageType.GROUP_MESSAGE
+-            if "Group" in m_type_str
+-            else MessageType.FRIEND_MESSAGE
+-        )
+-
+-        # 精确匹配平台实例：避免将消息发往错误平台
+-        platforms = self.context.platform_manager.get_insts()
+-        target_platform = next((p for p in platforms if p.meta().id == p_id), None)
+-
+-        if not target_platform:
+-            logger.warning(
+-                f"[主动消息] 找不到指定的平台 {p_id} 喵，尝试使用核心 API 兜底喵。"
+-            )
+-            await self.context.send_message(session_id, chain)
+-            await self._persist_proactive_message_to_platform_history(session_id, chain)
+-            return
+-
+-        if target_platform.status != PlatformStatus.RUNNING:
+-            logger.warning(f"[主动消息] 平台 {p_id} 未运行喵，跳过主动消息喵。")
+-            return
+-
+-        try:
+-            session_obj = MS(platform_name=p_id, message_type=m_type, session_id=t_id)
+-            await target_platform.send_by_session(session_obj, chain)
+-            logger.debug(f"[主动消息] 消息将通过平台 {p_id} 送达喵")
+-            if p_id != "webchat":
+-                await self._persist_proactive_message_to_platform_history(
+-                    session_id, chain
+-                )
++        """Decorate and send under the same verified account and current grants."""
++        from astrbot.core.platform.wechat_background_policy import (
++            background_event, send_background_message,
++        )
++
++        try:
++            authorized = await background_event(
++                self.context, session_id, "astrbot_plugin_proactive_chat",
++            )
++            if authorized[0].status != PlatformStatus.RUNNING:
++                logger.warning("Proactive platform is not running; delivery skipped.")
++                return
++            processed = await self._trigger_decorating_hooks(
++                session_id, components, authorized=authorized,
++            )
++            if not processed:
++                return
++            chain = MessageChain(processed)
++            sent = await send_background_message(
++                self.context, session_id, chain, "astrbot_plugin_proactive_chat",
++                authorized=authorized,
++            )
++            if sent and authorized[0].meta().id != "webchat":
++                await self._persist_proactive_message_to_platform_history(session_id, chain)
++        except PermissionError:
++            logger.info("Proactive permission revoked or account changed; delivery skipped.")
+         except Exception as e:
+-            logger.error(f"[主动消息] 通过平台 {p_id} 发送失败喵: {e}")
++            logger.error(f"Proactive delivery failed: {e}")
+             logger.debug(traceback.format_exc())
+             if self.telemetry and self.telemetry.enabled:
+-                # 平台发送失败是实际送达链路的问题，与 LLM 生成失败应在遥测上分开统计。
+-                self._track_task(
+-                    asyncio.create_task(
+-                        self.telemetry.track_error(
+-                            e,
+-                            module="core.message_sender._send_chain_with_hooks",
+-                        )
+-                    )
+-                )
++                self._track_task(asyncio.create_task(self.telemetry.track_error(
++                    e, module="core.message_sender._send_chain_with_hooks",
++                )))
+ 
+     async def _send_proactive_message(self, session_id: str, text: str) -> None:
+         """发送主动消息（支持TTS与分段）。"""
++        from astrbot.core.platform.wechat_background_policy import background_event
++        try:
++            await background_event(self.context, session_id, "astrbot_plugin_proactive_chat")
++        except PermissionError:
++            logger.info("Proactive permission unavailable; generation skipped.")
++            return
+         session_config = self._get_session_config(session_id)
+         if not session_config:
+             logger.info(

@@ -1,8 +1,11 @@
 """Pure runtime group-feature policy, copied into the pinned engine patch."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 
@@ -22,6 +25,172 @@ DEFAULT_GROUP_FEATURES = (
     "jiang_rocom",
 )
 _INFRASTRUCTURE = {"astrbot_plugin_patch_at_wxid", "jiang_capability_router", "astrbot_plugin_angel_heart"}
+_DEPENDENCIES = {"jiang_mimo_emoji_voice": {"astrbot_plugin_mimo_tts_clone", "meme_manager"}}
+_LOGGER = logging.getLogger(__name__)
+
+
+def _private_default_features(policy_path: Path) -> list[str]:
+    """Read the installed private-chat default feature set, failing closed."""
+    feature_path = policy_path.parent.parent.parent / "legal" / "feature-set.json"
+    try:
+        payload = json.loads(feature_path.read_text(encoding="utf-8-sig"))
+        features = payload.get("features")
+        if not isinstance(features, list):
+            return []
+        return [
+            item["module"]
+            for item in features
+            if isinstance(item, dict)
+            and isinstance(item.get("module"), str)
+            and item.get("default_enabled", True) is True
+            and item.get("visible", True) is True
+        ]
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+
+
+def conversation_plugins(
+    policy_path: Path,
+    account_id: str,
+    target_id: str,
+    globally_enabled: list[str] | None,
+    stars: Iterable[Any],
+    *,
+    command_handler: str | None = None,
+) -> list[str] | None:
+    """Return feature grants for either a WeChat group or private chat."""
+    if not account_id or not target_id or target_id.endswith("@chatroom"):
+        return group_plugins(policy_path, account_id, target_id, globally_enabled, stars,
+                             command_handler=command_handler)
+    private_path = policy_path.with_name("private-chat-policies.json")
+    try:
+        payload = json.loads(private_path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        payload = {"schema_version": 1, "accounts": {}}
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(payload, dict) or payload.get("schema_version") != 1
+            or not isinstance(payload.get("accounts"), dict)):
+        return None
+    account = payload["accounts"].get(account_id, {})
+    contacts = account.get("contacts", {}) if isinstance(account, dict) else None
+    if not isinstance(contacts, dict):
+        return None
+    raw = contacts.get(target_id, {})
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("bot_enabled", True) is not True:
+        return None
+    allowed = raw["allowed_features"] if "allowed_features" in raw else _private_default_features(policy_path)
+    if not isinstance(allowed, list) or any(not isinstance(item, str) for item in allowed):
+        return None
+    # Private contacts expose the command plugin as one feature; only the group
+    # policy UI has an independent random-image grant.
+    return _granted_plugins(allowed, globally_enabled, stars, None)
+
+
+async def event_plugins(event, globally_enabled: list[str] | None, stars: Iterable[Any],
+                        *, policy_path: Path | None = None,
+                        command_handler: str | None = None) -> list[str] | None:
+    """Apply conversation policy and session grants to a live event."""
+    try:
+        from astrbot.core.star.session_plugin_manager import SessionPluginManager
+
+        stars = list(stars)
+        if globally_enabled is not None and (not isinstance(globally_enabled, list)
+                or any(not isinstance(item, str) for item in globally_enabled)):
+            return None
+        allowed = globally_enabled
+        if event.get_platform_name() == "aiocqhttp":
+            account = str(event.get_self_id() or "").strip()
+            target = str(event.get_group_id() or "").strip()
+            if not target:
+                target = str(event.get_sender_id() or "").strip()
+            policy_path = policy_path or Path.cwd().parent.parent / "data/manager/group-policies.json"
+            allowed = conversation_plugins(policy_path, account, target, globally_enabled, stars,
+                                           command_handler=command_handler)
+            if allowed is None:
+                return None
+        previous = getattr(event, "plugins_name", None)
+        result: set[str] = set()
+        for star in stars:
+            root = str(getattr(star, "root_dir_name", "") or "")
+            name = str(getattr(star, "name", "") or "")
+            names = {value for value in (root, name) if value}
+            if not names or not getattr(star, "activated", False):
+                continue
+            if getattr(star, "reserved", False):
+                result.update(names)
+                continue
+            if allowed is not None and allowed != ["*"] and not names.intersection(allowed):
+                continue
+            if previous is not None and previous != ["*"] and not names.intersection(previous):
+                continue
+            if await SessionPluginManager.is_plugin_enabled_for_session(event.unified_msg_origin, name):
+                result.update(names)
+        for module, dependencies in _DEPENDENCIES.items():
+            if not dependencies.issubset(result):
+                for star in stars:
+                    if getattr(star, "root_dir_name", "") == module:
+                        result.difference_update({module, getattr(star, "name", "")})
+        return sorted(result)
+    except Exception:
+        _LOGGER.warning("Plugin permissions could not be verified; execution denied.")
+        return None
+
+
+async def plugin_allowed(context, event, module: str, *, command_handler: str | None = None) -> bool:
+    """Recheck a dependency immediately before side effects or delayed delivery."""
+    try:
+        stars = list(context.get_all_stars())
+        required = {module}
+        for star in stars:
+            if module == getattr(star, "name", ""):
+                required.add(getattr(star, "root_dir_name", ""))
+        pending = list(required)
+        while pending:
+            for dependency in _DEPENDENCIES.get(pending.pop(), ()):
+                if dependency not in required:
+                    required.add(dependency)
+                    pending.append(dependency)
+        selected = [star for star in stars if required.intersection({
+            getattr(star, "root_dir_name", ""), getattr(star, "name", "")})]
+        allowed = await event_plugins(event,
+            context.get_config(event.unified_msg_origin).get("plugin_set", ["*"]),
+            selected, command_handler=command_handler)
+        return bool(allowed and module in allowed)
+    except Exception:
+        _LOGGER.warning("Plugin dependency permissions could not be verified; execution denied.")
+        return False
+
+
+async def session_plugin_allowed(context, session: str, module: str, *, account_id: str = "",
+                                 user_id: str = "", command_handler: str | None = None) -> bool:
+    """Check a persisted task's target and current session/plugin permissions."""
+    try:
+        platform_id, kind, target = session.split(":", 2)
+        if kind not in {"GroupMessage", "FriendMessage"} or not target:
+            return False
+        platform = context.get_platform_inst(platform_id)
+        if platform is None:
+            return False
+        platform_name = platform.meta().name
+        if platform_name == "aiocqhttp":
+            if not account_id or (kind == "GroupMessage" and not target.endswith("@chatroom")):
+                return False
+            login = await asyncio.wait_for(platform.bot.get_login_info(self_id=account_id), timeout=5)
+            if str(login.get("user_id") or "") != account_id:
+                return False
+        event = SimpleNamespace(unified_msg_origin=session, plugins_name=None,
+            get_platform_name=lambda: platform_name, get_self_id=lambda: account_id,
+            get_group_id=lambda: target if kind == "GroupMessage" else "",
+            get_sender_id=lambda: user_id or target)
+        if kind == "FriendMessage" and user_id and target != user_id:
+            return False
+        return await plugin_allowed(context, event, module, command_handler=command_handler)
+    except Exception:
+        _LOGGER.warning("Background plugin permissions could not be verified; delivery denied.")
+        return False
 
 
 def group_plugins(
@@ -60,6 +229,11 @@ def group_plugins(
     allowed = raw.get("allowed_features", list(DEFAULT_GROUP_FEATURES))
     if not isinstance(allowed, list) or any(not isinstance(item, str) for item in allowed):
         return None
+    return _granted_plugins(allowed, globally_enabled, stars, command_handler)
+
+
+def _granted_plugins(allowed, globally_enabled, stars, command_handler):
+    """Resolve feature roots to registered plugin names for both chat types."""
     permitted = set(allowed) | _INFRASTRUCTURE
     enabled = None if globally_enabled is None or globally_enabled == ["*"] else set(globally_enabled)
     result: set[str] = set()

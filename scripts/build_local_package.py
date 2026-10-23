@@ -77,6 +77,7 @@ def runtime_matches(root: Path, runtime: Path) -> bool:
             "requirements_sha256": "release/runtime-requirements.lock",
             "astrbot_patch_sha256": "patches/astrbot-4.26.6-wechat.patch",
             "astrbot_outbound_policy_patch_sha256": "patches/astrbot-4.26.6-outbound-policy.patch",
+            "astrbot_background_permissions_patch_sha256": "patches/astrbot-4.26.6-background-permissions.patch",
             "astrbot_license_patch_sha256": "patches/astrbot-4.26.6-license.patch",
         }
         if any(manifest.get(key) != sha256_file(root / path) for key, path in inputs.items()):

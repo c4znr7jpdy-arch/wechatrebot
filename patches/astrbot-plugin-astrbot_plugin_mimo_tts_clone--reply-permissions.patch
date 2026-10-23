@@ -1,0 +1,305 @@
+diff --git a/core/tool_delivery.py b/core/tool_delivery.py
+index 70f0461..f9caccb 100644
+--- a/core/tool_delivery.py
++++ b/core/tool_delivery.py
+@@ -50,6 +50,7 @@ def _receipt(status: str, *, media_type: str = "", stage: str = "") -> dict:
+         "in_progress": "本条消息的语音仍在处理中，请勿重复调用或声称发送失败。",
+         "unknown": "已尝试发送，但结果未确认；请勿自动重发或断言发送失败。",
+         "failed": "语音合成失败，尚未开始发送。",
++        "blocked": "本条消息不允许语音回复，请直接用文字回答，不要重试语音或发送音频文件。",
+     }
+     result = {"status": status, "message": messages[status]}
+     if media_type:
+@@ -84,6 +85,9 @@ async def speak_once(plugin, event, *, text, emotion, voice, style) -> str:
+     receipt = _receipt("in_progress")
+     operations[key] = receipt
+     try:
++        if not await plugin._voice_allowed(event):
++            receipt.update(_receipt("blocked", stage="permission"))
++            return _json(receipt)
+         output = await plugin.synthesize_text(
+             text, voice_name=voice or None, emotion=key[1], context=style,
+             user_id=str(event.get_sender_id() or "").strip(),
+@@ -101,11 +105,17 @@ async def speak_once(plugin, event, *, text, emotion, voice, style) -> str:
+     if path_key is not None:
+         _state(event)["paths"][path_key] = receipt
+     try:
++        if not await plugin._voice_allowed(event):
++            raise PermissionError("Voice permission was revoked during synthesis")
+         # An exception may occur after a platform accepted a voice. Do not
+         # automatically send it again as a file in this tool execution.
+         media_type = await plugin._send_audio_result(event, output, retry_as_file=False)
+         if media_type not in {"record", "file"}:
+             raise RuntimeError("Audio sender returned no confirmed send branch")
++    except PermissionError:
++        receipt.update(_receipt("blocked", stage="permission"))
++        await plugin._discard_voice_output(output)
++        return _json(receipt)
+     except asyncio.CancelledError:
+         receipt.update(_receipt("unknown", stage="delivery"))
+         raise
+diff --git a/core/tts_jobs.py b/core/tts_jobs.py
+index 5c5f396..0874f33 100644
+--- a/core/tts_jobs.py
++++ b/core/tts_jobs.py
+@@ -34,6 +34,8 @@ class TTSJob:
+     group_id: str = ""
+     source: JobSource = "auto"
+     notify_on_failure: bool = False
++    account_id: str = ""
++    voice_authorized: bool = False
+     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+     created_at: float = field(default_factory=time.time)
+ 
+@@ -50,6 +52,8 @@ class TTSJob:
+             group_id=str(data.get("group_id") or ""),
+             source="command" if source == "command" else "auto",
+             notify_on_failure=bool(data.get("notify_on_failure", False)),
++            account_id=str(data.get("account_id") or ""),
++            voice_authorized=data.get("voice_authorized") is True,
+             id=str(data.get("id") or uuid.uuid4().hex[:12]),
+             created_at=float(data.get("created_at") or time.time()),
+         )
+diff --git a/main.py b/main.py
+index 9c09673..c60e8be 100644
+--- a/main.py
++++ b/main.py
+@@ -17,6 +17,9 @@ from astrbot.api import logger
+ from astrbot.api.event import AstrMessageEvent, filter
+ from astrbot.api.message_components import File
+ from astrbot.api.star import Context, Star, StarTools, register
++from astrbot.core.platform.wechat_background_policy import background_event, send_background_message
++from astrbot.core.platform.wechat_group_policy import plugin_allowed, session_plugin_allowed
++from astrbot.core.wechat_reply_policy import voice_reply_allowed
+ 
+ try:
+     from astrbot.api.message_components import Plain, Record
+@@ -1183,7 +1186,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         bot: Any,
+         *,
+         is_group: bool,
+-        target_id: int,
++        target_id: int | str,
+         source: str,
+         self_id: Any = None,
+     ) -> None:
+@@ -1252,9 +1255,22 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             source=source,
+         )
+ 
++    async def _voice_allowed(self, event: AstrMessageEvent) -> bool:
++        allowed = voice_reply_allowed(event) and await plugin_allowed(
++            self.context, event, "astrbot_plugin_mimo_tts_clone",
++        )
++        return allowed and voice_reply_allowed(event)
++
++    async def _discard_voice_output(self, output: pathlib.Path) -> None:
++        await asyncio.to_thread(
++            self._delete_delivery_output, output, self._delivery_audio_paths(output),
++        )
++
+     async def _send_audio_result(
+         self, event: AstrMessageEvent, audio_path: pathlib.Path, *, retry_as_file: bool = True,
+     ) -> str:
++        if not await self._voice_allowed(event):
++            raise PermissionError("当前消息不允许发送语音，请保留文字回复。")
+         source, _staged = self._transport_source(audio_path)
+         if self.plugin_config.audio_transport == "shared_path":
+             await self._send_shared_path_audio(source=source, event=event)
+@@ -1272,6 +1288,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         if self.plugin_config.audio_transport == "base64":
+             raise RuntimeError("NapCat 未接受 Base64 语音，已禁止回退为本地路径。")
+         if self.plugin_config.file_fallback_enabled:
++            if not await self._voice_allowed(event):
++                raise PermissionError("当前消息的语音权限已关闭。")
+             check_send_response(await event.send(event.chain_result([File(name=audio_path.name, file=source)])))
+             return "file"
+         raise RuntimeError("没有可用的音频发送方式，且文件回退未启用。")
+@@ -1325,7 +1343,19 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+     def _task_list(self, *, limit: int = 50) -> list[dict[str, Any]]:
+         return self._job_manager.list_tasks(limit=limit) if self._job_manager is not None else []
+ 
++    async def _job_voice_allowed(self, job: TTSJob) -> bool:
++        if not job.voice_authorized or self.plugin_config.reply_mode == "text_only":
++            return False
++        if job.source == "auto" and not self.plugin_config.auto_tts_enabled:
++            return False
++        return await session_plugin_allowed(
++            self.context, job.session, "astrbot_plugin_mimo_tts_clone",
++            account_id=job.account_id, user_id=job.user_id,
++        )
++
+     async def _process_tts_job(self, job: TTSJob) -> pathlib.Path:
++        if not await self._job_voice_allowed(job):
++            raise PermissionError("语音任务的权限已关闭或无法确认。")
+         if self.plugin_config.audio_transport in {"base64", "shared_path"}:
+             return await self._synthesize_delivery_bundle(job)
+         return await self.synthesize_text(
+@@ -1342,8 +1372,13 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             raise RuntimeError("当前 AstrBot 版本不支持主动消息 MessageChain。")
+         return MessageChain(chain=components)
+ 
+-    async def _send_to_session(self, session: str, components: list[Any]) -> None:
+-        sent = await self.context.send_message(session, self._message_chain(components))
++    async def _send_to_session(
++        self, session: str, components: list[Any], *, account_id: str = "",
++    ) -> None:
++        sent = await send_background_message(
++            self.context, session, self._message_chain(components),
++            "astrbot_plugin_mimo_tts_clone", account_id=account_id,
++        )
+         if sent is False:
+             raise RuntimeError("AstrBot 未找到可主动发送该会话的平台。")
+ 
+@@ -1351,15 +1386,28 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         self,
+         session: str,
+         audio_path: pathlib.Path,
++        *,
++        account_id: str = "",
+     ) -> None:
+         source, _staged = self._transport_source(audio_path)
+         if self.plugin_config.audio_transport == "shared_path":
+-            await self._send_shared_path_audio(source=source, session=session)
++            platform, authorized_event = await background_event(
++                self.context, session, "astrbot_plugin_mimo_tts_clone",
++                account_id=account_id,
++            )
++            group_id = authorized_event.get_group_id()
++            target_id = group_id or authorized_event.get_sender_id()
++            await self._call_onebot_message(
++                platform.bot, is_group=bool(group_id), target_id=target_id,
++                source=source, self_id=authorized_event.get_self_id(),
++            )
+             return
+         record_error: Exception | None = None
+         if Record is not None:
+             try:
+-                await self._send_to_session(session, [Record(file=source)])
++                await self._send_to_session(session, [Record(file=source)], account_id=account_id)
++            except PermissionError:
++                raise
+             except Exception as exc:
+                 record_error = exc
+                 self.logger.warning(
+@@ -1374,7 +1422,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         if not self.plugin_config.file_fallback_enabled:
+             raise record_error
+         await self._send_to_session(
+-            session, [File(name=audio_path.name, file=source)]
++            session, [File(name=audio_path.name, file=source)], account_id=account_id,
+         )
+ 
+     def _platform_capabilities(self) -> list[dict[str, Any]]:
+@@ -1409,8 +1457,14 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+     async def _deliver_tts_job(self, job: TTSJob, output: pathlib.Path) -> None:
+         self._preflight_session(job.session)
+         paths = self._delivery_audio_paths(output)
+-        for path in paths:
+-            await self._send_audio_path_to_session(job.session, path)
++        try:
++            for path in paths:
++                if not await self._job_voice_allowed(job):
++                    raise PermissionError("语音任务的权限已关闭或无法确认。")
++                await self._send_audio_path_to_session(job.session, path, account_id=job.account_id)
++        except PermissionError:
++            await self._discard_voice_output(output)
++            raise
+         self.logger.info(
+             "[mimo-tts] background audio delivered: job=%s source=%s session=%s segments=%s",
+             job.id,
+@@ -1431,9 +1485,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             clip_log_text(job.session),
+             exc,
+         )
+-        if not job.notify_on_failure or Plain is None:
++        if (isinstance(exc, PermissionError) or not job.notify_on_failure or Plain is None
++                or not await self._job_voice_allowed(job)):
+             return
+-        await self._send_to_session(job.session, [Plain(f"语音生成失败：{exc}")])
++        await self._send_to_session(
++            job.session, [Plain(f"语音生成失败：{exc}")], account_id=job.account_id,
++        )
+ 
+     def _failure_notice_enabled(self, source: str) -> bool:
+         mode = self.plugin_config.async_failure_notice
+@@ -1449,6 +1506,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         emotion: str = "",
+         context: str = "",
+     ) -> bool:
++        if not await self._voice_allowed(event):
++            raise PermissionError("当前消息不允许生成语音，请保留文字回复。")
+         session = str(getattr(event, "unified_msg_origin", "") or "").strip()
+         if not session:
+             raise RuntimeError("当前消息缺少 unified_msg_origin，无法后台补发语音。")
+@@ -1463,6 +1522,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             group_id=self._conversation_id(event),
+             source="command" if source == "command" else "auto",
+             notify_on_failure=self._failure_notice_enabled(source),
++            account_id=str(event.get_self_id() or "").strip(),
++            voice_authorized=True,
+         )
+         return await self._background_manager().submit(job)
+ 
+@@ -1503,10 +1564,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         message: str,
+     ) -> None:
+         session = str(getattr(event, "unified_msg_origin", "") or "").strip()
+-        if not session or Plain is None:
++        if not session or Plain is None or not await self._voice_allowed(event):
+             return
+         try:
+-            await self._send_to_session(session, [Plain(message)])
++            await self._send_to_session(session, [Plain(message)], account_id=str(event.get_self_id() or ""))
+         except Exception as exc:
+             self.logger.warning(
+                 "[mimo-tts] failed to deliver deferred queue notice: %s", exc
+@@ -1532,6 +1593,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+ 
+             # Consume before awaiting so another hook invocation cannot submit twice.
+             event.set_extra(_PENDING_BACKGROUND_JOB_EXTRA, None)
++            if not await self._voice_allowed(event):
++                return
+             text = clean_tts_text(str(pending.get("text") or ""))
+             if not text:
+                 self.logger.info(
+@@ -1569,6 +1632,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+ 
+     @filter.command("tts", alias={"朗读", "语音"})
+     async def tts_command(self, event: AstrMessageEvent):
++        if not await self._voice_allowed(event):
++            return
+         raw = self._tail_any(event.message_str, ("tts", "朗读", "语音"))
+         voice_name, requested_emotion, text, command_context = self._parse_tts_args(raw)
+         text = clean_tts_text(text)
+@@ -1630,7 +1695,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             yield event.plain_result(f"语音生成失败：{exc}")
+             return
+ 
+-        await self._send_audio_result(event, output)
++        try:
++            await self._send_audio_result(event, output)
++        except PermissionError:
++            await self._discard_voice_output(output)
+ 
+     @filter.command("tts音色列表", alias={"音色列表"})
+     async def list_voices_command(self, event: AstrMessageEvent):
+@@ -1652,6 +1720,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+ 
+     @filter.on_decorating_result()
+     async def auto_tts_reply(self, event: AstrMessageEvent):
++        if not await self._voice_allowed(event):
++            return
+         if not self.plugin_config.auto_tts_enabled:
+             self.logger.info("[mimo-tts] auto tts skipped: feature disabled")
+             return
+@@ -1729,6 +1799,9 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+             clip_log_text(text),
+         )
+ 
++        if not await self._voice_allowed(event):
++            await self._discard_voice_output(output)
++            return
+         audio_component = self._audio_component(output)
+         if audio_component is None:
+             return

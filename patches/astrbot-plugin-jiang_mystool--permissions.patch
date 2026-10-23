@@ -1,0 +1,15 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -625,7 +625,10 @@
+ 
+     async def _send_mission_private(self, umo: str, text: str) -> bool:
+         try:
+-            result = await self.context.send_message(umo, MessageChain().message(text))
++            from astrbot.core.platform.wechat_background_policy import send_background_message
++            result = await send_background_message(
++                self.context, umo, MessageChain().message(text), "jiang_mystool",
++            )
+             if result is False:
+                 logger.warning("[Mystool] 定时任务私聊发送失败: umo=%s", umo)
+                 return False

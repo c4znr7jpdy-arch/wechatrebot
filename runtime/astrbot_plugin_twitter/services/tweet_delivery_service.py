@@ -205,8 +205,12 @@ class TweetDeliveryService:
         umo: str,
         message_chain: MessageChain,
     ) -> None:
-        """将明确的 False 转为发送异常，保留其他无异常返回的既有行为。"""
-        result = await self.context.send_message(umo, message_chain)
+        """发送前复核当前聊天权限，并将微信发送绑定到已确认的账号。"""
+        from astrbot.core.platform.wechat_background_policy import send_background_message
+
+        result = await send_background_message(
+            self.context, umo, message_chain, "astrbot_plugin_twitter",
+        )
         if result is False:
             raise RuntimeError("Context.send_message returned False")
 

@@ -16,35 +16,15 @@ def identity(star) -> set[str]:
 
 
 async def available_plugins(context, event) -> list:
-    from astrbot.core.star.session_plugin_manager import SessionPluginManager
+    from astrbot.core.platform.wechat_group_policy import event_plugins
 
     configured = context.get_config(event.unified_msg_origin).get("plugin_set", ["*"])
-    event_names = event.plugins_name
-    if event.get_platform_name() == "aiocqhttp" and str(event.get_group_id()).endswith("@chatroom"):
-        from astrbot.core.platform.wechat_group_policy import group_plugins
-
-        event_names = group_plugins(
-            Path.cwd().parent.parent / "data/manager/group-policies.json",
-            str(event.get_self_id() or ""), str(event.get_group_id()),
-            configured, context.get_all_stars(),
-            command_handler="capability_invoke",
-        ) or []
-    result = []
-    for star in context.get_all_stars():
-        if not star.activated or star.reserved:
-            continue
-        names = identity(star)
-        if configured != ["*"] and not names.intersection(configured or []):
-            continue
-        if event.plugins_name is not None and not names.intersection(event.plugins_name):
-            continue
-        if event_names is not None and not names.intersection(event_names):
-            continue
-        if await SessionPluginManager.is_plugin_enabled_for_session(
-            event.unified_msg_origin, star.name
-        ):
-            result.append(star)
-    return result
+    stars = list(context.get_all_stars())
+    event_names = await event_plugins(
+        event, configured, stars, command_handler="capability_invoke",
+    ) or []
+    return [star for star in stars if star.activated and not star.reserved
+            and identity(star).intersection(event_names)]
 
 
 def natural_owner(capability) -> str:

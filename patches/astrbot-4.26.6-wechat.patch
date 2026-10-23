@@ -1,20 +1,27 @@
 diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/expected/astrbot/core/agent/runners/tool_loop_agent_runner.py
-index 43f6beb..b98df04 100644
 --- a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py
 +++ b/expected/astrbot/core/agent/runners/tool_loop_agent_runner.py
-@@ -106,6 +106,11 @@ class _ToolExecutionInterrupted(Exception):
+@@ -46,6 +46,7 @@
+     sanitize_contexts_by_modalities,
+ )
+ from astrbot.core.provider.provider import Provider
++from astrbot.core.wechat_reply_policy import mark_web_search_turn
+ 
+ from ..context.compressor import ContextCompressor
+ from ..context.config import ContextConfig
+@@ -104,6 +106,11 @@
+ 
+ 
  ToolExecutorResultT = T.TypeVar("ToolExecutorResultT")
- 
- 
++
++
 +def _should_emit_llm_result(llm_resp: LLMResponse) -> bool:
 +    """Only expose responses that have finished the tool loop."""
 +    return not llm_resp.tools_call_name
-+
-+
+ 
+ 
  class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
-     TOOL_RESULT_MAX_ESTIMATED_TOKENS = 27_500
-     TOOL_RESULT_PREVIEW_MAX_ESTIMATED_TOKENS = 7000
-@@ -816,28 +821,30 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
+@@ -816,28 +823,30 @@
          if not llm_resp.tools_call_name:
              await self._complete_with_assistant_response(llm_resp)
  
@@ -66,7 +73,7 @@ index 43f6beb..b98df04 100644
  
          # 如果有工具调用，还需处理工具调用
          if llm_resp.tools_call_name:
-@@ -969,6 +976,17 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
+@@ -969,6 +978,17 @@
  
              self.req.append_tool_calls_result(tool_calls_result)
  
@@ -84,6 +91,32 @@ index 43f6beb..b98df04 100644
      async def step_until_done(
          self, max_step: int
      ) -> T.AsyncGenerator[AgentResponse, None]:
+@@ -1014,6 +1033,25 @@
+                     tool_call_id=tool_call_id,
+                     content=self._merge_follow_up_notice(content),
+                 ),
++            )
++
++        # Mark the selected batch before its first tool. A voice tool can precede
++        # search in the same model response; subagents share this incoming event.
++        from astrbot.core.tools.web_search_tools import WEB_SEARCH_TOOL_NAMES
++
++        batch_tool_set = (
++            self._skill_like_raw_tool_set
++            if self.tool_schema_mode == "skills_like" and self._skill_like_raw_tool_set
++            else req.func_tool
++        )
++        if batch_tool_set:
++            mark_web_search_turn(
++                getattr(self.run_context.context, "event", None),
++                (
++                    name for name in llm_response.tools_call_name
++                    if batch_tool_set.get_tool(name) is not None
++                ),
++                WEB_SEARCH_TOOL_NAMES,
+             )
+ 
+         # 执行函数调用
 diff --git a/official/astrbot/core/config/default.py b/expected/astrbot/core/config/default.py
 index 6156601..d101d8d 100644
 --- a/official/astrbot/core/config/default.py
@@ -623,3 +656,161 @@ diff --git a/official/astrbot/core/astr_main_agent.py b/expected/astrbot/core/as
 +            ):
                  new_tool_set.add_tool(tool)
          req.func_tool = new_tool_set
+diff --git a/official/astrbot/core/pipeline/result_decorate/stage.py b/expected/astrbot/core/pipeline/result_decorate/stage.py
+--- a/official/astrbot/core/pipeline/result_decorate/stage.py
++++ b/expected/astrbot/core/pipeline/result_decorate/stage.py
+@@ -11,6 +11,7 @@
+ from astrbot.core.platform.astr_message_event import AstrMessageEvent
+ from astrbot.core.platform.message_type import MessageType
+ from astrbot.core.star.session_llm_manager import SessionServiceManager
++from astrbot.core.wechat_reply_policy import voice_reply_allowed
+ from astrbot.core.star.star import star_map
+ from astrbot.core.star.star_handler import EventType, star_handlers_registry
+ 
+@@ -266,6 +267,7 @@
+             should_tts = (
+                 bool(self.ctx.astrbot_config["provider_tts_settings"]["enable"])
+                 and result.is_llm_result()
++                and voice_reply_allowed(event)
+                 and await SessionServiceManager.should_process_tts_request(event)
+                 and random.random() <= self.tts_trigger_probability
+                 and tts_provider
+diff --git a/official/astrbot/core/tools/message_tools.py b/expected/astrbot/core/tools/message_tools.py
+--- a/official/astrbot/core/tools/message_tools.py
++++ b/expected/astrbot/core/tools/message_tools.py
+@@ -23,6 +23,9 @@
+     workspace_root_for_context,
+ )
+ from astrbot.core.tools.registry import builtin_tool
++from astrbot.core.wechat_reply_policy import (
++    is_voice_message_component, voice_reply_allowed,
++)
+ from astrbot.core.utils.astrbot_path import (
+     get_astrbot_system_tmp_path,
+     get_astrbot_temp_path,
+@@ -218,6 +221,11 @@
+         if not isinstance(messages, list) or not messages:
+             return "error: messages parameter is empty or invalid."
+ 
++        if not voice_reply_allowed(context.context.event) and any(
++            is_voice_message_component(message) for message in messages
++        ):
++            return "error: Web-search replies must use text, not voice or audio files. Reply in text."
++
+         components: list[Comp.BaseMessageComponent] = []
+         for idx, msg in enumerate(messages):
+             if not isinstance(msg, dict):
+diff --git a/official/astrbot/core/wechat_reply_policy.py b/expected/astrbot/core/wechat_reply_policy.py
+new file mode 100644
+--- /dev/null
++++ b/expected/astrbot/core/wechat_reply_policy.py
+@@ -0,0 +1,63 @@
++"""Per-message reply policy, copied into the pinned AstrBot engine patch."""
++from __future__ import annotations
++
++from typing import Any, Iterable
++from urllib.parse import unquote, urlsplit
++
++
++WEB_SEARCH_TURN_EXTRA = "_wechatrebot_web_search_turn"
++_AUDIO_EXTENSIONS = frozenset({
++    ".aac", ".aiff", ".alac", ".amr", ".flac", ".m4a", ".mp3", ".ogg",
++    ".opus", ".pcm", ".silk", ".slik", ".wav", ".wma",
++})
++
++
++def mark_web_search_turn(
++    event: Any,
++    called_tools: Iterable[str],
++    search_tools: Iterable[str],
++) -> None:
++    """Keep search replies textual throughout this message and its subagents.
++
++    Callers pass only tools selected for execution, never the registered tool
++    catalog or conversation history. Mark the whole batch before executing its
++    first tool so a voice tool listed before search cannot race this decision.
++    A later non-search batch must not clear an earlier search in the same turn.
++    """
++    if set(called_tools).intersection(search_tools):
++        setter = getattr(event, "set_extra", None)
++        if callable(setter):
++            setter(WEB_SEARCH_TURN_EXTRA, True)
++
++
++def voice_reply_allowed(event: Any) -> bool:
++    """Search suppression belongs to the incoming event, never to a chat."""
++    getter = getattr(event, "get_extra", None)
++    return not (callable(getter) and getter(WEB_SEARCH_TURN_EXTRA))
++
++
++def is_web_search_turn(event: Any) -> bool:
++    """Return whether this exact incoming event used a web-search tool."""
++    return not voice_reply_allowed(event)
++
++
++def is_voice_message_component(message: Any) -> bool:
++    """Recognize voice bubbles and audio-file fallbacks before media I/O."""
++    if not isinstance(message, dict):
++        return False
++    kind = str(message.get("type", "")).lower()
++    if kind == "record":
++        return True
++    if kind != "file":
++        return False
++    for field in ("path", "url", "text"):
++        value = str(message.get(field) or "").replace("\\", "/")
++        try:
++            value = urlsplit(value).path
++        except ValueError:
++            # Invalid URLs still pass through the normal send-tool validation.
++            pass
++        filename = unquote(value).rsplit("/", 1)[-1].lower()
++        if any(filename.endswith(extension) for extension in _AUDIO_EXTENSIONS):
++            return True
++    return False
+diff --git a/official/astrbot/core/astr_agent_tool_exec.py b/expected/astrbot/core/astr_agent_tool_exec.py
+--- a/official/astrbot/core/astr_agent_tool_exec.py
++++ b/expected/astrbot/core/astr_agent_tool_exec.py
+@@ -627,6 +627,26 @@
+         if not event:
+             raise ValueError("Event must be provided for local function tools.")
+ 
++        from astrbot.core.platform.wechat_group_policy import plugin_allowed
++        from astrbot.core.star.star import star_map
++
++        async def verify_permission():
++            if not getattr(tool, "active", True):
++                raise PermissionError("Tool is disabled; execution denied.")
++            module_path = getattr(tool, "handler_module_path", None)
++            if not module_path:
++                return  # Builtin tools keep their own existing admin checks.
++            owner = star_map.get(module_path)
++            if owner is None:
++                raise PermissionError("Tool plugin is unavailable; execution denied.")
++            if owner.reserved:
++                return
++            if not await plugin_allowed(
++                run_context.context.context, event, owner.root_dir_name,
++            ):
++                raise PermissionError("Tool plugin permission revoked; execution denied.")
++
++        await verify_permission()
+         is_override_call = False
+         for ty in type(tool).mro():
+             if "call" in ty.__dict__ and ty.__dict__["call"] is not FunctionTool.call:
+@@ -659,6 +679,7 @@
+         )
+         while True:
+             try:
++                await verify_permission()
+                 resp = await asyncio.wait_for(
+                     anext(wrapper),
+                     timeout=tool_call_timeout or run_context.tool_call_timeout,
+@@ -679,6 +700,7 @@
+                     if res := run_context.context.event.get_result():
+                         if res.chain:
++                            await verify_permission()
+                             try:
+                                 await event.send(
+                                     MessageChain(
+                                         chain=res.chain,

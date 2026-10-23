@@ -80,6 +80,8 @@ def _write_runtime_fixture(runtime: Path, commercial: Path) -> dict[str, object]
     manifest["licensing_bundle_sha256"] = install_runtime_bundle(commercial, runtime / "python/Lib/site-packages")
     manifest["astrbot_license_patch_sha256"] = hashlib.sha256(
         (commercial / "patches/astrbot-4.26.6-license.patch").read_bytes()).hexdigest().upper()
+    manifest["astrbot_background_permissions_patch_sha256"] = hashlib.sha256(
+        (commercial / "patches/astrbot-4.26.6-background-permissions.patch").read_bytes()).hexdigest().upper()
     (runtime / "runtime-manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
@@ -103,6 +105,16 @@ def test_runtime_root_validation_accepts_matching_fingerprint(tmp_path: Path) ->
     validated = _builder()._validate_runtime_root(runtime, commercial)
     assert validated["wheelhouse"] == manifest["wheelhouse"]
     assert validated["ffmpeg"] == manifest["ffmpeg"]
+
+
+def test_runtime_root_rejects_missing_background_permissions_fingerprint(tmp_path):
+    commercial = Path(__file__).parents[1]
+    runtime = tmp_path / "runtime"
+    manifest = _write_runtime_fixture(runtime, commercial)
+    manifest.pop("astrbot_background_permissions_patch_sha256")
+    (runtime / "runtime-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="background permissions"):
+        _builder()._validate_runtime_root(runtime, commercial)
 
 
 @pytest.mark.parametrize("relative", ["licensing/runtime_guard.py", "licensing/protocol.py", "licensing-channel.json"])

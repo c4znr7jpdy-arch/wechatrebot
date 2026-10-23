@@ -36,16 +36,22 @@ class ErrorHookService:
         if len(trace_tail) > 800:
             trace_tail = trace_tail[-800:]
 
-        sent = await self._context.send_message(
-            target_session,
-            MessageChain().message(
-                "[plugin-error-hook]\n"
-                f"plugin={plugin_name}\n"
-                f"handler={handler_name}\n"
-                f"error={error}\n"
-                f"trace_tail={trace_tail}",
-            ),
-        )
+        from astrbot.core.platform.wechat_background_policy import send_background_message
+
+        try:
+            sent = await send_background_message(
+                self._context, target_session, MessageChain().message(
+                    "[plugin-error-hook]\n"
+                    f"plugin={plugin_name}\n"
+                    f"handler={handler_name}\n"
+                    f"error={error}\n"
+                    f"trace_tail={trace_tail}",
+                ), "astrbot_plugin_office_assistant",
+            )
+        except PermissionError:
+            logger.info("Office error notification target is not authorized; skipped.")
+            event.stop_event()
+            return
         if not sent:
             logger.warning(
                 f"[plugin-error-hook] target session not found: {target_session}"

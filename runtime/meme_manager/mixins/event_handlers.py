@@ -1569,7 +1569,10 @@ class EventHandlerMixin:
 
     async def _send_meme_image(self, event: AstrMessageEvent, image: Image) -> None:
         image = await self._ensure_image_send_format(image)
-        if event.get_platform_name() in {"gewechat", "webchat"}:
+        from astrbot.core.platform.wechat_group_policy import plugin_allowed
+        if not await plugin_allowed(self.context, event, "meme_manager"):
+            return
+        if event.get_platform_name() in {"aiocqhttp", "gewechat", "webchat"}:
             await event.send(MessageChain([image]))
             return
         await self.context.send_message(event.unified_msg_origin, MessageChain([image]))

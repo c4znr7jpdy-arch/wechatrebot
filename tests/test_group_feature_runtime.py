@@ -1,11 +1,16 @@
 from pathlib import Path
+import asyncio
 import json
 import subprocess
 from types import SimpleNamespace
 import zipfile
+import sys
 import pytest
 
-from wechatrebot_manager.group_feature_runtime import DEFAULT_GROUP_FEATURES, group_plugins
+from wechatrebot_manager.group_feature_runtime import (
+    DEFAULT_GROUP_FEATURES, conversation_plugins, event_plugins, group_plugins,
+    plugin_allowed, session_plugin_allowed,
+)
 from wechatrebot_manager.group_policy import DEFAULT_GROUP_FEATURES as MANAGER_DEFAULTS
 
 
@@ -101,3 +106,125 @@ def test_packaged_group_filter_handles_commands_without_wheel_cache(tmp_path):
     assert "astrbot_plugin_music" in permitted
     _save(policy, bot_enabled=False)
     assert namespace["group_plugins"](policy, "wxid_bot", "room@chatroom", None, STARS) is None
+
+
+@pytest.fixture
+def permission_runtime(tmp_path, monkeypatch):
+    root = tmp_path
+    (root / "app/astrbot").mkdir(parents=True)
+    (root / "data/manager").mkdir(parents=True)
+    (root / "legal").mkdir()
+    monkeypatch.chdir(root / "app/astrbot")
+    (root / "legal/feature-set.json").write_text(json.dumps({"features": [
+        {"module": "voice", "visible": True, "default_enabled": True},
+        {"module": "hidden", "visible": False, "default_enabled": True},
+        {"module": "off", "visible": True, "default_enabled": False},
+    ]}), encoding="utf-8")
+    disabled = set()
+    async def enabled(session, name):
+        return name not in disabled
+    monkeypatch.setitem(sys.modules, "astrbot.core.star.session_plugin_manager",
+        SimpleNamespace(SessionPluginManager=SimpleNamespace(is_plugin_enabled_for_session=enabled)))
+    stars = [SimpleNamespace(root_dir_name=name, name="friendly_" + name, activated=True,
+                              reserved=False) for name in ("voice", "hidden", "off", "jiang_commands")]
+    event = SimpleNamespace(unified_msg_origin="wechat:FriendMessage:friend", plugins_name=None,
+        get_platform_name=lambda: "aiocqhttp", get_self_id=lambda: "wxid_bot",
+        get_group_id=lambda: "", get_sender_id=lambda: "friend")
+    config = {"plugin_set": ["*"]}
+    async def login(**kwargs):
+        return {"user_id": "wxid_bot"}
+    platform = SimpleNamespace(meta=lambda: SimpleNamespace(name="aiocqhttp"),
+                              bot=SimpleNamespace(get_login_info=login))
+    context = SimpleNamespace(get_config=lambda session: config, get_all_stars=lambda: stars,
+                              get_platform_inst=lambda platform_id: platform)
+    return root, disabled, stars, event, config, platform, context
+
+
+def _private_policy(root, account="wxid_bot", **policy):
+    (root / "data/manager/private-chat-policies.json").write_text(json.dumps({
+        "schema_version": 1, "accounts": {account: {"contacts": {"friend": policy}}}
+    }), encoding="utf-8")
+
+
+def test_private_defaults_and_explicit_grants_match_saved_contact_contract(permission_runtime):
+    root, _, stars, event, _, _, context = permission_runtime
+    read = lambda module="voice": asyncio.run(plugin_allowed(context, event, module))
+    assert read()
+    assert not read("hidden")
+    assert not read("off")
+    _private_policy(root, allowed_features=[])
+    assert not read()
+    _private_policy(root, allowed_features=["voice"])
+    assert read()
+    _private_policy(root, allowed_features=["voice"], bot_enabled=False)
+    assert not read()
+    event.get_self_id = lambda: "other_bot"
+    assert read()
+
+
+@pytest.mark.parametrize("change", ["chat", "global", "session", "inactive", "event", "corrupt", "account"])
+def test_dependency_rechecks_each_permission_before_later_side_effect(permission_runtime, change):
+    root, disabled, stars, event, config, _, context = permission_runtime
+    _private_policy(root, allowed_features=["voice"])
+    assert asyncio.run(plugin_allowed(context, event, "voice"))
+    if change == "chat":
+        _private_policy(root, allowed_features=[])
+    elif change == "global":
+        config["plugin_set"] = []
+    elif change == "session":
+        disabled.add("friendly_voice")
+    elif change == "inactive":
+        stars[0].activated = False
+    elif change == "event":
+        event.plugins_name = []
+    elif change == "account":
+        event.get_self_id = lambda: ""
+    else:
+        (root / "data/manager/private-chat-policies.json").write_text("corrupt", encoding="utf-8")
+    assert not asyncio.run(plugin_allowed(context, event, "voice"))
+
+
+def test_event_scope_removes_session_disabled_hooks_and_tools_for_other_platforms(permission_runtime):
+    _, disabled, stars, event, _, _, _ = permission_runtime
+    event.get_platform_name = lambda: "test"
+    disabled.add("friendly_voice")
+    permitted = asyncio.run(event_plugins(event, ["*"], stars))
+    assert "voice" not in permitted
+    assert "friendly_voice" not in permitted
+    assert "hidden" in permitted
+
+
+def test_private_commands_preserve_random_image_in_shared_feature(permission_runtime):
+    root, _, stars, event, _, _, context = permission_runtime
+    _private_policy(root, allowed_features=["jiang_commands"])
+    assert asyncio.run(plugin_allowed(context, event, "jiang_commands"))
+    assert asyncio.run(plugin_allowed(context, event, "jiang_commands", command_handler="random_image"))
+    assert asyncio.run(plugin_allowed(context, event, "jiang_commands", command_handler="news"))
+    _private_policy(root, allowed_features=[])
+    assert not asyncio.run(plugin_allowed(context, event, "jiang_commands", command_handler="random_image"))
+
+
+def test_background_task_requires_saved_account_and_rechecks_current_target(permission_runtime):
+    root, disabled, _, event, _, platform, context = permission_runtime
+    _private_policy(root, allowed_features=["voice"])
+    read = lambda **kwargs: asyncio.run(session_plugin_allowed(context, event.unified_msg_origin,
+                                                              "voice", **kwargs))
+    assert not read()
+    assert read(account_id="wxid_bot", user_id="friend")
+    assert not read(account_id="wxid_bot", user_id="other")
+    disabled.add("friendly_voice")
+    assert not read(account_id="wxid_bot")
+    disabled.clear()
+    async def switched(**kwargs):
+        return {"user_id": "another_bot"}
+    platform.bot.get_login_info = switched
+    assert not read(account_id="wxid_bot")
+
+
+def test_permission_storage_failure_is_denied(permission_runtime, monkeypatch):
+    _, _, _, event, _, _, context = permission_runtime
+    async def failed(*args):
+        raise OSError("unavailable")
+    monkeypatch.setattr(sys.modules["astrbot.core.star.session_plugin_manager"].SessionPluginManager,
+                        "is_plugin_enabled_for_session", failed)
+    assert not asyncio.run(plugin_allowed(context, event, "voice"))
