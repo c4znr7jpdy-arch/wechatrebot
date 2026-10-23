@@ -27,6 +27,13 @@ html[data-skin="soft"] #page-settings .settings-layout {
   gap: 28px;
 }
 
+@media (max-width: 880px) {
+  html[data-skin="soft"] #page-settings .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+}
+
 html[data-skin="soft"] #page-settings .settings-tabs {
   flex-direction: column;
   align-items: stretch;

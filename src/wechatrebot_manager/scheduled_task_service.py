@@ -72,7 +72,9 @@ class ScheduledTaskService:
 
     def _snapshot(self, *, refresh: bool = False) -> tuple[dict, dict, dict]:
         with ThreadPoolExecutor(max_workers=3) as executor:
-            group_future = executor.submit(self.groups.list, refresh)
+            # Task targets use names and IDs only. Loading every group's portrait
+            # here needlessly competes with bridge health and message traffic.
+            group_future = executor.submit(self.groups.list, refresh, include_portraits=False)
             contact_future = executor.submit(self.contacts.list, refresh)
             health_future = executor.submit(self.health)
             return group_future.result(), contact_future.result(), health_future.result()

@@ -105,12 +105,6 @@ html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-butt
   color: var(--red-700);
 }
 
-html[data-skin="soft"] #page-home .force-stop-action {
-  border-radius: var(--radius-control);
-  border: 1px solid var(--red-line);
-  background: var(--red-100);
-}
-
 html[data-skin="soft"] #page-home .control-copy h2 {
   letter-spacing: -.015em;
 }

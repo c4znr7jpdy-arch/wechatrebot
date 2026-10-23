@@ -106,7 +106,7 @@
 #page-groups .group-policy-form .advanced-details,
 #page-groups .private-feature-policy .advanced-details { margin: 10px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
 #page-groups .advanced-details > summary { cursor: pointer; font-weight: 600; }
-#page-groups .advanced-details > label { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 48%); align-items: center; gap: 12px 24px; margin: 20px 0; }
+#page-groups .advanced-details > label { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 48%); align-items: center; gap: 12px 24px; margin: 20px 0; padding-inline: 0; }
 #page-groups .advanced-details > label > small { grid-column: 2; }
 #page-groups .chat-profile { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 #page-groups .chat-profile-field { border: 0; padding-bottom: 8px; }
@@ -217,6 +217,6 @@
 #page-groups .advanced-details > summary::after { content: ""; flex: 0 0 8px; width: 8px; height: 8px; margin-right: 3px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); }
 #page-groups .advanced-details[open] > summary { border-radius: 7px 7px 0 0; }
 #page-groups .advanced-details[open] > summary::after { transform: translateY(2px) rotate(225deg); }
-#page-groups .advanced-details > :not(summary) { margin-left: 14px; margin-right: 14px; }
+#page-groups :is(.group-policy-form, .private-feature-policy) .advanced-details > :not(summary) { margin-left: 14px; margin-right: 14px; }
 #page-groups .advanced-details > summary:hover { color: var(--ink); background: var(--blue-100); }
 #page-groups .advanced-details > summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: -2px; }

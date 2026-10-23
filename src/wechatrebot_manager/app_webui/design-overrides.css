@@ -71,7 +71,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #page-home .power-button { width: auto; height: 44px; min-width: 172px; flex-direction: row; gap: 7px; padding: 0 18px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); box-shadow: none; font-size: 13px; }
 #page-home .power-button:hover:not(:disabled) { border-color: var(--blue-600); color: var(--blue-700); background: var(--surface-hover); }
 #page-home .power-button svg { width: 15px; height: 15px; }
-#page-home .force-stop-action { width: 100%; min-height: 30px; }
 #page-home .startup-ledger { min-height: 0; margin-top: 18px; padding: 0; overflow: hidden; }
 #page-home .startup-ledger > .panel-heading { display: none; }
 #page-home .stage-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; padding: 0; }
@@ -497,15 +496,12 @@ html[data-theme="dark"] .schedule-summary { color: var(--ink); background: var(-
 
 html[data-theme="dark"] .button.ghost,
 html[data-theme="dark"] .power-button,
-html[data-theme="dark"] .force-stop-action,
 html[data-theme="dark"] .schedule-target-chip,
 html[data-theme="dark"] .sender-card,
 html[data-theme="dark"] .current-sender > div { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
 html[data-theme="dark"] .button.ghost:hover,
 html[data-theme="dark"] .power-button:hover:not(:disabled),
 html[data-theme="dark"] .schedule-target-chip:hover { color: var(--blue-700); background: var(--surface-2); border-color: var(--blue-600); }
-html[data-theme="dark"] .force-stop-action { color: var(--muted); background: transparent; border-color: var(--line-strong); }
-html[data-theme="dark"] .force-stop-action:hover:not(:disabled) { color: #ffdce0; background: var(--red-100); border-color: var(--red-700); }
 html[data-theme="dark"] #page-home .stage-list li:not(.done) .stage-index { color: var(--muted); background: #26384d; }
 html[data-theme="dark"] .button.secondary { color: var(--blue-700); background: var(--blue-100); border-color: #38577e; }
 html[data-theme="dark"] .button.primary { color: #07111d; background: var(--blue-600); border-color: var(--blue-600); }
@@ -735,7 +731,8 @@ html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--vei
 .date-range-dialog::backdrop { background: rgba(0,0,0,.35); }
 .range-fields, .range-navigation { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
 .range-fields label { flex: 1; display: grid; gap: 8px; }
-.range-fields input { width: 100%; cursor: pointer; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.range-fields > span { align-self: end; display: grid; place-items: center; height: 44px; }
+.range-fields input { width: 100%; height: 44px; cursor: pointer; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
 .range-fields input.active { border-color: var(--blue-600); outline: 1px solid var(--blue-600); }
 .range-navigation span { font-size: 12px; color: var(--muted); }
 .range-calendars { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }

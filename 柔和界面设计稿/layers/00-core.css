@@ -639,8 +639,10 @@ html[data-skin="soft"] .search-box svg {
   color: var(--subtle);
 }
 
-html[data-skin="soft"] .search-box input {
+html[data-skin="soft"] .search-box input,
+html[data-skin="soft"] .search-box input:focus-visible {
   border: 0;
+  outline: none;
   background: transparent;
   box-shadow: none;
 }

@@ -366,6 +366,7 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
+    const confirmingConnection = current === "RUNNING" && !online && !accountStatusAvailable && !status.error;
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
     const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
@@ -408,21 +409,23 @@
       void openFeature(state.selectedFeature, false, true);
     }
 
-    $("#stateTitle").textContent = status.title;
-    $("#stateMessage").textContent = status.message;
+    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接" : status.title;
+    $("#stateMessage").textContent = current === "STOP_WAIT_WECHAT"
+      ? "关闭微信后会自动完成停止，也可再次点击“停止运行”立即结束机器人服务。"
+      : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。" : status.message;
     $("#accountText").textContent = !accountStatusAvailable ? "正在确认微信连接…"
       : runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
     $("#lastCheckText").textContent = `检查于 ${new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})}`;
 
     const global = $("#globalStatus");
     global.className = `status-badge ${online ? "online" : problem ? "error" : waiting ? "warning" : "checking"}`;
-    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : waiting ? status.title : active ? "正在启动" : environment.ready ? "等待启动" : "环境未就绪")}`;
+    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? "正在启动" : environment.ready ? "等待启动" : "环境未就绪")}`;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
-    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
+    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
 
     const orbit = $("#statusOrbit");
-    orbit.dataset.state = online ? "online" : problem ? "error" : waiting ? "waiting" : status.busy || active ? "starting" : "stopped";
+    orbit.dataset.state = online ? "online" : problem ? "error" : waiting || confirmingConnection ? "waiting" : status.busy || active ? "starting" : "stopped";
     const homeStatusIcon = $("#homeStatusIcon");
     if (homeStatusIcon) {
       homeStatusIcon.className = `home-status-icon ${problem ? "problem" : waiting ? "waiting" : online ? "online" : "checking"}`;
@@ -430,16 +433,20 @@
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
-    const primaryLabel = starting ? "启动中…" : stopMode ? (current === "STOP_WAIT_WECHAT" ? "等待关闭" : "停止运行") : "启动";
+    const primaryLabel = starting ? "启动中…" : stopMode ? "停止运行" : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = current === "STOP_WAIT_WECHAT"
-      || Boolean(status.busy)
+    primary.disabled = Boolean(status.busy)
       || (!status.can_start && !status.can_stop)
       || (state.mandatoryUpdate && !stopMode);
     primary.setAttribute("aria-busy", String(Boolean(status.busy)));
     primary.setAttribute("aria-label", primaryLabel);
-    primary.title = stopMode ? "安全停止机器人" : primaryLabel;
+    primary.title = current === "STOP_WAIT_WECHAT" ? "立即停止机器人，保留微信窗口"
+      : stopMode ? "安全停止机器人" : primaryLabel;
+    const stopRetainedConnection = $("#stopRetainedConnection");
+    const canStopRetainedConnection = licenseWaiting && status.can_start && status.can_stop && !status.busy;
+    stopRetainedConnection.hidden = !canStopRetainedConnection;
+    stopRetainedConnection.disabled = !canStopRetainedConnection;
 
     const alert = $("#environmentAlert");
     alert.hidden = Boolean(environment.ready);
@@ -461,25 +468,16 @@
 
     setStage($("#stageEnvironment"), environment.ready ? "done" : "problem", environment.ready ? "已通过" : "未通过");
     const coreStarted = Boolean(runtime.engine_ready);
-    setStage($("#stageCore"), coreStarted ? "done" : active ? "current" : "", coreStarted ? "已就绪" : active ? "启动中" : "未启动");
+    setStage($("#stageCore"), coreStarted ? "done" : active ? "current" : "", coreStarted ? "已就绪" : confirmingConnection ? "状态待确认" : active ? "启动中" : "未启动");
     const connectionStarting = current === "CONNECTION_STARTING";
-    const connectionMode = online || wechatLoggedIn ? "done" : waiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
-    setStage($("#stageConnection"), connectionMode, online ? "已连接" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
-
-    const canForceStop = current !== "STOPPED" && current !== "ERROR" && !status.busy;
-    const forceStop = $("#forceStopAction");
-    if (forceStop) {
-      forceStop.hidden = !canForceStop;
-      forceStop.disabled = !canForceStop;
-      forceStop.setAttribute("aria-label", "强制停止机器人，跳过正常关闭等待");
-      forceStop.title = canForceStop ? "立即结束机器人功能和消息连接" : "当前没有可停止的运行任务";
-    }
+    const connectionMode = online || wechatLoggedIn ? "done" : confirmingConnection || waiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
+    setStage($("#stageConnection"), connectionMode, online ? "已连接" : confirmingConnection ? "确认中" : wechatLoggedIn ? "已登录" : connectionStarting ? "正在打开" : waiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     const wechatConnection = !accountStatusAvailable ? "状态待确认" : runtime.hook_ready || wechatLoggedIn ? "已连接" : "待连接";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${wechatConnection}` : "请安装或重新选择微信";
-    $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : active ? "正在启动" : "未启动";
-    $("#signalMessage").textContent = online ? "通信正常" : wechatLoggedIn ? "已登录，功能启动中" : runtime.connection_ready ? "正在确认" : "未连接";
+    $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : confirmingConnection ? "状态待确认" : active ? "正在启动" : "未启动";
+    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : wechatLoggedIn ? "已登录，功能启动中" : runtime.connection_ready ? "正在确认" : "未连接";
     $("#wechatPath").textContent = environment.path || "尚未选择";
   }
 
@@ -498,6 +496,10 @@
   async function runPrimaryAction() {
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
+    if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
+      runForceStop();
+      return;
+    }
     button.disabled = true;
     if (action === "start" && !await subscription.beforeStart()) { renderStatus(state.status); return; }
     if (action === "start") {
@@ -517,10 +519,10 @@
 
   function runForceStop() {
     confirmAction({
-      title: "强制停止机器人？",
-      message: "将立即结束机器人功能和消息连接，不等待微信自行关闭。正在处理的消息可能会中断。",
-      confirmText: "强制停止",
-      pendingText: "正在强制停止…",
+      title: "停止运行？",
+      message: "将立即结束机器人功能和消息连接，保留微信窗口。正在处理的消息可能会中断。",
+      confirmText: "停止运行",
+      pendingText: "正在停止…",
       onConfirm: async () => {
         const result = await api("force_stop_robot");
         if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
@@ -860,7 +862,7 @@
       }
     });
     $("#primaryAction").addEventListener("click", runPrimaryAction);
-    $("#forceStopAction").addEventListener("click", runForceStop);
+    $("#stopRetainedConnection").addEventListener("click", runForceStop);
     $("#retryEnvironment").addEventListener("click", checkEnvironment);
     $("#settingsCheckWechat").addEventListener("click", checkEnvironment);
     $("#chooseWechat").addEventListener("click", chooseWechat);

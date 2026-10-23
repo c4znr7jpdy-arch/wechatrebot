@@ -15,7 +15,7 @@ class Directory:
     def __init__(self, kind: str):
         self.kind = kind
 
-    def list(self, refresh=False):
+    def list(self, refresh=False, *, include_portraits=True):
         items = ([{"group_id": GROUP, "name": "家人群"}] if self.kind == "group"
                  else [{"user_id": "wxid_friend", "remark": "张三"}])
         return {"account_id": ACCOUNT, "items": items, "stale": False}
@@ -93,6 +93,23 @@ def test_context_resolves_names_without_seeding(tmp_path: Path) -> None:
     assert context["command_definition_version"] == 1
     assert not any(item["id"] == "checkin" for item in context["command_catalog"])
     assert context["groups"] == [{"id": GROUP, "name": "家人群", "type": "group"}]
+
+
+def test_context_and_live_validation_skip_unneeded_group_portraits(tmp_path):
+    value = service(tmp_path)
+    original = value.groups.list
+    requests = []
+
+    def directory(refresh=False, *, include_portraits=True):
+        requests.append((refresh, include_portraits))
+        return original(refresh, include_portraits=include_portraits)
+
+    value.groups.list = directory
+
+    assert value.context()["groups"][0]["name"] == "家人群"
+    value._verify_live(payload())
+
+    assert requests == [(False, False), (True, False)]
 
 
 def test_lightweight_context_reads_current_account_without_waiting_for_directories(tmp_path):
