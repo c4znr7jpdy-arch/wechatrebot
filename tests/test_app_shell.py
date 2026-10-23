@@ -1703,6 +1703,8 @@ def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
     assert 'data-provider-thinking="${escapeHtml(item.id)}"' in script
     assert 'api("set_provider_thinking", providerId, !service.thinking_enabled)' in script
     assert 'role="switch"' in script
+    assert '已开启 · 模型支持时生效' not in script
+    assert 'button.setAttribute("aria-busy", "true")' in script
     assert ".provider-thinking-switch:focus-visible" in styles
 
 

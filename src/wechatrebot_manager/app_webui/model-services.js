@@ -395,7 +395,7 @@ window.createModelServices = function (helpers) {
             </div>
             <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
-              <span><strong>思考模式</strong><small data-provider-thinking-status>${item.thinking_enabled ? "已开启 · 模型支持时生效" : "已关闭 · 模型支持时生效"}</small></span>
+              <span><strong>思考模式</strong></span>
               <button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>
             </div>` : `<div class="provider-thinking-control"><span><strong>${capability.title}</strong><small>${capability.detail}</small></span></div>`}
           </div>
@@ -631,8 +631,7 @@ window.createModelServices = function (helpers) {
     const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
     if (!service || button.disabled) return;
     button.disabled = true;
-    const status = button.closest(".provider-thinking-control")?.querySelector("[data-provider-thinking-status]");
-    if (status) status.textContent = "正在应用…";
+    button.setAttribute("aria-busy", "true");
     try {
       await api("set_provider_thinking", providerId, !service.thinking_enabled);
       state.bootstrap.providers = await api("get_providers");
