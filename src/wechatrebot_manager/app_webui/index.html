@@ -116,7 +116,7 @@
                   <svg viewBox="0 0 220 220" aria-hidden="true"><circle class="orbit-track" cx="110" cy="110" r="92"/><circle class="orbit-progress" cx="110" cy="110" r="92"/></svg>
                   <div class="control-actions">
                     <button class="power-button" id="primaryAction" disabled><svg><use href="#i-play"/></svg><span>启动</span></button>
-                    <button class="force-stop-action" id="forceStopAction" type="button" data-force-stop data-action-bound disabled hidden aria-label="强制停止机器人" title="立即结束机器人功能和消息连接"><svg><use href="#i-stop"/></svg><span>强制停止</span></button>
+                    <button class="button secondary" id="stopRetainedConnection" type="button" hidden disabled title="结束保留的机器人连接，保留微信窗口"><svg><use href="#i-stop"/></svg><span>停止运行</span></button>
                   </div>
                 </div>
                 <div class="control-copy" role="status" aria-live="polite" aria-atomic="true"><span class="state-kicker" id="stateKicker">机器人状态</span><h2 id="stateTitle">正在检查环境</h2><p id="stateMessage">请稍候。</p></div>
@@ -514,7 +514,7 @@
     <p class="subtle">不选日期时显示最新消息，每次加载 20 条；向上滚动可查看更早消息。</p>
     <div class="range-fields"><label>开始日期<input id="rangeStart" readonly placeholder="不限" aria-label="选择开始日期"></label><span>至</span><label>结束日期<input id="rangeEnd" readonly placeholder="不限" aria-label="选择结束日期"></label></div>
     <div class="range-navigation"><button class="button ghost small" id="rangePrev" type="button" aria-label="上个月">←</button><span>先选择开始日期，再选择结束日期</span><button class="button ghost small" id="rangeNext" type="button" aria-label="下个月">→</button></div>
-    <div id="historyCalendar" class="range-calendars"></div><div class="modal-actions"><button class="button ghost" id="rangeClear" type="button">清空时间，查看最新</button><button class="button secondary" id="rangeCancel" type="button">取消</button><button class="button primary" id="rangeApply" type="button">应用日期</button></div>
+    <div id="historyCalendar" class="range-calendars"></div><div class="modal-actions"><button class="button secondary" id="rangeClear" type="button">清空时间，查看最新</button><button class="button secondary" id="rangeCancel" type="button">取消</button><button class="button primary" id="rangeApply" type="button">应用日期</button></div>
   </dialog>
 </body>
 </html>

@@ -650,8 +650,10 @@ html[data-skin="soft"] .search-box svg {
   color: var(--subtle);
 }
 
-html[data-skin="soft"] .search-box input {
+html[data-skin="soft"] .search-box input,
+html[data-skin="soft"] .search-box input:focus-visible {
   border: 0;
+  outline: none;
   background: transparent;
   box-shadow: none;
 }
@@ -1009,12 +1011,6 @@ html[data-skin="soft"] #page-home .power-button:hover:not(:disabled) {
 
 html[data-skin="soft"] #page-home .status-orbit[data-state="online"] .power-button {
   color: var(--red-700);
-}
-
-html[data-skin="soft"] #page-home .force-stop-action {
-  border-radius: var(--radius-control);
-  border: 1px solid var(--red-line);
-  background: var(--red-100);
 }
 
 html[data-skin="soft"] #page-home .control-copy h2 {
@@ -3119,6 +3115,13 @@ html[data-skin="soft"] #page-activity .gantt-row.failed .gantt-duration {
 html[data-skin="soft"] #page-settings .settings-layout {
   grid-template-columns: 204px minmax(0, 1fr);
   gap: 28px;
+}
+
+@media (max-width: 880px) {
+  html[data-skin="soft"] #page-settings .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
 }
 
 html[data-skin="soft"] #page-settings .settings-tabs {

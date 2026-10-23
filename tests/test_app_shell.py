@@ -3,6 +3,8 @@ import copy
 from io import BytesIO
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import threading
 from types import SimpleNamespace
@@ -1526,18 +1528,169 @@ def test_public_api_allowlist_matches_frontend_calls() -> None:
     assert "_attach_window" not in app_shell.PUBLIC_API_METHODS
 
 
-def test_run_center_force_stop_control_is_single_and_secondary() -> None:
+def test_run_center_stop_control_reuses_the_primary_action_while_waiting() -> None:
     webui = Path(app_shell.__file__).with_name("app_webui")
     script = manager_script()
     markup = (webui / "index.html").read_text(encoding="utf-8")
-    styles = (webui / "app.css").read_text(encoding="utf-8")
-
-    assert 'id="forceStopAction"' in markup
+    assert markup.count('id="primaryAction"') == 1
+    assert 'id="forceStopAction"' not in markup
     assert 'id="stageCoreStop"' not in markup
     assert 'id="stageConnectionStop"' not in markup
     assert 'api("force_stop_robot")' in script
-    assert '$("#forceStopAction").addEventListener("click", runForceStop)' in script
-    assert '.force-stop-action[hidden]' in styles
+    assert '$("#forceStopAction")' not in script
+    assert '["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)' in script
+    assert '$("#stopRetainedConnection").addEventListener("click", runForceStop)' in script
+    assert 'primary.disabled = current === "STOP_WAIT_WECHAT"' not in script
+    assert "保留微信窗口" in script
+
+
+def test_stop_actions_preserve_licensed_restart_and_complete_shutdown() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    start = script.index('    const primary = $("#primaryAction");')
+    controls = script[start:script.index('    const alert = $("#environmentAlert");', start)]
+    actions = script[script.index("  async function runPrimaryAction()"):script.index("  async function checkEnvironment()")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const nodes = new Map();
+const $ = selector => {
+  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}});
+  return nodes.get(selector);
+};
+const state = {mandatoryUpdate:false};
+const icon = () => '';
+const subscription = {beforeStart:async () => true};
+const calls = [];
+const api = async name => {calls.push(name); return {accepted:true};};
+const window = {setTimeout(){}};
+const refreshStatus = async () => {};
+const reportError = error => {throw error;};
+let dialog;
+const confirmAction = options => {dialog = options;};
+const startingStatus = status => ({...status, state:'CORE_STARTING', busy:true, can_start:false, can_stop:false});
+const select = (current, can_start=true, can_stop=true, busy=false) => renderStatus({state:current, can_start, can_stop, busy});
+(async () => {
+  for (const current of ['LICENSE_READY', 'LICENSE_PAUSED']) {
+    select(current);
+    assert.equal($('#primaryAction').dataset.action, 'start');
+    assert.equal($('#primaryAction').disabled, false);
+    assert.equal($('#stopRetainedConnection').hidden, false);
+    assert.equal($('#stopRetainedConnection').disabled, false);
+    const before = calls.length;
+    runForceStop();
+    assert.equal(calls.length, before, 'showing or canceling confirmation must not stop services');
+    assert.match(dialog.message, /保留微信窗口/);
+    await dialog.onConfirm();
+    assert.equal(calls.at(-1), 'force_stop_robot');
+    await runPrimaryAction();
+    assert.equal(calls.at(-1), 'start_robot');
+    assert.equal($('#stopRetainedConnection').hidden, true, 'starting must not offer force stop');
+    select(current, false);
+    assert.equal($('#primaryAction').dataset.action, 'stop');
+    assert.equal($('#stopRetainedConnection').hidden, true, 'only one stop button may be shown');
+    const stoppedBefore = calls.length;
+    await runPrimaryAction();
+    assert.equal(calls.length, stoppedBefore);
+    await dialog.onConfirm();
+    assert.equal(calls.at(-1), 'force_stop_robot');
+  }
+  select('RUNNING', false);
+  assert.equal($('#stopRetainedConnection').hidden, true);
+  await runPrimaryAction();
+  assert.equal(calls.at(-1), 'stop_robot');
+  select('STOP_WAIT_WECHAT', false);
+  assert.equal($('#primaryAction').disabled, false);
+  const before = calls.length;
+  await runPrimaryAction();
+  assert.equal(calls.length, before);
+  await dialog.onConfirm();
+  assert.equal(calls.at(-1), 'force_stop_robot');
+  select('LICENSE_PAUSED', true, true, true);
+  assert.equal($('#stopRetainedConnection').hidden, true);
+  assert.equal($('#primaryAction').disabled, true);
+  select('LICENSE_PAUSED', true, false);
+  assert.equal($('#stopRetainedConnection').hidden, true, 'no stop without owned services');
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    render = (
+        "function renderStatus(status) {state.status = status;"
+        "const current = status.state, online = false, starting = Boolean(status.busy);"
+        "const licenseWaiting = ['LICENSE_READY', 'LICENSE_PAUSED'].includes(current);"
+        + controls + "}\n"
+    )
+    result = subprocess.run(
+        ["node"], input=render + actions + harness, text=True, encoding="utf-8",
+        capture_output=True, check=True, timeout=10,
+    )
+    assert result.stdout == "ok"
+
+
+def test_running_status_distinguishes_an_unverified_connection_from_a_restart() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    render = script[script.index("  function renderStatus("):script.index("  async function refreshStatus()")]
+    harness = r"""
+const nodes = new Map();
+const $ = selector => {
+  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}});
+  return nodes.get(selector);
+};
+const state = {historyAccount:"", historyReadyAccount:"", activePage:"home"};
+const subscription = {updateRuntime(){}};
+const contactProfile = {updateAccount(){}};
+const reconcileStartPending = status => status;
+const invalidateHistoryState = () => {};
+const invalidateScheduledContext = () => {};
+const setHistoryActionsEnabled = () => {};
+const escapeHtml = value => value;
+const icon = () => "";
+const setStage = (node, mode, label) => {node.textContent = label;};
+const base = {
+  state:"RUNNING", title:"机器人可用", message:"微信连接和全部功能运行正常。",
+  online:false, busy:false, can_start:false, can_stop:true,
+  environment:{ready:true}, runtime:{account_status_available:false, engine_ready:true}
+};
+const cases = [
+  {},
+  {runtime:{account_status_available:true, engine_ready:true}},
+  {online:true, runtime:{account_status_available:true, engine_ready:true}},
+  {state:"STOPPED", title:"机器人未启动", can_start:true, can_stop:false},
+  {state:"ERROR", title:"机器人启动失败", error:{title:"错误", message:"托管服务退出"}},
+  {state:"STOP_WAIT_WECHAT", title:"请先关闭微信"},
+  {state:"STOPPING", title:"正在停止机器人", busy:true, can_stop:false},
+  {error:{title:"错误", message:"连接失败"}}
+];
+process.stdout.write(JSON.stringify(cases.map(changes => {
+  renderStatus({...base, ...changes});
+  return Object.fromEntries([
+    "stateTitle", "stateMessage", "globalStatus", "sideHealthText",
+    "stageConnection", "signalMessage", "primaryAction"
+  ].map(id => [id, $("#" + id).textContent || $("#" + id).innerHTML]));
+})));
+"""
+    result = subprocess.run(
+        ["node"], input=render + harness, text=True, encoding="utf-8",
+        capture_output=True, check=True, timeout=10,
+    )
+    pending, offline, online, stopped, error, waiting, stopping, failed = json.loads(result.stdout)
+    assert pending["stateTitle"] == pending["sideHealthText"] == "正在确认连接"
+    assert "正在确认连接" in pending["globalStatus"]
+    assert "暂时无法确认" in pending["stateMessage"]
+    assert pending["stageConnection"] == "确认中"
+    assert pending["signalMessage"] == "正在确认连接"
+    assert "停止运行" in pending["primaryAction"]
+    assert offline["signalMessage"] == "未连接"
+    assert online["stateTitle"] == "机器人可用"
+    assert online["signalMessage"] == "通信正常"
+    assert stopped["stateTitle"] == "机器人未启动"
+    assert error["stateTitle"] == "机器人启动失败"
+    assert waiting["stateTitle"] == "请先关闭微信"
+    assert "再次点击" in waiting["stateMessage"]
+    assert stopping["stateTitle"] == "正在停止机器人"
+    assert failed["stateTitle"] != "正在确认连接"
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
@@ -2103,9 +2256,8 @@ def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> 
     assert 'class="provider-add-card"' in script
     assert 'data-provider-delete="${escapeHtml(item.id)}"' in script
     assert 'function providerCardIdentity(service)' in script
-    assert ".provider-service-cards { display: grid; grid-template-columns: repeat(3,minmax(0,1fr));" in styles
-    assert "@media (max-width: 1220px)" in styles
-    assert ".provider-service-cards { grid-template-columns: 1fr; padding: 16px; }" in styles
+    assert ".provider-service-cards { display: grid; grid-template-columns: repeat(auto-fill, min(100%, 300px));" in styles
+    assert ".provider-service-cards { padding: 16px; }" in styles
     assert 'id="i-more"' in markup
     assert 'id="i-plus"' in markup
 
@@ -2145,7 +2297,7 @@ def test_online_stop_action_uses_a_quiet_default_and_danger_hover() -> None:
     styles = (webui / "app.css").read_text(encoding="utf-8")
 
     assert '"停止运行"' in script
-    assert 'primary.title = stopMode ? "安全停止机器人" : primaryLabel;' in script
+    assert ': stopMode ? "安全停止机器人" : primaryLabel;' in script
     assert '.status-orbit[data-state="online"] .power-button:hover:not(:disabled)' in styles
 
 

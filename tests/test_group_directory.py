@@ -33,6 +33,48 @@ def test_directory_manual_refresh_requeries_without_messages(tmp_path, monkeypat
     assert calls == ["/api/manager/groups"] * 2
 
 
+def test_directory_without_portraits_keeps_names_and_default_portrait_loading(tmp_path, monkeypatch):
+    obj, _, calls = service(tmp_path, monkeypatch)
+    enriched = []
+
+    def enrich(account, item, entity, fetch, **_options):
+        enriched.append(entity)
+        return {**item, "avatar": "cached-avatar"}
+
+    monkeypatch.setattr(obj._portraits, "enrich", enrich)
+
+    result = obj.list(include_portraits=False)
+
+    assert result["items"] == [{"group_id": "test@chatroom", "group_name": "测试群"}]
+    assert not result["stale"]
+    assert enriched == []
+    assert calls == ["/api/manager/groups"]
+    assert obj.list()["items"][0]["avatar"] == "cached-avatar"
+    assert enriched == ["test@chatroom"]
+
+
+def test_directory_without_portraits_preserves_fallback_and_account_checks(tmp_path, monkeypatch):
+    obj, account, _ = service(tmp_path, monkeypatch)
+    original = obj.list(include_portraits=False)
+    monkeypatch.setattr(obj._portraits, "enrich", lambda *_args, **_kw: pytest.fail("unexpected portrait load"))
+
+    def failure(*_args, **_kwargs):
+        raise directory.GroupDirectoryError("读取失败")
+
+    monkeypatch.setattr(obj, "_request", failure)
+    result = obj.list(True, include_portraits=False)
+    assert result["stale"]
+    assert result["items"] == original["items"]
+    with monkeypatch.context() as patch:
+        patch.setattr(directory, "probe_bridge_health", lambda **_kw: SimpleNamespace(
+            status_available=False, wechat_logged_in=False, wechat_identity="",
+        ))
+        with pytest.raises(directory.GroupDirectoryUnavailable):
+            obj.list(include_portraits=False)
+    account[0] = "different-account"
+    assert obj.list(include_portraits=False)["items"] == []
+
+
 def test_temporary_health_failure_does_not_return_or_destroy_cached_directory(tmp_path, monkeypatch):
     obj, account, _ = service(tmp_path, monkeypatch)
     original = obj.list()

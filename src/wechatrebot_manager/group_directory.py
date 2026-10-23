@@ -126,7 +126,7 @@ class GroupDirectoryService:
             raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
         return data
 
-    def list(self, refresh: bool = False):
+    def list(self, refresh: bool = False, *, include_portraits: bool = True):
         with self._lock:
             try:
                 port, token, account = self._connection()
@@ -147,12 +147,13 @@ class GroupDirectoryService:
                     self._next_refresh_at = time.monotonic() + self._REFRESH_INTERVAL_SECONDS
                     self._last_error = ""
                 snapshot = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": account, "updated_at": None})
-                snapshot["items"] = [self._portraits.enrich(
-                    account, item, str(item.get("group_id") or ""),
-                    lambda group_id=item.get("group_id"): self._request(
-                        port, token, account, f"/api/manager/contacts/{quote(str(group_id), safe='')}"
-                    ).get("item", {}), force=refresh,
-                ) for item in snapshot["items"]]
+                if include_portraits:
+                    snapshot["items"] = [self._portraits.enrich(
+                        account, item, str(item.get("group_id") or ""),
+                        lambda group_id=item.get("group_id"): self._request(
+                            port, token, account, f"/api/manager/contacts/{quote(str(group_id), safe='')}"
+                        ).get("item", {}), force=refresh,
+                    ) for item in snapshot["items"]]
                 return {**snapshot,
                         "stale": bool(self._last_error),
                         "message": self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
@@ -160,7 +161,8 @@ class GroupDirectoryService:
                 raise
             except GroupDirectoryError as exc:
                 fallback = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None})
-                fallback["items"] = [self._portraits.enrich(self._account, item, str(item.get("group_id") or ""), None) for item in fallback["items"]]
+                if include_portraits:
+                    fallback["items"] = [self._portraits.enrich(self._account, item, str(item.get("group_id") or ""), None) for item in fallback["items"]]
                 return {**fallback,
                         "stale": True, "message": str(exc)}
 

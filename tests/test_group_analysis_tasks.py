@@ -237,7 +237,7 @@ def _service_with_live_probe(root, state):
     from wechatrebot_manager.scheduled_task_service import ScheduledTaskService
 
     class Directory:
-        def list(self, refresh=False):
+        def list(self, refresh=False, *, include_portraits=True):
             return {"account_id": state["account"], "stale": not bool(state["account"]),
                     "items": [{"group_id": GROUP}] if state["account"] else []}
 
