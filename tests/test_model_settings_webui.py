@@ -7,6 +7,122 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+def _mock_embedding_deletion(page):
+    """Keep the delivered UI while isolating model mutations from an installation."""
+    def preview_route(route):
+        response = route.fetch()
+        route.fulfill(response=response, body=response.text() + """
+        const originalPreview = window.createPreviewApi;
+        window.createPreviewApi = (helpers) => {
+          const controller = originalPreview(helpers), originalApi = controller.previewApi;
+          controller.previewApi = () => {
+            const api = originalApi(), bootstrap = api.bootstrap;
+            let providers = [
+              {id: 'custom/qwen', name: 'qwen3-embedding-8b', model: 'qwen3-embedding-8b',
+                service_kind: 'embedding', configured: true, references: ['长期记忆']},
+              {id: 'custom/gemini', name: 'gemini-embedding-2-preview', model: 'gemini-embedding-2-preview',
+                service_kind: 'embedding', configured: true, references: []},
+              {id: 'custom/chat', name: 'chat-model', model: 'chat-model',
+                service_kind: 'chat', configured: true, is_default: true, references: []}
+            ];
+            window.deleteCalls = [];
+            window.failDeletion = true;
+            api.bootstrap = async () => {
+              const result = await bootstrap();
+              result.data.providers = structuredClone(providers);
+              result.data.experience.onboarding_complete = true;
+              return result;
+            };
+            api.get_providers = () => ({ok: true, data: structuredClone(providers)});
+            api.delete_provider = (id, replacement) => {
+              window.deleteCalls.push([id, replacement]);
+              if (window.failDeletion) return {ok: false, error: {message: '模拟删除失败，请重试'}};
+              providers = providers.filter(item => item.id !== id);
+              return {ok: true, data: {id}};
+            };
+            return api;
+          };
+          return controller;
+        };
+        """)
+    page.route("**/preview.js*", preview_route)
+
+
+@pytest.mark.parametrize("theme,width,height,entry", [
+    ("light", 1440, 1024, "footer"),
+    ("dark", 1080, 680, "menu"),
+    ("light", 760, 800, "editor"),
+])
+def test_embedding_delete_identifies_target_and_keeps_replacement(browser, manager_url, tmp_path, theme, width, height, entry):
+    page = browser.new_page(viewport={"width": width, "height": height})
+    errors, failures = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("response", lambda response: failures.append(response.url) if response.status >= 400 else None)
+    _mock_embedding_deletion(page)
+    try:
+        page.add_init_script(f"localStorage.setItem('wechatrebot-theme', '{theme}')")
+        page.goto(manager_url)
+        expect(page).to_have_title(re.compile("机器人管理$"))
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        page.locator('.nav-item[data-page="settings"]').click()
+        target = page.locator(".provider-service").filter(has_text="qwen3-embedding-8b")
+        if entry == "menu":
+            target.locator("summary").click()
+            target.locator('[role="menuitem"][data-provider-delete]').click()
+        elif entry == "editor":
+            target.locator("footer [data-provider-edit]").click()
+            page.locator("#deleteProvider").click()
+        else:
+            target.locator("footer [data-provider-delete]").click()
+        expect(page.get_by_role("dialog")).to_be_visible()
+        expect(page.locator("#modalSubjectLabel")).to_have_text("将删除的模型")
+        expect(page.locator("#modalSubjectValue")).to_have_text("qwen3-embedding-8b")
+        expect(page.locator("#modalField label")).to_contain_text("删除后，长期记忆改用")
+        expect(page.locator("#modalInput option")).to_have_text(["gemini-embedding-2-preview"])
+        expect(page.locator("#modalIcon")).to_have_count(0)
+        expect(page.locator("#modalConfirm")).to_have_text("切换并删除")
+        # All controls, including the replacement select, participate in focus trapping.
+        page.locator("#modalConfirm").focus()
+        page.keyboard.press("Tab")
+        expect(page.locator("#modalInput")).to_be_focused()
+        page.keyboard.press("Shift+Tab")
+        expect(page.locator("#modalConfirm")).to_be_focused()
+        bounds = page.get_by_role("dialog").bounding_box()
+        assert bounds and 0 <= bounds["x"] and bounds["x"] + bounds["width"] <= width
+        page.screenshot(path=str(tmp_path / f"model-delete-{theme}-{entry}.png"))
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalError")).to_have_text("模拟删除失败，请重试")
+        expect(page.locator("#modalSubjectValue")).to_have_text("qwen3-embedding-8b")
+        expect(page.locator("#modalCancel")).to_be_enabled()
+        expect(page.locator("#modalConfirm")).to_be_enabled()
+        page.evaluate("window.failDeletion = false")
+        page.locator("#modalConfirm").click()
+        expect(page.get_by_role("dialog")).to_be_hidden()
+        expect(target).to_have_count(0)
+        replacement = page.locator(".provider-service").filter(has_text="gemini-embedding-2-preview")
+        expect(replacement).to_be_visible()
+        assert page.evaluate("window.deleteCalls") == [["custom/qwen", "custom/gemini"]] * 2
+        # A later unreferenced deletion must show its own target and no stale replacement.
+        replacement.locator("footer [data-provider-delete]").click()
+        expect(page.locator("#modalSubjectValue")).to_have_text("gemini-embedding-2-preview")
+        expect(page.locator("#modalInput")).to_have_count(0)
+        expect(page.locator("#modalConfirm")).to_have_text("确认删除")
+        page.locator("#modalCancel").click()
+        expect(replacement).to_be_visible()
+        replacement.locator("footer [data-provider-edit]").click()
+        page.locator("#providerApiKey").fill("preview-only")
+        page.locator("#closeProviderEditor").click()
+        expect(page.get_by_role("dialog")).to_be_visible()
+        expect(page.locator("#modalSubject")).to_be_hidden()
+        page.locator("#modalCancel").click()
+        assert page.url == manager_url
+        assert not errors, errors
+        assert not failures, failures
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("theme,width,height", [("light", 1440, 1024), ("dark", 1080, 680)])
 def test_provider_icons_default_save_and_editor_navigation(browser, manager_url, tmp_path, theme, width, height):
     page = browser.new_page(viewport={"width": width, "height": height})
