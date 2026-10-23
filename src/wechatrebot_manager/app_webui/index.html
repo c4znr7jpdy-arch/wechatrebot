@@ -475,7 +475,9 @@
   <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
   <div class="modal-backdrop" id="modalBackdrop" hidden>
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-      <div class="modal-icon" id="modalIcon">!</div><h2 id="modalTitle">确认操作</h2><p id="modalMessage"></p><div id="modalField"></div>
+      <h2 id="modalTitle">确认操作</h2>
+      <dl class="modal-subject" id="modalSubject" hidden><dt id="modalSubjectLabel"></dt><dd id="modalSubjectValue"></dd></dl>
+      <p id="modalMessage"></p><div id="modalField"></div>
       <div class="modal-progress" id="modalProgress" hidden><span id="modalProgressBar"></span></div>
       <div class="modal-error" id="modalError" role="alert" hidden></div>
         <div class="modal-actions"><button class="button ghost" id="modalCancel" data-action-bound disabled>取消</button><button class="button danger" id="modalConfirm" data-action-bound disabled>确认</button></div>

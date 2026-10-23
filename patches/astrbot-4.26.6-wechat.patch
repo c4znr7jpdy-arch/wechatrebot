@@ -533,6 +533,18 @@ diff --git a/official/astrbot/core/star/star_manager.py b/expected/astrbot/core/
 +                    if smd.name:
                          await self._unbind_plugin(smd.name, specified_module_path)
 
+diff --git a/official/astrbot/core/provider/manager.py b/expected/astrbot/core/provider/manager.py
+--- a/official/astrbot/core/provider/manager.py
++++ b/expected/astrbot/core/provider/manager.py
+@@ -833,6 +833,8 @@
+                     prov for prov in config["provider"] if prov.get("id") != tpid
+                 ]
+             config.save_config()
++            # Deletion replaces the list; API queries must use the saved list.
++            self.providers_config = config["provider"]
+             logger.info(f"Provider {target_prov_ids} 已从配置中删除。")
+ 
+     async def update_provider(self, origin_provider_id: str, new_config: dict) -> None:
 diff --git a/official/astrbot/core/provider/sources/openai_source.py b/expected/astrbot/core/provider/sources/openai_source.py
 --- a/official/astrbot/core/provider/sources/openai_source.py
 +++ b/expected/astrbot/core/provider/sources/openai_source.py

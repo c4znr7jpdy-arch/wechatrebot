@@ -599,17 +599,16 @@ window.createModelServices = function (helpers) {
       toast("当前模型仍在被机器人或功能使用。请先添加另一个可用模型，再删除它。", "error");
       return;
     }
-    const referenceCopy = references.length
-      ? `使用它的功能：${references.join("、")}。删除前会自动切换到你选择的模型。`
-      : "";
+    const replacementUsers = [...new Set([...(service.is_default ? ["机器人回复"] : []), ...references])].join("、");
     confirmAction({
-      title: `删除 ${service.name}？`,
-      message: referenceCopy || (service.is_default
-        ? "删除前会先把机器人回复切换到你选择的模型；功能和聊天记录不会受影响。"
-        : "仅删除这项模型服务，不会删除功能或聊天记录。"),
-      confirmText: "删除模型服务",
+      title: "删除模型服务？",
+      subject: {label: "将删除的模型", value: service.name},
+      message: needsReplacement
+        ? "此模型正在使用中。确认后先切换到下方的接替模型，再删除上方模型。"
+        : "仅删除上方模型服务，不会删除功能或聊天记录。",
+      confirmText: needsReplacement ? "切换并删除" : "确认删除",
       field: needsReplacement ? {
-        label: references.length ? "接替机器人及相关功能的模型" : "接替机器人回复的模型",
+        label: `删除后，${replacementUsers}改用`,
         type: "select",
         value: alternatives[0]?.id || "",
         options: alternatives.map((item) => ({value: item.id, label: item.name})),

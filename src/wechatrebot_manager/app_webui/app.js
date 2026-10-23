@@ -658,11 +658,14 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
+  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
     $("#modalTitle").textContent = title;
+    $("#modalSubject").hidden = !subject;
+    $("#modalSubjectLabel").textContent = subject?.label || "";
+    $("#modalSubjectValue").textContent = subject?.value || "";
     $("#modalMessage").textContent = message;
     confirm.textContent = confirmText;
     cancel.textContent = cancelText;
@@ -1081,7 +1084,7 @@
     });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const targets = $$("button:not(:disabled), input:not(:disabled)", $("#modalBackdrop"));
+      const targets = $$("button:not(:disabled), input:not(:disabled), select:not(:disabled)", $("#modalBackdrop"));
       const first = targets[0], last = targets[targets.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }

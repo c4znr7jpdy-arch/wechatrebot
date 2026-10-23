@@ -738,11 +738,6 @@ html[data-skin="soft"] .onboarding-dialog {
   box-shadow: var(--shadow-lg);
 }
 
-html[data-skin="soft"] .modal-icon {
-  border-radius: var(--radius-card);
-  background: var(--surface-muted);
-}
-
 html[data-skin="soft"] .modal-actions .button {
   border-radius: var(--radius-pill);
 }

@@ -6,10 +6,15 @@ import inspect
 from pathlib import Path
 import shutil
 import subprocess
-from types import SimpleNamespace
+import sys
+from types import MethodType, SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 from openai.resources.chat.completions import AsyncCompletions
 import pytest
+
+from test_hot_config_runtime import _patched_runtime_source, _runtime_function
+from wechatrebot_manager.engine_api import EngineApiClient
 
 
 ROOT = Path(__file__).parents[1]
@@ -114,3 +119,139 @@ def test_provider_rejects_invalid_per_request_timeout(provider_request, timeout)
     with pytest.raises(ValueError, match="超时必须为有限正数"):
         asyncio.run(request(timeout=timeout))
     assert requests == []
+
+
+@pytest.fixture
+def provider_catalog(tmp_path, monkeypatch):
+    manager_source = _patched_runtime_source(
+        tmp_path, Path("astrbot/core/provider/manager.py"),
+    )
+    service_source = _patched_runtime_source(
+        tmp_path, Path("astrbot/dashboard/services/config_service.py"),
+    )
+    saved = []
+
+    class Config(dict):
+        def save_config(self):
+            saved.append(copy.deepcopy(self))
+
+    config = Config(
+        provider=[
+            {"id": f"{source}/{model}", "model": model, "provider_source_id": source,
+             "provider_type": kind, "enable": True}
+            for source, model, kind in (
+                ("shared", "qwen3-embedding-8b", "embedding"),
+                ("shared", "gemini-embedding-2-preview", "embedding"),
+                ("other", "reply-model", "chat_completion"),
+            )
+        ],
+        provider_sources=[{"id": source} for source in ("shared", "other")],
+    )
+    manager = SimpleNamespace(
+        acm=SimpleNamespace(default_conf=config),
+        providers_config=config["provider"],
+        provider_sources_config=config["provider_sources"],
+        resource_lock=asyncio.Lock(), reload_lock=asyncio.Lock(),
+        inst_map={item["id"]: copy.deepcopy(item) for item in config["provider"]},
+        provider_insts=[], stt_provider_insts=[], tts_provider_insts=[],
+    )
+
+    async def terminate(provider_id):
+        manager.inst_map.pop(provider_id, None)
+
+    async def load(provider):
+        manager.inst_map[provider["id"]] = copy.deepcopy(provider)
+
+    manager.terminate_provider, manager.load_provider = terminate, load
+    scope = {"copy": copy, "astrbot_config": config,
+             "logger": SimpleNamespace(info=lambda *_args: None)}
+    for name in ("delete_provider", "create_provider", "update_provider", "reload",
+                 "get_provider_config_by_id", "get_merged_provider_config"):
+        setattr(manager, name, MethodType(_runtime_function(manager_source, name, scope), manager))
+    monkeypatch.setitem(sys.modules, "astrbot.core.utils.llm_metadata", SimpleNamespace(LLM_METADATAS={}))
+    service = SimpleNamespace(config=config, provider_manager=manager, CAPABILITY_TO_PROVIDER_TYPE={})
+    scope = {"copy": copy, "save_config": lambda *_args, **_kwargs: config.save_config()}
+    for name in ("list_providers", "list_provider_sources", "_resolve_provider_type",
+                 "delete_provider", "delete_provider_source"):
+        setattr(service, name, MethodType(_runtime_function(service_source, name, scope), service))
+    client = EngineApiClient(tmp_path)
+    requests = []
+
+    def request(method, path, payload=None):
+        requests.append((method, path))
+        parsed = urlsplit(path)
+        if method == "GET" and parsed.path == "/api/v1/providers":
+            return service.list_providers()
+        if method == "GET" and parsed.path == "/api/v1/provider-sources":
+            return service.list_provider_sources()
+        query = parse_qs(parsed.query)
+        if method == "DELETE" and parsed.path == "/api/v1/providers/by-id":
+            asyncio.run(service.delete_provider(query["provider_id"][0]))
+            return {}
+        if method == "DELETE" and parsed.path == "/api/v1/provider-sources/by-id":
+            asyncio.run(service.delete_provider_source(query["source_id"][0]))
+            return {}
+        raise AssertionError((method, path))
+
+    client.request = request
+    return SimpleNamespace(manager=manager, service=service, client=client,
+                           config=config, saved=saved, requests=requests)
+
+
+def test_embedding_delete_readback_preserves_shared_source_and_second_model(provider_catalog):
+    catalog = provider_catalog
+    target, remaining, other = [item["id"] for item in catalog.config["provider"]]
+
+    catalog.client.delete_provider(target, "shared")
+
+    assert [item["id"] for item in catalog.service.list_providers()["providers"]] == [remaining, other]
+    assert catalog.manager.get_provider_config_by_id(target) is None
+    assert catalog.manager.get_provider_config_by_id(remaining)["model"] == "gemini-embedding-2-preview"
+    assert target not in catalog.manager.inst_map
+    assert remaining in catalog.manager.inst_map
+    assert catalog.config == catalog.saved[-1]
+    assert [item["id"] for item in catalog.config["provider_sources"]] == ["shared", "other"]
+    assert [(method, path) for method, path in catalog.requests if method == "DELETE"] == [
+        ("DELETE", "/api/v1/providers/by-id?provider_id=shared%2Fqwen3-embedding-8b"),
+    ]
+
+
+def test_last_embedding_delete_cleans_only_its_unused_source(provider_catalog):
+    catalog = provider_catalog
+    first, second, other = [item["id"] for item in catalog.config["provider"]]
+    catalog.client.delete_provider(first, "shared")
+    catalog.client.delete_provider(second, "shared")
+
+    assert [item["id"] for item in catalog.service.list_providers()["providers"]] == [other]
+    assert [item["id"] for item in catalog.config["provider_sources"]] == ["other"]
+    assert catalog.manager.get_provider_config_by_id(second) is None
+    assert catalog.config == catalog.saved[-1]
+
+
+def test_source_delete_after_single_model_delete_uses_current_catalog(provider_catalog):
+    catalog = provider_catalog
+    first, second, other = [item["id"] for item in catalog.config["provider"]]
+    catalog.client.delete_provider(first, "shared")
+    asyncio.run(catalog.service.delete_provider_source("shared"))
+
+    assert [item["id"] for item in catalog.service.list_providers()["providers"]] == [other]
+    assert catalog.manager.get_provider_config_by_id(second) is None
+    assert set(catalog.manager.inst_map) == {other}
+    assert [item["id"] for item in catalog.config["provider_sources"]] == ["other"]
+
+
+def test_deleted_embedding_can_be_recreated_and_updated_without_stale_records(provider_catalog):
+    catalog = provider_catalog
+    target = copy.deepcopy(catalog.config["provider"][0])
+    catalog.client.delete_provider(target["id"], "shared")
+    asyncio.run(catalog.manager.create_provider(target))
+    updated = {**target, "embedding_dimensions": 1024}
+    asyncio.run(catalog.manager.update_provider(target["id"], updated))
+
+    records = catalog.service.list_providers()["providers"]
+    matches = [item for item in records if item["id"] == target["id"]]
+    assert len(matches) == 1
+    assert matches[0]["embedding_dimensions"] == 1024
+    assert catalog.manager.get_provider_config_by_id(target["id"]) == updated
+    assert catalog.manager.inst_map[target["id"]] == updated
+    assert catalog.config == catalog.saved[-1]
