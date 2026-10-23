@@ -171,8 +171,11 @@ def test_proactive_denial_precedes_tts_and_session_work(background, tmp_path):
     owner._get_session_config.assert_not_called()
 
 
-def test_meme_rechecks_permission_after_image_conversion(background):
-    source = (ROOT / "runtime/meme_manager/mixins/event_handlers.py").read_text("utf-8")
+def test_meme_rechecks_permission_after_image_conversion(background, tmp_path):
+    directory = tmp_path / "meme_manager"
+    directory.mkdir()
+    source = _patched(directory, "meme_manager", "mixins/event_handlers.py",
+                      all_patches=True, source_root=ROOT / "runtime")
     function = _runtime_function(source, "_send_meme_image", {"MessageChain": list})
     async def convert(image):
         background.save([])
@@ -186,8 +189,11 @@ def test_meme_rechecks_permission_after_image_conversion(background):
     background.context.send_message.assert_not_called()
 
 
-def test_meme_reply_uses_authorized_original_event(background):
-    source = (ROOT / "runtime/meme_manager/mixins/event_handlers.py").read_text("utf-8")
+def test_meme_reply_uses_authorized_original_event(background, tmp_path):
+    directory = tmp_path / "meme_manager"
+    directory.mkdir()
+    source = _patched(directory, "meme_manager", "mixins/event_handlers.py",
+                      all_patches=True, source_root=ROOT / "runtime")
     function = _runtime_function(source, "_send_meme_image", {"MessageChain": list})
     event = asyncio.run(background.module.background_event(
         background.context, SESSION, "meme_manager"))[1]
@@ -198,8 +204,11 @@ def test_meme_reply_uses_authorized_original_event(background):
     background.context.send_message.assert_not_called()
 
 
-def test_office_debug_notification_checks_destination_permissions(background):
-    source = (ROOT / "runtime/astrbot_plugin_office_assistant/services/error_hook_service.py").read_text("utf-8")
+def test_office_debug_notification_checks_destination_permissions(background, tmp_path):
+    directory = tmp_path / "astrbot_plugin_office_assistant"
+    directory.mkdir()
+    source = _patched(directory, "astrbot_plugin_office_assistant", "services/error_hook_service.py",
+                      all_patches=True, source_root=ROOT / "runtime")
     function = _runtime_function(source, "handle_plugin_error", {
         "MessageChain": lambda: NS(message=lambda text: [text]), "logger": Mock()})
     owner = NS(_context=background.context, _config={"debug_error_hook_target_session": SESSION},
