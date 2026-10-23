@@ -77,7 +77,15 @@ def test_private_entries_share_profile_dialog_and_styles(browser, manager_url, t
             page.set_viewport_size({"width": 1440, "height": 1000})
         history_entry = open_private_history(page)
         copy = page.locator("#copySenderId")
-        assert history_entry.evaluate("e => getComputedStyle(e).borderRadius") == copy.evaluate("e => getComputedStyle(e).borderRadius")
+        # Read both controls from one inspector snapshot. History polling can
+        # replace the inspector between two locator evaluations, which compares
+        # controls from different render generations on slower Windows runners.
+        border_radii = page.locator("#conversationInspector").evaluate("root => {
+          const entry = root.querySelector('[data-contact-profile]');
+          const copy = root.querySelector('#copySenderId');
+          return [getComputedStyle(entry).borderRadius, getComputedStyle(copy).borderRadius];
+        }")
+        assert border_radii[0] == border_radii[1]
         history_entry.click()
         expect(dialog).to_be_visible()
         expect(page.locator(".contact-profile-dialog")).to_have_count(1)
