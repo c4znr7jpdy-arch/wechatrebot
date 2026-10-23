@@ -80,11 +80,11 @@ def test_private_entries_share_profile_dialog_and_styles(browser, manager_url, t
         # Read both controls from one inspector snapshot. History polling can
         # replace the inspector between two locator evaluations, which compares
         # controls from different render generations on slower Windows runners.
-        border_radii = page.locator("#conversationInspector").evaluate("root => {
+        border_radii = page.locator("#conversationInspector").evaluate("""root => {
           const entry = root.querySelector('[data-contact-profile]');
           const copy = root.querySelector('#copySenderId');
           return [getComputedStyle(entry).borderRadius, getComputedStyle(copy).borderRadius];
-        }")
+        }""")
         assert border_radii[0] == border_radii[1]
         history_entry.click()
         expect(dialog).to_be_visible()
