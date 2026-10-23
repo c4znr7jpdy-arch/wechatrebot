@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from types import SimpleNamespace
 import types
 import typing
@@ -78,7 +79,7 @@ class Event:
 
 
 @pytest.fixture
-def command_runtime(tmp_path):
+def command_runtime(tmp_path, monkeypatch):
     engine = ROOT / "vendor/engine"
     plugin_path = PROJECT_PLUGINS / MODULE / "main.py"
     if not engine.is_dir() or not plugin_path.is_file():
@@ -136,8 +137,11 @@ def command_runtime(tmp_path):
     registry.get_handlers_by_event_type = lambda *args, **kwargs: get_handlers(registry, *args, **kwargs)
     policy_scope = {}
     exec((tmp_path / "astrbot/core/platform/wechat_group_policy.py").read_text("utf-8"), policy_scope)
+    monkeypatch.setitem(sys.modules, "astrbot.core.star.session_plugin_manager", SimpleNamespace(
+        SessionPluginManager=SimpleNamespace(is_plugin_enabled_for_session=AsyncMock(return_value=True))))
     process = _runtime_function((tmp_path / stage_path).read_text("utf-8"), "process", {
         "Path": Path, "group_plugins": policy_scope["group_plugins"], "star_map": star_map,
+        "event_plugins": policy_scope["event_plugins"],
         "logger": Mock(), "At": type("At", (), {}), "AtAll": type("AtAll", (), {}),
         "Reply": type("Reply", (), {}), "PermissionTypeFilter": type("PermissionTypeFilter", (), {}),
         "CommandGroupFilter": type("CommandGroupFilter", (), {}),
@@ -227,3 +231,29 @@ def test_patched_waking_stage_obeys_independent_setu_checkbox(command_runtime, t
     asyncio.run(process(stage, event))
     key = "jiang_commands.setu" if handler_name == "random_image" else "jiang_commands"
     assert (metadata in event.get_extra("activated_handlers", [])) == (key in allowed)
+
+
+@pytest.mark.parametrize("policy,expected", [
+    ({"allowed_features": [MODULE]}, True),
+    ({"allowed_features": []}, False),
+    ({"allowed_features": [MODULE], "bot_enabled": False}, False),
+])
+def test_patched_waking_stage_enforces_private_contact_permissions(
+        command_runtime, tmp_path, monkeypatch, policy, expected):
+    process, stage, metadata, _, _ = command_runtime
+    path = tmp_path / "data/manager/private-chat-policies.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"schema_version": 1, "accounts": {
+        "wxid_bot": {"contacts": {"wxid_user": policy}}
+    }}), encoding="utf-8")
+    runtime = tmp_path / "app/astrbot"
+    runtime.mkdir(parents=True)
+    monkeypatch.chdir(runtime)
+    event = Event("/bt test")
+    event.get_group_id = lambda: ""
+    event.is_private_chat = lambda: True
+    event.unified_msg_origin = "hook:FriendMessage:wxid_user"
+    asyncio.run(process(stage, event))
+    assert (metadata in event.get_extra("activated_handlers", [])) is expected
+    if not expected:
+        assert REGISTERED_NAME not in (getattr(event, "plugins_name", None) or []) or event.stopped

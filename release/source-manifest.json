@@ -98,6 +98,11 @@
     },
     {
       "origin": "commercial",
+      "source": "patches/astrbot-4.26.6-background-permissions.patch",
+      "target": "legal/corresponding-source/astrbot-4.26.6-background-permissions.patch"
+    },
+    {
+      "origin": "commercial",
       "source": "patches/astrbot-4.26.6-license.patch",
       "target": "legal/corresponding-source/astrbot-4.26.6-license.patch"
     },

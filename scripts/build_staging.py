@@ -492,6 +492,10 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
         commercial_root / "patches/astrbot-4.26.6-license.patch"
     ):
         raise RuntimeError("Runtime authorization patch is stale; rebuild the runtime")
+    if runtime_manifest.get("astrbot_background_permissions_patch_sha256") != _sha256(
+        commercial_root / "patches/astrbot-4.26.6-background-permissions.patch"
+    ):
+        raise RuntimeError("Runtime background permissions are stale; rebuild the runtime")
     return runtime_manifest
 
 

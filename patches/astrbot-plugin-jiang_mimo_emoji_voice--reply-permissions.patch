@@ -1,0 +1,66 @@
+--- a/main.py
++++ b/main.py
+@@ -11,6 +11,8 @@
+ from astrbot.api.event import AstrMessageEvent, filter
+ from astrbot.api.message_components import Image, Plain, Record
+ from astrbot.api.star import Context, Star
++from astrbot.core.platform.wechat_group_policy import plugin_allowed
++from astrbot.core.wechat_reply_policy import voice_reply_allowed
+ 
+ 
+ _MEME_PATH_RE = re.compile(r"(?:^|/)meme_manager/(?:packs/[^/]+/)?memes/", re.I)
+@@ -137,6 +139,14 @@
+         self.ffmpeg_path = str(raw.get("ffmpeg_path", "") or "").strip()
+         self.keep_meme = bool(raw.get("keep_meme", True))
+ 
++    async def _reply_allowed(self, event: AstrMessageEvent) -> bool:
++        if not voice_reply_allowed(event):
++            return False
++        if not await plugin_allowed(self.context, event, "jiang_mimo_emoji_voice"):
++            logger.info("[jiang_mimo_emoji_voice] 跳过表情语音：当前会话未授权")
++            return False
++        return voice_reply_allowed(event)
++
+     def _mimo_plugin(self) -> Any | None:
+         metadata = self.context.get_registered_star("astrbot_plugin_mimo_tts_clone")
+         plugin = getattr(metadata, "star_cls", None) if metadata else None
+@@ -278,6 +288,8 @@
+             )
+             return
+ 
++        if not await self._reply_allowed(event):
++            return
+         plugin = self._mimo_plugin()
+         if plugin is None or not callable(getattr(plugin, "synthesize_text", None)):
+             return
+@@ -292,6 +304,9 @@
+             )
+             return
+ 
++        if not await self._reply_allowed(event):
++            self._discard_transcoded_audio(audio_path)
++            return
+         audio_component = Record.fromFileSystem(str(audio_path))
+         retained = [
+             component
+@@ -314,15 +329,17 @@
+         path_text = event.get_extra("jiang_mimo_emoji_voice_audio")
+         if not path_text:
+             return
+-        path = Path(str(path_text))
++        self._discard_transcoded_audio(Path(str(path_text)))
++        event.set_extra("jiang_mimo_emoji_voice_audio", None)
++
++    def _discard_transcoded_audio(self, path: Path) -> None:
+         # MiMo 插件自己的 WAV 由它管理；这里只清理本适配层生成的临时 SILK。
+         if path.suffix.lower() in {".silk", ".slik"} and path.name.startswith("jiang_mimo_emoji_voice_"):
+             try:
+                 path.unlink(missing_ok=True)
+             except Exception as exc:
+                 logger.warning(
+-                    "[jiang_mimo_emoji_voice] 临时 MP3 清理失败 path=%s error=%s",
++                    "[jiang_mimo_emoji_voice] 临时语音清理失败 path=%s error=%s",
+                     path,
+                     exc,
+                 )
+-        event.set_extra("jiang_mimo_emoji_voice_audio", None)

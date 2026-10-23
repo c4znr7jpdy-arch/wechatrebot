@@ -338,6 +338,7 @@ def _apply_astrbot_patch(commercial_root: Path, site_packages: Path) -> None:
     patches = (
         commercial_root / "patches" / "astrbot-4.26.6-wechat.patch",
         commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch",
+        commercial_root / "patches" / "astrbot-4.26.6-background-permissions.patch",
         commercial_root / "patches" / "astrbot-4.26.6-license.patch",
     )
     site_relative = site_packages.relative_to(commercial_root).as_posix()
@@ -484,6 +485,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "astrbot_outbound_policy_patch_sha256": sha256_file(
             commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch"
+        ),
+        "astrbot_background_permissions_patch_sha256": sha256_file(
+            commercial_root / "patches" / "astrbot-4.26.6-background-permissions.patch"
         ),
         "astrbot_license_patch_sha256": sha256_file(
             commercial_root / "patches" / "astrbot-4.26.6-license.patch"

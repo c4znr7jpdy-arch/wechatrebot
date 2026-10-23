@@ -13,11 +13,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from test_plugin_portability import _patched
 
 
 PLUGIN = "astrbot_plugin_mimo_tts_clone"
 SESSION = "wechat:GroupMessage:room"
 SPEECH = dict(text="hello", emotion="neutral", voice="", style="")
+
+
+@pytest.fixture(scope="module")
+def patched_plugins(tmp_path_factory):
+    root = tmp_path_factory.mktemp("voice-inputs")
+    plugin = root / PLUGIN
+    plugin.mkdir()
+    _patched(plugin, PLUGIN, "main.py", all_patches=True)
+    return root
 
 
 @pytest.fixture
@@ -92,6 +102,8 @@ def plugin_for(path, *, media_type="record"):
         _send_audio_result=AsyncMock(return_value=media_type),
         _conversation_id=lambda event: "conversation",
         logger=Mock(),
+        _voice_allowed=AsyncMock(return_value=True),
+        _discard_voice_output=AsyncMock(),
     )
 
 
@@ -441,6 +453,7 @@ def test_actual_send_method_reports_transport_without_unsafe_tool_retry(
         _transport_source=lambda path: (str(path), False),
         plugin_config=SimpleNamespace(audio_transport=transport, file_fallback_enabled=True),
         _send_shared_path_audio=AsyncMock(), logger=Mock(),
+        _voice_allowed=AsyncMock(return_value=True),
     )
     if expected == "error":
         with pytest.raises(Exception):
@@ -462,6 +475,7 @@ def test_no_record_and_disabled_fallback_is_not_silent_success(patched_plugins, 
         _transport_source=lambda path: (str(path), False),
         plugin_config=SimpleNamespace(audio_transport="local_path", file_fallback_enabled=False),
         logger=Mock(),
+        _voice_allowed=AsyncMock(return_value=True),
     )
     with pytest.raises(Exception):
         asyncio.run(send(plugin, event, tmp_path / "voice.wav"))
@@ -479,6 +493,7 @@ def test_actual_record_send_rejects_negative_adapter_receipt(patched_plugins, de
         _transport_source=lambda path: (str(path), False),
         plugin_config=SimpleNamespace(audio_transport="local_path", file_fallback_enabled=True),
         logger=Mock(),
+        _voice_allowed=AsyncMock(return_value=True),
     )
     with pytest.raises(RuntimeError):
         asyncio.run(send(plugin, event, tmp_path / "voice.wav", retry_as_file=False))

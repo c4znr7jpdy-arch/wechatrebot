@@ -139,6 +139,11 @@ def _load_main_module():
     star.Context = object
     star.Star = Star
     star.StarTools = types.SimpleNamespace()
+    background = types.ModuleType("astrbot.core.platform.wechat_background_policy")
+    async def send_background_message(context, session, chain, module, **kwargs):
+        return await context.send_message(session, chain)
+    background.send_background_message = send_background_message
+    sys.modules[background.__name__] = background
     sys.modules.update(
         {
             "astrbot": astrbot,

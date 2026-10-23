@@ -25,7 +25,7 @@ _GUIDES = {
     "jiang_commands.setu": ("发送一张随机图片", "在聊天中发送“图来”；需要自动撤回时打开开关并填写等待秒数。", "在群聊管理中独立勾选“图来”；“常用指令”不会代替此开关。自动撤回依赖微信返回可撤回的消息标识。", ("setu_recall_enabled", "setu_recall_seconds")),
     "jiang_group_notice": ("提示入群、退群和群昵称变化", "分别选择要提示的成员事件，并按场景修改加入、退出和群昵称变化文案。", "这不是微信群公告编辑器；仅在机器人收到成员变动事件时发送，不会补发历史通知。", ("notify_join", "notify_leave", "notify_profile_change", "welcome_title", "welcome_tail", "leave_title", "leave_body", "profile_change_title", "profile_change_body")),
     "jiang_image": ("用文字或参考图生成图片", "先到“设置 → 模型服务”添加图片模型，再在这里选择主模型；确有需要时可启用一个备用模型。服务地址、模型名称和密钥只在模型服务中管理。", "需要支持生图的图片模型服务；聊天模型不能自动替代生图模型。", ("primary_model", "secondary_enabled", "secondary_model", "use_system_proxy", "local_proxy_port")),
-    "jiang_mimo_emoji_voice": ("让表情回复带上语音", "先配置语音克隆和表情管理，再启用表情语音；它随表情触发，不受普通自动语音概率控制。普通文字回复的概率语音请到语音克隆页面设置。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
+    "jiang_mimo_emoji_voice": ("让表情回复带上语音", "当前聊天需同时允许语音克隆、表情管理和表情语音。它随表情触发，不受普通自动语音概率控制；联网查询回复保持文字，不转换语音。普通文字回复的概率语音请到语音克隆页面设置。", "依赖语音服务和可用的参考声音；语音生成可能产生费用。", ("enabled", "min_text_chars", "max_text_chars", "use_style_director")),
     "jiang_mystool": ("使用米游社签到", "在私聊中按提示绑定米游社账号，再启用需要的签到任务。", "需要你自己的米游社账号授权；不要在群聊公开验证码或登录凭据。", ()),
     "jiang_repeater": ("参与群里的复读互动", "启用后，在群聊出现连续相同消息时进行互动。", "无需额外配置；不想让机器人参与时可关闭。", ()),
     "jiang_rocom": ("使用洛克王国游戏助手", "按插件提示通过二维码或已有凭据绑定游戏账号，再使用角色、阵容、交换或家园能力。", "这是特定游戏工具，不是运势功能；账号凭据不要发到群里。", ()),

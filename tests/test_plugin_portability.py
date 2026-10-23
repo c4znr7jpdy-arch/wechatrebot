@@ -31,6 +31,7 @@ def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = 
     # Each portability patch may also adapt lifecycle code in other files.
     # Use an isolated repository so git does not silently skip paths outside
     # a parent checkout when pytest's temporary directory happens to be in it.
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     for patch in patches:
         for path in re.findall(r"^--- a/(.+)$", patch.read_text(encoding="utf-8"), re.MULTILINE):
             original = source_root / module / path
@@ -39,8 +40,6 @@ def _patched(tmp_path: Path, module: str, relative: str, *, all_patches: bool = 
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(original, destination)
-    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
-    for patch in patches:
         subprocess.run(
             ["git", "apply", "--ignore-space-change", str(patch)],
             cwd=tmp_path, check=True, capture_output=True,

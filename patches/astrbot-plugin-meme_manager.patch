@@ -72,6 +72,18 @@ diff --git a/mixins/event_handlers.py b/mixins/event_handlers.py
              return await self._resp_semantic_llm_impl(event, response, text)
          if semantic_mode == "tool":
              return await self._resp_semantic_impl(event, response, text)
+@@ -1569,7 +1572,10 @@ class EventHandlerMixin:
+ 
+     async def _send_meme_image(self, event: AstrMessageEvent, image: Image) -> None:
+         image = await self._ensure_image_send_format(image)
+-        if event.get_platform_name() in {"gewechat", "webchat"}:
++        from astrbot.core.platform.wechat_group_policy import plugin_allowed
++        if not await plugin_allowed(self.context, event, "meme_manager"):
++            return
++        if event.get_platform_name() in {"aiocqhttp", "gewechat", "webchat"}:
+             await event.send(MessageChain([image]))
+             return
+         await self.context.send_message(event.unified_msg_origin, MessageChain([image]))
 diff --git a/_conf_schema.json b/_conf_schema.json
 --- a/_conf_schema.json
 +++ b/_conf_schema.json

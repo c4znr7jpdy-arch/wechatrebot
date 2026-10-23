@@ -83,10 +83,18 @@ def test_refresh_repairs_public_targets_and_preserves_other_installations(tmp_pa
     (root / "manager").mkdir(parents=True)
     manager = root / "manager" / "WeChatReBot.exe"
     manager.write_bytes(b"manager")
+    (root / "卸载机器人.exe").write_bytes(b"legacy")
     (root / "unins000.exe").write_bytes(b"native")
     (root / "unins000.dat").write_bytes(b"data")
+    # This contract tests target ownership, not broken-link resolution. Keep all
+    # Shell targets real and isolated so saving a link cannot search the host for
+    # an absent installation (which can stall on unattended Windows runners).
+    other_manager = tmp_path / "other robot" / "manager" / "WeChatReBot.exe"
+    other_manager.parent.mkdir(parents=True)
+    other_manager.write_bytes(b"other manager")
     assert shortcuts.ensure_launcher_executable(root)
     environment = shortcuts._shortcut_environment(root, root / "启动机器人.exe", description="robot")
+    environment["TEST_OTHER_MANAGER"] = str(other_manager)
     script = shortcuts._REFRESH_SHORTCUT_SCRIPT
     for name in ("Desktop", "Programs", "CommonDesktopDirectory", "CommonPrograms"):
         folder = tmp_path / name
@@ -103,7 +111,7 @@ $link = $s.CreateShortcut((Join-Path $env:TEST_CommonPrograms '卸载微信机�
 $link.TargetPath = Join-Path $env:WECHATREBOT_SHORTCUT_WORKDIR '卸载机器人.exe'
 $link.Save()
 $link = $s.CreateShortcut((Join-Path $env:TEST_Programs 'WeChat ReBot.lnk'))
-$link.TargetPath = 'C:\OtherRobot\manager\WeChatReBot.exe'
+$link.TargetPath = $env:TEST_OTHER_MANAGER
 $link.Arguments = 'keep'
 $link.Save()
 '''
@@ -131,5 +139,5 @@ $s = New-Object UnicodeShortcutFactory
     assert Path(rows[0]["target"]) == root / "启动机器人.exe"
     assert rows[0]["args"] == ""
     assert Path(rows[1]["target"]) == root / "unins000.exe"
-    assert rows[2]["target"] == r"C:\OtherRobot\manager\WeChatReBot.exe"
+    assert Path(rows[2]["target"]) == other_manager
     assert rows[2]["args"] == "keep"

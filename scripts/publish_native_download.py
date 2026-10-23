@@ -65,6 +65,7 @@ def validate_runtime_for_release(runtime: Path) -> None:
         ("requirements_sha256", "release/runtime-requirements.lock"),
         ("astrbot_patch_sha256", "patches/astrbot-4.26.6-wechat.patch"),
         ("astrbot_outbound_policy_patch_sha256", "patches/astrbot-4.26.6-outbound-policy.patch"),
+        ("astrbot_background_permissions_patch_sha256", "patches/astrbot-4.26.6-background-permissions.patch"),
         ("astrbot_license_patch_sha256", "patches/astrbot-4.26.6-license.patch"),
     ):
         if manifest.get(field) != sha256_file(ROOT / path):
