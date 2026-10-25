@@ -115,7 +115,8 @@ def setup(tmp_path):
         "schema_version": 1, "enabled": True, "service_url": "https://license.example.test",
         "public_keys": {"test": public_key(service.key)},
     }), encoding="utf-8")
-    client = LicenseClient(tmp_path, transport=service, clock=clock, protection=protection)
+    client = LicenseClient(tmp_path, transport=service, clock=clock, protection=protection,
+                           machine_id_source=lambda root: "a" * 64)
     return client, service, clock, protection
 
 

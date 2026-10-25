@@ -235,7 +235,7 @@ async function wechatContactHasItsOwnRefreshCycle() {
 
   h.handlers.preview_activation_code = async () => ({preview_id: 'qr-preview', plan: 'month', valid_until: 1800000000});
   await h.preview('WRB-KEEP-INPUT');
-  h.element('#licensePlans').listeners.click({target: {closest: () => ({})}});
+  h.element('#licensePlans').listeners.click({target: {closest: selector => selector === '[data-license-plan]' ? {} : null}});
   assert.equal(h.element('#licenseContactPanel').scrolled, true);
   assert.equal(h.element('#licenseContactPanel').focused, true);
   remoteContact = {...h.contact, group_name: 'Updated WeChat group',
@@ -409,6 +409,142 @@ function runCenterCanStartWithBridgeConnected() {
   assert.equal(h.element('#primaryAction').disabled, false);
 }
 
+function clickTrial(h) {
+  return h.element('#licensePlans').listeners.click({target: {
+    closest: selector => selector === '[data-free-trial]' ? {} : null,
+  }});
+}
+
+function retryTrial(h) {
+  return h.element('#licensePlans').listeners.click({target: {
+    closest: selector => selector === '[data-trial-retry]' ? {} : null,
+  }});
+}
+
+async function freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded() {
+  const h = harness({can_connect: true});
+  await h.ui.initialize();
+  await h.ui.onNavigate('subscription');
+  assert.equal(h.element('#licenseConnect').hidden, false, 'An unactivated install must allow connecting WeChat');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  assert.match(h.element('#licenseTrialStatus').textContent, /请先连接微信/);
+  assert.equal(h.calls.some(([method]) => method === 'get_trial_status'), false);
+
+  h.handlers.get_trial_status = async () => ({free_trial: {
+    state: 'eligible', eligible: true, recoverable: false, account: h.snapshot.current_account,
+  }});
+  h.snapshot.current_account = 'wxid_trial_a';
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.element('#licenseActivateTrial').disabled, false);
+  assert.equal(h.element('#licenseActivateTrial').textContent, '激活免费试用');
+  assert.equal(h.element('#licenseCurrentAccountRow').hidden, false);
+  await h.ui.onNavigate('subscription');
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 1,
+    'Repeated navigation and the four-second local status poll must not query trial eligibility');
+
+  let release;
+  h.handlers.activate_free_trial = async account => {
+    assert.equal(account, 'wxid_trial_a');
+    await new Promise(resolve => { release = resolve; });
+    Object.assign(h.snapshot, {state: 'ready', authorized: true, can_connect: true,
+      license_id: 'trial-license', account, plan: 'trial', valid_until: 1800000000, remaining_seconds: 3600});
+    return structuredClone(h.snapshot);
+  };
+  const pending = clickTrial(h);
+  await clickTrial(h);
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  assert.equal(h.calls.filter(([method]) => method === 'activate_free_trial').length, 1);
+  assert.equal(h.confirmations.length, 0, 'Self-service trial activation must not show a confirmation dialog');
+  release(); await pending;
+  assert.equal(h.element('#licenseActivateTrial').textContent, '试用进行中');
+  assert.match(h.element('#licenseTrialStatus').textContent, /免费试用进行中，结束时间/);
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false, 'Trial activation must not start automation');
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 2);
+
+  Object.assign(h.snapshot, {state: 'expired', authorized: false, remaining_seconds: 0});
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.element('#licenseTrialStatus').textContent, '你的试用已结束，可联系群主购买');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 2,
+    'Signed local expiry must render without another remote eligibility query');
+}
+
+async function freeTrialStatesFailuresAndAccountChanges() {
+  for (const trialState of ['used', 'ended', 'paid']) {
+    const h = harness({current_account: 'wxid_trial'});
+    h.handlers.get_trial_status = () => ({free_trial: {state: trialState, eligible: false, recoverable: false}});
+    await h.ui.initialize(); await h.ui.onNavigate('subscription');
+    assert.equal(h.element('#licenseActivateTrial').disabled, true);
+    assert.equal(h.element('#licenseTrialStatus').textContent, trialState === 'paid'
+      ? '当前已有付费授权。' : trialState === 'used' ? '当前设备或微信账号已领取过试用，可联系群主购买'
+        : '你的试用已结束，可联系群主购买');
+    await clickTrial(h);
+    assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false);
+  }
+
+  const h = harness({current_account: 'wxid_trial_a'});
+  h.handlers.get_trial_status = () => { throw new Error('试用服务暂不可达'); };
+  await h.ui.initialize(); await h.ui.onNavigate('subscription');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  assert.equal(h.element('#licenseTrialRetry').hidden, false);
+  assert.equal(h.element('#licenseTrialStatus').textContent, '试用服务暂不可达');
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 1);
+
+  h.handlers.get_trial_status = () => ({free_trial: {state: 'active', eligible: false,
+    recoverable: true, account: 'wxid_trial_a', valid_until: 1800000000, remaining_seconds: 500}});
+  await retryTrial(h);
+  assert.equal(h.element('#licenseActivateTrial').textContent, '恢复免费试用');
+  assert.equal(h.element('#licenseActivateTrial').disabled, false);
+  h.handlers.activate_free_trial = () => { throw new Error('微信登录账号已变化'); };
+  await clickTrial(h);
+  assert.match(h.element('#licenseFeedback').textContent, /微信登录账号已变化/);
+  assert.equal(h.element('#licenseFeedback').dataset.tone, 'error');
+
+  let releaseOld, releaseNew;
+  h.snapshot.current_account = 'wxid_trial_b';
+  h.handlers.get_trial_status = () => new Promise(resolve => { releaseOld = resolve; });
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  h.snapshot.current_account = 'wxid_trial_c';
+  h.handlers.get_trial_status = () => new Promise(resolve => { releaseNew = resolve; });
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  releaseOld({free_trial: {state: 'eligible', eligible: true, account: 'wxid_trial_b'}}); await flush();
+  assert.equal(h.element('#licenseActivateTrial').disabled, true, 'A response for the previous account must not restore eligibility');
+  releaseNew({free_trial: {state: 'used', eligible: false, account: 'wxid_trial_c'}}); await flush();
+  assert.equal(h.element('#licenseTrialStatus').textContent, '当前设备或微信账号已领取过试用，可联系群主购买');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+}
+
+async function paidRedemptionInvalidatesOutstandingTrialQuery() {
+  const h = harness({current_account: 'wxid_trial'});
+  let release;
+  h.handlers.get_trial_status = () => new Promise(resolve => { release = resolve; });
+  await h.ui.initialize();
+  const pending = h.ui.onNavigate('subscription');
+  await flush();
+  h.handlers.preview_activation_code = () => ({preview_id: 'paid', plan: 'month', valid_until: 1800000000});
+  await h.preview('PAID-CODE');
+  h.handlers.redeem_activation_code = () => {
+    Object.assign(h.snapshot, {state: 'ready', authorized: true, account: 'wxid_trial',
+      license_id: 'paid-license', plan: 'month', valid_until: 1800000000});
+    return structuredClone(h.snapshot);
+  };
+  await h.click('#licenseConfirmRedeem');
+  release({free_trial: {state: 'eligible', eligible: true, account: 'wxid_trial'}});
+  await pending; await flush();
+  assert.equal(h.element('#licenseTrialStatus').textContent, '当前已有付费授权。');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  await clickTrial(h);
+  assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false);
+
+  const ended = harness({state: 'expired', plan: 'trial', license_id: 'trial-license',
+    account: 'wxid_old', current_account: ''});
+  await ended.ui.initialize();
+  assert.equal(ended.element('#licenseTrialStatus').textContent, '你的试用已结束，可联系群主购买');
+}
+
 (async () => {
   await activationAndRecovery();
   await expiryAndUnconfigured();
@@ -419,6 +555,9 @@ function runCenterCanStartWithBridgeConnected() {
   await contactFailureDoesNotBlockAnExistingCode();
   await invalidOrBrokenQrImagesAreHidden();
   await validBundledFallbackShowsTheRefreshWarning();
+  await freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded();
+  await freeTrialStatesFailuresAndAccountChanges();
+  await paidRedemptionInvalidatesOutstandingTrialQuery();
   runCenterCanStartWithBridgeConnected();
   process.stdout.write('Subscription UI activation, expiry, confirmation and WeChat QR checks passed.\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

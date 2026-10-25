@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
   <link rel="stylesheet" href="provider-settings.css?v=20261012">
-  <link rel="stylesheet" href="subscription.css?v=20261009">
+  <link rel="stylesheet" href="subscription.css?v=20261025">
   <link rel="stylesheet" href="activity.css?v=20261010">
   <script src="activity-errors.js"></script>
   <link rel="stylesheet" href="settings-layout.css">
@@ -179,7 +179,7 @@
               <div><dt>绑定微信</dt><dd id="licenseAccount">尚未绑定</dd></div>
             </dl>
             <ol class="subscription-steps" aria-label="授权步骤">
-              <li id="licenseStepCode"><span>1</span>领取激活码</li><li id="licenseStepRedeem"><span>2</span>兑换授权</li><li id="licenseStepAccount"><span>3</span>确认微信账号</li>
+              <li id="licenseStepCode"><span>1</span>选择授权方式</li><li id="licenseStepRedeem"><span>2</span>激活授权</li><li id="licenseStepAccount"><span>3</span>确认微信账号</li>
             </ol>
             <div class="subscription-account" id="licenseCurrentAccountRow" hidden><span>当前登录微信</span><strong id="licenseCurrentAccount"></strong></div>
             <p class="subscription-pause-note" id="licensePausedInfo" hidden>自动回复、模型调用、主动推送和定时任务已暂停。微信与数据保留；续费后由你确认恢复，不补发暂停期间的任务。</p>
@@ -197,14 +197,14 @@
           </section>
 
           <section class="subscription-plans-section" aria-labelledby="subscriptionPlansTitle">
-            <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>微信扫码入群，联系管理员领取激活码。模型费用自理。</p></div>
+            <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>免费试用可直接激活；月付、年付请入群联系管理员。模型费用自理。</p></div>
             <div class="subscription-plans" id="licensePlans"><p class="subtle">正在读取套餐…</p></div>
           </section>
 
           <div class="subscription-activation-grid">
             <section class="subscription-group panel" id="licenseContactPanel" aria-labelledby="licenseGroupTitle" tabindex="-1">
               <div class="subscription-card-heading"><span class="subscription-step-number">1</span><h2 id="licenseGroupTitle">微信扫码领码</h2></div>
-              <p>入群联系管理员，领取 1 小时试用码，或购买月付、年付激活码。</p>
+              <p>入群联系管理员，购买月付、年付激活码。</p>
               <div class="subscription-contact-content">
                 <div class="subscription-qr" id="licenseQrFrame" hidden><img id="licenseQrImage" width="760" height="760" alt="" hidden></div>
                 <div class="subscription-contact-details">
@@ -498,7 +498,7 @@
   <script src="date-range.js"></script>
   <script src="report-preview.js"></script>
   <script src="panel-layout.js"></script>
-  <script src="subscription.js?v=20261009"></script>
+  <script src="subscription.js?v=20261025"></script>
   <script src="features.js"></script>
   <script src="chat-profiles.js"></script>
   <script src="contact-profile.js"></script>

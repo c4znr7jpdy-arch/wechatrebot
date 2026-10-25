@@ -45,6 +45,12 @@
 .subscription-support code { overflow-wrap: anywhere; user-select: text; font-size: 12px; }
 .subscription-plans-section { margin-top: 26px; }
 #page-subscription .section-heading p { margin-top: 5px; }
+.subscription-trial-status { margin: 0; color: var(--muted); font-size: 13px; }
+.subscription-trial-status:empty { display: none; }
+.subscription-trial-status[data-state="active"] { color: var(--blue-700); }
+.subscription-trial-status[data-state="ended"], .subscription-trial-status[data-state="used"] { color: var(--amber-700); }
+.subscription-trial-status[data-state="paid"] { color: var(--green-700); }
+#licenseTrialRetry { margin-top: 0; }
 .subscription-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .subscription-plan { position: relative; display: flex; align-items: flex-start; flex-direction: column; gap: 12px; min-width: 0; padding: 22px; }
 .subscription-plan[data-plan="yearly"], .subscription-plan[data-plan="year"] { border-color: var(--blue-600); }

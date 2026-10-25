@@ -68,9 +68,13 @@ def create_app(
         await asyncio.to_thread(store.accept_nonce, device, value["nonce"], now)
         if action == "preview":
             data = await asyncio.to_thread(store.preview, device, body, now)
+        elif action == "trial-status":
+            data = await asyncio.to_thread(store.trial_status, device, body, now)
         else:
             if action == "redeem":
                 record = await asyncio.to_thread(store.redeem, device, value["public_key"], body, now)
+            elif action == "trial-claim":
+                record = await asyncio.to_thread(store.claim_trial, device, value["public_key"], body, now)
             else:
                 record = await asyncio.to_thread(getattr(store, action), device, body, now)
             # Sign after the transaction: a transient signing/delivery failure
@@ -87,7 +91,7 @@ def create_app(
         return web.json_response({"ok": True, "data": record, "server_time": int(clock())})
 
     app = web.Application(middlewares=[boundary], client_max_size=16 * 1024)
-    app.router.add_post("/v1/{action:preview|redeem|refresh|bind}", dispatch)
+    app.router.add_post("/v1/{action:preview|redeem|refresh|bind|trial-status|trial-claim}", dispatch)
     app.router.add_get(CONTACT_ENDPOINT, contact)
     app.router.add_get("/health", health)
     return app

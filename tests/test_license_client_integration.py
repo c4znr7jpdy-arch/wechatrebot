@@ -23,7 +23,8 @@ def replacement_client(client, root, transport, clock, protection):
     config = root / "config/licensing.json"
     config.parent.mkdir(parents=True)
     config.write_bytes((client.root / "config/licensing.json").read_bytes())
-    return LicenseClient(root, transport=transport, clock=clock, protection=protection)
+    return LicenseClient(root, transport=transport, clock=clock, protection=protection,
+                         machine_id_source=lambda root: "b" * 64)
 
 
 @pytest.mark.asyncio

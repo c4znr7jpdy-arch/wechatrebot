@@ -45,6 +45,29 @@ class LicensingApiMixin:
     def get_license_status(self) -> dict:
         return self._license_operation(self._license_status)
 
+    def get_trial_status(self) -> dict:
+        def status() -> dict:
+            actual = self._license_account(required=True)
+            trial = self._license_client().trial_status(actual)
+            if self._license_account(required=True) != actual:
+                raise LicenseError("account_changed", "微信登录账号已变化，请重新查看试用资格。")
+            return {**self._license_status(), "free_trial": trial}
+        return self._license_operation(status)
+
+    def activate_free_trial(self, expected_account: str) -> dict:
+        def activate() -> dict:
+            actual = self._license_account(required=True)
+            if not isinstance(expected_account, str) or expected_account != actual:
+                raise LicenseError("account_changed", "微信登录账号已变化，请重新查看并确认试用。")
+            status = self._license_client().claim_trial(actual)
+            if self._license_account(required=True) != actual:
+                raise LicenseError("account_changed", "微信登录账号已变化，试用已绑定原账号，请切回后查看。")
+            trial = {"state": "active" if status["authorized"] else "ended", "eligible": False,
+                     "recoverable": status["authorized"], "account": actual,
+                     "valid_until": status["valid_until"], "remaining_seconds": status["remaining_seconds"]}
+            return {**status, "current_account": actual, "free_trial": trial}
+        return self._license_operation(activate)
+
     def prepare_license_device(self) -> dict:
         return self._license_operation(self._license_client().prepare_device)
 

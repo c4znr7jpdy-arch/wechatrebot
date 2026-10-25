@@ -41,8 +41,8 @@ def issue(env, *, plan="month", owner="qq-customer-1", mode="new", license_id=""
 
 def redeem(env, code, *, device=None, pub=None, now=None):
     device, pub, now = device or env.device, pub or env.pub, env.now if now is None else now
-    preview = env.store.preview(device, {"code": code["code"]}, now)
-    record = env.store.redeem(device, pub, {"code": code["code"], "preview_id": preview["preview_id"]}, now)
+    preview = env.store.preview(device, {"code": code["code"], "machine_id": device}, now)
+    record = env.store.redeem(device, pub, {"code": code["code"], "preview_id": preview["preview_id"], "machine_id": device}, now)
     return record
 
 
@@ -63,6 +63,8 @@ async def api(env):
 
 
 async def request(api, env, action, body, key=None):
+    if action in {"preview", "redeem"}:
+        body = {"machine_id": fingerprint(public_key(key or env.key)), **body}
     envelope = sign_request(key or env.key, action, body, env.now, secrets.token_hex(16))
     response = await api.post("/v1/" + action, json=envelope)
     return response, await response.json(), envelope
@@ -86,10 +88,10 @@ def test_admin_reference_is_idempotent_and_error_does_not_expose_code(env):
 
 def test_preview_is_non_consuming_and_new_grant_starts_at_redemption(env):
     code = issue(env, plan="trial")
-    preview = env.store.preview(env.device, {"code": code["code"]}, env.now)
+    preview = env.store.preview(env.device, {"code": code["code"], "machine_id": env.device}, env.now)
     assert preview["valid_until"] == env.now + 3600 and preview["license_id"] == ""
     assert env.store.inspect()["licenses"] == 0
-    record = env.store.redeem(env.device, env.pub, {"code": code["code"], "preview_id": preview["preview_id"]}, env.now + 10)
+    record = env.store.redeem(env.device, env.pub, {"code": code["code"], "preview_id": preview["preview_id"], "machine_id": env.device}, env.now + 10)
     assert record["valid_until"] == env.now + 3610 and record["account"] == ""
     payload = lease_payload(record, "a" * 32, env.now + 10)
     assert payload["lease_until"] == record["valid_until"]
@@ -521,8 +523,8 @@ def test_two_preissued_trials_for_one_owner_cannot_grant_twice(env):
     requests = []
     for code, key in zip(codes, [env.key, other]):
         device = fingerprint(public_key(key))
-        preview = env.store.preview(device, {"code": code["code"]}, env.now)
-        requests.append((device, public_key(key), {"code": code["code"], "preview_id": preview["preview_id"]}))
+        preview = env.store.preview(device, {"code": code["code"], "machine_id": device}, env.now)
+        requests.append((device, public_key(key), {"code": code["code"], "preview_id": preview["preview_id"], "machine_id": device}))
 
     def execute(args):
         try:

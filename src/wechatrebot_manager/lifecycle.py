@@ -245,7 +245,7 @@ class LifecycleController:
                 self._runtime = self._snapshotter()
 
     def connect_wechat(self) -> LifecycleView:
-        """Open the dedicated WeChat bridge after redemption, without reply plugins."""
+        """Connect WeChat for identity checks or binding, without reply plugins."""
         status = self._license_snapshot()
         if not status["enabled"]:
             return self.start()

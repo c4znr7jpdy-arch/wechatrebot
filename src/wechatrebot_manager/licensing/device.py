@@ -6,6 +6,7 @@ import base64
 import ctypes
 from dataclasses import dataclass
 import os
+import hashlib
 from pathlib import Path
 from typing import Protocol
 
@@ -112,6 +113,73 @@ class DeviceIdentity:
     @property
     def device_id(self) -> str:
         return fingerprint(self.public_key)
+
+
+def _read_smbios() -> bytes:
+    """Read firmware with the Windows API, without processes or cached files."""
+    if os.name != "nt":
+        raise OSError("Windows firmware identity is unavailable")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    read = kernel32.GetSystemFirmwareTable
+    read.argtypes = (ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
+    read.restype = ctypes.c_uint32
+    provider = int.from_bytes(b"RSMB", "big")
+    size = read(provider, 0, None, 0)
+    if not 8 <= size <= 16 * 1024 * 1024:
+        raise OSError("Invalid firmware table size")
+    buffer = ctypes.create_string_buffer(size)
+    if read(provider, 0, buffer, size) != size:
+        raise OSError("Firmware table changed or could not be read")
+    return buffer.raw
+
+
+def _smbios_system_uuid(raw: bytes) -> bytes:
+    """Extract Type 1 UUID (DSP0134); never use a generic model or MAC address."""
+    if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != len(raw) - 8:
+        raise ValueError("Invalid SMBIOS header")
+    if (raw[1], raw[2]) < (2, 6):
+        raise ValueError("Unsupported SMBIOS UUID encoding")
+    table = raw[8:]
+    offset = 0
+    identifier = None
+    while offset < len(table):
+        if offset + 4 > len(table):
+            raise ValueError("Truncated SMBIOS structure")
+        kind, length = table[offset:offset + 2]
+        if length < 4 or offset + length > len(table):
+            raise ValueError("Invalid SMBIOS structure length")
+        end = table.find(b"\x00\x00", offset + length)
+        if end < 0:
+            raise ValueError("Unterminated SMBIOS string section")
+        if kind == 1:
+            if length < 25 or identifier is not None:
+                raise ValueError("Missing or ambiguous system UUID")
+            identifier = table[offset + 8:offset + 24]
+            if identifier in (bytes(16), b"\xff" * 16):
+                raise ValueError("System UUID is not assigned")
+        offset = end + 2
+        if kind == 127:
+            break
+    if identifier is None:
+        raise ValueError("System UUID is missing")
+    return identifier
+
+
+def stable_machine_id(_root: str | Path | None = None) -> str:
+    """Hash firmware identity independently of install path, user and local keys.
+
+    This is a continuity signal, not hardware attestation. Unsupported/missing
+    firmware IDs fail closed; no random or installation-specific fallback is
+    allowed to restore trial eligibility. Raw firmware identifiers are never
+    persisted or transmitted. The per-install signing key remains separate.
+    """
+    try:
+        identifier = _smbios_system_uuid(_read_smbios())
+        return hashlib.sha256(b"wechatrebot:trial-machine:smbios-v1:" + identifier).hexdigest()
+    except (OSError, ValueError, AttributeError) as exc:
+        raise LicenseError(
+            "device_identity_unavailable", "无法确认当前设备身份，请检查系统环境后重试或联系群主。"
+        ) from exc
 
 
 def protected_bytes(value: object) -> bytes:
