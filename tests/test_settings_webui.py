@@ -406,7 +406,9 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             close = dialog.get_by_role("button", name="关闭预览")
             expect(close).to_have_text("")
             expect(close.locator("svg")).to_be_visible()
-            expect(dialog.locator("output")).to_have_text("100%")
+            fitted_zoom = dialog.locator("output").text_content()
+            fitted_width = dialog.locator("img").bounding_box()["width"]
+            assert fitted_width > 320
             viewport = dialog.locator(".report-preview-viewport")
             geometry = dialog.evaluate("""dialog => {
               const image = dialog.querySelector('img').getBoundingClientRect();
@@ -422,15 +424,16 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             assert geometry["toolsBelow"] and abs(geometry["controlsCenter"]) <= 1
             assert abs(close.bounding_box()["height"] - dialog.locator(".report-preview-tools").bounding_box()["height"]) <= 1
             dialog.locator('[data-action="in"]').click()
-            expect(dialog.locator("output")).to_have_text("125%")
+            assert dialog.locator("img").bounding_box()["width"] == pytest.approx(fitted_width * 1.25, abs=1)
             dialog.locator('[data-action="out"]').click()
-            expect(dialog.locator("output")).to_have_text("100%")
+            expect(dialog.locator("output")).to_have_text(fitted_zoom)
             viewport.hover()
             before_scroll = page.evaluate("scrollY")
             page.mouse.wheel(0, -100)
-            expect(dialog.locator("output")).to_have_text("125%")
+            expect(dialog.locator("output")).not_to_have_text(fitted_zoom)
+            assert dialog.locator("img").bounding_box()["width"] == pytest.approx(fitted_width * 1.25, abs=1)
             page.mouse.wheel(0, 100)
-            expect(dialog.locator("output")).to_have_text("100%")
+            expect(dialog.locator("output")).to_have_text(fitted_zoom)
             assert page.evaluate("scrollY") == before_scroll
             page.screenshot(animations="disabled", path=str(tmp_path / f"message-preview-{theme}-{width}.png"))
             page.keyboard.press("Escape")
@@ -438,7 +441,7 @@ def test_settings_navigation_capsules_spacing_and_history_images(browser, manage
             expect(trigger).to_be_focused()
             expect(dialog.locator("img")).not_to_have_attribute("src", previews[0])
             trigger.click()
-            expect(dialog.locator("output")).to_have_text("100%")
+            expect(dialog.locator("output")).to_have_text(fitted_zoom)
             close.click()
             expect(dialog).not_to_be_visible()
             expect(trigger).to_be_focused()

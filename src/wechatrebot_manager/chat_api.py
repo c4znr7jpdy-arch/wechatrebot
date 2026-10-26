@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import sqlite3
 from typing import Any
 
 from .group_directory import GroupDirectoryError
@@ -471,6 +472,39 @@ class ChatApiMixin:
             return self._ok(messages)
         except (OSError, ValueError) as exc:
             return self._failed(exc)
+
+    def get_message_image(
+        self,
+        conversation_id: str,
+        message_id: int | str,
+        image_index: int = 0,
+        expected_account_id: str = "",
+    ) -> dict[str, object]:
+        try:
+            account_id, offline = self._history_data_identity()
+            if not account_id or not expected_account_id or expected_account_id != account_id:
+                raise ValueError("微信账号已变化，请刷新消息中心后重试。")
+            if offline:
+                raise OSError("微信当前离线，无法获取原图。")
+            source_id = self._history.image_source_id(
+                conversation_id, message_id, image_index, account_id=account_id,
+            )
+            image = self._groups.message_image(
+                account_id,
+                conversation_id,
+                source_id,
+                image_index,
+            )
+            return self._ok({
+                "account_id": account_id,
+                "src": image["image_data_url"],
+                "quality": image["quality"],
+            })
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return {"ok": False, "error": {
+                "title": "原图暂不可用",
+                "message": "图片记录读取失败，已显示缩略图。" if isinstance(exc, sqlite3.Error) else str(exc),
+            }}
 
     def delete_conversation(
         self, conversation_id: str, expected_account_id: str = ""

@@ -433,7 +433,7 @@ window.createMessageHistory = function (helpers) {
     }
     const previews = (Array.isArray(message.media_previews) ? message.media_previews : [])
       .slice(0, 4).filter((value) => typeof value === "string" && value.length <= 88000 && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value));
-    const media = previews.length ? `<div class="message-media">${previews.map((src) => `<button class="message-image-preview" type="button" aria-label="放大查看${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}"><img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" loading="lazy" decoding="async"></button>`).join("")}</div>` : "";
+    const media = previews.length ? `<div class="message-media">${previews.map((src, index) => `<button class="message-image-preview" type="button" data-message-id="${escapeHtml(String(message.id ?? ""))}" data-image-index="${index}" aria-label="放大查看${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}"><img src="${escapeHtml(src)}" alt="${presentation.content.includes("表情") ? "表情首帧" : "消息图片"}" loading="lazy" decoding="async"></button>`).join("")}</div>` : "";
     const caption = media && /^\[(图片|表情)\](\n\[(图片|表情)\])*$/.test(presentation.content) ? "" : escapeHtml(presentation.content);
     const bubble = caption || !media ? `<div class="message-bubble">${caption}</div>` : "";
     return `${media}${bubble}`;
@@ -474,7 +474,22 @@ window.createMessageHistory = function (helpers) {
       if (image.dataset.fallbackBound) return;
       image.dataset.fallbackBound = "true";
       const button = image.closest(".message-image-preview");
-      button.addEventListener("click", () => window.openMessageImagePreview(image.src, image.alt));
+      button.addEventListener("click", () => {
+        const conversationId = state.selectedConversation?.conversation_id || "";
+        const accountId = state.historyAccount || "";
+        const messageId = button.dataset.messageId || "";
+        const imageIndex = Number.parseInt(button.dataset.imageIndex || "0", 10);
+        const isCurrent = () => accountId === state.historyAccount
+          && conversationId === state.selectedConversation?.conversation_id;
+        const loadOriginal = conversationId && accountId && messageId
+          ? async () => {
+            const data = await requestHistoryRead(api("get_message_image", conversationId, messageId, imageIndex, accountId));
+            if (data?.account_id && data.account_id !== accountId) throw new Error("微信账号已切换，请重新打开图片。");
+            return data;
+          }
+          : null;
+        window.openMessageImagePreview(image.src, image.alt, loadOriginal ? {loadOriginal, isCurrent} : {});
+      });
       image.addEventListener("error", () => {
         const fallback = document.createElement("span");
         fallback.textContent = `${image.alt}暂不可用`;

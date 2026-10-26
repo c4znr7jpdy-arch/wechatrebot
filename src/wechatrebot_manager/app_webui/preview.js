@@ -516,6 +516,7 @@ window.createPreviewApi = function (helpers) {
       save_feature: (id, config) => { if (id === "feature-95a906d4b9173155") { corePreviewConfig = structuredClone(config); corePreviewRevision += 1; } else previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: (filters) => ok(previewConversations(filters)),
       get_group_qrcode: (accountId, groupId) => ok({account_id: accountId, group_id: groupId, image_data_url: ""}),
+      get_message_image: () => ok({src: "", message: "此预览仅提供缩略图。"}),
       get_messages: (conversationId, filters = {}) => {
         const search = String(filters.search || "").trim().toLocaleLowerCase("zh-CN");
         const matching = previewHistoryMessages.filter((message) => {

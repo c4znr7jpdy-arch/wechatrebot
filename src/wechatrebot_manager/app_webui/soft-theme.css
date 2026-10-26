@@ -777,7 +777,7 @@ html[data-skin="soft"] .report-preview-dialog::backdrop {
 }
 
 html[data-skin="soft"] .date-range-dialog,
-html[data-skin="soft"] .report-preview-dialog {
+html[data-skin="soft"] .report-preview-dialog:not(.is-message-preview) {
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--surface);
@@ -857,7 +857,7 @@ html[data-skin="soft"] .report-preview-tools output {
   background: var(--surface-muted);
 }
 
-html[data-skin="soft"] .report-preview-viewport {
+html[data-skin="soft"] .report-preview-dialog:not(.is-message-preview) .report-preview-viewport {
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--surface-inset);
