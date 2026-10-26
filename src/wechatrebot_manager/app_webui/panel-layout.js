@@ -24,6 +24,11 @@
       const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) saved = parsed;
     } catch (_error) { /* Layout preferences are optional in WebView2. */ }
+    // The model grid follows its container; old manual sizes must not constrain it.
+    if (Object.hasOwn(saved, "page-settings/providerOverview")) {
+      delete saved["page-settings/providerOverview"];
+      persist();
+    }
 
     function persist() {
       try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); }
@@ -179,7 +184,7 @@
       for (const page of root.querySelectorAll(".page")) {
         const panels = page.querySelectorAll(".panel, .conversation-list, .message-pane, .conversation-inspector");
         for (const [index, panel] of [...panels].entries()) {
-          if (panel.matches(".history-toolbar, .history-layout, .core-heading, .core-subtabs, .loading-row, .provider-service")) continue;
+          if (panel.matches(".history-toolbar, .history-layout, .core-heading, .core-subtabs, .loading-row, .provider-service, #providerOverview")) continue;
           const key = `${page.id}/${panel.id || `${[...panel.classList].filter((name) => !["layout-adjustable", "has-panel-size", "empty"].includes(name)).join(".")}/${index}`}`;
           if (registered.get(key) !== panel) {
             registered.set(key, panel);

@@ -67,6 +67,53 @@ def test_skin_save_failure_keeps_previous_skin_and_allows_retry(browser, manager
         page.close()
 
 
+def test_native_caption_receives_current_palette_at_startup_and_after_skin_or_mode_changes(browser, manager_url):
+    page = browser.new_page()
+
+    def track_caption(route):
+        response = route.fetch()
+        route.fulfill(response=response, body=response.text() + """
+        const createCaptionPreview = window.createPreviewApi;
+        window.createPreviewApi = (helpers) => {
+          const controller = createCaptionPreview(helpers), createApi = controller.previewApi;
+          controller.previewApi = () => {
+            const api = createApi();
+            window.captionUpdates = [];
+            api.sync_window_theme = (...palette) => {
+              window.captionUpdates.push(palette);
+              return {ok: true, data: {applied: true}};
+            };
+            return api;
+          };
+          return controller;
+        };
+        """)
+
+    def assert_current_palette():
+        page.wait_for_function("""() => {
+          const root = document.documentElement, css = getComputedStyle(root);
+          const expected = [root.dataset.theme, css.getPropertyValue('--surface').trim(),
+            css.getPropertyValue('--ink').trim()];
+          return JSON.stringify(window.captionUpdates.at(-1)) === JSON.stringify(expected);
+        }""")
+
+    page.route("**/preview.js*", track_caption)
+    try:
+        open_skin_settings(page, manager_url)
+        assert_current_palette()
+        for skin in ("soft", "default"):
+            previous = page.evaluate("captionUpdates.length")
+            page.locator(f'[data-skin-option][value="{skin}"]').check()
+            expect(page.locator("#skinStatus")).to_contain_text("已应用")
+            assert_current_palette()
+            assert page.evaluate("captionUpdates.length") > previous
+            page.locator("#themeToggle").click()
+            assert_current_palette()
+            assert page.evaluate("captionUpdates.length") > previous + 1
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("storage", ["unavailable", "invalid", "legacy"])
 def test_skin_storage_fallback_and_legacy_migration(browser, manager_url, storage):
     page = browser.new_page()
