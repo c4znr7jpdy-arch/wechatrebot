@@ -1,6 +1,7 @@
 """Model cards fill the shipped settings page without starting a robot."""
 import json
 import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -21,11 +22,14 @@ def mock_model_cards(page):
         ])
     ]
 
+    preview_source = (Path(__file__).resolve().parents[1] / "src/wechatrebot_manager/app_webui/preview.js").read_text(encoding="utf-8")
+    preview_body = preview_source.replace(
+        "let previewProviders = [];", f"let previewProviders = {json.dumps(providers)};",
+    )
+
     def preview(route):
-        response = route.fetch()
-        route.fulfill(response=response, body=response.text().replace(
-            "let previewProviders = [];", f"let previewProviders = {json.dumps(providers)};",
-        ))
+        # Keep the fixture independent of the temporary HTTP server during page teardown.
+        route.fulfill(status=200, content_type="application/javascript", body=preview_body)
     page.route("**/preview.js*", preview)
 
 

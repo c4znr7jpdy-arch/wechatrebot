@@ -985,7 +985,9 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
                 text_select=True,
             )
             tray = None
-            window.events.before_show += lambda: _fit_window_to_work_area(window)
+            before_show = getattr(window.events, "before_show", None)
+            if before_show is not None:
+                before_show += lambda: _fit_window_to_work_area(window)
             window.events.shown += api.confirm_update_startup
             if not development:
                 tray = WindowsTrayController(window, "WxRebot")
