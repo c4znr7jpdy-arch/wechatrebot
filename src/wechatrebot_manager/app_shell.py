@@ -76,6 +76,8 @@ PUBLIC_API_METHODS = (
     "save_skin",
     "get_status",
     "get_license_status",
+    "get_trial_status",
+    "activate_free_trial",
     "prepare_license_device",
     "preview_activation_code",
     "redeem_activation_code",

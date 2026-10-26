@@ -7,7 +7,8 @@
     const $ = (selector) => document.querySelector(selector);
     const state = {snapshot: null, preview: null, runtime: null, busy: false, loading: false,
       epoch: 0, activePage: "home", plansKey: "", readError: "", expiredSeen: false, initialized: false,
-      contact: null, contactLoading: false, contactReadAt: 0, contactExpanded: false, contactExpiryTimer: null};
+      contact: null, contactLoading: false, contactReadAt: 0, contactExpanded: false, contactExpiryTimer: null,
+      trial: null, trialAccount: null, trialLoading: false, trialEpoch: 0, trialError: ""};
     const contactRefreshMs = 60000;
     const monotonicNow = () => typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now() : Date.now();
@@ -16,8 +17,8 @@
     const labels = {
       disabled: ["尚未启用商业授权", "未启用", "neutral"],
       unconfigured: ["授权服务待配置", "待配置", "warning"],
-      unactivated: ["领取激活码，开始使用", "未激活", "neutral"],
-      missing: ["领取激活码，开始使用", "未激活", "neutral"],
+      unactivated: ["选择试用或兑换授权", "未激活", "neutral"],
+      missing: ["选择试用或兑换授权", "未激活", "neutral"],
       pending_account: ["请连接并确认微信账号", "待绑定", "warning"],
       pending: ["请连接并确认微信账号", "待绑定", "warning"],
       active_unbound: ["请连接并确认微信账号", "待绑定", "warning"],
@@ -48,6 +49,89 @@
       if (plan && typeof plan === "object") return String(plan.name || plan.id || "未激活");
       const plans = Array.isArray(snapshot?.plans) ? snapshot.plans : [];
       return plans.find((item) => item.id === plan)?.name || String(plan || "未激活");
+    }
+
+    function freeTrial(snapshot = state.snapshot) {
+      const account = accountId(snapshot?.current_account);
+      const plan = typeof snapshot?.plan === "object" ? snapshot.plan?.id : snapshot?.plan;
+      if (plan && plan !== "trial" && snapshot?.authorized) return {state: "paid"};
+      if (plan === "trial") {
+        if (["expired", "subscription_expired"].includes(snapshot.state)) return {state: "ended"};
+        if (snapshot.authorized && account && account === accountId(snapshot?.account)) return {state: "active", valid_until: snapshot.valid_until,
+          remaining_seconds: snapshot.remaining_seconds};
+      }
+      return snapshot?.free_trial || (state.trialAccount === account ? state.trial : null) || {};
+    }
+
+    function freeTrialState(snapshot = state.snapshot) {
+      const value = freeTrial(snapshot);
+      const stateName = String(value.state || value.status || "").trim().toLowerCase();
+      return ["eligible", "active", "ended", "used", "paid"].includes(stateName) ? stateName : "unavailable";
+    }
+
+    function freeTrialEnd(value) {
+      const seconds = Number(value?.valid_until ?? value?.expires_at ?? value?.ends_at);
+      return Number.isFinite(seconds) && seconds > 0 ? expiryText(seconds) : "";
+    }
+
+    function freeTrialStatusText(snapshot = state.snapshot) {
+      const value = freeTrial(snapshot);
+      const status = freeTrialState(snapshot);
+      if (!snapshot?.enabled || !snapshot?.configured) return "免费试用暂不可用。";
+      if (status === "ended") return "你的试用已结束，可联系群主购买";
+      if (status === "used") return "当前设备或微信账号已领取过试用，可联系群主购买";
+      if (status === "paid") return "当前已有付费授权。";
+      if (!accountId(snapshot?.current_account)) return "请先连接微信，再激活免费试用。";
+      if (state.trialLoading && status === "unavailable") return "正在查询免费试用资格…";
+      if (state.trialError && status === "unavailable") return state.trialError;
+      if (status === "active") {
+        const end = freeTrialEnd(value);
+        const remaining = Math.max(0, Math.floor(Number(value.remaining_seconds) || 0));
+        if (end) return `免费试用进行中，结束时间：${end}`;
+        if (remaining) return `免费试用进行中，剩余 ${Math.floor(remaining / 60)} 分 ${remaining % 60} 秒。`;
+        return "免费试用进行中。";
+      }
+      return status === "eligible" ? "可激活 1 小时免费试用，激活后立即开始计时。" : "免费试用资格暂未读取。";
+    }
+
+    function renderFreeTrialStatus() {
+      const node = $("#licenseTrialStatus");
+      if (!node) return;
+      const status = freeTrialState();
+      node.textContent = freeTrialStatusText();
+      node.dataset.state = status;
+      $("#licenseTrialRetry").hidden = !state.trialError;
+      $("#licenseTrialRetry").disabled = state.trialLoading || state.busy;
+    }
+
+    async function loadFreeTrial({force = false} = {}) {
+      const data = state.snapshot;
+      const account = accountId(data?.current_account);
+      if (!data?.enabled || !data?.configured || !account || state.trialLoading
+        || (!force && state.trialAccount === account)) return;
+      const epoch = ++state.trialEpoch;
+      state.trialLoading = true; state.trialError = "";
+      renderFreeTrialStatus(); renderControls();
+      try {
+        const result = await api("get_trial_status");
+        if (epoch !== state.trialEpoch || account !== accountId(state.snapshot?.current_account)) return;
+        if (!result?.free_trial || typeof result.free_trial !== "object") throw new Error("免费试用资格未能读取，请重试。");
+        if (accountId(result.free_trial.account) && accountId(result.free_trial.account) !== account) {
+          throw new Error("微信登录账号已变化，请重新查询试用资格。");
+        }
+        state.trial = result.free_trial;
+        state.trialAccount = account;
+      } catch (error) {
+        if (epoch === state.trialEpoch) {
+          state.trialError = error?.product?.message || error?.message || "免费试用资格未能读取，请重试。";
+          state.trialAccount = account;
+        }
+      } finally {
+        if (epoch === state.trialEpoch) {
+          state.trialLoading = false;
+          renderFreeTrialStatus(); renderPlans(); renderControls();
+        }
+      }
     }
 
     function readyToStart() {
@@ -184,10 +268,18 @@
 
     function updateSnapshot(data) {
       if (!data || typeof data.enabled !== "boolean") throw new Error("授权状态未能读取，请重新验证。");
+      const accountChanged = accountId(state.snapshot?.current_account) !== accountId(data.current_account);
+      const licenseChanged = String(state.snapshot?.license_id || "") !== String(data.license_id || "")
+        || String(state.snapshot?.plan?.id || state.snapshot?.plan || "") !== String(data.plan?.id || data.plan || "");
       state.snapshot = data;
       state.readError = "";
+      if (accountChanged || licenseChanged) {
+        state.trial = null; state.trialAccount = null; state.trialError = "";
+        state.trialEpoch += 1; state.trialLoading = false;
+      }
       if (["expired", "subscription_expired"].includes(data.state)) state.expiredSeen = true;
       render();
+      if (accountChanged && state.activePage === "subscription") void loadFreeTrial();
     }
 
     async function load({silent = false} = {}) {
@@ -245,9 +337,12 @@
         const amount = Number(plan.price_fen);
         const knownPrice = Number.isFinite(amount) && amount >= 0;
         const price = knownPrice ? new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 2}).format(amount / 100) : "待确认";
-        const trial = plan.id === "trial";
-        const unit = trial ? " / 1 小时" : ["yearly", "year"].includes(plan.id) ? " / 年" : " / 月";
-        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(plan.description || (trial ? "领取试用码后激活，体验完整功能。" : "1 个机器人账号，含订阅期内更新。"))}</p><button class="button ${trial ? "ghost" : "secondary"}" data-license-plan type="button">扫码入群领取</button></article>`;
+        const isTrial = plan.id === "trial";
+        const unit = isTrial ? " / 1 小时" : ["yearly", "year"].includes(plan.id) ? " / 年" : " / 月";
+        const trialButton = isTrial
+          ? '<p class="subscription-trial-status" id="licenseTrialStatus" role="status" aria-live="polite"></p><button class="button ghost small" id="licenseTrialRetry" data-trial-retry type="button" hidden>重新查询试用资格</button><button class="button ghost" id="licenseActivateTrial" data-free-trial type="button" disabled>激活免费试用</button>'
+          : `<button class="button secondary" data-license-plan type="button">扫码入群领取</button>`;
+        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(plan.description || (isTrial ? "每台设备和微信账号限用一次，激活后连续计时 1 小时。" : "1 个机器人账号，含订阅期内更新。"))}</p>${trialButton}</article>`;
       }).join("") || '<p class="subtle">套餐暂时无法读取，请重新读取授权状态。</p>';
     }
 
@@ -267,7 +362,7 @@
       $("#licenseCopyDevice").disabled = !data?.device_id;
       $("#licensePrepareDevice").hidden = !ready || Boolean(data?.device_id);
       $("#licensePrepareDevice").disabled = busy || !ready;
-      $("#licenseConnect").hidden = !ready || !data.can_connect || !data.license_id || Boolean(current);
+      $("#licenseConnect").hidden = !ready || !data.can_connect || Boolean(current);
       $("#licenseConnect").disabled = busy || Boolean(state.runtime?.busy);
       $("#licenseBind").hidden = !ready || !data.can_connect || !data.license_id || Boolean(bound) || !current;
       $("#licenseBind").disabled = busy;
@@ -275,6 +370,14 @@
       $("#licenseResume").hidden = !ready || !readyToStart();
       $("#licenseResume").disabled = busy || running || Boolean(state.runtime?.busy);
       $("#licenseResume").textContent = running ? "自动化运行中" : state.expiredSeen ? "恢复机器人" : "启动机器人";
+      const trialButton = $("#licenseActivateTrial");
+      if (trialButton) {
+        const trial = freeTrial(data), status = freeTrialState(data);
+        trialButton.disabled = busy || state.trialLoading || !ready || !current || !(trial.eligible || trial.recoverable);
+        trialButton.textContent = busy ? "处理中…" : trial.recoverable ? "恢复免费试用"
+          : status === "active" ? "试用进行中" : status === "ended" ? "试用已结束" : status === "used" ? "已领取试用"
+          : status === "paid" ? "已订阅" : "激活免费试用";
+      }
     }
 
     function render() {
@@ -295,12 +398,12 @@
       $("#licenseIdText").textContent = data.license_id || "尚未激活";
       $("#licenseDeviceText").textContent = data.device_id || "尚未生成";
       $("#licenseCurrentAccount").textContent = accountId(data.current_account) || "尚未连接";
-      $("#licenseCurrentAccountRow").hidden = !data.enabled || !data.license_id;
+      $("#licenseCurrentAccountRow").hidden = !data.enabled || (!data.license_id && !accountId(data.current_account));
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
       $("#licenseRedeemTitle").textContent = data.license_id ? "兑换续期码" : "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
         ? "授权服务尚未配置，暂时无法兑换激活码。" : "先查看套餐和有效期，确认后再兑换。";
-      renderSteps(); renderPlans(); renderControls(); renderHome();
+      renderSteps(); renderPlans(); renderFreeTrialStatus(); renderControls(); renderHome();
     }
 
     async function transact(action, message = "") {
@@ -323,6 +426,16 @@
     async function execute(action, message = "") {
       try { return await transact(action, message); }
       catch (error) { showError(error); return null; }
+    }
+
+    async function activateFreeTrial() {
+      const trial = freeTrial();
+      if (state.busy || state.trialLoading || !(trial.eligible || trial.recoverable)) return;
+      const account = accountId(state.snapshot?.current_account);
+      if (!account) return;
+      await execute(() => api("activate_free_trial", account), trial.recoverable
+        ? "免费试用已恢复，结束时间不变。" : "免费试用已激活，连续计时 1 小时。请确认模型设置后启动机器人。");
+      await loadFreeTrial({force: true});
     }
 
     function clearPreview() {
@@ -420,7 +533,11 @@
       $("#licenseCopyId").addEventListener("click", () => copyText(state.snapshot?.license_id, "授权编号"));
       $("#licenseCopyDevice").addEventListener("click", () => copyText(state.snapshot?.device_id, "设备编号"));
       $("#licensePrepareDevice").addEventListener("click", () => execute(() => api("prepare_license_device"), "本机设备编号已生成，可复制给群管理员办理授权迁移。"));
-      $("#licensePlans").addEventListener("click", (event) => { if (event.target.closest("[data-license-plan]")) showGroup(); });
+      $("#licensePlans").addEventListener("click", (event) => {
+        if (event.target.closest("[data-trial-retry]")) return loadFreeTrial({force: true});
+        if (event.target.closest("[data-free-trial]")) return activateFreeTrial();
+        if (event.target.closest("[data-license-plan]")) showGroup();
+      });
       $("#licenseOpenHistory").addEventListener("click", () => navigate("history"));
       $("#licenseOpenMaintenance").addEventListener("click", openMaintenance);
       window.setInterval(() => {
@@ -438,7 +555,7 @@
 
     return {
       initialize,
-      async onNavigate(page) { state.activePage = page; if (page === "subscription") { refreshContactIfNeeded(); await load(); } },
+      async onNavigate(page) { state.activePage = page; if (page === "subscription") { refreshContactIfNeeded(); await load(); await loadFreeTrial(); } },
       updateRuntime(runtime) { state.runtime = runtime; if (state.initialized) renderControls(); },
       needsEntry() { return Boolean(state.snapshot?.enabled && !readyToStart()); },
       async beforeStart() {

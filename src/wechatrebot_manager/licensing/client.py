@@ -14,7 +14,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from ..single_instance import SingleInstanceLock
 from .cache import LeaseCache, empty_state
 from .config import LicenseChannel, load_channel
-from .device import DeviceIdentity, Protection, WindowsProtection, boot_session_id, load_device
+from .device import DeviceIdentity, Protection, WindowsProtection, boot_session_id, load_device, stable_machine_id
 from .protocol import (
     ACCOUNT_PATTERN, CODE_MODES, PLANS, LicenseError, canonical, display_time, integer,
     parse_json, sign_request, verify_lease,
@@ -31,6 +31,8 @@ _ERROR_MESSAGES = {
     "preview_required": "请先预览激活码，再确认兑换。",
     "preview_stale": "预览已失效，请重新预览并确认兑换。",
     "trial_used": "此设备或微信账号已使用过试用，请领取月付或年付激活码。",
+    "device_identity_unavailable": "无法确认当前设备身份，请检查系统环境后重试。",
+    "device_identity_required": "领取试用需要设备身份，请更新管理器或检查系统环境后重试。",
     "license_unavailable": "当前设备授权不可用，请联系管理员恢复或迁移授权。",
     "license_revoked": "授权已撤销，自动化已暂停，请联系管理员。",
     "subscription_expired": "订阅已到期，请微信扫码入群领取续期码。",
@@ -72,15 +74,25 @@ def http_transport(url: str, payload: dict) -> dict:
 
 class LicenseClient:
     def __init__(self, root: str | Path, *, transport=None, clock=None,
-                 protection: Protection | None = None):
+                 protection: Protection | None = None, machine_id_source=None):
         self.root = Path(root).resolve()
         self.directory = self.root / "data" / "licensing"
         self.transport = transport or http_transport
         self.clock = clock or time
         self._boot_reader = getattr(self.clock, "boot_id", None) or boot_session_id
         self.protection = protection or WindowsProtection()
+        self.machine_id_source = machine_id_source or stable_machine_id
         self.cache = LeaseCache(self.directory, self.protection)
         self.lock_key = f"licensing:{self.root}"
+
+    def _machine_id(self) -> str:
+        try:
+            value = self.machine_id_source(self.root)
+        except (OSError, ValueError) as exc:
+            raise LicenseError("device_identity_unavailable", _ERROR_MESSAGES["device_identity_unavailable"]) from exc
+        if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+            raise LicenseError("device_identity_unavailable", _ERROR_MESSAGES["device_identity_unavailable"])
+        return value
 
     @contextmanager
     def _locked(self):
@@ -201,7 +213,7 @@ class LicenseClient:
         return {
             "enabled": channel.enabled if channel else True,
             "configured": channel.ready if channel else False,
-            "state": "unactivated", "message": "请微信扫码入群领取激活码，并在此预览、确认兑换。",
+            "state": "unactivated", "message": "连接微信后可激活免费试用；已有激活码可在此查看并确认兑换。",
             "authorized": False, "can_connect": False, "can_run": False,
             "account": "", "license_id": "", "device_id": "", "plan": "",
             "valid_until": 0, "lease_until": 0, "expires_text": "", "remaining_seconds": 0,
@@ -221,6 +233,7 @@ class LicenseClient:
         if device:
             result["device_id"] = device.device_id
         if payload is None:
+            result["can_connect"] = True
             return result
         self._maintain(state, payload, account, persist=persist)
         now, clock_error = self._now(state)
@@ -248,6 +261,8 @@ class LicenseClient:
                 **_ERROR_MESSAGES,
             }
             result.update(state=reason, message=messages.get(reason, "授权暂不可用，请重新验证。"))
+            if reason in {"expired", "subscription_expired"} and payload["plan"] == "trial":
+                result["message"] = "你的试用已结束，可联系群主购买"
         elif not payload["account"]:
             result.update(state="active_unbound", message="设备已激活，请连接微信并确认绑定实际账号。")
         elif can_run:
@@ -314,12 +329,72 @@ class LicenseClient:
             raise LicenseError("invalid_response", "授权服务响应无效，请稍后重试。")
         return data, nonce, max(0, self.clock.monotonic() - started)
 
+    @staticmethod
+    def _account(account: str) -> str:
+        if not isinstance(account, str) or not ACCOUNT_PATTERN.fullmatch(account):
+            raise LicenseError("invalid_account", _ERROR_MESSAGES["invalid_account"])
+        return account
+
+    def trial_status(self, account: str) -> dict:
+        account = self._account(account)
+        machine_id = self._machine_id()
+        with self._locked():
+            channel, device, state, _ = self._load(create=True)
+            self._channel_required(channel)
+            data, _, _ = self._request(channel, device, state, "trial-status", {
+                "account": account, "machine_id": machine_id,
+            })
+            try:
+                status = data["state"]
+                deadline, remaining = integer(data["valid_until"]), integer(data["remaining_seconds"])
+                if (status not in {"eligible", "active", "ended", "used", "paid"}
+                        or data["account"] != account
+                        or type(data["eligible"]) is not bool or type(data["recoverable"]) is not bool
+                        or data["eligible"] != (status == "eligible")
+                        or data["recoverable"] != (status == "active")
+                        or remaining > 3600 or (status == "active" and (not deadline or not remaining))
+                        or (status != "active" and remaining)):
+                    raise ValueError()
+            except (KeyError, TypeError, ValueError, LicenseError) as exc:
+                raise LicenseError("invalid_response", "试用状态响应无效，请稍后重试。") from exc
+            return {key: data[key] for key in (
+                "state", "eligible", "recoverable", "account", "valid_until", "remaining_seconds",
+            )}
+
+    def claim_trial(self, account: str) -> dict:
+        account = self._account(account)
+        machine_id = self._machine_id()
+        with self._locked():
+            channel, device, state, payload = self._load(create=True)
+            self._channel_required(channel)
+            now, clock_error = self._now(state)
+            if payload:
+                if clock_error:
+                    raise LicenseError("clock_error", "请先联网验证现有授权，再查看试用资格。")
+                if payload["status"] != "active" or state["remote_denial"]:
+                    raise LicenseError("license_unavailable", _ERROR_MESSAGES["license_unavailable"])
+                if payload["plan"] != "trial" and payload["valid_until"] > now:
+                    raise LicenseError("active_license_conflict", _ERROR_MESSAGES["active_license_conflict"])
+                if payload["plan"] == "trial" and payload["valid_until"] <= now:
+                    raise LicenseError("trial_used", "你的试用已结束，可联系群主购买")
+            data, nonce, elapsed = self._request(channel, device, state, "trial-claim", {
+                "account": account, "machine_id": machine_id,
+            })
+            approved = {"mode": "trial", "replaces_license_id": payload["license_id"] if payload else ""}
+            return self._accept(channel, device, state, payload, data, nonce, elapsed,
+                                account=account, approved=approved)
+
     def preview(self, code: str) -> dict:
         code = self._code(code)
         with self._locked():
             channel, device, state, payload = self._load(create=True)
             self._channel_required(channel)
             body = {"code": code}
+            try:
+                body["machine_id"] = self._machine_id()
+            except LicenseError as exc:
+                if exc.code != "device_identity_unavailable":
+                    raise
             if payload:
                 body["license_id"] = payload["license_id"]
             data, _, _ = self._request(channel, device, state, "preview", body)
@@ -342,6 +417,8 @@ class LicenseClient:
             result = {key: data[key] for key in (
                 "preview_id", "plan", "mode", "valid_until", "license_id", "already_redeemed", "expires_at",
             )} | {"message": str(data.get("message", ""))[:300], "replaces_license_id": replaced}
+            if data["plan"] == "trial" and data["mode"] == "new" and not data["already_redeemed"] and "machine_id" not in body:
+                raise LicenseError("device_identity_unavailable", _ERROR_MESSAGES["device_identity_unavailable"])
             state["pending_preview"] = {
                 **{key: result[key] for key in (
                     "preview_id", "mode", "license_id", "replaces_license_id", "plan", "valid_until", "expires_at",
@@ -373,6 +450,14 @@ class LicenseClient:
         permitted_switch = bool(approved and approved["mode"] == "migration" and old
                                 and approved["replaces_license_id"] == old["license_id"]
                                 and approved["license_id"] == payload["license_id"])
+        if approved and approved["mode"] == "trial":
+            if (payload["plan"] != "trial" or payload["status"] != "active" or not payload["account"]
+                    or not payload["issued_at"] < payload["valid_until"] <= payload["issued_at"] + 3600
+                    or (old and old["plan"] == "trial" and payload["valid_until"] != old["valid_until"])):
+                raise LicenseError("invalid_lease", "试用授权响应无效，请重新验证。")
+            permitted_switch = bool(old and old["plan"] != "trial"
+                                    and approved["replaces_license_id"] == old["license_id"]
+                                    and old["valid_until"] <= payload["issued_at"])
         if (switching and not permitted_switch) or (account and payload["account"] != account):
             raise LicenseError("identity_mismatch", "返回的授权身份不匹配，请重新验证。")
         if approved and approved["mode"] == "migration" and (
@@ -442,7 +527,10 @@ class LicenseClient:
                 approved["replaces_license_id"], approved["license_id"],
             }:
                 raise LicenseError("preview_stale", _ERROR_MESSAGES["preview_stale"])
-            data, nonce, elapsed = self._request(channel, device, state, "redeem", {"code": code, "preview_id": preview_id})
+            body = {"code": code, "preview_id": preview_id}
+            if approved["plan"] == "trial" and approved["mode"] == "new" and not approved["license_id"]:
+                body["machine_id"] = self._machine_id()
+            data, nonce, elapsed = self._request(channel, device, state, "redeem", body)
             return self._accept(channel, device, state, payload, data, nonce, elapsed, approved=approved)
 
     def _refresh(self, *, force: bool) -> dict:
@@ -479,8 +567,7 @@ class LicenseClient:
             return self.snapshot()
 
     def bind(self, account: str) -> dict:
-        if not isinstance(account, str) or not ACCOUNT_PATTERN.fullmatch(account):
-            raise LicenseError("invalid_account", _ERROR_MESSAGES["invalid_account"])
+        account = self._account(account)
         with self._locked():
             channel, device, state, payload = self._load()
             self._channel_required(channel)

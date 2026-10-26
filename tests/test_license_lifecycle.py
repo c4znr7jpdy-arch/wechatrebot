@@ -8,6 +8,8 @@ from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
 from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
+from test_license_client import setup as license_setup
+
 
 class License:
     def __init__(self):
@@ -74,9 +76,9 @@ class Supervisor:
         return bool(self.running)
 
 
-def setup_controller(tmp_path: Path):
+def setup_controller(tmp_path: Path, *, license_client=None):
     world = {"account": "", "core": False, "bridge": False}
-    license = License()
+    license = license_client or License()
     holders = []
     def factory(progress):
         supervisor = Supervisor(world, progress)
@@ -108,6 +110,40 @@ def test_redemption_connects_only_bridge_then_explicit_start_opens_core(tmp_path
     assert license.grants == ["wxid_a"]
     assert supervisor.started == ["new-hook-bridge", "astrbot"]
     assert running.online and running.state == LifecycleState.RUNNING
+
+
+def test_unactivated_identity_connection_keeps_only_bridge_without_consuming_trial(license_setup):
+    client, service, _, _ = license_setup
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+
+    connected = controller.connect_wechat()
+    assert holders[0].started == ["new-hook-bridge"]
+    assert connected.can_stop and not connected.online
+    assert world["bridge"] and not world["core"]
+
+    world["account"] = "wxid_new_trial"
+    for _ in range(3):
+        status = controller.refresh()
+        assert status.state == LifecycleState.LICENSE_PAUSED and not status.online
+    assert holders[0].stopped == []
+    assert client.snapshot(world["account"])["state"] == "unactivated"
+    assert not client.snapshot(world["account"])["can_run"]
+    with pytest.raises(LicenseError):
+        controller.start()
+    assert holders[0].started == ["new-hook-bridge"]
+    assert not service.calls and not client.directory.exists()
+
+
+def test_identity_connection_requires_a_configured_license_service(license_setup):
+    client, service, _, _ = license_setup
+    (client.root / "config/licensing.json").write_text(
+        '{"schema_version":1,"enabled":true}', encoding="utf-8",
+    )
+    controller, _, _, holders = setup_controller(client.root, license_client=client)
+    with pytest.raises(LicenseError) as error:
+        controller.connect_wechat()
+    assert error.value.code == "configuration_pending"
+    assert not holders and not service.calls and not client.directory.exists()
 
 
 def test_expiry_preserves_wechat_and_renewal_requires_explicit_resume(tmp_path):

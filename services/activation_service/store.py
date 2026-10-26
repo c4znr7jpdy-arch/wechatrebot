@@ -197,6 +197,96 @@ class LicenseStore:
         cls._trial(db, kind, identity_hash, license_id)
         db.execute("INSERT OR IGNORE INTO trials VALUES(?,?,?)", (kind, identity_hash, license_id))
 
+    @staticmethod
+    def _machine_hash(machine_id: object) -> str:
+        if not isinstance(machine_id, str) or not _FINGERPRINT.fullmatch(machine_id):
+            raise LicenseError("device_identity_required", "领取试用需要设备身份，请更新管理器后重试。")
+        return _hash(machine_id)
+
+    @classmethod
+    def _trial_request(cls, body: dict) -> tuple[str, str, str]:
+        _validate_body(body, {"account", "machine_id"})
+        machine_hash = cls._machine_hash(body["machine_id"])
+        account = _text(body["account"])
+        if not ACCOUNT_PATTERN.fullmatch(account):
+            raise LicenseError("invalid_account", "机器人账号格式无效。")
+        return account, _hash(account.casefold()), machine_hash
+
+    @classmethod
+    def _trial_context(cls, db, device: str, machine_hash: str, account_hash: str, now: int):
+        if db.execute(
+            "SELECT 1 FROM licenses WHERE plan<>'trial' AND status='active' AND valid_until>? "
+            "AND (device=? OR account_hash=?) LIMIT 1", (now, device, account_hash),
+        ).fetchone():
+            return "paid", None
+        identities = (("machine", machine_hash), ("device", device),
+                      ("account", account_hash), ("owner", account_hash))
+        matches = {}
+        for kind, identity in identities:
+            row = db.execute("SELECT license_id FROM trials WHERE kind=? AND identity_hash=?",
+                             (kind, identity)).fetchone()
+            if row:
+                matches[kind] = row["license_id"]
+        # The original device may attach a stable-machine history to a legacy
+        # trial already bound to this account, without extending its deadline.
+        target = matches.get("machine")
+        if not target and matches.get("device") and not db.execute(
+            "SELECT 1 FROM trials WHERE kind='machine' AND license_id=? LIMIT 1", (matches["device"],),
+        ).fetchone():
+            target = matches["device"]
+        if target and matches.get("account") == target and set(matches.values()) == {target}:
+            record = cls._license(db, target)
+            if record["plan"] == "trial" and record["account_hash"] == account_hash:
+                if record["valid_until"] <= now:
+                    return "ended", record
+                # An administrator's explicit migration owns recovery from then
+                # on. Old physical history cannot rotate the signed key back.
+                migrated = db.execute(
+                    "SELECT 1 FROM codes WHERE mode='migration' AND redeemed_license=? "
+                    "AND redeemed_at IS NOT NULL LIMIT 1", (target,),
+                ).fetchone()
+                if record["status"] == "active" and not migrated:
+                    return "active", record
+        if matches.get("account"):
+            record = cls._license(db, matches["account"])
+            if record["plan"] == "trial" and record["valid_until"] <= now:
+                return "ended", None
+        return ("used", None) if matches else ("eligible", None)
+
+    def trial_status(self, device: str, body: dict, now: int) -> dict:
+        account, account_hash, machine_hash = self._trial_request(body)
+        with self.connection() as db:
+            status, record = self._trial_context(db, device, machine_hash, account_hash, now)
+            deadline = record["valid_until"] if record else 0
+            return {"state": status, "eligible": status == "eligible",
+                    "recoverable": status == "active", "account": account,
+                    "valid_until": deadline, "remaining_seconds": max(0, deadline - now)}
+
+    def claim_trial(self, device: str, public_key: str, body: dict, now: int) -> dict:
+        account, account_hash, machine_hash = self._trial_request(body)
+        with self.connection(write=True) as db:
+            status, original = self._trial_context(db, device, machine_hash, account_hash, now)
+            if status == "paid":
+                raise LicenseError("active_license_conflict", "已有有效付费授权，不能领取试用。")
+            if status not in {"eligible", "active"}:
+                raise LicenseError("trial_used", "此设备或微信账号已使用过试用，请购买正式授权。")
+            if original:
+                license_id = original["id"]
+                # Reinstall recovery on the same machine/account rotates the
+                # signing identity, never the grant or its original deadline.
+                if original["device"] != device or original["public_key"] != public_key:
+                    db.execute("UPDATE licenses SET device=?,public_key=?,revision=revision+1 WHERE id=?",
+                               (device, public_key, license_id))
+            else:
+                license_id = self._apply_grant(db, {"mode": "new", "plan": "trial",
+                                                   "owner_hash": account_hash}, None,
+                                               device, public_key, now)
+                self._bind_account(db, device, license_id, account, account_hash, now)
+            self._remember_trial(db, "machine", machine_hash, license_id)
+            self._remember_trial(db, "device", device, license_id)
+            self._audit(db, now, device, "recover_trial" if original else "claim_trial", license_id)
+            return dict(self._license(db, license_id))
+
     def accept_nonce(self, device: str, nonce: str, now: int) -> None:
         # Retain beyond the complete +/- 300 second request acceptance window.
         with self.connection(write=True) as db:
@@ -348,7 +438,7 @@ class LicenseStore:
         return extend_period(now, code["plan"])
 
     def preview(self, device: str, body: dict, now: int) -> dict:
-        _validate_body(body, {"code"}, {"license_id"})
+        _validate_body(body, {"code"}, {"license_id", "machine_id"})
         supplied_id = body.get("license_id", "")
         if not isinstance(supplied_id, str):
             raise LicenseError("invalid_data", "请求参数无效。")
@@ -356,6 +446,7 @@ class LicenseStore:
         digest = code_digest(body["code"])
         with self.connection(write=True) as db:
             code, target, redeemed = self._code_context(db, digest, device, now)
+            self._new_trial_machine(db, code, redeemed, body)
             replaced = self._replacement(db, code, target, device, supplied_id, now, redeemed=redeemed)
             preview_id = secrets.token_hex(16)
             # Keep completed previews for a day for lost-response recovery.
@@ -378,11 +469,12 @@ class LicenseStore:
             }
 
     def redeem(self, device: str, public_key: str, body: dict, now: int) -> dict:
-        _validate_body(body, {"code", "preview_id"})
+        _validate_body(body, {"code", "preview_id"}, {"machine_id"})
         preview_id = _text(body["preview_id"])
         digest = code_digest(body["code"])
         with self.connection(write=True) as db:
             code, target, redeemed = self._code_context(db, digest, device, now)
+            machine_hash = self._new_trial_machine(db, code, redeemed, body)
             preview = db.execute("SELECT * FROM previews WHERE id=?", (preview_id,)).fetchone()
             if not preview or preview["device"] != device or preview["code_id"] != code["id"]:
                 raise LicenseError("preview_required", "请先预览激活码并确认兑换内容。")
@@ -402,12 +494,22 @@ class LicenseStore:
                 self._audit(db, now, device, "replace_license", replaced["id"],
                             migrated_license_id=target_id, code_id=code["id"])
             license_id = self._apply_grant(db, code, target, device, public_key, now)
+            if machine_hash:
+                self._remember_trial(db, "machine", machine_hash, license_id)
             db.execute(
                 "UPDATE codes SET redeemed_at=?,redeemed_license=?,redeemed_device=?,redeemed_replaces_id=? WHERE id=?",
                 (now, license_id, device, replaced["id"] if replaced else None, code["id"]),
             )
             self._audit(db, now, device, "redeem", license_id, code_id=code["id"], mode=code["mode"])
             return dict(self._license(db, license_id))
+
+    @classmethod
+    def _new_trial_machine(cls, db, code, redeemed: bool, body: dict) -> str:
+        if code["plan"] != "trial" or code["mode"] != "new" or redeemed:
+            return ""
+        machine_hash = cls._machine_hash(body.get("machine_id"))
+        cls._trial(db, "machine", machine_hash)
+        return machine_hash
 
     @classmethod
     def _apply_grant(cls, db, code, target, device: str, public_key: str, now: int) -> str:
@@ -456,23 +558,27 @@ class LicenseStore:
             raise LicenseError("invalid_account", "机器人账号格式无效。")
         account_hash = _hash(account.casefold())
         with self.connection(write=True) as db:
-            record = self._owned(db, _text(body["license_id"]), device)
-            self._active(record)
-            if record["account"] == account:
-                return dict(record)
-            if record["account"]:
-                raise LicenseError("account_bound", "该授权已绑定机器人账号，换绑请联系管理员。")
-            if record["valid_until"] <= now:
-                raise LicenseError("subscription_expired", "订阅已到期，请续期后再绑定机器人账号。")
-            self._account_available(db, account_hash, record["id"], now)
-            if record["plan"] == "trial":
-                self._remember_trial(db, "account", account_hash, record["id"])
-            db.execute(
-                "UPDATE licenses SET account=?,account_hash=?,revision=revision+1 WHERE id=?",
-                (account, account_hash, record["id"]),
-            )
-            self._audit(db, now, device, "bind", record["id"])
-            return dict(self._license(db, record["id"]))
+            return self._bind_account(db, device, _text(body["license_id"]), account, account_hash, now)
+
+    @classmethod
+    def _bind_account(cls, db, device: str, license_id: str, account: str, account_hash: str, now: int) -> dict:
+        record = cls._owned(db, license_id, device)
+        cls._active(record)
+        if record["account"] == account:
+            return dict(record)
+        if record["account"]:
+            raise LicenseError("account_bound", "该授权已绑定机器人账号，换绑请联系管理员。")
+        if record["valid_until"] <= now:
+            raise LicenseError("subscription_expired", "订阅已到期，请续期后再绑定机器人账号。")
+        cls._account_available(db, account_hash, record["id"], now)
+        if record["plan"] == "trial":
+            cls._remember_trial(db, "account", account_hash, record["id"])
+        db.execute(
+            "UPDATE licenses SET account=?,account_hash=?,revision=revision+1 WHERE id=?",
+            (account, account_hash, record["id"]),
+        )
+        cls._audit(db, now, device, "bind", record["id"])
+        return dict(cls._license(db, record["id"]))
 
     def revoke(self, *, now: int, license_id: str = "", code_id: str = "") -> dict:
         if bool(license_id) == bool(code_id):

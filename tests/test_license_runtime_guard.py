@@ -123,6 +123,34 @@ def test_data_and_identity_reads_remain_available_after_expiry(runtime, path):
     runtime.guard.require_hook(path)
 
 
+def test_unactivated_identity_connection_allows_login_reads_but_blocks_business(runtime):
+    runtime.client.state.update(can_run=False, state="unactivated", run_id="", account="")
+    runtime.identity["account"] = ""
+    calls = []
+
+    class Actions:
+        @module.guard_bridge_action
+        async def handle(self, request):
+            calls.append(request["action"])
+            runtime.guard.require_hook("/api/get_profile_cache")
+            return {"account": runtime.identity["account"]}
+
+    async def run():
+        runtime.guard.require_hook("/api/health")
+        assert await Actions().handle({"action": "get_login_info"}) == {"account": ""}
+        runtime.identity["account"] = "wxid_new_trial"
+        assert await Actions().handle({"action": "get_login_info"}) == {"account": "wxid_new_trial"}
+        with pytest.raises(LicenseError):
+            await Actions().handle({"action": "send_group_msg"})
+        with pytest.raises(LicenseError):
+            runtime.guard.require_hook("/api/send_text_msg")
+
+    asyncio.run(run())
+    assert calls == ["get_login_info", "get_login_info"]
+    assert runtime.guard.queue_event({"post_type": "message", "self_id": "wxid_new_trial"}) is None
+    assert not runtime.guard.status()["can_run"]
+
+
 def test_provider_wrapper_checks_before_call_and_after_result(runtime):
     calls = []
 

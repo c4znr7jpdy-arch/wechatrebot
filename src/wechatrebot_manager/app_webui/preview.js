@@ -354,25 +354,33 @@ window.createPreviewApi = function (helpers) {
       {id: "yearly", name: "年付", price_fen: 69900, duration_seconds: 365 * 86400},
     ];
     let previewLicenseState = licenseDemo ? licenseParams.get("license") || "unactivated" : "disabled";
+    const previewTrialMode = ["trial-active", "trial-ended", "trial-used"].includes(previewLicenseState) ? previewLicenseState : "";
+    if (previewTrialMode) previewLicenseState = previewTrialMode === "trial-active" ? "active" : previewTrialMode === "trial-ended" ? "expired" : "unactivated";
     const previewLicense = {license_id: ["pending", "active", "expired", "offline"].includes(previewLicenseState) ? "lic_preview" : "",
       device_id: ["pending", "active", "expired", "offline"].includes(previewLicenseState) ? "a".repeat(64) : "", plan: "monthly", account: ["active", "expired", "offline"].includes(previewLicenseState) ? "wxid_demo_account" : "",
       valid_until: previewLicenseState === "expired" ? Math.floor(Date.now() / 1000) - 60 : Math.floor(Date.now() / 1000) + 30 * 86400, can_run: false};
+    if (["trial-active", "trial-ended"].includes(previewTrialMode)) {
+      previewLicense.plan = "trial";
+      if (previewTrialMode === "trial-active") previewLicense.valid_until = Math.floor(Date.now() / 1000) + 3600;
+    }
     const previewCodes = new Map();
     const redeemedPreviewCodes = new Set();
     if (licenseDemo) {
       setPreviewRuntime(false);
       if (!["active", "expired", "offline"].includes(previewLicenseState)) status.runtime.wechat_identity = "";
+      if (previewTrialMode) status.runtime.wechat_identity = "wxid_demo_account";
     }
     const licenseError = (code, message) => Promise.resolve({ok: false, error: {code, message}});
     const licenseSnapshot = () => {
       const enabled = previewLicenseState !== "disabled";
       const configured = !["disabled", "unconfigured"].includes(previewLicenseState);
-      const canConnect = configured && Boolean(previewLicense.license_id) && previewLicense.valid_until > Date.now() / 1000;
-      const authorized = canConnect && Boolean(previewLicense.account) && previewLicense.account === status.runtime.wechat_identity;
+      const validLicense = Boolean(previewLicense.license_id) && previewLicense.valid_until > Date.now() / 1000;
+      const canConnect = configured && (previewLicenseState === "unactivated" || validLicense);
+      const authorized = validLicense && Boolean(previewLicense.account) && previewLicense.account === status.runtime.wechat_identity;
       const messages = {
         disabled: "此安装尚未启用商业授权，现有功能可按原方式使用。",
         unconfigured: "授权服务尚未配置，请联系软件提供者。",
-        unactivated: "微信扫码入群领取激活码，查看并确认兑换后绑定微信。",
+        unactivated: "连接微信后可激活免费试用；已有激活码可在此查看并确认兑换。",
         pending: "激活码已兑换，请连接微信并确认实际登录账号。",
         active: "授权已生效，由你确认启动机器人。",
         expired: "自动化已暂停。可兑换续期码，微信与本机数据保留。",
@@ -383,8 +391,29 @@ window.createPreviewApi = function (helpers) {
         valid_until: previewLicense.license_id ? previewLicense.valid_until : 0, plan: previewLicense.license_id ? previewLicense.plan : "",
         message: messages[previewLicenseState], plans: structuredClone(previewLicensePlans)};
     };
+    const trialSnapshot = () => {
+      const local = licenseSnapshot();
+      const plan = local.plan;
+      const state = plan === "trial" ? local.remaining_seconds > 0 ? "active" : "ended"
+        : plan ? "paid" : previewTrialMode === "trial-used" ? "used" : "eligible";
+      return {state, eligible: state === "eligible", recoverable: false,
+        account: status.runtime.wechat_identity || "", valid_until: plan === "trial" ? local.valid_until : 0,
+        remaining_seconds: plan === "trial" ? local.remaining_seconds : 0};
+    };
     const previewLicenseApi = {
       get_license_status: () => ok(licenseSnapshot()),
+      get_trial_status: () => status.runtime.wechat_identity ? ok({free_trial: trialSnapshot()})
+        : licenseError("account_required", "请先连接微信，再激活免费试用。"),
+      activate_free_trial: (expectedAccount) => {
+        if (!status.runtime.wechat_identity) return licenseError("account_required", "请先连接微信，再激活免费试用。");
+        if (expectedAccount !== status.runtime.wechat_identity) return licenseError("account_changed", "微信登录账号已变化，请重新查询试用资格。");
+        const trial = trialSnapshot();
+        if (!trial.eligible) return licenseError("trial_used", "你的试用已结束，可联系群主购买");
+        Object.assign(previewLicense, {license_id: "lic_preview_trial", device_id: "a".repeat(64), plan: "trial",
+          account: expectedAccount, valid_until: Math.floor(Date.now() / 1000) + 3600, can_run: false});
+        previewLicenseState = "active";
+        return ok(licenseSnapshot());
+      },
       get_license_contact: async () => {
         const unavailable = {state: "unavailable", group_name: "", expires_at: 0, remaining_seconds: 0, image_data_url: "", source: "bundled",
           message: "暂时无法获取入群二维码，请刷新重试。"};
