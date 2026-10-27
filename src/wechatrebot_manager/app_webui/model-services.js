@@ -468,7 +468,7 @@ window.createModelServices = function (helpers) {
     const button = $("#testProvider");
     const generation = ++providerTestGeneration;
     const model = form.elements.model.value;
-    const current = () => generation === providerTestGeneration && state.activePage === "settings"
+    const current = () => generation === providerTestGeneration && state.activePage === "settings" && state.settingsSection === "model"
       && state.providerScreen === "editor" && form.elements.provider_id.value === providerId;
     const result = $("#providerTestResult");
     const title = $("#providerTestTitle");
@@ -712,6 +712,7 @@ window.createModelServices = function (helpers) {
     applyProviderPreset,
     beginNewProvider,
     bindProviderModelCombobox,
+    clearProviderTest,
     deleteProvider,
     deleteSelectedProvider,
     discoverProviderModels,

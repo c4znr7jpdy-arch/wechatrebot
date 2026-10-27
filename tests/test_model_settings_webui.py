@@ -254,6 +254,24 @@ def test_model_test_shows_real_answer_failure_and_ignores_stale_result(browser, 
         }})""")
         expect(page.locator("#testProvider")).to_be_enabled()
         expect(page.locator("#providerTestResult")).to_be_hidden()
+        page.locator("#testProvider").click()
+        page.locator('.nav-item[data-page="home"]').click()
+        page.evaluate("""() => window.finishModelTest({ok:false, error:{
+          title:'不应弹出的旧测试错误', message:'stale navigation failure', code:'16007', recorded:true
+        }})""")
+        page.locator('.nav-item[data-page="settings"]').click()
+        expect(page.locator("#testProvider")).to_be_enabled()
+        expect(page.locator("#providerTestResult")).to_be_hidden()
+        expect(page.get_by_text("不应弹出的旧测试错误", exact=False)).to_have_count(0)
+        page.locator("#testProvider").click()
+        page.locator('[data-settings-tab="skin"]').click()
+        page.locator('[data-settings-tab="model"]').click()
+        page.evaluate("""() => window.finishModelTest({ok:true, data:{
+          id:window.modelTestCalls[0], model:'old', status:'available', test_kind:'chat',
+          response_text:'stale section response', elapsed_ms:12
+        }})""")
+        expect(page.locator("#testProvider")).to_be_enabled()
+        expect(page.locator("#providerTestResult")).to_be_hidden()
         assert page.url == manager_url and page.title().startswith("机器人总设置")
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         assert not errors, errors
