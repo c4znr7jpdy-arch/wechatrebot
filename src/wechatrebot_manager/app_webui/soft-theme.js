@@ -51,6 +51,7 @@
       url.searchParams.delete("style");
       window.history.replaceState(window.history.state, "", url);
     }
+    window.dispatchEvent(new Event("manager-skin-change"));
   }
 
   async function initialize(savePreference) {

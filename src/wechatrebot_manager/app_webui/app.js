@@ -149,6 +149,18 @@
     window.syncFeaturePageTheme(frame, state.theme, onStylesReady);
   }
 
+  async function syncWindowTheme() {
+    // Older manager bridges and browser previews may have no native caption.
+    if (typeof window.pywebview?.api?.sync_window_theme !== "function") return;
+    const palette = getComputedStyle(document.documentElement);
+    try {
+      await api("sync_window_theme", state.theme,
+        palette.getPropertyValue("--surface").trim(), palette.getPropertyValue("--ink").trim());
+    } catch (error) {
+      window.managerErrorReporter?.capture(error, state.activePage);
+    }
+  }
+
   function applyTheme(value, persist = false) {
     const theme = normalizeTheme(value);
     state.theme = theme;
@@ -172,6 +184,7 @@
     if (iconNode) iconNode.setAttribute("href", theme === "dark" ? "#i-sun" : "#i-moon");
     if (textNode) textNode.textContent = theme === "dark" ? "浅色模式" : "深色模式";
     syncEmbeddedTheme();
+    void syncWindowTheme();
   }
 
   function initializeTheme() {
@@ -840,6 +853,7 @@
 
   function bindEvents() {
     initializeTheme();
+    window.addEventListener("manager-skin-change", syncWindowTheme);
     window.initializePanelLayout();
     window.initializeHistoryDateRange(() => loadConversations({latest: true}));
     // Keep the browser-native calendar/clock as the single source of truth,

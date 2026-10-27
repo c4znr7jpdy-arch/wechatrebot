@@ -813,7 +813,12 @@ html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--vei
   .panel-resizing iframe { pointer-events: none; }
   #page-features .feature-layout { grid-template-columns: var(--layout-track-0, 300px) minmax(0,1fr); }
   #page-groups .group-layout, #page-groups .contact-layout { grid-template-columns: minmax(0,1fr) var(--layout-track-1, minmax(340px,.65fr)); }
-  #page-history .history-layout { grid-template-columns: var(--layout-track-0, 260px) minmax(0,1fr) var(--layout-track-2, 230px); }
+  #page-history .history-layout {
+    --history-track-0: 24fr;
+    --history-track-1: 54fr;
+    --history-track-2: 22fr;
+    grid-template-columns: var(--layout-track-0, minmax(220px, var(--history-track-0))) var(--layout-track-1, minmax(360px, var(--history-track-1))) var(--layout-track-2, minmax(200px, var(--history-track-2)));
+  }
   .core-layout { grid-template-columns: var(--layout-track-0, 235px) minmax(0,1fr); }
   #page-groups .group-inspector.has-panel-size, #page-groups .contact-inspector.has-panel-size { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
   #page-groups .has-panel-size .inspector-hero, #page-groups .has-panel-size .inspector-tabs, #page-groups .has-panel-size .inspector-footer { flex-shrink: 0; }
@@ -827,7 +832,7 @@ html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--vei
   #page-history .message-pane.has-panel-size { overflow: hidden; }
 }
 @media (min-width: 1101px) and (max-width: 1220px) {
-  #page-history .history-layout { grid-template-columns: var(--layout-track-0, 250px) minmax(0,1fr); }
+  #page-history .history-layout { grid-template-columns: var(--layout-track-0, minmax(220px, var(--history-track-0))) var(--layout-track-1, minmax(360px, var(--history-track-1))); }
 }
 @media (min-width: 1800px) {
   #page-features .feature-catalog, #page-features .feature-detail { min-height: 650px; height: calc(100dvh - 220px); }

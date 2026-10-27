@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import sqlite3
@@ -67,12 +68,14 @@ from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .installed_entries import ensure_launcher_executable
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
+from .windows_titlebar import apply_window_theme
 from .ui_skins import save_ui_skin
 
 
 PUBLIC_API_METHODS = (
     "bootstrap",
     "save_theme",
+    "sync_window_theme",
     "save_skin",
     "get_status",
     "get_license_status",
@@ -417,6 +420,13 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             save_ui_theme(self._install_root, theme)
             return self._ok({"theme": theme})
         except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
+    def sync_window_theme(self, theme: str, background: str, foreground: str) -> dict[str, object]:
+        try:
+            applied = apply_window_theme(self._window, theme, background, foreground)
+            return self._ok({"applied": applied})
+        except ValueError as exc:
             return self._failed(exc, "15001")
 
     def save_skin(self, skin: str) -> dict[str, object]:
@@ -914,6 +924,26 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             return self._failed(exc)
 
 
+def _fit_window_to_work_area(window: Any) -> None:
+    """Fit the default window on small/high-DPI displays before it becomes visible."""
+    try:
+        from System.Drawing import Point, Size  # type: ignore[import-not-found]
+        from System.Windows.Forms import Screen  # type: ignore[import-not-found]
+
+        native = window.native
+        area = Screen.FromControl(native).WorkingArea
+        if area.Width <= 0 or area.Height <= 0:
+            return
+        # WinForms has already applied DPI scaling; all values here are physical pixels.
+        native.MinimumSize = Size(min(native.MinimumSize.Width, area.Width),
+                                  min(native.MinimumSize.Height, area.Height))
+        native.Size = Size(min(native.Width, area.Width), min(native.Height, area.Height))
+        native.Location = Point(max(area.Left, min(native.Left, area.Right - native.Width)),
+                                max(area.Top, min(native.Top, area.Bottom - native.Height)))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not fit manager window to working area: %s", type(exc).__name__)
+
+
 def run_application(install_root: str | Path, *, development: bool = False) -> int:
     if os.name != "nt":
         return 2
@@ -949,13 +979,16 @@ def run_application(install_root: str | Path, *, development: bool = False) -> i
             window = webview.create_window(
                 title,
                 f"http://127.0.0.1:{server.server_port}/",
-                width=1380,
-                height=860,
+                width=1520,
+                height=900,
                 min_size=(1080, 680),
                 background_color="#111827" if load_ui_theme(install_root) == "dark" else "#F3F6FA",
                 text_select=True,
             )
             tray = None
+            before_show = getattr(window.events, "before_show", None)
+            if before_show is not None:
+                before_show += lambda: _fit_window_to_work_area(window)
             window.events.shown += api.confirm_update_startup
             if not development:
                 tray = WindowsTrayController(window, "WxRebot")
