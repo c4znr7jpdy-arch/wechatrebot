@@ -388,7 +388,15 @@ index a69cb91..f60f2b7 100644
 diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/astrbot/dashboard/services/config_service.py
 --- a/official/astrbot/dashboard/services/config_service.py
 +++ b/expected/astrbot/dashboard/services/config_service.py
-@@ -762,7 +762,7 @@
+@@ -4,6 +4,7 @@
+ import copy
+ import inspect
+ import os
++import time
+ import traceback
+ from pathlib import Path
+ from typing import Any
+@@ -762,7 +763,7 @@
          }
  
      def get_plugin_config(self, plugin_name: str) -> dict:
@@ -397,7 +405,7 @@ diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/as
  
          for plugin_md in star_registry:
              if plugin_md.name != plugin_name:
-@@ -906,16 +906,30 @@
+@@ -906,16 +907,30 @@
  
          return scope, name, key_path, metadata, metadata.config
  
@@ -431,7 +439,7 @@ diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/as
  
          errors, post_configs = validate_config(
              post_configs,
-@@ -924,8 +938,72 @@
+@@ -924,8 +939,72 @@
          )
          if errors:
              raise ValueError(f"格式校验未通过: {errors}")
@@ -506,7 +514,7 @@ diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/as
  
      async def save_plugin_configs_from_dashboard_payload(
          self,
-@@ -935,7 +1013,7 @@
+@@ -935,7 +1014,7 @@
      ) -> str:
          post_configs = payload if isinstance(payload, dict) else {}
          await self.save_plugin_configs(post_configs, plugin_name)
@@ -515,6 +523,45 @@ diff --git a/official/astrbot/dashboard/services/config_service.py b/expected/as
  
      async def upload_config_file(
          self,
+@@ -1682,11 +1761,36 @@
+             "status": "unavailable",
+             "error": None,
+         }
++        # Exercise the same runtime instance (model, keys, proxy and thinking
++        # settings) that handles replies, without creating a chat or saving config.
++        kind = getattr(provider_type, "value", None)
++        result["test_kind"] = {"chat_completion": "chat", "speech_to_text": "stt",
++                               "text_to_speech": "tts"}.get(kind, kind)
++        started = time.monotonic()
+         try:
+-            await target.test()
++            if kind == "chat_completion":
++                response = await asyncio.wait_for(
++                    target.text_chat(prompt="REPLY `PONG` ONLY", request_max_retries=1),
++                    timeout=45.0,
++                )
++                text = getattr(response, "completion_text", None)
++                if not isinstance(text, str) or not text.strip():
++                    result.update(error_type="EmptyModelResponseError",
++                                  error="模型没有返回可用回答，不能确认测试成功。")
++                    return result
++                result["response_text"] = text.strip()[:2000]
++            elif kind in {"embedding", "rerank", "speech_to_text", "text_to_speech"}:
++                await asyncio.wait_for(target.test(), timeout=45.0)
++            else:
++                result.update(error_type="UnsupportedModelTestError",
++                              error="当前模型用途尚不支持真实请求测试。")
++                return result
+             result["status"] = "available"
+         except Exception as exc:
+-            result["error"] = str(exc)
++            result["error"] = str(exc) or "模型测试未完成。"
++            result["error_type"] = type(exc).__name__
++        finally:
++            result["elapsed_ms"] = round((time.monotonic() - started) * 1000, 1)
+         return result
+ 
+     async def test_provider_from_dashboard_args(self, args) -> dict:
 diff --git a/official/astrbot/dashboard/api/plugins.py b/expected/astrbot/dashboard/api/plugins.py
 --- a/official/astrbot/dashboard/api/plugins.py
 +++ b/expected/astrbot/dashboard/api/plugins.py
@@ -630,7 +677,40 @@ diff --git a/official/astrbot/core/provider/sources/request_retry.py b/expected/
  REQUEST_RETRY_WAIT_MIN_S = 0.2
  REQUEST_RETRY_WAIT_MAX_S = 30
  REQUEST_RETRY_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504, 529}
-
+@@ -121,9 +121,18 @@
+         max_attempts=max_attempts,
+     )
+ 
+-    async for attempt in retrying:
+-        with attempt:
+-            return await request_factory()
++    try:
++        async for attempt in retrying:
++            with attempt:
++                return await request_factory()
++    except Exception as error:
++        # Record typed evidence even when a caller handles the exception. Do not
++        # log request bodies, credentials or the upstream exception text.
++        logger.error(
++            f"MODEL_REQUEST_FAILED error_type={type(error).__name__} "
++            f"status_code={_get_status_code(error) or 'none'}"
++        )
++        raise
+ 
+     raise RuntimeError("Provider request retry loop exited unexpectedly.")
+ 
+@@ -156,6 +165,11 @@
+     try:
+         yield value
+     except BaseException as error:
++        if isinstance(error, Exception):
++            logger.error(
++                f"MODEL_REQUEST_FAILED error_type={type(error).__name__} "
++                f"status_code={_get_status_code(error) or 'none'}"
++            )
+         if await manager.__aexit__(type(error), error, error.__traceback__):
+             return
+         raise
 diff --git a/official/astrbot/core/star/star_handler.py b/expected/astrbot/core/star/star_handler.py
 --- a/official/astrbot/core/star/star_handler.py
 +++ b/expected/astrbot/core/star/star_handler.py

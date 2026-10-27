@@ -606,7 +606,7 @@ window.createPreviewApi = function (helpers) {
       },
       set_default_provider: (id) => { previewProviders = previewProviders.map((item) => ({...item, is_default: item.id === id})); return ok({id, apply_state: "applied"}, "默认回复模型已切换并立即生效。"); },
       set_provider_thinking: (id, enabled) => { previewProviders = previewProviders.map((item) => item.id === id ? {...item, thinking_enabled: Boolean(enabled)} : item); return ok({id, thinking_enabled: Boolean(enabled), apply_state: "applied"}, "思考模式已热更新，下一条消息立即生效。"); },
-      test_provider: () => ok({ok: true}, "模型服务连接正常。"),
+      test_provider: (id) => ok({id, model: previewProviders.find(item => item.id === id)?.model || "preview-model", status: "available", test_kind: "chat", response_text: "PONG（预览回答）", elapsed_ms: 120}),
       discover_provider_models: () => ok({items: ["deepseek-flash", "glm-4.6v", "gemini-3.8-flash", "qwen-plus", "doubao-seed-2-0-lite-260215"], total: 5}, "已读取 5 个可用模型。"),
       delete_provider: (id) => { previewProviders = previewProviders.filter((item) => item.id !== id); return ok({id}, "模型服务已删除并立即生效。"); },
       get_maintenance: () => ok({preview: {file_count: 18, uncompressed_size: 39636172, can_create: true}, backups: [{id: "robot-backup-preview.zip", file_name: "robot-backup-preview.zip", size: 12740121, modified_at: new Date(Date.now() - 86400000).toISOString()}], diagnostics: {summary: {error_count: 0, warning_count: 1, check_count: 14}}}),

@@ -521,6 +521,12 @@ tbody tr:hover { background: #fbfdff; }
 .provider-editor-heading strong, .provider-editor-heading span { display: block; }
 .provider-editor-heading span { margin-top: 3px; color: var(--muted); font-size: 11px; }
 .provider-actions { align-items: flex-end; }
+.provider-test-result { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-width: 0; }
+.provider-test-result > span { color: var(--muted); font-size: 12px; }
+.provider-test-result pre { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.provider-test-result[data-status="error"] { border-color: var(--amber-700); }
+.provider-test-result[data-status="success"] > strong { color: var(--green-600); }
+
 .secret-input { display: flex; gap: 8px; align-items: stretch; }
 .secret-input input { flex: 1; min-width: 0; }
 .secret-input button { flex: 0 0 auto; }

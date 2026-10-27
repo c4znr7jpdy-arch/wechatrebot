@@ -189,3 +189,73 @@ def test_provider_icons_default_save_and_editor_navigation(browser, manager_url,
         assert not errors, errors
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("theme,width,height", [("light", 1440, 1000), ("dark", 760, 850)])
+def test_model_test_shows_real_answer_failure_and_ignores_stale_result(browser, manager_url, tmp_path, theme, width, height):
+    page = browser.new_page(viewport={"width": width, "height": height})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        page.add_init_script(f"localStorage.setItem('wechatrebot-theme', '{theme}')")
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerApiKey").fill("preview-only")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        page.locator('.provider-service footer [data-provider-edit]').first.click()
+        expect(page.locator("#testProvider")).to_have_text("测试模型")
+        original_model = page.locator("#providerModelInput").input_value()
+        page.evaluate("""() => {
+          window.modelTestCalls = [];
+          window.pywebview.api.test_provider = id => {
+            window.modelTestCalls.push(id);
+            return new Promise(resolve => { window.finishModelTest = resolve; });
+          };
+        }""")
+        page.locator("#providerModelInput").fill("unsaved-model")
+        page.locator("#testProvider").click()
+        expect(page.locator("#providerNote")).to_have_text("请先保存修改，再测试当前模型。")
+        assert page.evaluate("window.modelTestCalls.length") == 0
+        page.locator("#providerModelInput").fill(original_model)
+        page.locator("#testProvider").click()
+        expect(page.locator("#providerTestTitle")).to_have_text("正在请求模型…")
+        expect(page.locator("#testProvider")).to_be_disabled()
+        page.evaluate("""() => window.finishModelTest({ok: true, data: {
+          id: window.modelTestCalls[0], model: 'saved-model', test_kind: 'chat',
+          status: 'available', response_text: 'PONG <script>literal</script>', elapsed_ms: 1250
+        }})""")
+        expect(page.locator("#providerTestTitle")).to_have_text("本次模型测试成功")
+        expect(page.locator("#providerTestMeta")).to_have_text("saved-model · 1.3 秒")
+        expect(page.locator("#providerTestOutput")).to_have_text("PONG <script>literal</script>")
+        expect(page.locator("#providerTestOutput script")).to_have_count(0)
+        page.screenshot(path=str(tmp_path / f"model-test-success-{theme}.png"))
+        page.locator("#testProvider").click()
+        page.evaluate("""() => window.finishModelTest({ok:false, error:{
+          title:'模型响应超时', message:'未收到完整回答', detail:'模型 saved-model：请求超时',
+          code:'16007', recorded:true
+        }})""")
+        expect(page.locator("#providerTestTitle")).to_have_text("模型响应超时")
+        expect(page.locator("#providerTestOutput")).to_have_text("模型 saved-model：请求超时")
+        expect(page.locator("#providerTestMeta")).to_contain_text("16007")
+        page.screenshot(path=str(tmp_path / f"model-test-timeout-{theme}.png"))
+        page.locator("#testProvider").click()
+        page.locator("#closeProviderEditor").click()
+        page.locator('.provider-service footer [data-provider-edit]').first.click()
+        expect(page.locator("#providerTestResult")).to_be_hidden()
+        page.evaluate("""() => window.finishModelTest({ok:true, data:{
+          id:window.modelTestCalls[0], model:'old', status:'available', test_kind:'chat',
+          response_text:'stale response', elapsed_ms:12
+        }})""")
+        expect(page.locator("#testProvider")).to_be_enabled()
+        expect(page.locator("#providerTestResult")).to_be_hidden()
+        assert page.url == manager_url and page.title().startswith("机器人总设置")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert not errors, errors
+    finally:
+        page.close()

@@ -17,6 +17,14 @@ window.createModelServices = function (helpers) {
   } = helpers;
 
   let providerGridMotion;
+  let providerTestGeneration = 0;
+  let providerTestBusy = false;
+
+  function clearProviderTest() {
+    providerTestGeneration += 1;
+    $("#providerTestResult").hidden = true;
+    $("#providerTestOutput").textContent = "";
+  }
 
   const providerIconFiles = {
     deepseek: "deepseek.ico",
@@ -49,6 +57,7 @@ window.createModelServices = function (helpers) {
 
   function updateProviderDirty() {
     if (state.providerScreen !== "editor") return;
+    clearProviderTest();
     syncProviderIcon();
     const form = $("#providerForm");
     const keyChanged = Boolean(form?.elements.api_key.value);
@@ -59,6 +68,7 @@ window.createModelServices = function (helpers) {
   }
 
   function showProviderOverview(focus = false) {
+    clearProviderTest();
     state.providerScreen = "overview";
     state.providerDirty = false;
     $("#providerOverview").hidden = false;
@@ -67,6 +77,7 @@ window.createModelServices = function (helpers) {
   }
 
   function showProviderEditor(focus = true) {
+    clearProviderTest();
     state.providerScreen = "editor";
     $("#providerOverview").hidden = true;
     $("#providerEditorPage").hidden = false;
@@ -446,15 +457,61 @@ window.createModelServices = function (helpers) {
   }
 
   async function testSelectedProvider() {
-    const providerId = $("#providerForm").elements.provider_id.value;
-    if (!providerId) return;
+    const form = $("#providerForm");
+    const providerId = form.elements.provider_id.value;
+    if (!providerId || providerTestBusy) return;
+    updateProviderDirty();
+    if (state.providerDirty) {
+      $("#providerNote").textContent = "请先保存修改，再测试当前模型。";
+      return;
+    }
     const button = $("#testProvider");
-    const original = button.textContent;
+    const generation = ++providerTestGeneration;
+    const model = form.elements.model.value;
+    const current = () => generation === providerTestGeneration && state.activePage === "settings"
+      && state.providerScreen === "editor" && form.elements.provider_id.value === providerId;
+    const result = $("#providerTestResult");
+    const title = $("#providerTestTitle");
+    const meta = $("#providerTestMeta");
+    const output = $("#providerTestOutput");
+    const started = performance.now();
+    providerTestBusy = true;
     button.disabled = true;
     button.textContent = "测试中…";
-    try { await api("test_provider", providerId); $("#providerNote").textContent = "连接正常，可以使用。"; }
-    catch (error) { reportError(error); $("#providerNote").textContent = error.message; }
-    finally { button.disabled = false; button.textContent = original; }
+    $("#providerNote").textContent = "";
+    result.hidden = false;
+    result.dataset.status = "pending";
+    title.textContent = "正在请求模型…";
+    output.textContent = "";
+    const updateElapsed = () => {
+      if (current()) meta.textContent = `${model} · 已等待 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 500);
+    try {
+      const data = await api("test_provider", providerId);
+      if (!current()) return;
+      if (data?.status !== "available" || data.id !== providerId
+          || (data.test_kind === "chat" && !data.response_text?.trim())) {
+        throw new Error("未收到有效的模型测试结果，请更新后重试。");
+      }
+      result.dataset.status = "success";
+      title.textContent = "本次模型测试成功";
+      meta.textContent = `${data.model || model} · ${(data.elapsed_ms / 1000).toFixed(1)} 秒`;
+      output.textContent = data.response_text || "已完成该模型用途的实际请求。";
+    } catch (error) {
+      if (!current()) return;
+      result.dataset.status = "error";
+      title.textContent = error.product?.title || "模型测试失败";
+      meta.textContent = `${model} · ${((performance.now() - started) / 1000).toFixed(1)} 秒${error.product?.code ? ` · ${error.product.code}` : ""}`;
+      output.textContent = error.product?.detail || error.message;
+      reportError(error);
+    } finally {
+      window.clearInterval(timer);
+      providerTestBusy = false;
+      button.disabled = false;
+      button.textContent = "测试模型";
+    }
   }
 
   async function discoverProviderModels() {
