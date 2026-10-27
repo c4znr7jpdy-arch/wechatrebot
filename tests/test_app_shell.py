@@ -107,6 +107,15 @@ def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Pa
     assert _api(tmp_path).save_theme("dark")["ok"] is False
 
 
+def test_window_theme_api_is_optional_and_rejects_invalid_colors(tmp_path):
+    api = _api(tmp_path)
+    assert api.sync_window_theme("light", "#ffffff", "#14181f") == {
+        "ok": True, "data": {"applied": False}, "message": "",
+    }
+    assert api.sync_window_theme("light", "invalid", "#14181f")["ok"] is False
+    assert not (tmp_path / "data/manager/ui-preferences.json").exists()
+
+
 def test_skin_preference_survives_new_api_instances_and_preserves_theme(tmp_path: Path) -> None:
     path = tmp_path / "data/manager/ui-preferences.json"
     model_api.write_json_atomic(path, {"theme": "dark", "other": "keep"})
@@ -2258,7 +2267,7 @@ def test_model_services_use_responsive_grid_cards_with_an_aligned_add_card() -> 
     assert 'class="provider-add-card"' in script
     assert 'data-provider-delete="${escapeHtml(item.id)}"' in script
     assert 'function providerCardIdentity(service)' in script
-    assert ".provider-service-cards { display: grid; grid-template-columns: repeat(auto-fill, min(100%, 300px));" in styles
+    # Column count, equal widths and right-edge alignment are covered in the browser.
     assert ".provider-service-cards { padding: 16px; }" in styles
     assert 'id="i-more"' in markup
     assert 'id="i-plus"' in markup
@@ -2339,7 +2348,7 @@ def test_run_application_uses_explicit_webview_api_allowlist(
 ) -> None:
     exposed: list[str] = []
     create_options: dict[str, object] = {}
-    handlers: dict[str, list] = {"shown": [], "closing": [], "closed": []}
+    handlers: dict[str, list] = {"before_show": [], "shown": [], "closing": [], "closed": []}
 
     class FakeHook:
         def __init__(self, name: str) -> None:
@@ -2352,6 +2361,7 @@ def test_run_application_uses_explicit_webview_api_allowlist(
     class FakeWindow:
         def __init__(self) -> None:
             self.events = SimpleNamespace(
+                before_show=FakeHook("before_show"),
                 shown=FakeHook("shown"),
                 closing=FakeHook("closing"),
                 closed=FakeHook("closed"),
@@ -2400,15 +2410,60 @@ def test_run_application_uses_explicit_webview_api_allowlist(
 
     assert app_shell.run_application(tmp_path) == 0
     assert "js_api" not in create_options
+    assert (create_options["width"], create_options["height"]) == (1520, 900)
+    assert create_options["min_size"] == (1080, 680)
     assert exposed == list(app_shell.PUBLIC_API_METHODS)
     assert api._window is not None
     assert isinstance(api._tray, FakeTray)
     assert api._tray.title == "WxRebot"
+    fit_calls = []
+    monkeypatch.setattr(app_shell, "_fit_window_to_work_area", fit_calls.append)
+    assert len(handlers["before_show"]) == 1
+    handlers.pop("before_show")[0]()
+    assert fit_calls == [api._window]
     assert handlers == {
         "shown": [api.confirm_update_startup, api._tray.start],
         "closing": [api._tray.handle_window_closing],
         "closed": [api._tray.stop],
     }
+
+
+@pytest.mark.parametrize("work_area,size,position,minimum,expected", [
+    ((0, 0, 1920, 1040), (1520, 900), (200, 70), (1080, 680), (1520, 900, 200, 70)),
+    ((0, 0, 1920, 1040), (1900, 1125), (10, -23), (1350, 850), (1900, 1040, 10, 0)),
+    ((-1280, 40, 1280, 680), (1520, 900), (-1400, 0), (1080, 680), (1280, 680, -1280, 40)),
+    ((0, 0, 1024, 600), (1520, 900), (-248, -150), (1080, 680), (1024, 600, 0, 0)),
+])
+def test_default_window_fits_monitor_work_area_without_hiding_controls(
+    monkeypatch, work_area, size, position, minimum, expected,
+):
+    left, top, width, height = work_area
+    area = SimpleNamespace(Left=left, Top=top, Width=width, Height=height,
+                           Right=left + width, Bottom=top + height)
+
+    class Native:
+        def __init__(self):
+            self.Size = SimpleNamespace(Width=size[0], Height=size[1])
+            self.Location = SimpleNamespace(X=position[0], Y=position[1])
+            self.MinimumSize = SimpleNamespace(Width=minimum[0], Height=minimum[1])
+
+        Width = property(lambda self: self.Size.Width)
+        Height = property(lambda self: self.Size.Height)
+        Left = property(lambda self: self.Location.X)
+        Top = property(lambda self: self.Location.Y)
+
+    native = Native()
+    monkeypatch.setitem(sys.modules, "System.Drawing", SimpleNamespace(
+        Size=lambda w, h: SimpleNamespace(Width=w, Height=h),
+        Point=lambda x, y: SimpleNamespace(X=x, Y=y),
+    ))
+    monkeypatch.setitem(sys.modules, "System.Windows.Forms", SimpleNamespace(
+        Screen=SimpleNamespace(FromControl=lambda control: SimpleNamespace(WorkingArea=area)),
+    ))
+    app_shell._fit_window_to_work_area(SimpleNamespace(native=native))
+    assert (native.Width, native.Height, native.Left, native.Top) == expected
+    assert native.MinimumSize.Width <= width
+    assert native.MinimumSize.Height <= height
 
 
 def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:

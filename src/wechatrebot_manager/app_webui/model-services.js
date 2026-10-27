@@ -16,6 +16,8 @@ window.createModelServices = function (helpers) {
     getCoreSettings,
   } = helpers;
 
+  let providerGridMotion;
+
   const providerIconFiles = {
     deepseek: "deepseek.ico",
     glm: "glm.png",
@@ -343,13 +345,16 @@ window.createModelServices = function (helpers) {
   }
 
   function renderProviderServices() {
+    const list = $("#providerServiceList");
+    providerGridMotion ??= window.managerMotion?.trackGrid(list);
+    const before = providerGridMotion?.capture();
     const items = visibleProviderServices();
     const displayItems = [...items].sort((left, right) => Number(right.is_default) - Number(left.is_default));
     const status = $("#providerStatus");
     const defaultProvider = items.find((item) => item.is_default);
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
     status.textContent = `${items.length} 项服务`;
-    $("#providerServiceList").innerHTML = items.length ? `
+    list.innerHTML = items.length ? `
       <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，API Key / Token Plan 仅保存在当前设备。</span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
         const identity = providerCardIdentity(item);
@@ -370,7 +375,7 @@ window.createModelServices = function (helpers) {
             ? {title: "语音能力", detail: "供语音功能选择"}
             : {title: "向量能力", detail: "供长期记忆等检索功能选择"};
         return `
-        <article class="provider-service ${item.is_default ? "active" : ""}">
+        <article class="provider-service ${item.is_default ? "active" : ""}" data-motion-key="provider:${escapeHtml(item.id)}">
           <header class="provider-card-header">
             <div class="provider-card-title">
               <span class="provider-logo ${identity.className}" aria-hidden="true">${identity.mark}</span>
@@ -406,7 +411,7 @@ window.createModelServices = function (helpers) {
           </footer>
         </article>`;
       }).join("")}
-        <button class="provider-add-card" type="button" data-action-bound disabled data-provider-create>
+        <button class="provider-add-card" type="button" data-motion-key="provider-add" data-action-bound disabled data-provider-create>
           <span class="provider-add-icon" aria-hidden="true">${icon("i-plus")}</span>
           <strong>添加模型服务</strong>
           <small>连接其他兼容模型</small>
@@ -421,6 +426,7 @@ window.createModelServices = function (helpers) {
 
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
+    providerGridMotion?.refresh(before);
     renderHomeSetupAlerts();
   }
 
