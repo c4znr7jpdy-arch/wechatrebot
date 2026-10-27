@@ -1,0 +1,366 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index 6a00fc3..c699111 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -25,6 +25,7 @@ from .config import Settings
+ from .event_normalizer import integer, normalize_event, scalar
+ from .hook_client import HookApiError, HookClient
+ from .history_store import MessageHistoryStore
++from .history_original import HistoryOriginalImages
+ from .inbound_file import parse_file_attachment
+ from .inbound_image import (
+     ImageCdnCandidate,
+@@ -112,6 +113,7 @@ class BridgeApplication:
+         )
+         bind_account_source(lambda: self.state.bot_wxid if self._hook_ready else "")
+         self.history = history
++        self.history_images = None
+         self.router = router
+         self.onebot = onebot
+         self.injector_factory = injector_factory
+@@ -186,6 +188,11 @@ class BridgeApplication:
+                     self.settings.project_root.parent.parent / "data/manager/group-policies.json"
+                 ),
+             )
++        if self.history_images is None and self.history is not None:
++            self.history_images = HistoryOriginalImages(
++                self.history, self.settings.media_root, self._download_cdn_candidates,
++                self.settings.media_max_bytes,
++            )
+         if self.onebot is None:
+             self.onebot = OneBotClient(
+                 self.settings.astrbot_ws_url,
+@@ -204,6 +211,7 @@ class BridgeApplication:
+             status_provider=self._health_snapshot,
+             manager_hook=self.hook,
+             manager_query_token=self.settings.manager_query_token,
++            manager_history_images=self.history_images,
+         )
+         self._callback_runner = web.AppRunner(app, access_log=None)
+         await self._callback_runner.setup()
+@@ -1697,16 +1705,22 @@ class BridgeApplication:
+         return event
+ 
+     async def _periodic_media_cleanup(self) -> None:
++        next_media_cleanup = 0.0
+         while True:
+             try:
+-                removed = self.media.cleanup_expired(
+-                    self.settings.media_retention_hours * 3600
+-                )
+-                if removed:
+-                    logger.info("removed %s expired media files", removed)
++                if self.history_images is not None:
++                    self.history_images.cleanup()
++                now = time.monotonic()
++                if now >= next_media_cleanup:
++                    removed = self.media.cleanup_expired(
++                        self.settings.media_retention_hours * 3600
++                    )
++                    next_media_cleanup = now + 30 * 60
++                    if removed:
++                        logger.info("removed %s expired media files", removed)
+             except Exception:
+-                logger.exception("media cleanup failed")
+-            await asyncio.sleep(30 * 60)
++                logger.warning("media cleanup failed")
++            await asyncio.sleep(60)
+ 
+     async def _watch_injector(self) -> None:
+         while True:
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+index c4d3545..7731841 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+@@ -276,6 +276,7 @@ def create_callback_app(
+     status_provider: Any | None = None,
+     manager_hook: Any | None = None,
+     manager_query_token: str = "",
++    manager_history_images: Any | None = None,
+ ) -> web.Application:
+     app = web.Application(client_max_size=max_body_bytes)
+ 
+@@ -545,6 +546,34 @@ def create_callback_app(
+             }
+         )
+ 
++    async def manager_history_image(request: web.Request) -> web.Response:
++        account, denied = await authorize_manager(request)
++        if denied is not None:
++            return denied
++        try:
++            message_id = int(request.match_info.get("message_id", ""))
++            image_index = int(request.match_info.get("image_index", ""))
++            conversation = request.query.get("conversation_id", "")
++            if not 1 <= message_id <= 2**63 - 1 or not 0 <= image_index < 4 or not (
++                _valid_contact_id(conversation) or _valid_group_id(conversation)
++            ):
++                raise ValueError()
++        except (TypeError, ValueError):
++            return _manager_error("图片标识无效", 400)
++        if manager_history_images is None:
++            return _manager_error("原图接口尚不可用，请更新连接组件", 503)
++        try:
++            item = await manager_history_images.get(account, conversation, message_id, image_index)
++        except FileNotFoundError:
++            return _manager_error("原图已失效或未记录，当前仅能查看缩略图", 404)
++        except (OSError, ValueError):
++            return _manager_error("原图暂时无法读取，请稍后重试", 502)
++        if not await account_still_current(account):
++            return _manager_error("当前微信账号已变化，请刷新后重试", 409)
++        return _manager_response({"ok": True, "data": {
++            "account_id": account, "items": [item], "total": 1,
++        }})
++
+     async def receive(request: web.Request) -> web.Response:
+         try:
+             payload = await request.json()
+@@ -656,5 +685,6 @@ def create_callback_app(
+     )
+     app.router.add_get("/api/manager/contacts", manager_contacts)
+     app.router.add_get("/api/manager/contacts/{user_id}", manager_contact_detail)
++    app.router.add_get("/api/manager/history/{message_id}/images/{image_index}", manager_history_image)
+     app.router.add_post("/send_raw_xml", send_raw_xml)
+     return app
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_original.py b/hook_41827_astrbot_bridge/src/hook_bridge/history_original.py
+new file mode 100644
+index 0000000..df0a6f1
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_original.py
+@@ -0,0 +1,171 @@
++"""On-demand history images with a small, expiring cache and no journal blobs."""
++from __future__ import annotations
++
++import asyncio
++import base64
++from collections.abc import Mapping
++import hashlib
++import io
++import logging
++from pathlib import Path
++import re
++import time
++import warnings
++
++from PIL import Image
++
++from .history_media import image_preview
++from .inbound_image import ImageCdnCandidate, callback_image_candidates_from_payload
++
++
++logger = logging.getLogger(__name__)
++IMAGE_MAX_BYTES = 20 * 1024 * 1024
++CACHE_MAX_BYTES = 128 * 1024 * 1024
++CACHE_MAX_FILES = 16
++CACHE_TTL_SECONDS = 15 * 60
++_CACHE_NAME = re.compile(r"[a-f0-9]{64}(?:-[a-z0-9-]+)?\.img")
++
++
++def history_images(paths, raw=None) -> dict:
++    """Keep references aligned with thumbnails; never download or copy here."""
++    candidates = callback_image_candidates_from_payload(raw) if isinstance(raw, Mapping) else ()
++    originals = [
++        {"file_id": item.file_id, "aes_key": item.aes_key, "image_type": 1}
++        for item in candidates
++        if item.image_type == 1 and len(item.file_id) <= 8192 and len(item.aes_key) <= 256
++    ][:4]
++    previews, references = [], []
++    for path in list(paths)[:4]:
++        preview = image_preview(path)
++        if not preview:
++            continue
++        previews.append(preview)
++        references.append({"path": str(path.resolve()), "cdn": originals})
++    return {"media_previews": previews, "media_originals": references}
++
++
++def _image_data(path: Path, limit: int) -> str:
++    with path.open("rb") as handle:
++        raw = handle.read(limit + 1)
++    if not raw or len(raw) > limit:
++        raise ValueError("image is too large or empty")
++    with warnings.catch_warnings():
++        warnings.simplefilter("error", Image.DecompressionBombWarning)
++        with Image.open(io.BytesIO(raw)) as image:
++            mime = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp", "GIF": "gif"}.get(image.format)
++            if not mime or image.width * image.height > 20_000_000:
++                raise ValueError("unsupported history image")
++            image.verify()
++    return f"data:image/{mime};base64," + base64.b64encode(raw).decode("ascii")
++
++
++class HistoryOriginalImages:
++    def __init__(self, history, media_root: Path, download, max_bytes: int) -> None:
++        if max_bytes <= 0:
++            raise ValueError("max_bytes must be positive")
++        self.history = history
++        self.media_root = media_root.resolve()
++        self.root = self.media_root / "history-original"
++        self.download = download
++        self.max_bytes = min(max_bytes, IMAGE_MAX_BYTES)
++        self._pending: dict[str, asyncio.Task] = {}
++        self._active: set[str] = set()
++        self._download_lock = asyncio.Lock()
++
++    def cleanup(self, now: float | None = None) -> int:
++        if not self.root.is_dir() or self.root.resolve() != self.root:
++            return 0
++        current = time.time() if now is None else now
++        entries, removed = [], 0
++        for path in self.root.iterdir():
++            if (not _CACHE_NAME.fullmatch(path.name) or path.is_symlink()
++                    or not path.is_file() or path.name[:64] in self._active):
++                continue
++            try:
++                stat = path.stat()
++                if stat.st_mtime <= current - CACHE_TTL_SECONDS:
++                    path.unlink()
++                    removed += 1
++                else:
++                    entries.append((stat.st_mtime, path, stat.st_size))
++            except FileNotFoundError:
++                continue
++        entries.sort(reverse=True)
++        total = 0
++        for index, (_, path, size) in enumerate(entries):
++            total += size
++            if index >= CACHE_MAX_FILES or total > CACHE_MAX_BYTES:
++                path.unlink(missing_ok=True)
++                removed += 1
++        return removed
++
++    async def get(self, account: str, conversation: str, message_id: int, image_index: int) -> dict:
++        reference = self.history.image_reference(account, conversation, message_id, image_index)
++        key = hashlib.sha256(f"{account}\0{conversation}\0{message_id}\0{image_index}".encode()).hexdigest()
++        task = self._pending.get(key)
++        if task is None:
++            if len(self._pending) >= 4:
++                raise ValueError("图片正在加载，请稍后重试")
++            task = asyncio.create_task(self._load(key, reference))
++            self._pending[key] = task
++            def finished(completed):
++                self._pending.pop(key, None)
++                if not completed.cancelled():
++                    completed.exception()  # A closed viewer may stop awaiting this task.
++            task.add_done_callback(finished)
++        result = await asyncio.shield(task)
++        return {"message_id": message_id, "image_index": image_index, **result}
++
++    async def _load(self, key: str, reference: dict) -> dict:
++        try:
++            await asyncio.wait_for(self._download_lock.acquire(), timeout=1)
++        except asyncio.TimeoutError:
++            raise ValueError("图片正在加载，请稍后重试") from None
++        try:
++            self.cleanup()
++            if self.root.resolve() != self.root:
++                raise ValueError("图片缓存目录无效")
++            self.root.mkdir(parents=True, exist_ok=True)
++            destination = self.root / f"{key}.img"
++            if destination.is_file() and not destination.is_symlink():
++                try:
++                    return {"image_data_url": _image_data(destination, self.max_bytes), "quality": "original"}
++                except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
++                    destination.unlink(missing_ok=True)
++            candidates = []
++            sources = reference.get("cdn", [])
++            for item in (sources[:4] if isinstance(sources, list) else []):
++                if (isinstance(item, dict) and item.get("image_type") == 1
++                        and isinstance(item.get("file_id"), str) and 0 < len(item["file_id"]) <= 8192
++                        and isinstance(item.get("aes_key"), str) and 0 < len(item["aes_key"]) <= 256):
++                    candidates.append(ImageCdnCandidate(item["file_id"], item["aes_key"], 1))
++            if candidates:
++                valid_download = False
++                self._active.add(key)
++                try:
++                    downloaded = await asyncio.wait_for(self.download(destination, tuple(candidates), key), timeout=15)
++                    if downloaded:
++                        image = _image_data(destination, self.max_bytes)
++                        valid_download = True
++                        return {"image_data_url": image, "quality": "original"}
++                except Exception:
++                    logger.warning("History original image download unavailable")
++                finally:
++                    self._active.discard(key)
++                    for path in self.root.glob(f"{key}-*.img"):
++                        path.unlink(missing_ok=True)
++                    # Invalid/partial destinations must never become cache hits.
++                    if not valid_download:
++                        destination.unlink(missing_ok=True)
++                    self.cleanup()
++            raw_path = reference.get("path")
++            if isinstance(raw_path, str) and raw_path:
++                path = Path(raw_path).resolve()
++                if path.is_relative_to(self.media_root) and not path.is_relative_to(self.root):
++                    try:
++                        return {"image_data_url": _image_data(path, self.max_bytes), "quality": "cached"}
++                    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
++                        logger.debug("History cached image unavailable")
++            raise FileNotFoundError("原图已失效或未记录，当前仅能查看缩略图")
++        finally:
++            self._download_lock.release()
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+index c4975b8..0451b9c 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/history_store.py
+@@ -8,7 +8,7 @@ from typing import Sequence
+ import uuid
+ 
+ from .models import NormalizedEvent, OutboundCommand
+-from .history_media import message_previews
++from .history_original import history_images
+ 
+ 
+ def _event_timestamp(value: int | float | None) -> float:
+@@ -225,7 +225,7 @@ class MessageHistoryStore:
+                 "wechat_id": getattr(event, "wechat_id", ""),
+                 "avatar": getattr(event, "member_avatar", ""),
+                 **message_metadata,
+-                "media_previews": message_previews([event.media_path]) if event.message_type in {3, 47} else [],
++                **(history_images([event.media_path], event.raw) if event.message_type in {3, 47} else {}),
+             },
+             ensure_ascii=False,
+             separators=(",", ":"),
+@@ -271,7 +271,7 @@ class MessageHistoryStore:
+                 "group_name": "",
+                 "group_nickname": "",
+                 "wechat_name": sender_name,
+-                "media_previews": message_previews(media_paths),
++                **history_images(media_paths),
+                 "avatar": "",
+             },
+             ensure_ascii=False,
+@@ -294,6 +294,33 @@ class MessageHistoryStore:
+             dedup_key=dedup_key,
+         )
+ 
++    def image_reference(self, account: str, conversation: str, message_id: int, image_index: int) -> dict:
++        if not account or not conversation or message_id <= 0 or not 0 <= image_index < 4:
++            raise ValueError("图片标识无效")
++        session = ("hook_bridge:GroupMessage:" if conversation.endswith("@chatroom")
++                   else "hook_bridge:FriendMessage:") + conversation
++        try:
++            with self._connect() as connection:
++                row = connection.execute(
++                    "SELECT metadata FROM messages WHERE id = ? AND account_id = ? AND session_id = ?",
++                    (message_id, account, session),
++                ).fetchone()
++        except sqlite3.Error:
++            raise OSError("历史记录暂时无法读取") from None
++        if row is None:
++            raise FileNotFoundError("原图已失效或未记录")
++        try:
++            metadata = json.loads(row[0])
++            references = metadata.get("media_originals", [])
++            if not isinstance(references, list):
++                raise ValueError()
++            reference = references[image_index]
++            if not isinstance(reference, dict):
++                raise ValueError()
++            return reference
++        except (ValueError, TypeError, AttributeError, IndexError, KeyError):
++            raise FileNotFoundError("原图已失效或未记录") from None
++
+     def _insert(
+         self,
+         *,

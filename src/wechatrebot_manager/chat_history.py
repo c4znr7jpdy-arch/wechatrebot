@@ -758,6 +758,30 @@ class ChatHistoryService:
             })
         return tuple(messages)
 
+    def image_source_id(
+        self, conversation_id: str, message_id: int | str, image_index: int,
+        *, account_id: str,
+    ) -> int:
+        """Resolve a visible record to its account-scoped bridge journal row."""
+        if (not isinstance(account_id, str) or not account_id
+                or not isinstance(conversation_id, str) or not conversation_id
+                or isinstance(message_id, bool)
+                or not str(message_id).isascii() or not str(message_id).isdigit()
+                or len(str(message_id)) > 18
+                or isinstance(image_index, bool) or not isinstance(image_index, int)
+                or not 0 <= image_index < 4):
+            raise ValueError("消息图片标识无效，请刷新消息中心后重试。")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT source_message_id, media_previews FROM messages "
+                "WHERE id = ? AND account_id = ? AND conversation_id = ? AND source_key = ?",
+                (int(message_id), account_id, conversation_id,
+                 str(self.bridge_source.resolve()).casefold()),
+            ).fetchone()
+        if row is None or image_index >= len(_media_previews(row["media_previews"])):
+            raise ValueError("这条记录没有可获取的原图，已显示缩略图。")
+        return int(row["source_message_id"])
+
     def delete_conversation(
         self,
         conversation_id: str,

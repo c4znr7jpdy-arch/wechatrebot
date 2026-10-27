@@ -117,6 +117,7 @@ PUBLIC_API_METHODS = (
     "get_private_policy",
     "save_private_policy",
     "get_messages",
+    "get_message_image",
     "delete_conversation",
     "delete_history_before",
     "export_history",

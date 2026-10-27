@@ -1,5 +1,6 @@
 """Skin selection through shipped manager routes, without starting a robot."""
 import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -69,10 +70,11 @@ def test_skin_save_failure_keeps_previous_skin_and_allows_retry(browser, manager
 
 def test_native_caption_receives_current_palette_at_startup_and_after_skin_or_mode_changes(browser, manager_url):
     page = browser.new_page()
+    preview_source = (Path(__file__).resolve().parents[1] / "src/wechatrebot_manager/app_webui/preview.js").read_text(encoding="utf-8")
 
     def track_caption(route):
-        response = route.fetch()
-        route.fulfill(response=response, body=response.text() + """
+        # Use the shipped asset without a second request to the temporary server.
+        route.fulfill(status=200, content_type="application/javascript", body=preview_source + """
         const createCaptionPreview = window.createPreviewApi;
         window.createPreviewApi = (helpers) => {
           const controller = createCaptionPreview(helpers), createApi = controller.previewApi;

@@ -93,15 +93,26 @@ class GroupDirectoryService:
         with self._lock:
             clear()
 
-    def _request(self, port, token, account, path, *, state_locked: bool = False):
+    def _request(
+        self,
+        port,
+        token,
+        account,
+        path,
+        *,
+        state_locked: bool = False,
+        max_response_bytes: int = 4 * 1024 * 1024,
+    ):
+        if isinstance(max_response_bytes, bool) or not 1 <= max_response_bytes <= 32 * 1024 * 1024:
+            raise ValueError("响应大小上限无效")
         request = Request(f"http://127.0.0.1:{port}{path}", headers={
             "X-WeChatReBot-Token": token, "X-WeChatReBot-Account": account,
             "Accept": "application/json", "Cache-Control": "no-cache",
         })
         try:
             with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=20) as response:
-                raw = response.read(4 * 1024 * 1024 + 1)
-                if len(raw) > 4 * 1024 * 1024:
+                raw = response.read(max_response_bytes + 1)
+                if len(raw) > max_response_bytes:
                     raise ValueError()
                 body = json.loads(raw.decode("utf-8"))
         except HTTPError as exc:
@@ -204,3 +215,64 @@ class GroupDirectoryService:
                 self._qrcodes.pop(next(iter(self._qrcodes)))
             self._qrcodes[group_id] = (time.monotonic() + self._QRCODE_CACHE_SECONDS, result)
         return dict(result)
+
+    def message_image(
+        self,
+        account_id: str,
+        conversation_id: str,
+        message_id: int | str,
+        image_index: int,
+    ) -> dict[str, object]:
+        """Read one original image through the account-authenticated bridge route."""
+        if not isinstance(conversation_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.:@-]{1,256}", conversation_id
+        ):
+            raise GroupDirectoryError("消息会话标识无效，请刷新消息中心后重试。")
+        if (isinstance(message_id, bool) or not str(message_id).isascii()
+                or not str(message_id).isdigit() or len(str(message_id)) > 18
+                or isinstance(image_index, bool) or not isinstance(image_index, int)):
+            raise GroupDirectoryError("消息图片标识无效，请刷新消息中心后重试。")
+        numeric_message_id = int(message_id)
+        numeric_image_index = image_index
+        if numeric_message_id <= 0 or not 0 <= numeric_image_index < 4:
+            raise GroupDirectoryError("消息图片标识无效，请刷新消息中心后重试。")
+        with self._lock:
+            port, token, account = self._connection()
+            if not account_id or account_id != account:
+                raise GroupDirectoryError("微信账号已变化，请刷新消息中心后重试。")
+        path = (
+            f"/api/manager/history/{numeric_message_id}/images/{numeric_image_index}"
+            f"?conversation_id={quote(conversation_id, safe='')}"
+        )
+        try:
+            data = self._request(
+                port, token, account, path, max_response_bytes=28 * 1024 * 1024,
+            )
+        except GroupDirectoryError:
+            raise GroupDirectoryError(
+                "原图未能获取，可能已过期或连接暂不可用；已显示缩略图。"
+            ) from None
+        item = data["items"][0] if len(data["items"]) == 1 else None
+        if (not isinstance(item, dict) or type(item.get("message_id")) is not int
+                or item["message_id"] != numeric_message_id):
+            raise GroupDirectoryError("未收到当前消息的原图，请稍后重试。")
+        if type(item.get("image_index")) is not int or item["image_index"] != numeric_image_index:
+            raise GroupDirectoryError("未收到请求的消息图片，请稍后重试。")
+        source = item.get("image_data_url")
+        if (
+            not isinstance(source, str)
+            or len(source) > 28 * 1024 * 1024
+            or not re.fullmatch(
+                r"data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+",
+                source,
+            )
+        ):
+            raise GroupDirectoryError("原图格式不正确，请稍后重试。")
+        quality = item.get("quality")
+        return {
+            "account_id": account,
+            "message_id": numeric_message_id,
+            "image_index": numeric_image_index,
+            "image_data_url": source,
+            "quality": quality if isinstance(quality, str) and quality in {"original", "cached"} else "cached",
+        }
