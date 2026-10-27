@@ -1,5 +1,6 @@
 """Model editor behavior through the delivered asset routes, without a robot."""
 import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -9,9 +10,10 @@ from test_manager_startup import browser, manager_url  # noqa: F401
 
 def _mock_embedding_deletion(page):
     """Keep the delivered UI while isolating model mutations from an installation."""
+    preview_source = (Path(__file__).resolve().parents[1] / "src/wechatrebot_manager/app_webui/preview.js").read_text(encoding="utf-8")
     def preview_route(route):
-        response = route.fetch()
-        route.fulfill(response=response, body=response.text() + """
+        # Use the shipped asset without a second request to the temporary server.
+        route.fulfill(status=200, content_type="application/javascript", body=preview_source + """
         const originalPreview = window.createPreviewApi;
         window.createPreviewApi = (helpers) => {
           const controller = originalPreview(helpers), originalApi = controller.previewApi;
