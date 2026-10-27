@@ -66,8 +66,8 @@ window.createScheduledTasks = function (helpers) {
         state.scheduledContext = scheduledAccountMatches(initialAccount) ? initial : {account_id: "", items: [], loading: true};
         state.schedules = [];
         state.legacyMigrations = [];
-        $("#scheduleContextMessage").textContent = initial.message || "正在读取发送对象与运行状态…";
-        $("#scheduleContextMessage").hidden = false;
+        $("#scheduleContextMessage").textContent = "";
+        $("#scheduleContextMessage").hidden = true;
         renderSchedules();
         renderGroupAnalysisMigration();
         renderScheduledTasks();

@@ -67,6 +67,8 @@ function assertDraftRetained(f) {
 const cases = {
   async progressive_task_list() {
     const f = fixture();
+    f.$('#scheduleContextMessage').textContent = '上次读取提示';
+    f.$('#scheduleContextMessage').hidden = false;
     let finishFull, fullStarted;
     const started = new Promise(resolve => { fullStarted = resolve; });
     f.responses.get_scheduled_task_context = (lightweight) => lightweight
@@ -76,11 +78,15 @@ const cases = {
     await started;
     assert.equal(f.$('#taskRows').innerHTML, 'local-a', 'Local tasks render while directories are still pending');
     assert.equal(f.state.scheduledContext.loading, true);
+    assert.equal(f.$('#scheduleContextMessage').hidden, true, 'Routine loading must not shift the schedule layout');
+    assert.equal(f.$('#scheduleContextMessage').textContent, '');
     assert.equal(f.$('#refreshSchedules').disabled, true);
     assertDraftRetained(f);
     finishFull({account_id: 'account-a', items: [{id: 'verified-a'}]});
     await pending;
     assert.equal(f.$('#taskRows').innerHTML, 'verified-a');
+    assert.equal(f.$('#scheduleContextMessage').hidden, true);
+    assert.deepEqual(f.toasts, [], 'Routine loading must stay silent');
     assert.equal(f.state.scheduledContextRequest, null);
     assertDraftRetained(f);
   },
@@ -184,6 +190,7 @@ const cases = {
     assert.equal(f.$('#scheduleRows').innerHTML, '');
     assert.equal(f.$('#taskRows').innerHTML, '');
     assert.match(f.$('#scheduleContextMessage').textContent, /请登录原微信账号/);
+    assert.equal(f.$('#scheduleContextMessage').hidden, false, 'Actionable failures remain visible');
     assert.equal(f.state.scheduledContext.legacy_group_analysis, undefined);
     assert.equal(f.$('#refreshSchedules').disabled, false);
     assertDraftRetained(f);
