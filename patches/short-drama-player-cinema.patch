@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,238 @@
+@@ -5,369 +5,237 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -480,10 +480,9 @@ diff --git a/index.html b/index.html
 +    .sheet-backdrop { touch-action: none; }
 +    .episode-ranges { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
 +
-+    .video-shell:fullscreen, .video-shell:-webkit-full-screen, .video-shell.pseudo-fullscreen { width: 100vw; height: 100dvh; max-height: none; position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
-+    .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet, .video-shell.pseudo-fullscreen .sheet { position: absolute; align-items: center; justify-content: flex-end; padding: 16px; }
-+    .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: min(46vw, 420px); max-height: calc(100dvh - 32px); border-radius: 16px; }
-+    .video-shell.pseudo-fullscreen.pseudo-landscape { inset: auto; top: 50%; left: 50%; width: 100dvh; height: 100vw; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center; }
++    .video-shell:fullscreen, .video-shell:-webkit-full-screen { width: 100vw; height: 100dvh; max-height: none; position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
++    .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet { position: absolute; align-items: center; justify-content: flex-end; padding: 16px; }
++    .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel { width: min(46vw, 420px); max-height: calc(100dvh - 32px); border-radius: 16px; }
 +    .related { padding: 18px 20px 20px; }
 +    .related-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 +    #refreshRelated { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 90px; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
@@ -497,7 +496,7 @@ diff --git a/index.html b/index.html
 +    @media (min-width: 761px) { main.watch-mode { margin-top: 24px; } .related-card { aspect-ratio: 16 / 9; } }
 +    @media (max-width: 760px) { .video-shell.player--landscape, .video-shell.player--cinema { aspect-ratio: 4 / 3; } .video-header { gap: 4px; padding-inline: 4px; } .video-controls { padding-inline: 6px; } .watch-description, .inline-episodes, .related { padding-left: 14px; padding-right: 14px; } .below-player { padding-inline: 14px; } }
 +    @media (max-width: 380px) { .episode-grid { gap: 7px; grid-template-columns: repeat(5, minmax(0, 1fr)); } .controls-row { gap: 2px; } .video-heading { font-size: 13px; } .playback-time { font-size: 12px; } }
-+    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel, .video-shell.pseudo-fullscreen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet, .video-shell.pseudo-fullscreen .sheet { align-items: flex-end; padding: 0; } }
++    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet { align-items: flex-end; padding: 0; } }
 +
 +    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 +    @media (forced-colors: active) { :root { scrollbar-color: auto; } button, .search-field { border: 1px solid ButtonText; } .episode-item.active { outline: 2px solid Highlight; } }
@@ -590,7 +589,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +275,327 @@
+@@ -406,8 +274,342 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -720,12 +719,13 @@ diff --git a/index.html b/index.html
 +          morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false');
 +        }
 +      });
-+      let fullscreenOrientation = null, fullscreenTransition = false;
++      let fullscreenOrientation = null, fullscreenTransition = false, nativeFullscreen = false;
++      let containerFullscreenFailed = false;
 +      const hasHorizontalVideo = () => video.videoWidth > video.videoHeight && video.videoHeight > 0;
 +      const activeFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
-+      const nativeVideoFullscreenActive = () => video.webkitDisplayingFullscreen === true;
++      const nativeVideoFullscreenActive = () => nativeFullscreen || video.webkitDisplayingFullscreen === true
++        || activeFullscreenElement() === video;
 +      const playerFullscreenActive = () => activeFullscreenElement() === videoShell
-+        || videoShell.classList.contains('pseudo-fullscreen')
 +        || nativeVideoFullscreenActive();
 +      const unlockOrientation = () => {
 +        try { screen.orientation?.unlock?.(); }
@@ -751,16 +751,8 @@ diff --git a/index.html b/index.html
 +        } catch (_error) { /* Synchronous host errors use the same unlock fallback. */ }
 +        finally { clearTimeout(timer); releaseOrientation(session); }
 +      };
-+      const syncPseudoFullscreenLayout = () => {
-+        const rotate = videoShell.classList.contains('pseudo-fullscreen')
-+          && hasHorizontalVideo()
-+          && window.innerHeight > window.innerWidth
-+          && matchMedia('(pointer: coarse)').matches;
-+        videoShell.classList.toggle('pseudo-landscape', rotate);
-+      };
 +      const syncFullscreen = () => {
 +        const active = playerFullscreenActive();
-+        syncPseudoFullscreenLayout();
 +        document.body.classList.toggle('player-fullscreen', active);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
 +        if ((!active && !fullscreenTransition) || !hasHorizontalVideo()) {
@@ -772,7 +764,7 @@ diff --git a/index.html b/index.html
 +      const requestLandscapeOrientation = async () => {
 +        const session = fullscreenOrientation;
 +        if (!session || session.exiting || session.locked || session.pending
-+          || !playerFullscreenActive() || !hasHorizontalVideo() || !screen.orientation?.lock) return;
++          || activeFullscreenElement() !== videoShell || !hasHorizontalVideo() || !screen.orientation?.lock) return;
 +        session.pending = true;
 +        try {
 +          await screen.orientation.lock('landscape');
@@ -785,21 +777,21 @@ diff --git a/index.html b/index.html
 +        finally { session.pending = false; }
 +        syncFullscreen();
 +      };
-+      const waitForNativeFullscreen = (request) => new Promise((resolve) => {
-+        let timer = null;
++      const waitForFullscreen = (request) => new Promise((resolve) => {
++        const events = [[document, 'fullscreenchange'], [document, 'webkitfullscreenchange'],
++          [video, 'webkitbeginfullscreen'], [video, 'webkitendfullscreen']];
++        let timer;
 +        const finish = () => {
-+          if (timer !== null) clearTimeout(timer);
-+          document.removeEventListener('fullscreenchange', check);
-+          document.removeEventListener('webkitfullscreenchange', check);
-+          resolve(activeFullscreenElement() === videoShell);
++          clearTimeout(timer);
++          events.forEach(([target, event]) => target.removeEventListener(event, check));
++          resolve(playerFullscreenActive());
 +        };
-+        const check = () => {
-+          if (activeFullscreenElement() === videoShell) finish();
-+        };
-+        document.addEventListener('fullscreenchange', check);
-+        document.addEventListener('webkitfullscreenchange', check);
-+        timer = setTimeout(finish, 220);
-+        Promise.resolve(request).catch(() => {}).finally(check);
++        const check = () => { if (playerFullscreenActive()) finish(); };
++        events.forEach(([target, event]) => target.addEventListener(event, check));
++        timer = setTimeout(finish, 1200);
++        // Invoke inside the click's activation, before awaiting any work.
++        try { Promise.resolve(request()).then(check, finish); check(); }
++        catch (_error) { finish(); }
 +      });
 +      fullButton.addEventListener('click', async () => {
 +        if (fullscreenTransition) return;
@@ -807,39 +799,61 @@ diff --git a/index.html b/index.html
 +        let entering = false;
 +        try {
 +          if (playerFullscreenActive()) {
-+            await restoreOrientation(fullscreenOrientation);
-+            if (nativeVideoFullscreenActive()) video.webkitExitFullscreen?.();
-+            else if (activeFullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-+            videoShell.classList.remove('pseudo-fullscreen', 'pseudo-landscape');
-+          }
-+          else {
++            if (nativeVideoFullscreenActive() && !activeFullscreenElement()) {
++              const exit = video.webkitExitFullscreen || video.webkitExitFullScreen;
++              if (!exit) throw new Error('Fullscreen exit unavailable');
++              exit.call(video);
++            } else {
++              await restoreOrientation(fullscreenOrientation);
++              await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
++            }
++          } else {
 +            entering = true;
++            if (video.readyState < 1) { showHint('视频准备好后再点击全屏'); return; }
 +            fullscreenOrientation = {
 +              initial: screen.orientation?.type || (innerHeight > innerWidth ? 'portrait' : 'landscape'),
 +              locked: false, pending: false, exiting: false,
 +            };
-+            const request = videoShell.requestFullscreen || videoShell.webkitRequestFullscreen;
-+            if (!request || !await waitForNativeFullscreen(request.call(videoShell))) videoShell.classList.add('pseudo-fullscreen');
++            const container = document.fullscreenEnabled === false && document.webkitFullscreenEnabled !== true
++              ? null : videoShell.requestFullscreen || videoShell.webkitRequestFullscreen;
++            const native = video.webkitEnterFullscreen || video.webkitEnterFullScreen;
++            const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
++              || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
++            let entered = false;
++            if (native && (ios || !container || containerFullscreenFailed)) {
++              entered = await waitForFullscreen(() => native.call(video));
++            } else {
++              if (container) {
++                entered = await waitForFullscreen(() => container.call(videoShell));
++                containerFullscreenFailed = !entered;
++              }
++              // A container request can consume the gesture. The next click uses
++              // native fullscreen directly instead of repeating a known failure.
++              if (!entered && native && navigator.userActivation?.isActive) {
++                entered = await waitForFullscreen(() => native.call(video));
++              }
++            }
++            if (!entered) showHint(native && containerFullscreenFailed
++              ? '请再点一次全屏，切换到系统播放器' : '当前浏览器未允许全屏，请重试或在系统浏览器打开');
 +          }
 +        } catch (_error) {
-+          if (entering) videoShell.classList.add('pseudo-fullscreen');
-+          else showHint('暂时无法退出全屏，请使用系统返回');
++          showHint(entering ? '无法进入全屏，请重试或在系统浏览器打开' : '暂时无法退出全屏，请使用系统返回');
++        } finally {
++          fullscreenTransition = false;
++          syncFullscreen();
 +        }
-+        finally { fullscreenTransition = false; }
-+        syncFullscreen();
-+        if (entering) requestLandscapeOrientation();
++        if (entering && activeFullscreenElement() === videoShell) requestLandscapeOrientation();
 +      });
 +      document.addEventListener('fullscreenchange', syncFullscreen);
 +      document.addEventListener('webkitfullscreenchange', syncFullscreen);
-+      video.addEventListener('webkitbeginfullscreen', syncFullscreen);
-+      video.addEventListener('webkitendfullscreen', syncFullscreen);
++      video.addEventListener('webkitbeginfullscreen', () => { nativeFullscreen = true; syncFullscreen(); });
++      video.addEventListener('webkitendfullscreen', () => { nativeFullscreen = false; syncFullscreen(); });
 +      window.addEventListener('resize', syncFullscreen);
 +      screen.orientation?.addEventListener?.('change', syncFullscreen);
 +      document.addEventListener('keydown', (event) => {
 +        if (event.isComposing) return;
 +        if (event.key === 'Escape' && episodeSheet.hidden) {
 +          if (!morePanel.hidden) { morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false'); moreButton.focus(); }
-+          else if (videoShell.classList.contains('pseudo-fullscreen')) fullButton.click();
 +        }
 +        if (event.target === video && [' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
 +          event.preventDefault();
@@ -918,7 +932,7 @@ diff --git a/index.html b/index.html
  
        const fail = (message) => {
          statusNode.textContent = message;
-@@ -415,15 +603,27 @@
+@@ -415,15 +617,27 @@
          retry.hidden = false;
        };
  
@@ -949,7 +963,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +721,7 @@
+@@ -521,7 +735,7 @@
            }
            return { name, url };
          });
@@ -958,7 +972,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +735,71 @@
+@@ -535,6 +749,71 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -1030,7 +1044,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +817,29 @@
+@@ -552,22 +831,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1063,7 +1077,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +858,15 @@
+@@ -586,14 +872,15 @@
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
@@ -1085,7 +1099,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +887,15 @@
+@@ -614,27 +901,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1120,7 +1134,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,17 +957,69 @@
+@@ -696,17 +971,69 @@
          updateQualityActive();
        };
  
@@ -1193,7 +1207,7 @@ diff --git a/index.html b/index.html
        };
  
  
-@@ -717,6 +1030,10 @@
+@@ -717,6 +1044,10 @@
          const loadId = ++episodeLoadId;
          removeEpisodeReadyListener();
          current = index;
@@ -1204,15 +1218,63 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -749,7 +1066,6 @@
+@@ -728,20 +1059,25 @@
+         loadTimer = setTimeout(() => {
+           fail('资源站响应超时，可能不允许浏览器直连。请稍后重试或回到微信更换资源。');
+         }, 15000);
+-        const onEpisodeReady = () => {
+-          if (loadId !== episodeLoadId) return;
+-          if (loadTimer) clearTimeout(loadTimer);
+-          applyVideoAspect();
++        let playbackRequested = false;
++        const resumeEpisode = () => {
+           video.playbackRate = Number(playbackRate.value) || 1;
+-          if (resumePlayback && video.paused) {
++          if (resumePlayback && !playbackRequested) {
++            playbackRequested = true;
+             video.play().catch((error) => {
+               if (loadId === episodeLoadId && error.name !== 'AbortError') {
+                 statusNode.textContent = '已就绪，点击播放。';
+               }
+             });
+-          } else if (video.paused) {
++          } else if (!resumePlayback && video.paused) {
+             statusNode.textContent = '已连接，点击播放。';
+           }
++        };
++        const onEpisodeReady = () => {
++          if (loadId !== episodeLoadId) return;
++          if (loadTimer) clearTimeout(loadTimer);
++          applyVideoAspect();
++          resumeEpisode();
+         };
+         if (hls) { hls.destroy(); hls = null; }
+         qualityMenu.hidden = true;
+@@ -749,19 +1085,18 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
 -        resetVideoAspect();
-         video.pause();
-         video.removeAttribute('src');
-         video.load();
-@@ -784,44 +1100,75 @@
+-        video.pause();
+-        video.removeAttribute('src');
+-        video.load();
+         syncNativeControls();
+         if (!isSafePublicHttpsUrl(source) || !/\.m3u8(?:$|[?#])/i.test(source)) {
++          video.pause();
+           fail('播放地址无效，请回到微信重新搜索。');
+           return;
+         }
+         if (video.canPlayType('application/vnd.apple.mpegurl')) {
+-          video.src = source;
+           video.addEventListener('loadedmetadata', onEpisodeReady, { once: true });
+           removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
++          // Keep the same native player alive across episodes; never load an empty src.
++          video.src = source;
++          resumeEpisode();
+         } else if (window.Hls && Hls.isSupported()) {
+           hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
+           hls.loadSource(source);
+@@ -784,44 +1119,75 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1318,7 +1380,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1177,16 @@
+@@ -830,11 +1196,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1335,7 +1397,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1208,11 @@
+@@ -856,10 +1227,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1348,7 +1410,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1235,7 @@
+@@ -882,7 +1254,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1357,7 +1419,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1244,66 @@
+@@ -891,21 +1263,66 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1433,7 +1495,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1316,7 @@
+@@ -918,6 +1335,7 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1441,7 +1503,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1340,15 @@
+@@ -941,6 +1359,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1457,7 +1519,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1366,21 @@
+@@ -958,12 +1385,21 @@
          }
        });
        syncNativeControls();

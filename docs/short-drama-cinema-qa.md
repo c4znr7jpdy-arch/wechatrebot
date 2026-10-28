@@ -115,3 +115,13 @@ final result: passed
 - 实际命令：`python -m pytest tests/test_short_drama_player_controls.py tests/test_short_drama_player_hardening.py::test_hosted_player_removes_open_url_and_third_party_fallback -q -k 'fullscreen or orientation or video_aspect_fit or hosted_player_removes'`，结果 `18 passed, 23 deselected in 21.38s`；`git diff --check` 通过。截图保存在 pytest 临时目录，检查了 390×844 容器全屏、旋转页面全屏与选集弹窗。
 - 实机边界：本轮没有真实 iPhone、Android 或微信内置浏览器验收。页面全屏只能占满宿主提供的网页视口，不能强制隐藏 iOS/微信导航栏和系统手势区；浏览器允许容器全屏时才能获得浏览器提供的完整屏幕区域。设备最终方向仍遵循操作系统与用户的方向设置，不能承诺在所有宿主强制恢复竖屏。
 - 本轮只改代码和测试，没有同步服务器或更新客户端包；线上页面效果尚未改变。
+
+### 单入口真实全屏与原生连播（2026-10-27）
+
+本次按用户最新选择，以隐藏微信顶部栏的真实全屏为目标，替代上节的页面旋转方案。保留一个全屏按钮：iPhone/iPad 在点击手势中调用视频原生全屏；其他宿主优先使用容器 Fullscreen API，失败时尝试可用的 WebKit 视频全屏。只有实际全屏属性或事件确认后才显示退出状态；不支持、拒绝或静默失败时给出提示，不再进入 CSS 伪全屏。原生退出事件恢复网页状态，方向锁仅用于容器全屏。
+
+自动连播仍由现有 `ended` 事件和默认开启的开关控制。下一集直接替换同一个视频元素的地址并发起播放，不再先清空地址并加载空播放器，减少原生播放器退出的机会；保留用户在网页设置的倍速。iOS 原生全屏显示系统控件，手动选集可退出后操作。宿主可能阻止下一集自动播放或在换源时退出全屏，实际 iPhone/Android 微信行为仍需实机验收，模拟测试不能证明隐藏了微信栏。
+
+源码基线仅使用本仓库 `vendor/deploy/short_drama_player` 和现有三个播放器补丁。部署范围仅为服务器静态 `index.html`，不更新状态服务、Nginx 配置、机器人或客户端安装包；客户端目标版本保持 0.9.9。本次服务器更新另行以候选哈希、备份、公网回读及服务健康证据确认。
+
+验证：`python -m pytest -q tests/test_short_drama_player_controls.py` 50 项通过，`python -m pytest -q tests/test_short_drama_player_hardening.py` 6 项通过；包含真实 MP4 连播、原生 API 两种拼写、同步点击、失败后新手势重试、系统退出、用户暂停保护、方向恢复及 320/390/768/1440 布局。原生 API 通过属性和事件模拟，浏览器使用项目声明版本的 Chromium Playwright。补丁应用、JavaScript 语法、`scripts/source_inputs.py`、`scripts/validate_release_metadata.py`、`git diff --check` 通过。

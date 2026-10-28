@@ -10,6 +10,13 @@ from playwright.sync_api import sync_playwright
 from test_short_drama_player_hardening import _patched_player
 
 
+IOS_BROWSER = {
+    "has_touch": True,
+    "is_mobile": True,
+    "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
+}
+
+
 @pytest.fixture(scope="module")
 def player_assets(tmp_path_factory):
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -58,6 +65,14 @@ def player_page(browser, player_assets, request):
       const add = EventTarget.prototype.addEventListener;
       EventTarget.prototype.addEventListener = function(type, ...args) {
         if (this instanceof HTMLVideoElement && type === 'click') window.customVideoClicks++;
+        if (type === 'click' && this.id === 'fullscreenButton' && typeof args[0] === 'function') {
+          const listener = args[0];
+          args[0] = function(event) {
+            window.fullscreenClickInProgress = true;
+            try { return listener.call(this, event); }
+            finally { window.fullscreenClickInProgress = false; }
+          };
+        }
         return add.call(this, type, ...args);
       };
     })();""")
@@ -121,6 +136,73 @@ def exit_fullscreen(page):
       && !document.getElementById('video').webkitDisplayingFullscreen
       && !document.getElementById('videoShell').classList.contains('pseudo-fullscreen')
       && !document.body.classList.contains('player-fullscreen')""")
+
+
+def mock_video_fullscreen(page, *, enter_method="webkitEnterFullscreen", mode="success"):
+    """Emulate Safari's fullscreen API and events, while retaining real media playback."""
+    page.evaluate("""({enterMethod, mode}) => {
+      const video = document.getElementById('video');
+      window.videoFullscreenCalls = [];
+      window.orientationCalls = [];
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async value => window.orientationCalls.push(value)});
+      Object.defineProperty(screen.orientation, 'unlock', {configurable: true, value: () => window.orientationCalls.push('unlock')});
+      video.__displayingFullscreen = false;
+      Object.defineProperty(video, 'webkitDisplayingFullscreen', {configurable: true, get: () => video.__displayingFullscreen});
+      Object.defineProperty(video, 'webkitSupportsFullscreen', {configurable: true, value: true});
+      window.beginVideoFullscreen = () => {
+        video.__displayingFullscreen = true;
+        video.dispatchEvent(new Event('webkitbeginfullscreen'));
+      };
+      window.endVideoFullscreen = () => {
+        video.__displayingFullscreen = false;
+        video.dispatchEvent(new Event('webkitendfullscreen'));
+      };
+      video.webkitEnterFullscreen = undefined;
+      video.webkitEnterFullScreen = undefined;
+      video[enterMethod] = () => {
+        window.videoFullscreenCalls.push({action: 'enter', synchronous: window.fullscreenClickInProgress === true, active: navigator.userActivation.isActive});
+        if (mode === 'rejected') throw new Error('native fullscreen denied');
+        if (mode === 'success') window.beginVideoFullscreen();
+      };
+      video.webkitExitFullscreen = () => {
+        window.videoFullscreenCalls.push({action: 'exit'});
+        window.endVideoFullscreen();
+      };
+    }""", {"enterMethod": enter_method, "mode": mode})
+
+
+def observe_episode_handoff(page):
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+      const play = video.play.bind(video), load = video.load.bind(video), remove = video.removeAttribute.bind(video);
+      window.handoffVideo = video;
+      window.mediaHandoff = [];
+      let sourceTurn = false;
+      Object.defineProperty(video, 'src', {configurable: true, get: () => descriptor.get.call(video), set(value) {
+        window.mediaHandoff.push({action: 'source', value});
+        sourceTurn = true;
+        descriptor.set.call(video, value);
+        queueMicrotask(() => { sourceTurn = false; });
+      }});
+      video.play = () => {
+        window.mediaHandoff.push({action: 'play', sameTurn: sourceTurn});
+        return play();
+      };
+      video.load = () => {
+        window.mediaHandoff.push({action: video.getAttribute('src') ? 'load' : 'empty-load'});
+        return load();
+      };
+      video.removeAttribute = name => {
+        if (name === 'src') window.mediaHandoff.push({action: 'remove-source'});
+        return remove(name);
+      };
+    }""")
+
+
+def assert_real_fullscreen_only(page):
+    assert page.locator("#videoShell").evaluate("node => !node.classList.contains('pseudo-fullscreen') && !node.classList.contains('pseudo-landscape')")
+    assert page.locator("#videoShell").evaluate("node => getComputedStyle(node).transform") == "none"
 
 
 def test_custom_controls_toggle_once_and_seeking_keeps_pause(player_page):
@@ -327,7 +409,8 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
     page.set_viewport_size({"width": 960, "height": 600})
     page.locator(".recommend-card").first.click()
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell') || document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+    assert_real_fullscreen_only(page)
     page.get_by_role("button", name="选择剧集", exact=True).click()
     assert page.get_by_role("dialog", name="选择剧集").is_visible()
     panel = page.locator(".sheet-panel").bounding_box()
@@ -378,70 +461,185 @@ def test_mobile_landscape_video_requests_device_orientation(player_page, tmp_pat
     assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
 
 
-@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_fullscreen_fallback_rotates_landscape_video(player_page):
+@pytest.mark.parametrize("mode", ["missing", "rejected", "silent", "native-rejected", "native-silent"])
+@pytest.mark.parametrize("player_page", [IOS_BROWSER], indirect=True)
+def test_fullscreen_unavailable_shows_hint_without_faking_fullscreen(player_page, mode):
     page = player_page
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
+    page.locator("#videoShell").evaluate("""(node, mode) => {
+      node.webkitRequestFullscreen = undefined;
+      node.requestFullscreen = mode === 'rejected' ? async () => { throw new Error('denied'); }
+        : mode === 'silent' ? async () => {} : undefined;
+    }""", mode)
+    if mode.startswith("native-"):
+        mock_video_fullscreen(page, mode=mode.removeprefix("native-"))
+    else:
+        page.locator("#video").evaluate("node => { node.webkitEnterFullscreen = undefined; node.webkitEnterFullScreen = undefined; }")
+    before = page.locator("#videoShell").bounding_box()
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('videoHint').textContent.includes('全屏') && !document.getElementById('videoHint').hidden")
+    assert_real_fullscreen_only(page)
+    assert page.evaluate("!document.fullscreenElement && !document.getElementById('video').webkitDisplayingFullscreen")
+    assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
+    assert page.get_by_label("全屏播放", exact=True).is_visible()
+    after = page.locator("#videoShell").bounding_box()
+    assert abs(after["width"] - before["width"]) < 1 and abs(after["height"] - before["height"]) < 1
+
+
+@pytest.mark.parametrize("enter_method", ["webkitEnterFullscreen", "webkitEnterFullScreen"])
+@pytest.mark.parametrize("player_page", [IOS_BROWSER], indirect=True)
+def test_ios_prefers_video_fullscreen_synchronously_and_exit_restores_controls(player_page, enter_method):
+    page = player_page
+    mock_video_fullscreen(page, enter_method=enter_method)
+    page.locator("#videoShell").evaluate("""node => {
+      window.containerFullscreenCalls = 0;
+      node.requestFullscreen = () => { window.containerFullscreenCalls++; return Promise.resolve(); };
+    }""")
+    assert page.get_by_label("自动连播").is_checked()
+    assert page.get_by_label("全屏播放", exact=True).count() == 1
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen")
+    assert page.evaluate("window.videoFullscreenCalls") == [{"action": "enter", "synchronous": True, "active": True}]
+    assert page.evaluate("window.containerFullscreenCalls") == 0
+    assert page.evaluate("window.orientationCalls") == []
+    assert_real_fullscreen_only(page)
+    exit_fullscreen(page)
+    assert page.evaluate("window.videoFullscreenCalls.at(-1)") == {"action": "exit"}
+    assert page.evaluate("window.orientationCalls") == []
+    page.locator("#speedButton").click()
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
+    assert page.locator("[inert]").count() == 0
+
+
+@pytest.mark.parametrize("container", ["missing", "rejected"])
+def test_video_fullscreen_fallback_uses_native_state_without_orientation_lock(player_page, container):
+    page = player_page
+    mock_video_fullscreen(page)
+    page.locator("#videoShell").evaluate("""(node, mode) => {
+      node.webkitRequestFullscreen = undefined;
+      node.requestFullscreen = mode === 'rejected' ? async () => { throw new Error('container denied'); } : undefined;
+    }""", container)
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen")
+    assert_real_fullscreen_only(page)
+    assert page.evaluate("window.orientationCalls") == []
+    page.evaluate("window.endVideoFullscreen()")
+    page.wait_for_function("!document.body.classList.contains('player-fullscreen')")
+    assert page.get_by_label("全屏播放", exact=True).is_visible()
+    assert page.locator("body").evaluate("node => getComputedStyle(node).overflowY") != "hidden"
+    assert page.evaluate("window.orientationCalls") == []
+
+
+def test_container_rejection_consumes_gesture_and_next_click_uses_native_directly(player_page):
+    page = player_page
+    mock_video_fullscreen(page)
     page.evaluate("""() => {
-      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async () => { throw Error('unavailable'); }});
+      window.containerFullscreenCalls = 0;
+      window.fullscreenActivation = true;
+      Object.defineProperty(navigator.userActivation, 'isActive', {configurable: true, get: () => window.fullscreenActivation});
+      document.getElementById('videoShell').requestFullscreen = async () => {
+        window.containerFullscreenCalls++;
+        window.fullscreenActivation = false;
+        throw new Error('container denied after consuming gesture');
+      };
     }""")
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
-    shell = page.locator("#videoShell")
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
-    assert shell.evaluate("node => getComputedStyle(node).transform") != "none"
-    bounds = shell.bounding_box()
-    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-    page.set_viewport_size({"width": 844, "height": 390})
-    page.wait_for_function("!document.getElementById('videoShell').classList.contains('pseudo-landscape')")
-    bounds = shell.bounding_box()
-    assert abs(bounds["width"] - 844) < 1 and abs(bounds["height"] - 390) < 1
-    page.get_by_role("button", name="选择剧集", exact=True).click()
-    assert page.get_by_role("dialog", name="选择剧集").is_visible()
-    page.locator("#sheetClose").click()
-    exit_fullscreen(page)
-    assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
-
-
-@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_fullscreen_fallback_when_native_request_is_silent(player_page):
-    page = player_page
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = async () => {}; node.webkitRequestFullscreen = undefined; }")
+    page.wait_for_function("document.getElementById('videoHint').textContent.includes('全屏') && !document.getElementById('videoHint').hidden")
+    assert page.evaluate("window.videoFullscreenCalls") == []
+    assert page.evaluate("window.containerFullscreenCalls") == 1
+    assert_real_fullscreen_only(page)
+    page.evaluate("window.fullscreenActivation = true")
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
-    shell = page.locator("#videoShell")
-    assert shell.evaluate("node => getComputedStyle(node).transform") != "none"
-    bounds = shell.bounding_box()
-    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-    exit_fullscreen(page)
-    assert not shell.evaluate("node => node.classList.contains('pseudo-fullscreen')")
-    assert not shell.evaluate("node => node.classList.contains('pseudo-landscape')")
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen")
+    assert page.evaluate("window.videoFullscreenCalls") == [{"action": "enter", "synchronous": True, "active": True}]
+    assert page.evaluate("window.containerFullscreenCalls") == 1
+    assert page.evaluate("window.orientationCalls") == []
 
 
-@pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
-def test_mobile_fullscreen_keeps_custom_player_when_only_video_fullscreen_exists(player_page, tmp_path):
+@pytest.mark.parametrize("player_page", [IOS_BROWSER], indirect=True)
+def test_native_fullscreen_waits_for_begin_event_and_handles_system_exit(player_page):
     page = player_page
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.locator("#videoShell").evaluate("node => { node.requestFullscreen = undefined; node.webkitRequestFullscreen = undefined; }")
-    page.locator("#video").evaluate("node => { node.__webkitFullscreen = false; node.webkitEnterFullscreen = () => { node.__webkitFullscreen = true; node.dispatchEvent(new Event('webkitbeginfullscreen')); }; node.webkitExitFullscreen = () => { node.__webkitFullscreen = false; node.dispatchEvent(new Event('webkitendfullscreen')); }; Object.defineProperty(node, 'webkitDisplayingFullscreen', { configurable: true, get: () => node.__webkitFullscreen }); }")
+    mock_video_fullscreen(page, mode="deferred")
     page.get_by_label("全屏播放", exact=True).click()
-    page.wait_for_function("document.getElementById('videoShell').classList.contains('pseudo-landscape')")
-    assert not page.locator("#video").evaluate("node => node.webkitDisplayingFullscreen")
-    bounds = page.locator("#videoShell").bounding_box()
-    assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
-    assert page.get_by_role("button", name="切换倍速，当前 1 倍").is_visible()
-    page.screenshot(path=str(tmp_path / "ios-custom-fullscreen.png"))
-    page.get_by_role("button", name="选择剧集", exact=True).click()
-    assert page.get_by_role("dialog", name="选择剧集").is_visible()
-    page.screenshot(path=str(tmp_path / "ios-custom-fullscreen-episodes.png"))
-    page.locator("#sheetClose").click()
+    assert not page.locator("body").evaluate("node => node.classList.contains('player-fullscreen')")
+    assert page.get_by_label("全屏播放", exact=True).is_visible()
+    page.evaluate("window.beginVideoFullscreen()")
+    page.wait_for_function("document.body.classList.contains('player-fullscreen')")
     assert page.get_by_label("退出全屏", exact=True).is_visible()
-    exit_fullscreen(page)
-    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen === false")
-    assert not page.locator("#videoShell").evaluate("node => node.classList.contains('pseudo-fullscreen')")
+    assert_real_fullscreen_only(page)
+    page.evaluate("window.endVideoFullscreen()")
+    page.wait_for_function("!document.body.classList.contains('player-fullscreen')")
+    assert page.get_by_label("全屏播放", exact=True).is_visible()
+    assert page.evaluate("window.orientationCalls") == []
+
+
+@pytest.mark.parametrize("player_page", [IOS_BROWSER], indirect=True)
+def test_native_fullscreen_auto_next_keeps_video_and_speed_then_can_be_disabled(player_page):
+    page = player_page
+    mock_video_fullscreen(page)
+    page.locator("#speedButton").click()
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.getElementById('video').webkitDisplayingFullscreen")
+    observe_episode_handoff(page)
+    for episode in [2, 3]:
+        page.locator("#video").evaluate("video => { video.currentTime = video.duration - .2; }")
+        page.wait_for_function(f"document.getElementById('meta').textContent === '第{episode}集' && !document.getElementById('video').paused && document.getElementById('video').currentTime > .1")
+        assert page.evaluate("window.handoffVideo === document.getElementById('video')")
+        assert page.locator("#video").evaluate("video => video.webkitDisplayingFullscreen && video.playbackRate === 1.5")
+    events = page.evaluate("window.mediaHandoff")
+    assert len([event for event in events if event["action"] == "source"]) == 2
+    assert not any(event["action"] in {"remove-source", "empty-load"} for event in events)
+    for index, event in enumerate(events):
+        if event["action"] == "source":
+            assert events[index + 1] == {"action": "play", "sameTurn": True}
+    page.evaluate("window.endVideoFullscreen()")
+    page.get_by_label("更多播放设置").click()
+    page.locator(".switch-label").click()
+    assert not page.get_by_label("自动连播").is_checked()
+    page.get_by_label("更多播放设置").click()
+    page.get_by_role("button", name="选择剧集", exact=True).click()
+    page.locator("#sheetEpisodeGrid").get_by_role("button", name="第1集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第1集' && !document.getElementById('video').paused")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.locator("#video").evaluate("video => { video.currentTime = video.duration - .2; }")
+    page.wait_for_function("document.getElementById('video').ended")
+    assert page.locator("#meta").inner_text() == "第1集"
+    assert page.locator("#video").evaluate("video => video.webkitDisplayingFullscreen")
+    assert page.evaluate("window.orientationCalls") == []
+
+
+def test_episode_metadata_does_not_override_pause_after_immediate_play(player_page):
+    page = player_page
+    page.locator("#speedButton").click()
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
+    observe_episode_handoff(page)
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      const add = video.addEventListener.bind(video);
+      window.metadataReadyListeners = [];
+      video.addEventListener = (type, listener, options) => {
+        if (type === 'loadedmetadata' && options?.once) window.metadataReadyListeners.push(listener);
+        else add(type, listener, options);
+      };
+    }""")
+    page.get_by_label("更多播放设置").click()
+    page.get_by_role("button", name="下一集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && !document.getElementById('video').paused && document.getElementById('video').currentTime > .1")
+    play_click(page)
+    page.wait_for_function("document.getElementById('video').paused")
+    page.evaluate("window.metadataReadyListeners.forEach(listener => listener(new Event('loadedmetadata')))")
+    events = page.evaluate("window.mediaHandoff")
+    assert events[:2] == [{"action": "source", "value": "https://media.example/2.m3u8"}, {"action": "play", "sameTurn": True}]
+    assert len([event for event in events if event["action"] == "play"]) == 1
+    assert page.locator("#video").evaluate("video => video.paused")
+    assert not any(event["action"] in {"remove-source", "empty-load"} for event in events)
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
 
 
 @pytest.mark.parametrize("restore", ["success", "rejected", "pending"])
@@ -540,7 +738,8 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
           Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: async mode => window.orientationCalls.push(mode)});
         }""")
         page.get_by_label("全屏播放", exact=True).click()
-        page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell') || document.getElementById('videoShell').classList.contains('pseudo-fullscreen')")
+        page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+        assert_real_fullscreen_only(page)
         assert page.evaluate("window.orientationCalls") == []
         shell = page.locator("#videoShell")
         assert shell.evaluate("node => getComputedStyle(node).transform") == "none"
