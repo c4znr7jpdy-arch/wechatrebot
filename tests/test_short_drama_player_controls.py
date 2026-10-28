@@ -98,7 +98,7 @@ def player_page(browser, player_assets, request):
             route.fulfill(json=payload)
         elif path.endswith("/api/recommendations"):
             route.fulfill(json={"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": [
-                {"title": f"推荐短剧{index}", "category": "短剧", "cover": "", "selection_token": f"abcdefghijklmnop{index}",
+                {"title": f"推荐短剧{index}", "category": "短剧", "cover": "", "selection_token": f"abcdefghijklmnop{index}", "recommendation_id": f"{index:016x}",
                  "episodes": [{"name": "第1集", "url": f"https://media.example/related{index}.m3u8"}]}
                 for index in range(1, 10)
             ]})
@@ -398,11 +398,14 @@ def test_random_three_refresh_navigation_failure_and_return(cinema_catalog):
     assert page.locator("#videoTitle").inner_text() == selected
     assert "i=0" in page.url
     page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
-    assert selected not in page.locator(".related-card strong").all_text_contents()
-    page.route("**/api/recommendations", lambda route: route.fulfill(status=503, json={"error": "offline"}))
+    third_titles = set(page.locator(".related-card strong").all_text_contents())
+    assert len(third_titles) == 3
+    assert third_titles.isdisjoint(previous_titles | next_titles)
+    before_failure = page.locator(".related-card strong").all_text_contents()
+    page.route("**/api/recommendations?*", lambda route: route.fulfill(status=503, json={"error": "offline"}))
     page.get_by_role("button", name="换一换").click()
     page.wait_for_function("document.getElementById('relatedStatus').textContent.includes('更新失败')")
-    assert page.locator(".related-card").count() == 3
+    assert page.locator(".related-card strong").all_text_contents() == before_failure
     page.get_by_label("返回", exact=True).click()
     assert page.locator(".recommend-card:visible").count() == 8
     assert page.url.endswith("?s=abcdefghijklmnop#") or page.url.endswith("?s=abcdefghijklmnop")
@@ -424,6 +427,67 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
     page.locator("#sheetEpisodeGrid").get_by_label("第32集", exact=True).click()
     assert page.locator("#meta").inner_text() == "第32集"
     exit_fullscreen(page)
+
+
+def test_random_recommendations_do_not_repeat_across_rounds_and_exhaust_cleanly(cinema_catalog):
+    page = cinema_catalog
+    requests = []
+    page.on("request", lambda request: requests.append(parse_qs(urlsplit(request.url).query))
+            if urlsplit(request.url).path.endswith("/api/recommendations") else None)
+    page.locator(".recommend-card").first.click()
+    seen = set()
+    for turn in range(3):
+        page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+        titles = set(page.locator(".related-card strong").all_text_contents())
+        assert len(titles) == 3
+        assert titles.isdisjoint(seen)
+        seen.update(titles)
+        if turn < 2:
+            page.get_by_role("button", name="换一换").click()
+    assert len(seen) == 9
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    assert page.locator(".related-card").count() == 0
+    assert page.locator("#relatedStatus").inner_text()
+    assert page.get_by_role("button", name="换一换").is_enabled()
+    assert set(requests[-1]["exclude"][0].split(",")) >= {f"{index:016x}" for index in range(1, 10)}
+
+
+def test_random_recommendations_failure_retry_excludes_previously_seen_cards(cinema_catalog):
+    page = cinema_catalog
+    state = {"fail": False, "requests": []}
+    items = [{"title": f"随机影片{index}", "category": "电影", "source": "非凡资源",
+              "recommendation_id": f"{index:016x}",
+              "episodes": [{"name": "正片", "url": f"https://media.example/movie-{index}.m3u8"}]}
+             for index in range(21, 30)]
+
+    def respond(route):
+        state["requests"].append(parse_qs(urlsplit(route.request.url).query))
+        if state["fail"]:
+            route.fulfill(status=503, json={"error": "offline"})
+        else:
+            route.fulfill(json={"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": items})
+
+    page.route("**/api/recommendations?*", respond)
+    page.locator(".recommend-card").first.click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    first = page.locator(".related-card strong").all_text_contents()
+    assert len(first) == 3
+    state["fail"] = True
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('relatedStatus').textContent.includes('更新失败')")
+    assert page.locator(".related-card strong").all_text_contents() == first
+    state["fail"] = False
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    second = set(page.locator(".related-card strong").all_text_contents())
+    assert len(second) == 3 and second.isdisjoint(first)
+    page.route("**/api/recommendations?*", lambda route: route.fulfill(json={
+        "v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": []}))
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    assert page.locator(".related-card").count() == 0
+    assert "失败" not in page.locator("#relatedStatus").inner_text()
 
 
 @pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
@@ -1048,6 +1112,10 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     bounds = button.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
     assert bounds["height"] >= 32
+    assert button.evaluate("node => node.parentElement.id") == "sourceDock"
+    assert page.locator("#sourceDock").bounding_box()["y"] >= page.locator("#videoShell").bounding_box()["y"] + page.locator("#videoShell").bounding_box()["height"]
+    assert page.locator("#castButton").is_visible()
+    assert page.locator("#shareButton").is_visible()
     button.click()
     alternative = page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True)
     alternative.wait_for(state="visible")
@@ -1124,9 +1192,9 @@ def test_source_switch_is_available_after_media_error(source_catalog, screenshot
     page.route("**/unavailable.mp4", lambda route: route.abort("failed"))
     page.locator("#video").evaluate("video => { video.src = 'https://media.example/unavailable.m3u8'; video.load(); }")
     page.locator("#switchSourceOnError").wait_for(state="visible")
-    assert "切换" in page.locator("#status").inner_text()
+    assert re.search("切换|更换", page.locator("#status").inner_text())
     assert page.locator("#videoHint").is_visible()
-    assert "右上角" in page.locator("#videoHint").inner_text()
+    assert re.search("切换|更换|换源", page.locator("#videoHint").inner_text())
     assert "当前资源" not in page.locator("#videoHint").inner_text()
     assert not page.locator("#videoShell").evaluate("node => node.classList.contains('controls-hidden')")
     page.screenshot(path=str(screenshots / "source-error-390.png"))
@@ -1191,3 +1259,219 @@ def test_source_switch_keyboard_escape_restores_button_focus(source_catalog):
     assert page.locator("#sourceMenu").is_hidden()
     assert page.locator("#sourceButton").get_attribute("aria-expanded") == "false"
     assert page.locator("#sourceButton").evaluate("node => node === document.activeElement")
+
+
+@pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
+def test_android_landscape_controls_source_menu_and_back_keep_playback(source_catalog, screenshots):
+    page, _ = source_catalog
+    page.set_viewport_size({"width": 844, "height": 390})
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.locator("#video").evaluate("video => { video.currentTime = 2; }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+    assert page.locator("#sourceButton").count() == 1
+    assert page.locator("#sourceButton").evaluate("node => node.parentElement.id") == "fullscreenSourceDock"
+    assert page.locator("#sourceMenu").evaluate("node => node.parentElement.id") == "fullscreenSourceDock"
+    assert page.locator("#videoTitle").is_hidden()
+    assert page.locator("#meta").inner_text() == "第2集"
+    seek = page.locator("#seek").bounding_box()
+    play = page.locator("#togglePlayback").bounding_box()
+    next_episode = page.locator("#fullscreenNext").bounding_box()
+    source = page.locator("#sourceButton").bounding_box()
+    speed = page.locator("#speedButton").bounding_box()
+    episode = page.locator("#episodeOpen").bounding_box()
+    assert seek["width"] > 500
+    assert seek["y"] + seek["height"] <= play["y"] + 2
+    assert play["x"] + play["width"] <= next_episode["x"] + 2
+    assert next_episode["x"] + next_episode["width"] < source["x"]
+    assert source["x"] + source["width"] <= speed["x"] + 2
+    assert speed["x"] + speed["width"] <= episode["x"] + 2
+    assert abs(source["y"] - speed["y"]) <= 4
+    assert "选集" in page.locator("#episodeOpen").inner_text()
+    assert page.locator("#sourceButton").evaluate("node => parseFloat(getComputedStyle(node).fontSize)") <= 16
+    page.screenshot(path=str(screenshots / "android-landscape-controls-844.png"))
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).wait_for(state="visible")
+    menu = page.locator("#sourceMenu").bounding_box()
+    assert 0 <= menu["x"] and menu["x"] + menu["width"] <= 844
+    assert 0 <= menu["y"] and menu["y"] + menu["height"] <= 390
+    page.screenshot(path=str(screenshots / "android-landscape-source-menu-844.png"))
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-2.mp4') && document.getElementById('video').readyState >= 2")
+    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.2)
+    page.locator("#fullscreenNext").click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-3.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#video").evaluate("video => { video.pause(); video.currentTime = 2; }")
+    page.get_by_label("返回", exact=True).click()
+    page.wait_for_function("!document.fullscreenElement")
+    assert page.locator("#sourceButton").evaluate("node => node.parentElement.id") == "sourceDock"
+    assert page.locator("#sourceMenu").evaluate("node => node.parentElement.id") == "sourceDock"
+    assert page.locator("#sourceButton").inner_text().strip() == "非凡"
+    assert page.locator("#meta").inner_text() == "第3集"
+    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.2)
+    assert page.locator("#recommendations").is_hidden()
+
+
+@pytest.mark.parametrize("width", [320, 390])
+@pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
+def test_portrait_container_fullscreen_controls_do_not_overlap(source_catalog, width, screenshots):
+    page, _ = source_catalog
+    page.set_viewport_size({"width": width, "height": 844})
+    page.evaluate("""() => Object.defineProperty(screen.orientation, 'lock', {
+      configurable: true, value: async () => { throw new Error('orientation unavailable'); }
+    })""")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+    controls = [page.locator(selector) for selector in (
+        "#togglePlayback", "#fullscreenNext", "#sourceButton", "#speedButton", "#episodeOpen"
+    )]
+    bounds = [control.bounding_box() for control in controls]
+    for control, box in zip(controls, bounds):
+        assert control.is_visible() and control.is_enabled()
+        assert 0 <= box["x"] and box["x"] + box["width"] <= width + 1
+        assert 0 <= box["y"] and box["y"] + box["height"] <= 844
+    for left, right in zip(bounds, bounds[1:]):
+        assert left["x"] + left["width"] <= right["x"] + 1
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(screenshots / f"portrait-fullscreen-controls-{width}.png"))
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#speedButton").click()
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
+    page.locator("#episodeOpen").click()
+    page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
+    page.locator("#togglePlayback").click()
+    page.wait_for_function("!document.getElementById('video').paused")
+    page.locator("#fullscreenNext").click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第3集' && !document.getElementById('video').paused")
+    page.get_by_label("返回", exact=True).click()
+    page.wait_for_function("!document.fullscreenElement")
+
+
+@pytest.mark.parametrize("backend", ["remote", "webkit"])
+def test_player_cast_uses_available_browser_api(source_catalog, backend):
+    page, _ = source_catalog
+    page.evaluate("""backend => {
+      const video = document.getElementById('video');
+      window.castRequests = 0;
+      Object.defineProperty(video, 'remote', {configurable: true, value: backend === 'remote' ? {
+        prompt: async () => { window.castRequests++; }
+      } : undefined});
+      video.webkitShowPlaybackTargetPicker = backend === 'webkit' ? () => { window.castRequests++; } : undefined;
+    }""", backend)
+    page.locator("#castButton").click()
+    page.wait_for_function("window.castRequests === 1")
+    assert page.locator("#video").evaluate("video => video.currentSrc.includes('bf-1.mp4') && video.paused")
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_player_cast_reports_unsupported_or_failed_request(source_catalog, available):
+    page, _ = source_catalog
+    page.evaluate("""available => {
+      const video = document.getElementById('video');
+      Object.defineProperty(video, 'remote', {configurable: true, value: available ? {
+        prompt: async () => { throw new Error('No available receiver'); }
+      } : undefined});
+      video.webkitShowPlaybackTargetPicker = undefined;
+    }""", available)
+    page.locator("#castButton").click()
+    page.wait_for_function("document.getElementById('actionStatus').textContent.trim().length > 0")
+    assert "投屏" in page.locator("#actionStatus").inner_text()
+    assert page.locator("#castButton").is_enabled()
+
+
+@pytest.mark.parametrize("backend", ["share", "clipboard"])
+def test_player_share_uses_browser_sheet_or_copies_current_page(source_catalog, backend):
+    page, _ = source_catalog
+    page.evaluate("""backend => {
+      window.sharedValues = [];
+      Object.defineProperty(navigator, 'share', {configurable: true, value: backend === 'share'
+        ? async payload => { window.sharedValues.push(payload); } : undefined});
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        writeText: async value => { window.sharedValues.push(value); }
+      }});
+    }""", backend)
+    page.locator("#shareButton").click()
+    page.wait_for_function("window.sharedValues.length === 1")
+    shared = page.evaluate("window.sharedValues[0]")
+    assert (shared["url"] if backend == "share" else shared) == page.url
+    if backend == "share":
+        assert "欢天喜地七仙女" in shared["title"]
+    else:
+        assert "复制" in page.locator("#actionStatus").inner_text()
+
+
+def test_player_share_failure_explains_without_navigating(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      Object.defineProperty(navigator, 'share', {configurable: true, value: undefined});
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        writeText: async () => { throw new Error('clipboard denied'); }
+      }});
+    }""")
+    before = page.url
+    page.locator("#shareButton").click()
+    page.wait_for_function("document.getElementById('actionStatus').textContent.trim().length > 0")
+    assert page.url == before
+    assert page.locator("#shareButton").is_enabled()
+
+
+def test_pending_recommendation_refresh_can_retry_after_return_and_reentry(cinema_catalog):
+    page = cinema_catalog
+    page.locator(".recommend-card").first.click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    assert page.locator(".related-card").count() == 3
+    page.evaluate("""() => {
+      const fetch = window.fetch;
+      window.fetch = (input, options) => String(input).includes('/api/recommendations')
+        ? new Promise(resolve => { window.releaseRecommendations = () => resolve(new Response(JSON.stringify({
+            v: 1, kind: 'recommendations', heading: '猜你喜欢', items: []
+          }), {status: 200, headers: {'Content-Type': 'application/json'}})); })
+        : fetch(input, options);
+      window.restoreRecommendationFetch = () => { window.fetch = fetch; };
+    }""")
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("typeof window.releaseRecommendations === 'function'")
+    page.get_by_label("返回", exact=True).click()
+    page.locator(".recommend-card").first.click()
+    assert page.get_by_role("button", name="换一换").is_enabled()
+    assert page.locator("#related").get_attribute("aria-busy") == "false"
+    page.evaluate("window.releaseRecommendations(); window.restoreRecommendationFetch()")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    assert page.get_by_role("button", name="换一换").is_enabled()
+    page.get_by_role("button", name="换一换").click()
+    page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
+    assert page.locator(".related-card").count() == 3
+
+
+@pytest.mark.parametrize("action", ["share", "cast"])
+def test_delayed_player_action_cannot_change_another_work_status(cinema_catalog, action):
+    page = cinema_catalog
+    page.locator(".recommend-card").first.click()
+    page.evaluate("""action => {
+      const pending = () => new Promise((resolve, reject) => {
+        window.finishOldPlayerAction = action === 'share' ? resolve : () => reject(new Error('receiver offline'));
+      });
+      if (action === 'share') {
+        Object.defineProperty(navigator, 'share', {configurable: true, value: undefined});
+        Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: pending}});
+      } else {
+        Object.defineProperty(document.getElementById('video'), 'remote', {
+          configurable: true, value: {prompt: pending}
+        });
+      }
+    }""", action)
+    page.locator(f"#{action}Button").click()
+    page.wait_for_function("typeof window.finishOldPlayerAction === 'function'")
+    assert page.locator(f"#{action}Button").is_disabled()
+    page.get_by_label("返回", exact=True).click()
+    page.locator(".recommend-card").nth(1).click()
+    assert page.locator("#title").inner_text() == "长风入夜"
+    assert page.locator(f"#{action}Button").is_enabled()
+    page.evaluate("window.finishOldPlayerAction()")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    assert page.locator("#actionStatus").inner_text() == ""
+    assert page.locator(f"#{action}Button").is_enabled()

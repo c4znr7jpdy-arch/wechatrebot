@@ -265,3 +265,114 @@ def test_catalog_reader_stops_slow_trickles_and_closes_response(state_module, mo
         module._catalog_json("https://catalog.example/", ac="detail", wd=TITLE)
     assert response.reads == 3
     assert response.closed
+
+
+def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(state_module, tmp_path, monkeypatch):
+    module = state_module
+    store = module.StateStore(tmp_path / "random-state", 600, 100)
+    catalog = module.RecommendationCatalog(store)
+    calls = []
+    monkeypatch.setattr(module.secrets, "randbelow", lambda upper: upper - 1)
+
+    def catalog_json(_base, **params):
+        calls.append(params)
+        if params["ac"] == "list":
+            return {"class": [{"type_id": 3, "type_name": "短剧"}]}
+        if params["pg"] == 1:
+            return {"pagecount": 100, "list": [_record("只在首页的新剧", category="短剧")]}
+        assert params["pg"] == 100
+        return {"list": [
+            _record(f"随机作品{index}", category="短剧", count=2) for index in range(20)
+        ] + [_record("随机作品0 2005", category="短剧", count=2)]}
+
+    monkeypatch.setattr(module, "_catalog_json", catalog_json)
+    first = catalog.get(set())
+    assert len(first) == 12
+    assert len(catalog.cached) == 20
+    assert all(item["title"] != "只在首页的新剧" for item in catalog.cached)
+    assert len({item["recommendation_id"] for item in catalog.cached}) == 20
+    first_ids = {item["recommendation_id"] for item in first}
+    second = catalog.get(first_ids)
+    assert len(second) == 8
+    assert not first_ids.intersection(item["recommendation_id"] for item in second)
+    seen = first_ids | {item["recommendation_id"] for item in second}
+    assert catalog.get(seen) == []
+    # Exclusions belong to the request; another viewer can still see every cached work.
+    assert len(catalog.get(set())) == 12
+    assert len(calls) == 3
+    for item in first:
+        assert store.get(item["selection_token"])["items"][0]["title"] == item["title"]
+
+
+def test_recommendation_resampling_keeps_shared_cache_bounded(state_module, tmp_path, monkeypatch):
+    module = state_module
+    store = module.StateStore(tmp_path / "bounded-state", 600, 100)
+    catalog = module.RecommendationCatalog(store)
+    catalog.max_candidates = 5
+    calls = [0]
+    clock = [1000.0]
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+
+    def load():
+        calls[0] += 1
+        return [
+            {**module._catalog_item(_record(f"作品{calls[0]}-{number}", category="短剧", count=1), "暴风资源"),
+             "recommendation_id": f"{calls[0] * 10 + number:016x}"}
+            for number in range(5)
+        ]
+
+    monkeypatch.setattr(catalog, "_load", load)
+    first = catalog.get(set())
+    seen = {item["recommendation_id"] for item in first}
+    assert catalog.get(seen) == [] and calls[0] == 1
+    clock[0] += 4
+    second = catalog.get(seen)
+    assert len(second) == 5 and calls[0] == 2
+    assert len(catalog.cached) == 5
+    assert not seen.intersection(item["recommendation_id"] for item in second)
+    catalog.max_cache_bytes = 100
+    clock[0] += 4
+    assert catalog.get({item["recommendation_id"] for item in second}) == []
+    assert not catalog.cached
+
+
+def test_recommendation_exclusion_http_contract(state_module, tmp_path, monkeypatch):
+    module = state_module
+    catalog = module.RecommendationCatalog(module.StateStore(tmp_path / "http-state", 600, 100))
+    requests = []
+
+    def get(excluded=None):
+        requests.append(excluded)
+        return []
+
+    monkeypatch.setattr(catalog, "get", get)
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    server.recommendation_catalog = catalog
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    base = f"http://127.0.0.1:{server.server_port}/recommendations"
+    try:
+        for value in ("", "0123456789abcdef", "0123456789abcdef,fedcba9876543210"):
+            with urlopen(base + "?" + urlencode({"exclude": value}), timeout=3) as response:
+                assert json.load(response)["items"] == []
+                assert response.headers["Cache-Control"] == "no-store"
+        assert requests == [set(), {"0123456789abcdef"}, {"0123456789abcdef", "fedcba9876543210"}]
+        for query in (
+            "exclude=bad", "exclude=",  # Duplicate parameter below is rejected even if empty.
+        ):
+            if query == "exclude=":
+                query += "&exclude="
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "?" + query, timeout=3)
+            assert error.value.code == 400
+        for value in ("0123456789abcdef,0123456789abcdef", ",".join(f"{number:016x}" for number in range(257))):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "?" + urlencode({"exclude": value}), timeout=3)
+            assert error.value.code == 400
+        with pytest.raises(HTTPError) as error:
+            urlopen(base, timeout=3)
+        assert error.value.code == 503
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)

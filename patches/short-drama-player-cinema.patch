@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,249 @@
+@@ -5,369 +5,295 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -195,7 +195,161 @@ diff --git a/index.html b/index.html
 -        background: rgba(10,12,15,.58);
 -      }
 -      .mobile-tool-button svg { width: 19px; height: 19px; }
--    }
++    ::-webkit-scrollbar { width: 8px; height: 8px; }
++    ::-webkit-scrollbar-track { background: var(--canvas); }
++    ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; }
++    ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
++    ::-webkit-scrollbar-thumb:active { background: var(--scroll-active); }
++    body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 85% 0%, #26303966, transparent 48%), var(--canvas); }
++    [hidden], #direct[hidden] { display: none !important; }
++    button, input, select { font: inherit; }
++    button, select { cursor: pointer; }
++    button { color: inherit; border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius); min-height: 44px; }
++    @media (hover: hover) and (pointer: fine) { button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); } }
++    button:active:not(:disabled) { filter: brightness(.9); }
++    button:disabled { opacity: .45; cursor: default; }
++    :focus { outline: none; }
++    .keyboard-navigation :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
++    button { -webkit-tap-highlight-color: transparent; }
++    svg { width: 22px; height: 22px; fill: currentColor; }
++    .site-header { max-width: 1360px; margin: auto; padding: 26px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
++    .site-brand { display: flex; align-items: center; gap: 12px; font-family: var(--display-font); font-weight: 700; letter-spacing: .12em; }
++    .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); }
++    .brand-mark svg { width: 17px; height: 17px; }
++    .site-caption { color: var(--muted); font-size: 12px; }
++    main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 28px; width: min(100%, 1360px); margin: auto; padding: 32px 32px max(48px, env(safe-area-inset-bottom)); }
++    .recommendations-page { grid-column: 1 / -1; min-width: 0; }
++    .catalog-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin: 16px 0 28px; }
++    .eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; letter-spacing: .14em; }
++    .catalog-heading h2 { margin: 0 0 12px; font: 700 clamp(26px, 4vw, 42px)/1.3 var(--display-font); overflow-wrap: anywhere; }
++    #recommendationsSummary { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.7; }
++    .catalog-search { width: min(100%, 300px); flex-shrink: 0; }
++    .catalog-search label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
++    .search-field { display: flex; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 0 6px 0 14px; }
++    .search-field:focus-within { border-color: var(--accent); }
++    .search-field svg { flex-shrink: 0; width: 18px; color: var(--muted); }
++    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 14px; }
++    .search-field input::placeholder { color: var(--muted); }
++    .search-field input::-webkit-search-cancel-button { appearance: none; }
++    .search-field button { flex-shrink: 0; width: 44px; border: 0; background: transparent; font-size: 22px; }
++    .recommendation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px 22px; }
++    .recommend-card { display: flex; min-width: 0; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius); background: transparent; text-align: left; transition: border-color 160ms ease, background 160ms ease; }
++    .recommend-card:hover:not(:disabled) { background: var(--surface); }
++    .cover { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; border-radius: var(--radius); background: linear-gradient(145deg, var(--surface-2), var(--canvas)); color: var(--accent); font: 700 64px var(--display-font); }
++    .cover::after { content: ""; position: absolute; inset: 55% 0 0; background: linear-gradient(transparent, #000a); pointer-events: none; }
++    .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
++    .cover b { position: absolute; z-index: 1; bottom: 12px; left: 12px; color: var(--text); font: 14px "Bahnschrift", sans-serif; letter-spacing: .08em; }
++    .recommend-card .info { display: flex; flex: 1; flex-direction: column; width: 100%; min-width: 0; padding: 14px 10px 12px; }
++    .info strong { order: -2; display: -webkit-box; min-height: 48px; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font: 700 17px/1.4 var(--display-font); }
++    .tags { order: -1; display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0; color: var(--muted); font-size: 12px; }
++    .meta, .source { color: var(--muted); font-size: 12px; line-height: 1.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .source { margin-bottom: 12px; }
++    .play { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--accent); font-size: 13px; }
++    .play span { font-size: 21px; line-height: 1; }
++    .recommendation-tip { margin: 30px 0 0; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.8; }
++    .catalog-empty { padding: 64px 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); line-height: 1.8; }
++
++    @media (max-width: 1000px) { .recommendation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
++    @media (max-width: 760px) { .site-header { padding: 18px 16px; } .site-caption { display: none; } main { display: block; padding: 24px 14px; } .catalog-heading { display: block; margin: 0 0 22px; } .catalog-search { width: 100%; margin-top: 20px; } .recommendation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; } .info strong { font-size: 15px; min-height: 42px; } .recommend-card .info { padding: 12px 4px 8px; } }
++    main.watch-mode { display: block; width: min(100%, 1100px); padding: 0 0 max(24px, env(safe-area-inset-bottom)); }
++    body:has(main.watch-mode) { background: var(--canvas); }
++    body:has(main.watch-mode) > .site-header { display: none; }
++    .watch-stage { min-width: 0; }
++    .video-shell { position: relative; width: 100%; height: min(72svh, 680px); min-height: 210px; overflow: hidden; isolation: isolate; background: #000; border: 1px solid var(--line); border-radius: 14px 14px 0 0; }
++    video { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
++    .video-shell.player--portrait { height: min(58svh, calc(100vw * 16 / 9)); }
++    .video-shell.player--square { height: min(72svh, 100vw); }
++    .video-shell.player--landscape, .video-shell.player--cinema { height: auto; aspect-ratio: 16 / 10; max-height: 72svh; }
++    main.watch-mode:has(.player--portrait) { max-width: 520px; }
++    .video-header { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 12px; padding: max(12px, env(safe-area-inset-top)) 12px 28px; background: linear-gradient(#000d, #0007 65%, transparent); pointer-events: none; }
++    .video-header button { pointer-events: auto; }
++    .video-heading { flex: 1; min-width: 0; font-size: clamp(14px, 2vw, 20px); font-weight: 650; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .video-header .control-button { flex: 0 0 40px; }
++    .source-button { flex: 0 0 auto; min-height: 34px; max-width: 90px; padding: 0 9px; border-color: #ffffff24; border-radius: 7px; background: #11181f99; font-family: var(--body-font); font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
++    .source-value { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
++    .source-value svg { width: 13px; height: 13px; }
++    .more-panel.source-menu { top: auto; bottom: calc(100% + 8px); right: auto; left: 0; width: 176px; max-width: calc(100vw - 40px); max-height: 230px; padding: 7px; overscroll-behavior: contain; }
++    .source-menu p { margin: 4px 3px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
++    .source-menu p:empty { display: none; }
++    .source-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
++    .source-menu .source-options button { min-height: 36px; padding: 0 8px; border-radius: 7px; font-size: 12px; text-align: center; font-weight: 400; }
++    .source-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
++    #sourceRetry { margin-top: 8px; }
++    .control-button { display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); }
++    @media (hover: hover) and (pointer: fine) { .video-shell .control-button:hover:not(:disabled) { border: 0; background: #ffffff1f; } }
++    .video-shell .control-button { outline-color: var(--text); box-shadow: none; color: var(--text); border: 0; }
++    .control-button svg { width: 23px; height: 23px; }
++    .control-button:disabled { opacity: .4; }
++    #togglePlayback .pause-mark { display: none; }
++    #togglePlayback.is-playing .pause-mark { display: block; }
++    #togglePlayback.is-playing .play-mark { display: none; }
++    .video-controls { position: absolute; z-index: 3; bottom: 0; left: 0; right: 0; padding: 28px 12px 6px; background: linear-gradient(transparent, #000b 42%, #000e); }
++    .controls-row { display: flex; gap: 8px; align-items: center; }
++    .playback-time { margin-right: auto; color: var(--text); font: 13px/1.5 "Bahnschrift", var(--body-font); white-space: nowrap; }
++    .playback-time .duration { color: #c5cbd2; }
++    .seek { display: block; appearance: none; -webkit-appearance: none; width: calc(100% - 8px); height: 24px; margin: 0 4px; background: transparent; cursor: pointer; touch-action: pan-y; }
++    .seek::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, var(--accent) var(--progress, 0%), #ffffff50 var(--progress, 0%)); }
++    .seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border: 0; border-radius: 50%; background: var(--accent); }
++    .seek::-moz-range-track { height: 3px; background: #ffffff50; }
++    .seek::-moz-range-progress { height: 3px; background: var(--accent); }
++    .seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); }
++    .speed-button { flex: 0 0 44px; font: 600 12px/1 "Bahnschrift", var(--body-font); white-space: nowrap; }
++    .controls-row { gap: 4px; }
++    @media (max-width: 420px) { .controls-row { gap: 2px; } .controls-row .control-button { min-width: 38px; flex-basis: 38px; } .playback-time { font-size: 11px; } }
++    .video-hint { position: absolute; z-index: 5; top: 42%; left: 50%; transform: translate(-50%, -50%); padding: 10px 18px; max-width: calc(100% - 40px); border-radius: 10px; color: var(--text); background: #080b0edf; font-size: 14px; text-align: center; pointer-events: none; }
++    .video-controls, .video-header, .speed-button { transition: opacity 180ms ease; }
++    .controls-hidden .video-controls, .controls-hidden .video-header, .controls-hidden .speed-button { opacity: 0; pointer-events: none; }
++    .keyboard-navigation .controls-hidden:has(:focus-visible) .video-controls, .keyboard-navigation .controls-hidden:has(:focus-visible) .video-header, .keyboard-navigation .controls-hidden:has(:focus-visible) .speed-button { opacity: 1; pointer-events: auto; }
++    .more-panel { position: absolute; z-index: 6; top: 60px; right: 14px; width: min(270px, calc(100% - 28px)); max-height: calc(100% - 130px); overflow: auto; padding: 12px; background: #11181ff5; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px #0008; }
++    .more-panel button { min-height: 44px; padding: 0 12px; font-size: 13px; }
++    .episode-navigation { display: flex; gap: 8px; margin-top: 12px; }
++    .switch-label { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; cursor: pointer; }
++    .switch-label input { accent-color: var(--accent); width: 18px; height: 18px; }
++    .quality-control { margin-top: 12px; }
++    .quality-menu { display: grid; gap: 6px; margin-top: 8px; }
++    .quality-menu button.active { color: var(--accent); border-color: var(--accent); }
++    .watch-description { position: relative; isolation: isolate; margin: 20px; padding: 20px; border: 1px solid #ffffff24; border-radius: 16px; background: var(--surface-2); }
++    .work-backdrop { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; opacity: .65; }
++    .watch-description::before { content: ''; position: absolute; z-index: -1; inset: 0; border-radius: inherit; background: linear-gradient(100deg, #08131be8, #08131b70 75%), linear-gradient(0deg, #08131bd9, transparent 85%); }
++    .watch-description h1 { margin: 0 0 18px; font: 600 22px/1.4 var(--body-font); overflow-wrap: anywhere; }
++    .watch-description p { margin: 16px 0 0; font-size: 12px; line-height: 1.8; color: #d6dce1; overflow-wrap: anywhere; }
++    #watchDetails { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
++    .work-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 400px; }
++    .source-dock { position: relative; min-width: 0; }
++    .work-actions button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: none; min-height: 72px; border: 1px solid #ffffff1f; border-radius: 10px; background: #09131e80; color: var(--text); font-size: 13px; font-weight: 400; backdrop-filter: blur(6px); -webkit-font-smoothing: antialiased; }
++    .work-actions svg { width: 23px; height: 23px; }
++    .work-actions .source-value svg { width: 12px; height: 12px; }
++    .work-actions .source-menu button { min-height: 36px; font-size: 12px; }
++    #actionStatus:empty { display: none; }
++    .timeline { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 12px; align-items: center; padding: 0 4px 3px; font: 12px/1.5 "Bahnschrift", var(--body-font); }
++    .timeline .seek { width: 100%; margin: 0; }
++    .timeline #duration { color: #c5cbd2; }
++    .controls-spacer { flex: 1; }
++    #fullscreenNext, #fullscreenSourceDock, .fullscreen-label { display: none; }
++    body:has(main.watch-mode) { --accent: #00d99b; --accent-soft: #10382e; }
++    .video-shell.container-fullscreen .video-header { padding: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) 38px max(28px, env(safe-area-inset-left)); }
++    .container-fullscreen .video-heading { font-size: 20px; font-weight: 400; }
++    .container-fullscreen #videoTitle, .container-fullscreen .title-separator { display: none; }
++    .container-fullscreen .video-controls { padding: 36px max(32px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left)); }
++    .container-fullscreen .timeline { gap: 20px; padding-bottom: 12px; font-size: 16px; }
++    .container-fullscreen .controls-row { gap: 16px; }
++    .container-fullscreen #fullscreenNext { display: inline-grid; }
++    .container-fullscreen #fullscreenSourceDock { display: block; }
++    .container-fullscreen .source-button { min-height: 44px; padding: 0 6px; border: 0; background: transparent; font-size: 16px; }
++    .container-fullscreen .source-icon, .container-fullscreen #episodeOpen svg { display: none; }
++    .container-fullscreen #episodeOpen { order: 4; min-width: 56px; }
++    .container-fullscreen .fullscreen-label { display: inline; font: 400 16px var(--body-font); }
++    .container-fullscreen .speed-button { font-size: 16px; min-width: 64px; order: 3; }
++    .container-fullscreen #fullscreenSourceDock { order: 2; }
++    .container-fullscreen .source-menu { left: auto; right: 0; bottom: calc(100% + 20px); max-height: calc(100dvh - 150px); }
++    @media (max-width: 480px) {
++      .video-shell.container-fullscreen .video-controls { padding-inline: 12px; }
++      .container-fullscreen .controls-row { gap: 6px; }
++      .container-fullscreen #fullscreenSourceDock { flex: 0 0 auto; }
++      .container-fullscreen .speed-button { min-width: 52px; flex-basis: 52px; }
++      .container-fullscreen #episodeOpen { min-width: 44px; }
++      .container-fullscreen #fullscreenControlDock { display: none; }
+     }
 -    @media (max-width: 350px) {
 -      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop { max-width: 105px; padding-right: 7px; padding-left: 7px; gap: 3px; font-size: 11.5px; white-space: nowrap; }
 -      .video-shell:not(:fullscreen):not(.pseudo-fullscreen) #mobileEpisodeButtonTop .episode-list-icon { width: 14px; height: 14px; }
@@ -335,122 +489,7 @@ diff --git a/index.html b/index.html
 -      .below-player { flex-wrap: wrap; }
 -      .below-player #status { flex-basis: 100%; text-align: left; }
 -    }
-+    ::-webkit-scrollbar { width: 8px; height: 8px; }
-+    ::-webkit-scrollbar-track { background: var(--canvas); }
-+    ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; }
-+    ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
-+    ::-webkit-scrollbar-thumb:active { background: var(--scroll-active); }
-+    body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 85% 0%, #26303966, transparent 48%), var(--canvas); }
-+    [hidden], #direct[hidden] { display: none !important; }
-+    button, input, select { font: inherit; }
-+    button, select { cursor: pointer; }
-+    button { color: inherit; border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius); min-height: 44px; }
-+    @media (hover: hover) and (pointer: fine) { button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); } }
-+    button:active:not(:disabled) { filter: brightness(.9); }
-+    button:disabled { opacity: .45; cursor: default; }
-+    :focus { outline: none; }
-+    .keyboard-navigation :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-+    button { -webkit-tap-highlight-color: transparent; }
-+    svg { width: 22px; height: 22px; fill: currentColor; }
-+    .site-header { max-width: 1360px; margin: auto; padding: 26px 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
-+    .site-brand { display: flex; align-items: center; gap: 12px; font-family: var(--display-font); font-weight: 700; letter-spacing: .12em; }
-+    .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); }
-+    .brand-mark svg { width: 17px; height: 17px; }
-+    .site-caption { color: var(--muted); font-size: 12px; }
-+    main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 28px; width: min(100%, 1360px); margin: auto; padding: 32px 32px max(48px, env(safe-area-inset-bottom)); }
-+    .recommendations-page { grid-column: 1 / -1; min-width: 0; }
-+    .catalog-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin: 16px 0 28px; }
-+    .eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; letter-spacing: .14em; }
-+    .catalog-heading h2 { margin: 0 0 12px; font: 700 clamp(26px, 4vw, 42px)/1.3 var(--display-font); overflow-wrap: anywhere; }
-+    #recommendationsSummary { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.7; }
-+    .catalog-search { width: min(100%, 300px); flex-shrink: 0; }
-+    .catalog-search label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
-+    .search-field { display: flex; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 0 6px 0 14px; }
-+    .search-field:focus-within { border-color: var(--accent); }
-+    .search-field svg { flex-shrink: 0; width: 18px; color: var(--muted); }
-+    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 14px; }
-+    .search-field input::placeholder { color: var(--muted); }
-+    .search-field input::-webkit-search-cancel-button { appearance: none; }
-+    .search-field button { flex-shrink: 0; width: 44px; border: 0; background: transparent; font-size: 22px; }
-+    .recommendation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px 22px; }
-+    .recommend-card { display: flex; min-width: 0; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius); background: transparent; text-align: left; transition: border-color 160ms ease, background 160ms ease; }
-+    .recommend-card:hover:not(:disabled) { background: var(--surface); }
-+    .cover { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; border-radius: var(--radius); background: linear-gradient(145deg, var(--surface-2), var(--canvas)); color: var(--accent); font: 700 64px var(--display-font); }
-+    .cover::after { content: ""; position: absolute; inset: 55% 0 0; background: linear-gradient(transparent, #000a); pointer-events: none; }
-+    .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-+    .cover b { position: absolute; z-index: 1; bottom: 12px; left: 12px; color: var(--text); font: 14px "Bahnschrift", sans-serif; letter-spacing: .08em; }
-+    .recommend-card .info { display: flex; flex: 1; flex-direction: column; width: 100%; min-width: 0; padding: 14px 10px 12px; }
-+    .info strong { order: -2; display: -webkit-box; min-height: 48px; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font: 700 17px/1.4 var(--display-font); }
-+    .tags { order: -1; display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0; color: var(--muted); font-size: 12px; }
-+    .meta, .source { color: var(--muted); font-size: 12px; line-height: 1.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-+    .source { margin-bottom: 12px; }
-+    .play { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--accent); font-size: 13px; }
-+    .play span { font-size: 21px; line-height: 1; }
-+    .recommendation-tip { margin: 30px 0 0; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.8; }
-+    .catalog-empty { padding: 64px 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); line-height: 1.8; }
-+
-+    @media (max-width: 1000px) { .recommendation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-+    @media (max-width: 760px) { .site-header { padding: 18px 16px; } .site-caption { display: none; } main { display: block; padding: 24px 14px; } .catalog-heading { display: block; margin: 0 0 22px; } .catalog-search { width: 100%; margin-top: 20px; } .recommendation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; } .info strong { font-size: 15px; min-height: 42px; } .recommend-card .info { padding: 12px 4px 8px; } }
-+    main.watch-mode { display: block; width: min(100%, 1100px); padding: 0 0 max(24px, env(safe-area-inset-bottom)); }
-+    body:has(main.watch-mode) { background: var(--canvas); }
-+    body:has(main.watch-mode) > .site-header { display: none; }
-+    .watch-stage { min-width: 0; }
-+    .video-shell { position: relative; width: 100%; height: min(72svh, 680px); min-height: 210px; overflow: hidden; isolation: isolate; background: #000; border: 1px solid var(--line); border-radius: 14px 14px 0 0; }
-+    video { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-+    .video-shell.player--portrait { height: min(58svh, calc(100vw * 16 / 9)); }
-+    .video-shell.player--square { height: min(72svh, 100vw); }
-+    .video-shell.player--landscape, .video-shell.player--cinema { height: auto; aspect-ratio: 16 / 10; max-height: 72svh; }
-+    main.watch-mode:has(.player--portrait) { max-width: 520px; }
-+    .video-header { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 12px; padding: max(12px, env(safe-area-inset-top)) 12px 28px; background: linear-gradient(#000d, #0007 65%, transparent); pointer-events: none; }
-+    .video-header button { pointer-events: auto; }
-+    .video-heading { flex: 1; min-width: 0; font-size: clamp(14px, 2vw, 20px); font-weight: 650; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-+    .video-header .control-button { flex: 0 0 40px; }
-+    .source-button { flex: 0 0 auto; min-height: 34px; max-width: 90px; padding: 0 9px; border-color: #ffffff24; border-radius: 7px; background: #11181f99; font-family: var(--body-font); font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-+    .source-value { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-+    .source-value svg { width: 13px; height: 13px; }
-+    .more-panel.source-menu { top: 58px; right: 52px; width: 176px; max-width: calc(100% - 64px); max-height: calc(100% - 72px); padding: 7px; overscroll-behavior: contain; }
-+    .source-menu p { margin: 4px 3px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
-+    .source-menu p:empty { display: none; }
-+    .source-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
-+    .source-menu .source-options button { min-height: 36px; padding: 0 8px; border-radius: 7px; font-size: 12px; text-align: center; font-weight: 400; }
-+    .source-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-+    #sourceRetry { margin-top: 8px; }
-+    .control-button { display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); }
-+    @media (hover: hover) and (pointer: fine) { .video-shell .control-button:hover:not(:disabled) { border: 0; background: #ffffff1f; } }
-+    .video-shell .control-button { outline-color: var(--text); box-shadow: none; color: var(--text); border: 0; }
-+    .control-button svg { width: 23px; height: 23px; }
-+    .control-button:disabled { opacity: .4; }
-+    #togglePlayback .pause-mark { display: none; }
-+    #togglePlayback.is-playing .pause-mark { display: block; }
-+    #togglePlayback.is-playing .play-mark { display: none; }
-+    .video-controls { position: absolute; z-index: 3; bottom: 0; left: 0; right: 0; padding: 28px 12px 6px; background: linear-gradient(transparent, #000b 42%, #000e); }
-+    .controls-row { display: flex; gap: 8px; align-items: center; }
-+    .playback-time { margin-right: auto; color: var(--text); font: 13px/1.5 "Bahnschrift", var(--body-font); white-space: nowrap; }
-+    .playback-time .duration { color: #c5cbd2; }
-+    .seek { display: block; appearance: none; -webkit-appearance: none; width: calc(100% - 8px); height: 24px; margin: 0 4px; background: transparent; cursor: pointer; touch-action: pan-y; }
-+    .seek::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, var(--accent) var(--progress, 0%), #ffffff50 var(--progress, 0%)); }
-+    .seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border: 0; border-radius: 50%; background: var(--accent); }
-+    .seek::-moz-range-track { height: 3px; background: #ffffff50; }
-+    .seek::-moz-range-progress { height: 3px; background: var(--accent); }
-+    .seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); }
-+    .speed-button { flex: 0 0 44px; font: 600 12px/1 "Bahnschrift", var(--body-font); white-space: nowrap; }
-+    .controls-row { gap: 4px; }
-+    @media (max-width: 420px) { .controls-row { gap: 2px; } .controls-row .control-button { min-width: 38px; flex-basis: 38px; } .playback-time { font-size: 11px; } }
-+    .video-hint { position: absolute; z-index: 5; top: 42%; left: 50%; transform: translate(-50%, -50%); padding: 10px 18px; max-width: calc(100% - 40px); border-radius: 10px; color: var(--text); background: #080b0edf; font-size: 14px; text-align: center; pointer-events: none; }
-+    .video-controls, .video-header, .speed-button { transition: opacity 180ms ease; }
-+    .controls-hidden .video-controls, .controls-hidden .video-header, .controls-hidden .speed-button { opacity: 0; pointer-events: none; }
-+    .keyboard-navigation .controls-hidden:has(:focus-visible) .video-controls, .keyboard-navigation .controls-hidden:has(:focus-visible) .video-header, .keyboard-navigation .controls-hidden:has(:focus-visible) .speed-button { opacity: 1; pointer-events: auto; }
-+    .more-panel { position: absolute; z-index: 6; top: 60px; right: 14px; width: min(270px, calc(100% - 28px)); max-height: calc(100% - 130px); overflow: auto; padding: 12px; background: #11181ff5; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px #0008; }
-+    .more-panel button { min-height: 44px; padding: 0 12px; font-size: 13px; }
-+    .episode-navigation { display: flex; gap: 8px; margin-top: 12px; }
-+    .switch-label { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; cursor: pointer; }
-+    .switch-label input { accent-color: var(--accent); width: 18px; height: 18px; }
-+    .quality-control { margin-top: 12px; }
-+    .quality-menu { display: grid; gap: 6px; margin-top: 8px; }
-+    .quality-menu button.active { color: var(--accent); border-color: var(--accent); }
-+    .watch-description { padding: 18px 20px 8px; }
-+    .watch-description h1 { margin: 0 0 6px; font: 700 21px/1.4 var(--display-font); overflow-wrap: anywhere; }
-+    .watch-description p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
++    @media (max-height: 450px) and (orientation: landscape) { .video-shell.container-fullscreen .video-header { padding-top: 10px; } .container-fullscreen .video-controls { padding-bottom: 8px; } .container-fullscreen .timeline { padding-bottom: 4px; } }
 +    .metadata-feedback { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
 +    .metadata-feedback p { margin: 0; color: var(--muted); font-size: 12px; }
 +    .metadata-feedback:has(p:empty):has(button[hidden]) { display: none; }
@@ -504,7 +543,7 @@ diff --git a/index.html b/index.html
 +    .related-card strong { position: absolute; inset: auto 0 0; padding: 24px 7px 7px; font-size: 12px; font-weight: 500; line-height: 1.4; background: linear-gradient(transparent, #000e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 +    #relatedStatus { min-height: 20px; margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
 +    @media (min-width: 761px) { main.watch-mode { margin-top: 24px; } .related-card { aspect-ratio: 16 / 9; } }
-+    @media (max-width: 760px) { .video-shell.player--landscape, .video-shell.player--cinema { aspect-ratio: 4 / 3; } .video-header { gap: 4px; padding-inline: 4px; } .video-controls { padding-inline: 6px; } .watch-description, .inline-episodes, .related { padding-left: 14px; padding-right: 14px; } .below-player { padding-inline: 14px; } }
++    @media (max-width: 760px) { .video-shell.player--landscape, .video-shell.player--cinema { aspect-ratio: 16 / 9; } .video-header { gap: 4px; padding-inline: 4px; } .video-controls { padding-inline: 6px; } .watch-description { margin: 16px 14px; padding: 18px; } .inline-episodes, .related { padding-left: 14px; padding-right: 14px; } .below-player { padding-inline: 14px; } }
 +    @media (max-width: 380px) { .episode-grid { gap: 7px; grid-template-columns: repeat(5, minmax(0, 1fr)); } .controls-row { gap: 2px; } .video-heading { font-size: 13px; } .playback-time { font-size: 12px; } }
 +    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet { align-items: flex-end; padding: 0; } }
 +
@@ -527,23 +566,22 @@ diff --git a/index.html b/index.html
 +        <video id="video" aria-label="视频播放区域" playsinline webkit-playsinline preload="metadata" crossorigin="anonymous" tabindex="0"></video>
 +        <header class="video-header">
 +          <button id="pageBackButton" class="control-button" type="button" aria-label="返回"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.7 5.3-1.4-1.4L5.2 12l8.1 8.1 1.4-1.4L8 12Z"/></svg></button>
-+          <div class="video-heading"><span id="videoTitle">正在加载</span><span aria-hidden="true"> · </span><span id="meta">第1集</span></div>
-+          <button id="sourceButton" class="source-button" type="button" aria-expanded="false" aria-controls="sourceMenu" hidden><span class="source-value"><span id="sourceLabel"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6-1.4-1.4L12 12.2 7.4 7.6Z"/></svg></span></button>
++          <div class="video-heading"><span id="videoTitle">正在加载</span><span class="title-separator" aria-hidden="true"> · </span><span id="meta">第1集</span></div>
 +          <button id="moreButton" class="control-button" type="button" aria-label="更多播放设置" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
 +        </header>
 +        <input id="playbackRate" type="hidden" value="1">
 +        <div id="videoHint" class="video-hint" role="status" aria-live="polite" hidden></div>
 +        <div class="video-controls" role="group" aria-label="播放控制">
++          <div class="timeline"><span id="elapsed">00:00</span><input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度" disabled><span id="duration">00:00</span></div>
 +          <div class="controls-row">
 +            <button id="togglePlayback" class="control-button" type="button" aria-label="播放"><svg class="play-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8Z"/></svg><svg class="pause-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="5" height="18" rx="1.5"/><rect x="14" y="3" width="5" height="18" rx="1.5"/></svg></button>
-+            <span class="playback-time"><span id="elapsed">00:00</span> <span class="duration">/ <span id="duration">00:00</span></span></span>
-+            <button id="episodeOpen" class="control-button" type="button" aria-label="选择剧集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v18H3Zm2 2v14h14V5Zm2 3h2v2H7Zm4 0h6v2h-6Zm-4 5h2v2H7Zm4 0h6v2h-6Z"/></svg></button>
++            <button id="fullscreenNext" class="control-button" type="button" aria-label="下一集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 4 10 8L5 20Zm11 0h3v16h-3Z"/></svg></button>
++            <span class="controls-spacer"></span><div id="fullscreenSourceDock" class="source-dock"></div>
++            <button id="episodeOpen" class="control-button" type="button" aria-label="选择剧集"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v18H3Zm2 2v14h14V5Zm2 3h2v2H7Zm4 0h6v2h-6Zm-4 5h2v2H7Zm4 0h6v2h-6Z"/></svg><span class="fullscreen-label">选集</span></button>
 +            <button id="speedButton" class="control-button speed-button" type="button" aria-label="切换倍速，当前 1 倍">1.0x</button>
-+            <button id="fullscreenButton" class="control-button" type="button" aria-label="全屏播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v2H5v5H3Zm11 0h7v7h-2V5h-5ZM3 14h2v5h5v2H3Zm16 0h2v7h-7v-2h5Z"/></svg></button>
++            <span id="fullscreenControlDock"><button id="fullscreenButton" class="control-button" type="button" aria-label="全屏播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v2H5v5H3Zm11 0h7v7h-2V5h-5ZM3 14h2v5h5v2H3Zm16 0h2v7h-7v-2h5Z"/></svg></button></span>
 +          </div>
-+          <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度" disabled>
 +        </div>
-+        <section id="sourceMenu" class="more-panel source-menu" aria-label="切换资源" hidden><p id="sourceStatus" role="status" aria-live="polite"></p><div id="sourceOptions" class="source-options" role="group" aria-label="资源列表"></div><button id="sourceRetry" type="button" hidden>重试获取资源</button></section>
 +        <section id="morePanel" class="more-panel" aria-label="播放设置" hidden>
 +          <label class="switch-label"><input id="autoNext" type="checkbox" checked><span>自动连播</span></label>
 +          <div class="episode-navigation"><button id="previous" type="button">上一集</button><button id="next" type="button">下一集</button></div>
@@ -551,7 +589,14 @@ diff --git a/index.html b/index.html
 +        </section>
 +        <div id="episodeSheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden><button id="sheetBackdrop" class="sheet-backdrop" type="button" aria-label="关闭选集"></button><section class="sheet-panel"><header class="sheet-header"><span id="sheetTitle">选择剧集</span><button aria-label="关闭选集" id="sheetClose" class="sheet-close" type="button">×</button></header><div id="sheetEpisodeRanges" class="episode-ranges" role="group" aria-label="剧集范围"></div><div id="sheetEpisodeGrid" class="episode-grid"></div></section></div>
 +      </div>
-+      <section class="watch-description"><h1 id="title">短剧播放</h1><p id="watchDetails">正在读取作品信息…</p></section>
++      <section class="watch-description"><img id="workBackdrop" class="work-backdrop" alt="" referrerpolicy="no-referrer" hidden><h1 id="title">短剧播放</h1>
++        <!-- Action icons: Google Material Icons (Apache-2.0), matching the existing 24px icon system. -->
++        <div class="work-actions" role="group" aria-label="作品操作"><div id="sourceDock" class="source-dock">
++          <button id="sourceButton" class="source-button" type="button" aria-expanded="false" aria-controls="sourceMenu" hidden><svg class="source-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg><span class="source-value"><span id="sourceLabel"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6-1.4-1.4L12 12.2 7.4 7.6Z"/></svg></span></button>
++          <section id="sourceMenu" class="more-panel source-menu" aria-label="切换资源" hidden><p id="sourceStatus" role="status" aria-live="polite"></p><div id="sourceOptions" class="source-options" role="group" aria-label="资源列表"></div><button id="sourceRetry" type="button" hidden>重试获取资源</button></section>
++        </div><button id="castButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg><span>投屏</span></button><button id="shareButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg><span>分享</span></button></div>
++        <p id="watchDetails">正在读取作品信息…</p><p id="actionStatus" role="status" aria-live="polite"></p>
++      </section>
 +      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><button id="switchSourceOnError" type="button" hidden>切换资源</button><a id="direct" hidden aria-hidden="true"></a></div>
 +      <div class="metadata-feedback"><p id="metadataStatus" role="status"></p><button id="metadataRetry" type="button" hidden>重试获取选集</button></div>
 +    </section>
@@ -589,7 +634,7 @@ diff --git a/index.html b/index.html
 -    <section id="recommendations" class="recommendations-page" hidden><header><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary"></p></header><section id="recommendationGrid" class="recommendation-grid"></section><p class="recommendation-tip">点击任一作品即可进入播放器；推荐结果会随资源站更新。</p></section>
 -    <section id="episodes" class="inline-episodes"><header class="inline-episodes-header"><span class="inline-episodes-title">选集</span><span class="inline-episodes-tools"><span id="episodeCount"></span><button id="episodeExpand" class="episode-expand-button" type="button" aria-label="展开选集" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z"/></svg></button></span></header><div id="episodeGrid" class="inline-episode-grid"></div></section>
 +    <section id="episodes" class="inline-episodes"><header class="inline-episodes-header"><span class="inline-episodes-title">选集</span><span class="inline-episodes-tools"><span id="episodeCount"></span><button id="episodeExpand" class="episode-expand-button" type="button" aria-label="展开选集" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z"/></svg></button></span></header><div id="episodeRanges" hidden></div><div id="episodeGrid" class="inline-episode-grid"></div></section>
-+    <section id="related" class="related" hidden><header class="related-header"><h2>猜你喜欢</h2><button id="refreshRelated" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V3h2v8h-8V9h4.5a6 6 0 1 0 .4 6H20A8 8 0 1 1 19 7Z"/></svg><span>换一换</span></button></header><div id="relatedGrid" class="related-grid"></div><p id="relatedStatus" role="status"></p></section>
++    <section id="related" class="related" hidden><header class="related-header"><h2>为你推荐</h2><button id="refreshRelated" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V3h2v8h-8V9h4.5a6 6 0 1 0 .4 6H20A8 8 0 1 1 19 7Z"/></svg><span>换一换</span></button></header><div id="relatedGrid" class="related-grid"></div><p id="relatedStatus" role="status"></p></section>
    </main>
    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako_inflate.min.js"></script>
@@ -601,22 +646,29 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -377,6 +257,14 @@
+@@ -377,6 +303,21 @@
        const videoShell = document.getElementById('videoShell');
        const fallback = document.getElementById('direct');
        const retry = document.getElementById('retry');
 +      const sourceButton = document.getElementById('sourceButton');
++      const sourceDock = document.getElementById('sourceDock');
++      const fullscreenSourceDock = document.getElementById('fullscreenSourceDock');
 +      const sourceLabel = document.getElementById('sourceLabel');
 +      const sourceMenu = document.getElementById('sourceMenu');
 +      const sourceOptions = document.getElementById('sourceOptions');
 +      const sourceStatus = document.getElementById('sourceStatus');
 +      const sourceRetry = document.getElementById('sourceRetry');
 +      const switchSourceOnError = document.getElementById('switchSourceOnError');
-+      let sourceSession = null;
++      const fullscreenNext = document.getElementById('fullscreenNext');
++      const castButton = document.getElementById('castButton');
++      const shareButton = document.getElementById('shareButton');
++      const actionStatus = document.getElementById('actionStatus');
++      const workBackdrop = document.getElementById('workBackdrop');
++      let sourceSession = null, actionGeneration = 0;
        const previous = document.getElementById('previous');
        const next = document.getElementById('next');
        const episodeOpen = document.getElementById('episodeOpen');
-@@ -406,24 +294,375 @@
+@@ -406,24 +347,408 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -645,7 +697,8 @@ diff --git a/index.html b/index.html
 +      const refreshRelatedButton = document.getElementById('refreshRelated');
 +      const hint = document.getElementById('videoHint');
 +      let hintTimer, controlsTimer, relatedRequest = 0, relatedAbort = null;
-+      let relatedPool = [], relatedShown = [], isSeeking = false;
++      let relatedPool = [], relatedWork = '', isSeeking = false;
++      const relatedSeen = new Set(), relatedExcludedIds = new Set();
 +      const rates = [1, 1.5, 2];
 +      const showHint = (message, duration = 1400) => {
 +        clearTimeout(hintTimer);
@@ -781,6 +834,18 @@ diff --git a/index.html b/index.html
 +      };
 +      const syncFullscreen = () => {
 +        const active = playerFullscreenActive();
++        const containerActive = activeFullscreenElement() === videoShell;
++        videoShell.classList.toggle('container-fullscreen', containerActive);
++        const dock = containerActive ? fullscreenSourceDock : sourceDock;
++        if (sourceButton.parentElement !== dock) {
++          sourceMenu.hidden = true; sourceButton.setAttribute('aria-expanded', 'false');
++          dock.append(sourceButton, sourceMenu);
++        }
++        const fullControlDock = containerActive ? videoShell.querySelector('.video-header') : document.getElementById('fullscreenControlDock');
++        if (fullButton.parentElement !== fullControlDock) {
++          if (containerActive) fullControlDock.insertBefore(fullButton, moreButton);
++          else fullControlDock.appendChild(fullButton);
++        }
 +        document.body.classList.toggle('player-fullscreen', active);
 +        fullButton.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');
 +        if ((!active && !fullscreenTransition) || !hasHorizontalVideo()) {
@@ -898,17 +963,30 @@ diff --git a/index.html b/index.html
 +        }
 +        return result;
 +      };
++      const relatedTitle = (item) => {
++        let title = String(item?.title || '').normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[^\p{L}\p{N}]/gu, '');
++        const year = String(item?.year || '').match(/(?:19|20)\d{2}/)?.[0]
++          || String(item?.title || '').match(/[\s(（]((?:19|20)\d{2})[)）]?$/)?.[1];
++        if (year && title.length > year.length && title.endsWith(year)) title = title.slice(0, -year.length);
++        return title;
++      };
++      const rememberRelated = (item) => {
++        relatedSeen.add(relatedTitle(item));
++        if (/^[0-9a-f]{16}$/.test(item.recommendation_id || '')) relatedExcludedIds.add(item.recommendation_id);
++      };
 +      const renderRelated = () => {
 +        const unique = new Map();
-+        relatedPool.forEach((item) => { if (item.title !== playlist?.title) unique.set(item.title, item); });
-+        const candidates = [...unique.values()];
-+        const fresh = shuffle(candidates.filter((item) => !relatedShown.includes(item.title)));
-+        const repeats = shuffle(candidates.filter((item) => relatedShown.includes(item.title)));
-+        const selected = [...fresh, ...repeats].slice(0, 3);
-+        relatedShown = selected.map((item) => item.title);
++        relatedPool.forEach((item) => {
++          const key = relatedTitle(item);
++          if (relatedSeen.has(key)) rememberRelated(item);
++          else unique.set(key, item);
++        });
++        const selected = shuffle([...unique.values()]).slice(0, 3);
++        selected.forEach(rememberRelated);
 +        relatedGrid.replaceChildren();
 +        selected.forEach((item) => {
 +          const button = document.createElement('button'); button.type = 'button'; button.className = 'related-card';
++          button.dataset.relatedTitle = relatedTitle(item);
 +          button.setAttribute('aria-label', `播放${item.title}`);
 +          const initial = document.createElement('span'); initial.className = 'initial'; initial.textContent = Array.from(item.title)[0] || '剧'; button.appendChild(initial);
 +          if (item.cover) {
@@ -927,48 +1005,54 @@ diff --git a/index.html b/index.html
 +          });
 +          relatedGrid.appendChild(button);
 +        });
-+        relatedStatus.textContent = selected.length === 3 ? '' : selected.length ? '可推荐的短剧暂时较少，稍后再换一换。' : '暂时没有可推荐的短剧，请稍后重试。';
++        relatedStatus.textContent = selected.length === 3 ? '' : selected.length ? '本次新的推荐较少，可稍后再换一换。' : '暂时没有新的推荐，稍后再试。';
 +      };
-+      const refreshRelated = async () => {
++      const refreshRelated = async (force = false) => {
 +        if (!playlist) return;
 +        relatedNode.hidden = false;
++        const currentWork = relatedTitle(playlist);
++        rememberRelated(playlist);
++        // Hydrating metadata or changing the same work's source must not consume another batch.
++        if (!force && relatedWork === currentWork && relatedGrid.children.length) return;
++        relatedWork = currentWork;
++        [...relatedGrid.children].forEach((card) => { if (card.dataset.relatedTitle === currentWork) card.remove(); });
 +        const requestId = ++relatedRequest;
 +        relatedAbort?.abort(); relatedAbort = new AbortController();
 +        const controller = relatedAbort;
 +        const timeout = setTimeout(() => controller.abort(), 20000);
 +        refreshRelatedButton.disabled = true;
 +        relatedNode.setAttribute('aria-busy', 'true');
-+        relatedStatus.textContent = '正在挑选短剧…';
++        relatedStatus.textContent = '正在挑选作品…';
 +        try {
-+          const response = await fetch('/short-drama/api/recommendations', {cache: 'no-store', credentials: 'omit', signal: controller.signal});
++          const query = new URLSearchParams({exclude: [...relatedExcludedIds].slice(-256).join(',')});
++          const response = await fetch(`/short-drama/api/recommendations?${query}`, {cache: 'no-store', credentials: 'omit', signal: controller.signal});
 +          const payload = await response.json();
 +          if (!response.ok) throw new Error('recommendation unavailable');
-+          const items = validateSelectionPayload(payload);
++          if (payload?.v !== 1 || payload.kind !== 'recommendations' || !Array.isArray(payload.items) || payload.items.length > 24) throw new Error('invalid recommendations');
++          const items = payload.items.map(validateSelectionItem);
 +          if (requestId !== relatedRequest) return;
-+          relatedPool = items.filter((item) => /短剧|漫剧/.test(String(item.category || ''))).map((item) => ({...item, selectionToken: /^[A-Za-z0-9_-]{16,96}$/.test(item.selection_token || '') ? item.selection_token : ''}));
++          relatedPool = items.map((item) => ({...item, selectionToken: /^[A-Za-z0-9_-]{16,96}$/.test(item.selection_token || '') ? item.selection_token : ''}));
 +          renderRelated();
 +        } catch (_error) {
 +          if (requestId !== relatedRequest) return;
-+          if (relatedPool.length) { renderRelated(); relatedStatus.textContent = '推荐更新失败，已从上次片单中挑选。'; }
-+          else relatedStatus.textContent = '推荐暂时无法加载，点击换一换重试。';
++          relatedStatus.textContent = relatedGrid.children.length ? '推荐更新失败，已保留当前推荐，点击换一换重试。' : '推荐暂时无法加载，点击换一换重试。';
 +        } finally {
 +          clearTimeout(timeout);
 +          if (requestId === relatedRequest) { refreshRelatedButton.disabled = false; relatedNode.setAttribute('aria-busy', 'false'); }
 +        }
 +      };
-+      refreshRelatedButton.addEventListener('click', refreshRelated);
++      refreshRelatedButton.addEventListener('click', () => refreshRelated(true));
 +
        const fail = (message) => {
--        statusNode.textContent = message;
 +        if (loadTimer) clearTimeout(loadTimer);
 +        switchSourceOnError.hidden = !playlist || sourceButton.hidden;
-+        statusNode.textContent = message + (switchSourceOnError.hidden ? '' : ' 可点击右上角源名称切换。');
+         statusNode.textContent = message;
          statusNode.classList.add('error');
          retry.hidden = false;
 -      };
 -
 -      const decodePlaylist = (token) => {
-+        if (!switchSourceOnError.hidden) showHint('播放失败，可点击右上角源名称切换', 5000);
++        if (!switchSourceOnError.hidden) showHint('播放失败，可点击源名称换源', 5000);
 +        showControls();
 +      };
 +
@@ -998,7 +1082,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +760,7 @@
+@@ -521,7 +846,7 @@
            }
            return { name, url };
          });
@@ -1007,7 +1091,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +774,186 @@
+@@ -535,6 +860,223 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -1016,6 +1100,40 @@ diff --git a/index.html b/index.html
 +      const metadataRequests = new WeakMap();
 +      const metadataSources = new Set(['暴风资源', '非凡资源', '量子资源', '红牛资源', '极速资源', '百度云资源', '金鹰资源', '飘零资源']);
 +      const sourceDisplayName = (source) => String(source || '').replace(/资源$/, '');
++      workBackdrop.addEventListener('error', () => { workBackdrop.hidden = true; });
++      const currentAction = (generation) => generation === actionGeneration && !watchStage.hidden;
++      castButton.addEventListener('click', async () => {
++        if (!playlist || castButton.disabled) return;
++        const generation = actionGeneration;
++        castButton.disabled = true; actionStatus.textContent = '';
++        try {
++          if (typeof video.remote?.prompt === 'function') {
++            await video.remote.prompt();
++          } else if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
++            video.webkitShowPlaybackTargetPicker();
++          } else {
++            actionStatus.textContent = '当前浏览器不支持投屏，请在支持投屏的系统浏览器打开。';
++          }
++        } catch (error) {
++          if (currentAction(generation)) actionStatus.textContent = error.name === 'NotFoundError' ? '未找到可投屏设备，请确认设备与手机连接同一网络。'
++            : error.name === 'NotAllowedError' || error.name === 'AbortError' ? '已取消投屏。' : '投屏连接失败，请重试。';
++        } finally { if (currentAction(generation)) castButton.disabled = false; }
++      });
++      shareButton.addEventListener('click', async () => {
++        if (!playlist || shareButton.disabled) return;
++        const generation = actionGeneration;
++        shareButton.disabled = true; actionStatus.textContent = '';
++        try {
++          const data = {title: playlist.title, url: location.href};
++          if (typeof navigator.share === 'function') await navigator.share(data);
++          else if (typeof navigator.clipboard?.writeText === 'function') {
++            await navigator.clipboard.writeText(data.url);
++            if (currentAction(generation)) actionStatus.textContent = '播放链接已复制。';
++          } else actionStatus.textContent = '当前浏览器不支持分享，请复制地址栏链接。';
++        } catch (error) {
++          if (currentAction(generation) && error.name !== 'AbortError') actionStatus.textContent = '分享失败，请复制地址栏链接。';
++        } finally { if (currentAction(generation)) shareButton.disabled = false; }
++      });
 +      const selectionQuery = async (item) => {
 +        const bytes = new TextEncoder().encode(item.episodes[0].url);
 +        const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -1028,14 +1146,17 @@ diff --git a/index.html b/index.html
 +      };
 +      const resetSources = (item = null) => {
 +        sourceSession?.controller?.abort();
++        actionGeneration++;
++        castButton.disabled = shareButton.disabled = false;
 +        sourceSession = item ? {item, items: [item], loaded: false, controller: null} : null;
 +        closeSourceMenu();
 +        sourceOptions.replaceChildren();
 +        sourceStatus.textContent = '';
 +        sourceRetry.hidden = switchSourceOnError.hidden = true;
++        actionStatus.textContent = '';
 +        sourceButton.hidden = !item || !metadataSources.has(item.source);
 +        sourceLabel.textContent = sourceDisplayName(item?.source);
-+        sourceButton.setAttribute('aria-label', `当前资源：${sourceDisplayName(item?.source)}，点击切换`);
++        sourceButton.setAttribute('aria-label', `换源，当前${sourceDisplayName(item?.source)}`);
 +      };
 +      const matchingEpisode = (target) => {
 +        const name = playlist?.episodes[current]?.name || '';
@@ -1194,7 +1315,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +971,29 @@
+@@ -552,22 +1094,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1227,9 +1348,11 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +1012,15 @@
+@@ -585,15 +1134,17 @@
+         }
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
++        fullscreenNext.disabled = next.disabled;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
 -        episodeOpen.textContent = `选集 · ${label}`;
 +        episodeOpen.title = `选集 · ${label}`;
@@ -1249,7 +1372,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1041,15 @@
+@@ -614,27 +1165,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1284,7 +1407,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1111,84 @@
+@@ -696,27 +1235,84 @@
          updateQualityActive();
        };
  
@@ -1376,7 +1499,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1196,35 @@
+@@ -724,24 +1320,35 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -1419,7 +1542,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,19 +1232,18 @@
+@@ -749,19 +1356,18 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1444,7 +1567,7 @@ diff --git a/index.html b/index.html
          } else if (window.Hls && Hls.isSupported()) {
            hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
            hls.loadSource(source);
-@@ -775,7 +1257,7 @@
+@@ -775,7 +1381,7 @@
            hls.on(Hls.Events.ERROR, (_event, data) => {
              if (loadId === episodeLoadId && data && data.fatal) {
                if (loadTimer) clearTimeout(loadTimer);
@@ -1453,7 +1576,7 @@ diff --git a/index.html b/index.html
              }
            });
          } else {
-@@ -784,44 +1266,78 @@
+@@ -784,44 +1390,82 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1540,7 +1663,11 @@ diff --git a/index.html b/index.html
 +      const updateWatchDetails = () => {
 +        if (!playlist) return;
 +        sourceLabel.textContent = sourceDisplayName(playlist.source);
-+        sourceButton.setAttribute('aria-label', `当前资源：${sourceDisplayName(playlist.source)}，点击切换`);
++        sourceButton.setAttribute('aria-label', `换源，当前${sourceDisplayName(playlist.source)}`);
++        const cover = playlist.cover || sourceSession?.item.cover || '';
++        if (cover && isSafePublicHttpsUrl(cover)) {
++          if (workBackdrop.getAttribute('src') !== cover) { workBackdrop.hidden = false; workBackdrop.src = cover; }
++        } else { workBackdrop.hidden = true; workBackdrop.removeAttribute('src'); }
 +        watchDetails.textContent = [playlist.year, playlist.category,
 +          `${playlist.episodeCount || playlist.episodes.length} 集`,
 +          playlist.actor ? `主演：${playlist.actor}` : '',
@@ -1562,7 +1689,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1346,16 @@
+@@ -830,11 +1474,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1579,7 +1706,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1377,11 @@
+@@ -856,10 +1505,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1592,7 +1719,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1404,7 @@
+@@ -882,7 +1532,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1601,7 +1728,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1413,73 @@
+@@ -891,21 +1541,77 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1632,6 +1759,7 @@ diff --git a/index.html b/index.html
        renderEpisodes();
        previous.addEventListener('click', () => loadEpisode(current - 1));
        next.addEventListener('click', () => loadEpisode(current + 1));
++      fullscreenNext.addEventListener('click', () => loadEpisode(current + 1));
        retry.addEventListener('click', () => loadEpisode(current));
        episodeOpen.addEventListener('click', openEpisodeSheet);
        pageBackButton.addEventListener('click', () => {
@@ -1667,7 +1795,10 @@ diff --git a/index.html b/index.html
 +          document.title = recommendationsTitle.textContent;
 +          fragment.delete('i'); fragment.delete('ep');
 +          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
-+          relatedAbort?.abort(); relatedRequest++;
++          relatedAbort?.abort(); relatedAbort = null; relatedRequest++;
++          refreshRelatedButton.disabled = false;
++          relatedNode.setAttribute('aria-busy', 'false');
++          relatedStatus.textContent = '';
 +          const filter = fragment.get('q');
 +          [...fragment.keys()].forEach((key) => fragment.delete(key));
 +          originalFragment.forEach((value, key) => fragment.set(key, value));
@@ -1684,7 +1815,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,15 +1492,17 @@
+@@ -918,15 +1624,17 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1703,7 +1834,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('waiting', () => {
          if (!video.paused) statusNode.textContent = '正在缓冲…';
-@@ -941,6 +1517,15 @@
+@@ -941,6 +1649,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1719,7 +1850,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1543,21 @@
+@@ -958,12 +1675,21 @@
          }
        });
        syncNativeControls();
@@ -1744,7 +1875,7 @@ diff --git a/index.html b/index.html
 diff --git a/state_server.py b/state_server.py
 --- a/state_server.py
 +++ b/state_server.py
-@@ -187,6 +187,313 @@
+@@ -187,6 +187,369 @@
      return payload, None
  
  
@@ -1829,53 +1960,109 @@ diff --git a/state_server.py b/state_server.py
 +        self.cached: list[dict] = []
 +        self.refresh_at = 0.0
 +        self.expires_at = 0.0
++        self.sample_at = 0.0
++        self.max_candidates = 96
++        self.max_cache_bytes = 8 * 1024 * 1024
 +
 +    def _load(self) -> list[dict]:
 +        found = {}
-+        for source_name, base in self.SOURCES:
++        sources = list(self.SOURCES)
++        secrets.SystemRandom().shuffle(sources)
++        deadline = time.monotonic() + 8
++        completed = False
++        for source_name, base in sources:
 +            try:
++                if time.monotonic() >= deadline:
++                    break
 +                listing = _catalog_json(base, ac='list')
 +                categories = [category.get('type_id') for category in listing.get('class', [])
 +                              if isinstance(category, dict) and re.search(r'短剧|漫剧', str(category.get('type_name') or ''))]
 +                if not categories:
++                    completed = True
 +                    continue
-+                # Rotate category; latest 20 records provide a pool for random groups of three.
 +                category = secrets.choice(categories)
++                if time.monotonic() >= deadline:
++                    break
 +                details = _catalog_json(base, ac='detail', t=category, pg=1)
++                page_count = max(1, min(100000, int(details.get('pagecount') or 1)))
++                page = secrets.randbelow(page_count) + 1
++                if page != 1:
++                    if time.monotonic() >= deadline:
++                        break
++                    details = _catalog_json(base, ac='detail', t=category, pg=page)
++                completed = True
 +                for record in details.get('list', [])[:100]:
 +                    item = _catalog_item(record, source_name)
 +                    if item:
-+                        found.setdefault(item['title'], item)
++                        item['recommendation_id'] = hashlib.sha256(_source_identity(item)[0].encode()).hexdigest()[:16]
++                        found.setdefault(item['recommendation_id'], item)
 +                if len(found) >= 6:
 +                    break
 +            except (OSError, ValueError, TypeError, KeyError, AttributeError):
 +                LOGGER.warning('recommendation catalog source unavailable: %s', source_name)
-+        return list(found.values())[:12]
++        if not completed:
++            raise OSError('recommendation catalogs unavailable')
++        return list(found.values())[:self.max_candidates]
 +
-+    def get(self) -> list[dict]:
++    def _select(self, excluded: set[str] | None) -> list[dict]:
++        if time.time() >= self.expires_at:
++            return []
++        if excluded is None:
++            return self.cached[:12]
++        available = [item for item in self.cached if item['recommendation_id'] not in excluded]
++        selected, size = [], 2048
++        for item in secrets.SystemRandom().sample(available, min(12, len(available))):
++            size += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
++            if size > MAX_BODY_BYTES:
++                break
++            selected.append(item)
++        return selected
++
++    def get(self, excluded: set[str] | None = None) -> list[dict]:
 +        now = time.time()
-+        if now < self.refresh_at:
-+            return self.cached if now < self.expires_at else []
++        selected = self._select(excluded)
++        needs_sample = excluded is not None and len(selected) < 12 and now >= self.sample_at
++        if now < self.refresh_at and not needs_sample:
++            return selected
 +        # A refresh is shared across requests; busy callers use the still-valid cache.
 +        if not self.lock.acquire(blocking=False):
-+            return self.cached if now < self.expires_at else []
++            return selected
 +        try:
-+            if time.time() < self.refresh_at:
-+                return self.cached if time.time() < self.expires_at else []
-+            items = self._load()
++            if time.time() < self.refresh_at and not needs_sample:
++                return self._select(excluded)
++            self.sample_at = time.time() + 3
++            try:
++                items = self._load()
++            except OSError:
++                if selected:
++                    return selected
++                raise
 +            if not items:
 +                self.refresh_at = time.time() + 30
-+                return self.cached if time.time() < self.expires_at else []
-+            expires = []
++                return self._select(excluded)
++            previous = self.cached if now < self.expires_at else []
++            combined = {item['recommendation_id']: item for item in previous}
++            expires = [self.expires_at] if previous else []
 +            for item in items:
++                if item['recommendation_id'] in combined:
++                    continue
 +                token, expires_at = self.state.put({'v': 1, 'kind': 'recommendations',
 +                                                   'heading': item['title'], 'items': [dict(item)]})
 +                item['selection_token'] = token
 +                expires.append(expires_at)
-+            self.cached = items
++                combined[item['recommendation_id']] = item
++            # Keep only bounded public metadata; request-specific exclusions are never stored.
++            size, bounded = 0, []
++            for item in reversed(list(combined.values())):
++                item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
++                if len(bounded) >= self.max_candidates or size + item_size > self.max_cache_bytes:
++                    break
++                bounded.append(item)
++                size += item_size
++            self.cached = list(reversed(bounded))
 +            self.expires_at = min(expires)
 +            self.refresh_at = time.time() + min(300, self.state.ttl_seconds / 2)
-+            return self.cached
++            return self._select(excluded)
 +        finally:
 +            self.lock.release()
 +
@@ -2058,17 +2245,27 @@ diff --git a/state_server.py b/state_server.py
  class Handler(BaseHTTPRequestHandler):
      server_version = "short-drama-state/1.0"
  
-@@ -211,6 +518,45 @@
+@@ -211,6 +574,55 @@
          path = unquote(urlsplit(self.path).path)
          if path == "/health":
              self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
 +            return
 +        if path == "/recommendations":
++            from urllib.parse import parse_qs
++            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
++            if len(self.path) > 6144 or set(query) - {'exclude'} or any(len(values) != 1 for values in query.values()):
++                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid recommendation query'})
++                return
++            excluded = query.get('exclude', [''])[0].split(',') if query.get('exclude', [''])[0] else []
++            if len(excluded) > 256 or len(set(excluded)) != len(excluded) or any(not re.fullmatch(r'[0-9a-f]{16}', value) for value in excluded):
++                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid recommendation exclusions'})
++                return
 +            try:
-+                items = self.server.recommendation_catalog.get()
++                items = self.server.recommendation_catalog.get(set(excluded)) if 'exclude' in query else self.server.recommendation_catalog.get()
 +            except (OSError, ValueError):
-+                items = []
-+            if not items:
++                self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "recommendations unavailable"})
++                return
++            if not items and 'exclude' not in query:
 +                self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "recommendations unavailable"})
 +            else:
 +                self._send_json(HTTPStatus.OK, {"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": items})
@@ -2104,7 +2301,7 @@ diff --git a/state_server.py b/state_server.py
              return
          prefix = "/selections/"
          if path.startswith(prefix):
-@@ -272,6 +618,8 @@
+@@ -272,6 +684,8 @@
      logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
      server = ThreadingHTTPServer((args.host, args.port), Handler)
      server.state_store = StateStore(Path(args.directory), args.ttl, args.max_entries)  # type: ignore[attr-defined]
