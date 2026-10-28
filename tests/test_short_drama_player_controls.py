@@ -1466,12 +1466,60 @@ def test_player_cast_prefers_webkit_picker_when_both_browser_apis_exist(source_c
       remote.state = 'disconnected';
       remote.prompt = async () => { window.castCalls.remote++; };
       Object.defineProperty(video, 'remote', {configurable: true, value: remote});
-      video.webkitShowPlaybackTargetPicker = () => { window.castCalls.webkit++; };
+      video.webkitShowPlaybackTargetPicker = () => {
+        window.castCalls.webkit++;
+        window.castCalls.synchronous = window.castClickInProgress;
+      };
     }""")
-    page.locator("#castButton").click()
+    page.evaluate("""() => {
+      window.castClickInProgress = true;
+      document.getElementById('castButton').click();
+      window.castClickInProgress = false;
+    }""")
     page.wait_for_function("window.castCalls.webkit === 1")
     assert page.evaluate("window.castCalls.remote") == 0
+    assert page.evaluate("window.castCalls.synchronous") is True
     assert page.locator("#castButton").is_enabled()
+
+
+@pytest.mark.parametrize("mode", ["sync", "async", "cancel"])
+def test_player_cast_handles_webkit_picker_rejection(source_catalog, mode):
+    page, _ = source_catalog
+    page.evaluate("""mode => {
+      document.getElementById('video').webkitShowPlaybackTargetPicker = () => {
+        const error = {name: mode === 'cancel' ? 'AbortError' : 'NotSupportedError'};
+        if (mode === 'sync') throw error;
+        return Promise.reject(error);
+      };
+    }""", mode)
+    page.locator("#castButton").click()
+    page.wait_for_function("!document.getElementById('castButton').disabled")
+    assert page.locator("#castFallback").is_visible() == (mode != "cancel")
+    assert ("取消" if mode == "cancel" else "无法投屏") in page.locator("#actionStatus").inner_text()
+
+
+def test_player_airplay_waits_for_wireless_event_and_can_disconnect(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitShowPlaybackTargetPicker = () => {};
+      video.webkitCurrentPlaybackTargetIsWireless = false;
+    }""")
+    page.locator("#castButton").click()
+    assert page.locator("#castButton > span").inner_text() == "投屏"
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = false;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "投屏"
+    assert "断开" in page.locator("#actionStatus").inner_text()
 
 
 @pytest.mark.parametrize("error_name", ["NotSupportedError", "InvalidStateError", None])
@@ -1554,6 +1602,31 @@ def test_player_cast_connection_state_survives_episode_change(source_catalog):
     page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集'")
     assert page.locator("#castButton > span").inner_text() == "已投屏"
+
+
+def test_player_cast_copy_recovers_after_new_request_and_clipboard_failure(source_catalog, screenshots):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      document.getElementById('video').webkitShowPlaybackTargetPicker = () => { throw null; };
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        writeText: () => new Promise(resolve => { window.finishCastCopy = resolve; })
+      }});
+    }""")
+    page.locator("#castButton").click()
+    page.locator("#castCopyButton").click()
+    assert page.locator("#castCopyButton").is_disabled()
+    page.locator("#castButton").click()
+    page.evaluate("window.finishCastCopy()")
+    assert page.locator("#castCopyButton").is_enabled()
+    assert "已复制" not in page.locator("#actionStatus").inner_text()
+    page.evaluate("() => { navigator.clipboard.writeText = async () => { throw new Error('denied'); }; }")
+    page.locator("#castCopyButton").click()
+    page.locator("#castLink").wait_for(state="visible")
+    assert page.locator("#castLink").input_value() == "https://media.example/bf-1.m3u8"
+    assert page.locator("#castLink").get_attribute("readonly") is not None
+    assert page.locator("#videoShell").bounding_box()["height"] > 500
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(screenshots / "cast-copy-fallback-390.png"))
 
 
 @pytest.mark.parametrize("backend", ["share", "clipboard"])
