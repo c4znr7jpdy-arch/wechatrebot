@@ -308,17 +308,25 @@ def test_catalog_filter_clear_ime_and_return_keep_context(cinema_catalog):
     assert "q=" not in page.url
 
 
-def test_episode_groups_modal_focus_and_current_state(cinema_catalog):
+@pytest.mark.parametrize("trigger", ["episodeOpen", "workEpisodeButton"])
+def test_episode_groups_modal_focus_and_current_state(cinema_catalog, trigger):
     page = cinema_catalog
     page.locator(".recommend-card").first.click()
     assert page.locator("#episodeGrid button").count() == 65
     page.locator("#episodeGrid").get_by_label("第32集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第32集'")
     assert page.locator('#episodeGrid [aria-current="true"]').inner_text() == "32"
-    page.get_by_role("button", name="选择剧集", exact=True).click()
+    page.locator(f"#{trigger}").click()
     assert page.get_by_role("dialog", name="选择剧集").is_visible()
+    for button in ["episodeOpen", "episodeExpand", "workEpisodeButton"]:
+        assert page.locator(f"#{button}").get_attribute("aria-expanded") == "true"
     assert page.locator("#sheetClose").evaluate("node => node === document.activeElement")
     assert not page.locator("#episodeSheet").evaluate("node => node.inert")
+    assert page.locator(".sheet-panel").evaluate("""panel => {
+      const bounds = panel.getBoundingClientRect(), x = bounds.x + bounds.width / 2;
+      return [bounds.top + 8, bounds.top + bounds.height / 2, bounds.bottom - 8]
+        .every(y => panel.contains(document.elementFromPoint(x, y)));
+    }""")
     page.keyboard.press("Shift+Tab")
     assert page.locator("#sheetEpisodeGrid button").last.evaluate("node => node === document.activeElement")
     page.keyboard.press("Tab")
@@ -327,11 +335,20 @@ def test_episode_groups_modal_focus_and_current_state(cinema_catalog):
     assert page.locator("#sheetEpisodeGrid button").count() == 5
     page.keyboard.press("Escape")
     assert page.locator("#episodeSheet").is_hidden()
-    assert page.locator("#episodeOpen").evaluate("node => node === document.activeElement")
+    assert page.locator(f"#{trigger}").evaluate("node => node === document.activeElement")
     assert page.locator("[inert]").count() == 0
+    for button in ["episodeOpen", "episodeExpand", "workEpisodeButton"]:
+        assert page.locator(f"#{button}").get_attribute("aria-expanded") == "false"
+    page.locator(f"#{trigger}").click()
+    page.locator("#sheetEpisodeRanges").get_by_role("button", name="31–60").click()
+    page.locator("#sheetEpisodeGrid").get_by_label("第33集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第33集'")
+    assert page.locator("#episodeSheet").is_hidden()
+    assert page.locator(f"#{trigger}").evaluate("node => node === document.activeElement")
+    assert page.locator("#workEpisodeButton").get_attribute("aria-expanded") == "false"
 
 
-@pytest.mark.parametrize("width", [320, 390, 768, 1440])
+@pytest.mark.parametrize("width", [320, 390, 760, 768, 1440])
 def test_cinema_catalog_and_player_responsive(cinema_catalog, width, screenshots):
     page = cinema_catalog
     page.set_viewport_size({"width": width, "height": 900})
@@ -343,6 +360,16 @@ def test_cinema_catalog_and_player_responsive(cinema_catalog, width, screenshots
     page.wait_for_function("document.getElementById('video').readyState >= 2")
     page.screenshot(path=str(screenshots / f"player-{width}.png"), full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    player = page.locator("#videoShell").bounding_box()
+    card = page.locator(".watch-description").bounding_box()
+    assert card["x"] == pytest.approx(player["x"], abs=1)
+    assert card["width"] == pytest.approx(player["width"], abs=1)
+    assert card["y"] >= player["y"] + player["height"]
+    if width <= 760:
+        assert player["x"] == pytest.approx(0, abs=1)
+        assert player["width"] == pytest.approx(width, abs=1)
+        assert player["height"] == pytest.approx(900 * .66, abs=1)
+        assert card["height"] <= 180
     if width == 390:
         assert page.locator("#episodes").bounding_box()["y"] > page.locator("#video").bounding_box()["y"]
     page.get_by_role("button", name="选择剧集", exact=True).click()
@@ -396,6 +423,7 @@ def test_random_three_refresh_navigation_failure_and_return(cinema_catalog):
     page.locator(".related-card").first.click()
     assert page.locator("#title").inner_text() == selected
     assert page.locator("#videoTitle").inner_text() == selected
+    assert page.locator("#workEpisodeButton").is_disabled()
     assert "i=0" in page.url
     page.wait_for_function("document.getElementById('related').getAttribute('aria-busy') === 'false'")
     third_titles = set(page.locator(".related-card strong").all_text_contents())
@@ -886,7 +914,7 @@ def test_delayed_orientation_lock_cannot_survive_exit_or_unlock_new_session(play
         assert page.evaluate("window.orientationCalls") == calls + ["unlock"]
 
 
-@pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (420, 180, "cinema")])
+@pytest.mark.parametrize("aspect", [(180, 320, "portrait"), (320, 320, "square"), (320, 180, "landscape"), (420, 180, "cinema")])
 def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     page = player_page
     width, height, mode = aspect
@@ -912,12 +940,19 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
         bounds = shell.bounding_box()
         assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
         exit_fullscreen(page)
-    for viewport in [{"width": 390, "height": 844}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
+    for viewport in [{"width": 320, "height": 480}, {"width": 320, "height": 844}, {"width": 390, "height": 844},
+                     {"width": 760, "height": 900}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
         page.set_viewport_size(viewport)
         video = page.locator("#video").bounding_box()
         assert video["width"] <= viewport["width"]
         assert video["height"] <= viewport["height"] * .72
+        if viewport["width"] <= 760 and viewport["height"] > viewport["width"]:
+            shell = page.locator("#videoShell").bounding_box()
+            assert shell["x"] == pytest.approx(0, abs=1)
+            assert shell["width"] == pytest.approx(viewport["width"], abs=1)
+            assert shell["height"] == pytest.approx(max(320, viewport["height"] * .66), abs=1)
         assert page.locator("#video").evaluate("node => getComputedStyle(node).objectFit") == "contain"
+        assert page.locator("#video").evaluate("node => getComputedStyle(node).objectPosition") == "50% 50%"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
@@ -948,6 +983,7 @@ def test_compact_link_recovers_cover_full_strip_and_next_episode(player_page):
     page.locator(".recommend-card").click()
     page.wait_for_function("document.querySelectorAll('#episodeGrid button').length === 16")
     assert page.locator("#episodes").is_visible()
+    assert page.locator("#workEpisodeButton").is_enabled()
     assert len(requests) == 1
     assert "https%3A" not in requests[0]  # Resolver accepts a fingerprint, never a fetch URL.
     page.get_by_label("更多播放设置").click()
@@ -1003,6 +1039,7 @@ def test_compact_metadata_failure_can_retry_without_losing_playback(player_page)
     page.locator("#metadataRetry").wait_for(state="visible")
     assert page.locator("#title").inner_text() == "旧作品"
     assert page.locator("#video").evaluate("video => video.paused")
+    assert page.locator("#workEpisodeButton").is_disabled()
 
     page.route("**/api/resolve?*", lambda route: route.fulfill(json=full))
     page.locator("#metadataRetry").click()
@@ -1010,6 +1047,11 @@ def test_compact_metadata_failure_can_retry_without_losing_playback(player_page)
     assert page.locator("#metadataRetry").is_hidden()
     assert page.locator("#metadataStatus").inner_text() == ""
     assert page.locator("#video").evaluate("video => video.paused")
+    assert page.locator("#workEpisodeButton").is_enabled()
+    page.locator("#workEpisodeButton").click()
+    assert page.locator("#sheetEpisodeGrid button").count() == 3
+    page.locator("#sheetClose").click()
+    assert page.locator("#workEpisodeButton").evaluate("node => node === document.activeElement")
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)
@@ -1101,7 +1143,7 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     page, state = source_catalog
     state["variants"].extend(
         {**state["variants"][1], "source": source}
-        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "飘零资源")
+        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源")
     )
     page.set_viewport_size({"width": width, "height": 844})
     button = page.locator("#sourceButton")
@@ -1113,24 +1155,56 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
     assert bounds["height"] >= 32
     assert button.evaluate("node => node.parentElement.id") == "sourceDock"
-    assert page.locator("#sourceDock").bounding_box()["y"] >= page.locator("#videoShell").bounding_box()["y"] + page.locator("#videoShell").bounding_box()["height"]
-    assert page.locator("#castButton").is_visible()
-    assert page.locator("#shareButton").is_visible()
+    action_ids = ["sourceButton", "castButton", "workEpisodeButton", "shareButton"]
+    assert page.locator(".work-actions > button, #sourceButton").evaluate_all("nodes => nodes.map(node => node.id)") == action_ids
+    player = page.locator("#videoShell").bounding_box()
+    if width <= 760:
+        assert page.locator(".watch-description").bounding_box()["height"] <= 180
+    previous_right = 0
+    for action_id in action_ids:
+        action = page.locator(f"#{action_id}")
+        assert action.is_visible() and action.is_enabled()
+        action.click(trial=True)
+        action_bounds = action.bounding_box()
+        assert action_bounds["y"] >= player["y"] + player["height"]
+        assert action_bounds["x"] >= previous_right
+        assert action_bounds["x"] + action_bounds["width"] <= width
+        previous_right = action_bounds["x"] + action_bounds["width"]
     button.click()
-    alternative = page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True)
+    alternative = page.locator("#sourceMenu").get_by_role("button", name="百度云", exact=True)
     alternative.wait_for(state="visible")
     assert page.locator("#sourceMenu").get_by_role("button", name="暴风", exact=True).get_attribute("aria-pressed") == "true"
     assert state["requests"][0]["episode"] == [hashlib.sha256(b"https://media.example/bf-1.m3u8").hexdigest()]
     assert state["requests"][0]["year"] == ["2005"]
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.locator("#sourceMenu").scroll_into_view_if_needed()
     menu = page.locator("#sourceMenu").bounding_box()
+    actions = page.locator(".work-actions").bounding_box()
     assert menu["x"] >= 0 and menu["x"] + menu["width"] <= width
-    assert menu["y"] >= 0 and menu["y"] + menu["height"] <= 844
+    assert menu["y"] < 844 and menu["y"] + menu["height"] > 0
+    assert menu["y"] >= actions["y"] + actions["height"] + 7
     assert page.locator("#sourceOptions button").count() == 7
+    for option in page.locator("#sourceOptions button").all():
+        assert option.is_visible() and option.is_enabled()
+        # Page scrolling may leave a fractional menu border outside the viewport;
+        # each actual control must still scroll fully into view and receive input.
+        option.click(trial=True)
+        option_bounds = option.bounding_box()
+        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844
+        assert option.evaluate("""node => {
+          const bounds = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+        }""")
     page.screenshot(path=str(screenshots / f"source-menu-{width}.png"))
     alternative.click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4')")
-    assert button.inner_text().strip() == "非凡"
+    assert button.inner_text().strip() == "百度云"
+    value = button.locator(".source-value")
+    assert value.evaluate("node => node.scrollWidth <= node.clientWidth")
+    value_bounds, button_bounds = value.bounding_box(), button.bounding_box()
+    assert value_bounds["x"] >= button_bounds["x"]
+    assert value_bounds["x"] + value_bounds["width"] <= button_bounds["x"] + button_bounds["width"]
+    assert page.locator("#workEpisodeButton").is_enabled()
     page.get_by_label("返回", exact=True).click()
     assert page.locator(".recommend-card:visible").count() == 1
 
