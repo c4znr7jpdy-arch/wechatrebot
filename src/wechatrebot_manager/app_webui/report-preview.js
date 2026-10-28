@@ -4,6 +4,31 @@
 const openImagePreview = (() => {
   let dialog, image, viewport, status, zoom, copyMenu, opener, fit = true, scale = 1, message = false;
   let loadToken = 0, imageMode = "thumb", statusSticky = false, enlargeToFit = false;
+  let statusTimer = 0;
+  const STATUS_AUTO_HIDE_MS = 3600;
+
+  function clearStatusTimer() {
+    window.clearTimeout(statusTimer);
+    statusTimer = 0;
+  }
+
+  function showStatus(message, sticky = false) {
+    clearStatusTimer();
+    statusSticky = sticky;
+    status.textContent = message;
+    status.hidden = false;
+    statusTimer = window.setTimeout(() => {
+      status.hidden = true;
+      statusSticky = false;
+      statusTimer = 0;
+    }, STATUS_AUTO_HIDE_MS);
+  }
+
+  function hideStatus() {
+    clearStatusTimer();
+    status.hidden = true;
+    statusSticky = false;
+  }
 
   function validImageSource(src, kind = "report") {
     if (typeof src !== "string") return false;
@@ -25,12 +50,11 @@ const openImagePreview = (() => {
         (blob) => blob ? resolve(blob) : reject(new Error("无法转换图片")), "image/png"));
       await navigator.clipboard.write([new ClipboardItem({"image/png": png})]);
       if (!dialog.open || image.src !== source) return;
-      status.textContent = "图片已复制";
+      showStatus("图片已复制");
     } catch (_error) {
       if (!dialog.open || image.src !== source) return;
-      status.textContent = "复制失败，请检查剪贴板权限后重试。";
+      showStatus("复制失败，请检查剪贴板权限后重试。");
     }
-    status.hidden = false;
   }
   function fittedWidth() {
     return Math.max(1, Math.min(enlargeToFit ? Infinity : image.naturalWidth, viewport.clientWidth - 32,
@@ -67,22 +91,19 @@ const openImagePreview = (() => {
     zoom = dialog.querySelector("output");
     image.addEventListener("load", () => {
       image.hidden = false;
-      status.hidden = !statusSticky;
+      if (!statusSticky) hideStatus();
       layout();
       viewport.scrollTo(0, 0);
     });
     image.addEventListener("error", () => {
       if (message && imageMode === "original") {
         imageMode = "thumb";
-        statusSticky = true;
-        status.textContent = "原图加载失败，已显示缩略图。";
+        showStatus("原图加载失败，已显示缩略图。", true);
         image.src = image.dataset.thumbnailSource || "";
         return;
       }
       image.hidden = true;
-      statusSticky = true;
-      status.hidden = false;
-      status.textContent = "预览图片加载失败，请关闭后重新打开。";
+      showStatus("预览图片加载失败，请关闭后重新打开。", true);
     });
     viewport.addEventListener("wheel", (event) => {
       // Long reports retain native vertical scrolling.
@@ -117,7 +138,7 @@ const openImagePreview = (() => {
       if (dialog.open) return;
       loadToken += 1;
       imageMode = "thumb";
-      statusSticky = false;
+      hideStatus();
       copyMenu.hidden = true;
       image.removeAttribute("src");
       image.removeAttribute("data-thumbnail-source");
@@ -164,8 +185,7 @@ const openImagePreview = (() => {
     dialog.querySelector("header p").hidden = message;
     viewport.setAttribute("aria-label", message ? "消息图片，可缩放和滚动查看" : "完整报告，可滚动查看");
     image.alt = message ? (name || "消息图片") : "完整报告样式预览（示例数据）";
-    status.textContent = originalPending ? "正在获取原图…" : "正在加载完整预览…";
-    status.hidden = false;
+    showStatus(originalPending ? "正在获取原图…" : "正在加载完整预览…", originalPending);
     image.hidden = true;
     image.dataset.thumbnailSource = src;
     copyMenu.hidden = true;
@@ -183,14 +203,12 @@ const openImagePreview = (() => {
         }
         imageMode = "original";
         statusSticky = original?.quality === "cached";
-        if (statusSticky) status.textContent = "当前为已缓存图片，原图不可用。";
+        if (statusSticky) showStatus("当前为已缓存图片，原图不可用。", true);
         fit = true;
         image.src = candidate;
       }).catch((error) => {
         if (!stillCurrent()) return;
-        statusSticky = true;
-        status.hidden = false;
-        status.textContent = error?.message || "原图暂不可用，已显示缩略图。";
+        showStatus(error?.message || "原图暂不可用，已显示缩略图。", true);
       });
     }
   };

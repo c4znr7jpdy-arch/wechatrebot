@@ -136,6 +136,22 @@ def test_original_failure_keeps_thumbnail_and_reports_status(browser, manager_ur
         page.close()
 
 
+def test_original_failure_status_auto_dismisses(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    thumbnail = image_source((120, 240))
+    try:
+        images = open_images(page, manager_url, thumbnail)
+        images.first.click()
+        dialog = page.locator(".report-preview-dialog")
+        page.evaluate("pendingImages.shift()({ok:true, data:{src:'', message:'原图未能获取，已显示缩略图。'}})")
+        status = dialog.locator('[role="status"]')
+        expect(status).to_have_text("原图未能获取，已显示缩略图。")
+        expect(status).to_be_visible()
+        expect(status).to_be_hidden(timeout=5000)
+    finally:
+        page.close()
+
+
 def test_account_change_closes_view_and_discards_pending_original(browser, manager_url):
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     thumbnail = image_source((120, 240))
