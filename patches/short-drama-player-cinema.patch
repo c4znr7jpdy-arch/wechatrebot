@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,313 @@
+@@ -5,369 +5,317 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -324,6 +324,9 @@ diff --git a/index.html b/index.html
 +    .work-actions .source-menu { top: calc(100% + 8px); bottom: auto; }
 +    .watch-description:has(.source-menu:not([hidden])) { z-index: 4; }
 +    #actionStatus:empty { display: none; }
++    .cast-fallback { margin-top: 8px; }
++    .cast-fallback button { min-height: 36px; padding: 6px 12px; font-size: 12px; }
++    .cast-fallback input { width: 100%; margin-top: 8px; font-size: 12px; }
 +    .timeline { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 12px; align-items: center; padding: 0 4px 3px; font: 12px/1.5 "Bahnschrift", var(--body-font); }
 +    .timeline .seek { width: 100%; margin: 0; }
 +    .timeline #duration { color: #c5cbd2; }
@@ -613,6 +616,7 @@ diff --git a/index.html b/index.html
 +          <section id="sourceMenu" class="more-panel source-menu" aria-label="切换资源" hidden><p id="sourceStatus" role="status" aria-live="polite"></p><div id="sourceOptions" class="source-options" role="group" aria-label="资源列表"></div><button id="sourceRetry" type="button" hidden>重试获取资源</button></section>
 +        </div><button id="castButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg><span>投屏</span></button><button id="workEpisodeButton" type="button" aria-haspopup="dialog" aria-controls="episodeSheet" aria-expanded="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v18H3Zm2 2v14h14V5Zm2 3h2v2H7Zm4 0h6v2h-6Zm-4 5h2v2H7Zm4 0h6v2h-6Z"/></svg><span>选集</span></button><button id="shareButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg><span>分享</span></button></div>
 +        <p id="watchDetails">正在读取作品信息…</p><p id="actionStatus" role="status" aria-live="polite"></p>
++        <div id="castFallback" class="cast-fallback" hidden><button id="castCopyButton" type="button">复制视频链接</button><input id="castLink" type="text" aria-label="当前集视频链接，可长按复制到投屏应用" readonly hidden></div>
 +      </section>
 +      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><button id="switchSourceOnError" type="button" hidden>切换资源</button><a id="direct" hidden aria-hidden="true"></a></div>
 +      <div class="metadata-feedback"><p id="metadataStatus" role="status"></p><button id="metadataRetry" type="button" hidden>重试获取选集</button></div>
@@ -663,7 +667,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -377,9 +321,25 @@
+@@ -377,9 +325,28 @@
        const videoShell = document.getElementById('videoShell');
        const fallback = document.getElementById('direct');
        const retry = document.getElementById('retry');
@@ -680,6 +684,9 @@ diff --git a/index.html b/index.html
 +      const castButton = document.getElementById('castButton');
 +      const shareButton = document.getElementById('shareButton');
 +      const actionStatus = document.getElementById('actionStatus');
++      const castFallback = document.getElementById('castFallback');
++      const castCopyButton = document.getElementById('castCopyButton');
++      const castLink = document.getElementById('castLink');
 +      const workBackdrop = document.getElementById('workBackdrop');
 +      let sourceSession = null, actionGeneration = 0;
        const previous = document.getElementById('previous');
@@ -689,7 +696,7 @@ diff --git a/index.html b/index.html
        const episodeSheet = document.getElementById('episodeSheet');
        const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
        const sheetBackdrop = document.getElementById('sheetBackdrop');
-@@ -406,24 +366,408 @@
+@@ -406,24 +373,408 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -1103,7 +1110,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +865,7 @@
+@@ -521,7 +872,7 @@
            }
            return { name, url };
          });
@@ -1112,7 +1119,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +879,223 @@
+@@ -535,6 +886,310 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -1123,26 +1130,112 @@ diff --git a/index.html b/index.html
 +      const sourceDisplayName = (source) => String(source || '').replace(/资源$/, '');
 +      workBackdrop.addEventListener('error', () => { workBackdrop.hidden = true; });
 +      const currentAction = (generation) => generation === actionGeneration && !watchStage.hidden;
++      let castRequest = 0, removeCastListeners = () => {}, castOwnsStatus = false;
++      const castStatus = (message, fallback = false) => {
++        castOwnsStatus = true;
++        actionStatus.textContent = message;
++        castFallback.hidden = !fallback;
++        castLink.hidden = true;
++      };
++      const observeCastConnection = () => {
++        removeCastListeners();
++        const generation = actionGeneration, request = castRequest;
++        const webkit = typeof video.webkitShowPlaybackTargetPicker === 'function';
++        const target = webkit ? video : video.remote;
++        const state = () => webkit ? (video.webkitCurrentPlaybackTargetIsWireless ? 'connected' : 'disconnected')
++          : target?.state || 'disconnected';
++        let previousState = state();
++        const changed = (announce = true) => {
++          if (!currentAction(generation) || request !== castRequest) return;
++          const currentState = state();
++          const label = currentState === 'connected' ? '已投屏' : currentState === 'connecting' ? '连接中' : '投屏';
++          castButton.querySelector('span').textContent = label;
++          castButton.setAttribute('aria-label', currentState === 'connected' ? '投屏，已连接，点击管理设备' : '投屏');
++          if (announce) {
++            if (currentState === 'connected') castStatus('已连接投屏设备，点击“已投屏”可管理连接。');
++            else if (currentState === 'connecting') castStatus('正在连接投屏设备…');
++            else if (previousState !== 'disconnected') castStatus('投屏连接已断开，可重新选择设备。');
++          }
++          previousState = currentState;
++        };
++        const events = webkit ? ['webkitcurrentplaybacktargetiswirelesschanged'] : ['connecting', 'connect', 'disconnect'];
++        events.forEach((event) => target?.addEventListener?.(event, changed));
++        removeCastListeners = () => events.forEach((event) => target?.removeEventListener?.(event, changed));
++        changed(false);
++        return changed;
++      };
++      const resetCast = () => {
++        castRequest++;
++        removeCastListeners(); removeCastListeners = () => {};
++        castButton.disabled = castCopyButton.disabled = false;
++        castButton.querySelector('span').textContent = '投屏';
++        castButton.setAttribute('aria-label', '投屏');
++        castFallback.hidden = castLink.hidden = true;
++        castLink.value = '';
++        if (castOwnsStatus) actionStatus.textContent = '';
++        castOwnsStatus = false;
++        if (playlist && !watchStage.hidden) observeCastConnection();
++      };
++      const reportCastError = (error) => {
++        const messages = {
++          NotFoundError: '未找到可投屏设备，请确认电视已开启投屏，并与手机连接同一 Wi-Fi。',
++          NotSupportedError: '当前浏览器无法投屏此视频。请用支持投屏的浏览器打开，或复制视频链接到投屏应用。',
++          InvalidAccessError: '请再次点击投屏，并在设备列表中选择电视。',
++          InvalidStateError: '当前播放环境已禁用投屏，请在系统浏览器打开，或复制视频链接到投屏应用。',
++          OperationError: '投屏请求仍在处理中，请先完成或关闭已有设备选择窗口后重试。',
++          NotAllowedError: '投屏选择已取消或未获允许，请再次点击投屏并允许连接。',
++          AbortError: '已取消投屏。',
++          SecurityError: '当前浏览器限制了投屏，请在系统浏览器打开本页。',
++        };
++        const name = error?.name;
++        castStatus(messages[name] || '投屏未能连接，请确认电视与手机在同一 Wi-Fi；也可复制视频链接到投屏应用。',
++          !['NotAllowedError', 'AbortError', 'InvalidAccessError'].includes(name));
++      };
 +      castButton.addEventListener('click', async () => {
 +        if (!playlist || castButton.disabled) return;
 +        const generation = actionGeneration;
-+        castButton.disabled = true; actionStatus.textContent = '';
++        const request = ++castRequest, loadId = episodeLoadId;
++        const active = () => currentAction(generation) && request === castRequest && loadId === episodeLoadId;
++        const changed = observeCastConnection();
++        castButton.disabled = true;
++        castCopyButton.disabled = false;
++        castStatus('请在设备列表中选择电视。');
 +        try {
-+          if (typeof video.remote?.prompt === 'function') {
++          // Invoke the picker in this click, before awaiting anything, to retain user activation.
++          if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
++            await video.webkitShowPlaybackTargetPicker();
++          } else if (typeof video.remote?.prompt === 'function') {
 +            await video.remote.prompt();
-+          } else if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
-+            video.webkitShowPlaybackTargetPicker();
 +          } else {
-+            actionStatus.textContent = '当前浏览器不支持投屏，请在支持投屏的系统浏览器打开。';
++            castStatus('当前浏览器不支持网页投屏。请在支持投屏的系统浏览器打开，或复制视频链接到投屏应用。', true);
 +          }
++          changed();
 +        } catch (error) {
-+          if (currentAction(generation)) actionStatus.textContent = error.name === 'NotFoundError' ? '未找到可投屏设备，请确认设备与手机连接同一网络。'
-+            : error.name === 'NotAllowedError' || error.name === 'AbortError' ? '已取消投屏。' : '投屏连接失败，请重试。';
-+        } finally { if (currentAction(generation)) castButton.disabled = false; }
++          if (active()) reportCastError(error);
++        } finally { if (active()) castButton.disabled = false; }
++      });
++      castCopyButton.addEventListener('click', async () => {
++        const url = playlist?.episodes[current]?.url;
++        if (castCopyButton.disabled || !isSafePublicHttpsUrl(url) || !/\.m3u8(?:$|[?#])/i.test(url)) return;
++        const generation = actionGeneration, request = castRequest, loadId = episodeLoadId;
++        const active = () => currentAction(generation) && request === castRequest && loadId === episodeLoadId;
++        castCopyButton.disabled = true;
++        try {
++          if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('clipboard unavailable');
++          await navigator.clipboard.writeText(url);
++          if (active()) castStatus('当前集视频链接已复制，请粘贴到投屏应用中选择电视。', true);
++        } catch {
++          if (active()) {
++            castStatus('请长按下方视频链接复制，再粘贴到投屏应用中。', true);
++            castLink.value = url; castLink.hidden = false;
++            castLink.focus(); castLink.select();
++          }
++        } finally { if (active()) castCopyButton.disabled = false; }
 +      });
 +      shareButton.addEventListener('click', async () => {
 +        if (!playlist || shareButton.disabled) return;
 +        const generation = actionGeneration;
++        castOwnsStatus = false;
 +        shareButton.disabled = true; actionStatus.textContent = '';
 +        try {
 +          const data = {title: playlist.title, url: location.href};
@@ -1168,6 +1261,7 @@ diff --git a/index.html b/index.html
 +      const resetSources = (item = null) => {
 +        sourceSession?.controller?.abort();
 +        actionGeneration++;
++        resetCast();
 +        castButton.disabled = shareButton.disabled = false;
 +        sourceSession = item ? {item, items: [item], loaded: false, controller: null} : null;
 +        closeSourceMenu();
@@ -1336,7 +1430,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +1113,30 @@
+@@ -552,22 +1207,30 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1370,7 +1464,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -581,19 +1150,24 @@
+@@ -581,19 +1244,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1402,7 +1496,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1188,15 @@
+@@ -614,27 +1282,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1437,7 +1531,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1258,84 @@
+@@ -696,27 +1352,85 @@
          updateQualityActive();
        };
  
@@ -1520,6 +1614,7 @@ diff --git a/index.html b/index.html
          if (index < 0 || index >= playlist.episodes.length) return;
          const resumePlayback = autoplay || (!video.paused && !video.ended);
          const loadId = ++episodeLoadId;
++        resetCast();
          removeEpisodeReadyListener();
          current = index;
 +        if (episodePage !== Math.floor(current / EPISODES_PER_PAGE)) {
@@ -1529,7 +1624,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1343,35 @@
+@@ -724,24 +1438,35 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -1572,7 +1667,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,19 +1379,18 @@
+@@ -749,19 +1474,18 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1597,7 +1692,7 @@ diff --git a/index.html b/index.html
          } else if (window.Hls && Hls.isSupported()) {
            hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
            hls.loadSource(source);
-@@ -775,7 +1404,7 @@
+@@ -775,7 +1499,7 @@
            hls.on(Hls.Events.ERROR, (_event, data) => {
              if (loadId === episodeLoadId && data && data.fatal) {
                if (loadTimer) clearTimeout(loadTimer);
@@ -1606,7 +1701,7 @@ diff --git a/index.html b/index.html
              }
            });
          } else {
-@@ -784,44 +1413,82 @@
+@@ -784,44 +1508,82 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1719,7 +1814,7 @@ diff --git a/index.html b/index.html
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1497,16 @@
+@@ -830,11 +1592,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1736,7 +1831,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1528,11 @@
+@@ -856,10 +1623,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1749,7 +1844,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1555,7 @@
+@@ -882,7 +1650,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1758,7 +1853,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1564,77 @@
+@@ -891,21 +1659,77 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1846,7 +1941,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,15 +1647,17 @@
+@@ -918,15 +1742,17 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1865,7 +1960,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('waiting', () => {
          if (!video.paused) statusNode.textContent = '正在缓冲…';
-@@ -941,6 +1672,15 @@
+@@ -941,6 +1767,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1881,7 +1976,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1698,21 @@
+@@ -958,12 +1793,21 @@
          }
        });
        syncNativeControls();
