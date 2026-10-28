@@ -632,7 +632,7 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
 @pytest.mark.parametrize("online", [False, True])
 @pytest.mark.parametrize("operation", ["save", "default"])
 @pytest.mark.parametrize("binding", ["", "custom/analysis"])
-def test_model_settings_fill_only_empty_analysis_binding(
+def test_model_settings_preserve_explicit_analysis_binding(
     monkeypatch, tmp_path: Path, online: bool, operation: str, binding: str,
 ) -> None:
     api = _api(tmp_path)
@@ -706,7 +706,56 @@ def test_analysis_binding_failure_reports_model_already_saved(monkeypatch, tmp_p
     result = api.set_default_provider(profile.model_id)
     assert result["ok"] is False
     assert calls == [profile.model_id]
-    assert "模型已保存，但群聊分析模型自动绑定未完成" in result["error"]["message"]
+    assert "模型已保存，但主动接话模型自动绑定未完成" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("online", [False, True])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_switching_default_model_updates_automatic_core_bindings(
+    monkeypatch, tmp_path: Path, online: bool, explicit: bool,
+) -> None:
+    api = _api(tmp_path)
+    old = model_api.OpenAIProviderProfile(
+        api_key="old-key", api_base="https://example.test/v1", model="old-chat",
+    ).normalized()
+    new = model_api.OpenAIProviderProfile(
+        api_key="new-key", api_base="https://example.test/v1", model="new-chat",
+    ).normalized()
+    model_api.save_provider_profile(tmp_path, old)
+    model_api.save_provider_profile(tmp_path, new, make_default=False)
+    data_root = tmp_path / "app" / "astrbot" / "data"
+    (data_root / "plugins" / "astrbot_plugin_angel_heart").mkdir(parents=True)
+    path = data_root / "config" / "astrbot_plugin_angel_heart_config.json"
+    config = {
+        "analyzer_model": "custom/analysis" if explicit else old.model_id,
+        "image_caption_provider_id": old.model_id,
+    }
+    model_api.write_json_atomic(path, config)
+
+    class Client:
+        def is_available(self):
+            return online
+
+        def set_default_provider(self, provider_id):
+            assert provider_id == new.model_id
+
+        def get_config(self, module):
+            assert module == "astrbot_plugin_angel_heart"
+            return {"config": copy.deepcopy(config), "revision": "before"}
+
+        def save_config(self, module, values, revision):
+            assert module == "astrbot_plugin_angel_heart"
+            assert revision == "before"
+            config.update(values)
+            return {"verified": True, "state": "applied"}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.set_default_provider(new.model_id)
+
+    assert result["ok"] is True
+    actual = config if online else json.loads(path.read_text(encoding="utf-8"))
+    assert actual["analyzer_model"] == ("custom/analysis" if explicit else new.model_id)
+    assert actual["image_caption_provider_id"] == old.model_id
 
 
 @pytest.mark.parametrize("kind", ["chat", "image", "embedding", "voice"])

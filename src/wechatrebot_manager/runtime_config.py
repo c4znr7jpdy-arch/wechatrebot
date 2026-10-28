@@ -371,14 +371,26 @@ def _sync_delivery_plugins(
 
 
 def bind_missing_analysis_model(
-    config: dict[str, object], profile: OpenAIProviderProfile | None,
+    config: dict[str, object],
+    profile: OpenAIProviderProfile | None,
+    *,
+    previous_model_id: str = "",
 ) -> bool:
-    """Seed an empty analysis binding without replacing an explicit choice."""
+    """Bind the default model while preserving an explicit model choice.
+
+    A value equal to the previous default is still an automatic binding and may
+    follow a deliberate default-model switch. Other non-empty values are
+    explicit choices and remain untouched.
+    """
     if profile is None or profile.service_kind != "chat":
         return False
-    if str(config.get("analyzer_model") or "").strip():
+    current = str(config.get("analyzer_model") or "").strip()
+    if current and current != previous_model_id:
         return False
-    config["analyzer_model"] = profile.normalized().model_id
+    model_id = profile.normalized().model_id
+    if current == model_id:
+        return False
+    config["analyzer_model"] = model_id
     return True
 
 

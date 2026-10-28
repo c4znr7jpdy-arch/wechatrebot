@@ -84,10 +84,10 @@ def group_analysis_ui_schema(schema: dict[str, Any]) -> dict[str, Any]:
     for key, field in result.get("llm", {}).get("items", {}).items():
         if key.endswith("provider_id"):
             primary = key == "llm_provider_id"
-            label = "跟随默认聊天模型（推荐）" if primary else "跟随报告分析模型"
+            label = "跟随默认聊天模型（推荐）" if primary else "跟随日报分析模型"
             field.update({"_required": False, "_blank_label": label})
-            field["description"] = "报告分析模型" if primary else field.get("description", key).replace("Provider ID", "模型").replace("LLM", "")
-            field["hint"] = ("与全局模型服务共用模型，无需重复配置。默认跟随聊天模型；群聊有独立模型时优先使用。选择具体模型后，仅本报告固定使用它。" if primary else "留空使用报告分析模型；仅在需要时为这项分析指定不同模型。")
+            field["description"] = "群聊日报分析模型" if primary else field.get("description", key).replace("Provider ID", "模型").replace("LLM", "")
+            field["hint"] = ("用于生成群聊日报、热门话题和群友画像。默认跟随聊天模型；与机器人核心的主动接话判断模型独立。选择具体模型后，仅日报分析固定使用它。" if primary else "留空使用群聊日报分析模型；仅在需要时为这项分析指定不同模型。")
             if field.get("options", [None])[0] == "" and field.get("labels"):
                 field["labels"][0] = label
     return result

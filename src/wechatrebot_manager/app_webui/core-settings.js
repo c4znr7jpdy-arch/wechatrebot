@@ -96,7 +96,7 @@
       if (state.view === "template") return "打开“单独设置”来修改这一项；关闭时跟随全局，后续全局调整也会同步。";
       if (state.capabilityWarning) return state.capabilityWarning;
       if (!state.detail.engine_online) return "未连接到机器人：仅保存到本机，启动后加载。若机器人仍在运行，请恢复连接后重新保存。";
-      if (!state.detail.advanced_config.analyzer_model) return "群聊分析模型尚未绑定；请到“模型设置”选择已配置模型，才能完整使用接话分析。";
+      if (!state.detail.advanced_config.analyzer_model) return "主动接话判断模型尚未绑定；请到“模型设置”选择已配置模型，才能完整使用群聊接话判断。";
       return "保存后自动应用并核验。正在执行的工作可能被中断。";
     }
 

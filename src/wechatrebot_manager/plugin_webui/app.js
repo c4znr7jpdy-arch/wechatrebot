@@ -823,8 +823,11 @@ function renderConfigPanels() {
   const hasRequiredModel = Object.values(modelSchema).some((field) =>
     customerText(field?._blank_label || "").includes("必需"),
   );
+  const isGroupAnalysis = state.detail.configuration_profile === "group-analysis-simple";
   el("model-config-note").textContent = hasRequiredModel
-    ? "群聊分析模型是完整使用这项功能所必需的；图片理解模型可以按需留空。这里的选择不会改变日常回复模型。"
+    ? (isGroupAnalysis
+      ? "群聊日报分析模型用于生成日报、热门话题和群友画像；与机器人核心的主动接话判断模型独立。留空时跟随默认聊天模型。"
+      : "主动接话判断模型用于是否接话和上下文整理；与群聊日报分析模型独立。图片理解模型可以按需留空。")
     : "这里只影响当前功能，不会改变机器人的日常对话模型。留空时跟随机器人默认设置。";
   el("models-tab").hidden = !hasModels;
   modelFields.hidden = !hasModels;

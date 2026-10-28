@@ -87,8 +87,8 @@ window.createPreviewApi = function (helpers) {
         chat_quality_analysis_enabled: {description: "聊天质量点评", type: "bool", hint: "从多个角度总结当天群聊质量。"},
       }},
     };
-    const groupAnalysisModelSchema = {llm: {description: "分析模型", type: "object", items: {
-      llm_provider_id: {description: "用于分析的模型", type: "string", options: [""], labels: ["使用系统默认"], hint: "通常选择与智能回复相同的模型；不选择时使用当前群聊的默认模型。"},
+    const groupAnalysisModelSchema = {llm: {description: "群聊日报分析模型", type: "object", items: {
+      llm_provider_id: {description: "群聊日报分析模型", type: "string", options: [""], labels: ["跟随默认聊天模型（推荐）"], hint: "用于生成群聊日报、热门话题和群友画像；与机器人核心的主动接话判断模型独立。留空时跟随默认聊天模型。"},
     }}};
     const groupAnalysisConfig = {
       basic: {admin_ids: [], group_list_mode: "none", group_list: [], bot_self_ids: [], report_template: "scrapbook", analysis_days: 1, min_messages_threshold: 200},
@@ -138,7 +138,7 @@ window.createPreviewApi = function (helpers) {
     };
     const previewSavedConfigs = new Map();
     const corePreviewSchema = {
-      analyzer_model: {type: "string", description: "群聊分析模型", options: [""], labels: ["请选择模型（完整使用所必需）"], default: ""},
+      analyzer_model: {type: "string", description: "主动接话判断模型", options: [""], labels: ["请选择主动接话模型（完整使用所必需）"], default: ""},
       personality: {type: "object", description: "身份与接话原则", items: {ai_self_identity: {type: "text", description: "群聊身份", default: "你是小妹，是群聊里的熟人型机器人。说话自然、直接。"}, reply_strategy_guide: {type: "text", description: "接话原则", default: "围绕当前话题提供帮助，不连续插话。"}}},
       wake_interaction: {type: "object", description: "点名与唤醒", items: {alias: {type: "string", description: "可识别的昵称", default: "小妹"}, enter_on_mention_only: {type: "bool", description: "仅在被点名后参与", default: true}, direct_wake_fast_path: {type: "bool", description: "点名时快速回应", default: true}}},
       timing: {type: "object", description: "回复节奏", items: {assistant_debounce_time: {type: "float", description: "点名后等待补充（秒）", default: 1, min: 0}, waiting_time: {type: "float", description: "回复后休息（秒）", default: 30, min: 0}}},

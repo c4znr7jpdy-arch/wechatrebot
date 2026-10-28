@@ -150,7 +150,9 @@ def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
         "reply_length",
         "access_control",
     ]
-    assert projected["analyzer_model"]["_blank_label"].startswith("请选择模型")
+    assert projected["analyzer_model"]["_blank_label"].startswith("请选择主动接话模型")
+    assert projected["analyzer_model"]["description"] == "主动接话判断模型"
+    assert "日报分析模型独立" in projected["analyzer_model"]["hint"]
     assert list(projected["wake_interaction"]["items"]) == [
         "alias",
         "enter_on_mention_only",
@@ -709,6 +711,8 @@ def test_group_analysis_uses_simple_settings_and_preserves_values(
     assert detail["model_schema"] == {}
     assert "llm_provider_id" in detail["basic_schema"]["llm"]["items"]
     assert detail["configuration_profile"] == "group-analysis-simple"
+    assert detail["basic_schema"]["llm"]["description"] == "群聊日报分析模型"
+    assert "主动接话判断模型独立" in detail["basic_schema"]["llm"]["items"]["llm_provider_id"]["hint"]
     assert "llm" in detail["advanced_schema"]
     assert "max_messages" in detail["advanced_schema"]["basic"]["items"]
     assert detail["schedule_schema"]["auto_analysis"]["items"]["scheduled_group_list"]["_ui_control"] == "line-list"

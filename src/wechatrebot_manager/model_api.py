@@ -122,7 +122,10 @@ class ModelApiMixin:
                 )
             if saved.service_kind == "chat":
                 self._bind_group_analysis_model(
-                    saved if make_default else current, client, hot_applied
+                    saved if make_default else current,
+                    client,
+                    hot_applied,
+                    previous_model_id=current.model_id if current is not None else "",
                 )
             return self._ok(
                 {
@@ -165,8 +168,12 @@ class ModelApiMixin:
             return self._failed(exc, "15001")
 
     def _bind_group_analysis_model(
-        self, profile: OpenAIProviderProfile | None,
-        client: EngineApiClient, online: bool,
+        self,
+        profile: OpenAIProviderProfile | None,
+        client: EngineApiClient,
+        online: bool,
+        *,
+        previous_model_id: str = "",
     ) -> None:
         data_root = self._install_root / "app" / "astrbot" / "data"
         module = "astrbot_plugin_angel_heart"
@@ -181,7 +188,10 @@ class ModelApiMixin:
                 config = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
             if not isinstance(config, dict):
                 raise ValueError("机器人核心配置格式不正确。")
-            if not bind_missing_analysis_model(config, profile):
+            changed = bind_missing_analysis_model(
+                config, profile, previous_model_id=previous_model_id
+            )
+            if not changed:
                 return
             if online:
                 client.save_config(module, config, snapshot["revision"])
@@ -189,7 +199,7 @@ class ModelApiMixin:
                 write_json_atomic(path, config)
         except (OSError, ValueError, PluginCenterError) as exc:
             raise AnalysisModelBindingError(
-                "模型已保存，但群聊分析模型自动绑定未完成。"
+                "模型已保存，但主动接话模型自动绑定未完成。"
                 "请在机器人核心的模型设置中核对绑定，并查看运行记录。"
             ) from exc
 
@@ -268,6 +278,20 @@ class ModelApiMixin:
                 raise ValueError("所选模型服务不存在或尚未完成配置。")
             if getattr(selected, "service_kind", "chat") != "chat":
                 raise ValueError("只有聊天模型可以设为默认回复模型。")
+            previous_default = next(
+                (item for item in services if item.is_default and item.service_kind == "chat"),
+                None,
+            )
+            previous_model_id = previous_default.provider_id if previous_default else ""
+            selected_profile = OpenAIProviderProfile(
+                api_key=selected.api_key,
+                api_base=selected.api_base,
+                model=selected.model,
+                source_id=selected.source_id,
+                thinking_enabled=selected.thinking_enabled,
+                service_kind=selected.service_kind,
+                modalities=selected.modalities,
+            ).normalized()
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
             if hot_applied:
@@ -275,7 +299,10 @@ class ModelApiMixin:
             else:
                 set_default_provider(self._install_root, provider_id)
             self._bind_group_analysis_model(
-                load_provider_profile(self._install_root), client, hot_applied
+                selected_profile,
+                client,
+                hot_applied,
+                previous_model_id=previous_model_id,
             )
             return self._ok(
                 {
