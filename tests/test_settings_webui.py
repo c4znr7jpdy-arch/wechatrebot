@@ -44,6 +44,19 @@ def test_flat_settings_and_aligned_chat_details(browser, manager_url, width, hei
         page.locator('[data-settings-tab="core"]').click()
         expect(page.locator("#coreForm")).to_be_visible()
         expect(page.locator("#coreDetail")).to_have_attribute("open", "")
+        summary_layout = page.locator("#coreDetail > summary").evaluate("""node => {
+          const heading = node.querySelector('.core-detail-heading');
+          const title = node.querySelector('h2');
+          return {
+            summaryDisplay: getComputedStyle(node).display,
+            headingDisplay: getComputedStyle(heading).display,
+            titleTop: title.getBoundingClientRect().top,
+            summaryTop: node.getBoundingClientRect().top,
+          };
+        }""")
+        assert summary_layout["summaryDisplay"] == "flex"
+        assert summary_layout["headingDisplay"] == "flex"
+        assert abs(summary_layout["titleTop"] - summary_layout["summaryTop"]) <= 2
         page.locator("#coreDetail > summary").click()
         expect(page.locator("#coreDetail")).not_to_have_attribute("open", "")
         expect(page.locator("#coreForm")).not_to_be_visible()
