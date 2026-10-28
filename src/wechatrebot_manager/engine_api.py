@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 from pathlib import Path
 import socket
 import time
@@ -14,7 +15,9 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from .plugin_configuration import _dashboard_path, _json_revision, _read_object, _white_label_schema
-from .plugin_errors import ConfigConflictError, EngineUnavailableError, PluginCenterError
+from .plugin_errors import ConfigConflictError, EngineUnavailableError, PluginCenterError, ProviderTestError
+from .customer_logs import sanitize_log_text
+from .error_catalog import provider_error_code
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
@@ -31,6 +34,8 @@ _LONG_MEME_REQUEST_PATHS = frozenset({
     "/api/plug/meme_manager/packs/import",
     "/api/plug/meme_manager/settings/backup/import",
 })
+
+_PROVIDER_TEST_KINDS = frozenset({"chat", "embedding", "image", "voice", "stt", "tts", "rerank"})
 
 
 def _base64url(value: bytes) -> str:
@@ -408,12 +413,41 @@ class EngineApiClient:
         return True
 
     def test_provider(self, provider_id: str) -> dict[str, Any]:
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise ProviderTestError("请选择需要测试的模型服务。", code="16001")
         result = self.request(
             "POST",
             "/api/v1/providers/test",
             {"provider_id": provider_id},
         )
-        return result if isinstance(result, dict) else {"result": result}
+        if not isinstance(result, dict) or result.get("id") != provider_id:
+            raise ProviderTestError("模型测试没有返回对应服务的结果，请刷新后重试。")
+        status = result.get("status")
+        if not isinstance(status, str) or status not in {"available", "unavailable"}:
+            raise ProviderTestError("模型测试结果格式无法识别，未确认模型可用。")
+        if result["status"] != "available" or result.get("error") not in (None, ""):
+            code = provider_error_code(result.get("error_type", ""), result.get("status_code")) or "19000"
+            detail = str(result.get("error") or "模型没有完成本次测试。")
+            raise ProviderTestError(f"模型 {provider_id} 测试失败：{detail}", code=code)
+        kind = result.get("test_kind")
+        if not isinstance(kind, str) or kind not in _PROVIDER_TEST_KINDS or (kind == "chat" and "response_text" not in result):
+            raise ProviderTestError("当前运行核心未返回真实模型测试结果，请更新机器人后重试。")
+        response = result.get("response_text", "")
+        if not isinstance(response, str) or (kind == "chat" and not response.strip()):
+            raise ProviderTestError(f"模型 {provider_id} 返回了空回复，未确认模型可用。")
+        elapsed = result.get("elapsed_ms")
+        if (isinstance(elapsed, bool) or not isinstance(elapsed, (int, float))
+                or elapsed < 0 or (isinstance(elapsed, float) and not math.isfinite(elapsed))):
+            raise ProviderTestError("模型测试没有返回有效的耗时记录，请更新机器人后重试。")
+        model = result.get("model")
+        if not isinstance(model, str) or (kind == "chat" and not model.strip()):
+            raise ProviderTestError("模型测试没有返回有效的模型名称，未确认模型可用。")
+        return {
+            "id": provider_id, "model": sanitize_log_text(model).strip()[:128],
+            "status": "available", "test_kind": kind,
+            "response_text": sanitize_log_text(response).strip()[:2000],
+            "elapsed_ms": elapsed,
+        }
 
     def delete_provider(self, provider_id: str, source_id: str) -> None:
         _sources, providers = self._provider_records()

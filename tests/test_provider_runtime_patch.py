@@ -255,3 +255,95 @@ def test_deleted_embedding_can_be_recreated_and_updated_without_stale_records(pr
     assert catalog.manager.get_provider_config_by_id(target["id"]) == updated
     assert catalog.manager.inst_map[target["id"]] == updated
     assert catalog.config == catalog.saved[-1]
+
+
+@pytest.fixture
+def runtime_model_test(tmp_path):
+    import time
+    source = _patched_runtime_source(tmp_path, Path("astrbot/dashboard/services/config_service.py"))
+    function = _runtime_function(source, "test_provider", {"asyncio": asyncio, "time": time})
+    calls = []
+    provider = SimpleNamespace()
+    provider.meta = lambda: SimpleNamespace(id="saved/model", model="model", provider_type=SimpleNamespace(value="chat_completion"))
+
+    async def text_chat(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(completion_text="PONG", reasoning_content="private reasoning")
+
+    provider.text_chat = text_chat
+    service = SimpleNamespace(provider_manager=SimpleNamespace(inst_map={"saved/model": provider}))
+    return lambda: asyncio.run(function(service, "saved/model")), provider, calls
+
+
+def test_runtime_model_probe_returns_actual_answer_and_duration(runtime_model_test):
+    run, provider, calls = runtime_model_test
+    result = run()
+    assert result["status"] == "available" and result["response_text"] == "PONG"
+    assert result["test_kind"] == "chat" and result["id"] == "saved/model"
+    assert result["elapsed_ms"] >= 0
+    assert calls == [{"prompt": "REPLY `PONG` ONLY", "request_max_retries": 1}]
+    assert "private reasoning" not in str(result)
+
+
+@pytest.mark.parametrize("content", [None, "", "   ", [], 12])
+def test_runtime_model_probe_rejects_empty_or_invalid_answers(runtime_model_test, content):
+    run, provider, _calls = runtime_model_test
+
+    async def empty(**kwargs):
+        return SimpleNamespace(completion_text=content, reasoning_content="thinking only")
+
+    provider.text_chat = empty
+    result = run()
+    assert result["status"] == "unavailable"
+    assert result["error_type"] == "EmptyModelResponseError"
+    assert "response_text" not in result and result["elapsed_ms"] >= 0
+
+
+def test_runtime_model_probe_preserves_typed_timeout(runtime_model_test):
+    run, provider, _calls = runtime_model_test
+
+    async def fail(**kwargs):
+        raise TimeoutError()
+
+    provider.text_chat = fail
+    result = run()
+    assert result["status"] == "unavailable" and result["error_type"] == "TimeoutError"
+    assert result["error"] and result["elapsed_ms"] >= 0
+
+
+def test_runtime_model_probe_caps_displayed_answer(runtime_model_test):
+    run, provider, _calls = runtime_model_test
+
+    async def long_answer(**kwargs):
+        return SimpleNamespace(completion_text="x" * 3000)
+
+    provider.text_chat = long_answer
+    assert len(run()["response_text"]) == 2000
+
+
+def test_final_provider_failure_is_logged_without_request_details(patched_provider_sources):
+    _source, retry_source = patched_provider_sources
+    logs, requests = [], []
+
+    class Attempt:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    async def attempts():
+        yield Attempt()
+
+    async def request():
+        requests.append(1)
+        raise TimeoutError("private upstream key=secret response")
+
+    scope = {"logger": SimpleNamespace(error=logs.append), "_build_retrying": lambda *a, **k: attempts(),
+             "_get_status_code": lambda error: None}
+    function = _runtime_function(retry_source, "retry_provider_request", scope)
+    with pytest.raises(TimeoutError):
+        asyncio.run(function("OpenAI", request))
+    assert requests == [1]
+    assert logs == ["MODEL_REQUEST_FAILED error_type=TimeoutError status_code=none"]
+    assert "secret" not in str(logs)

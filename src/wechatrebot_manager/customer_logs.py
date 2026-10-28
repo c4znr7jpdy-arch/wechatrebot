@@ -26,18 +26,26 @@ class LogSource:
 
 def log_sources(root: str | Path) -> tuple[LogSource, ...]:
     install = Path(root).expanduser().resolve()
+    runtime_log = install / "app" / "logs" / "astrbot-core.log"
+    if not runtime_log.is_file():
+        runtime_log = install / "logs" / "astrbot-core.log"
     return (
         LogSource("engine-service", "回复引擎", install / "logs" / "astrbot-service.log"),
         LogSource("wechat-connection", "微信连接", install / "logs" / "new-hook-bridge.log"),
-        LogSource("engine-runtime", "运行核心", install / "logs" / "astrbot-core.log"),
+        LogSource("engine-runtime", "运行核心", runtime_log),
         LogSource("message-forward", "消息转发", install / "app" / "bridge" / "var" / "log" / "bridge.log"),
     )
+
+
+def strip_log_ansi(text: str) -> str:
+    """Remove logger color codes before parsing record boundaries or display."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", str(text))
 
 
 def sanitize_log_text(text: str) -> str:
     # Redact before truncation/formatting: headers may contain spaces and JSON
     # credentials may contain escaped quotes. Never retain chat payloads.
-    text = re.sub(r"\x1b\[[0-9;]*m", "", str(text))
+    text = strip_log_ansi(text)
     text = re.sub(r"(?im)(\b(?:Authorization|Cookie|Set-Cookie)\s*:\s*)[^\r\n]*", r"\1***", text)
     text = re.sub(r"(?im)(\[[^\]\n]*event_bus:\d+\]\s*:?).*", r"\1 <聊天内容已脱敏>", text)
     text = re.sub(r"(?im)(?:Tool `[^`]+` Result:|completion:|genai result:|保存打断消息:|语音转文本[^:\n]*结果:|已合并消息，提示:).*", "<消息或工具正文已脱敏>", text)
@@ -97,4 +105,4 @@ def tail_log(path: str | Path, *, max_bytes: int = 512 * 1024, max_lines: int = 
     return sanitize_log_text(text)
 
 
-__all__ = ["LogSource", "log_sources", "sanitize_log_text", "tail_log", "read_log_tail"]
+__all__ = ["LogSource", "log_sources", "sanitize_log_text", "strip_log_ansi", "tail_log", "read_log_tail"]
