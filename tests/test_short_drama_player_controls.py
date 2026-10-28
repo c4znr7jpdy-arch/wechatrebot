@@ -15,6 +15,11 @@ IOS_BROWSER = {
     "is_mobile": True,
     "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
 }
+ANDROID_BROWSER = {
+    "has_touch": True,
+    "is_mobile": True,
+    "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.54",
+}
 
 
 @pytest.fixture(scope="module")
@@ -419,6 +424,103 @@ def test_fullscreen_keeps_controls_and_episode_dialog(cinema_catalog):
     page.locator("#sheetEpisodeGrid").get_by_label("第32集", exact=True).click()
     assert page.locator("#meta").inner_text() == "第32集"
     exit_fullscreen(page)
+
+
+@pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
+def test_fullscreen_back_button_exits_before_navigation(cinema_catalog):
+    page = cinema_catalog
+    search = page.get_by_label("在当前片单中查找")
+    search.fill("山海")
+    filtered_titles = page.locator(".recommend-card:visible strong").all_text_contents()
+    assert len(filtered_titles) == 2
+    page.locator(".recommend-card").first.click()
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
+    page.locator("#speedButton").click()
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
+    page.locator("#video").evaluate("video => { video.currentTime = 2; }")
+    page.get_by_label("全屏播放", exact=True).click()
+    page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+    before = page.locator("#video").evaluate("""video => {
+      window.backNavigationVideo = video;
+      return {src: video.currentSrc, time: video.currentTime, rate: video.playbackRate};
+    }""")
+
+    page.get_by_label("返回", exact=True).click()
+    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+    assert page.locator(".watch-stage").is_visible()
+    assert page.locator("#recommendations").is_hidden()
+    assert page.locator("#meta").inner_text() == "第2集"
+    after = page.locator("#video").evaluate("""video => ({
+      same: video === window.backNavigationVideo, src: video.currentSrc,
+      time: video.currentTime, rate: video.playbackRate, paused: video.paused
+    })""")
+    assert after["same"] and not after["paused"]
+    assert after["src"] == before["src"]
+    assert after["rate"] == before["rate"] == 1.5
+    assert after["time"] >= before["time"] - .1
+    assert_real_fullscreen_only(page)
+
+    page.get_by_label("返回", exact=True).click()
+    assert page.locator(".watch-stage").is_hidden()
+    assert page.locator("#recommendations").is_visible()
+    assert search.input_value() == "山海"
+    assert page.locator(".recommend-card:visible strong").all_text_contents() == filtered_titles
+    assert page.locator("#video").get_attribute("src") is None
+
+
+@pytest.mark.parametrize("phase", ["enter", "exit", "orientation"])
+@pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
+def test_fullscreen_back_button_ignores_repeated_clicks_during_transition(player_page, phase):
+    page = player_page
+    page.evaluate("""phase => {
+      const video = document.getElementById('video'), shell = document.getElementById('videoShell');
+      const exit = document.exitFullscreen.bind(document);
+      window.backNavigationVideo = video;
+      window.fullscreenBackCalls = {exit: 0, restore: 0};
+      Object.defineProperty(screen.orientation, 'type', {configurable: true, value: 'portrait-primary'});
+      Object.defineProperty(screen.orientation, 'lock', {configurable: true, value: mode => {
+        if (mode === 'landscape') return Promise.resolve();
+        window.fullscreenBackCalls.restore++;
+        return phase === 'orientation' ? new Promise(resolve => { window.finishFullscreenTransition = resolve; }) : Promise.resolve();
+      }});
+      Object.defineProperty(screen.orientation, 'unlock', {configurable: true, value: () => {}});
+      if (phase === 'enter') shell.requestFullscreen = () => new Promise((_resolve, reject) => {
+        window.finishFullscreenTransition = () => reject(new Error('deferred entry denied'));
+      });
+      document.exitFullscreen = () => {
+        window.fullscreenBackCalls.exit++;
+        return phase === 'exit' ? new Promise(resolve => { window.finishFullscreenTransition = () => exit().then(resolve); }) : exit();
+      };
+    }""", phase)
+    source = page.locator("#video").get_attribute("src")
+    page.get_by_label("全屏播放", exact=True).click()
+    if phase != "enter":
+        page.wait_for_function("document.fullscreenElement === document.getElementById('videoShell')")
+    pending = page.evaluate("""async phase => {
+      const back = document.getElementById('pageBackButton');
+      if (phase !== 'enter') back.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      for (let click = 0; click < 3; click++) back.click();
+      return {...window.fullscreenBackCalls,
+        watching: !document.querySelector('.watch-stage').hidden,
+        catalogHidden: getComputedStyle(document.getElementById('recommendations')).display === 'none',
+        sameVideo: window.backNavigationVideo === document.getElementById('video'),
+        src: document.getElementById('video').getAttribute('src')};
+    }""", phase)
+    assert pending["watching"] and pending["catalogHidden"] and pending["sameVideo"]
+    assert pending["src"] == source
+    assert pending["exit"] == (1 if phase == "exit" else 0)
+    assert pending["restore"] == (0 if phase == "enter" else 1)
+    page.evaluate("window.finishFullscreenTransition()")
+    page.wait_for_function("!document.fullscreenElement && !document.body.classList.contains('player-fullscreen')")
+    if phase == "enter":
+        page.wait_for_function("document.getElementById('videoHint').textContent.includes('全屏')")
+    assert page.evaluate("window.fullscreenBackCalls.exit") == (0 if phase == "enter" else 1)
+    assert page.locator(".watch-stage").is_visible()
+    assert page.locator("#recommendations").is_hidden()
+    assert page.locator("#video").get_attribute("src") == source
 
 
 @pytest.mark.parametrize("player_page", [{"has_touch": True, "is_mobile": True}], indirect=True)

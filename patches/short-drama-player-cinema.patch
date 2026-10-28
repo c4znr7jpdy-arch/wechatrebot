@@ -1419,7 +1419,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1263,66 @@
+@@ -891,21 +1263,71 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1461,6 +1461,11 @@ diff --git a/index.html b/index.html
 -        episodeExpand.setAttribute('aria-expanded', String(episodesExpanded));
 -        episodeExpand.setAttribute('aria-label', episodesExpanded ? '收起选集' : '展开选集');
 -      });
++        if (fullscreenTransition) return;
++        if (playerFullscreenActive()) {
++          fullButton.click();
++          return;
++        }
 +        if (recommendationItems.length) {
 +          closeEpisodeSheet();
 +          video.pause();
@@ -1495,7 +1500,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1335,7 @@
+@@ -918,6 +1340,7 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1503,7 +1508,7 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1359,15 @@
+@@ -941,6 +1364,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1519,7 +1524,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1385,21 @@
+@@ -958,12 +1390,21 @@
          }
        });
        syncNativeControls();
