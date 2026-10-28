@@ -43,6 +43,13 @@ def test_flat_settings_and_aligned_chat_details(browser, manager_url, width, hei
         page.locator('.nav-item[data-page="settings"]').click()
         page.locator('[data-settings-tab="core"]').click()
         expect(page.locator("#coreForm")).to_be_visible()
+        expect(page.locator("#coreDetail")).to_have_attribute("open", "")
+        page.locator("#coreDetail > summary").click()
+        expect(page.locator("#coreDetail")).not_to_have_attribute("open", "")
+        expect(page.locator("#coreForm")).not_to_be_visible()
+        page.locator("#coreDetail > summary").click()
+        expect(page.locator("#coreDetail")).to_have_attribute("open", "")
+        expect(page.locator("#coreForm")).to_be_visible()
         paths = page.locator("#coreForm .config-input").evaluate_all(
             "els => els.map(e => e.dataset.path)")
         assert len(paths) == len(set(paths)), "Fields must not appear in multiple sections"

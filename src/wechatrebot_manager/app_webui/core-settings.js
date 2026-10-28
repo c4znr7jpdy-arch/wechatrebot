@@ -133,7 +133,7 @@
       const templateBasic = Object.fromEntries(Object.entries(state.detail.template_schema || {}).filter(([key]) => key in schemas.basic));
       const templateMore = remainingSchema(state.detail.template_schema, templateBasic);
       const identityMarkup = state.view === "global" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><h3 id="coreIdentityTitle">机器人名称与管理员</h3></div></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
-      root().innerHTML = `<div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "机器人配置")}</h2></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : ""}</div>
+      root().innerHTML = `<summary><div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "机器人配置")}</h2></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : ""}</div></summary>
         <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<button class="row-action" id="backCoreGlobal" type="button">返回全局机器人配置</button><label class="form-field full"><span>模板说明</span><textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>${schemaMarkup(templateBasic, state.config, [], "core-")}${Object.keys(templateMore).length ? `<details class="core-advanced"><summary>更多模板设置</summary>${schemaMarkup(templateMore, state.config, [], "core-")}</details>` : ""}` : `${identityMarkup}${schemaMarkup(schemas.basic, state.config, [], "core-")}<details class="core-advanced"><summary>模型设置</summary>${schemaMarkup(remainingSchema(schemas.models, schemas.basic), state.config, [], "core-")}</details><details class="core-advanced"><summary>高级设置</summary>${schemaMarkup(remainingSchema(schemas.advanced, schemas.basic, schemas.models), state.config, [], "core-")}</details>`}</form>
         <p class="form-note" id="coreNote" role="status">${esc(note())}</p><div class="core-savebar"><button class="button primary" id="saveCore" type="button">${state.view === "template" ? "保存模板" : state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
       if (state.view === "template") attachOverrides();
@@ -145,8 +145,8 @@
       $$('.config-input[data-type="bool"]', root()).forEach((input) => input.addEventListener("change", () => { input.closest('.toggle').querySelector('span:last-child').textContent = input.checked ? "已启用" : "已停用"; }));
       $$('textarea', root()).forEach(growTextarea);
       $("#saveCore").addEventListener("click", saveCurrent);
-      $("#renameCoreTemplate")?.addEventListener("click", renameTemplate);
-      $("#deleteCoreTemplate")?.addEventListener("click", deleteTemplate);
+      $("#renameCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); renameTemplate(); });
+      $("#deleteCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); deleteTemplate(); });
     }
 
     function attachOverrides() {

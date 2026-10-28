@@ -20,6 +20,9 @@
 #page-settings .core-workspace { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 #page-settings .core-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0; min-width: 0; background: transparent; }
 #page-settings .core-detail { padding: 0; border: 0; background: transparent; }
+#page-settings .core-detail > summary { cursor: pointer; }
+#page-settings .core-detail > summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 3px; border-radius: 6px; }
+#page-settings .core-detail > summary .core-detail-heading { margin-bottom: 0; }
 #page-settings .core-detail-heading { margin-bottom: 12px; }
 #page-settings .core-detail-heading h2 { font-size: 24px; }
 #page-settings .core-form { display: block; }
