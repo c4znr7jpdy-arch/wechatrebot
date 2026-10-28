@@ -125,3 +125,13 @@ final result: passed
 源码基线仅使用本仓库 `vendor/deploy/short_drama_player` 和现有三个播放器补丁。部署范围仅为服务器静态 `index.html`，不更新状态服务、Nginx 配置、机器人或客户端安装包；客户端目标版本保持 0.9.9。本次服务器更新另行以候选哈希、备份、公网回读及服务健康证据确认。
 
 验证：`python -m pytest -q tests/test_short_drama_player_controls.py` 50 项通过，`python -m pytest -q tests/test_short_drama_player_hardening.py` 6 项通过；包含真实 MP4 连播、原生 API 两种拼写、同步点击、失败后新手势重试、系统退出、用户暂停保护、方向恢复及 320/390/768/1440 布局。原生 API 通过属性和事件模拟，浏览器使用项目声明版本的 Chromium Playwright。补丁应用、JavaScript 语法、`scripts/source_inputs.py`、`scripts/validate_release_metadata.py`、`git diff --check` 通过。
+
+### 全屏返回先退出全屏（2026-10-28）
+
+Android 容器全屏中点击左上角返回，原处理器直接暂停、清空视频并展示搜索片单。现在先复用唯一全屏按钮的退出流程，包括方向恢复；退出后保留当前作品、集数、进度、倍速和播放状态，再次返回才回到原片单。进入或退出全屏尚未完成时忽略重复返回，避免迟到的全屏事件打开已隐藏的播放区域。
+
+本次只更新 `short-drama-player-cinema.patch` 的页面逻辑和对应测试，固定源码基线仍为本仓库 `vendor/`。目标版本保持 0.9.9，交付类型为托管静态页更新；没有客户端安装包、状态服务或 Nginx 配置变化。真实 Android 微信的全屏退出及方向恢复仍需实机验收。
+
+验证：`python -m pytest tests/test_short_drama_player_controls.py -q` 为 `54 passed`，`python -m pytest tests/test_short_drama_player_hardening.py -q` 为 `6 passed`；`python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py` 与 `git diff --check` 通过。Browser plugin not available，复用已有 Chromium Playwright 和真实 MP4 夹具；新增 Android 微信 UA/触屏模拟验证两次返回、播放状态保留，以及进入、退出和方向恢复等待期间重复返回。未启动机器人。
+
+资源来源需要区分：机器人搜索和推荐使用 `jiang_short_drama/search.py` 的八个固定源——暴风、非凡、量子、红牛、极速、百度云、金鹰、飘零资源。服务器 `SelectionResolver` 从这八个源按原来源补取完整片单；播放器“猜你喜欢”的 `RecommendationCatalog` 则只从暴风、非凡资源建立公共推荐池。视频清单和分片由浏览器直连资源站提供的地址，播放器服务器不转发视频流。
