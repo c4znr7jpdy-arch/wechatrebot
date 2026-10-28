@@ -135,3 +135,26 @@ Android 容器全屏中点击左上角返回，原处理器直接暂停、清空
 验证：`python -m pytest tests/test_short_drama_player_controls.py -q` 为 `54 passed`，`python -m pytest tests/test_short_drama_player_hardening.py -q` 为 `6 passed`；`python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py` 与 `git diff --check` 通过。Browser plugin not available，复用已有 Chromium Playwright 和真实 MP4 夹具；新增 Android 微信 UA/触屏模拟验证两次返回、播放状态保留，以及进入、退出和方向恢复等待期间重复返回。未启动机器人。
 
 资源来源需要区分：机器人搜索和推荐使用 `jiang_short_drama/search.py` 的八个固定源——暴风、非凡、量子、红牛、极速、百度云、金鹰、飘零资源。服务器 `SelectionResolver` 从这八个源按原来源补取完整片单；播放器“猜你喜欢”的 `RecommendationCatalog` 则只从暴风、非凡资源建立公共推荐池。视频清单和分片由浏览器直连资源站提供的地址，播放器服务器不转发视频流。
+
+### 播放页切换同剧来源（2026-10-28）
+
+搜索片单继续显示默认来源。播放页右上角新增小按钮，仅显示“暴风”“非凡”等简称，不显示“当前资源”、资源后缀或集数；使用现有深色、金色选中态、12px 常规字重，点击展开 176px 宽的两列来源菜单。播放失败或连接超时会在播放器内提示换源，同时提供重试、切换资源按钮。菜单支持键盘操作、Escape 关闭及焦点恢复。
+
+复用 `SelectionResolver`、固定八源、`_catalog_item` 和现有 `/resolve` 路由，只有点击来源菜单才通过 `alternatives=1` 请求同剧候选；旧卡片和原解析请求格式保持兼容。匹配片名、年份、媒体类型及首位主演，排除解说、预告、续集及不同版本，原来源目录失效时可使用卡片元数据匹配。结果仅表示目录返回了安全的 HTTPS HLS 分集地址，不代表所有分集已实际播放成功。
+
+换源优先匹配当前集名或数字集号，缺集时保留原播放并说明原因；匹配成功后保留进度、倍速及暂停/播放意图。HLS 的进度恢复等待新媒体 `loadedmetadata`，不在旧视频仍就绪的 `MANIFEST_PARSED` 阶段消耗进度。返回片单、切换作品会取消并隔离旧查询；原搜索卡片不被换源操作覆盖。
+
+服务端同一时刻只允许一次备用源扫描，复用四个上游请求槽；缓存最多 64 项/8MiB，成功结果 300 秒、空结果 30 秒。上游读取限制 4MiB，分块读取并检查 4 秒截止时间，最后一次 socket 读取仍可能耗时 3 秒；极慢响应可能先触发前端 12 秒等待提示，用户可重试。全部上游失败返回 503，可访问但没有匹配作品返回空列表。
+
+验证使用 Browser plugin not available 路径，沿用项目 Chromium Playwright 1.60 和本地真实 MP4 夹具，没有启动机器人。入口 `https://player.example/short-drama/player?s=abcdefghijklmnop` 的资源、媒体、失败响应均由测试拦截。320、390、1280 宽度验证七源菜单、按钮可点击、无横向溢出；源切换、缺集、失败重试、晚到响应、原生播放状态及 HLS 时序均覆盖。既有全屏返回修复已同步并通过回归。
+
+| 检查 | 结果 |
+| --- | --- |
+| 页面地址、标题及非空内容 | 通过 |
+| 页面脚本异常、错误遮罩 | 无未解释的脚本异常；媒体失败用例按预期显示恢复入口 |
+| 交互 | 默认卡片 → 来源菜单 → 非凡 → 保留当前集/进度/倍速；返回仍为单条默认搜索结果 |
+| 截图 | 320/390/1280 七源菜单与 390 播放失败提示已检查；pytest 临时目录保存证据 |
+
+实际命令：`python -m pytest tests/test_short_drama_player_controls.py tests/test_short_drama_player_hardening.py tests/test_short_drama_source_switching.py -q`，`84 passed`；`python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。源输入、依赖锁和固定 vendor 内容没有变动。
+
+线上稳定清单实查为 0.9.8，待发布目标保持 0.9.9。本次交付范围为托管页面与状态服务更新，不属于管理器增量或完整载荷构建，不涉及客户端包、Nginx 路由或数据库结构变化。代码提交不代表服务器已部署；部署时需同时更新 `index.html` 与 `state_server.py` 并保留回滚版本。真实微信/手机验收待完成，iOS 原生全屏使用系统控件，需要退出后操作网页换源按钮。
