@@ -1,7 +1,7 @@
 """Custom player interaction regression checks using a locally generated video, no network."""
 import re
 import subprocess
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import imageio_ffmpeg
 import pytest
@@ -891,3 +891,201 @@ def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page, scr
     assert page.locator("body").evaluate("node => getComputedStyle(node).position") != "fixed"
     page.evaluate("window.scrollTo(0, 120)")
     assert page.evaluate("window.scrollY") == 120
+
+
+@pytest.fixture
+def source_catalog(player_page):
+    """A single search result with two independently served playback sources."""
+    page = player_page
+    variants = [
+        {
+            "title": "欢天喜地七仙女", "year": "2005", "category": "国产剧",
+            "actor": "霍思燕,郑国霖", "source": source,
+            "cover": "https://media.example/poster.png", "episode_count": 3,
+            "episodes": [
+                {"name": f"第{index}集", "url": f"https://media.example/{code}-{index}.m3u8"}
+                for index in range(1, 4)
+            ],
+        }
+        for source, code in [("暴风资源", "bf"), ("非凡资源", "ff")]
+    ]
+    payload = {"v": 1, "kind": "search", "heading": "搜索结果", "items": [variants[0]]}
+    state = {"variants": variants, "requests": [], "fail": False}
+
+    def resolve(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        state["requests"].append(query)
+        assert query.get("alternatives") == ["1"]
+        if state["fail"]:
+            route.fulfill(status=503, json={"error": "temporarily unavailable"})
+        else:
+            route.fulfill(json={**payload, "items": state["variants"]})
+
+    page.route("**/api/selections/**", lambda route: route.fulfill(json=payload))
+    page.route("**/api/resolve?*", resolve)
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    return page, state
+
+
+@pytest.mark.parametrize("width", [320, 390, 1280])
+def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_catalog, width, screenshots):
+    import hashlib
+    page, state = source_catalog
+    state["variants"].extend(
+        {**state["variants"][1], "source": source}
+        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "飘零资源")
+    )
+    page.set_viewport_size({"width": width, "height": 844})
+    button = page.locator("#sourceButton")
+    assert button.inner_text().strip() == "暴风"
+    assert button.is_enabled()
+    assert not state["requests"]  # Opening the default result does not query every source.
+    assert button.evaluate("node => parseFloat(getComputedStyle(node).fontSize)") <= 13
+    bounds = button.bounding_box()
+    assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+    assert bounds["height"] >= 32
+    button.click()
+    alternative = page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True)
+    alternative.wait_for(state="visible")
+    assert page.locator("#sourceMenu").get_by_role("button", name="暴风", exact=True).get_attribute("aria-pressed") == "true"
+    assert state["requests"][0]["episode"] == [hashlib.sha256(b"https://media.example/bf-1.m3u8").hexdigest()]
+    assert state["requests"][0]["year"] == ["2005"]
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    menu = page.locator("#sourceMenu").bounding_box()
+    assert menu["x"] >= 0 and menu["x"] + menu["width"] <= width
+    assert menu["y"] >= 0 and menu["y"] + menu["height"] <= 844
+    assert page.locator("#sourceOptions button").count() == 7
+    page.screenshot(path=str(screenshots / f"source-menu-{width}.png"))
+    alternative.click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4')")
+    assert button.inner_text().strip() == "非凡"
+    page.get_by_label("返回", exact=True).click()
+    assert page.locator(".recommend-card:visible").count() == 1
+
+
+@pytest.mark.parametrize("playing", [False, True])
+def test_source_switch_preserves_episode_position_speed_and_play_intent(source_catalog, playing):
+    page, _ = source_catalog
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.locator("#speedButton").click()
+    page.locator("#video").evaluate("video => { video.currentTime = 2; }")
+    page.wait_for_function("!document.getElementById('video').seeking")
+    if playing:
+        play_click(page)
+        page.wait_for_function("!document.getElementById('video').paused")
+    before = page.locator("#video").evaluate("video => video.currentTime")
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-2.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
+    assert page.locator("#meta").inner_text() == "第2集"
+    assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
+    assert page.locator("#video").evaluate("video => video.paused") is not playing
+    assert before - .15 <= page.locator("#video").evaluate("video => video.currentTime") < before + 2
+
+
+def test_source_switch_does_not_substitute_another_episode_when_missing(source_catalog):
+    page, state = source_catalog
+    state["variants"][1]["episodes"] = state["variants"][1]["episodes"][:2]
+    state["variants"][1]["episode_count"] = 2
+    page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-3.mp4')")
+    page.locator("#sourceButton").click()
+    alternative = page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True)
+    alternative.wait_for(state="visible")
+    # Either disable a missing episode or explain it on click; never silently play episode 2.
+    if alternative.is_enabled():
+        alternative.click()
+    assert page.locator("#sourceButton").inner_text().strip() == "暴风"
+    assert page.locator("#meta").inner_text() == "第3集"
+    assert page.locator("#video").evaluate("video => video.currentSrc.includes('bf-3.mp4')")
+
+
+def test_source_switch_lookup_failure_can_retry_without_losing_current_video(source_catalog):
+    page, state = source_catalog
+    state["fail"] = True
+    page.locator("#sourceButton").click()
+    page.locator("#sourceRetry").wait_for(state="visible")
+    assert page.locator("#sourceStatus").inner_text()
+    assert page.locator("#video").evaluate("video => video.currentSrc.includes('bf-1.mp4') && video.paused")
+    state["fail"] = False
+    page.locator("#sourceRetry").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).wait_for(state="visible")
+    assert page.locator("#sourceRetry").is_hidden()
+    assert len(state["requests"]) == 2
+
+
+def test_source_switch_is_available_after_media_error(source_catalog, screenshots):
+    page, _ = source_catalog
+    page.route("**/unavailable.mp4", lambda route: route.abort("failed"))
+    page.locator("#video").evaluate("video => { video.src = 'https://media.example/unavailable.m3u8'; video.load(); }")
+    page.locator("#switchSourceOnError").wait_for(state="visible")
+    assert "切换" in page.locator("#status").inner_text()
+    assert page.locator("#videoHint").is_visible()
+    assert "右上角" in page.locator("#videoHint").inner_text()
+    assert "当前资源" not in page.locator("#videoHint").inner_text()
+    assert not page.locator("#videoShell").evaluate("node => node.classList.contains('controls-hidden')")
+    page.screenshot(path=str(screenshots / "source-error-390.png"))
+    page.locator("#switchSourceOnError").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2")
+    assert page.locator("#switchSourceOnError").is_hidden()
+
+
+def test_source_switch_late_response_does_not_reopen_player_after_return(source_catalog):
+    page, state = source_catalog
+    page.evaluate("""payload => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, options) => String(input).includes('alternatives=1')
+        ? new Promise(resolve => { window.releaseSourceResponse = () => resolve(new Response(JSON.stringify(payload), {status: 200, headers: {'Content-Type': 'application/json'}})); })
+        : originalFetch(input, options);
+    }""", {"v": 1, "kind": "search", "heading": "搜索结果", "items": state["variants"]})
+    page.locator("#sourceButton").click()
+    page.wait_for_function("typeof window.releaseSourceResponse === 'function'")
+    page.get_by_label("返回", exact=True).click()
+    page.evaluate("window.releaseSourceResponse()")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    assert page.locator(".recommend-card:visible").count() == 1
+    assert page.locator("#sourceMenu").is_hidden()
+    assert page.locator("#video").get_attribute("src") is None
+
+
+def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming(source_catalog):
+    page, _ = source_catalog
+    page.locator("#video").evaluate("video => { video.currentTime = 2; }")
+    page.wait_for_function("!document.getElementById('video').seeking")
+    page.evaluate("""() => {
+      document.getElementById('video').canPlayType = () => '';
+      window.Hls = class {
+        static Events = {MANIFEST_PARSED: 'manifest', LEVEL_SWITCHED: 'level', ERROR: 'error'};
+        static isSupported() { return true; }
+        constructor() { this.handlers = {}; this.levels = []; window.testHls = this; }
+        loadSource(url) { this.url = url; }
+        attachMedia(video) { this.video = video; }
+        on(name, callback) { this.handlers[name] = callback; }
+        destroy() {}
+      };
+    }""")
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    # A real HLS manifest may arrive while the previous video's duration is still valid.
+    page.evaluate("window.testHls.handlers.manifest()")
+    assert page.locator("#video").evaluate("video => video.readyState >= 2 && video.currentSrc.includes('bf-1.mp4')")
+    page.evaluate("window.testHls.video.src = window.testHls.url")
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
+    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.1)
+    assert page.locator("#video").evaluate("video => video.paused")
+
+
+def test_source_switch_keyboard_escape_restores_button_focus(source_catalog):
+    page, _ = source_catalog
+    page.keyboard.press("Tab")
+    page.locator("#sourceButton").focus()
+    page.keyboard.press("Enter")
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).wait_for(state="visible")
+    page.keyboard.press("Escape")
+    assert page.locator("#sourceMenu").is_hidden()
+    assert page.locator("#sourceButton").get_attribute("aria-expanded") == "false"
+    assert page.locator("#sourceButton").evaluate("node => node === document.activeElement")

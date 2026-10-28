@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,237 @@
+@@ -5,369 +5,249 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -405,6 +405,16 @@ diff --git a/index.html b/index.html
 +    .video-header button { pointer-events: auto; }
 +    .video-heading { flex: 1; min-width: 0; font-size: clamp(14px, 2vw, 20px); font-weight: 650; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 +    .video-header .control-button { flex: 0 0 40px; }
++    .source-button { flex: 0 0 auto; min-height: 34px; max-width: 90px; padding: 0 9px; border-color: #ffffff24; border-radius: 7px; background: #11181f99; font-family: var(--body-font); font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
++    .source-value { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
++    .source-value svg { width: 13px; height: 13px; }
++    .more-panel.source-menu { top: 58px; right: 52px; width: 176px; max-width: calc(100% - 64px); max-height: calc(100% - 72px); padding: 7px; overscroll-behavior: contain; }
++    .source-menu p { margin: 4px 3px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
++    .source-menu p:empty { display: none; }
++    .source-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
++    .source-menu .source-options button { min-height: 36px; padding: 0 8px; border-radius: 7px; font-size: 12px; text-align: center; font-weight: 400; }
++    .source-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
++    #sourceRetry { margin-top: 8px; }
 +    .control-button { display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); }
 +    @media (hover: hover) and (pointer: fine) { .video-shell .control-button:hover:not(:disabled) { border: 0; background: #ffffff1f; } }
 +    .video-shell .control-button { outline-color: var(--text); box-shadow: none; color: var(--text); border: 0; }
@@ -448,7 +458,7 @@ diff --git a/index.html b/index.html
 +    #status { flex: 1; margin: 0; font-size: 12px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
 +    #status.error { color: var(--danger); }
 +    .watch-stage.video-ready .below-player:has(#retry[hidden]) { min-height: 0; height: 0; overflow: hidden; padding: 0; }
-+    #retry { padding: 0 12px; color: var(--accent); }
++    #retry, #switchSourceOnError { flex-shrink: 0; padding: 0 10px; color: var(--accent); font-size: 12px; }
 +    .inline-episodes { padding: 18px 20px 8px; margin: 0; border: 0; background: transparent; }
 +    .inline-episodes-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 +    .inline-episodes-title, .related-header h2 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -518,6 +528,7 @@ diff --git a/index.html b/index.html
 +        <header class="video-header">
 +          <button id="pageBackButton" class="control-button" type="button" aria-label="返回"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.7 5.3-1.4-1.4L5.2 12l8.1 8.1 1.4-1.4L8 12Z"/></svg></button>
 +          <div class="video-heading"><span id="videoTitle">正在加载</span><span aria-hidden="true"> · </span><span id="meta">第1集</span></div>
++          <button id="sourceButton" class="source-button" type="button" aria-expanded="false" aria-controls="sourceMenu" hidden><span class="source-value"><span id="sourceLabel"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6-1.4-1.4L12 12.2 7.4 7.6Z"/></svg></span></button>
 +          <button id="moreButton" class="control-button" type="button" aria-label="更多播放设置" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
 +        </header>
 +        <input id="playbackRate" type="hidden" value="1">
@@ -532,6 +543,7 @@ diff --git a/index.html b/index.html
 +          </div>
 +          <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度" disabled>
 +        </div>
++        <section id="sourceMenu" class="more-panel source-menu" aria-label="切换资源" hidden><p id="sourceStatus" role="status" aria-live="polite"></p><div id="sourceOptions" class="source-options" role="group" aria-label="资源列表"></div><button id="sourceRetry" type="button" hidden>重试获取资源</button></section>
 +        <section id="morePanel" class="more-panel" aria-label="播放设置" hidden>
 +          <label class="switch-label"><input id="autoNext" type="checkbox" checked><span>自动连播</span></label>
 +          <div class="episode-navigation"><button id="previous" type="button">上一集</button><button id="next" type="button">下一集</button></div>
@@ -540,7 +552,7 @@ diff --git a/index.html b/index.html
 +        <div id="episodeSheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden><button id="sheetBackdrop" class="sheet-backdrop" type="button" aria-label="关闭选集"></button><section class="sheet-panel"><header class="sheet-header"><span id="sheetTitle">选择剧集</span><button aria-label="关闭选集" id="sheetClose" class="sheet-close" type="button">×</button></header><div id="sheetEpisodeRanges" class="episode-ranges" role="group" aria-label="剧集范围"></div><div id="sheetEpisodeGrid" class="episode-grid"></div></section></div>
 +      </div>
 +      <section class="watch-description"><h1 id="title">短剧播放</h1><p id="watchDetails">正在读取作品信息…</p></section>
-+      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><a id="direct" hidden aria-hidden="true"></a></div>
++      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><button id="switchSourceOnError" type="button" hidden>切换资源</button><a id="direct" hidden aria-hidden="true"></a></div>
 +      <div class="metadata-feedback"><p id="metadataStatus" role="status"></p><button id="metadataRetry" type="button" hidden>重试获取选集</button></div>
 +    </section>
 +    <section id="recommendations" class="recommendations-page" hidden>
@@ -589,7 +601,22 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -406,8 +274,342 @@
+@@ -377,6 +257,14 @@
+       const videoShell = document.getElementById('videoShell');
+       const fallback = document.getElementById('direct');
+       const retry = document.getElementById('retry');
++      const sourceButton = document.getElementById('sourceButton');
++      const sourceLabel = document.getElementById('sourceLabel');
++      const sourceMenu = document.getElementById('sourceMenu');
++      const sourceOptions = document.getElementById('sourceOptions');
++      const sourceStatus = document.getElementById('sourceStatus');
++      const sourceRetry = document.getElementById('sourceRetry');
++      const switchSourceOnError = document.getElementById('switchSourceOnError');
++      let sourceSession = null;
+       const previous = document.getElementById('previous');
+       const next = document.getElementById('next');
+       const episodeOpen = document.getElementById('episodeOpen');
+@@ -406,24 +294,375 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -605,7 +632,7 @@ diff --git a/index.html b/index.html
 +      let composing = false;
        let episodesExpanded = false;
        const VIDEO_ASPECT_CLASSES = ['player--cinema', 'player--landscape', 'player--square', 'player--portrait'];
-+
+ 
 +      const togglePlayback = document.getElementById('togglePlayback');
 +      const speedButton = document.getElementById('speedButton');
 +      const seek = document.getElementById('seek');
@@ -620,10 +647,10 @@ diff --git a/index.html b/index.html
 +      let hintTimer, controlsTimer, relatedRequest = 0, relatedAbort = null;
 +      let relatedPool = [], relatedShown = [], isSeeking = false;
 +      const rates = [1, 1.5, 2];
-+      const showHint = (message) => {
++      const showHint = (message, duration = 1400) => {
 +        clearTimeout(hintTimer);
 +        hint.textContent = message; hint.hidden = false;
-+        hintTimer = setTimeout(() => { hint.hidden = true; hint.textContent = ''; }, 1400);
++        hintTimer = setTimeout(() => { hint.hidden = true; hint.textContent = ''; }, duration);
 +      };
 +      document.addEventListener('keydown', (event) => { if (event.key === 'Tab') document.body.classList.add('keyboard-navigation'); });
 +      document.addEventListener('pointerdown', () => document.body.classList.remove('keyboard-navigation'), {passive: true});
@@ -631,9 +658,9 @@ diff --git a/index.html b/index.html
 +      const showControls = () => {
 +        clearTimeout(controlsTimer);
 +        videoShell.classList.remove('controls-hidden');
-+        if (!video.paused && morePanel.hidden && episodeSheet.hidden && !isSeeking) {
++        if (!video.paused && !statusNode.classList.contains('error') && morePanel.hidden && sourceMenu.hidden && episodeSheet.hidden && !isSeeking) {
 +          controlsTimer = setTimeout(() => {
-+            if (!video.paused && morePanel.hidden && episodeSheet.hidden && !isSeeking) videoShell.classList.add('controls-hidden');
++            if (!video.paused && morePanel.hidden && sourceMenu.hidden && episodeSheet.hidden && !isSeeking) videoShell.classList.add('controls-hidden');
 +          }, 2800);
 +        }
 +      };
@@ -663,7 +690,7 @@ diff --git a/index.html b/index.html
 +      // Picture taps toggle chrome; playback remains owned by the play button.
 +      video.addEventListener('click', () => {
 +        if (videoShell.classList.contains('controls-hidden')) showControls();
-+        else if (morePanel.hidden && episodeSheet.hidden) {
++        else if (morePanel.hidden && sourceMenu.hidden && episodeSheet.hidden) {
 +          clearTimeout(controlsTimer);
 +          videoShell.classList.add('controls-hidden');
 +          video.blur();
@@ -709,6 +736,7 @@ diff --git a/index.html b/index.html
 +      window.addEventListener('pointerup', () => { if (isSeeking) endSeek(); });
 +      window.addEventListener('pointercancel', () => { if (isSeeking) endSeek(); });
 +      moreButton.addEventListener('click', () => {
++        closeSourceMenu();
 +        morePanel.hidden = !morePanel.hidden;
 +        moreButton.setAttribute('aria-expanded', String(!morePanel.hidden));
 +        if (!morePanel.hidden) autoNext.focus();
@@ -889,7 +917,7 @@ diff --git a/index.html b/index.html
 +          }
 +          const title = document.createElement('strong'); title.textContent = item.title; button.appendChild(title);
 +          button.addEventListener('click', () => {
-+            playlist = item; current = 0;
++            playlist = item; current = 0; resetSources(item);
 +            titleNode.textContent = item.title; document.title = item.title;
 +            fragment.delete('i'); fragment.delete('ep');
 +            // A new same-origin selection token makes refreshed recommendations shareable.
@@ -929,14 +957,21 @@ diff --git a/index.html b/index.html
 +        }
 +      };
 +      refreshRelatedButton.addEventListener('click', refreshRelated);
- 
++
        const fail = (message) => {
-         statusNode.textContent = message;
-@@ -415,15 +617,27 @@
+-        statusNode.textContent = message;
++        if (loadTimer) clearTimeout(loadTimer);
++        switchSourceOnError.hidden = !playlist || sourceButton.hidden;
++        statusNode.textContent = message + (switchSourceOnError.hidden ? '' : ' 可点击右上角源名称切换。');
+         statusNode.classList.add('error');
          retry.hidden = false;
-       };
- 
+-      };
+-
 -      const decodePlaylist = (token) => {
++        if (!switchSourceOnError.hidden) showHint('播放失败，可点击右上角源名称切换', 5000);
++        showControls();
++      };
++
 +      const decodePlaylist = async (token) => {
          if (!/^[A-Za-z0-9_-]{1,1800}$/.test(String(token || ''))) {
            throw new Error('播放参数不合法');
@@ -963,7 +998,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +735,7 @@
+@@ -521,7 +760,7 @@
            }
            return { name, url };
          });
@@ -972,7 +1007,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +749,71 @@
+@@ -535,6 +774,186 @@
            throw new Error('选集数据不合法');
          }
          return payload.items.map(validateSelectionItem);
@@ -980,6 +1015,124 @@ diff --git a/index.html b/index.html
 +
 +      const metadataRequests = new WeakMap();
 +      const metadataSources = new Set(['暴风资源', '非凡资源', '量子资源', '红牛资源', '极速资源', '百度云资源', '金鹰资源', '飘零资源']);
++      const sourceDisplayName = (source) => String(source || '').replace(/资源$/, '');
++      const selectionQuery = async (item) => {
++        const bytes = new TextEncoder().encode(item.episodes[0].url);
++        const digest = await crypto.subtle.digest('SHA-256', bytes);
++        const fingerprint = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
++        return new URLSearchParams({title: item.title, source: item.source, episode: fingerprint});
++      };
++      const closeSourceMenu = () => {
++        sourceMenu.hidden = true;
++        sourceButton.setAttribute('aria-expanded', 'false');
++      };
++      const resetSources = (item = null) => {
++        sourceSession?.controller?.abort();
++        sourceSession = item ? {item, items: [item], loaded: false, controller: null} : null;
++        closeSourceMenu();
++        sourceOptions.replaceChildren();
++        sourceStatus.textContent = '';
++        sourceRetry.hidden = switchSourceOnError.hidden = true;
++        sourceButton.hidden = !item || !metadataSources.has(item.source);
++        sourceLabel.textContent = sourceDisplayName(item?.source);
++        sourceButton.setAttribute('aria-label', `当前资源：${sourceDisplayName(item?.source)}，点击切换`);
++      };
++      const matchingEpisode = (target) => {
++        const name = playlist?.episodes[current]?.name || '';
++        const exact = target.episodes.findIndex((episode) => episode.name.trim() === name.trim());
++        if (exact >= 0) return exact;
++        const number = (value) => {
++          const match = value.trim().match(/^(?:第|EP(?:ISODE)?\s*)?0*(\d+)(?:集|话|期)?$/i);
++          return match ? Number(match[1]) : null;
++        };
++        const episodeNumber = number(name);
++        if (episodeNumber !== null) return target.episodes.findIndex((episode) => number(episode.name) === episodeNumber);
++        return playlist?.episodes.length === 1 && playlist.episodeCount === 1 && target.episodes.length === 1 ? 0 : -1;
++      };
++      const selectSource = (item) => {
++        if (!playlist || item.source === playlist.source) { closeSourceMenu(); return; }
++        const index = matchingEpisode(item);
++        if (index < 0) {
++          sourceStatus.textContent = '该资源暂无当前集，请选择其他资源。';
++          return;
++        }
++        const resumeTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
++        const autoplay = !video.paused || statusNode.classList.contains('error');
++        playlist = item; current = index;
++        closeSourceMenu();
++        metadataStatus.textContent = ''; metadataRetry.hidden = true;
++        titleNode.textContent = item.title;
++        updateWatchDetails(); renderEpisodes();
++        loadEpisode(index, {autoplay, resumeTime});
++        showHint(`已切换至${sourceDisplayName(item.source)}`);
++        focusForKeyboard(sourceButton);
++      };
++      const renderSources = () => {
++        sourceOptions.replaceChildren();
++        sourceSession?.items.forEach((item) => {
++          const button = document.createElement('button');
++          button.type = 'button';
++          button.setAttribute('aria-pressed', String(item.source === playlist?.source));
++          button.textContent = sourceDisplayName(item.source);
++          button.addEventListener('click', () => selectSource(item));
++          sourceOptions.appendChild(button);
++        });
++      };
++      const loadSources = async () => {
++        const session = sourceSession;
++        if (!session || session.controller || session.loaded) return;
++        const controller = new AbortController(); session.controller = controller;
++        const timeout = setTimeout(() => controller.abort(), 12000);
++        sourceStatus.textContent = '正在查找同剧资源…'; sourceRetry.hidden = true;
++        sourceMenu.setAttribute('aria-busy', 'true');
++        try {
++          const query = await selectionQuery(session.item);
++          query.set('alternatives', '1');
++          ['year', 'category', 'actor'].forEach((field) => query.set(field, String(session.item[field] || '')));
++          const response = await fetch(`/short-drama/api/resolve?${query}`, {cache: 'no-store', credentials: 'omit', signal: controller.signal});
++          if (!response.ok) throw new Error('sources unavailable');
++          const payload = await response.json();
++          if (payload?.v !== 1 || payload.kind !== 'search' || !Array.isArray(payload.items) || payload.items.length > metadataSources.size) throw new Error('invalid sources');
++          const items = payload.items.map(validateSelectionItem);
++          if (session !== sourceSession || watchStage.hidden) return;
++          // The server matches work identity; keep the original playable choice even if its catalog is offline.
++          const choices = new Map([[session.item.source, session.item]]);
++          items.forEach((item) => { if (metadataSources.has(item.source)) choices.set(item.source, item); });
++          session.items = [...choices.values()]; session.loaded = true;
++          renderSources();
++          sourceStatus.textContent = session.items.length > 1 ? '' : '暂未找到其他同剧资源。';
++          sourceRetry.hidden = session.items.length > 1;
++        } catch (_error) {
++          if (session !== sourceSession || watchStage.hidden) return;
++          sourceStatus.textContent = '资源列表加载失败，请重试。'; sourceRetry.hidden = false;
++        } finally {
++          clearTimeout(timeout); session.controller = null;
++          if (session === sourceSession) sourceMenu.setAttribute('aria-busy', 'false');
++        }
++      };
++      const openSourceMenu = () => {
++        if (!sourceSession || sourceButton.hidden) return;
++        morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false');
++        sourceMenu.hidden = false; sourceButton.setAttribute('aria-expanded', 'true');
++        renderSources(); showControls(); loadSources();
++        focusForKeyboard(sourceOptions.querySelector('[aria-pressed="true"]'));
++      };
++      sourceButton.addEventListener('click', () => {
++        if (sourceMenu.hidden) openSourceMenu();
++        else { closeSourceMenu(); showControls(); }
++      });
++      switchSourceOnError.addEventListener('click', () => { openSourceMenu(); sourceButton.scrollIntoView({block: 'nearest'}); });
++      sourceRetry.addEventListener('click', () => { if (sourceSession) sourceSession.loaded = false; loadSources(); });
++      document.addEventListener('click', (event) => {
++        if (!sourceMenu.hidden && !sourceMenu.contains(event.target) && !sourceButton.contains(event.target) && !switchSourceOnError.contains(event.target)) {
++          closeSourceMenu(); showControls();
++        }
++      });
++      document.addEventListener('keydown', (event) => {
++        if (event.key === 'Escape' && !sourceMenu.hidden) {
++          event.preventDefault(); closeSourceMenu(); sourceButton.focus(); showControls();
++        }
++      });
 +      const needsMetadata = (item) => metadataSources.has(item.source) && (!item.cover || item.episodeCount > item.episodes.length);
 +      const addPoster = (container, item) => {
 +        if (!item.cover || container.querySelector('img')) return;
@@ -995,10 +1148,7 @@ diff --git a/index.html b/index.html
 +          const controller = new AbortController();
 +          const timeout = setTimeout(() => controller.abort(), 12000);
 +          try {
-+            const bytes = new TextEncoder().encode(item.episodes[0].url);
-+            const digest = await crypto.subtle.digest('SHA-256', bytes);
-+            const fingerprint = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
-+            const query = new URLSearchParams({title: item.title, source: item.source, episode: fingerprint});
++            const query = await selectionQuery(item);
 +            const response = await fetch(`/short-drama/api/resolve?${query}`, {cache: 'no-store', credentials: 'omit', signal: controller.signal});
 +            if (!response.ok) throw new Error('metadata unavailable');
 +            const resolved = validateSelectionPayload(await response.json())[0];
@@ -1044,7 +1194,7 @@ diff --git a/index.html b/index.html
        };
  
        try {
-@@ -552,22 +831,29 @@
+@@ -552,22 +971,29 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1077,7 +1227,7 @@ diff --git a/index.html b/index.html
          return;
        }
  
-@@ -586,14 +872,15 @@
+@@ -586,14 +1012,15 @@
          previous.disabled = current <= 0;
          next.disabled = current >= playlist.episodes.length - 1;
          const label = String(playlist.episodes[current]?.name || `第${current + 1}集`);
@@ -1099,7 +1249,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +901,15 @@
+@@ -614,27 +1041,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1134,7 +1284,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,17 +971,69 @@
+@@ -696,27 +1111,84 @@
          updateQualityActive();
        };
  
@@ -1175,6 +1325,7 @@ diff --git a/index.html b/index.html
        const openEpisodeSheet = () => {
 -        if (!playlist || playlist.episodes.length < 2) return;
 +        if (!playlist || playlist.episodes.length < 2 || !episodeSheet.hidden) return;
++        closeSourceMenu();
          qualityMenu.hidden = true;
          qualityButton.setAttribute('aria-expanded', 'false');
 +        sheetReturnFocus = document.activeElement;
@@ -1199,15 +1350,22 @@ diff --git a/index.html b/index.html
 +        const wasOpen = !episodeSheet.hidden;
          episodeSheet.hidden = true;
 -        document.body.classList.remove('sheet-open');
+-      };
+-
+-
+-      const loadEpisode = (index, { autoplay = false } = {}) => {
 +        episodeOpen.setAttribute('aria-expanded', 'false');
 +        episodeExpand.setAttribute('aria-expanded', 'false');
 +        [...document.querySelector('main').children, ...watchStage.children, ...videoShell.children].forEach((node) => { node.inert = false; });
 +        if (wasOpen) unlockPageScroll();
 +        if (wasOpen && sheetReturnFocus?.isConnected) sheetReturnFocus.focus({preventScroll: true});
-       };
- 
- 
-@@ -717,6 +1044,10 @@
++      };
++
++
++      const loadEpisode = (index, { autoplay = false, resumeTime = 0 } = {}) => {
+         if (!playlist) return;
+         if (index < 0 || index >= playlist.episodes.length) return;
+         const resumePlayback = autoplay || (!video.paused && !video.ended);
          const loadId = ++episodeLoadId;
          removeEpisodeReadyListener();
          current = index;
@@ -1218,15 +1376,22 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -728,20 +1059,25 @@
+@@ -724,24 +1196,35 @@
+         statusNode.classList.remove('error');
+         statusNode.textContent = '正在连接资源站……';
+         retry.hidden = true;
++        switchSourceOnError.hidden = true;
+         if (loadTimer) clearTimeout(loadTimer);
          loadTimer = setTimeout(() => {
-           fail('资源站响应超时，可能不允许浏览器直连。请稍后重试或回到微信更换资源。');
+-          fail('资源站响应超时，可能不允许浏览器直连。请稍后重试或回到微信更换资源。');
++          fail('资源站响应超时，请重试或切换资源。');
          }, 15000);
 -        const onEpisodeReady = () => {
 -          if (loadId !== episodeLoadId) return;
 -          if (loadTimer) clearTimeout(loadTimer);
 -          applyVideoAspect();
 +        let playbackRequested = false;
++        let seekPending = resumeTime > 0;
 +        const resumeEpisode = () => {
            video.playbackRate = Number(playbackRate.value) || 1;
 -          if (resumePlayback && video.paused) {
@@ -1242,15 +1407,19 @@ diff --git a/index.html b/index.html
              statusNode.textContent = '已连接，点击播放。';
            }
 +        };
-+        const onEpisodeReady = () => {
++        const onEpisodeReady = (event) => {
 +          if (loadId !== episodeLoadId) return;
 +          if (loadTimer) clearTimeout(loadTimer);
++          if (seekPending && event?.type === 'loadedmetadata' && video.readyState >= 1 && Number.isFinite(video.duration)) {
++            video.currentTime = Math.max(0, Math.min(resumeTime, video.duration - 0.25));
++            seekPending = false;
++          }
 +          applyVideoAspect();
 +          resumeEpisode();
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,19 +1085,18 @@
+@@ -749,19 +1232,18 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1264,17 +1433,27 @@ diff --git a/index.html b/index.html
            fail('播放地址无效，请回到微信重新搜索。');
            return;
          }
++        video.addEventListener('loadedmetadata', onEpisodeReady, { once: true });
++        removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
          if (video.canPlayType('application/vnd.apple.mpegurl')) {
--          video.src = source;
-           video.addEventListener('loadedmetadata', onEpisodeReady, { once: true });
-           removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
 +          // Keep the same native player alive across episodes; never load an empty src.
-+          video.src = source;
+           video.src = source;
+-          video.addEventListener('loadedmetadata', onEpisodeReady, { once: true });
+-          removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
 +          resumeEpisode();
          } else if (window.Hls && Hls.isSupported()) {
            hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
            hls.loadSource(source);
-@@ -784,44 +1119,75 @@
+@@ -775,7 +1257,7 @@
+           hls.on(Hls.Events.ERROR, (_event, data) => {
+             if (loadId === episodeLoadId && data && data.fatal) {
+               if (loadTimer) clearTimeout(loadTimer);
+-              fail('资源站拒绝了浏览器直连，请重试或回到微信更换资源。');
++              fail('视频加载失败，请重试或切换资源。');
+             }
+           });
+         } else {
+@@ -784,44 +1266,78 @@
          fragment.set('ep', String(current + 1));
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
@@ -1360,6 +1539,8 @@ diff --git a/index.html b/index.html
 +
 +      const updateWatchDetails = () => {
 +        if (!playlist) return;
++        sourceLabel.textContent = sourceDisplayName(playlist.source);
++        sourceButton.setAttribute('aria-label', `当前资源：${sourceDisplayName(playlist.source)}，点击切换`);
 +        watchDetails.textContent = [playlist.year, playlist.category,
 +          `${playlist.episodeCount || playlist.episodes.length} 集`,
 +          playlist.actor ? `主演：${playlist.actor}` : '',
@@ -1375,12 +1556,13 @@ diff --git a/index.html b/index.html
          if (!selected || !Array.isArray(selected.episodes) || !selected.episodes.length) return;
 +        lastSelectedCard = recommendationGrid.children[index];
          playlist = selected;
++        resetSources(selected);
 +        current = 0;
 +        updateWatchDetails();
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1196,16 @@
+@@ -830,11 +1346,16 @@
          fragment.delete('ep');
          renderEpisodes();
          loadEpisode(0);
@@ -1397,7 +1579,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1227,11 @@
+@@ -856,10 +1377,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1410,7 +1592,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1254,7 @@
+@@ -882,7 +1404,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1419,7 +1601,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1263,66 @@
+@@ -891,21 +1413,68 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
        }
@@ -1445,6 +1627,7 @@ diff --git a/index.html b/index.html
 +      catalogSearch.addEventListener('input', () => { clearSearch.hidden = !catalogSearch.value; if (!composing) filterCatalog(); });
 +      clearSearch.addEventListener('click', () => { catalogSearch.value = ''; composing = false; filterCatalog(); catalogSearch.focus(); });
 +      hydrateCatalog();
++      if (playlist) resetSources(playlist);
 +      updateWatchDetails();
        renderEpisodes();
        previous.addEventListener('click', () => loadEpisode(current - 1));
@@ -1462,6 +1645,7 @@ diff --git a/index.html b/index.html
 -        episodeExpand.setAttribute('aria-label', episodesExpanded ? '收起选集' : '展开选集');
 -      });
 +        if (recommendationItems.length) {
++          resetSources();
 +          closeEpisodeSheet();
 +          video.pause();
 +          removeEpisodeReadyListener();
@@ -1495,7 +1679,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,6 +1335,7 @@
+@@ -918,15 +1487,17 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -1503,7 +1687,18 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('playing', () => {
          if (loadTimer) clearTimeout(loadTimer);
-@@ -941,6 +1359,15 @@
+         retry.hidden = true;
++        switchSourceOnError.hidden = true;
+         statusNode.classList.remove('error');
+         statusNode.textContent = '正在播放';
+       });
+       video.addEventListener('pause', () => {
+-        if (!video.ended && video.readyState >= 2) statusNode.textContent = '已暂停';
++        if (!video.ended && video.readyState >= 2 && !statusNode.classList.contains('error')) statusNode.textContent = '已暂停';
+       });
+       video.addEventListener('waiting', () => {
+         if (!video.paused) statusNode.textContent = '正在缓冲…';
+@@ -941,6 +1512,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1519,7 +1714,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1385,21 @@
+@@ -958,12 +1538,21 @@
          }
        });
        syncNativeControls();
@@ -1544,7 +1739,7 @@ diff --git a/index.html b/index.html
 diff --git a/state_server.py b/state_server.py
 --- a/state_server.py
 +++ b/state_server.py
-@@ -187,6 +187,172 @@
+@@ -187,6 +187,313 @@
      return payload, None
  
  
@@ -1561,8 +1756,20 @@ diff --git a/state_server.py b/state_server.py
 +    from urllib.parse import urlencode
 +    from urllib.request import Request, build_opener
 +    request = Request(base + '?' + urlencode(params), headers={'User-Agent': 'ShortDramaPlayer/1.0'})
-+    with build_opener(_NoRedirect()).open(request, timeout=4) as response:
-+        raw = response.read(MAX_BODY_BYTES + 1)
++    deadline = time.monotonic() + 4
++    with build_opener(_NoRedirect()).open(request, timeout=3) as response:
++        chunks, size = [], 0
++        while size <= MAX_BODY_BYTES:
++            # read1 performs at most one socket read, so slow trickles cannot keep
++            # the scan occupied indefinitely. A final socket read may take 3s.
++            if time.monotonic() >= deadline:
++                raise TimeoutError('catalog read deadline exceeded')
++            chunk = response.read1(min(65536, MAX_BODY_BYTES + 1 - size))
++            if not chunk:
++                break
++            chunks.append(chunk)
++            size += len(chunk)
++        raw = b''.join(chunks)
 +    if len(raw) > MAX_BODY_BYTES:
 +        raise ValueError('catalog response too large')
 +    result = json.loads(raw)
@@ -1667,6 +1874,33 @@ diff --git a/state_server.py b/state_server.py
 +        finally:
 +            self.lock.release()
 +
++def _source_identity(item: dict) -> tuple[str, str, str, str]:
++    """Compare works across providers without treating commentary as a version."""
++    import unicodedata
++    def normalized(value: object) -> str:
++        return re.sub(r'[\W_]+', '', unicodedata.normalize('NFKC', str(value or '')).casefold())
++    title = normalized(item.get('title'))
++    year_match = re.search(r'(?:19|20)\d{2}', str(item.get('year') or ''))
++    if not year_match:
++        year_match = re.search(r'(?<=[\s(（])(?:19|20)\d{2}(?=[)）]?$)', str(item.get('title') or ''))
++    year = year_match.group(0) if year_match else ''
++    if year and len(title) > len(year) and title.endswith(year):
++        title = title[:-len(year)]
++    category = normalized(item.get('category'))
++    if re.search(r'动漫|动画|漫剧', category):
++        category = '动画'
++    elif '短剧' in category:
++        category = '短剧'
++    elif '剧' in category and not category.endswith('片'):
++        category = '电视剧'
++    elif '电影' in category or category.endswith('片'):
++        category = '电影'
++    elif '综艺' in category:
++        category = '综艺'
++    actors = re.split(r'[,，、/\s]+', str(item.get('actor') or '').strip())
++    return title, year, category, normalized(actors[0]) if actors else ''
++
++
 +class SelectionResolver:
 +    """Recover compact-link metadata from the original fixed product source."""
 +    SOURCES = dict(RecommendationCatalog.SOURCES + (
@@ -1683,41 +1917,143 @@ diff --git a/state_server.py b/state_server.py
 +        self.lock = threading.Lock()
 +        self.slots = threading.BoundedSemaphore(4)
 +        self.cache = {}
++        self.alternative_slot = threading.Lock()
++        self.alternative_cache = {}
++        self.alternative_cache_limit = 64
++        self.alternative_cache_bytes = 8 * 1024 * 1024
 +
-+    def get(self, title: str, source: str, fingerprint: str) -> dict | None:
++    def _validate_request(self, title: str, source: str, fingerprint: str) -> None:
 +        if not title or len(title) > 300 or source not in self.SOURCES or not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
 +            raise ValueError('invalid metadata request')
++
++    def _records(self, title: str, source: str) -> list:
++        if not self.slots.acquire(timeout=1):
++            raise OSError('metadata resolver busy')
++        try:
++            details = _catalog_json(self.SOURCES[source], ac='detail', wd=title, pg=1)
++            records = details.get('list', [])
++            if not isinstance(records, list):
++                raise ValueError('invalid source records')
++            return records[:100]
++        finally:
++            self.slots.release()
++
++    def get(self, title: str, source: str, fingerprint: str) -> dict | None:
++        self._validate_request(title, source, fingerprint)
 +        key = (title, source, fingerprint)
 +        with self.lock:
 +            cached = self.cache.get(key)
 +            if cached and cached[0] > time.time():
 +                return cached[1]
-+        if not self.slots.acquire(timeout=1):
-+            raise OSError('metadata resolver busy')
++        item = None
++        for record in self._records(title, source):
++            if not isinstance(record, dict) or str(record.get('vod_name') or '').strip() != title:
++                continue
++            item = _catalog_item(record, source, short_only=False, fingerprint=fingerprint)
++            if item:
++                break
++        with self.lock:
++            now = time.time()
++            self.cache = {key: value for key, value in self.cache.items() if value[0] > now}
++            if len(self.cache) >= 200:
++                self.cache.pop(next(iter(self.cache)))
++            self.cache[key] = (now + (300 if item else 30), item)
++        return item
++
++    def _source_items(self, title: str, source: str, fingerprint: str) -> list[dict] | None:
 +        try:
-+            details = _catalog_json(self.SOURCES[source], ac='detail', wd=title, pg=1)
-+            item = None
-+            for record in details.get('list', [])[:100]:
-+                if not isinstance(record, dict) or str(record.get('vod_name') or '').strip() != title:
++            items = []
++            for record in self._records(title, source):
++                if not isinstance(record, dict):
++                    continue
++                metadata = ' '.join(str(record.get(field) or '') for field in ('vod_name', 'type_name', 'vod_remarks'))
++                if re.search(r'解说|预告|花絮|幕后|片段', metadata):
 +                    continue
 +                item = _catalog_item(record, source, short_only=False, fingerprint=fingerprint)
 +                if item:
-+                    break
++                    items.append(item)
++            return items
++        except (OSError, ValueError, TypeError, KeyError, AttributeError):
++            LOGGER.warning('alternative catalog source unavailable: %s', source)
++            return None
++
++    def _matching_sources(self, candidates: list[dict], hint: dict, source: str) -> list[dict]:
++        wanted = _source_identity(hint)
++        anchor = next((item for item in candidates if item['source'] == source and all(not value or value == _source_identity(item)[index] for index, value in enumerate(wanted))), None)
++        expected = list(_source_identity({**hint, **({key: value for key, value in anchor.items() if value} if anchor else {})}))
++        matching = [(item, _source_identity(item)) for item in candidates]
++        matching = [(item, identity) for item, identity in matching if identity[0] == expected[0]]
++        for index in range(1, 4):
++            if expected[index]:
++                matching = [(item, identity) for item, identity in matching if identity[index] == expected[index]]
++        # Old links can omit metadata. Never guess between different remakes or media kinds.
++        for index in range(1, 4):
++            if not expected[index]:
++                values = {identity[index] for _, identity in matching if identity[index]}
++                if len(values) > 1:
++                    return []
++                expected[index] = next(iter(values), '')
++        if not anchor and not (expected[1] or expected[3]):
++            return []
++        unique = {}
++        for item, identity in matching:
++            if any(expected[index] and identity[index] != expected[index] for index in range(1, 4)):
++                continue
++            previous = unique.get(item['source'])
++            if previous is None or len(item['episodes']) > len(previous['episodes']):
++                unique[item['source']] = item
++        ordered = sorted(unique.values(), key=lambda item: item['source'] != source)
++        bounded, size = [], 2048  # Leave room for the JSON envelope and heading.
++        for item in ordered:
++            size += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
++            if size > MAX_BODY_BYTES:
++                break
++            bounded.append(item)
++        return bounded
++
++    def alternatives(self, title: str, source: str, fingerprint: str, *, year: str = '', category: str = '', actor: str = '') -> list[dict]:
++        self._validate_request(title, source, fingerprint)
++        if len(year) > 20 or len(category) > 100 or len(actor) > 300:
++            raise ValueError('invalid work metadata')
++        key = (title, source, fingerprint, year, category, actor)
++        with self.lock:
++            cached = self.alternative_cache.get(key)
++            if cached and cached[0] > time.time():
++                return cached[1]
++        # One scan per service, including identical requests, bounds public fanout.
++        if not self.alternative_slot.acquire(blocking=False):
++            raise OSError('alternative catalog busy')
++        try:
++            from concurrent.futures import ThreadPoolExecutor
++            with self.lock:
++                cached = self.alternative_cache.get(key)
++                if cached and cached[0] > time.time():
++                    return cached[1]
++            with ThreadPoolExecutor(max_workers=4) as executor:
++                search_title = re.sub(r'[\s(（]+(?:19|20)\d{2}[)）]?\s*$', '', title)
++                futures = [executor.submit(self._source_items, search_title, name, fingerprint if name == source else '') for name in self.SOURCES]
++                results = [future.result() for future in futures]
++            if all(result is None for result in results):
++                raise OSError('alternative catalogs unavailable')
++            candidates = [item for result in results if result is not None for item in result]
++            items = self._matching_sources(candidates, {'title': title, 'year': year, 'category': category, 'actor': actor}, source)
++            size = len(json.dumps(items, ensure_ascii=False).encode('utf-8'))
 +            with self.lock:
 +                now = time.time()
-+                self.cache = {key: value for key, value in self.cache.items() if value[0] > now}
-+                if len(self.cache) >= 200:
-+                    self.cache.pop(next(iter(self.cache)))
-+                self.cache[key] = (now + (300 if item else 30), item)
-+            return item
++                self.alternative_cache = {key: value for key, value in self.alternative_cache.items() if value[0] > now}
++                while self.alternative_cache and (len(self.alternative_cache) >= self.alternative_cache_limit or sum(value[2] for value in self.alternative_cache.values()) + size > self.alternative_cache_bytes):
++                    self.alternative_cache.pop(next(iter(self.alternative_cache)))
++                if size <= self.alternative_cache_bytes:
++                    self.alternative_cache[key] = (now + (300 if items else 30), items, size)
++            return items
 +        finally:
-+            self.slots.release()
++            self.alternative_slot.release()
 +
 +
  class Handler(BaseHTTPRequestHandler):
      server_version = "short-drama-state/1.0"
  
-@@ -211,6 +377,38 @@
+@@ -211,6 +518,45 @@
          path = unquote(urlsplit(self.path).path)
          if path == "/health":
              self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
@@ -1737,11 +2073,18 @@ diff --git a/state_server.py b/state_server.py
 +                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "metadata query too long"})
 +                return
 +            from urllib.parse import parse_qs
-+            query = parse_qs(urlsplit(self.path).query)
-+            if set(query) != {'title', 'source', 'episode'} or any(len(values) != 1 for values in query.values()):
++            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
++            required = {'title', 'source', 'episode'}
++            alternatives = query.get('alternatives') == ['1']
++            allowed = required | {'alternatives', 'year', 'category', 'actor'} if alternatives else required
++            if not required <= set(query) or not set(query) <= allowed or any(len(values) != 1 for values in query.values()):
 +                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid metadata request'})
 +                return
 +            try:
++                if alternatives:
++                    items = self.server.selection_resolver.alternatives(query['title'][0], query['source'][0], query['episode'][0], **{key: query.get(key, [''])[0] for key in ('year', 'category', 'actor')})
++                    self._send_json(HTTPStatus.OK, {'v': 1, 'kind': 'search', 'heading': query['title'][0], 'items': items})
++                    return
 +                item = self.server.selection_resolver.get(query['title'][0], query['source'][0], query['episode'][0])
 +            except ValueError:
 +                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid metadata request'})
@@ -1756,7 +2099,7 @@ diff --git a/state_server.py b/state_server.py
              return
          prefix = "/selections/"
          if path.startswith(prefix):
-@@ -272,6 +470,8 @@
+@@ -272,6 +618,8 @@
      logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
      server = ThreadingHTTPServer((args.host, args.port), Handler)
      server.state_store = StateStore(Path(args.directory), args.ttl, args.max_entries)  # type: ignore[attr-defined]
