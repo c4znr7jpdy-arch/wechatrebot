@@ -326,7 +326,7 @@ diff --git a/index.html b/index.html
 +    .timeline #duration { color: #c5cbd2; }
 +    .controls-spacer { flex: 1; }
 +    #fullscreenNext, #fullscreenSourceDock, .fullscreen-label { display: none; }
-+    body:has(main.watch-mode) { --accent: #00d99b; --accent-soft: #10382e; }
++    body:has(main.watch-mode) { --accent: #e3bf82; --accent-soft: #302a20; }
 +    .video-shell.container-fullscreen .video-header { padding: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) 38px max(28px, env(safe-area-inset-left)); }
 +    .container-fullscreen .video-heading { font-size: 20px; font-weight: 400; }
 +    .container-fullscreen #videoTitle, .container-fullscreen .title-separator { display: none; }
