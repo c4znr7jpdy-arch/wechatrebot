@@ -573,6 +573,7 @@
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
     const leavingGroupManagement = state.activePage === "groups" && page !== "groups";
+    if (state.activePage === "settings" && page !== "settings") clearProviderTest();
     state.activePage = page;
     if (leavingGroupManagement) {
       window.clearTimeout(state.groupRefreshRetryTimer);
@@ -1274,7 +1275,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
@@ -1295,6 +1296,7 @@
     SETTINGS_SECTIONS,
     api: (...args) => api(...args),
     applyBrand: (...args) => applyBrand(...args),
+    clearProviderTest: (...args) => clearProviderTest(...args),
     confirmAction: (...args) => confirmAction(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),

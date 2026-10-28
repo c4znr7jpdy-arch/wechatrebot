@@ -10,16 +10,22 @@ import time
 from . import __version__
 from .customer_logs import (
     ACTIVITY_RETENTION_SECONDS, ERROR_REPEAT_WINDOW_SECONDS,
-    LogSource, log_sources, log_timestamp, read_log_tail, sanitize_log_text,
+    LogSource, log_sources, log_timestamp, read_log_tail, sanitize_log_text, strip_log_ansi,
 )
 from .diagnostics import redact_sensitive
-from .error_catalog import load_error_catalog
+from .error_catalog import load_error_catalog, provider_error_code
 from .events import EventStore
 from .update_errors import UPDATE_ERRORS
 
 
 _LEVEL = re.compile(r"\b(ERROR|ERRO|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|DBUG)\b", re.I)
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
+_MODEL_FAILURE = re.compile(
+    r"(?m)^\[(?:\d{4}-\d{2}-\d{2}[ T])?\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\] "
+    r"\[(?:Core|Plug)\] \[(?:ERROR|ERRO|WARNING|WARN)\](?: \[v[^\]\r\n]+\])? "
+    r"\[sources\.request_retry:\d+\]: MODEL_REQUEST_FAILED "
+    r"error_type=([A-Za-z_][A-Za-z_0-9]*) status_code=(\d{3}|none)\s*$"
+)
 _PRIVATE_FIELDS = re.compile(r"(?i)^(?:content|prompt|messages|chat_text|request_body|response_body)$")
 _EVENT_NAMES = {
     "APP_START": "软件已打开", "CHECK_WECHAT": "正在检查微信环境",
@@ -51,7 +57,7 @@ def diagnostic_text(value: object, root: Path, *, limit: int = 12000) -> str:
 def _blocks(text: str):
     """Keep traceback continuation lines with the record that introduced them."""
     block: list[str] = []
-    for line in text.splitlines():
+    for line in strip_log_ansi(text).splitlines():
         prefix = line[:100]
         start = bool(_TIME.search(prefix) or re.match(r"^\[?\d{2}:\d{2}:\d{2}", prefix) or re.match(r"^\[?(?:ERROR|ERRO|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|DBUG)\b", prefix, re.I))
         if start and block:
@@ -78,6 +84,7 @@ class ActivityService:
         )
 
     def _item(self, source: LogSource, raw: str, *, position: int = 0) -> dict:
+        raw = strip_log_ansi(raw)
         structured = None
         if source.key in {"manager", "update"}:
             try:
@@ -214,12 +221,14 @@ class ActivityService:
 
 def classify_log_code(text: str) -> str:
     """Only recognize explicit SDK exception evidence, not HTTP-like chat text."""
-    sdk = re.search(r"\bopenai\.(AuthenticationError|PermissionDeniedError|RateLimitError|APITimeoutError|APIConnectionError|NotFoundError|InternalServerError|BadRequestError):", text)
+    text = strip_log_ansi(text)
+    failure = _MODEL_FAILURE.search(text)
+    if failure:
+        status = int(failure.group(2)) if failure.group(2) != "none" else None
+        return provider_error_code(failure.group(1), status)
+    sdk = re.search(r"(?m)^\s*openai\.(?:_exceptions\.)?(AuthenticationError|PermissionDeniedError|RateLimitError|APITimeoutError|APIConnectionError|NotFoundError|InternalServerError|BadRequestError):", text)
     if not sdk:
         return ""
-    return {
-        "AuthenticationError": "16002", "PermissionDeniedError": "16003",
-        "RateLimitError": "16005" if re.search(r"['\"]code['\"]\s*:\s*['\"]insufficient_quota['\"]", text) else "16004",
-        "APITimeoutError": "16007", "APIConnectionError": "16006", "NotFoundError": "16009",
-        "InternalServerError": "16008", "BadRequestError": "16010",
-    }[sdk.group(1)]
+    if sdk.group(1) == "RateLimitError" and re.search(r"['\"]code['\"]\s*:\s*['\"]insufficient_quota['\"]", text):
+        return "16005"
+    return provider_error_code(sdk.group(1))
