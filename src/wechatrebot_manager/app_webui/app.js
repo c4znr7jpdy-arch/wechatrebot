@@ -606,12 +606,16 @@
       if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
     }
     if (page === "history") {
-      // Keep the current account's conversation and message DOM when returning
-      // to this page. The normal background poll refreshes it without showing
-      // the initial-load state or issuing two consecutive message requests.
-      if ((!state.historyAccount || state.historyReadyAccount !== state.historyAccount)
-          && !state.historyConversationsLoading) {
-        await loadConversations({refreshGroups: true});
+      // The first visit needs the account gate and initial loading state. Once
+      // the account has been read, refresh the retained conversation silently
+      // on every return so a long-hidden page catches up immediately without
+      // replacing the current messages or scroll position with a loader.
+      if (!state.historyAccount || state.historyReadyAccount !== state.historyAccount) {
+        if (!state.historyConversationsLoading) {
+          await loadConversations({refreshGroups: true});
+        }
+      } else if (!state.historyConversationsLoading) {
+        void loadConversations({silent: true, refreshGroups: true});
       }
     }
     if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
