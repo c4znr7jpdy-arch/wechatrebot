@@ -193,6 +193,8 @@ def test_core_ui_flattens_settings_and_moves_chat_binding_to_chat_details():
     html = (webui / 'index.html').read_text(encoding='utf-8')
     app = manager_script()
     core = (webui / 'core-settings.js').read_text(encoding='utf-8')
+    assert '<details class="core-detail" id="coreDetail" open>' in html
+    assert '<summary><div class="core-detail-heading">' in core
     assert 'data-settings-tab="core"' in html
     assert '人格身份与维护' not in html
     assert 'personaForm' not in html + app
