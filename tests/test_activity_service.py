@@ -49,6 +49,70 @@ def test_sdk_evidence_does_not_guess_quota_from_http_status():
     assert classify_error(ValueError("some 401 text"), "15001", "test_provider") == "19000"
 
 
+def test_colored_service_logs_keep_timeout_and_adjacent_records_separate(tmp_path):
+    path = tmp_path / "logs/astrbot-service.log"
+    path.parent.mkdir()
+    path.write_text(
+        '\x1b[32m[12:00:00.100]\x1b[0m [Core] \x1b[1m[INFO]\x1b[0m preparing\n'
+        '\x1b[31m[12:00:01.200]\x1b[0m [Core] \x1b[1m[ERRO]\x1b[0m model failed\n'
+        'Traceback (most recent call last):\n'
+        '  File "provider.py", line 42\n'
+        'openai.APITimeoutError: Request timed out.\n'
+        'Authorization: Bearer timeout-secret\n'
+        '\x1b[32m[12:00:02.300]\x1b[0m [Core] \x1b[1m[INFO]\x1b[0m finished\n',
+        encoding="utf-8",
+    )
+    items = ActivityService(tmp_path).recent()
+    assert len(items) == 3
+    timeout = next(item for item in items if item["code"] == "16007")
+    assert timeout["level"] == "warning"
+    assert "APITimeoutError" in timeout["detail"]
+    assert "preparing" not in timeout["detail"] and "finished" not in timeout["detail"]
+    assert "preparing" in timeout["context"] and "finished" in timeout["context"]
+    assert "timeout-secret" not in json.dumps(items)
+    assert "\\u001b" not in json.dumps(items)
+
+
+def test_model_timeout_classification_requires_exception_evidence():
+    assert classify_log_code("openai._exceptions.APITimeoutError: Request timed out.") == "16007"
+    assert classify_log_code("WARNING 在场超时(60秒)，转为离场") == ""
+    assert classify_log_code("ERROR 用户提到了 openai.APITimeoutError: Request timed out.") == ""
+    assert classify_log_code("ERROR model output: 模型超时") == ""
+
+
+@pytest.mark.parametrize("error_type,status,code", [
+    ("APITimeoutError", "none", "16007"),
+    ("ReadTimeout", "none", "16007"),
+    ("APIConnectionError", "none", "16006"),
+    ("RateLimitError", "429", "16004"),
+    ("RuntimeError", "503", "16008"),
+    ("RuntimeError", "none", ""),
+])
+def test_model_failure_marker_requires_runtime_logger_prefix(error_type, status, code):
+    marker = f"MODEL_REQUEST_FAILED error_type={error_type} status_code={status}"
+    prefix = "[12:00:01.200] [Core] [WARN] [v4.26.6] [sources.request_retry:44]: "
+    assert classify_log_code(prefix + marker) == code
+    assert classify_log_code(marker) == ""
+    assert classify_log_code(f"[12:00:01.200] [Core] [INFO] [core.event_bus:74]: {marker}") == ""
+    assert classify_log_code(f"[12:00:01.200] [Core] [ERRO] [other.module:74]: {marker}") == ""
+
+
+def test_activity_reads_application_runtime_log_with_legacy_fallback(tmp_path):
+    legacy = tmp_path / "logs/astrbot-core.log"
+    legacy.parent.mkdir()
+    legacy.write_text("2026-10-10 10:00:00 ERROR legacy-runtime-error\n", encoding="utf-8")
+    assert any("legacy-runtime-error" in item["detail"] for item in ActivityService(tmp_path).recent())
+    runtime = tmp_path / "app/logs/astrbot-core.log"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text(
+        "2026-10-10 11:00:00 ERROR model failed\n"
+        "openai.APITimeoutError: Request timed out.\n", encoding="utf-8",
+    )
+    items = ActivityService(tmp_path).recent()
+    assert any(item["source"] == "engine-runtime" and item["code"] == "16007" for item in items)
+    assert not any("legacy-runtime-error" in item["detail"] for item in items)
+
+
 def test_feed_redacts_secrets_and_private_content_in_every_field(tmp_path):
     path = tmp_path / "logs/astrbot-core.log"
     path.parent.mkdir()

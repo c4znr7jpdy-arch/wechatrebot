@@ -7,8 +7,32 @@ from typing import Mapping
 from urllib.error import HTTPError, URLError
 import sqlite3
 
+from .plugin_errors import ProviderTestError
+
 
 DEFAULT_ERROR_CODE = "19000"
+_PROVIDER_ERROR_CODES = {
+    "AuthenticationError": "16002", "PermissionDeniedError": "16003",
+    "RateLimitError": "16004", "APITimeoutError": "16007",
+    "TimeoutError": "16007", "ReadTimeout": "16007", "ConnectTimeout": "16007",
+    "WriteTimeout": "16007", "PoolTimeout": "16007",
+    "APIConnectionError": "16006", "ConnectError": "16006",
+    "InternalServerError": "16008", "NotFoundError": "16009",
+    "BadRequestError": "16010", "UnprocessableEntityError": "16010",
+    "EmptyModelResponseError": "16012",
+}
+
+
+def provider_error_code(error_type: str, status_code: int | None = None) -> str:
+    """Classify explicit provider exception metadata, never arbitrary error prose."""
+    code = _PROVIDER_ERROR_CODES.get(str(error_type).rsplit(".", 1)[-1], "")
+    if code:
+        return code
+    if isinstance(status_code, int) and not isinstance(status_code, bool) and 400 <= status_code <= 599:
+        return {401: "16002", 403: "16003", 404: "16009", 429: "16004"}.get(
+            status_code, "16008" if status_code >= 500 else "16010"
+        )
+    return ""
 
 
 class AccountStatusUnavailableError(OSError):
@@ -26,8 +50,10 @@ def classify_error(exc: BaseException, fallback: str, operation: str) -> str:
         seen: set[int] = set()
         while cause is not None and id(cause) not in seen:
             seen.add(id(cause))
+            if isinstance(cause, ProviderTestError):
+                return cause.error_code
             if isinstance(cause, HTTPError):
-                return {401: "16002", 403: "16003", 404: "16009", 429: "16004"}.get(cause.code, "16008" if cause.code >= 500 else "16010")
+                return provider_error_code(type(cause).__name__, cause.code) or DEFAULT_ERROR_CODE
             if isinstance(cause, TimeoutError):
                 return "16007"
             if isinstance(cause, URLError):
@@ -121,4 +147,5 @@ __all__ = [
     "ErrorCatalog",
     "ErrorDefinition",
     "load_error_catalog",
+    "provider_error_code",
 ]

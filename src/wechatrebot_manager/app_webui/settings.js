@@ -7,6 +7,7 @@ window.createManagerSettings = function (helpers) {
     SETTINGS_SECTIONS,
     api,
     applyBrand,
+    clearProviderTest,
     confirmAction,
     escapeHtml,
     fullTime,
@@ -74,6 +75,7 @@ window.createManagerSettings = function (helpers) {
   function setSettingsSection(section, focus = false) {
     if (!SETTINGS_SECTIONS.has(section)) return;
     const changed = state.settingsSection !== section;
+    if (changed) clearProviderTest();
     state.settingsSection = section;
     const page = $("#page-settings");
     page.dataset.settingsSection = section;
