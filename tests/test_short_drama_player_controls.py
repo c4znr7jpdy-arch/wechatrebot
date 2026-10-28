@@ -322,6 +322,11 @@ def test_episode_groups_modal_focus_and_current_state(cinema_catalog, trigger):
         assert page.locator(f"#{button}").get_attribute("aria-expanded") == "true"
     assert page.locator("#sheetClose").evaluate("node => node === document.activeElement")
     assert not page.locator("#episodeSheet").evaluate("node => node.inert")
+    assert page.locator(".sheet-panel").evaluate("""panel => {
+      const bounds = panel.getBoundingClientRect(), x = bounds.x + bounds.width / 2;
+      return [bounds.top + 8, bounds.top + bounds.height / 2, bounds.bottom - 8]
+        .every(y => panel.contains(document.elementFromPoint(x, y)));
+    }""")
     page.keyboard.press("Shift+Tab")
     assert page.locator("#sheetEpisodeGrid button").last.evaluate("node => node === document.activeElement")
     page.keyboard.press("Tab")
@@ -343,7 +348,7 @@ def test_episode_groups_modal_focus_and_current_state(cinema_catalog, trigger):
     assert page.locator("#workEpisodeButton").get_attribute("aria-expanded") == "false"
 
 
-@pytest.mark.parametrize("width", [320, 390, 768, 1440])
+@pytest.mark.parametrize("width", [320, 390, 760, 768, 1440])
 def test_cinema_catalog_and_player_responsive(cinema_catalog, width, screenshots):
     page = cinema_catalog
     page.set_viewport_size({"width": width, "height": 900})
@@ -360,10 +365,11 @@ def test_cinema_catalog_and_player_responsive(cinema_catalog, width, screenshots
     assert card["x"] == pytest.approx(player["x"], abs=1)
     assert card["width"] == pytest.approx(player["width"], abs=1)
     assert card["y"] >= player["y"] + player["height"]
-    if width <= 390:
+    if width <= 760:
         assert player["x"] == pytest.approx(0, abs=1)
         assert player["width"] == pytest.approx(width, abs=1)
-        assert player["height"] == pytest.approx(width * 3 / 4, abs=1)
+        assert player["height"] == pytest.approx(900 * .66, abs=1)
+        assert card["height"] <= 180
     if width == 390:
         assert page.locator("#episodes").bounding_box()["y"] > page.locator("#video").bounding_box()["y"]
     page.get_by_role("button", name="选择剧集", exact=True).click()
@@ -934,15 +940,19 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
         bounds = shell.bounding_box()
         assert abs(bounds["width"] - 390) < 1 and abs(bounds["height"] - 844) < 1
         exit_fullscreen(page)
-    for viewport in [{"width": 320, "height": 844}, {"width": 390, "height": 844}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
+    for viewport in [{"width": 320, "height": 480}, {"width": 320, "height": 844}, {"width": 390, "height": 844},
+                     {"width": 760, "height": 900}, {"width": 1280, "height": 800}, {"width": 844, "height": 390}]:
         page.set_viewport_size(viewport)
         video = page.locator("#video").bounding_box()
         assert video["width"] <= viewport["width"]
         assert video["height"] <= viewport["height"] * .72
-        if mode in {"landscape", "cinema"} and viewport["width"] <= 390:
+        if viewport["width"] <= 760 and viewport["height"] > viewport["width"]:
             shell = page.locator("#videoShell").bounding_box()
-            assert shell["height"] == pytest.approx(shell["width"] * 3 / 4, abs=1)
+            assert shell["x"] == pytest.approx(0, abs=1)
+            assert shell["width"] == pytest.approx(viewport["width"], abs=1)
+            assert shell["height"] == pytest.approx(max(320, viewport["height"] * .66), abs=1)
         assert page.locator("#video").evaluate("node => getComputedStyle(node).objectFit") == "contain"
+        assert page.locator("#video").evaluate("node => getComputedStyle(node).objectPosition") == "50% 50%"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
@@ -1148,6 +1158,8 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     action_ids = ["sourceButton", "castButton", "workEpisodeButton", "shareButton"]
     assert page.locator(".work-actions > button, #sourceButton").evaluate_all("nodes => nodes.map(node => node.id)") == action_ids
     player = page.locator("#videoShell").bounding_box()
+    if width <= 760:
+        assert page.locator(".watch-description").bounding_box()["height"] <= 180
     previous_right = 0
     for action_id in action_ids:
         action = page.locator(f"#{action_id}")
@@ -1165,10 +1177,24 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     assert state["requests"][0]["episode"] == [hashlib.sha256(b"https://media.example/bf-1.m3u8").hexdigest()]
     assert state["requests"][0]["year"] == ["2005"]
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.locator("#sourceMenu").scroll_into_view_if_needed()
     menu = page.locator("#sourceMenu").bounding_box()
+    actions = page.locator(".work-actions").bounding_box()
     assert menu["x"] >= 0 and menu["x"] + menu["width"] <= width
-    assert menu["y"] >= 0 and menu["y"] + menu["height"] <= 844
+    assert menu["y"] < 844 and menu["y"] + menu["height"] > 0
+    assert menu["y"] >= actions["y"] + actions["height"] + 7
     assert page.locator("#sourceOptions button").count() == 7
+    for option in page.locator("#sourceOptions button").all():
+        assert option.is_visible() and option.is_enabled()
+        # Page scrolling may leave a fractional menu border outside the viewport;
+        # each actual control must still scroll fully into view and receive input.
+        option.click(trial=True)
+        option_bounds = option.bounding_box()
+        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844
+        assert option.evaluate("""node => {
+          const bounds = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+        }""")
     page.screenshot(path=str(screenshots / f"source-menu-{width}.png"))
     alternative.click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4')")
