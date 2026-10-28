@@ -36,6 +36,10 @@ def bridge(tmp_path_factory):
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True, capture_output=True)
     package_root = repository / "hook_41827_astrbot_bridge/src/hook_bridge"
     shutil.copytree(SOURCE / "src", repository / "hook_41827_astrbot_bridge/src")
+    shutil.copy2(
+        SOURCE / "config.example.json",
+        repository / "hook_41827_astrbot_bridge/config.example.json",
+    )
     # Exercise the complete ordered bridge patch stack without touching SOURCE.
     for patch in sorted((ROOT / "patches").glob("hook-bridge-*.patch")):
         applied = subprocess.run(

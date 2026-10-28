@@ -23,6 +23,7 @@ def office_bridge(tmp_path_factory):
     checkout = tmp_path_factory.mktemp("office-bridge")
     source = ROOT / "vendor/hook_41827_astrbot_bridge"
     shutil.copytree(source / "src", checkout / "src")
+    shutil.copy2(source / "config.example.json", checkout / "config.example.json")
     shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py", checkout / "src/hook_bridge/task_store.py")
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     for patch in sorted((ROOT / "patches").glob("hook-bridge-*.patch")):
@@ -71,7 +72,9 @@ def test_app_card_is_not_an_office_attachment(office_bridge):
                                                            (0, b"data", False), (500, b"data", False)])
 def test_attachment_download_and_onebot_handoff(office_bridge, tmp_path, size, downloaded, expected):
     application = object.__new__(office_bridge.app.BridgeApplication)
-    application.settings = NS(media_root=tmp_path, media_max_bytes=100, request_timeout_seconds=.02)
+    application._active_native_downloads = 0
+    application._native_download_generation = 0
+    application.settings = NS(media_root=tmp_path, media_max_bytes=100, request_timeout_seconds=.02, file_download_timeout_seconds=.02)
     calls = []
 
     async def download(payload):

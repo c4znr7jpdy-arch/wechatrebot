@@ -22,6 +22,10 @@ BOT = "wxid_bot"
 def bridge(tmp_path):
     package_dir = tmp_path / "app/bridge/src/hook_bridge"
     shutil.copytree(ROOT / "vendor/hook_41827_astrbot_bridge/src/hook_bridge", package_dir)
+    shutil.copy2(
+        ROOT / "vendor/hook_41827_astrbot_bridge/config.example.json",
+        tmp_path / "app/bridge/config.example.json",
+    )
     manifest = json.loads((ROOT / "release/source-manifest.json").read_text("utf-8"))
     for entry in manifest["entries"]:
         if entry["origin"] == "commercial" and entry["target"].startswith("app/bridge/src/hook_bridge/"):
@@ -46,8 +50,8 @@ def bridge(tmp_path):
         models = importlib.import_module(f"{name}.models")
         state_module = importlib.import_module(f"{name}.state")
         app = object.__new__(app_module.BridgeApplication)
-        app._active_video_downloads = 0
-        app._video_download_generation = 0
+        app._active_native_downloads = 0
+        app._native_download_generation = 0
         app.state = state_module.BridgeState(600, 100)
         app.state.bot_wxid = BOT
         app._polled_group_members = {}

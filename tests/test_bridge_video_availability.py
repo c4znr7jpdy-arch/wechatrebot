@@ -1,4 +1,4 @@
-"""Video/download overlap regressions using the complete delivery patch stack."""
+"""Native download overlap regressions using the complete delivery patch stack."""
 import asyncio
 import copy
 import logging
@@ -25,7 +25,7 @@ def test_snapshot_preserves_last_state_without_probing_during_download(bridge, r
     app, _ = bridge
     setup_health(app)
     app._hook_ready = ready
-    app._active_video_downloads = 2
+    app._active_native_downloads = 2
     snapshot = asyncio.run(app._health_snapshot())
     assert snapshot["hook_ready"] is ready
     assert snapshot["wechat_logged_in"] is ready
@@ -41,8 +41,8 @@ def test_snapshot_ignores_overlapping_probe_but_next_failure_marks_offline(
     setup_health(app)
 
     async def overlapping_probe():
-        app._video_download_generation += 1
-        app._active_video_downloads = 0 if download_finished else 1
+        app._native_download_generation += 1
+        app._active_native_downloads = 0 if download_finished else 1
         return False
 
     app._hook_api_accepting_connections.side_effect = overlapping_probe
@@ -50,7 +50,7 @@ def test_snapshot_ignores_overlapping_probe_but_next_failure_marks_offline(
         snapshot = asyncio.run(app._health_snapshot())
         assert snapshot["hook_ready"] and snapshot["wechat_identity"] == BOT
         assert "no longer accepting" not in caplog.text
-        app._active_video_downloads = 0
+        app._active_native_downloads = 0
         app._hook_api_accepting_connections.side_effect = None
         snapshot = asyncio.run(app._health_snapshot())
     assert not snapshot["hook_ready"] and not app._hook_ready
@@ -65,13 +65,13 @@ def test_poll_pause_keeps_snapshots_and_resumes_real_member_changes(bridge, capl
     state = copy.deepcopy(app.state.group_members)
     app.hook.get_groups.reset_mock()
     app.hook.get_group_members.reset_mock()
-    app._active_video_downloads = 1
+    app._active_native_downloads = 1
     assert asyncio.run(app._poll_group_member_changes_once()) == 0
     app.hook.get_groups.assert_not_awaited()
     app.hook.get_group_members.assert_not_awaited()
     assert app._polled_group_members == baseline and app.state.group_members == state
     assert not caplog.records
-    app._active_video_downloads = 0
+    app._active_native_downloads = 0
     app.hook.get_group_members.return_value = members(BOT, "existing", "new")
     assert asyncio.run(app._poll_group_member_changes_once()) == 1
     assert asyncio.run(app._poll_group_member_changes_once()) == 0
@@ -88,7 +88,7 @@ def test_successful_response_overlapping_download_does_not_replace_snapshots(bri
     app.hook.get_group_members.reset_mock()
 
     async def response(*args):
-        app._video_download_generation += 1  # Download already finished on return.
+        app._native_download_generation += 1  # Download already finished on return.
         if stage == "get_groups":
             return [{"wxid": ROOM}]
         return members(BOT, "unreliable")
@@ -119,8 +119,8 @@ def test_poll_overlap_is_debug_but_next_connection_failure_warns(
         nonlocal requests
         requests += 1
         if requests == 1:
-            app._video_download_generation += 1
-            app._active_video_downloads = 0 if download_finished else 1
+            app._native_download_generation += 1
+            app._active_native_downloads = 0 if download_finished else 1
             raise error_type("during-download")
         raise error_type("after-download")
 
@@ -130,7 +130,7 @@ def test_poll_overlap_is_debug_but_next_connection_failure_warns(
     async def sleep(_):
         nonlocal sleeps
         sleeps += 1
-        app._active_video_downloads = 0
+        app._active_native_downloads = 0
         if sleeps == 3:
             raise asyncio.CancelledError
 
@@ -171,8 +171,8 @@ def test_unrelated_member_api_error_is_not_hidden_by_video(bridge, caplog):
     app, _ = bridge
 
     async def bad_response(_):
-        app._video_download_generation += 1
-        app._active_video_downloads = 1
+        app._native_download_generation += 1
+        app._active_native_downloads = 1
         raise ValueError("invalid-member-response")
 
     app.hook.get_group_members.side_effect = bad_response
@@ -196,12 +196,12 @@ def test_health_watcher_defers_overlap_then_detects_sustained_failure(
         nonlocal probes
         probes += 1
         if probes == 1:
-            app._video_download_generation += 1
-            app._active_video_downloads = 0 if download_finished else 1
+            app._native_download_generation += 1
+            app._active_native_downloads = 0 if download_finished else 1
         return False
 
     async def sleep(_):
-        app._active_video_downloads = 0
+        app._active_native_downloads = 0
 
     monkeypatch.setattr(sys.modules[app.__module__].asyncio, "sleep", sleep)
     app._hook_api_accepting_connections.side_effect = probe
@@ -218,12 +218,12 @@ def test_actual_video_download_tracks_overlap_until_wait_finishes(bridge, tmp_pa
     observed = []
 
     async def download(payload):
-        observed.append((app._active_video_downloads, app._video_download_generation))
+        observed.append((app._active_native_downloads, app._native_download_generation))
         Path(payload["path"]).write_bytes(b"video")
         return {"status": "success"}
 
     async def wait(*args, **kwargs):
-        observed.append((app._active_video_downloads, app._video_download_generation))
+        observed.append((app._active_native_downloads, app._native_download_generation))
         if cancelled:
             raise asyncio.CancelledError
         return True, 5
@@ -241,4 +241,4 @@ def test_actual_video_download_tracks_overlap_until_wait_finishes(bridge, tmp_pa
         result = asyncio.run(app._prepare_inbound_media(event))
         assert result.media_path.read_bytes() == b"video"
     assert observed == [(1, 1), (1, 1)]
-    assert app._active_video_downloads == 0 and app._video_download_generation == 1
+    assert app._active_native_downloads == 0 and app._native_download_generation == 1
