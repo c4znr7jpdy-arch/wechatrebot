@@ -269,6 +269,8 @@ def test_catalog_reader_stops_slow_trickles_and_closes_response(state_module, mo
 
 def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(state_module, tmp_path, monkeypatch):
     module = state_module
+    # This checks reuse inside the sampling cooldown; disk speed must not advance it.
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
     store = module.StateStore(tmp_path / "random-state", 600, 100)
     catalog = module.RecommendationCatalog(store)
     calls = []
