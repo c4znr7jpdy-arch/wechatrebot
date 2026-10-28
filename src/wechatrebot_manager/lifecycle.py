@@ -171,7 +171,7 @@ class LifecycleController:
                         )
                     elif self._runtime.online:
                         self._mark_running()
-                    elif self._runtime.connection_ready and not self._runtime.wechat_identity:
+                    elif self._runtime.login_required:
                         self.state = LifecycleState.WAITING_WECHAT
                         self._error = None
                     else:
@@ -336,7 +336,7 @@ class LifecycleController:
                 return self.refresh()
             if self._runtime.online:
                 self._mark_running()
-            elif not self._runtime.wechat_identity:
+            elif self._runtime.login_required:
                 self.state = LifecycleState.WAITING_WECHAT
                 self._error = None
             else:
@@ -389,10 +389,10 @@ class LifecycleController:
                     return self._set_error("13002", detail="托管服务意外退出。")
                 if self._runtime.online:
                     self._mark_running()
-                elif self._runtime.connection_ready and not self._runtime.wechat_identity:
+                elif self._runtime.login_required:
                     self.state = LifecycleState.WAITING_WECHAT
                     self._error = None
-                elif self._runtime.connection_ready:
+                else:
                     self.state = LifecycleState.VERIFYING_CONNECTION
                     self._error = None
             elif self._runtime.online:

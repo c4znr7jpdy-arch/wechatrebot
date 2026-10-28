@@ -32,10 +32,6 @@ def patched(tmp_path_factory):
         shutil.copy2(VENDOR / "engine" / relative, target)
     shutil.copytree(VENDOR / "hook_41827_astrbot_bridge/src",
                     checkout / "hook_41827_astrbot_bridge/src")
-    shutil.copy2(
-        VENDOR / "hook_41827_astrbot_bridge/config.example.json",
-        checkout / "hook_41827_astrbot_bridge/config.example.json",
-    )
     core_patch = ROOT / "patches/astrbot-4.26.6-license.patch"
     subprocess.run(["git", "apply", "--check", "-p2", str(core_patch)], cwd=checkout, check=True, capture_output=True)
     subprocess.run(["git", "apply", "-p2", str(core_patch)], cwd=checkout, check=True, capture_output=True)

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from aiohttp import ClientConnectionError
 import pytest
+from wechatrebot_manager import runtime_status
 
 from test_office_integration import office_bridge
 
@@ -80,6 +81,81 @@ def test_native_file_timeout_releases_overlap_guard(office_bridge, tmp_path):
             )
         )
     assert app._active_native_downloads == 0
+    assert app._native_download_generation == 1
+
+
+@pytest.mark.parametrize("disconnect", [False, True])
+def test_file_route_keeps_health_through_request_and_disk_wait(
+    office_bridge, tmp_path, monkeypatch, disconnect,
+):
+    app = _native_app(office_bridge, tmp_path, timeout=2)
+    app._hook_ready = True
+    app.onebot = SimpleNamespace(connected=True, heartbeat_fresh=True)
+    app.state = SimpleNamespace(bot_wxid="bot")
+    app._hook_api_accepting_connections = AsyncMock(return_value=False)
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda *_args: True)
+    hook_client = __import__("_office_bridge_test.hook_client", fromlist=["HookClient"])
+    app.hook = hook_client.HookClient.__new__(hook_client.HookClient)
+    app.hook.file_download_timeout = object()
+    request_started, release_request, wait_started = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event()
+    )
+    destinations = []
+
+    async def post(_path, payload, **_kwargs):
+        destination = Path(payload["path"])
+        destinations.append(destination)
+        destination.write_bytes(b"da")
+        request_started.set()
+        await release_request.wait()
+        if disconnect:
+            raise ClientConnectionError("listener closed after accepting download")
+        return {"status": "accepted"}
+
+    wait_for_download = app._wait_for_media_download
+
+    async def wait(*args, **kwargs):
+        wait_started.set()
+        return await wait_for_download(*args, **kwargs)
+
+    app.hook._post = AsyncMock(side_effect=post)
+    app._wait_for_media_download = wait
+    event = office_bridge.models.NormalizedEvent(
+        kind="message", message_type=49, message_id="message-health",
+        sender_id="sender", conversation_id="room@chatroom",
+        raw={"data": {"content": (
+            "<msg><appmsg><title>document.pdf</title><type>6</type><appattach>"
+            "<totallen>4</totallen><attachid>opaque</attachid><fileext>pdf</fileext>"
+            "</appattach></appmsg></msg>"
+        )}},
+    )
+
+    async def run():
+        task = asyncio.create_task(app._prepare_inbound_media(event))
+        for phase in (request_started, wait_started):
+            await asyncio.wait_for(phase.wait(), timeout=1)
+            snapshot = await app._health_snapshot()
+            assert snapshot["hook_ready"] and snapshot["wechat_logged_in"]
+            assert snapshot["heartbeat_fresh"] and snapshot["wechat_identity"] == "bot"
+            monkeypatch.setattr(
+                runtime_status, "probe_bridge_health",
+                lambda **_kwargs: runtime_status.BridgeHealth(**snapshot),
+            )
+            manager_snapshot = runtime_status.runtime_snapshot()
+            assert manager_snapshot.online and not manager_snapshot.login_required
+            assert app._active_native_downloads == 1
+            app._hook_api_accepting_connections.assert_not_awaited()
+            release_request.set()
+        destinations[0].write_bytes(b"data")
+        result = await task
+        assert result.media_path == destinations[0]
+        assert result.media_path.read_bytes() == b"data"
+        assert app._active_native_downloads == 0
+        assert not (await app._health_snapshot())["hook_ready"]
+
+    asyncio.run(run())
+    app.hook._post.assert_awaited_once()
+    assert app.hook._post.await_args.kwargs["retry_read"] is False
     assert app._native_download_generation == 1
 
 

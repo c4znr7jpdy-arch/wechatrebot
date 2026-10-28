@@ -132,12 +132,23 @@ class RuntimeSnapshot:
         return base and all(value is True for value in confirmations)
 
     @property
+    def login_required(self) -> bool:
+        # An unreachable HOOK cannot confirm that the account logged out.
+        # None keeps the legacy three-field snapshot contract intact.
+        return (
+            self.connection_ready
+            and self.account_status_available
+            and self.hook_ready is not False
+            and not self.wechat_identity
+        )
+
+    @property
     def stage(self) -> str:
         if self.online:
             return "online"
-        if self.connection_ready:
+        if self.login_required:
             return "login"
-        if self.engine_ready:
+        if self.engine_ready or self.connection_ready:
             return "connection"
         return "idle"
 
@@ -161,7 +172,7 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
         hook_ready=health.hook_ready,
         upstream_connected=health.upstream_connected,
         heartbeat_fresh=health.heartbeat_fresh,
-        account_status_available=health.status_available or bool(identity),
+        account_status_available=(health.status_available and health.hook_ready) or bool(identity),
     )
 
 

@@ -101,6 +101,55 @@ def test_wechat_signal_uses_live_connection_instead_of_last_environment_scan(bro
         page.close()
 
 
+def test_download_connection_check_recovers_without_login_prompt(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_status;
+          window.testDownloadPhase = 'unknown';
+          api.get_status = async () => {
+            const result = await read(), status = result.data;
+            const phase = window.testDownloadPhase;
+            status.online = phase === 'recovered';
+            status.state = phase === 'unknown' ? 'VERIFYING_CONNECTION'
+              : phase === 'logout' ? 'WAITING_WECHAT' : 'RUNNING';
+            status.title = phase === 'unknown' ? '正在确认连接'
+              : phase === 'logout' ? '等待登录微信' : '机器人可用';
+            status.message = phase === 'logout' ? '请在微信窗口完成登录。' : '';
+            status.runtime = {...status.runtime, connection_ready: true,
+              account_status_available: phase !== 'unknown',
+              hook_ready: phase !== 'unknown',
+              wechat_identity: phase === 'recovered' ? 'wxid_current' : ''};
+            return result;
+          };
+        }""")
+        expect(page.locator("#stateTitle")).to_have_text("正在确认连接")
+        expect(page.locator("#sideHealthText")).to_have_text("正在确认连接")
+        expect(page.locator("#signalMessage")).to_have_text("正在确认连接")
+        expect(page.locator("#accountText")).to_have_text("正在确认微信连接…")
+        expect(page.locator("#stateMessage")).not_to_contain_text("登录")
+        page.screenshot(path=str(tmp_path / "download-connection-check.png"))
+
+        page.evaluate("window.testDownloadPhase = 'recovered'")
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        expect(page.locator("#signalMessage")).to_have_text("通信正常")
+        page.evaluate("window.testDownloadPhase = 'logout'")
+        expect(page.locator("#stateTitle")).to_have_text("等待登录微信")
+        expect(page.locator("#stateMessage")).to_have_text("请在微信窗口完成登录。")
+        assert page.url == manager_url
+        assert page.title()
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("missing_script", ["subscription.js", "core-settings.js", "chat-profiles.js", "panel-layout.js", "features.js", "scheduled-tasks.js", "preview.js"])
 def test_manager_reports_missing_startup_dependency(browser, manager_url, missing_script, tmp_path: Path):
     page = browser.new_page()

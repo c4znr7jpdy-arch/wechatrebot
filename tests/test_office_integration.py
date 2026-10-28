@@ -23,7 +23,6 @@ def office_bridge(tmp_path_factory):
     checkout = tmp_path_factory.mktemp("office-bridge")
     source = ROOT / "vendor/hook_41827_astrbot_bridge"
     shutil.copytree(source / "src", checkout / "src")
-    shutil.copy2(source / "config.example.json", checkout / "config.example.json")
     shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py", checkout / "src/hook_bridge/task_store.py")
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     for patch in sorted((ROOT / "patches").glob("hook-bridge-*.patch")):

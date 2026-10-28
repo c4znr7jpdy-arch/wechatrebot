@@ -83,7 +83,11 @@ def test_legacy_bridge_can_still_use_profile_fallback(monkeypatch) -> None:
     assert runtime_status.runtime_snapshot().wechat_identity == "wxid_legacy"
 
 
-@pytest.mark.parametrize("payload", [None, {"service_ready": True, "status_available": False}])
+@pytest.mark.parametrize("payload", [
+    None,
+    {"service_ready": True, "status_available": False},
+    {"service_ready": True, "status_available": True, "hook_ready": False},
+])
 def test_unknown_health_does_not_probe_hook_or_confirm_logout(monkeypatch, payload):
     def response(*args, **kwargs):
         if payload is None:
@@ -97,16 +101,20 @@ def test_unknown_health_does_not_probe_hook_or_confirm_logout(monkeypatch, paylo
     assert snapshot.account_status_available is False
     assert snapshot.wechat_identity == ""
     assert snapshot.online is False
+    assert snapshot.login_required is False
+    assert snapshot.stage == "connection"
 
 
 def test_confirmed_logout_is_authoritative(monkeypatch):
     monkeypatch.setattr(runtime_status, "port_accepting", lambda *args: True)
     monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **kw: BridgeHealth(
-        service_ready=True, status_available=True,
+        service_ready=True, status_available=True, hook_ready=True,
     ))
     snapshot = runtime_status.runtime_snapshot()
     assert snapshot.account_status_available is True
     assert snapshot.wechat_identity == ""
+    assert snapshot.login_required is True
+    assert snapshot.stage == "login"
 
 
 def test_delayed_bridge_health_keeps_refresh_authoritative(monkeypatch):

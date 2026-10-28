@@ -22,10 +22,6 @@ BOT = "wxid_bot"
 def bridge(tmp_path):
     package_dir = tmp_path / "app/bridge/src/hook_bridge"
     shutil.copytree(ROOT / "vendor/hook_41827_astrbot_bridge/src/hook_bridge", package_dir)
-    shutil.copy2(
-        ROOT / "vendor/hook_41827_astrbot_bridge/config.example.json",
-        tmp_path / "app/bridge/config.example.json",
-    )
     manifest = json.loads((ROOT / "release/source-manifest.json").read_text("utf-8"))
     for entry in manifest["entries"]:
         if entry["origin"] == "commercial" and entry["target"].startswith("app/bridge/src/hook_bridge/"):

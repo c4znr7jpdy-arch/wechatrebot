@@ -1,15 +1,3 @@
-diff --git a/hook_41827_astrbot_bridge/config.example.json b/hook_41827_astrbot_bridge/config.example.json
-index 0abd0b8..9bc3473 100644
---- a/hook_41827_astrbot_bridge/config.example.json
-+++ b/hook_41827_astrbot_bridge/config.example.json
-@@ -10,6 +10,7 @@
-   "astrbot_ws_url": "ws://127.0.0.1:6200/ws",
-   "queue_size": 256,
-   "request_timeout_seconds": 10,
-+  "file_download_timeout_seconds": 180,
-   "video_download_timeout_seconds": 180,
-   "video_upload_timeout_seconds": 180,
-   "video_send_mode": "file",
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
 index f3fe201..acbb2dc 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py

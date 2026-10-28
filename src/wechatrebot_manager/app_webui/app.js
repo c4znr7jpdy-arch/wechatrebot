@@ -379,7 +379,8 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
-    const confirmingConnection = current === "RUNNING" && !online && !accountStatusAvailable && !status.error;
+    const confirmingConnection = !status.error && (current === "VERIFYING_CONNECTION"
+      || (current === "RUNNING" && !online && !accountStatusAvailable));
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
     const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
