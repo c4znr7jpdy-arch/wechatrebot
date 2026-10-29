@@ -366,6 +366,7 @@
 
   function renderStatus(rawStatus) {
     const wasOnline = Boolean(state.status?.online);
+    const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
     const status = reconcileStartPending(rawStatus);
     state.status = status;
     subscription.updateRuntime(status);
@@ -394,11 +395,18 @@
       state.historyAccount = historyAccount;
       invalidateHistoryState();
       invalidateScheduledContext();
+      invalidateChatManagementContext();
       if (state.activePage === "schedules") void loadSchedules();
+      if (state.activePage === "groups" && historyAccount) {
+        if (state.chatManagementTab === "groups") void loadGroups(true);
+        else void loadContacts(false);
+      }
       if (state.activePage === "history") {
         renderHistoryAccountGate(historyAccount);
         if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
       }
+    } else if (wasAccountUnavailable && accountStatusAvailable) {
+      void refreshVisibleChatData().catch(reportError);
     }
     setHistoryActionsEnabled(
       (wechatLoggedIn || Boolean(offlineHistory)) && state.historyReadyAccount === historyAccount
@@ -567,6 +575,8 @@
 
   const SETTINGS_SECTIONS = new Set(["model", "core", "search", "skin", "system"]);
 
+  const retainedPageScroll = new Map(["groups", "history", "schedules", "activity"].map(page => [page, 0]));
+
   async function navigate(page) {
     if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
     if (page !== state.activePage && coreSettings.guard(() => navigate(page))) return;
@@ -574,6 +584,8 @@
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
     const leavingGroupManagement = state.activePage === "groups" && page !== "groups";
+    const content = $(".content-scroll");
+    if (content && retainedPageScroll.has(state.activePage)) retainedPageScroll.set(state.activePage, content.scrollTop);
     if (state.activePage === "settings" && page !== "settings") clearProviderTest();
     state.activePage = page;
     if (leavingGroupManagement) {
@@ -588,10 +600,9 @@
     $("#defaultTopActions").hidden = page === "schedules";
     $("#scheduleTopActions").hidden = page !== "schedules";
     document.title = `${PAGE_TITLES[page]} · WxRebot`;
-    const content = $(".content-scroll");
     if (content) {
       content.classList.toggle("history-active", page === "history");
-      content.scrollTop = 0;
+      content.scrollTop = retainedPageScroll.get(page) || 0;
     }
     await subscription.onNavigate(page);
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
@@ -602,10 +613,14 @@
     if (page === "groups") {
       if (state.chatManagementTab === "groups") {
         if (!state.groupsLoaded) await loadGroups(true);
+        else void loadGroups(true, {background: true});
         if (state.groupInspectorView === "members" && state.selectedGroup
             && !state.groupMembers[state.selectedGroup]) renderGroupInspector();
       }
-      if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false);
+      if (state.chatManagementTab === "private") {
+        if (!state.contactsLoaded) await loadContacts(false);
+        else void loadContacts(true, {background: true});
+      }
     }
     if (page === "history") {
       // The first visit needs the account gate and initial loading state. Once
@@ -620,8 +635,8 @@
         void loadConversations({silent: true, refreshGroups: true});
       }
     }
-    if (page === "schedules") { await loadSchedules(); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
-    if (page === "activity") await loadActivity();
+    if (page === "schedules") { await loadSchedules({background: true}); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
+    if (page === "activity") await loadActivity({background: true});
     if (page === "help") {
       if (!state.featuresLoaded) await loadFeatures();
       renderHelp();
@@ -656,14 +671,24 @@
   }
 
   async function pollGroups() {
-    if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || !state.groupsLoaded) return;
-    await loadGroups(false, {background: true});
+    if (state.activePage !== "groups") return;
+    if (state.chatManagementTab === "groups" && state.groupsLoaded) await loadGroups(false, {background: true});
+    if (state.chatManagementTab === "private" && state.contactsLoaded) await loadContacts(false, {background: true});
   }
 
   async function refreshVisibleChatData() {
     if (document.visibilityState === "hidden") return;
-    if (state.activePage === "groups" && state.chatManagementTab === "groups") {
-      await loadGroups(true, {background: true});
+    if (state.activePage === "groups") {
+      if (state.chatManagementTab === "groups") await loadGroups(true, {background: true});
+      else await loadContacts(true, {background: true});
+      return;
+    }
+    if (state.activePage === "schedules") {
+      await loadSchedules({background: true});
+      return;
+    }
+    if (state.activePage === "activity") {
+      await loadActivity({background: true});
       return;
     }
     if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
@@ -1204,7 +1229,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasGroupDrafts, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasGroupDrafts, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,

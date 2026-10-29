@@ -20,6 +20,7 @@ function fixture() {
   $('#scheduleRows').innerHTML = 'old-a|pending-a';
   $('#taskRows').innerHTML = 'task-a';
   const controls = [$('old-control')], calls = [], dialogs = [], errors = [], toasts = [];
+  const renders = {legacy: 0, tasks: 0, migration: 0};
   const responses = {
     get_scheduled_task_context: {account_id: 'account-a', items: [{id: 'task-a'}], groups: [], contacts: []},
     get_schedules: {account_id: 'account-a', items: [{id: 'old-a'}]},
@@ -36,11 +37,12 @@ function fixture() {
       return typeof value === 'function' ? value(...args) : value;
     },
     renderSchedules() {
+      renders.legacy++;
       $('#scheduleRows').innerHTML = [...state.schedules.map(item => item.id),
         ...state.legacyMigrations.map(item => item.key)].join('|');
     },
-    renderScheduledTasks() { $('#taskRows').innerHTML = (state.scheduledContext?.items || []).map(item => item.id).join('|'); },
-    renderGroupAnalysisMigration() {},
+    renderScheduledTasks() { renders.tasks++; $('#taskRows').innerHTML = (state.scheduledContext?.items || []).map(item => item.id).join('|'); },
+    renderGroupAnalysisMigration() { renders.migration++; },
     updateScheduledSummary() {},
     reportError(error) { errors.push(error); },
     scheduledName() { return '热点资讯'; },
@@ -55,7 +57,7 @@ function fixture() {
     assert.ok(start >= 0 && end > start, startMarker);
     vm.runInContext(script.slice(start, end), context);
   }
-  return {context, state, $, draft, controls, calls, dialogs, errors, responses, toasts};
+  return {context, state, $, draft, controls, calls, dialogs, errors, responses, toasts, renders};
 }
 
 function assertDraftRetained(f) {
@@ -65,6 +67,81 @@ function assertDraftRetained(f) {
 }
 
 const cases = {
+  async background_unknown_account() {
+    const f = fixture();
+    f.state.scheduledContext = null;
+    f.state.status = {runtime: {account_status_available: false}};
+    await f.context.loadSchedules({background: true});
+    assert.ok(f.calls.some(call => call.method === 'get_scheduled_task_context'), 'First entry must still read when account verification is pending');
+    f.state.status.runtime.account_status_available = true;
+    await f.context.loadSchedules();
+    let finish;
+    const current = f.state.scheduledContext;
+    f.responses.get_scheduled_task_context = () => new Promise(resolve => { finish = resolve; });
+    const pending = f.context.loadSchedules({background: true});
+    f.state.status.runtime.account_status_available = false;
+    finish(structuredClone(current));
+    await pending;
+    assert.equal(f.$('#taskRows').innerHTML, 'task-a', 'A transient probe failure is not an account switch');
+    assert.equal(f.state.scheduledContext, current);
+    const calls = f.calls.length;
+    await f.context.loadSchedules({background: true});
+    assert.equal(f.calls.length, calls, 'A retained view waits for account verification before its next background read');
+  },
+  async background_retains_snapshot() {
+    const f = fixture();
+    await f.context.loadSchedules();
+    Object.keys(f.renders).forEach(key => { f.renders[key] = 0; });
+    f.controls[0].disabled = false;
+    f.$('.content-scroll').scrollTop = 320;
+    f.$('#scheduledTaskRuns').innerHTML = 'opened run details';
+    let finish;
+    const current = f.state.scheduledContext;
+    f.responses.get_scheduled_task_context = () => new Promise(resolve => { finish = resolve; });
+    const beforeCalls = f.calls.length;
+    const pending = f.context.loadSchedules({background: true});
+    const repeated = f.context.loadSchedules({background: true});
+    assert.equal(f.calls.length - beforeCalls, 3, 'Background reads share the full request and skip the lightweight stage');
+    assert.equal(f.controls[0].disabled, false);
+    assert.equal(f.$('#refreshSchedules').disabled, false);
+    assert.equal(f.$('#taskRows').innerHTML, 'task-a');
+    assert.equal(f.$('#scheduleRows').innerHTML, 'old-a');
+    finish(structuredClone(current));
+    await Promise.all([pending, repeated]);
+    assert.deepEqual(f.renders, {legacy: 0, tasks: 0, migration: 0}, 'Unchanged responses must retain DOM and expanded controls');
+    assert.equal(f.$('.content-scroll').scrollTop, 320);
+    assert.equal(f.$('#scheduledTaskRuns').innerHTML, 'opened run details');
+    assertDraftRetained(f);
+  },
+  async background_updates_and_failures() {
+    const f = fixture();
+    await f.context.loadSchedules();
+    Object.keys(f.renders).forEach(key => { f.renders[key] = 0; });
+    f.$('.content-scroll').scrollTop = 320;
+    f.$('#legacyScheduleSection').open = false;
+    f.responses.get_scheduled_task_context = {...f.state.scheduledContext, items: [{id: 'updated-task'}]};
+    await f.context.loadSchedules({background: true});
+    assert.equal(f.$('#taskRows').innerHTML, 'updated-task');
+    assert.deepEqual(f.renders, {legacy: 0, tasks: 1, migration: 0});
+    assert.equal(f.$('.content-scroll').scrollTop, 320);
+    assert.equal(f.$('#legacyScheduleSection').open, false);
+    for (const failure of ['get_scheduled_task_context', 'get_schedules', 'get_legacy_schedule_migrations']) {
+      const response = f.responses[failure];
+      f.responses[failure] = new Error('temporary failure');
+      await f.context.loadSchedules({background: true});
+      assert.equal(f.$('#taskRows').innerHTML, 'updated-task');
+      assert.equal(f.$('#scheduleRows').innerHTML, 'old-a');
+      f.responses[failure] = response;
+    }
+    assert.deepEqual(f.errors, []);
+    assertDraftRetained(f);
+    f.state.historyAccount = 'account-a';
+    f.responses.get_scheduled_task_context = {account_id: 'account-b', items: [{id: 'other-task'}]};
+    await f.context.loadSchedules({background: true});
+    assert.equal(f.$('#taskRows').innerHTML, '', 'A confirmed account mismatch must invalidate the retained view');
+    assert.equal(f.$('#scheduleRows').innerHTML, '');
+    assert.match(f.$('#scheduleContextMessage').textContent, /账号已变化/);
+  },
   async progressive_task_list() {
     const f = fixture();
     f.$('#scheduleContextMessage').textContent = '上次读取提示';

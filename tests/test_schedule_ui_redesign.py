@@ -41,6 +41,7 @@ def test_schedule_empty_state_has_scenario_guidance_and_a_real_create_action() -
 
 
 @pytest.mark.parametrize("scenario", [
+    "background_retains_snapshot", "background_updates_and_failures", "background_unknown_account",
     "progressive_task_list", "progressive_account_change", "progressive_overlapping_refresh",
     "invalidate_context_keeps_draft", "editor_waits_for_full_context",
     "failed_context_keeps_draft", "unreadable_migration_blocks_legacy",

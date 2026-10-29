@@ -25,6 +25,87 @@ def open_schedules(page, url):
     expect(page.locator("#refreshSchedules")).to_be_enabled()
 
 
+def test_schedule_restore_keeps_cached_rows_and_unsaved_editor(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        open_schedules(page, manager_url)
+        page.locator("#newScheduledTask").click()
+        page.locator("#scheduledName").fill("缓存中的天气任务")
+        page.locator("#scheduledSaveDraft").click()
+        row = page.locator("#scheduledTaskRows tr").filter(has_text="缓存中的天气任务")
+        expect(row).to_be_visible()
+        page.locator("#scheduledStatusFilter").select_option("draft")
+        page.evaluate("""() => {
+          window.retainedScheduleRow = document.querySelector('#scheduledTaskRows tr');
+          const read = window.pywebview.api.get_scheduled_task_context;
+          window.scheduleReadCount = 0;
+          window.pywebview.api.get_scheduled_task_context = async (...args) => {
+            const result = await read(...args);
+            window.scheduleReadCount++;
+            await new Promise(resolve => { window.finishScheduleRead = resolve; });
+            return result;
+          };
+          window.dispatchEvent(new Event('focus'));
+        }""")
+        page.wait_for_function("window.scheduleReadCount === 1")
+        expect(row).to_be_visible()
+        expect(page.locator("#scheduledStatusFilter")).to_have_value("draft")
+        page.evaluate("""async () => {
+          window.finishScheduleRead();
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }""")
+        assert page.evaluate("window.retainedScheduleRow === document.querySelector('#scheduledTaskRows tr')")
+        row.locator('[data-task-action="edit"]').first.click()
+        page.locator("#scheduledName").fill("尚未保存的名称")
+        page.evaluate("window.dispatchEvent(new Event('focus'))")
+        page.wait_for_function("window.scheduleReadCount === 2")
+        expect(page.locator("#scheduledName")).to_have_value("尚未保存的名称")
+        page.evaluate("""async () => {
+          window.finishScheduleRead();
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }""")
+        expect(page.locator("#scheduledName")).to_have_value("尚未保存的名称")
+        expect(page.locator("#scheduledTaskEditor")).to_be_visible()
+        page.screenshot(path=str(tmp_path / "schedule-restored-draft.png"), animations="disabled")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+def test_schedule_background_directory_update_retains_migration_selection(browser, manager_url):
+    page = browser.new_page()
+    try:
+        open_schedules(page, manager_url)
+        page.evaluate("""() => {
+          const read = window.pywebview.api.get_scheduled_task_context;
+          window.pywebview.api.get_scheduled_task_context = async (...args) => {
+            const result = await read(...args);
+            result.data.legacy_group_analysis = {state: 'available', days: 1,
+              requires_target_selection: true, times: ['09:00']};
+            if (window.updatedScheduleDirectory) result.data.groups.push({id: 'new-group', name: '新群'});
+            return result;
+          };
+        }""")
+        page.locator("#refreshSchedules").click()
+        expect(page.locator("#analysisMigrationDays")).to_be_visible()
+        selected = page.locator("[data-analysis-migration-target]").first
+        selected.check()
+        page.locator("#analysisMigrationDays").select_option("7")
+        page.locator("#groupAnalysisMigration summary").click()
+        page.evaluate("""() => {
+          window.updatedScheduleDirectory = true;
+          window.dispatchEvent(new Event('focus'));
+        }""")
+        expect(page.locator('[data-analysis-migration-target][value="new-group"]')).to_have_count(1)
+        expect(selected).to_be_checked()
+        expect(page.locator("#analysisMigrationDays")).to_have_value("7")
+        assert page.locator("#groupAnalysisMigration details").evaluate("details => !details.open")
+    finally:
+        page.close()
+
+
 def test_analysis_uses_persisted_tasks_for_draft_preview_toggle_and_delete(browser, manager_url, tmp_path):
     page = browser.new_page(viewport={"width": 1380, "height": 860})
     errors = []

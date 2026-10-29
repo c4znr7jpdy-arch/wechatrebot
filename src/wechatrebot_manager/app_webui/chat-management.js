@@ -31,6 +31,7 @@ window.createChatManagement = function (helpers) {
   const chatProfiles = window.createChatProfiles({api, escapeHtml, confirmAction, openCoreTemplates, state});
 
   let groupDrafts = {};
+  let chatContextGeneration = 0;
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
@@ -87,8 +88,8 @@ window.createChatManagement = function (helpers) {
     $("#privateManagementPanel").hidden = tab !== "private";
     $("#refreshGroups").hidden = tab !== "groups";
     $("#refreshContacts").hidden = tab !== "private";
-    if (tab === "groups" && !state.groupsLoaded) await loadGroups(true);
-    if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
+    if (tab === "groups") await loadGroups(true, {background: state.groupsLoaded});
+    if (tab === "private") await loadContacts(state.contactsLoaded, {background: state.contactsLoaded});
     if (changed && state.chatManagementTab === tab) {
       window.managerMotion?.enter($(tab === "groups" ? "#groupManagementPanel" : "#privateManagementPanel"));
     }
@@ -127,10 +128,42 @@ window.createChatManagement = function (helpers) {
     });
   }
 
+  function invalidateChatManagementContext() {
+    chatContextGeneration += 1;
+    clearGroupRefreshRetry();
+    state.groupMemberLoad += 1;
+    state.contactLoad += 1;
+    state.groupsLoaded = state.contactsLoaded = false;
+    state.groupsBusy = state.contactsBusy = false;
+    state.groups = [];
+    state.contacts = [];
+    state.groupAccount = state.contactAccount = "";
+    state.groupUpdatedAt = state.contactUpdatedAt = "";
+    state.groupStale = state.contactStale = state.contactTruncated = false;
+    state.selectedGroup = state.selectedContact = null;
+    state.groupMembers = {};
+    state.groupPolicies = {};
+    state.groupMemberCounts = {};
+    state.contactDetails = {};
+    state.privatePolicies = {};
+    state.contactPage = 1;
+    groupDrafts = {};
+    chatProfiles.invalidate();
+    for (const [selector, label] of [["#refreshGroups", "刷新群列表"], ["#refreshContacts", "刷新联系人"]]) {
+      const button = $(selector);
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.innerHTML = `${icon("i-refresh")}<span>${label}</span>`;
+    }
+    renderGroups();
+    renderContacts();
+  }
+
   async function loadGroups(refresh = false, options = {}) {
-    if (state.groupsBusy) return;
+    if (state.groupsBusy || state.status?.runtime?.account_status_available === false) return;
     const background = options.background === true;
     const retryAttempt = Number.isInteger(options.retryAttempt) ? options.retryAttempt : 0;
+    const generation = chatContextGeneration;
     if (refresh && retryAttempt === 0) clearGroupRefreshRetry();
     state.groupsBusy = true;
     const button = $("#refreshGroups");
@@ -139,9 +172,10 @@ window.createChatManagement = function (helpers) {
       button.setAttribute("aria-busy", "true");
       button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
     }
-    if (!state.groups.length) $("#groupRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信的群聊…</td></tr>';
+    if (!state.groupsLoaded) $("#groupRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信的群聊…</td></tr>';
     try {
       const data = await api("get_groups", refresh);
+      if (generation !== chatContextGeneration || state.status?.runtime?.account_status_available === false) return;
       const previousAccount = state.groupAccount;
       const previousGroups = JSON.stringify(state.groups);
       const previousStale = state.groupStale;
@@ -206,7 +240,7 @@ window.createChatManagement = function (helpers) {
         };
       });
       groupDirectoryStatus(data);
-      if (!background || refresh || previousGroups !== JSON.stringify(state.groups)
+      if (!background || previousGroups !== JSON.stringify(state.groups)
           || previousAccount !== state.groupAccount || previousStale !== state.groupStale
           || groupsNeedingCounts.length) {
         renderGroups({preserveInspector: background});
@@ -218,14 +252,15 @@ window.createChatManagement = function (helpers) {
         void hydrateGroupMemberCounts(groupsNeedingCounts.map((item) => item.group_id), memberLoad, {preMarked: true});
       }
     } catch (error) {
+      if (generation !== chatContextGeneration) return;
       state.groupStale = true;
       scheduleGroupRefreshRetry(retryAttempt);
       groupDirectoryStatus({message: error?.message}, true);
       renderGroups({preserveInspector: background});
       if (!background) reportError(error);
     } finally {
-      state.groupsBusy = false;
-      if (!background) {
+      if (generation === chatContextGeneration) state.groupsBusy = false;
+      if (!background && generation === chatContextGeneration) {
         button.disabled = false;
         button.removeAttribute("aria-busy");
         button.innerHTML = `${icon("i-refresh")}<span>刷新群列表</span>`;
@@ -569,48 +604,63 @@ window.createChatManagement = function (helpers) {
     panel.innerHTML = `<div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
   }
 
-  async function loadContacts(refresh = false) {
-    if (state.contactsBusy) return;
+  async function loadContacts(refresh = false, options = {}) {
+    if (state.contactsBusy || state.status?.runtime?.account_status_available === false) return;
+    const background = options.background === true;
     state.contactsBusy = true;
     const generation = ++state.contactLoad;
     const button = $("#refreshContacts");
-    button.disabled = true;
-    button.setAttribute("aria-busy", "true");
-    button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
-    if (!state.contacts.length) $("#contactRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信通讯录…</td></tr>';
+    if (!background) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.innerHTML = `${icon("i-refresh")}<span>${refresh ? "正在刷新…" : "正在读取…"}</span>`;
+    }
+    if (!state.contactsLoaded) $("#contactRows").innerHTML = '<tr><td colspan="4" class="table-empty">正在读取当前微信通讯录…</td></tr>';
     try {
       const data = await api("get_contacts", refresh);
-      if (generation !== state.contactLoad) return;
+      if (generation !== state.contactLoad || state.status?.runtime?.account_status_available === false) return;
       const previousAccount = state.contactAccount;
+      const previousContacts = JSON.stringify(state.contacts);
+      const previousStale = state.contactStale;
+      const previousTruncated = state.contactTruncated;
       state.contacts = Array.isArray(data.items) ? data.items : [];
       state.contactAccount = data.account_id || "";
-      if (previousAccount && previousAccount !== state.contactAccount) {
+      if (previousAccount !== state.contactAccount) {
         state.selectedContact = null;
         state.contactDetails = {};
         state.privatePolicies = {};
+        state.contactPage = 1;
       }
       state.contactUpdatedAt = data.updated_at || "";
       state.contactStale = Boolean(data.stale);
       state.contactTruncated = Boolean(data.truncated);
       state.contactsLoaded = true;
-      state.contactPage = 1;
       if (state.selectedContact && !state.contacts.some((item) => item.user_id === state.selectedContact)) {
         state.selectedContact = null;
       }
       contactDirectoryStatus(data);
-      renderContacts();
+      if (!background || previousContacts !== JSON.stringify(state.contacts)
+          || previousAccount !== state.contactAccount || previousStale !== state.contactStale
+          || previousTruncated !== state.contactTruncated) {
+        renderContacts({preserveInspector: true});
+      } else {
+        $("#contactUpdated").textContent = state.contactUpdatedAt
+          ? `${state.contactStale ? "上次成功" : "更新于"} ${fullTime(state.contactUpdatedAt)}` : "尚无可用结果";
+      }
     } catch (error) {
       if (generation !== state.contactLoad) return;
       state.contactStale = true;
       contactDirectoryStatus({message: error?.message}, true);
-      renderContacts();
-      reportError(error);
+      renderContacts({preserveInspector: true});
+      if (!background) reportError(error);
     } finally {
       if (generation === state.contactLoad) {
         state.contactsBusy = false;
-        button.disabled = false;
-        button.removeAttribute("aria-busy");
-        button.innerHTML = `${icon("i-refresh")}<span>刷新联系人</span>`;
+        if (!background) {
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+          button.innerHTML = `${icon("i-refresh")}<span>刷新联系人</span>`;
+        }
       }
     }
   }
@@ -626,7 +676,7 @@ window.createChatManagement = function (helpers) {
     });
   }
 
-  function renderContacts() {
+  function renderContacts(options = {}) {
     const scroll = $(".contact-table-scroll");
     const previousScroll = scroll?.scrollTop || 0;
     const items = filteredContacts();
@@ -668,11 +718,12 @@ window.createChatManagement = function (helpers) {
     });
     $$(".inspect-contact").forEach((button) => button.addEventListener("click", () => selectContact(button.dataset.contactId)));
     bindAvatarFallbacks($("#contactRows"));
-    renderContactInspector();
+    if (!options.preserveInspector || !state.selectedContact) renderContactInspector();
     if (scroll) scroll.scrollTop = previousScroll;
   }
 
   async function selectContact(contactId) {
+    if (state.selectedContact === contactId) return;
     state.selectedContact = contactId;
     renderContacts();
     $("#contactInspector").scrollIntoView({block: "nearest", behavior: "smooth"});
@@ -680,18 +731,21 @@ window.createChatManagement = function (helpers) {
   }
 
   async function loadContactDetail(contactId) {
-    state.contactDetails[contactId] = {loading: true};
+    const account = state.contactAccount;
+    const details = state.contactDetails;
+    if (details[contactId]?.loading) return;
+    details[contactId] = {loading: true};
     renderContactInspector();
     try {
       const data = await api("get_contact_detail", contactId);
-      if (state.selectedContact !== contactId) return;
+      if (state.contactAccount !== account || state.contactDetails !== details) return;
       const detail = data?.item || {};
-      state.contactDetails[contactId] = detail;
+      details[contactId] = detail;
       const index = state.contacts.findIndex((item) => item.user_id === contactId);
       if (index >= 0) state.contacts[index] = {...state.contacts[index], ...detail};
     } catch (error) {
-      if (state.selectedContact !== contactId) return;
-      state.contactDetails[contactId] = {error: error?.message || "联系人详情暂时无法读取。"};
+      if (state.contactAccount !== account || state.contactDetails !== details) return;
+      details[contactId] = {error: error?.message || "联系人详情暂时无法读取。"};
       reportError(error);
     }
     if (state.selectedContact === contactId) renderContactInspector();
@@ -699,12 +753,18 @@ window.createChatManagement = function (helpers) {
 
   async function loadPrivatePolicy(contactId) {
     if (!state.contactAccount || !contactId) return;
-    state.privatePolicies[contactId] = {loading: true};
+    const account = state.contactAccount;
+    const policies = state.privatePolicies;
+    if (policies[contactId]?.loading) return;
+    policies[contactId] = {loading: true};
     renderContactInspector();
     try {
-      state.privatePolicies[contactId] = await api("get_private_policy", state.contactAccount, contactId);
+      const data = await api("get_private_policy", account, contactId);
+      if (state.contactAccount !== account || state.privatePolicies !== policies) return;
+      policies[contactId] = data;
     } catch (error) {
-      state.privatePolicies[contactId] = {error: error?.message || "联系人可用功能暂时无法读取。"};
+      if (state.contactAccount !== account || state.privatePolicies !== policies) return;
+      policies[contactId] = {error: error?.message || "联系人可用功能暂时无法读取。"};
       reportError(error);
     }
     if (state.selectedContact === contactId) renderContactInspector();
@@ -797,6 +857,7 @@ window.createChatManagement = function (helpers) {
 
   return {
     clearPendingGroupMemberLoading,
+    invalidateChatManagementContext,
     hasGroupDrafts: () => Object.keys(groupDrafts).length > 0,
     loadContacts,
     loadGroups,

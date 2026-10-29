@@ -57,7 +57,9 @@ async function testDropdownFilters(view, state, $, reports, sample, now) {
 async function main() {
   const nodes = new Map();
   const $ = (key) => {
-    if (!nodes.has(key)) nodes.set(key, {value: '', innerHTML: '', textContent: '', disabled: false, hidden: true,
+    if (!nodes.has(key)) nodes.set(key, {value: '', html: '', writes: 0, textContent: '', disabled: false, hidden: true,
+      scrollTop: 0, querySelectorAll() { return []; },
+      get innerHTML() { return this.html; }, set innerHTML(value) { this.html = value; this.writes++; },
       events: {}, addEventListener(type, handler) { this.events[type] = handler; }});
     return nodes.get(key);
   };
@@ -68,6 +70,9 @@ async function main() {
   const now = Date.now();
   let fail = false;
   let copyFails = false;
+  let pendingRead = null;
+  let reads = 0;
+  let errors = 0;
   const items = Array.from({length: 18}, (_, i) => ({
     id: `issue-${i}`, code: '19001', level: i === 17 ? 'info' : 'error',
     title: '<img src=x onerror=alert(1)>', source: 'manager', source_name: '管理器',
@@ -78,16 +83,34 @@ async function main() {
     Date: class extends Date { static now() { return now; } },
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'activity.js'), 'utf8'), context);
+  let responseItems = items;
   const view = context.window.createActivityView({$, state,
-    api: async () => { if (fail) throw Error('read failed'); return items; },
+    api: async () => { reads++; if (pendingRead) await pendingRead; if (fail) throw Error('read failed'); return responseItems; },
     escapeHtml: (v) => String(v ?? '').replaceAll('<','&lt;').replaceAll('>','&gt;'),
-    fullTime: (v) => v, reportError: () => {},
+    fullTime: (v) => v, reportError: () => { errors++; },
     copyText: async (v) => { reports.push(v); return !copyFails; },
   });
-  await view.loadActivity();
+  const initialRead = view.loadActivity({background: true});
+  assert.equal($('#refreshActivity').disabled, true, 'first entry still uses normal loading');
+  await initialRead;
   assert.match($('#activityPage').textContent, /17/);
   assert.ok(!$('#activityList').innerHTML.includes('<img'));
   assert.ok(!$('#activityList').innerHTML.includes('已恢复'));
+  const initialWrites = $('#activityList').writes;
+  const initialSourceWrites = $('#activitySource').writes;
+  let finishRead;
+  pendingRead = new Promise((resolve) => { finishRead = resolve; });
+  const previousReads = reads;
+  const backgroundRead = view.loadActivity({background: true});
+  await new Promise(setImmediate);
+  assert.equal($('#refreshActivity').disabled, false, 'cached entry does not flash loading controls');
+  await view.loadActivity({background: true});
+  assert.equal(reads, previousReads + 1, 'concurrent refreshes share the active read');
+  finishRead();
+  await backgroundRead;
+  pendingRead = null;
+  assert.equal($('#activityList').writes, initialWrites, 'unchanged records retain their DOM');
+  assert.equal($('#activitySource').writes, initialSourceWrites, 'unchanged sources retain their DOM');
   $('#activityNext').events.click();
   assert.match($('#activityPage').textContent, /2 \/ 2/);
   $('#activitySearch').value = 'no match';
@@ -106,10 +129,24 @@ async function main() {
   await view.loadActivity();
   const before = $('#activityList').innerHTML;
   fail = true;
+  const errorsBefore = errors;
+  await view.loadActivity({background: true});
+  assert.equal(errors, errorsBefore, 'background failure does not interrupt the cached view');
+  assert.equal($('#activityReadError').hidden, true);
+  assert.equal($('#activityList').innerHTML, before);
   await view.loadActivity();
   assert.equal($('#activityList').innerHTML, before);
   assert.equal($('#activityReadError').hidden, false);
   assert.equal($('#refreshActivity').disabled, false);
+  fail = false;
+  $('#activitySource').value = 'manager';
+  responseItems = [];
+  await view.loadActivity({background: true});
+  assert.equal($('#activitySource').value, 'manager', 'a temporarily missing source does not reset the filter');
+  const emptyWrites = $('#activityList').writes;
+  fail = true;
+  await view.loadActivity({background: true});
+  assert.equal($('#activityList').writes, emptyWrites, 'a cached empty result survives background failure');
   state.activityItems = [];
   await view.loadActivity();
   assert.ok(!$('#activityList').innerHTML.includes('正在读取'));

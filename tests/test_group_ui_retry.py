@@ -36,6 +36,11 @@ def test_group_member_queue_limits_concurrency_and_discards_stale_work() -> None
     subprocess.run(["node", str(harness), str(script_path)], check=True, timeout=15)
 
 
+def test_chat_directories_retain_cached_views_and_isolate_accounts() -> None:
+    harness = Path(__file__).parent / "chat_management_webui.cjs"
+    subprocess.run(["node", str(harness)], check=True, timeout=15)
+
+
 def test_leaving_group_management_cancels_pending_retries() -> None:
     script = _script()
 
