@@ -1693,7 +1693,7 @@ def test_running_status_distinguishes_an_unverified_connection_from_a_restart() 
     harness = r"""
 const nodes = new Map();
 const $ = selector => {
-  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}});
+  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}, querySelector(){ return null; }});
   return nodes.get(selector);
 };
 const state = {historyAccount:"", historyReadyAccount:"", activePage:"home"};

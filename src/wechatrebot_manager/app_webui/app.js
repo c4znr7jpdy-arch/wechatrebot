@@ -450,8 +450,17 @@
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting || confirmingConnection ? "waiting" : status.busy || active ? "starting" : "stopped";
     const homeStatusIcon = $("#homeStatusIcon");
     if (homeStatusIcon) {
-      homeStatusIcon.className = `home-status-icon ${problem ? "problem" : waiting ? "waiting" : online ? "online" : "checking"}`;
-      homeStatusIcon.textContent = online ? "✓" : problem ? "!" : waiting ? "!" : "…";
+      const loading = !online && !problem && !waiting && (status.busy || active);
+      homeStatusIcon.className = `home-status-icon ${problem ? "problem" : waiting ? "waiting" : online ? "online" : "checking"}${loading ? " loading" : ""}`;
+      if (online || problem || waiting) {
+        homeStatusIcon.textContent = online ? "✓" : "!";
+      } else {
+        const symbol = loading ? "i-refresh" : "i-play";
+        // Preserve the SVG across status polls so its animation stays smooth.
+        if (homeStatusIcon.querySelector("use")?.getAttribute("href") !== `#${symbol}`) {
+          homeStatusIcon.innerHTML = icon(symbol);
+        }
+      }
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
