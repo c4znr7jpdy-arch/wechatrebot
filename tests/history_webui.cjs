@@ -125,6 +125,9 @@ async function history() {
   // Long absence: never merge disconnected pages and silently omit their gap.
   c.response = () => ({account_id: 'account-a', items: messages(481, 500), has_more: true});
   await c.selectConversation('a', {forceRefresh: true});
+  assert.equal(s.selectedMessages[0].id, 21);
+  assert.equal(s.historyHasNewer, true);
+  await c.selectConversation('a', {latest: true});
   assert.equal(s.selectedMessages.length, 20); assert.equal(s.selectedMessages[0].id, 481);
   // Clearing the time filter explicitly returns to a single latest page.
   $('#historyStart').value = '2026-10-01'; $('#historyEnd').value = '2026-10-02';
@@ -152,6 +155,41 @@ async function history() {
   await pending; assert.equal(s.historyMessageCache.size, 0);
   for (let i = 0; i < 40; i++) c.setHistoryMessageCacheEntry(String(i), {messages: []});
   assert.equal(s.historyMessageCache.size, 32);
+}
+
+async function retainMessagesAfterLongAbsence() {
+  const {context: c, state: s, calls, $} = historyContext();
+  s.conversations = [{conversation_id: 'a', message_count: 40, last_timestamp: 40}];
+  c.response = () => ({account_id: 'account-a', items: messages(21, 40), has_more: true});
+  await c.selectConversation('a');
+  s.selectedSenderKey = 'member';
+  c.saveSelectedHistoryMessages();
+  const before = $('#messageList').innerHTML;
+  const scrollTop = $('#messageList').scrollTop;
+  let resolve;
+  c.response = () => new Promise(done => { resolve = done; });
+  const pending = c.selectConversation('a', {silent: true, forceRefresh: true});
+  assert.equal($('#messageList').innerHTML, before);
+  resolve({account_id: 'account-a', items: messages(481, 500), has_more: true});
+  await pending;
+  assert.equal($('#messageList').innerHTML, before, 'long absence must retain the visible DOM even at the bottom');
+  assert.equal($('#messageList').scrollTop, scrollTop);
+  assert.equal(s.selectedSenderKey, 'member');
+  assert.equal(s.selectedMessages[0].id, 21);
+  assert.equal(s.historyMessagesLoading, false);
+  assert.equal($('#newMessageButton').hidden, false);
+  assert.match($('#newMessageButton').textContent, /回到最新消息/);
+  await c.selectConversation('a', {silent: true, forceRefresh: true});
+  assert.equal(calls.length, 2, 'automatic polling must retain the pending newer-message prompt');
+  c.response = () => ({account_id: 'account-a', items: messages(481, 500), has_more: true});
+  await c.selectConversation('a', {latest: true});
+  assert.equal(s.selectedMessages.length, 20);
+  assert.equal(s.selectedMessages[0].id, 481);
+  assert.equal(s.historyHasNewer, false);
+  assert.equal($('#newMessageButton').hidden, true);
+  c.response = () => ({account_id: 'account-a', items: [], has_more: false});
+  await c.selectConversation('a', {silent: true, forceRefresh: true});
+  assert.equal(s.selectedMessages.length, 0, 'an empty response must still clear deleted records');
 }
 
 async function olderMessagesDuringRefresh() {
@@ -303,5 +341,5 @@ async function unknownAccountPolling() {
   assert.equal(reads, 2, 'verified offline history remains available');
 }
 
-(async () => { dates(); await history(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

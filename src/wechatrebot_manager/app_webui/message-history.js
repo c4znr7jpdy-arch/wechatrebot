@@ -622,9 +622,10 @@ window.createMessageHistory = function (helpers) {
       const overlaps = !priorMessages.length || page.items.some((message) => priorMessages.some((prior) => prior.id === message.id));
       let messages = latest || !overlaps ? page.items : mergeMessages(priorMessages, page.items);
       let hasMore = latest || !overlaps || priorMessages.length <= page.items.length ? page.has_more : (previous?.hasMore ?? state.historyHasMore);
-      // Do not insert a disconnected latest page into an older window being read.
-      if (current && !latest && priorMessages.length && page.items.length && !nearBottom
-          && (!overlaps || messages.length > HISTORY_MESSAGE_WINDOW_LIMIT)) {
+      // Returning from the tray must retain the visible window even when it was
+      // at the bottom: a disconnected latest page would discard unread history.
+      if (current && !latest && priorMessages.length && page.items.length
+          && (!overlaps || (!nearBottom && messages.length > HISTORY_MESSAGE_WINDOW_LIMIT))) {
         state.historyHasNewer = true;
         saveSelectedHistoryMessages();
         showHistoryNewerMessages();

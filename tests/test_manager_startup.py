@@ -150,6 +150,43 @@ def test_download_connection_check_recovers_without_login_prompt(browser, manage
         page.close()
 
 
+@pytest.mark.parametrize("target,method", [("groups", "get_groups"), ("schedules", "get_scheduled_task_context")])
+def test_first_page_read_resumes_when_the_same_account_recovers(browser, manager_url, target, method):
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""method => {
+          const api = window.pywebview.api, status = api.get_status, read = api[method];
+          window.accountProbeAvailable = false;
+          window.pageReadCount = 0;
+          api.get_status = async () => {
+            const result = structuredClone(await status());
+            result.data.runtime.account_status_available = window.accountProbeAvailable;
+            return result;
+          };
+          api[method] = (...args) => { window.pageReadCount++; return read(...args); };
+        }""", method)
+        expect(page.locator("#signalWechatDetail")).to_contain_text("状态待确认")
+        page.locator(f'.nav-item[data-page="{target}"]').click()
+        expect(page.locator(f"#page-{target}")).to_be_visible()
+        reads = page.evaluate("window.pageReadCount")
+        page.evaluate("window.accountProbeAvailable = true")
+        expect(page.locator("#signalWechatDetail")).to_contain_text("已连接")
+        assert page.evaluate("window.pageReadCount") > reads
+        if target == "groups":
+            expect(page.locator("#groupRows .group-row").first).to_be_visible()
+        else:
+            expect(page.locator("#scheduleContextMessage")).to_be_hidden()
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("missing_script", ["subscription.js", "core-settings.js", "chat-profiles.js", "panel-layout.js", "features.js", "scheduled-tasks.js", "preview.js"])
 def test_manager_reports_missing_startup_dependency(browser, manager_url, missing_script, tmp_path: Path):
     page = browser.new_page()

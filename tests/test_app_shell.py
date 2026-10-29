@@ -1955,7 +1955,7 @@ def test_chat_management_adds_private_directory_profile_and_feature_scope() -> N
     assert 'id="contactInspector"' in markup
     assert 'api("get_contacts", refresh)' in script
     assert 'api("get_contact_detail", contactId)' in script
-    assert 'api("get_private_policy", state.contactAccount, contactId)' in script
+    assert 'api("get_private_policy", account, contactId)' in script
     assert '"save_private_policy"' in script
     assert "CONTACT_PAGE_SIZE = 100" in script
     assert "资料只在当前运行期间保存在内存中" in script
@@ -2037,7 +2037,7 @@ def test_091_history_and_group_layout_regressions_are_covered() -> None:
     assert "data-avatar-source" in script
     assert "async function refreshVisibleChatData()" in script
     assert 'document.addEventListener("visibilitychange"' in script
-    assert "if (!background || refresh || previousGroups !== JSON.stringify(state.groups)" in script
+    assert "if (!background || previousGroups !== JSON.stringify(state.groups)" in script
     assert ".group-inspector.empty" in styles
     assert '.group-policy-form input[type="time"]' in styles
     assert ".message-pane > header > .status-badge" in styles

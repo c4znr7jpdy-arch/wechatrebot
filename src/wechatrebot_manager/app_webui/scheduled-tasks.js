@@ -18,12 +18,22 @@ window.createScheduledTasks = function (helpers) {
     toast,
   } = helpers;
 
-  async function loadSchedules() {
+  async function loadSchedules(options = {}) {
+    const background = options?.background === true;
+    if (background && (state.scheduledBusy || state.legacyMigrationLoading || !$("#modalBackdrop").hidden
+        || (state.scheduledContext && !state.scheduledContext.loading
+          && state.status?.runtime?.account_status_available === false))) return;
+    if (background && state.scheduledContextRequest) return state.scheduledContextRequest;
+    const retained = background && state.scheduledContext && !state.scheduledContext.loading
+      && scheduledAccountMatches(state.scheduledContext.account_id || "")
+      ? {context: state.scheduledContext, schedules: state.schedules, migrations: state.legacyMigrations} : null;
     const generation = ++state.scheduledLoad;
     const button = $("#refreshSchedules");
-    button.disabled = true;
-    $$("button", $("#scheduleRows")).forEach((control) => { control.disabled = true; });
-    const request = loadScheduledData(generation);
+    if (!retained) {
+      button.disabled = true;
+      $$("button", $("#scheduleRows")).forEach((control) => { control.disabled = true; });
+    }
+    const request = loadScheduledData(generation, retained);
     state.scheduledContextRequest = request;
     try { await request; }
     finally {
@@ -56,31 +66,33 @@ window.createScheduledTasks = function (helpers) {
     if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
   }
 
-  async function loadScheduledData(generation) {
+  async function loadScheduledData(generation, retained = null) {
     try {
-      let initialAccount = "";
-      try {
-        const initial = await api("get_scheduled_task_context", true);
-        if (generation !== state.scheduledLoad) return;
-        initialAccount = initial.account_id || "";
-        state.scheduledContext = scheduledAccountMatches(initialAccount) ? initial : {account_id: "", items: [], loading: true};
-        state.schedules = [];
-        state.legacyMigrations = [];
-        $("#scheduleContextMessage").textContent = "";
-        $("#scheduleContextMessage").hidden = true;
-        renderSchedules();
-        renderGroupAnalysisMigration();
-        renderScheduledTasks();
-        if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
-      } catch (_error) {
-        if (generation !== state.scheduledLoad) return;
-        state.scheduledContext = {account_id: "", items: [], loading: true};
-        state.schedules = [];
-        state.legacyMigrations = [];
-        renderSchedules();
-        renderGroupAnalysisMigration();
-        renderScheduledTasks();
-        if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+      let initialAccount = retained?.context.account_id || "";
+      if (!retained) {
+        try {
+          const initial = await api("get_scheduled_task_context", true);
+          if (generation !== state.scheduledLoad) return;
+          initialAccount = initial.account_id || "";
+          state.scheduledContext = scheduledAccountMatches(initialAccount) ? initial : {account_id: "", items: [], loading: true};
+          state.schedules = [];
+          state.legacyMigrations = [];
+          $("#scheduleContextMessage").textContent = "";
+          $("#scheduleContextMessage").hidden = true;
+          renderSchedules();
+          renderGroupAnalysisMigration();
+          renderScheduledTasks();
+          if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+        } catch (_error) {
+          if (generation !== state.scheduledLoad) return;
+          state.scheduledContext = {account_id: "", items: [], loading: true};
+          state.schedules = [];
+          state.legacyMigrations = [];
+          renderSchedules();
+          renderGroupAnalysisMigration();
+          renderScheduledTasks();
+          if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
+        }
       }
       const [context, legacy, migrations] = await Promise.allSettled([
         api("get_scheduled_task_context"),
@@ -88,18 +100,25 @@ window.createScheduledTasks = function (helpers) {
         api("get_legacy_schedule_migrations"),
       ]);
       if (generation !== state.scheduledLoad) return;
+      if (retained && state.status?.runtime?.account_status_available === false) return;
+      // A failed background read must not replace a verified same-account view.
+      if (retained && scheduledAccountMatches(initialAccount)
+          && [context, legacy, migrations].some((result) => result.status === "rejected")
+          && (context.status === "rejected" || context.value.account_id === initialAccount)) return;
       let contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
       const accountChanged = Boolean(contextData.account_id && ((!scheduledAccountMatches(contextData.account_id))
         || (initialAccount && contextData.account_id !== initialAccount)));
       if (accountChanged) {
         contextData = {account_id: "", items: [], message: "微信账号已变化，请刷新任务列表。"};
       }
+      const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
+      const visibleMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
+      const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
+      const schedules = legacyAccountMatches && migrations.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action && !visibleMigrations.some((migration) => migration.job_id === item.id)) : [];
       state.scheduledContext = contextData;
       state.scheduledCommandCatalog = Array.isArray(contextData.command_catalog) ? contextData.command_catalog : [];
-      const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
-      state.legacyMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
-      const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
-      state.schedules = legacyAccountMatches && migrations.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action && !state.legacyMigrations.some((migration) => migration.job_id === item.id)) : [];
+      state.legacyMigrations = visibleMigrations;
+      state.schedules = schedules;
       const message = $("#scheduleContextMessage");
       message.textContent = contextData.message || (!contextData.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
       if (context.status === "rejected" && state.legacyMigrations.length) message.textContent += " 可继续完成下方已确认的旧任务迁移。";
@@ -108,12 +127,11 @@ window.createScheduledTasks = function (helpers) {
       if (migrations.status === "rejected") message.textContent += " 旧任务迁移记录暂时无法读取，请检查后重试。";
       if ((contextData.account_id && legacy.status === "fulfilled" && legacy.value.account_id && !legacyAccountMatches) || state.legacyMigrations.length !== migrationItems.length) message.textContent += " 微信账号已变化，其他账号的旧任务已隐藏，请刷新重试。";
       message.hidden = !message.textContent;
-      renderSchedules();
-      renderGroupAnalysisMigration();
-      renderScheduledTasks();
+      renderScheduledSnapshot(retained);
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
     } catch (error) {
       if (generation !== state.scheduledLoad) return;
+      if (retained && scheduledAccountMatches(retained.context.account_id || "")) return;
       state.scheduledContext = null;
       state.scheduledCommandCatalog = [];
       state.schedules = [];
@@ -128,6 +146,19 @@ window.createScheduledTasks = function (helpers) {
     }
   }
 
+  function renderScheduledSnapshot(previous) {
+    const changed = (before, after) => !previous || JSON.stringify(before) !== JSON.stringify(after);
+    const scroll = $(".content-scroll");
+    const scrollTop = scroll?.scrollTop;
+    const legacyOpen = $("#legacyScheduleSection").open;
+    if (changed([previous?.schedules, previous?.migrations], [state.schedules, state.legacyMigrations])) renderSchedules();
+    const migration = (context) => [context?.account_id, context?.legacy_group_analysis, context?.groups];
+    if (changed(migration(previous?.context), migration(state.scheduledContext))) renderGroupAnalysisMigration();
+    if (changed([previous?.context.items, previous?.schedules], [state.scheduledContext?.items, state.schedules])) renderScheduledTasks();
+    if (previous && (previous.schedules.length || previous.migrations.length)) $("#legacyScheduleSection").open = legacyOpen;
+    if (previous && scroll) scroll.scrollTop = scrollTop;
+  }
+
   function groupAnalysisMigrationAccount(context = {}) {
     const legacy = context.legacy_group_analysis;
     if (!["confirmed", "prepared"].includes(legacy?.state)) return context.account_id || "";
@@ -140,6 +171,11 @@ window.createScheduledTasks = function (helpers) {
     if (!root) return;
     const context = state.scheduledContext || {};
     const legacy = context.legacy_group_analysis;
+    const sameAccount = root.dataset.account === (context.account_id || "");
+    const selected = new Set(sameAccount ? $$('[data-analysis-migration-target]:checked', root).map((input) => input.value) : []);
+    const selectedDays = sameAccount ? $("#analysisMigrationDays")?.value ?? null : null;
+    const expanded = sameAccount ? $("details", root)?.open ?? null : null;
+    root.dataset.account = context.account_id || "";
     root.hidden = !legacy || ["none", "complete"].includes(legacy.state);
     if (root.hidden) { root.replaceChildren(); return; }
     const groups = context.groups || [];
@@ -151,6 +187,9 @@ window.createScheduledTasks = function (helpers) {
       ${legacy.requires_target_selection && !resuming ? `<details open><summary>选择迁移后的日报群</summary><p>旧规则没有明确包含的群，请重新选择需要生成日报的群聊。</p><div class="scheduled-target-choices">${groups.map((group) => `<label class="scheduled-target-option"><input type="checkbox" data-analysis-migration-target value="${escapeHtml(group.id)}"><span>${escapeHtml(group.name || group.id)}</span></label>`).join("")}</div></details>` : ""}
       <button type="button" class="button secondary small" id="previewGroupAnalysisMigration" ${!groupAnalysisMigrationAccount(context) || legacy.state === "blocked" ? "disabled" : ""}>${resuming ? "继续迁移" : "预览迁移"}</button>
       ${legacy.state === "confirmed" ? `<button type="button" class="row-action" id="cancelGroupAnalysisMigration" ${!groupAnalysisMigrationAccount(context) ? "disabled" : ""}>取消迁移</button>` : ""}`;
+    $$('[data-analysis-migration-target]', root).forEach((input) => { input.checked = selected.has(input.value); });
+    if (selectedDays !== null && $("#analysisMigrationDays")) $("#analysisMigrationDays").value = selectedDays;
+    if (expanded !== null && $("details", root)) $("details", root).open = expanded;
     $("#previewGroupAnalysisMigration").addEventListener("click", previewGroupAnalysisMigration);
     $("#cancelGroupAnalysisMigration")?.addEventListener("click", cancelGroupAnalysisMigration);
   }

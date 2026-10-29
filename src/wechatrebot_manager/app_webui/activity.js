@@ -13,6 +13,9 @@ window.createActivityView = function (helpers) {
   const activityPageSize = 15;
   let bound = false;
   let loading = false;
+  let loaded = false;
+  let renderedItems = null;
+  let renderedSources = null;
   const labels = {error: "错误", warning: "警告", info: "提示"};
 
   async function boundedRequest(method) {
@@ -86,12 +89,15 @@ window.createActivityView = function (helpers) {
     } finally { button.disabled = false; }
   }
 
-  async function loadActivity() {
+  async function loadActivity(options = {}) {
     bindActivity();
     if (loading) return;
+    const background = options.background === true && loaded;
     loading = true;
-    $("#refreshActivity").disabled = true;
-    $("#activityReadError").hidden = true;
+    if (!background) {
+      $("#refreshActivity").disabled = true;
+      $("#activityReadError").hidden = true;
+    }
     try {
       await window.managerErrorReporter?.flush();
       const items = await boundedRequest("get_activity");
@@ -100,17 +106,26 @@ window.createActivityView = function (helpers) {
       const source = $("#activitySource");
       const selected = source.value;
       const sources = new Map(items.map((item) => [item.source, item.source_name]));
-      source.innerHTML = '<option value="">全部来源</option>' + [...sources].map(([key, name]) => `<option value="${escapeHtml(key)}">${escapeHtml(name)}</option>`).join("");
-      source.value = sources.has(selected) ? selected : "";
+      if (selected && !sources.has(selected)) sources.set(selected, source.selectedOptions?.[0]?.textContent || selected);
+      const markup = '<option value="">全部来源</option>' + [...sources].map(([key, name]) => `<option value="${escapeHtml(key)}">${escapeHtml(name)}</option>`).join("");
+      if (markup !== renderedSources) {
+        source.innerHTML = markup;
+        source.value = selected;
+        renderedSources = markup;
+      }
       renderActivity();
+      loaded = true;
+      $("#activityReadError").hidden = true;
     } catch (error) {
-      $("#activityReadError").hidden = false;
-      $("#activityReadError").textContent = "19003 · 运行记录读取失败，请点击刷新重试。已有结果仍保留。";
-      if (!state.activityItems.length) $("#activityList").innerHTML = '<div class="empty-state compact"><p>暂时无法读取运行记录</p><p>请刷新重试，或截图联系技术支持。</p></div>';
-      reportError(error);
+      if (!background) {
+        $("#activityReadError").hidden = false;
+        $("#activityReadError").textContent = "19003 · 运行记录读取失败，请点击刷新重试。已有结果仍保留。";
+        if (!loaded && !state.activityItems.length) $("#activityList").innerHTML = '<div class="empty-state compact"><p>暂时无法读取运行记录</p><p>请刷新重试，或截图联系技术支持。</p></div>';
+        reportError(error);
+      }
     } finally {
       loading = false;
-      $("#refreshActivity").disabled = false;
+      if (!background) $("#refreshActivity").disabled = false;
     }
   }
 
@@ -127,9 +142,9 @@ window.createActivityView = function (helpers) {
     const errors = filtered.filter((item) => item.level === "error").length;
     const warnings = filtered.filter((item) => item.level === "warning").length;
     $("#activitySummary").textContent = `当前筛选（最近 ${hours} 小时）：${filtered.length} 条记录 · ${errors} 条错误 · ${warnings} 条警告。间隔不超过 5 分钟的同类异常合并，保留次数和首次、最近时间。`;
-    $("#activityList").innerHTML = items.length ? items.map((item) => {
+    const markup = items.length ? items.map((item) => {
       const level = Object.hasOwn(labels, item.level) ? item.level : "info";
-      return `<article class="diagnostic-card ${level}">
+      return `<article class="diagnostic-card ${level}" data-activity-id="${escapeHtml(item.id)}">
         <header><span class="diagnostic-level ${level}">${labels[level]}</span><strong>${escapeHtml(item.title)}</strong><code>${escapeHtml(item.code || "")}</code></header>
         <div class="diagnostic-meta"><time>${escapeHtml(item.time ? fullTime(item.time) : "时间未记录")}</time><span>${escapeHtml(item.source_name)}</span>${item.count > 1 ? `<span>同类问题 ${item.count} 次</span>` : ""}</div>
         ${item.operation ? `<div class="diagnostic-operation">操作：${escapeHtml(item.operation)}</div>` : ""}
@@ -139,6 +154,18 @@ window.createActivityView = function (helpers) {
         <details><summary>技术详情与问题报告</summary><pre class="diagnostic-report" tabindex="0">${escapeHtml(item.report)}</pre></details>
       </article>`;
     }).join("") : `<div class="empty-state compact"><p>${state.activityItems.length ? "没有符合筛选条件的记录" : "当前还没有可读取的运行记录"}</p><p>${state.activityItems.length ? "可切换全部记录，或调整来源、时间和关键词。" : "发生问题后刷新此页，复制问题信息或导出诊断文件。"}</p></div>`;
+    if (markup === renderedItems) return;
+    const list = $("#activityList");
+    const scrollPositions = [$(".activity-panel"), $(".content-scroll")]
+      .map((node) => [node, node.scrollTop]);
+    const openIds = new Set([...list.querySelectorAll("[data-activity-id]")]
+      .filter((card) => card.querySelector("details")?.open).map((card) => card.dataset.activityId));
+    list.innerHTML = markup;
+    for (const card of list.querySelectorAll("[data-activity-id]")) {
+      if (openIds.has(card.dataset.activityId)) card.querySelector("details").open = true;
+    }
+    for (const [node, scrollTop] of scrollPositions) node.scrollTop = scrollTop;
+    renderedItems = markup;
   }
 
   async function generateResponseTrace() {
