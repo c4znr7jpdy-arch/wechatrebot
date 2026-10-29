@@ -767,7 +767,10 @@ html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--vei
 .report-preview-close { width: 36px; height: 36px; padding: 0; flex: none; }
 .report-preview-tools { display: flex; flex: none; align-items: center; justify-content: center; gap: 8px; padding: 12px 18px; }
 .report-preview-tools output { min-width: 42px; text-align: center; }
-.report-preview-status { margin: 16px; }
+.report-preview-status-slot { flex: none; }
+.report-preview-status { margin: 16px; opacity: 0; transform: translateY(-4px); transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms; visibility: hidden; }
+.report-preview-status.is-visible { opacity: 1; transform: translateY(0); transition-delay: 0s; visibility: visible; }
+.report-preview-status.is-hiding { pointer-events: none; }
 .report-preview-viewport { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; padding: 16px; background: var(--canvas); }
 .report-preview-viewport img { display: block; max-width: none; height: auto; margin: 0 auto; }
 .report-preview-viewport img[hidden] { display: none; }
@@ -785,9 +788,13 @@ html[data-skin="soft"] .contact-profile-dialog::backdrop { background: var(--vei
 .is-message-preview .report-preview-tools output { display: none; }
 .is-message-preview .report-preview-viewport { display: flex; background: transparent; }
 .is-message-preview .report-preview-viewport img { flex: none; align-self: flex-start; margin: auto; box-shadow: 0 16px 48px #0006; }
-.is-message-preview .report-preview-status:not([hidden]) { position: absolute; top: 14px; left: 50%; z-index: 2; transform: translateX(-50%); max-width: calc(100vw - 140px); margin: 0; padding: 8px 14px; border-radius: 16px; background: var(--surface); box-shadow: 0 6px 20px #0003; }
+.is-message-preview .report-preview-status-slot { display: flex; justify-content: center; min-height: 58px; padding: 14px 72px 0; box-sizing: border-box; }
+.is-message-preview .report-preview-status { align-self: flex-start; max-width: 100%; max-height: min(160px, 30dvh); overflow: auto; overflow-wrap: anywhere; box-sizing: border-box; margin: 0; padding: 8px 14px; border-radius: 16px; background: var(--surface); box-shadow: 0 6px 20px #0003; }
 .preview-copy-menu { position: fixed; z-index: 2; padding: 9px 18px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: 0 3px 16px #0003; cursor: pointer; }
 .preview-copy-menu[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .report-preview-status { transition: none; }
+}
 @media (max-width: 600px) {
   .report-preview-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
   .report-preview-header { padding: 10px; }

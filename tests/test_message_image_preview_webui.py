@@ -136,16 +136,80 @@ def test_original_failure_keeps_thumbnail_and_reports_status(browser, manager_ur
         page.close()
 
 
-def test_original_failure_status_auto_dismisses(browser, manager_url):
-    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+@pytest.mark.parametrize("width,theme,motion", [(1440, "light", "no-preference"), (430, "dark", "no-preference"), (430, "light", "reduce")])
+def test_original_failure_status_auto_dismisses(browser, manager_url, tmp_path, width, theme, motion):
+    page = browser.new_page(viewport={"width": width, "height": 1000}, reduced_motion=motion)
     thumbnail = image_source((120, 240))
     try:
         images = open_images(page, manager_url, thumbnail)
+        page.evaluate("theme => { document.documentElement.dataset.theme = theme; }", theme)
+        page.evaluate("""() => {
+          window.previewOpacities = [];
+          window.recordPreview = true;
+          const sample = () => {
+            const status = document.querySelector('.report-preview-status');
+            if (status && !status.hidden) previewOpacities.push(Number(getComputedStyle(status).opacity));
+            if (window.recordPreview) requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        }""")
         images.first.click()
         dialog = page.locator(".report-preview-dialog")
-        page.evaluate("pendingImages.shift()({ok:true, data:{src:'', message:'原图未能获取，已显示缩略图。'}})")
+        notice = "原图未能获取，可能已过期或连接暂不可用；已显示缩略图。"
+        page.evaluate("message => pendingImages.shift()({ok:true, data:{src:'', message}})", notice)
         status = dialog.locator('[role="status"]')
-        expect(status).to_have_text("原图未能获取，已显示缩略图。")
+        expect(status).to_have_text(notice)
+        expect(status).to_be_visible()
+        expect(status).to_have_css("opacity", "1")
+        status_box = status.bounding_box()
+        image_box = dialog.locator("img").bounding_box()
+        assert status_box["y"] + status_box["height"] <= image_box["y"]
+        assert status_box["x"] >= 0 and status_box["x"] + status_box["width"] <= width
+        page.screenshot(path=str(tmp_path / f"toast-{theme}-{width}-{motion}.png"))
+        expect(status).to_be_hidden(timeout=5000)
+        expect(status).to_have_attribute("hidden", "")
+        after = dialog.locator("img").bounding_box()
+        for key in ("x", "y", "width", "height"):
+            assert after[key] == pytest.approx(image_box[key], abs=1)
+        samples = page.evaluate("() => { window.recordPreview = false; return previewOpacities; }")
+        if motion == "no-preference":
+            peak = samples.index(1)
+            assert any(0 < value < 1 for value in samples[:peak]), samples
+            assert any(0 < value < 1 for value in samples[peak + 1:]), samples
+        else:
+            assert not any(0 < value < 1 for value in samples), samples
+    finally:
+        page.close()
+
+
+def test_loading_notice_expires_and_new_notice_survives_previous_fade(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    try:
+        images = open_images(page, manager_url, image_source((120, 240)))
+        images.first.click()
+        status = page.locator('.report-preview-status')
+        expect(status).to_have_text("正在获取原图…")
+        expect(status).to_be_visible()
+        # Resolve the original while the loading notice is fading out.
+        page.evaluate("""() => new Promise((resolve, reject) => {
+          const status = document.querySelector('.report-preview-status');
+          const observer = new MutationObserver(() => {
+            if (!status.classList.contains('is-hiding')) return;
+            observer.disconnect(); clearTimeout(timeout);
+            pendingImages.shift()({ok:true, data:{src:'', message:'原图暂不可用，已显示缩略图。'}});
+            resolve();
+          });
+          const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Loading notice did not fade')); }, 5000);
+          observer.observe(status, {attributes:true, attributeFilter:['class']});
+        })""")
+        expect(status).to_have_text("原图暂不可用，已显示缩略图。")
+        expect(status).to_have_css("opacity", "1")
+        page.wait_for_timeout(300)
+        expect(status).to_be_visible()
+        expect(status).to_be_hidden(timeout=5000)
+        page.keyboard.press("Escape")
+        images.first.click()
+        expect(status).to_have_text("正在获取原图…")
         expect(status).to_be_visible()
         expect(status).to_be_hidden(timeout=5000)
     finally:
