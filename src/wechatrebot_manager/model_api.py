@@ -400,6 +400,10 @@ class ModelApiMixin:
                 {"items": list(models), "total": len(models)},
                 message=f"已读取 {len(models)} 个可用模型。",
             )
+        except ProviderTestError as exc:
+            result = self._failed(exc, exc.error_code)
+            result["error"].update(message=str(exc), detail=str(exc))
+            return result
         except (OSError, ValueError) as exc:
             return self._failed(exc, "15001")
 
