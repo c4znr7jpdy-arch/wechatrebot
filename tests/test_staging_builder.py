@@ -2,7 +2,10 @@ import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import struct
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -410,6 +413,42 @@ def test_staging_checks_applies_and_archives_bridge_patch(
     )
     archived = output / "legal" / "corresponding-source" / patch.name
     assert archived.read_text(encoding="utf-8") == "bridge patch"
+
+
+def test_bridge_patch_stack_applies_to_real_manifest_layout(tmp_path, monkeypatch):
+    module = _builder()
+    root = Path(__file__).parents[1]
+    manifest = json.loads((root / "release/source-manifest.json").read_text("utf-8"))
+    output = tmp_path / "artifacts/staging"
+    patches = tmp_path / "patches"
+    patches.mkdir()
+    for patch in (root / "patches").glob("hook-bridge-*.patch"):
+        shutil.copy2(patch, patches / patch.name)
+    for entry in manifest["entries"]:
+        target = entry["target"]
+        if target.startswith("app/bridge/src") or target in {
+            "app/bridge/pyproject.toml", "config/templates/bridge.example.json",
+        }:
+            source_root = root / "vendor" if entry["origin"] == "vendor" else root
+            module._copy_source_entry(source_root / entry["source"], output / target, entry)
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    template = output / "config/templates/bridge.example.json"
+    original_template = template.read_bytes()
+    assert not (output / "app/bridge/config.example.json").exists()
+
+    module._apply_bridge_patch(tmp_path, output)
+
+    assert template.read_bytes() == original_template
+    archived = output / "legal/corresponding-source"
+    assert {path.name for path in archived.iterdir()} == {path.name for path in patches.iterdir()}
+    spec = importlib.util.spec_from_file_location(
+        "_staged_bridge_config", output / "app/bridge/src/hook_bridge/config.py",
+    )
+    assert spec and spec.loader
+    config = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, config)
+    spec.loader.exec_module(config)
+    assert config.Settings.load(template).file_download_timeout_seconds == 180.0
 
 
 def test_staging_applies_base_then_named_extension_patch_to_same_plugin(

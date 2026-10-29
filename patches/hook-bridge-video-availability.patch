@@ -1,21 +1,45 @@
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index f3fe201..acbb2dc 100644
 --- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
-@@ -133,6 +133,7 @@
+@@ -11,7 +11,7 @@ import socket
+ import re
+ import subprocess
+ import time
+-from typing import Any, Callable
++from typing import Any, Awaitable, Callable
+ import uuid
+ import xml.etree.ElementTree as ET
+ 
+@@ -129,10 +129,11 @@ class BridgeApplication:
+         self._injector_watch_task: asyncio.Task[None] | None = None
+         self._hook_watch_task: asyncio.Task[None] | None = None
+         self._group_member_watch_task: asyncio.Task[None] | None = None
+-        # The 4.1.8.27 video endpoint may stop accepting new HTTP connections
++        # The 4.1.8.27 native download endpoints may stop accepting HTTP connections
          # while a native download is running.  Keep the health watcher from
          # treating that expected interval as a fatal hook failure.
-         self._active_video_downloads = 0
-+        self._video_download_generation = 0
+-        self._active_video_downloads = 0
++        self._active_native_downloads = 0
++        self._native_download_generation = 0
          # Keep the query-derived baseline separate from BridgeState.  Direct
          # callbacks can arrive before /api/get_room_members refreshes its
          # cache; sharing the same map would turn that temporary stale result
-@@ -260,13 +261,20 @@
+@@ -157,6 +158,7 @@ class BridgeApplication:
+                 timeout=self.settings.request_timeout_seconds,
+                 image_path_field=self.settings.image_path_field,
+                 video_download_timeout_seconds=self.settings.video_download_timeout_seconds,
++                file_download_timeout_seconds=self.settings.file_download_timeout_seconds,
+                 video_upload_timeout_seconds=self.settings.video_upload_timeout_seconds,
+             )
+         if self.media is None:
+@@ -260,13 +262,20 @@ class BridgeApplication:
          except OSError:
              return False
  
-+    def _hook_check_overlapped_video(self, generation: int) -> bool:
++    def _hook_check_overlapped_native_download(self, generation: int) -> bool:
 +        # A download can finish before an older request reports its failure.
-+        return bool(self._active_video_downloads) or generation != self._video_download_generation
++        return bool(self._active_native_downloads) or generation != self._native_download_generation
 +
      async def _health_snapshot(self) -> dict[str, object]:
          onebot_connected = bool(getattr(self.onebot, "connected", False))
@@ -24,32 +48,32 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrb
 -        if self._hook_ready and not hook_ready:
 -            logger.info("HOOK API is no longer accepting connections")
 -            self._hook_ready = False
-+        generation = self._video_download_generation
++        generation = self._native_download_generation
 +        hook_ready = self._hook_ready
-+        if hook_ready and not self._hook_check_overlapped_video(generation):
++        if hook_ready and not self._hook_check_overlapped_native_download(generation):
 +            accepting = await self._hook_api_accepting_connections()
-+            if not accepting and not self._hook_check_overlapped_video(generation):
++            if not accepting and not self._hook_check_overlapped_native_download(generation):
 +                logger.info("HOOK API is no longer accepting connections")
 +                self._hook_ready = hook_ready = False
          wechat_identity = self.state.bot_wxid if hook_ready else ""
          return {
              "service_ready": True,
-@@ -925,9 +933,14 @@
+@@ -925,9 +934,14 @@ class BridgeApplication:
          if not self.state.bot_wxid:
              return 0
  
-+        generation = self._video_download_generation
-+        if self._hook_check_overlapped_video(generation):
++        generation = self._native_download_generation
++        if self._hook_check_overlapped_native_download(generation):
 +            return 0
          groups = await self.hook.get_groups()
          emitted = 0
          for raw_group in groups:
-+            if self._hook_check_overlapped_video(generation):
++            if self._hook_check_overlapped_native_download(generation):
 +                break
              if not isinstance(raw_group, Mapping):
                  continue
              room_id, group_name = self._group_identity(raw_group)
-@@ -938,11 +951,18 @@
+@@ -938,11 +952,18 @@ class BridgeApplication:
  
              try:
                  members = await self.hook.get_group_members(room_id)
@@ -57,23 +81,23 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrb
 +            except Exception as exc:
 +                if (
 +                    isinstance(exc, (ClientConnectionError, asyncio.TimeoutError))
-+                    and self._hook_check_overlapped_video(generation)
++                    and self._hook_check_overlapped_native_download(generation)
 +                ):
 +                    raise
                  logger.exception(
                      "failed to poll HOOK group members room=%s", room_id
                  )
                  continue
-+            if self._hook_check_overlapped_video(generation):
++            if self._hook_check_overlapped_native_download(generation):
 +                break
              current = self._group_member_identities(members)
              # A bot that belongs to the group cannot have a genuinely empty
              # member list.  Treat empty as an unrefreshed/error response so a
-@@ -1018,11 +1038,17 @@
+@@ -1018,11 +1039,17 @@ class BridgeApplication:
          # not deliver its documented join/leave callbacks.
          await asyncio.sleep(min(3.0, self.group_member_poll_interval_seconds))
          while True:
-+            generation = self._video_download_generation
++            generation = self._native_download_generation
              try:
                  await self._poll_group_member_changes_once()
              except (HookApiError, ClientConnectionError, asyncio.TimeoutError) as exc:
@@ -81,40 +105,270 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrb
 -                logger.warning(
 +                overlapping_download = (
 +                    isinstance(exc, (ClientConnectionError, asyncio.TimeoutError))
-+                    and self._hook_check_overlapped_video(generation)
++                    and self._hook_check_overlapped_native_download(generation)
 +                )
 +                log = logger.debug if overlapping_download else logger.warning
 +                log(
                      "HOOK group member polling delayed; will retry: error=%s diagnostics=%s",
                      exc,
                      diagnostics,
-@@ -1555,6 +1581,7 @@
+@@ -1250,6 +1277,51 @@ class BridgeApplication:
+                 return False, actual_size
+             await asyncio.sleep(min(poll_interval, remaining))
+ 
++    async def _download_native_media(
++        self,
++        download: Callable[[Mapping[str, Any]], Awaitable[Any]],
++        payload: Mapping[str, Any],
++        destination: Path,
++        expected_size: int,
++        message_id: str,
++        *,
++        timeout_seconds: float,
++    ) -> tuple[Any, bool, int | None]:
++        """Track one native download until its bounded file wait finishes."""
++        timeout_seconds = max(0.001, float(timeout_seconds))
++        loop = asyncio.get_running_loop()
++        deadline = loop.time() + timeout_seconds
++        self._native_download_generation += 1
++        self._active_native_downloads += 1
++        try:
++            try:
++                response = await asyncio.wait_for(download(payload), timeout_seconds)
++            except (ClientConnectionError, HookApiError, asyncio.TimeoutError) as exc:
++                # A native download may outlive its HTTP connection. Never
++                # start it twice or remove a file still owned by the DLL.
++                if not destination.is_file():
++                    await asyncio.sleep(min(0.2, max(0.0, deadline - loop.time())))
++                if not destination.is_file():
++                    raise
++                logger.warning(
++                    "HOOK native download endpoint disconnected after starting message=%s; "
++                    "waiting for the native download to finish error=%s",
++                    message_id,
++                    type(exc).__name__,
++                )
++                response = {
++                    "status": "download_in_progress_after_disconnect",
++                    "error_type": type(exc).__name__,
++                }
++            complete, actual_size = await self._wait_for_media_download(
++                destination,
++                expected_size,
++                timeout_seconds=max(0.001, deadline - loop.time()),
++            )
++            return response, complete, actual_size
++        finally:
++            self._active_native_downloads -= 1
++
+     @staticmethod
+     def _valid_image(path: Path) -> bool:
+         try:
+@@ -1379,7 +1451,7 @@ class BridgeApplication:
+                     quoted_message_id=quoted_message.message_id,
+                 )
+                 if quoted_message.quote_type == 1:
+-                    destination.unlink(missing_ok=True)
++                    self._discard_media(destination, event.message_id)
+                     return event
+                 if await self._download_cdn_candidates(
+                     destination,
+@@ -1387,7 +1459,7 @@ class BridgeApplication:
+                     event.message_id,
+                 ):
+                     return replace(event, media_path=destination)
+-                destination.unlink(missing_ok=True)
++                self._discard_media(destination, event.message_id)
+                 logger.warning("quoted image download failed for message %s", event.message_id)
+                 return event
+             video_metadata = (
+@@ -1555,38 +1627,14 @@ class BridgeApplication:
                      }
                      | {"media_name": destination.name},
                  )
-+                self._video_download_generation += 1
-                 self._active_video_downloads += 1
-                 try:
-                     try:
-@@ -1694,13 +1721,19 @@
+-                self._active_video_downloads += 1
+-                try:
+-                    try:
+-                        response = await self.hook.download_video(payload)
+-                    except (ClientConnectionError, HookApiError, asyncio.TimeoutError) as exc:
+-                        # The native 4.1.8.27 endpoint can close its HTTP
+-                        # listener after accepting a download.  If it has
+-                        # already created the destination, keep waiting for
+-                        # that in-flight operation instead of retrying the
+-                        # request (which can crash the DLL) or discarding the
+-                        # completed media.
+-                        if not destination.is_file():
+-                            await asyncio.sleep(0.2)
+-                        if not destination.is_file():
+-                            raise
+-                        logger.warning(
+-                            "HOOK video endpoint disconnected after starting message=%s; "
+-                            "waiting for the native download to finish error=%s",
+-                            event.message_id,
+-                            type(exc).__name__,
+-                        )
+-                        response = {
+-                            "status": "download_in_progress_after_disconnect",
+-                            "error_type": type(exc).__name__,
+-                        }
+-                    complete, actual_size = await self._wait_for_media_download(
+-                        destination,
+-                        payload["total_len"],
+-                        timeout_seconds=self.settings.video_download_timeout_seconds,
+-                    )
+-                finally:
+-                    self._active_video_downloads -= 1
++                response, complete, actual_size = await self._download_native_media(
++                    self.hook.download_video,
++                    payload,
++                    destination,
++                    payload["total_len"],
++                    event.message_id,
++                    timeout_seconds=self.settings.video_download_timeout_seconds,
++                )
+                 logger.info(
+                     "[VIDEO DEBUG] inbound download response message=%s "
+                     "response=%s destination_exists=%s destination_size=%s "
+@@ -1599,7 +1647,7 @@ class BridgeApplication:
+                     complete,
+                 )
+                 if not complete:
+-                    destination.unlink(missing_ok=True)
++                    self._discard_media(destination, event.message_id)
+                     logger.warning(
+                         "HOOK video download did not complete for message %s: "
+                         "expected_size=%s actual_size=%s",
+@@ -1623,25 +1671,29 @@ class BridgeApplication:
+                         "attachid": attachment.attach_id or payload["attachid"],
+                         "type": "6",
+                     })
+-                await self.hook.download_file(payload)
+-                complete, actual_size = await self._wait_for_media_download(
+-                    destination, attachment.size if attachment is not None else advertised_size,
++                _, complete, actual_size = await self._download_native_media(
++                    self.hook.download_file,
++                    payload,
++                    destination,
++                    attachment.size if attachment is not None else advertised_size,
++                    event.message_id,
++                    timeout_seconds=self.settings.file_download_timeout_seconds,
+                 )
+                 if not complete or (attachment is not None and actual_size != attachment.size):
+-                    destination.unlink(missing_ok=True)
++                    self._discard_media(destination, event.message_id)
+                     logger.warning("attachment download incomplete message=%s", event.message_id)
+                     return event
+             if destination.is_file() and destination.resolve().is_relative_to(destination_root):
+                 actual_size = destination.stat().st_size
+                 if actual_size == 0:
+-                    destination.unlink(missing_ok=True)
++                    self._discard_media(destination, event.message_id)
+                     logger.warning(
+                         "deleted empty inbound media for message %s",
+                         event.message_id,
+                     )
+                     return event
+                 if actual_size > self.settings.media_max_bytes:
+-                    destination.unlink(missing_ok=True)
++                    self._discard_media(destination, event.message_id)
+                     logger.warning(
+                         "deleted inbound media larger than %s bytes for message %s",
+                         self.settings.media_max_bytes,
+@@ -1654,7 +1706,7 @@ class BridgeApplication:
+                 event.message_id,
+             )
+         except Exception:
+-            destination.unlink(missing_ok=True)
++            self._discard_media(destination, event.message_id)
+             logger.exception("HOOK media download failed for message %s", event.message_id)
+         return event
+ 
+@@ -1694,13 +1746,19 @@ class BridgeApplication:
          consecutive_failures = 0
          while True:
              await asyncio.sleep(self.hook_health_interval_seconds)
 -            if self._active_video_downloads:
-+            generation = self._video_download_generation
-+            if self._hook_check_overlapped_video(generation):
++            generation = self._native_download_generation
++            if self._hook_check_overlapped_native_download(generation):
 +                consecutive_failures = 0
                  logger.debug(
-                     "HOOK health check deferred while %s inbound video download(s) are active",
-                     self._active_video_downloads,
+-                    "HOOK health check deferred while %s inbound video download(s) are active",
+-                    self._active_video_downloads,
++                    "HOOK health check deferred while %s inbound native download(s) are active",
++                    self._active_native_downloads,
                  )
                  continue
 -            if await self._hook_api_accepting_connections():
 +            accepting = await self._hook_api_accepting_connections()
-+            if self._hook_check_overlapped_video(generation):
++            if self._hook_check_overlapped_native_download(generation):
 +                consecutive_failures = 0
 +                continue
 +            if accepting:
                  consecutive_failures = 0
                  self._hook_ready = True
                  continue
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/config.py b/hook_41827_astrbot_bridge/src/hook_bridge/config.py
+index 1ebfe85..9826145 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/config.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/config.py
+@@ -77,6 +77,7 @@ class Settings:
+     hook_start_timeout_seconds: float
+     allow_existing_hook_reuse: bool
+     log_level: str
++    file_download_timeout_seconds: float = 180.0
+ 
+     @classmethod
+     def load(cls, path: Path) -> "Settings":
+@@ -155,6 +156,13 @@ class Settings:
+             manager_query_token=str(raw.get("manager_query_token") or "").strip(),
+             queue_size=int(_positive_number(raw.get("queue_size", 256), "queue_size", int)),
+             request_timeout_seconds=float(_positive_number(raw.get("request_timeout_seconds", 10), "request_timeout_seconds", float)),
++            file_download_timeout_seconds=float(
++                _positive_number(
++                    raw.get("file_download_timeout_seconds", 180),
++                    "file_download_timeout_seconds",
++                    float,
++                )
++            ),
+             video_download_timeout_seconds=float(
+                 _positive_number(
+                     raw.get("video_download_timeout_seconds", 180),
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+index 1008ff8..ec95dae 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -370,12 +370,19 @@ class HookClient:
+         image_path_field: str = "filepath",
+         video_download_timeout_seconds: float = 180.0,
+         video_upload_timeout_seconds: float = 180.0,
++        file_download_timeout_seconds: float = 180.0,
+     ) -> None:
+         if image_path_field not in {"image_path", "filepath"}:
+             raise ValueError("image_path_field must be image_path or filepath")
+         self.base_url = base_url.rstrip("/")
+         self.session = session
+         self.timeout = ClientTimeout(total=timeout)
++        if file_download_timeout_seconds <= 0:
++            raise ValueError("file_download_timeout_seconds must be greater than zero")
++        self.file_download_timeout_seconds = float(file_download_timeout_seconds)
++        self.file_download_timeout = ClientTimeout(
++            total=max(float(timeout), self.file_download_timeout_seconds)
++        )
+         if video_download_timeout_seconds <= 0:
+             raise ValueError("video_download_timeout_seconds must be greater than zero")
+         self.video_download_timeout_seconds = float(video_download_timeout_seconds)
+@@ -1073,7 +1080,13 @@ class HookClient:
+         )
+ 
+     async def download_file(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+-        return await self._post("/api/download_file", payload, retry_read=True)
++        # This starts a native download; retrying can duplicate the operation.
++        return await self._post(
++            "/api/download_file",
++            payload,
++            retry_read=False,
++            timeout=self.file_download_timeout,
++        )
+ 
+     async def download_voice(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+         return await self._post("/api/download_voice", payload, retry_read=True)

@@ -1,6 +1,8 @@
 from pathlib import Path
 import threading
 
+import pytest
+
 from wechatrebot_manager.environment import WechatEnvironment
 from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
@@ -187,7 +189,7 @@ def test_start_waits_for_wechat_login_without_reporting_an_error(tmp_path: Path)
     snapshots = iter(
         (
             RuntimeSnapshot(False, False, ""),
-            RuntimeSnapshot(True, False, "", True, False, False),
+            RuntimeSnapshot(True, True, "", True, False, False),
         )
     )
 
@@ -243,6 +245,63 @@ def test_status_remains_readable_while_services_are_starting(tmp_path: Path) -> 
     release.set()
     worker.join(2)
     assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("unknown", [
+    RuntimeSnapshot(True, True, "", False, True, True),
+    RuntimeSnapshot(True, True, "", account_status_available=False),
+    RuntimeSnapshot(True, False, "", False, False, False, False),
+])
+def test_unavailable_connection_never_requests_login_and_recovers(tmp_path: Path, unknown) -> None:
+    ready = RuntimeSnapshot(True, True, "wxid_bot", True, True, True)
+    logged_out = RuntimeSnapshot(True, True, "", True, True, True)
+    snapshots = iter((RuntimeSnapshot(False, False, ""), unknown, ready, unknown, ready, logged_out))
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: _environment(tmp_path),
+        environment_saver=lambda root, environment: None,
+        snapshotter=lambda: next(snapshots),
+        process_probe=lambda: (),
+        preflight=lambda root: (),
+        supervisor_factory=lambda progress: _Supervisor(progress),
+    )
+
+    starting = controller.start()
+    assert starting.state == LifecycleState.VERIFYING_CONNECTION
+    assert starting.title == "正在确认连接"
+    assert controller.refresh().state == LifecycleState.RUNNING
+
+    unavailable = controller.refresh()
+    assert unavailable.state == LifecycleState.VERIFYING_CONNECTION
+    assert unavailable.title == "正在确认连接"
+    assert unavailable.error is None
+    assert not unavailable.online
+    assert controller.refresh().state == LifecycleState.RUNNING
+
+    logout = controller.refresh()
+    assert logout.state == LifecycleState.WAITING_WECHAT
+    assert logout.title == "等待登录微信"
+
+
+def test_adopted_service_with_unknown_account_does_not_request_login(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from wechatrebot_manager import lifecycle
+
+    supervisor = SimpleNamespace(
+        running=[SimpleNamespace(spec=_Spec("astrbot")), SimpleNamespace(spec=_Spec("new-hook-bridge"))],
+        adoption_complete=True,
+        adopt=lambda: True,
+    )
+    monkeypatch.setattr(lifecycle, "build_service_specs", lambda root: ())
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", lambda *args, **kwargs: supervisor)
+    controller = LifecycleController(
+        tmp_path,
+        environment_checker=lambda root: _environment(tmp_path),
+        snapshotter=lambda: RuntimeSnapshot(True, True, "", False, True, True),
+    )
+
+    assert controller.view().state == LifecycleState.VERIFYING_CONNECTION
+    assert controller.view().title == "正在确认连接"
 
 
 def test_logged_in_account_is_acknowledged_while_features_are_still_starting(
