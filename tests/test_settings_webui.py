@@ -173,11 +173,17 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
         page.evaluate("""() => {
           window.policyReads = 0; window.forcedGroupReads = 0;
+          window.completedForcedGroupReads = 0;
           const api = window.pywebview.api;
           const policy = api.get_group_policy;
           api.get_group_policy = (...args) => { window.policyReads++; return policy(...args); };
           const groups = api.get_groups;
-          api.get_groups = (...args) => { if(args[0]) window.forcedGroupReads++; return groups(...args); };
+          api.get_groups = async (...args) => {
+            if (args[0]) window.forcedGroupReads++;
+            const result = await groups(...args);
+            if (args[0]) window.completedForcedGroupReads++;
+            return result;
+          };
         }""")
         page.locator('.nav-item[data-page="groups"]').click()
         rows = page.locator('#groupRows .group-row')
@@ -189,13 +195,19 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         expect(mode).to_be_visible()
         rows.nth(0).click()
         expect(mode).to_have_value('off')
+        page.evaluate("window.retainedGroupPolicyForm = document.querySelector('#groupPolicyForm')")
         page.locator('[data-chat-management-tab="private"]').click()
         page.locator('[data-chat-management-tab="groups"]').click()
+        page.wait_for_function("() => window.completedForcedGroupReads === 2")
+        assert page.evaluate("window.retainedGroupPolicyForm === document.querySelector('#groupPolicyForm')")
         page.locator('.nav-item[data-page="settings"]').click()
         page.locator('.nav-item[data-page="groups"]').click()
+        page.wait_for_function("() => window.completedForcedGroupReads === 3")
         expect(mode).to_have_value('off')
+        assert page.evaluate("window.retainedGroupPolicyForm === document.querySelector('#groupPolicyForm')")
         assert page.evaluate('window.policyReads') == 2
-        assert page.evaluate('window.forcedGroupReads') == 1
+        # Initial load and both returns refresh the directory without rereading rules.
+        assert page.evaluate('window.forcedGroupReads') == 3
         page.locator('#refreshGroupPolicy').click()
         expect(page.locator('#modalBackdrop')).to_be_visible()
         page.locator('#modalCancel').click()
