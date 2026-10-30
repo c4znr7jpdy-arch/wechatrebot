@@ -383,7 +383,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .member-count-state { display: inline-block; white-space: nowrap; }
 .member-count-state.loading { color: var(--blue-700); }
 .member-count-state.error { color: var(--red-700); }
-.field-label-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.field-label-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
 .inline-action { padding: 0; border: 0; color: var(--blue-700); background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }
 .inline-action:hover { text-decoration: underline; }
 .inline-action:disabled { color: var(--subtle); cursor: wait; text-decoration: none; }

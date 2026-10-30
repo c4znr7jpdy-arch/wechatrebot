@@ -63,8 +63,14 @@ html[data-skin="soft"] #page-home .home-status-icon {
 }
 
 html[data-skin="soft"] #page-home .home-status-icon.checking {
-  background: var(--blue-600);
-  box-shadow: 0 10px 26px var(--glow-primary);
+  color: var(--muted);
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+html[data-skin="soft"] #page-home .home-status-icon.loading {
+  color: var(--blue-700);
+  background: var(--blue-100);
 }
 
 html[data-skin="soft"] #page-home .home-status-icon.problem,
