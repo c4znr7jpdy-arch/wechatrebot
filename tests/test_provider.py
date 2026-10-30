@@ -1,6 +1,10 @@
+from io import BytesIO
+from urllib.error import HTTPError, URLError
+
 import pytest
 
 from wechatrebot_manager import provider
+from wechatrebot_manager.plugin_errors import ProviderTestError
 from wechatrebot_manager.provider import (
     DEEPSEEK_PROVIDER_API_BASE,
     DEEPSEEK_PROVIDER_MODEL,
@@ -331,3 +335,73 @@ def test_model_directory_reads_openai_compatible_models(monkeypatch) -> None:
         "authorization": "Bearer secret",
         "timeout": 15.0,
     }
+
+
+@pytest.mark.parametrize(("api_key", "api_base", "message"), [
+    ("", "https://models.example.test/v1", "API Key / Token Plan 不能为空"),
+    ("secret", "models.example.test/v1", "HTTP(S) 绝对地址"),
+    ("secret", "https://[invalid", "HTTP(S) 绝对地址"),
+])
+def test_model_directory_rejects_invalid_configuration_before_request(
+    monkeypatch, api_key, api_base, message,
+) -> None:
+    def unexpected_request(*_args, **_kwargs):
+        pytest.fail("invalid configuration must not send a request")
+
+    monkeypatch.setattr(provider, "urlopen", unexpected_request)
+    with pytest.raises(ProviderTestError) as caught:
+        discover_openai_models(api_key=api_key, api_base=api_base)
+    assert caught.value.error_code == "15004"
+    assert message in str(caught.value)
+
+
+@pytest.mark.parametrize(("status", "code"), [
+    (401, "16002"), (403, "16003"), (404, "16009"),
+    (429, "16004"), (500, "16008"), (400, "16010"),
+])
+def test_model_directory_preserves_http_classification_without_response_body(
+    monkeypatch, status, code,
+) -> None:
+    def rejected_request(*_args, **_kwargs):
+        raise HTTPError(
+            "https://models.example.test/v1/models", status, "upstream-secret",
+            {}, BytesIO(b"upstream-secret"),
+        )
+
+    monkeypatch.setattr(provider, "urlopen", rejected_request)
+    with pytest.raises(ProviderTestError) as caught:
+        discover_openai_models(api_key="secret", api_base="https://models.example.test/v1")
+    assert caught.value.error_code == code
+    assert "secret" not in str(caught.value)
+    if status == 404:
+        assert "手动填写模型名称" in str(caught.value)
+
+
+@pytest.mark.parametrize(("failure", "code"), [
+    (TimeoutError("transport-secret"), "16007"),
+    (URLError(TimeoutError("transport-secret")), "16007"),
+    (URLError("transport-secret"), "16006"),
+    (OSError("transport-secret"), "16006"),
+])
+def test_model_directory_distinguishes_timeout_from_connection_failure(
+    monkeypatch, failure, code,
+) -> None:
+    def failed_request(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(provider, "urlopen", failed_request)
+    with pytest.raises(ProviderTestError) as caught:
+        discover_openai_models(api_key="secret", api_base="https://models.example.test/v1")
+    assert caught.value.error_code == code
+    assert "secret" not in str(caught.value)
+
+
+@pytest.mark.parametrize("raw", [
+    b"invalid-json-secret", b'{}', b'{"data":[]}', b"x" * (2 * 1024 * 1024 + 1),
+], ids=["invalid-json", "missing-models", "empty-models", "oversized-list"])
+def test_model_directory_rejects_unusable_responses_with_safe_message(monkeypatch, raw) -> None:
+    monkeypatch.setattr(provider, "urlopen", lambda *_args, **_kwargs: BytesIO(raw))
+    with pytest.raises(ProviderTestError) as caught:
+        discover_openai_models(api_key="secret", api_base="https://models.example.test/v1")
+    assert caught.value.error_code == "16012"
+    assert "secret" not in str(caught.value)

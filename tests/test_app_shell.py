@@ -808,6 +808,45 @@ def test_model_discovery_reuses_saved_key_without_exposing_it(
     assert captured["api_key"] == "saved-secret"
 
 
+def test_model_discovery_explains_missing_key_without_echoing_misplaced_credentials(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: ())
+    misplaced_key = "sk-test-misplaced-credential"
+
+    result = api.discover_provider_models({
+        "api_base": "https://models.example.test/v1",
+        "api_key": "", "model": misplaced_key,
+    })
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15004"
+    assert result["error"]["message"] == "模型 API Key / Token Plan 不能为空。"
+    assert result["error"]["detail"] == result["error"]["message"]
+    assert result["error"]["recorded"] is True
+    assert misplaced_key not in json.dumps(result)
+    assert misplaced_key not in repr(api._lifecycle.events.items)
+
+
+def test_model_discovery_does_not_expose_unexpected_configuration_errors(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+
+    def invalid_config(_root):
+        raise ValueError("config-secret at private-path")
+
+    monkeypatch.setattr(model_api, "load_provider_services", invalid_config)
+    result = api.discover_provider_models({"api_base": "https://models.example.test/v1"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "19000"
+    assert "detail" not in result["error"]
+    assert "config-secret" not in json.dumps(result)
+    assert "private-path" not in json.dumps(result)
+
+
 def test_deleting_current_provider_requires_and_applies_replacement(
     monkeypatch, tmp_path: Path
 ) -> None:
