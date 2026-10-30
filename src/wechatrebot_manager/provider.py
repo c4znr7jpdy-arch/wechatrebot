@@ -9,6 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlsplit
 from urllib.request import Request, urlopen
 
+from .error_catalog import provider_error_code
+from .plugin_errors import ProviderTestError
+
 
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 
@@ -740,9 +743,14 @@ def discover_openai_models(
         model="model-discovery",
         source_id="model_discovery",
     ).normalized()
-    errors = profile.validate()
+    try:
+        errors = profile.validate()
+    except ValueError:
+        raise ProviderTestError(
+            "API 地址必须是有效的 HTTP(S) 绝对地址。", code="15004"
+        ) from None
     if errors:
-        raise ValueError("；".join(errors))
+        raise ProviderTestError("；".join(errors), code="15004")
     endpoint = (
         profile.api_base
         if profile.api_base.casefold().endswith("/models")
@@ -761,23 +769,34 @@ def discover_openai_models(
             raw = response.read(2 * 1024 * 1024 + 1)
     except HTTPError as exc:
         if exc.code in {401, 403}:
-            raise ValueError("API Key / Token Plan 未通过验证，请检查后重试。") from None
-        if exc.code == 404:
-            raise ValueError("这个服务没有提供模型列表接口，请手动填写模型名称。") from None
-        raise ValueError(f"模型列表读取失败（HTTP {exc.code}），请稍后重试。") from None
-    except (OSError, URLError, TimeoutError):
-        raise ValueError("模型列表读取超时，请检查接口地址和网络后重试。") from None
+            message = "API Key / Token Plan 未通过验证或无权访问模型列表，请检查后重试。"
+        elif exc.code == 404:
+            message = "这个地址没有提供模型列表接口，请检查 Base URL，或手动填写模型名称。"
+        else:
+            message = f"模型列表读取失败（HTTP {exc.code}），请稍后重试。"
+        raise ProviderTestError(
+            message, code=provider_error_code(type(exc).__name__, exc.code) or "16012"
+        ) from None
+    except (OSError, URLError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or (
+            isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
+        )
+        raise ProviderTestError(
+            "模型列表读取超时，请检查接口地址和网络后重试。"
+            if timed_out else "模型列表连接失败，请检查接口地址、网络和代理设置后重试。",
+            code="16007" if timed_out else "16006",
+        ) from None
     if len(raw) > 2 * 1024 * 1024:
-        raise ValueError("模型列表过大，已停止读取；请手动填写模型名称。")
+        raise ProviderTestError("模型列表过大，已停止读取；请手动填写模型名称。")
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ValueError("模型服务返回的列表格式无法识别。") from None
+        raise ProviderTestError("模型服务返回的列表格式无法识别。") from None
     candidates: object = payload.get("data") if isinstance(payload, dict) else payload
     if isinstance(payload, dict) and not isinstance(candidates, list):
         candidates = payload.get("models")
     if not isinstance(candidates, list):
-        raise ValueError("模型服务没有返回可选择的模型列表。")
+        raise ProviderTestError("模型服务没有返回可选择的模型列表。")
     models: set[str] = set()
     for item in candidates:
         value = item.get("id") if isinstance(item, dict) else item
@@ -785,7 +804,7 @@ def discover_openai_models(
         if model and len(model) <= 128 and not any(ord(character) < 32 for character in model):
             models.add(model)
     if not models:
-        raise ValueError("模型服务没有返回可选择的模型；请手动填写模型名称。")
+        raise ProviderTestError("模型服务没有返回可选择的模型；请手动填写模型名称。")
     return tuple(sorted(models, key=str.casefold)[:500])
 
 

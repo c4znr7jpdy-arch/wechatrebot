@@ -17,7 +17,7 @@ class ConfigConflictError(PluginCenterError):
 
 
 class ProviderTestError(PluginCenterError):
-    """A model probe failed or did not prove a usable model response."""
+    """A model probe or directory request failed with a safe customer message."""
 
     def __init__(self, message: str, *, code: str = "16012") -> None:
         self.error_code = code
