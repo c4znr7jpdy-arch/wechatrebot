@@ -218,6 +218,14 @@ window.createPreviewApi = function (helpers) {
     if (new URLSearchParams(window.location.search).get("demo") === "thinking-mode") {
       previewProviders = [{id: "custom_mimo/mimo-v2.5", name: "mimo-v2.5", api_base: "https://token-plan-cn.xiaomimimo.com/v1", model: "mimo-v2.5", configured: true, api_key_configured: true, is_default: true, is_recommended: false, thinking_supported: true, thinking_enabled: true}];
     }
+    if (new URLSearchParams(window.location.search).get("demo") === "runtime-alerts") {
+      previewProviders = [
+        {id: "preview-chat", name: "示例回复模型", model: "demo-chat", api_base: "https://example.invalid/v1", service_kind: "chat", modalities: ["text", "image"], configured: true, api_key_configured: true, is_default: true},
+        {id: "preview-image", name: "示例生图模型", model: "demo-image", api_base: "https://example.invalid/v1", service_kind: "image", modalities: ["image"], configured: true, api_key_configured: true, is_default: false},
+        {id: "preview-embedding", name: "示例向量模型", model: "demo-embedding", api_base: "https://example.invalid/v1", service_kind: "embedding", modalities: ["embedding"], configured: true, api_key_configured: true, is_default: false},
+      ];
+      status.message = "微信连接和机器人服务运行正常。";
+    }
     const previewPresets = [
       {id: "deepseek", name: "DeepSeek", api_base: "https://api.deepseek.com", model: "deepseek-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "DeepSeek 官方兼容接口；默认填入 DeepSeek Flash。"},
       {id: "glm", name: "智谱 GLM", api_base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6v", service_kind: "chat", modalities: ["text", "image", "audio"], description: "智谱 GLM 兼容接口；默认填入 GLM-4.6V。"},
@@ -465,8 +473,31 @@ window.createPreviewApi = function (helpers) {
         return ok(licenseSnapshot());
       },
     };
+    const reminderCategories = [{id: "memory_initialization", title: "长期记忆向量初始化失败", muted_at: ""}];
+    const reminderClosed = [];
+    const reminderDemo = new URLSearchParams(window.location.search).get("demo") === "runtime-alerts";
+    const reminderTime = new Date(Date.now() - 20000).toISOString();
+    const reminderItem = {id: "preview-memory-initialization", category: "memory_initialization", title: "长期记忆初始化失败", message: "向量模型连接失败，长期记忆未能完成初始化；原有记忆和索引未改动。", level: "warning", state: "recovery_unconfirmed", time: reminderTime, timestamp: Date.parse(reminderTime) / 1000, first_time: reminderTime, count: 4, action: "models", action_label: "检查向量模型", report: "预览示例 · 机器人问题报告\n长期记忆初始化失败\n向量模型连接失败或未返回有效向量，请检查模型服务；原有记忆和索引未改动。", detail: "向量模型连接失败或未返回有效向量，请检查模型服务。", closed_at: "", muted_at: "", hidden: false};
+    const reminderSnapshot = () => {
+      const item = {...reminderItem, closed_at: reminderClosed[0]?.closed_at || "", muted_at: reminderCategories[0].muted_at};
+      item.hidden = Boolean(item.closed_at || item.muted_at);
+      return {items: reminderDemo ? [item] : [], categories: structuredClone(reminderCategories), closed: structuredClone(reminderClosed), session_id: "preview-manager-session", window_seconds: 3600, updated_at: new Date().toISOString()};
+    };
     return {
       ...previewLicenseApi,
+      get_runtime_alerts: () => ok(reminderSnapshot()),
+      set_runtime_alert_preference: (category, action, alertId = "") => {
+        if (category !== reminderCategories[0].id || !["close", "mute", "reopen", "restore"].includes(action)
+            || (["close", "reopen"].includes(action) && alertId !== reminderItem.id)) {
+          return {ok: false, error: {message: "提醒设置请求无效。"}};
+        }
+        const now = new Date().toISOString();
+        if (action === "close") reminderClosed.splice(0, reminderClosed.length, {id: reminderItem.id, category, closed_at: now});
+        if (action === "reopen") reminderClosed.length = 0;
+        if (action === "mute") reminderCategories[0].muted_at = now;
+        if (action === "restore") reminderCategories[0].muted_at = "";
+        return ok(reminderSnapshot());
+      },
       bootstrap: () => ok({version: "0.9.9", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: previewOnboardingReadiness(), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status),
       start_robot: () => {

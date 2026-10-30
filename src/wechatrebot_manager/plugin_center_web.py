@@ -333,6 +333,8 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/activity.js",
                     "/activity-errors.js",
                     "/activity.css",
+                    "/runtime-alerts.js",
+                    "/runtime-alerts.css",
                     "/core-settings.js",
                     "/date-range.js",
                     "/report-preview.js",

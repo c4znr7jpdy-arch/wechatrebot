@@ -2,15 +2,48 @@
 from __future__ import annotations
 
 from datetime import datetime
+import sqlite3
 import threading
 import time
 import traceback
 
 from .activity_service import ActivityService, diagnostic_text
 from .error_catalog import AccountStatusUnavailableError
+from .runtime_alerts import RuntimeAlertsService
+from .task_store import TaskStore
+
+
+_RUNTIME_ALERT_API_LOCK = threading.Lock()
 
 
 class ActivityApiMixin:
+    def _runtime_alert_service(self) -> RuntimeAlertsService:
+        with _RUNTIME_ALERT_API_LOCK:
+            service = getattr(self, "_runtime_alerts", None)
+            if service is None:
+                self._runtime_alerts = service = RuntimeAlertsService(
+                    self._install_root, build=getattr(self, "_build_number", 0),
+                )
+            return service
+
+    def get_runtime_alerts(self) -> dict:
+        try:
+            # Status polling already refreshes health. Reading its current view
+            # adds no service probes, process actions or model test requests.
+            view = self._lifecycle.view().to_dict()
+            runtime = view.get("runtime") or {}
+            account = runtime.get("wechat_identity") if runtime.get("account_status_available") else ""
+            tasks = TaskStore(self._install_root / "data/manager/scheduled-tasks.db").list(account) if account else []
+            return self._ok(self._runtime_alert_service().snapshot(view, tasks=tasks))
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return self._failed(exc, "19003")
+
+    def set_runtime_alert_preference(self, category: str, action: str, alert_id: str = "") -> dict:
+        try:
+            return self._ok(self._runtime_alert_service().set_preference(category, action, alert_id))
+        except (OSError, ValueError) as exc:
+            return self._failed(exc, "15001")
+
     def _activity_service(self) -> ActivityService:
         return ActivityService(self._install_root, build=getattr(self, "_build_number", 0))
 

@@ -1,0 +1,57 @@
+/* Run-center reminders share the active manager palette in every skin. */
+.runtime-alert-section { margin-top: 26px; padding-bottom: 12px; }
+.runtime-alert-section[hidden], .runtime-alert-section [hidden] { display: none; }
+.runtime-alert-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.runtime-alert-heading h2 { margin: 0; font-size: 20px; }
+.runtime-alert-heading small { color: var(--muted); font-size: 12px; }
+.runtime-alert-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.runtime-alert-count { padding: 4px 9px; border-radius: 999px; color: var(--amber-700); background: var(--amber-100); font-size: 12px; font-weight: 600; }
+.runtime-alert-count.is-muted { color: var(--muted); background: var(--surface-muted); }
+.runtime-alert-list { display: grid; gap: 12px; }
+.runtime-reminder { --reminder-ink: var(--amber-700); --reminder-bg: var(--amber-100); position: relative; overflow: hidden; color: var(--ink); background: var(--reminder-bg); border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.runtime-reminder.error { --reminder-ink: var(--red-700); --reminder-bg: var(--red-100); }
+.runtime-reminder-close { position: absolute; top: 8px; right: 10px; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--reminder-ink); background: transparent; font-size: 22px; cursor: pointer; }
+.runtime-reminder-close:hover { background: var(--surface); }
+.runtime-reminder-main { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: start; gap: 16px; padding: 24px 26px 14px; }
+.runtime-reminder-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--reminder-ink); background: var(--surface); font-size: 22px; font-weight: 700; }
+.runtime-reminder-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 1px 0 7px; padding-right: 24px; }
+.runtime-reminder-title h3 { margin: 0; font-size: 17px; line-height: 1.5; }
+.runtime-reminder-title > span { padding: 3px 8px; border-radius: 6px; color: var(--reminder-ink); background: var(--surface); font-size: 11px; white-space: nowrap; }
+.runtime-reminder-copy p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.runtime-reminder-meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.runtime-reminder-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; padding: 25px 0 0 12px; }
+.runtime-reminder-actions .button.secondary { color: var(--reminder-ink); background: var(--surface); white-space: nowrap; }
+.runtime-reminder-mute { padding: 4px 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.runtime-reminder-mute:hover { color: var(--reminder-ink); text-decoration: underline; }
+.runtime-reminder-mute > span { margin-left: 5px; font-size: 11px; }
+.runtime-reminder-detail { padding: 0 26px 18px 78px; }
+.runtime-reminder-detail summary { width: fit-content; color: var(--reminder-ink); font-size: 13px; cursor: pointer; }
+.runtime-reminder-detail > div { padding-top: 12px; }
+.runtime-reminder-detail p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.runtime-reminder-detail pre { max-height: 280px; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.runtime-alert-hidden, .runtime-alert-feedback { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.runtime-alert-feedback.error { color: var(--red-700); }
+.runtime-alert-preferences { margin-top: 14px; padding: 22px 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.runtime-alert-preferences h3 { margin: 0 0 8px; font-size: 16px; }
+.runtime-alert-preferences > p { margin: 0 0 8px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.runtime-reminder-choice { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 0; border-top: 1px solid var(--line); }
+.runtime-reminder-choice strong { font-size: 14px; }
+.runtime-reminder-choice p, .runtime-reminder-empty { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.runtime-reminder-choice .button { flex-shrink: 0; }
+html[data-skin="soft"] .runtime-reminder { border-color: var(--amber-line); border-radius: 18px; background: var(--surface-2); box-shadow: var(--shadow-sm); }
+html[data-skin="soft"] .runtime-reminder.warning { background: #fff9ee; }
+html[data-skin="soft"] .runtime-reminder.error { border-color: var(--red-line); background: var(--red-100); }
+html[data-skin="soft"][data-theme="dark"] .runtime-reminder.warning { background: var(--amber-100); }
+html[data-skin="soft"] .runtime-alert-preferences { border-radius: 18px; }
+@media (max-width: 1250px) {
+  .runtime-reminder-main { grid-template-columns: 36px minmax(0, 1fr); }
+  .runtime-reminder-actions { grid-column: 2; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 14px; padding: 0; }
+}
+@media (max-width: 700px) {
+  .runtime-alert-heading h2 { font-size: 18px; }
+  .runtime-alert-tools { width: 100%; justify-content: flex-end; }
+  .runtime-reminder-main { padding: 24px 16px 14px; gap: 12px; }
+  .runtime-reminder-detail { padding: 0 16px 18px; }
+  .runtime-alert-preferences { padding: 18px; }
+  .runtime-reminder-choice { align-items: flex-start; flex-direction: column; gap: 10px; }
+}

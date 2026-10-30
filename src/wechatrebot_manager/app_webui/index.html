@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="provider-settings.css?v=20261012">
   <link rel="stylesheet" href="subscription.css?v=20261025">
   <link rel="stylesheet" href="activity.css?v=20261010">
+  <link rel="stylesheet" href="runtime-alerts.css">
   <script src="activity-errors.js"></script>
   <link rel="stylesheet" href="settings-layout.css">
   <!-- manager-skins -->
@@ -155,6 +156,14 @@
               </button>
             </div>
             <div class="home-setup-alerts" id="homeSetupAlerts" role="region" aria-label="配置提醒" aria-live="polite" hidden></div>
+          </section>
+
+          <section class="runtime-alert-section" id="runtimeAlerts" aria-labelledby="runtimeAlertsHeading" hidden>
+            <div class="runtime-alert-heading"><h2 id="runtimeAlertsHeading">运行提醒</h2><span class="runtime-alert-count" id="runtimeAlertCount"></span><small id="runtimeAlertWindow"></small><div class="runtime-alert-tools"><button class="button ghost small" id="runtimeAlertSettingsToggle" type="button" aria-controls="runtimeAlertPreferences" aria-expanded="false">提醒设置</button><button class="button ghost small" id="runtimeAlertRefresh" type="button" title="刷新运行提醒">刷新</button><button class="button ghost small" id="runtimeAlertRecords" type="button">查看运行记录<svg aria-hidden="true"><use href="#i-chevron-right"/></svg></button></div></div>
+            <div class="runtime-alert-list" id="runtimeAlertList"></div>
+            <p class="runtime-alert-hidden" id="runtimeAlertHidden" hidden></p>
+            <section class="runtime-alert-preferences" id="runtimeAlertPreferences" aria-labelledby="runtimeAlertPreferencesHeading" hidden><h3 id="runtimeAlertPreferencesHeading">提醒设置</h3><p>关闭仅对本次软件会话有效，页面刷新和托盘开合不会恢复；不再提醒永久有效，直到手动恢复。操作时间与异常发生时间分别记录。</p><div id="runtimeAlertPreferenceList"></div></section>
+            <p class="runtime-alert-feedback" id="runtimeAlertFeedback" role="status" aria-live="polite" hidden></p>
           </section>
 
           <div class="signal-strip">
@@ -509,6 +518,7 @@
   <script src="model-services.js"></script>
   <script src="settings.js"></script>
   <script src="activity.js"></script>
+  <script src="runtime-alerts.js"></script>
   <script src="updates.js"></script>
   <script src="preview.js"></script>
   <script src="app.js?v=20261010-modules"></script>

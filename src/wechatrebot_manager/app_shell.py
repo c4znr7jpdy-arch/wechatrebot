@@ -142,6 +142,8 @@ PUBLIC_API_METHODS = (
     "parse_scheduled_command",
     "preview_scheduled_times",
     "get_activity",
+    "get_runtime_alerts",
+    "set_runtime_alert_preference",
     "record_ui_error",
     "export_activity_diagnostics",
     "get_onboarding_readiness",

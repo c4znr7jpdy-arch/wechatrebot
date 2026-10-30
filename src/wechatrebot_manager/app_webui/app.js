@@ -614,6 +614,7 @@
       content.scrollTop = retainedPageScroll.get(page) || 0;
     }
     await subscription.onNavigate(page);
+    if (page === "home") void loadRuntimeAlerts();
     if (page === "features" && !state.featuresLoaded) await loadFeatures();
     if (page === "features" && state.imageServiceChoicesStale) {
       state.imageServiceChoicesStale = false;
@@ -1206,6 +1207,8 @@
       window.setInterval(pollUpdateStatus, 1200);
       window.setInterval(pollHistory, 1500);
       window.setInterval(pollGroups, 15000);
+      void loadRuntimeAlerts();
+      window.setInterval(pollRuntimeAlerts, 15000);
       if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
     } catch (error) {
       reportError(error);
@@ -1355,6 +1358,19 @@
     copyText: (...args) => copyText(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
+    reportError: (...args) => reportError(...args),
+    state,
+  });
+
+  const { loadRuntimeAlerts, pollRuntimeAlerts } = createPageController("createRuntimeAlerts", {
+    $,
+    api: (...args) => api(...args),
+    confirmAction: (...args) => confirmAction(...args),
+    copyText: (...args) => copyText(...args),
+    escapeHtml,
+    navigate: (...args) => navigate(...args),
+    openModels: async () => { await navigate("settings"); setSettingsSection("model"); showProviderOverview(); },
+    refreshRuntime: (...args) => refreshStatus(...args),
     reportError: (...args) => reportError(...args),
     state,
   });

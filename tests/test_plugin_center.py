@@ -1980,11 +1980,12 @@ def test_manager_web_handler_serves_main_ui_from_same_origin(tmp_path: Path, the
         "core-settings.js": b"window.core = true;",
         "chat-profiles.js": b"window.profiles = true;",
         "settings-layout.css": b".settings-layout{}",
+        "runtime-alerts.css": b".runtime-alerts{}",
         "assets/app-icon.png": b"PNG",
         **{f"{module}.js": f"window.{module.replace('-', '_')} = true;".encode()
            for module in (
                "scheduled-tasks", "model-services", "chat-management", "message-history",
-               "features", "preview", "updates", "settings", "activity",
+               "features", "preview", "updates", "settings", "activity", "runtime-alerts",
            )},
     }
     for relative, raw in expected_assets.items():
