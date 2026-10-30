@@ -2308,7 +2308,7 @@ def test_model_editor_defaults_chat_services_to_multimodal_input() -> None:
     markup = (webui / "index.html").read_text(encoding="utf-8")
 
     assert '<span>模型供应商</span>' in markup
-    assert '<span>Base URL</span>' in markup
+    assert '<span class="field-label-action">Base URL</span>' in markup
     assert '<span>API Key / Token Plan</span>' in markup
     assert 'escapeHtml(preset.name)}</option>' in script
     assert ' · ${kind}</option>' not in script
