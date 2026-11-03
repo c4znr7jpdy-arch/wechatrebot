@@ -54,3 +54,57 @@ def asset_url(repo: str, tag: str, name: str) -> str:
 
 def stable_manifest_url(repo: str) -> str:
     return asset_url(repo, STABLE_TAG, STABLE_MANIFEST_NAME)
+
+
+_USER_AGENT = "WeChatReBot-Publisher/2"
+
+
+def _final_https_url(response, request_url: str) -> str:
+    final = response.geturl()
+    parsed = urllib.parse.urlsplit(final)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError(f"公网资产最终地址不是 HTTPS：{request_url}")
+    if response.status != 200:
+        raise ValueError(f"公网资产返回 HTTP {response.status}：{request_url}")
+    return final
+
+
+def _request(url: str, method: str = "GET") -> urllib.request.Request:
+    return urllib.request.Request(
+        url, method=method,
+        headers={"Cache-Control": "no-cache", "User-Agent": _USER_AGENT, "Accept": "*/*"},
+    )
+
+
+def verify_public_asset(
+    url: str, *, expected_size: int, expected_sha256: str, timeout: int,
+    attempts: int = 3, delay: float = 5.0, sleep=time.sleep,
+) -> str:
+    """HEAD then GET the asset through GitHub's 302, comparing size and SHA-256. Returns the final URL."""
+    failure: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(_request(url, "HEAD"), timeout=timeout) as response:
+                final = _final_https_url(response, url)
+                length = response.headers.get("Content-Length")
+                if int(length or 0) != expected_size:
+                    raise ValueError(f"公网资产大小与本地产物不一致：{url}")
+            digest = hashlib.sha256()
+            size = 0
+            with urllib.request.urlopen(_request(url), timeout=timeout) as response:
+                _final_https_url(response, url)
+                while chunk := response.read(4 * 1024 * 1024):
+                    size += len(chunk)
+                    digest.update(chunk)
+            if size != expected_size:
+                raise ValueError(f"公网资产下载大小与本地产物不一致：{url}")
+            if digest.hexdigest().lower() != expected_sha256.lower():
+                raise ValueError(f"公网资产 SHA-256 与本地产物不一致：{url}")
+            return final
+        except urllib.error.HTTPError as exc:
+            # A freshly uploaded asset can lag behind the release API for a few seconds.
+            failure = ValueError(f"公网资产暂不可访问（HTTP {exc.code}）：{url}")
+            if exc.code not in {403, 404} or attempt + 1 >= attempts:
+                raise failure from exc
+            sleep(delay)
+    raise failure or ValueError(f"公网资产校验失败：{url}")
