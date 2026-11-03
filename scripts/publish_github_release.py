@@ -108,3 +108,55 @@ def verify_public_asset(
                 raise failure from exc
             sleep(delay)
     raise failure or ValueError(f"公网资产校验失败：{url}")
+
+
+def _gh(argv: list[str]) -> str:
+    command = ["gh", *argv]
+    print("+", subprocess.list2cmdline(command), flush=True)
+    completed = subprocess.run(command, cwd=COMMERCIAL_ROOT, check=True, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace")
+    return completed.stdout
+
+
+def repo_name_with_owner() -> str:
+    payload = json.loads(_gh(["repo", "view", "--json", "nameWithOwner"]))
+    return _repo(str(payload["nameWithOwner"]))
+
+
+def ensure_gh_ready(repo: str) -> None:
+    _gh(["auth", "status"])
+    payload = json.loads(_gh(["repo", "view", repo, "--json", "viewerPermission"]))
+    if payload.get("viewerPermission") not in {"ADMIN", "MAINTAIN", "WRITE"}:
+        raise ValueError(f"当前 gh 账号对 {repo} 没有发布权限")
+
+
+def release_exists(repo: str, tag: str) -> bool:
+    try:
+        _gh(["release", "view", tag, "-R", repo, "--json", "tagName"])
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
+def create_release(repo: str, tag: str, *, title: str, notes_file: Path, target: str, latest: bool) -> None:
+    argv = ["release", "create", tag, "-R", repo, "--draft", "--title", title,
+            "--notes-file", str(notes_file), "--target", target]
+    if not latest:
+        argv.append("--latest=false")
+    _gh(argv)
+
+
+def upload_assets(repo: str, tag: str, paths: list[Path]) -> None:
+    if not paths:
+        return
+    _gh(["release", "upload", tag, *(str(path) for path in paths), "-R", repo, "--clobber"])
+
+
+def publish_release(repo: str, tag: str) -> None:
+    _gh(["release", "edit", tag, "-R", repo, "--draft=false"])
+
+
+def download_asset(repo: str, tag: str, name: str, directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    _gh(["release", "download", tag, "-R", repo, "--pattern", name, "--dir", str(directory), "--clobber"])
+    return directory / name
