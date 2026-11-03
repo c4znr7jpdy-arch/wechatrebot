@@ -188,7 +188,8 @@ def _plugin_components(
         if entry is not None:
             origin = repository if entry["origin"] == "commercial" else project_root
             plugin_root = origin / entry["source"]
-        metadata = _simple_yaml(plugin_root / "metadata.yaml")
+        metadata_path = plugin_root / "metadata.yaml"
+        metadata = _simple_yaml(metadata_path) if metadata_path.is_file() else {}
         license_files = _license_documents(plugin_root)
         license_name = "Proprietary"
         if feature["ownership"] == "third-party":

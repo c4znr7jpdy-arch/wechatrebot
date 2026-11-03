@@ -164,3 +164,26 @@ def test_legal_inventory_includes_ffmpeg_in_all_artifacts(tmp_path: Path, monkey
     review = json.loads(outputs["review"].read_text(encoding="utf-8"))
     assert review["runtime_component_count"] == 2
     assert review["artifacts"]["license_texts"]["sha256"] == builder._sha256(outputs["licenses"])
+
+
+def test_plugin_without_metadata_yaml_is_inventoried_as_unknown(tmp_path: Path) -> None:
+    plugin = tmp_path / "data" / "plugins" / "jiang_commands"
+    plugin.mkdir(parents=True)
+    (plugin / "main.py").write_text("pass\n", encoding="utf-8")
+    (plugin / "_conf_schema.json").write_text("{}\n", encoding="utf-8")
+
+    components, documents = _builder()._plugin_components(
+        tmp_path,
+        {"features": [{"module": "jiang_commands", "ownership": "owner"}]},
+        None,
+    )
+
+    assert documents == []
+    assert components == [{
+        "type": "application",
+        "group": "delivered-plugin",
+        "name": "jiang_commands",
+        "version": "UNKNOWN",
+        "licenses": [{"license": {"name": "Proprietary"}}],
+        "properties": [{"name": "wechatrebot:ownership", "value": "owner"}],
+    }]
