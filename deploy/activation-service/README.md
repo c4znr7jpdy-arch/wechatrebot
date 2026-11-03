@@ -42,6 +42,14 @@ ssh root@47.242.208.64 wechatrebot-activation-admin issue --owner-ref customer-0
 
 首次备份已完成并在独立、无网络的容器内恢复到临时目录，数据库完整性、私钥与客户端公钥匹配、二维码内容和权限均通过。备份是本机恢复点，独立存储复制及异机灾备仍待安排。恢复旧数据库可能回滚兑换或撤销记录，须先停止独立授权服务并核对恢复点之后的业务审计，不能直接覆盖正在运行的数据库。
 
+## 服务升级
+
+开发机一键入口：双击或在 PowerShell 运行 `scripts/deploy-activation-service.ps1`。入口先按 Dockerfile 实际 `COPY` 的文件集合（`services/activation_service/*.py` 与 `requirements.txt`、复用的 `wechatrebot_manager` 公共协议、二维码规则与原子 JSON 写入模块，加上 Dockerfile 本身）在本地生成确定性 tar（文本按 LF 规范化，与仓库存储及 Linux 检出一致，Windows 检出得到相同标识），取其 SHA-256 前 12 位作为内容标识并打印完整计划；输入 `UPGRADE` 确认后才连接服务器。随后通过 BatchMode SSH 把 tar 上传到 `/opt/wechatrebot-activation/releases/`，在服务器核对大小与 SHA-256 后原子解包为 `releases/<内容标识>`，执行 `docker build -t wechatrebot-activation:<内容标识>`；切换前先 `systemctl start wechatrebot-activation-backup.service` 并核对备份目录出现新快照，把当前 `ACTIVATION_IMAGE` 记录到 `/opt/wechatrebot-activation/previous-image`、环境文件副本保存到 `env-backups/`，再原子改写 `/etc/wechatrebot-activation.env`（只替换镜像行，读回核对）、把 `current` 指向新发布目录并 `systemctl restart wechatrebot-activation`。
+
+切换后入口从公网验证：容器 `running/healthy`；`GET /health` 返回 200 的健康 JSON；`POST /v1/trial-status` 空请求体返回 409 `invalid_data`（旧镜像返回 404 `invalid_endpoint`）；`POST /v1/preview` 以 `{}` 请求返回 401 `invalid_request`；`GET /v1/contact` 的 `data` 与升级前读到的内容一致。任一项失败都会自动改回旧镜像、重启并再次确认 `/health`，再明确报告失败原因；回滚本身失败时提示需要人工介入。`-Plan` 只计算内容标识并打印步骤，不连接服务器；`-Rollback` 显式回滚到记录的上一镜像，并把换下的镜像记为下一次回滚目标。服务器 `ACTIVATION_IMAGE` 已是目标镜像时入口拒绝重复切换。入口不读写数据目录、签名私钥和数据库文件，不覆盖服务器上独立存放的 `deploy/` 备份脚本，也不删除旧镜像或旧发布目录。
+
+新版管理器的激活码预览附带 `machine_id`，旧服务会拒绝，因此必须先完成本节升级并通过上述验证，再分发新版客户端。手工升级仍按下一节的原则执行：使用新的内容标识镜像，保留旧镜像和一致的数据库备份，再更新 `/etc/wechatrebot-activation.env` 中的镜像并重启独立服务。
+
 ## 反向代理与回滚
 
 `../nginx/wechatrebot-license-limits.conf` 放在 nginx `http` 级配置目录，`../nginx/wechatrebot-license.conf` 只包含在 ss.xiuxianjyj.xin 的 HTTPS server 中。仅新增 `/wechatrebot-license/` 路由，原网站和 `/wechatrebot-updates/` 继续使用原配置。代理按实际客户端 IP 限流；业务服务只信任 socket 来源，不信任转发头。
