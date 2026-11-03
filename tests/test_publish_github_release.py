@@ -300,3 +300,154 @@ def test_rollback_stable_downloads_verifies_signature_and_republishes(tmp_path: 
     monkeypatch.setattr(module, "download_asset", download_tampered)
     with pytest.raises(ValueError, match="签名"):
         module.rollback_stable(REPO, "0.9.8", channel=channel, work_root=tmp_path / "work2", sleep=lambda _s: None)
+
+
+def _fake_build(root: Path, module, version: str, prefix: str):
+    out = root / "artifacts" / "built"
+    update = out / "update"
+    update.mkdir(parents=True)
+    archive = update / f"wechatrebot-{version}-update.zip"
+    archive.write_bytes(b"zip")
+    manifest = update / "stable.json"
+    manifest.write_text("{}", encoding="utf-8")
+    customer = out / "customer.zip"
+    customer.write_bytes(b"customer")
+    checksum = customer.with_suffix(".zip.sha256")
+    checksum.write_text("x", encoding="ascii")
+    payload = out / f"WeChatReBot-{version}-payload-abc.wrb"
+    payload.write_bytes(b"payload")
+    release = module.full.BuiltFullUpdate(
+        version=version, archive_path=archive, manifest_path=manifest,
+        package_url=f"{prefix}/{archive.name}", package_size=3, package_sha256=hashlib.sha256(b"zip").hexdigest(),
+    )
+    package = module.full.BuiltCustomerPackage(
+        version=version, archive_path=customer, checksum_path=checksum,
+        package_url=f"{prefix}/{customer.name}", checksum_url=f"{prefix}/{checksum.name}",
+        package_size=8, package_sha256=hashlib.sha256(b"customer").hexdigest(),
+        installer={"kind": "inno-online"}, payload_path=payload, payload_url=f"{prefix}/{payload.name}",
+    )
+    return release, package
+
+
+def _common_main_patches(module, monkeypatch, tmp_path: Path, *, live_version: str | None):
+    root = tmp_path / "commercial"
+    (root / "artifacts").mkdir(parents=True)
+    (root / "config" / "local").mkdir(parents=True)
+    (root / "config" / "local" / "update-signing-private.pem").write_bytes(b"key")
+    (root / "vendor").mkdir()
+    key = Ed25519PrivateKey.generate()
+    channel, _ = _channel(key)
+    monkeypatch.setattr(module, "COMMERCIAL_ROOT", root)
+    monkeypatch.setattr(module, "_project_version", lambda: "0.9.9")
+    monkeypatch.setattr(module, "load_update_channel", lambda: channel)
+    monkeypatch.setattr(module, "verify_source_inputs", lambda _root, source: source)
+    monkeypatch.setattr(module.publisher, "_signing_key", lambda *_a: key)
+    monkeypatch.setattr(module, "repo_name_with_owner", lambda: REPO)
+    monkeypatch.setattr(module, "ensure_gh_ready", lambda _repo: None)
+    monkeypatch.setattr(module, "_git_head", lambda: "abc123")
+    monkeypatch.setattr(module, "fetch_stable_manifest",
+                        lambda _c: None if live_version is None else {"version": live_version})
+    return root, channel
+
+
+def test_main_dry_run_builds_without_touching_github(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    prefix = module.asset_prefix(REPO, "v0.9.9")
+    built = _fake_build(root, module, "0.9.9", prefix)
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda *_a, **_k: built)
+    gh = _FakeGh()
+    monkeypatch.setattr(module, "_gh", gh)
+    assert module.main(["--dry-run", "--output", str(root / "artifacts" / "publish"), "--title", "t"]) == 0
+    assert gh.calls == []
+
+
+def test_main_full_publish_creates_release_uploads_verifies_and_promotes(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    prefix = module.asset_prefix(REPO, "v0.9.9")
+    built = _fake_build(root, module, "0.9.9", prefix)
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda *_a, **_k: built)
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh")})
+    monkeypatch.setattr(module, "_gh", gh)
+    verified: list[str] = []
+    monkeypatch.setattr(module, "verify_public_asset", lambda url, **k: verified.append(url) or url)
+    promoted: list[tuple] = []
+    monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: promoted.append((a, k)))
+    smoked: list[str] = []
+    monkeypatch.setattr(module, "smoke_update_from_github",
+                        lambda channel, release, root: smoked.append(release.version))
+
+    assert module.main(["--output", str(root / "artifacts" / "publish"), "--title", "t", "--yes"]) == 0
+
+    create = next(c for c in gh.calls if c[:2] == ["release", "create"])
+    assert create[2] == "v0.9.9" and "--draft" in create
+    upload = next(c for c in gh.calls if c[:2] == ["release", "upload"])
+    uploaded = [Path(p).name for p in upload[3:] if not p.startswith("-") and p != REPO]
+    assert set(uploaded) >= {"wechatrebot-0.9.9-update.zip", "customer.zip", "customer.zip.sha256",
+                             "WeChatReBot-0.9.9-payload-abc.wrb", "wechatrebot-0.9.9-update.zip.sha256",
+                             "WeChatReBot-0.9.9-payload-abc.wrb.sha256"}
+    assert len(uploaded) == len(set(uploaded))
+    assert ["release", "edit", "v0.9.9", "-R", REPO, "--draft=false"] in gh.calls
+    assert set(verified) == {built[0].package_url, built[1].package_url, built[1].payload_url}
+    assert promoted and promoted[0][0][:2] == (REPO, "0.9.9")
+    assert smoked == ["0.9.9"]
+
+
+def test_main_refuses_version_not_above_live_stable(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.9")
+    with pytest.raises(SystemExit):
+        module.main(["--output", str(root / "artifacts" / "publish"), "--yes"])
+
+
+def test_main_manager_only_uses_manager_delta_builder(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    prefix = module.asset_prefix(REPO, "v0.9.9")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(module, "_run", lambda argv, **_k: commands.append(argv))
+    update = root / "artifacts" / "built" / "update"
+    update.mkdir(parents=True)
+    archive = update / "wechatrebot-0.9.9-manager-abc.zip"
+    archive.write_bytes(b"m")
+    manifest = update / "stable.json"
+    manifest.write_text("{}", encoding="utf-8")
+    delta = module.publisher.BuiltManagerUpdate(version="0.9.9", archive_path=archive, manifest_path=manifest,
+                                                package_url=f"{prefix}/{archive.name}", package_size=1,
+                                                package_sha256=hashlib.sha256(b"m").hexdigest())
+    seen: dict = {}
+    monkeypatch.setattr(module.publisher, "build_manager_update", lambda **k: seen.update(k) or delta)
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh")})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "verify_public_asset", lambda url, **k: url)
+    monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: None)
+    monkeypatch.setattr(module, "smoke_update_from_github", lambda *a, **k: None)
+
+    assert module.main(["--manager-only", "--output", str(root / "artifacts" / "publish"), "--yes",
+                        "--skip-tests"]) == 0
+    assert Path(commands[0][1]).name == "build_manager.py"
+    assert seen["asset_prefix"] == prefix
+    upload = next(c for c in gh.calls if c[:2] == ["release", "upload"])
+    assert any(p.endswith("wechatrebot-0.9.9-manager-abc.zip") for p in upload)
+
+
+def test_main_manager_only_refuses_legacy_live_base(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.8.6")
+    with pytest.raises(SystemExit):
+        module.main(["--manager-only", "--output", str(root / "artifacts" / "publish"), "--yes", "--skip-tests"])
+
+
+def test_main_rollback_calls_rollback_stable(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.9")
+    calls: list[tuple] = []
+    monkeypatch.setattr(module, "rollback_stable", lambda repo, version, **k: calls.append((repo, version)))
+    assert module.main(["--rollback", "0.9.8", "--yes"]) == 0
+    assert calls == [(REPO, "0.9.8")]
+
+
+def test_powershell_entry_forwards_all_arguments() -> None:
+    script = (Path(__file__).parents[1] / "scripts" / "publish-github-release.ps1").read_text(encoding="utf-8")
+    assert "publish_github_release.py" in script and "@args" in script and "py -3.13" in script

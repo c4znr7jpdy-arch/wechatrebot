@@ -26,6 +26,8 @@ for search_root in (SCRIPTS_ROOT, SOURCE_ROOT):
     if str(search_root) not in sys.path:
         sys.path.insert(0, str(search_root))
 
+import publish_full_update as full
+from source_inputs import verify_source_inputs
 import publish_manager_update as publisher
 from wechatrebot_manager.payload import sha256_file
 from wechatrebot_manager.updates import (
@@ -248,3 +250,212 @@ def rollback_stable(repo: str, version: str, *, channel: UpdateChannel, work_roo
     shutil.copyfile(downloaded, stable_copy)
     upload_assets(repo, STABLE_TAG, [stable_copy])
     verify_stable_manifest(channel, manifest, attempts=attempts, delay=delay, sleep=sleep)
+
+
+def _project_version() -> str:
+    return full._project_version()
+
+
+def _run(argv: list[str], *, env: dict[str, str] | None = None) -> None:
+    full._run(argv, env=env)
+
+
+def _git_head() -> str:
+    completed = subprocess.run(["git", "rev-parse", "HEAD"], cwd=COMMERCIAL_ROOT, check=True,
+                               capture_output=True, text=True, encoding="utf-8")
+    return completed.stdout.strip()
+
+
+def _write_checksum(path: Path) -> Path:
+    checksum = path.with_name(path.name + ".sha256")
+    checksum.write_text(f"{sha256_file(path)}  {path.name}\n", encoding="ascii")
+    return checksum
+
+
+def _write_notes(path: Path, *, title: str, notes: tuple[str, ...], version: str) -> Path:
+    lines = [f"# {title.strip() or f'版本 {version}'}", ""]
+    lines.extend(f"- {note.strip()}" for note in notes if note.strip())
+    lines.extend([
+        "",
+        "安装：下载 `WeChatReBot-*-online-*.zip`，解压后运行其中的安装程序；"
+        "安装时会从本 Release 下载 `payload.wrb` 并校验 SHA-256。",
+        "已安装的管理器会通过签名清单自动获得本次更新。",
+    ])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def smoke_update_from_github(channel: UpdateChannel, release, smoke_root: Path) -> None:
+    """Act like an installed manager: read the manifest, download the package, check the digest."""
+    live = fetch_stable_manifest(channel)
+    parsed = parse_update_manifest(live or {}, channel, current_version="0.0.0")
+    if parsed is None or parsed.version != release.version or parsed.package_sha256 != release.package_sha256:
+        raise ValueError("公网稳定清单未指向刚发布的更新包")
+    prepared = prepare_update(parsed, channel, smoke_root)
+    if sha256_file(prepared.archive_path) != release.package_sha256:
+        raise ValueError("从 GitHub 下载的更新包摘要不一致")
+    if not (prepared.payload_root / "manager" / "WeChatReBot.exe").is_file():
+        raise ValueError("从 GitHub 下载的更新包缺少管理器")
+
+
+def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], version: str,
+                    assets: list[Path], work_root: Path, timeout: int) -> None:
+    if release_exists(repo, tag):
+        raise ValueError(f"Release {tag} 已存在；同版本不能重复发布，请提升版本号")
+    names: set[str] = set()
+    unique: list[Path] = []
+    for path in assets:
+        if path.name not in names:
+            names.add(path.name)
+            unique.append(path)
+    checksums = [_write_checksum(path) for path in unique
+                 if not path.name.endswith(".sha256") and f"{path.name}.sha256" not in names]
+    notes_file = _write_notes(work_root / "release-notes.md", title=title, notes=notes, version=version)
+    create_release(repo, tag, title=f"{Version(version)} {title.strip()}".strip(), notes_file=notes_file,
+                   target=_git_head(), latest=True)
+    upload_assets(repo, tag, [*unique, *checksums])
+    publish_release(repo, tag)
+    for path in unique:
+        if path.name.endswith(".sha256"):
+            continue
+        verify_public_asset(asset_url(repo, tag, path.name), expected_size=path.stat().st_size,
+                            expected_sha256=sha256_file(path), timeout=timeout)
+        print(f"GitHub 公网校验通过：{asset_url(repo, tag, path.name)}", flush=True)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="构建、签名并发布到 GitHub Release；稳定清单放在 stable 标签。")
+    parser.add_argument("--source-root", type=Path, default=COMMERCIAL_ROOT / "vendor")
+    parser.add_argument("--title", default="完整载荷更新")
+    parser.add_argument("--note", action="append", default=[])
+    parser.add_argument("--minimum-supported-version", default="0.7.0")
+    parser.add_argument("--build", type=int)
+    parser.add_argument("--mandatory", action="store_true")
+    parser.add_argument("--private-key", type=Path,
+                        default=COMMERCIAL_ROOT / "config" / "local" / "update-signing-private.pem")
+    parser.add_argument("--wheelhouse", type=Path)
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--manager-build", type=Path, help="--manager-only 时复用已完成的管理器构建目录")
+    parser.add_argument("--manager-only", action="store_true", help="只发布管理器增量包")
+    parser.add_argument("--rollback", metavar="VERSION", help="把 stable 清单回滚到该版本的签名副本")
+    parser.add_argument("--skip-tests", action="store_true")
+    parser.add_argument("--skip-remote-smoke", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--refresh-manager", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if tuple(sys.version_info[:2]) != (3, 13) or platform.architecture()[0] != "64bit":
+        parser.error("必须使用 Python 3.13 x64 执行发布脚本")
+    if args.refresh_manager and not args.resume:
+        parser.error("--refresh-manager 必须与 --resume 一起使用")
+    channel = load_update_channel()
+    repo = repo_name_with_owner()
+    if not args.dry_run:
+        ensure_gh_ready(repo)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    artifacts_root = (COMMERCIAL_ROOT / "artifacts").resolve()
+
+    if args.rollback:
+        version = str(Version(args.rollback))
+        if not args.yes and input(f"将把稳定清单回滚到 {version}，输入 {version} 确认：").strip() != version:
+            print("未确认，已取消回滚。")
+            return 2
+        rollback_stable(repo, version, channel=channel,
+                        work_root=artifacts_root / f"rollback-{version}-{timestamp}")
+        print(json.dumps({"rolled_back_to": version, "manifest_url": channel.manifest_url}, ensure_ascii=False))
+        return 0
+
+    private_key = args.private_key.expanduser().resolve()
+    if not private_key.is_file():
+        parser.error(f"更新签名私钥不存在：{private_key}")
+    publisher._signing_key(private_key, channel)
+    version = _project_version()
+    live = fetch_stable_manifest(channel)
+    live_version = str(Version(str(live["version"]))) if live else "0.0.0"
+    if Version(version) < Version(live_version) or (Version(version) == Version(live_version) and not args.dry_run):
+        parser.error(f"项目版本 {version} 必须高于线上稳定版本 {live_version}；请先提升版本号")
+    if args.manager_only:
+        try:
+            publisher._require_safe_delta_base(live_version)
+        except ValueError as exc:
+            parser.error(str(exc))
+
+    tag = release_tag(version)
+    prefix = asset_prefix(repo, tag)
+    output = (args.output or artifacts_root / f"publish-github-{version}-{timestamp}").expanduser().resolve()
+    if output == artifacts_root or artifacts_root not in output.parents:
+        parser.error("输出目录必须位于本项目 artifacts 目录内")
+    if output.exists() and any(output.iterdir()) and not args.resume:
+        parser.error(f"输出目录不是空目录：{output}")
+    output.mkdir(parents=True, exist_ok=True)
+    work_root = output / "github"
+
+    if args.manager_only:
+        if not args.skip_tests:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(SOURCE_ROOT)
+            _run([sys.executable, "-m", "pytest", "-q"], env=env)
+        manager_build = (args.manager_build.expanduser().resolve() if args.manager_build
+                         else output / "manager-build")
+        if not args.manager_build:
+            _run([sys.executable, str(SCRIPTS_ROOT / "build_manager.py"), "--output", str(manager_build),
+                  "--host-python", sys.executable])
+        release = publisher.build_manager_update(
+            manager_build=manager_build, output=output / "update", version=version, private_key_path=private_key,
+            channel=channel, asset_prefix=prefix, title=args.title, notes=tuple(args.note),
+            minimum_supported_version=args.minimum_supported_version, build=args.build, mandatory=args.mandatory,
+        )
+        assets = [release.archive_path]
+    else:
+        source_root = verify_source_inputs(COMMERCIAL_ROOT, args.source_root)
+        options = full.FullBuildOptions(
+            source_root=source_root, private_key=private_key, output=output, title=args.title,
+            notes=tuple(args.note), minimum_supported_version=args.minimum_supported_version, build=args.build,
+            mandatory=args.mandatory, wheelhouse=args.wheelhouse, offline=args.offline, skip_tests=args.skip_tests,
+            resume=args.resume, refresh_manager=args.refresh_manager,
+        )
+        release, customer = full.build_full_update_artifacts(
+            options, version=version, channel=channel, previous_version=live_version,
+            package_url=asset_url(repo, tag, f"wechatrebot-{version}-update.zip"), asset_prefix=prefix,
+        )
+        assets = [release.archive_path, customer.archive_path, customer.checksum_path]
+        if customer.payload_path is not None:
+            assets.append(customer.payload_path)
+
+    summary = {
+        "version": version, "tag": tag, "repo": repo,
+        "assets": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in assets],
+        "manifest": str(release.manifest_path), "package_url": release.package_url,
+        "stable_manifest_url": stable_manifest_url(repo), "dry_run": args.dry_run,
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+    if args.dry_run:
+        print("本地构建完成；--dry-run 未创建 Release。")
+        return 0
+    if not args.yes and not publisher._prompt_publish(version, release.package_size):
+        print("未确认版本号，已取消发布。")
+        return 2
+
+    _publish_assets(repo, tag, title=args.title, notes=tuple(args.note), version=version, assets=assets,
+                    work_root=work_root, timeout=channel.request_timeout_seconds)
+    promote_manifest(repo, version, release.manifest_path, channel=channel, target=_git_head(),
+                     work_root=work_root)
+    if not args.skip_remote_smoke:
+        smoke_update_from_github(channel, release, artifacts_root / f"smoke-github-{version.replace('.', '')}")
+    print(json.dumps({**summary, "published": True, "previous_version": live_version},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    raise SystemExit(main())
