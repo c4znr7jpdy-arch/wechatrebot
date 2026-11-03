@@ -116,7 +116,7 @@ def test_embedded_update_channel_has_a_valid_pinned_public_key() -> None:
     assert len(channel.key_id) == 16
     assert channel.enabled
     assert channel.manifest_url == (
-        "https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json"
+        "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/stable/stable.json"
     )
 
 
@@ -767,3 +767,37 @@ def test_legacy_update_result_gets_status_for_webui(tmp_path: Path) -> None:
         "message": "文件仍被占用。",
     }
     assert not result_path.exists()
+
+
+def test_download_accepts_https_redirect_to_github_asset_host(monkeypatch, tmp_path: Path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("stray.txt", "outside payload/")
+    content = buffer.getvalue()
+    base = _release_for_archive(content)
+    release = UpdateRelease(
+        base.version, base.title, base.notes, base.published_at,
+        "https://github.com/o/r/releases/download/v0.8.0/wechatrebot-0.8.0-update.zip",
+        base.package_size, base.package_sha256, base.mandatory,
+    )
+    channel, _private = _channel_and_key()
+
+    class Redirected(_DownloadResponse):
+        def geturl(self) -> str:
+            return "https://objects.githubusercontent.com/github-production-release-asset/1?X-Amz-Signature=x"
+
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", lambda *_a, **_k: Redirected(content))
+    with pytest.raises(UpdateFailure) as accepted:
+        prepare_update(release, channel, tmp_path / "install")
+    # The redirect target was accepted and the digest matched; only the archive layout failed.
+    assert accepted.value.definition.code == "UPD-1012"
+
+    class Insecure(_DownloadResponse):
+        def geturl(self) -> str:
+            return "http://objects.githubusercontent.com/github-production-release-asset/1"
+
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", lambda *_a, **_k: Insecure(content))
+    with pytest.raises(UpdateFailure) as rejected:
+        prepare_update(release, channel, tmp_path / "install-insecure")
+    assert rejected.value.definition.code == "UPD-1003"
+    assert "HTTPS" in rejected.value.detail
