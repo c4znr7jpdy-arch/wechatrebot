@@ -118,19 +118,20 @@ def _customer_package_from_output(
     package_root: Path,
     *,
     version: str,
-    base_url: str,
+    asset_prefix: str,
     native: bool = False,
     manager_exe: Path | None = None,
     output_root: Path | None = None,
     build_installer: bool = True,
 ) -> BuiltCustomerPackage:
+    prefix = asset_prefix.rstrip("/")
     if native:
         if manager_exe is None or output_root is None:
             raise ValueError("标准安装器构建缺少管理器或输出目录")
         return _native_customer_package_from_output(
             package_root,
             version=version,
-            base_url=base_url,
+            asset_prefix=prefix,
             manager_exe=manager_exe,
             output_root=output_root,
             build_installer=build_installer,
@@ -178,8 +179,8 @@ def _customer_package_from_output(
         version=version,
         archive_path=archive_path,
         checksum_path=checksum_path,
-        package_url=f"{base_url.rstrip('/')}/downloads/{archive_path.name}",
-        checksum_url=f"{base_url.rstrip('/')}/downloads/{checksum_path.name}",
+        package_url=f"{prefix}/{archive_path.name}",
+        checksum_url=f"{prefix}/{checksum_path.name}",
         package_size=archive_path.stat().st_size,
         package_sha256=digest,
     )
@@ -237,7 +238,7 @@ def _native_customer_package_from_output(
     package_root: Path,
     *,
     version: str,
-    base_url: str,
+    asset_prefix: str,
     manager_exe: Path,
     output_root: Path,
     build_installer: bool,
@@ -256,7 +257,7 @@ def _native_customer_package_from_output(
     digest = sha256_file(payload)
     named_payload = output_root / "payloads" / f"WeChatReBot-{version}-payload-{digest[:12].lower()}.wrb"
     _copy_or_link(payload, named_payload)
-    payload_url = f"{base_url.rstrip('/')}/releases/{named_payload.name}"
+    payload_url = f"{asset_prefix}/{named_payload.name}"
     setup_root = output_root / "native-installer"
     setup = setup_root / f"WeChatReBot-Setup-{version}.exe"
     if build_installer or not setup.is_file():
@@ -287,8 +288,8 @@ def _native_customer_package_from_output(
         version=version,
         archive_path=archive,
         checksum_path=checksum,
-        package_url=f"{base_url.rstrip('/')}/downloads/{archive.name}",
-        checksum_url=f"{base_url.rstrip('/')}/downloads/{checksum.name}",
+        package_url=f"{asset_prefix}/{archive.name}",
+        checksum_url=f"{asset_prefix}/{checksum.name}",
         package_size=archive.stat().st_size,
         package_sha256=package_digest,
         installer={
@@ -881,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
     customer_package = _customer_package_from_output(
         customer_root,
         version=version,
-        base_url=asset_base_url,
+        asset_prefix=asset_base_url,
         native=True,
         manager_exe=manager_build / "dist" / "WeChatReBot.exe",
         output_root=output,

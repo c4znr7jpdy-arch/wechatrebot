@@ -226,60 +226,25 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
     assert published == [release]
 
 
-def test_customer_package_is_content_addressed_and_metadata_matches(
-    tmp_path: Path,
-) -> None:
+def test_customer_package_is_content_addressed_under_the_asset_prefix(tmp_path: Path) -> None:
     module = _publisher()
     package_root = tmp_path / "WeChatReBot-0.8.7-Windows-x64"
     original_archive = package_root.parent / f"{package_root.name}.zip"
     with zipfile.ZipFile(original_archive, "w") as archive:
-        for name in (
-            "WeChatReBot.exe",
-            "payload.wrb",
-            "DISTRIBUTION-MANIFEST.json",
-            "START-HERE.txt",
-        ):
+        for name in ("WeChatReBot.exe", "payload.wrb", "DISTRIBUTION-MANIFEST.json", "START-HERE.txt"):
             archive.writestr(f"{package_root.name}/{name}", name)
     digest = sha256_file(original_archive)
     original_archive.with_name(original_archive.name + ".sha256").write_text(
-        f"{digest}  {original_archive.name}\n",
-        encoding="ascii",
-    )
+        f"{digest}  {original_archive.name}\n", encoding="ascii")
+    prefix = "https://github.com/o/r/releases/download/v0.8.7"
 
-    package = module._customer_package_from_output(
-        package_root,
-        version="0.8.7",
-        base_url="https://updates.example.test/product",
-    )
-    metadata_path = module._write_download_metadata(
-        tmp_path / "download.json",
-        package=package,
-        published_at="2026-09-04T02:30:00+00:00",
-        title="手动下载安装",
-        notes=("新增完整 ZIP 下载页",),
-    )
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    package = module._customer_package_from_output(package_root, version="0.8.7", asset_prefix=prefix)
 
     assert digest[:12].lower() in package.archive_path.name
-    assert package.archive_path.name.endswith(".zip")
-    assert package.checksum_path.read_text(encoding="ascii").strip() == (
-        f"{digest}  {package.archive_path.name}"
-    )
-    assert metadata["version"] == "0.8.7"
-    assert metadata["download"] == {
-        "url": package.package_url,
-        "filename": package.archive_path.name,
-        "size": package.package_size,
-        "sha256": package.package_sha256,
-        "checksum_url": package.checksum_url,
-    }
-
-    resumed = module._customer_package_from_output(
-        package_root,
-        version="0.8.7",
-        base_url="https://updates.example.test/product",
-    )
-    assert resumed == package
+    assert package.package_url == f"{prefix}/{package.archive_path.name}"
+    assert package.checksum_url == f"{prefix}/{package.checksum_path.name}"
+    assert package.checksum_path.read_text(encoding="ascii").strip() == f"{digest}  {package.archive_path.name}"
+    assert module._customer_package_from_output(package_root, version="0.8.7", asset_prefix=prefix) == package
 
 
 def test_native_customer_package_uses_standard_setup_and_pinned_payload(
@@ -321,7 +286,7 @@ def test_native_customer_package_uses_standard_setup_and_pinned_payload(
     package = module._customer_package_from_output(
         package_root,
         version="0.9.8",
-        base_url="https://download.example.test/wechatrebot-updates",
+        asset_prefix="https://github.com/o/r/releases/download/v0.9.8",
         native=True,
         manager_exe=manager,
         output_root=output,
@@ -334,6 +299,10 @@ def test_native_customer_package_uses_standard_setup_and_pinned_payload(
     assert package.payload_path is not None
     assert package.payload_path.name.startswith("WeChatReBot-0.9.8-payload-")
     assert package.payload_url in package.installer["payload_url"]
+    prefix = "https://github.com/o/r/releases/download/v0.9.8"
+    assert package.package_url == f"{prefix}/{package.archive_path.name}"
+    assert package.checksum_url == f"{prefix}/{package.checksum_path.name}"
+    assert package.payload_url == f"{prefix}/{package.payload_path.name}"
     assert Path(commands[0][1]).name == "build_native_installer.py"
     assert commands[0][commands[0].index("--payload-sha256") + 1] == package.installer["payload_sha256"]
     with zipfile.ZipFile(package.archive_path) as archive:
@@ -341,16 +310,6 @@ def test_native_customer_package_uses_standard_setup_and_pinned_payload(
             "WeChatReBot-Setup-0.9.8.exe",
             "安装说明.txt",
         }
-
-    metadata_path = module._write_download_metadata(
-        tmp_path / "download.json",
-        package=package,
-        published_at="2026-09-20T06:00:00+00:00",
-        title="标准安装器",
-        notes=(),
-    )
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    assert metadata["installer"] == package.installer
 
 
 def test_full_update_powershell_entry_forwards_all_arguments() -> None:

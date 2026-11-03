@@ -170,7 +170,7 @@ def build_manager_update(
     version: str,
     private_key_path: Path,
     channel: UpdateChannel,
-    base_url: str,
+    asset_prefix: str,
     title: str,
     notes: tuple[str, ...],
     minimum_supported_version: str,
@@ -218,7 +218,7 @@ def build_manager_update(
     )
     archive_path = output / archive_name
     temporary_archive.replace(archive_path)
-    package_url = f"{base_url.rstrip('/')}/releases/{archive_name}"
+    package_url = f"{asset_prefix.rstrip('/')}/{archive_name}"
     with zipfile.ZipFile(archive_path, "r") as package:
         uncompressed_size = sum(item.file_size for item in package.infolist())
     key = _signing_key(private_key_path.resolve(), channel)
@@ -553,7 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         version=version,
         private_key_path=args.private_key.expanduser(),
         channel=channel,
-        base_url=asset_base_url,
+        asset_prefix=asset_base_url,
         title=args.title,
         notes=tuple(args.note),
         minimum_supported_version=args.minimum_supported_version,

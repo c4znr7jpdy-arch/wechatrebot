@@ -88,7 +88,7 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
         version="0.8.8",
         private_key_path=key_path,
         channel=channel,
-        base_url="https://updates.example.test/product",
+        asset_prefix="https://github.com/o/r/releases/download/v0.8.8",
         title="插件配置更新",
         notes=("修复高级页面",),
         minimum_supported_version="0.7.0",
@@ -120,6 +120,7 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
     assert release is not None
     assert release.version == "0.8.8"
     assert release.package_url == result.package_url
+    assert result.package_url == f"https://github.com/o/r/releases/download/v0.8.8/{result.archive_path.name}"
     assert release.build == 42
     assert release.mandatory is True
     assert stable["package"]["payload_file_count"] == 1
@@ -139,7 +140,7 @@ def test_build_manager_update_rejects_tampered_manager(tmp_path: Path) -> None:
             version="0.8.8",
             private_key_path=key_path,
             channel=channel,
-            base_url="https://updates.example.test/product",
+            asset_prefix="https://github.com/o/r/releases/download/v0.8.8",
             title="update",
             notes=(),
             minimum_supported_version="0.7.0",
