@@ -1,9 +1,11 @@
 {
   "schema_version": 1,
-  "enabled": true,
+  "enabled": false,
   "bucket": "jiangxiaomei-releases-bj",
   "region": "cn-beijing",
   "endpoint": "oss-cn-beijing.aliyuncs.com",
   "object_prefix": "wechatrebot-updates",
-  "public_base_url": "https://download.xiuxianjyj.xin/wechatrebot-updates"
+  "public_base_url": "https://download.xiuxianjyj.xin/wechatrebot-updates",
+  "retired_at": "2026-11-03",
+  "replaced_by": "GitHub Release，见 docs/requirements/requirements-github-release-distribution.md"
 }

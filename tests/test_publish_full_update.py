@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
-import io
 import json
 from pathlib import Path
 import sys
-import urllib.error
 import zipfile
 
 from wechatrebot_manager.payload import sha256_file
@@ -22,85 +20,6 @@ def _publisher():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def test_public_cdn_download_checks_head_size_and_get_sha256(monkeypatch) -> None:
-    module = _publisher()
-    url = "https://download.example.test/releases/update.zip"
-    body = b"published archive"
-    methods: list[str] = []
-
-    class Response(io.BytesIO):
-        status = 200
-
-        def __init__(self, content: bytes) -> None:
-            super().__init__(content)
-            self.headers = {"Content-Length": str(len(body))}
-
-        def geturl(self) -> str:
-            return url
-
-    def urlopen(request, *, timeout):
-        assert timeout == 20
-        methods.append(request.get_method())
-        return Response(body if request.get_method() == "GET" else b"")
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", urlopen)
-    module._verify_public_download(
-        url,
-        expected_size=len(body),
-        expected_sha256=hashlib.sha256(body).hexdigest(),
-        timeout=20,
-    )
-    assert methods == ["HEAD", "GET"]
-
-    try:
-        module._verify_public_download(
-            url, expected_size=len(body), expected_sha256="0" * 64, timeout=20
-        )
-    except ValueError as exc:
-        assert "SHA-256" in str(exc)
-    else:
-        raise AssertionError("CDN 内容不匹配时发布必须停止")
-
-
-def test_public_download_page_must_return_not_found(monkeypatch) -> None:
-    module = _publisher()
-    base_url = "https://updates.example.test/product"
-    checked: list[str] = []
-
-    def hidden(request, *, timeout):
-        assert timeout == 20
-        checked.append(request.full_url)
-        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", hidden)
-    module._public_download_page_is_hidden(base_url, timeout=20)
-    assert checked == [
-        f"{base_url}/",
-        f"{base_url}/index.html",
-        f"{base_url}/site",
-        f"{base_url}/site/",
-        f"{base_url}/site/index.html",
-    ]
-
-    class VisibleResponse(io.BytesIO):
-        status = 200
-
-        def geturl(self) -> str:
-            return f"{base_url}/"
-
-    monkeypatch.setattr(
-        module.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: VisibleResponse(b"download page"),
-    )
-    try:
-        module._public_download_page_is_hidden(base_url, timeout=20)
-    except ValueError as exc:
-        assert "仍可访问" in str(exc)
-    else:
-        raise AssertionError("下载页仍公开时发布必须停止")
 
 
 def test_build_full_update_artifacts_runs_the_build_pipeline_in_order(
@@ -241,68 +160,3 @@ def test_native_customer_package_uses_standard_setup_and_pinned_payload(
             "WeChatReBot-Setup-0.9.8.exe",
             "安装说明.txt",
         }
-
-
-def test_full_update_powershell_entry_forwards_all_arguments() -> None:
-    wrapper = (
-        Path(__file__).parents[1] / "scripts" / "publish-full-update.ps1"
-    ).read_text(encoding="utf-8")
-
-    assert "& py -3.13 $publisher @args" in wrapper
-    assert "publish_full_update.py" in wrapper
-
-
-def test_oss_download_site_stage_does_not_copy_large_package_to_server(
-    tmp_path: Path, monkeypatch
-) -> None:
-    module = _publisher()
-    root = tmp_path / "commercial"
-    page = root / "deploy" / "download-site" / "index.html"
-    nginx = root / "deploy" / "nginx" / "wechatrebot-updates.conf"
-    page.parent.mkdir(parents=True)
-    nginx.parent.mkdir(parents=True)
-    page.write_text('<a id="downloadLink"></a><script>fetch("./download.json")</script>', encoding="utf-8")
-    nginx.write_text("/srv/wechatrebot-updates", encoding="utf-8")
-    archive = tmp_path / "customer.zip"
-    checksum = tmp_path / "customer.zip.sha256"
-    metadata = tmp_path / "download.json"
-    archive.write_bytes(b"package")
-    checksum.write_text("checksum", encoding="ascii")
-    metadata.write_text("{}", encoding="utf-8")
-    package = module.BuiltCustomerPackage(
-        version="0.8.8",
-        archive_path=archive,
-        checksum_path=checksum,
-        package_url="https://download.example.test/downloads/customer.zip",
-        checksum_url="https://download.example.test/downloads/customer.zip.sha256",
-        package_size=archive.stat().st_size,
-        package_sha256=sha256_file(archive),
-    )
-    copied: list[Path] = []
-    monkeypatch.setattr(module, "COMMERCIAL_ROOT", root)
-    monkeypatch.setattr(module.publisher, "_ssh", lambda *_args: None)
-    monkeypatch.setattr(
-        module.publisher, "_scp", lambda local, *_args: copied.append(local)
-    )
-    monkeypatch.setattr(
-        module, "_public_download_page_is_hidden", lambda *_args, **_kwargs: None
-    )
-    monkeypatch.setattr(module, "_public_head", lambda *_args, **_kwargs: None)
-
-    work = tmp_path / "work"
-    work.mkdir()
-    module._stage_download_site(
-        package,
-        metadata,
-        host="root@example.test",
-        remote_root="/srv/updates",
-        base_url="https://updates.example.test",
-        work_root=work,
-        timeout=20,
-        upload_package_to_server=False,
-    )
-
-    assert archive not in copied
-    assert checksum not in copied
-    assert page in copied
-    assert metadata in copied
