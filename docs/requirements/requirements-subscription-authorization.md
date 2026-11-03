@@ -2,6 +2,8 @@
 
 > 2026-10-25 新增一小时自助试用：第 9 节保留已确认的需求基线，第 10 节记录实现及验证范围。源码实现不代表已部署服务、启用商业授权或更新本地机器人。前 8 节保留原人工发码方案和历史验证记录。
 
+> 2026-11-03：分发改为 GitHub Release，见 [requirements-github-release-distribution.md](requirements-github-release-distribution.md)；维护者管理后台将提供经登录与动态码保护的公网管理入口，见 [requirements-admin-console.md](requirements-admin-console.md)，本文中"没有公网管理员接口"的表述以该文档为准。
+
 > 2026-11-03：源码包内商业开关已改为 `enabled:true`。0.9.9 首发前没有存量客户，不设老安装豁免，所有安装都需要激活；客户安装包仍未构建、发布。测试通过 conftest 夹具把包内通道指向未启用文件，继续用 `config/licensing.json` 指向测试服务。
 
 > 2026-10-09，目标版本 0.9.9。首版采用微信群二维码人工发码。授权服务已接入 `https://ss.xiuxianjyj.xin/wechatrebot-license`，客户端已填入生产公钥；商业开关仍关闭，客户安装包尚未更新。
