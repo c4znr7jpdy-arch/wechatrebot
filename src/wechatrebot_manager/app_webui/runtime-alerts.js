@@ -22,7 +22,7 @@ window.createRuntimeAlerts = function (helpers) {
     return Number.isNaN(date.getTime()) ? "时间未记录" : operationTime.format(date);
   }
 
-  async function request(method, ...args) {
+  async function boundedRequest(method, ...args) {
     let timer;
     try {
       return await Promise.race([
@@ -114,7 +114,7 @@ window.createRuntimeAlerts = function (helpers) {
     preferenceRevision++;
     setBusy(true);
     try {
-      applySnapshot(await request("set_runtime_alert_preference", category, action, id));
+      applySnapshot(await boundedRequest("set_runtime_alert_preference", category, action, id));
       const stillMuted = snapshot.categories.some((entry) => entry.id === category && entry.muted_at);
       const stillClosed = snapshot.closed.some((entry) => entry.category === category);
       feedback({close: "已关闭本次提醒；完全退出并重新打开软件后，仍需关注的问题再次提醒。", mute: "已永久关闭此类提醒，可在提醒设置中恢复。", reopen: `已撤销本次关闭。${stillMuted ? "此类问题仍遵循永久屏蔽设置。" : ""}`, restore: `已恢复此类提醒。${stillClosed ? "已关闭的本次提醒仍在本次软件会话内隐藏。" : ""}`}[action]);
@@ -180,7 +180,7 @@ window.createRuntimeAlerts = function (helpers) {
     const revision = preferenceRevision;
     lastRead = Date.now();
     try {
-      const value = await request("get_runtime_alerts");
+      const value = await boundedRequest("get_runtime_alerts");
       if (revision !== preferenceRevision) return;
       applySnapshot(value);
       if ($("#runtimeAlertFeedback").classList.contains("error")) feedback("");
