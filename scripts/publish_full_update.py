@@ -612,6 +612,113 @@ def _activate_download_metadata(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class FullBuildOptions:
+    source_root: Path
+    private_key: Path
+    output: Path
+    title: str
+    notes: tuple[str, ...]
+    minimum_supported_version: str
+    build: int | None
+    mandatory: bool
+    wheelhouse: Path | None
+    offline: bool
+    skip_tests: bool
+    resume: bool
+    refresh_manager: bool
+
+
+def build_full_update_artifacts(
+    options: FullBuildOptions,
+    *,
+    version: str,
+    channel: UpdateChannel,
+    previous_version: str,
+    package_url: str,
+    asset_prefix: str,
+) -> tuple[BuiltFullUpdate, BuiltCustomerPackage]:
+    """Tests, metadata, manager, runtime, legal inventory, staging, signed update ZIP and customer package."""
+    output = options.output
+    output.mkdir(parents=True, exist_ok=True)
+    build_env = os.environ.copy()
+    build_env["PYTHONPATH"] = str(SOURCE_ROOT)
+    if not options.skip_tests:
+        _run([sys.executable, "-m", "pytest", "-q"], env=build_env)
+        _run([sys.executable, str(SCRIPTS_ROOT / "validate_release_metadata.py"), "--root", str(COMMERCIAL_ROOT)],
+             env=build_env)
+
+    manager_build = output / "manager-build"
+    runtime_build = output / "runtime-build"
+    staging = output / "staging"
+    update_output = output / "update"
+    distribution_root = output / "distribution"
+    if options.refresh_manager:
+        for candidate in (manager_build, staging, update_output, distribution_root):
+            try:
+                candidate.relative_to(output)
+            except ValueError as exc:
+                raise RuntimeError(f"拒绝清理输出目录之外的路径：{candidate}") from exc
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+            elif candidate.exists():
+                candidate.unlink()
+    distribution_root.mkdir(parents=True, exist_ok=True)
+    customer_root = distribution_root / f"WeChatReBot-{version}-Windows-x64"
+    rebuild = not options.resume or options.refresh_manager
+    if rebuild:
+        _run([sys.executable, str(SCRIPTS_ROOT / "build_manager.py"), "--output", str(manager_build),
+              "--host-python", sys.executable])
+    runtime_command = [sys.executable, str(SCRIPTS_ROOT / "build_runtime.py"), "--output", str(runtime_build),
+                       "--host-python", sys.executable]
+    if options.wheelhouse:
+        runtime_command.extend(["--wheelhouse", str(options.wheelhouse.expanduser().resolve())])
+    if options.offline:
+        runtime_command.append("--offline")
+    if not options.resume:
+        _run(runtime_command)
+    if rebuild:
+        _run([sys.executable, str(SCRIPTS_ROOT / "build_legal_inventory.py"),
+              "--runtime-root", str(runtime_build),
+              "--manager-site-packages", str(manager_build / "build-venv" / "Lib" / "site-packages"),
+              "--project-root", str(options.source_root),
+              "--sbom", "release/sbom.cdx.json", "--notices", "legal/THIRD-PARTY-NOTICES.md",
+              "--licenses", "legal/THIRD-PARTY-LICENSES.txt", "--review", "release/legal-review.json",
+              "--corresponding-source", "legal/CORRESPONDING-SOURCE.md"])
+        _run([sys.executable, str(SCRIPTS_ROOT / "validate_release_metadata.py"), "--root", str(COMMERCIAL_ROOT)],
+             env=build_env)
+        _run([sys.executable, str(SCRIPTS_ROOT / "build_staging.py"), "--source-root", str(options.source_root),
+              "--runtime-root", str(runtime_build), "--manager-exe", str(manager_build / "dist" / "WeChatReBot.exe"),
+              "--output", str(staging)])
+    release_command = [sys.executable, str(SCRIPTS_ROOT / "build_update_release.py"), "--payload", str(staging),
+                       "--output", str(update_output), "--private-key", str(options.private_key),
+                       "--package-url", package_url, "--title", options.title,
+                       "--minimum-supported-version", options.minimum_supported_version]
+    if options.mandatory:
+        release_command.append("--mandatory")
+    if options.build is not None:
+        release_command.extend(["--build", str(options.build)])
+    if rebuild:
+        for note in options.notes:
+            release_command.extend(["--note", note])
+        _run(release_command)
+        _run([sys.executable, str(SCRIPTS_ROOT / "build_distribution.py"), "--payload", str(staging),
+              "--output", str(customer_root)])
+    else:
+        print(f"正在复用已完成的完整构建产物：{output}", flush=True)
+
+    release = _release_from_output(update_output, version=version, channel=channel,
+                                   previous_version=previous_version)
+    if release.package_url != package_url:
+        raise ValueError("复用产物中的更新包地址与当前发布目标不一致；请使用新的输出目录重新构建，"
+                         "或搭配 --refresh-manager 重建交付包。")
+    customer_package = _customer_package_from_output(
+        customer_root, version=version, asset_prefix=asset_prefix, native=True,
+        manager_exe=manager_build / "dist" / "WeChatReBot.exe", output_root=output, build_installer=rebuild,
+    )
+    return release, customer_package
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="一键测试、构建、签名并发布完整载荷更新。"

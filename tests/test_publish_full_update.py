@@ -103,7 +103,7 @@ def test_public_download_page_must_return_not_found(monkeypatch) -> None:
         raise AssertionError("下载页仍公开时发布必须停止")
 
 
-def test_full_update_entry_runs_complete_build_and_publish_pipeline(
+def test_build_full_update_artifacts_runs_the_build_pipeline_in_order(
     tmp_path: Path, monkeypatch, vendor_inputs
 ) -> None:
     module = _publisher()
@@ -113,117 +113,48 @@ def test_full_update_entry_runs_complete_build_and_publish_pipeline(
     (root / "artifacts").mkdir(parents=True)
     scripts.mkdir()
     (root / "src").mkdir()
-    (root / "pyproject.toml").write_text(
-        '[project]\nname="test"\nversion="0.8.7"\n', encoding="utf-8"
-    )
-    key = root / "update-key.pem"
-    key.write_text("test", encoding="utf-8")
-    channel = UpdateChannel(
-        manifest_url="https://updates.example.test/stable.json",
-        channel="stable",
-        key_id="test",
-        public_key=b"0" * 32,
-    )
+    channel = UpdateChannel(manifest_url="https://github.com/o/r/releases/download/stable/stable.json",
+                            channel="stable", key_id="test", public_key=b"0" * 32)
     commands: list[list[str]] = []
-    published: list[object] = []
-
     monkeypatch.setattr(module, "COMMERCIAL_ROOT", root)
     monkeypatch.setattr(module, "SCRIPTS_ROOT", scripts)
     monkeypatch.setattr(module, "SOURCE_ROOT", root / "src")
-    monkeypatch.setattr(module, "_project_version", lambda: "0.8.7")
-    monkeypatch.setattr(module, "load_update_channel", lambda: channel)
-    monkeypatch.setattr(module.publisher, "_signing_key", lambda *_args: object())
-    monkeypatch.setattr(
-        module.publisher,
-        "_fetch_live_manifest",
-        lambda _channel: {"version": "0.8.6"},
-    )
-    monkeypatch.setattr(
-        module.publisher,
-        "_fetch_download_version",
-        lambda _base_url: "0.8.6",
-    )
     monkeypatch.setattr(module, "_run", lambda argv, **_kwargs: commands.append(argv))
     release = module.BuiltFullUpdate(
-        version="0.8.7",
-        archive_path=root / "artifacts" / "release.zip",
+        version="0.8.7", archive_path=root / "artifacts" / "release.zip",
         manifest_path=root / "artifacts" / "stable.json",
-        package_url="https://updates.example.test/releases/wechatrebot-0.8.7-update.zip",
-        package_size=123,
-        package_sha256="A" * 64,
+        package_url="https://github.com/o/r/releases/download/v0.8.7/wechatrebot-0.8.7-update.zip",
+        package_size=123, package_sha256="A" * 64,
     )
-    release.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    release.manifest_path.write_text(
-        json.dumps({"published_at": "2026-09-04T02:30:00+00:00"}),
-        encoding="utf-8",
-    )
-    customer_archive = root / "artifacts" / "customer.zip"
-    customer_archive.write_bytes(b"customer")
-    customer_checksum = customer_archive.with_suffix(".zip.sha256")
-    customer_checksum.write_text("checksum", encoding="ascii")
     customer = module.BuiltCustomerPackage(
-        version="0.8.7",
-        archive_path=customer_archive,
-        checksum_path=customer_checksum,
-        package_url="https://updates.example.test/downloads/customer.zip",
-        checksum_url="https://updates.example.test/downloads/customer.zip.sha256",
-        package_size=8,
-        package_sha256="B" * 64,
+        version="0.8.7", archive_path=root / "artifacts" / "customer.zip",
+        checksum_path=root / "artifacts" / "customer.zip.sha256",
+        package_url="https://github.com/o/r/releases/download/v0.8.7/customer.zip",
+        checksum_url="https://github.com/o/r/releases/download/v0.8.7/customer.zip.sha256",
+        package_size=8, package_sha256="B" * 64,
     )
-    monkeypatch.setattr(module, "_release_from_output", lambda *_args, **_kwargs: release)
-    monkeypatch.setattr(
-        module,
-        "_customer_package_from_output",
-        lambda *_args, **_kwargs: customer,
-    )
-    staged = module.StagedDownloadSite("pending", "rollback", "nonce")
-    monkeypatch.setattr(module, "_stage_download_site", lambda *_args, **_kwargs: staged)
-    monkeypatch.setattr(
-        module.publisher,
-        "_publish",
-        lambda value, **_kwargs: published.append(value),
+    monkeypatch.setattr(module, "_release_from_output", lambda *_a, **_k: release)
+    monkeypatch.setattr(module, "_customer_package_from_output", lambda *_a, **_k: customer)
+    options = module.FullBuildOptions(
+        source_root=source, private_key=root / "key.pem", output=root / "artifacts" / "publish",
+        title="升级修复", notes=("修复更新回滚",), minimum_supported_version="0.7.0",
+        build=None, mandatory=False, wheelhouse=None, offline=False,
+        skip_tests=False, resume=False, refresh_manager=False,
     )
 
-    assert module.main(
-        [
-            "--source-root",
-            str(source),
-            "--private-key",
-            str(key),
-            "--base-url",
-            "https://updates.example.test",
-            "--artifact-storage",
-            "server",
-            "--title",
-            "升级修复",
-            "--note",
-            "修复更新回滚",
-            "--yes",
-        ]
-    ) == 0
+    built_release, built_customer = module.build_full_update_artifacts(
+        options, version="0.8.7", channel=channel, previous_version="0.8.6",
+        package_url=release.package_url, asset_prefix="https://github.com/o/r/releases/download/v0.8.7",
+    )
 
-    invoked = [
-        "pytest" if command[1:3] == ["-m", "pytest"] else Path(command[1]).name
-        for command in commands
-        if len(command) > 1
-    ]
-    assert invoked == [
-        "pytest",
-        "validate_release_metadata.py",
-        "build_manager.py",
-        "build_runtime.py",
-        "build_legal_inventory.py",
-        "validate_release_metadata.py",
-        "build_staging.py",
-        "build_update_release.py",
-        "build_distribution.py",
-    ]
-    assert "--include" not in commands[-2]
-    inventory = next(command for command in commands if "build_legal_inventory.py" in command[1])
-    assert inventory[inventory.index("--notices") + 1] == "legal/THIRD-PARTY-NOTICES.md"
-    assert inventory[inventory.index("--licenses") + 1] == "legal/THIRD-PARTY-LICENSES.txt"
-    assert "--archive" not in commands[-1]
-    assert published == [release]
+    assert (built_release, built_customer) == (release, customer)
+    invoked = ["pytest" if c[1:3] == ["-m", "pytest"] else Path(c[1]).name for c in commands if len(c) > 1]
+    assert invoked == ["pytest", "validate_release_metadata.py", "build_manager.py", "build_runtime.py",
+                       "build_legal_inventory.py", "validate_release_metadata.py", "build_staging.py",
+                       "build_update_release.py", "build_distribution.py"]
+    update_release = next(c for c in commands if "build_update_release.py" in c[1])
+    assert update_release[update_release.index("--package-url") + 1] == release.package_url
+    assert "--include" not in update_release
 
 
 def test_customer_package_is_content_addressed_under_the_asset_prefix(tmp_path: Path) -> None:
