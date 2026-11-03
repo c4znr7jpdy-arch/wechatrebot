@@ -26,6 +26,17 @@ for search_root in (SCRIPTS_ROOT, SOURCE_ROOT):
     if str(search_root) not in sys.path:
         sys.path.insert(0, str(search_root))
 
+import publish_manager_update as publisher
+from wechatrebot_manager.payload import sha256_file
+from wechatrebot_manager.updates import (
+    UpdateChannel,
+    UpdateError,
+    canonical_manifest_bytes,
+    load_update_channel,
+    parse_update_manifest,
+    prepare_update,
+)
+
 STABLE_TAG = "stable"
 STABLE_MANIFEST_NAME = "stable.json"
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -160,3 +171,80 @@ def download_asset(repo: str, tag: str, name: str, directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     _gh(["release", "download", tag, "-R", repo, "--pattern", name, "--dir", str(directory), "--clobber"])
     return directory / name
+
+
+def fetch_stable_manifest(channel: UpdateChannel) -> dict | None:
+    try:
+        return publisher._fetch_live_manifest(channel)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def _load_manifest(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"清单根节点不是对象：{path}")
+    return payload
+
+
+def _verify_signed_manifest(payload: dict, channel: UpdateChannel, version: str) -> None:
+    try:
+        parsed = parse_update_manifest(payload, channel, current_version="0.0.0")
+    except (UpdateError, ValueError) as exc:
+        raise ValueError(f"清单签名校验失败：{exc}") from exc
+    if parsed is None or parsed.version != str(Version(version)):
+        raise ValueError(f"清单签名校验失败或版本不是 {version}")
+
+
+def verify_stable_manifest(channel: UpdateChannel, expected: dict, *, attempts: int = 10,
+                           delay: float = 6.0, sleep=time.sleep) -> None:
+    for attempt in range(attempts):
+        live = fetch_stable_manifest(channel)
+        if (live is not None and canonical_manifest_bytes(live) == canonical_manifest_bytes(expected)
+                and live.get("signature") == expected.get("signature")):
+            return
+        if attempt + 1 < attempts:
+            sleep(delay)
+    raise ValueError("公网稳定清单与刚上传的清单不一致")
+
+
+def ensure_stable_release(repo: str, *, target: str, work_root: Path) -> None:
+    if release_exists(repo, STABLE_TAG):
+        return
+    work_root.mkdir(parents=True, exist_ok=True)
+    notes = work_root / "stable-notes.md"
+    notes.write_text("客户端读取的签名稳定清单。请勿手工修改此 Release 的资产。\n", encoding="utf-8")
+    create_release(repo, STABLE_TAG, title="稳定清单", notes_file=notes, target=target, latest=False)
+    publish_release(repo, STABLE_TAG)
+
+
+def promote_manifest(repo: str, version: str, manifest_path: Path, *, channel: UpdateChannel, target: str,
+                     work_root: Path, attempts: int = 10, delay: float = 6.0, sleep=time.sleep) -> None:
+    """Keep a per-version signed copy, then overwrite stable/stable.json and read it back."""
+    manifest = _load_manifest(manifest_path)
+    _verify_signed_manifest(manifest, channel, version)
+    work_root.mkdir(parents=True, exist_ok=True)
+    tag = release_tag(version)
+    versioned = work_root / f"stable-{Version(version)}.json"
+    shutil.copyfile(manifest_path, versioned)
+    upload_assets(repo, tag, [versioned])
+    ensure_stable_release(repo, target=target, work_root=work_root)
+    stable_copy = work_root / STABLE_MANIFEST_NAME
+    shutil.copyfile(manifest_path, stable_copy)
+    upload_assets(repo, STABLE_TAG, [stable_copy])
+    verify_stable_manifest(channel, manifest, attempts=attempts, delay=delay, sleep=sleep)
+
+
+def rollback_stable(repo: str, version: str, *, channel: UpdateChannel, work_root: Path,
+                    attempts: int = 10, delay: float = 6.0, sleep=time.sleep) -> None:
+    tag = release_tag(version)
+    name = f"stable-{Version(version)}.json"
+    downloaded = download_asset(repo, tag, name, work_root)
+    manifest = _load_manifest(downloaded)
+    _verify_signed_manifest(manifest, channel, version)
+    stable_copy = work_root / STABLE_MANIFEST_NAME
+    shutil.copyfile(downloaded, stable_copy)
+    upload_assets(repo, STABLE_TAG, [stable_copy])
+    verify_stable_manifest(channel, manifest, attempts=attempts, delay=delay, sleep=sleep)

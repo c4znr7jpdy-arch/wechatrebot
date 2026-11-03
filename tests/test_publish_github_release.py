@@ -190,3 +190,113 @@ def test_download_asset_places_file_in_directory(tmp_path: Path, monkeypatch) ->
     assert target == tmp_path / "stable-0.9.8.json"
     assert gh.calls[0] == ["release", "download", "v0.9.8", "-R", REPO, "--pattern", "stable-0.9.8.json",
                            "--dir", str(tmp_path), "--clobber"]
+
+
+import base64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from wechatrebot_manager.updates import UpdateChannel, canonical_manifest_bytes
+
+
+def _signed_manifest(version: str, key: Ed25519PrivateKey, key_id: str, package_url: str) -> dict:
+    manifest = {
+        "schema_version": 1, "product": "wechatrebot-desktop", "channel": "stable", "version": version,
+        "minimum_supported_version": "0.7.0", "published_at": "2026-11-03T00:00:00+00:00",
+        "title": f"版本 {version}", "notes": [], "mandatory": False,
+        "package": {"url": package_url, "format": "zip", "size": 3, "sha256": "A" * 64,
+                    "payload_file_count": 1, "uncompressed_size": 3},
+    }
+    signature = key.sign(canonical_manifest_bytes(manifest))
+    manifest["signature"] = {"algorithm": "ed25519", "key_id": key_id,
+                             "value": base64.b64encode(signature).decode("ascii")}
+    return manifest
+
+
+def _channel(key: Ed25519PrivateKey) -> tuple[UpdateChannel, str]:
+    public = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    key_id = hashlib.sha256(public).hexdigest().upper()[:16]
+    return UpdateChannel(manifest_url=f"https://github.com/{REPO}/releases/download/stable/stable.json",
+                         channel="stable", key_id=key_id, public_key=public), key_id
+
+
+def test_fetch_stable_manifest_returns_none_on_404(monkeypatch) -> None:
+    module = _module()
+    channel, _ = _channel(Ed25519PrivateKey.generate())
+
+    def missing(_channel):
+        raise urllib.error.HTTPError(channel.manifest_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(module.publisher, "_fetch_live_manifest", missing)
+    assert module.fetch_stable_manifest(channel) is None
+
+
+def test_promote_manifest_uploads_version_copy_then_overwrites_stable(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    key = Ed25519PrivateKey.generate()
+    channel, key_id = _channel(key)
+    manifest = _signed_manifest("0.9.9", key, key_id, module.asset_url(REPO, "v0.9.9", "u.zip"))
+    manifest_path = tmp_path / "update" / "stable.json"
+    manifest_path.parent.mkdir()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    gh = _FakeGh({("release", "view", "stable"): subprocess.CalledProcessError(1, "gh")})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: manifest)
+
+    module.promote_manifest(REPO, "0.9.9", manifest_path, channel=channel, target="abc123",
+                            work_root=tmp_path / "work", sleep=lambda _s: None)
+
+    uploads = [c for c in gh.calls if c[:2] == ["release", "upload"]]
+    assert uploads[0][2] == "v0.9.9" and uploads[0][3].endswith("stable-0.9.9.json")
+    assert any(c[:3] == ["release", "create", "stable"] and "--latest=false" in c for c in gh.calls)
+    assert uploads[1][2] == "stable" and uploads[1][3].endswith("stable.json") and "--clobber" in uploads[1]
+    assert json.loads((tmp_path / "work" / "stable-0.9.9.json").read_text("utf-8")) == manifest
+
+
+def test_promote_manifest_fails_when_public_manifest_differs(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    key = Ed25519PrivateKey.generate()
+    channel, key_id = _channel(key)
+    manifest = _signed_manifest("0.9.9", key, key_id, module.asset_url(REPO, "v0.9.9", "u.zip"))
+    other = _signed_manifest("0.9.8", key, key_id, module.asset_url(REPO, "v0.9.8", "u.zip"))
+    manifest_path = tmp_path / "stable.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(module, "_gh", _FakeGh({("release", "view", "stable"): "{}"}))
+    monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: other)
+    with pytest.raises(ValueError, match="稳定清单"):
+        module.promote_manifest(REPO, "0.9.9", manifest_path, channel=channel, target="abc123",
+                                work_root=tmp_path / "work", attempts=2, sleep=lambda _s: None)
+
+
+def test_rollback_stable_downloads_verifies_signature_and_republishes(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    key = Ed25519PrivateKey.generate()
+    channel, key_id = _channel(key)
+    previous = _signed_manifest("0.9.8", key, key_id, module.asset_url(REPO, "v0.9.8", "u.zip"))
+
+    def download(repo, tag, name, directory):
+        assert (repo, tag, name) == (REPO, "v0.9.8", "stable-0.9.8.json")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / name
+        path.write_text(json.dumps(previous), encoding="utf-8")
+        return path
+
+    gh = _FakeGh({("release", "view", "stable"): "{}"})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "download_asset", download)
+    monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: previous)
+    module.rollback_stable(REPO, "0.9.8", channel=channel, work_root=tmp_path / "work", sleep=lambda _s: None)
+    upload = next(c for c in gh.calls if c[:2] == ["release", "upload"])
+    assert upload[2] == "stable" and upload[3].endswith("stable.json")
+
+    tampered = dict(previous)
+    tampered["title"] = "改过"
+
+    def download_tampered(repo, tag, name, directory):
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / name
+        path.write_text(json.dumps(tampered), encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(module, "download_asset", download_tampered)
+    with pytest.raises(ValueError, match="签名"):
+        module.rollback_stable(REPO, "0.9.8", channel=channel, work_root=tmp_path / "work2", sleep=lambda _s: None)
