@@ -247,3 +247,12 @@ def test_guard_allows_native_plugin_placeholders_and_rendered_session_label(tmp_
     )
     findings = _load_guard()(tmp_path)
     assert {item["reason"] for item in findings} == {"developer-path", "assigned-secret"}
+
+
+def test_guard_accepts_shipped_runtime_alerts_preview_mock(tmp_path: Path) -> None:
+    source = Path(__file__).parents[1] / "src/wechatrebot_manager/app_webui/preview.js"
+    target = tmp_path / "manager/src/wechatrebot_manager/app_webui/preview.js"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(source.read_bytes())
+
+    assert _load_guard()(tmp_path) == []
