@@ -1,12 +1,13 @@
 from copy import deepcopy
 from datetime import datetime
 import json
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
 
-from wechatrebot_manager.licensing.config import load_channel
+from wechatrebot_manager.licensing.config import _read_channel, load_channel
 from wechatrebot_manager.licensing.protocol import (
     LEASE_DOMAIN, REQUEST_DOMAIN, LicenseError, canonical, decode, encode,
     extend_period, fingerprint, issue_lease, parse_json, public_key, sign_request,
@@ -174,3 +175,14 @@ def test_valid_channel_and_explicit_unconfigured_channel(tmp_path):
 ])
 def test_channel_rejects_unsafe_or_malformed_configuration(tmp_path, overrides):
     assert_invalid("configuration_invalid", lambda: load_channel(config(tmp_path, **overrides)))
+
+
+def test_packaged_channel_pins_the_commercial_trust_root():
+    """The shipped channel is the commercial switch: enabled, HTTPS service and the production key only."""
+    import wechatrebot_manager
+
+    packaged = Path(wechatrebot_manager.__file__).with_name("licensing-channel.json")
+    channel = _read_channel(packaged)
+    assert channel.enabled and channel.ready
+    assert channel.service_url == "https://ss.xiuxianjyj.xin/wechatrebot-license"
+    assert set(channel.public_keys) == {"b2c3cac3613bdfcb"}

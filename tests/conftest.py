@@ -14,6 +14,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 SOURCE = ROOT / "vendor/data/plugins/jiang_image"
 
 
+@pytest.fixture(autouse=True)
+def packaged_channel_disabled(tmp_path_factory, monkeypatch):
+    """Tests drive licensing through config/licensing.json; the shipped commercial
+    switch would otherwise make the loader ignore that override everywhere."""
+    from wechatrebot_manager.licensing import config as licensing_config
+
+    channel = tmp_path_factory.mktemp("channel") / "licensing-channel.json"
+    channel.write_text(json.dumps({"schema_version": 1, "enabled": False, "service_url": "", "public_keys": {}}),
+                       encoding="utf-8")
+    monkeypatch.setattr(licensing_config, "PACKAGED_CHANNEL", channel)
+
+
 @pytest.fixture
 def vendor_inputs():
     def create(repository):

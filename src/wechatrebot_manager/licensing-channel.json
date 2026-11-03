@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "enabled": false,
+  "enabled": true,
   "service_url": "https://ss.xiuxianjyj.xin/wechatrebot-license",
   "public_keys": {
     "b2c3cac3613bdfcb": "1LskIqyIbVqZAJ/C51ftSJ3CDYJrEmEFMIgAS8Fn4EM="
