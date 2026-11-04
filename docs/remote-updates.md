@@ -1,33 +1,34 @@
 # 商业版远程更新发布
 
-远程更新只发布客户二进制载荷和签名清单，不要求客户访问私有 GitHub 仓库，也不会把源码仓库地址或访问令牌写进客户端。
+远程更新只发布客户二进制载荷和签名清单。自 1.0.0 起，安装包、完整载荷、在线更新包和签名稳定清单全部放在本仓库的 GitHub Release；仓库为公开仓库，Release 资产任何人可下载，安全依赖 Ed25519 签名、SHA-256 校验和激活码，不依赖地址保密。更新签名私钥只保存在发布电脑和离线备份中，不进入 GitHub、服务器或 CI。
 
 ## 首次绑定
 
 项目已在 `config/local/update-signing-private.pem` 生成本机 Ed25519 私钥，并把对应公钥写入 `src/wechatrebot_manager/update-channel.json`。私钥已被 `.gitignore` 排除。
 
-正式首发已绑定签名清单地址：
+客户端内置的签名清单地址固定为：
 
-`https://ss.xiuxianjyj.xin/wechatrebot-updates/stable.json`
+`https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/stable/stable.json`
 
-服务器发布目录为 `/srv/wechatrebot-updates`，内部在线更新 ZIP 放在 `releases/`，稳定清单为根目录的 `stable.json`。客户手动下载页默认返回 404；面向客户的完整安装 ZIP 仍放在 `downloads/`，根目录的 `download.json` 继续保存版本、实际文件大小、更新说明和 SHA-256，供发布流程核对版本但不展示网页。
+它指向固定标签 `stable` 的 Release 资产，每次发布覆盖上传，地址永远不变。Release 资产地址会 302 到 `objects.githubusercontent.com`，客户端与发布器都跟随跳转并校验最终地址为 HTTPS。
 
 正式首发前还必须完成：
 
 1. 把签名私钥复制到至少一份离线加密备份。私钥丢失后，已售客户端无法验证用新密钥签发的更新。
-2. 不要把服务器凭据、GitHub PAT 或更新签名私钥放进客户程序、配置模板、日志或仓库。
+2. 不要把 GitHub 令牌或更新签名私钥放进客户程序、配置模板、日志或仓库。
+3. 发布机的 `gh` 已登录且对本仓库有写权限；发布器开始前会检查。
 
 客户安装目录可以用 `config/update-channel.json` 覆盖 `manifest_url`、检查间隔和超时，签名公钥仍固定使用程序内置值，不能被覆盖。
 
 客户端使用仓库中已绑定的生产清单地址 `stable.json`，不是未签名的 `latest.json`。稳定清单必须先通过 Ed25519 校验，不能为了兼容示例格式而另建不带签名的版本入口。清单沿用 snake_case 字段：`version`、可选 `build`、`mandatory`、`minimum_supported_version`、`title`、`notes`，以及 `package.url/size/sha256/uncompressed_size`。`build` 与本机已安装载荷记录比较；版本或构建号不更新时不会提示。缺少非关键展示字段会回落默认标题/空更新说明；包摘要、URL、版本、签名等关键字段无效时会拒绝该更新。
 
-开发模式不加载正式更新通道，也不会连接生产服务器。正式包可使用安装目录覆盖 `manifest_url` 指向 staging，但签名公钥固定不变，staging 清单仍须由对应私钥签名。
+开发模式不加载正式更新通道，也不会连接 GitHub。正式包可使用安装目录覆盖 `manifest_url` 指向测试用的 Release，但签名公钥固定不变，测试清单仍须由对应私钥签名。
 
-没有可发布的新包时，用 `scripts/build_update_status.py` 发布当前版本的签名状态清单。它不携带下载包，当前版本客户端会显示“已是最新版本”：
+没有可发布的新包时，用 `scripts/build_update_status.py` 生成当前版本的签名状态清单，再用 `gh release upload stable <输出目录>\stable.json --clobber` 覆盖上传。它不携带下载包，当前版本客户端会显示“已是最新版本”：
 
 ```powershell
 python scripts\build_update_status.py `
-  --output artifacts\update-status-0.8.0 `
+  --output artifacts\update-status-1.0.0 `
   --private-key config\local\update-signing-private.pem `
   --note "远程更新通道已就绪"
 ```
@@ -39,18 +40,16 @@ python scripts\build_update_status.py `
 仅修改 `src/wechatrebot_manager/`、插件中心或管理器内置 Web UI 时，先把项目版本提升到高于线上稳定版，然后执行：
 
 ```powershell
-.\scripts\publish-manager-update.ps1 `
-  --title '插件配置更新' `
-  --note '修复高级配置页面'
+.\scripts\publish-github-release.ps1 --manager-only --title '插件配置更新' --note '修复高级配置页面'
 ```
 
-该命令自动完成测试、冻结管理器、自检、生成仅含管理器 EXE 的 Ed25519 签名增量包、SSH 上传、服务器 SHA-256 校验、稳定清单原子切换和公网下载/解压冒烟。线上验收失败时会自动恢复上一份稳定清单。
+该命令自动完成测试、冻结管理器、自检、生成仅含管理器 EXE 的 Ed25519 签名增量包，在 GitHub 创建 `v<版本>` Release 并上传增量包和 `.sha256`，从公网跟随跳转核对大小与 SHA-256，再把签名清单作为 `stable-<版本>.json` 存入该 Release 并覆盖到 `stable` 标签的 `stable.json`，最后按客户端逻辑做一次下载冒烟。公网核对失败时流程停止，稳定清单不更新。
 
 > 兼容边界：`0.8.7` 之前的 PyInstaller 单文件客户端只等待应用子进程退出，没有等待仍占用管理器 EXE 的引导父进程。从这些旧版升级时必须使用完整载荷更新；线上稳定版低于 `0.8.7` 时，一键增量发布器会直接拒绝发布。完整载荷的事务预处理为旧引导进程留出退出时间，`0.8.7` 起的更新器还会显式等待两个进程并重试短暂文件占用。
 
 后续恢复管理器增量发布前，应确认所有仍受支持的客户安装都已至少升级到 `0.8.7`；只提升线上稳定版本并不能证明离线客户已经完成过渡。
 
-- `--dry-run`：只在本地构建和签名，不上传。
+- `--dry-run`：只在本地构建和签名，不创建 Release。
 - `--yes`：跳过发布前输入版本号确认，适合无人值守执行。
 - `--manager-build artifacts\...`：复用已经完成且清单校验通过的管理器构建。
 - `--skip-tests`、`--skip-remote-smoke`：仅用于明确知道风险的故障排查，不建议正式发布使用。
@@ -59,35 +58,41 @@ python scripts\build_update_status.py `
 
 ### 完整载荷发布
 
-运行时、AstrBot 插件、桥接程序、hook，或旧单文件管理器的引导修复必须使用完整载荷一键入口。该入口内部依次完成全量测试、发布元数据校验、管理器冻结、便携运行时构建、staging 组装、面向客户的完整安装 ZIP 与校验文件生成、在线更新载荷扫描、Ed25519 签名、上传、Nginx 配置校验、稳定清单与客户下载元数据原子切换，以及公网下载/解压冒烟；客户下载元数据验收失败时会同时恢复上一份下载信息和稳定清单，下载页入口始终保持 404。
+运行时、AstrBot 插件、桥接程序、hook，或旧单文件管理器的引导修复必须使用完整载荷一键入口。该入口内部依次完成全量测试、发布元数据校验、管理器冻结、便携运行时构建、staging 组装、面向客户的在线安装 ZIP、`payload.wrb` 与在线更新 ZIP 生成、Ed25519 签名，然后创建 `v<版本>` Release、上传全部资产和 `.sha256`、从公网逐个核对、提升稳定清单并做下载冒烟；任一公网核对失败则停止，稳定清单不更新，Release 保留供排查。
 
 ```powershell
-.\scripts\publish-full-update.ps1 `
+.\scripts\publish-github-release.ps1 `
   --source-root '.\vendor' `
   --title '完整载荷稳定性更新' `
   --note '修复旧版管理器更新回滚' `
   --yes
 ```
 
-`--source-root` 必须指向包含桥接程序和所交付 AstrBot 插件的项目源码根目录。正式发布前项目版本必须高于线上稳定版本，签名私钥与 SSH 环境必须可用。只需本地完整构建时可追加 `--dry-run`；正式发布不要跳过测试或远程冒烟。
+`--source-root` 必须指向包含桥接程序和所交付 AstrBot 插件的项目源码根目录。正式发布前项目版本必须高于线上稳定版本，签名私钥与 `gh` 登录必须可用。只需本地完整构建时可追加 `--dry-run`；正式发布不要跳过测试或远程冒烟。同一版本不能重复发布；重试前先删除失败的 Release 或提升版本号。
 
-## OSS/CDN 大文件分发
+### 回滚
 
-`release/oss-publish.json` 保存不含密钥的 OSS 目标配置。当前目标为北京地域的私有 Bucket `jiangxiaomei-releases-bj`，对象前缀为 `wechatrebot-updates`。从 0.9.8 起启用 OSS/CDN，正式完整载荷发布必须先确认 RAM 凭证、上传工具和私有 Bucket 回源可用。
+```powershell
+.\scripts\publish-github-release.ps1 --rollback 0.9.9
+```
 
-`public_base_url` 指向 CDN HTTPS 地址。`--dry-run` 只生成和校验本地产物，不查找 `ossutil`、不上传 OSS、也不修改服务器状态。同版本允许用于本地试构建，但正式发布仍要求项目版本高于线上稳定版本。
+把该版本 Release 中的 `stable-0.9.9.json` 验签后覆盖上传为 `stable` 标签的 `stable.json`，并从公网读回核对。不删除任何版本 Release。
 
-正式 OSS 发布按以下顺序执行：
+## GitHub Release 布局
 
-1. 本地测试、构建、签名并校验交付包。
-2. 通过已配置 RAM 凭证的 `ossutil` 将在线更新包、客户完整包和校验文件上传为私有 Object。
-3. 使用 `stat` 核对 Object 的 `Content-Length` 和发布时写入的 SHA-256 元数据；一致时可跳过重复上传。
-4. 从 CDN 公网地址对每个对象执行 HEAD、完整下载，并核对字节数和 SHA-256。
-5. 最后才原子切换服务器上的 `stable.json` 与 `download.json`。
+每个版本标签 `v<版本>` 上传以下资产，文件名带内容哈希前缀：
 
-OSS Object 始终使用私有 ACL。CDN 应开启“OSS 私有 Bucket 回源”；发布脚本不会关闭 Bucket 的“阻止公共访问”。上传使用 ossutil 自带的 CRC64 校验和大文件断点续传能力。
+| 资产 | 用途 |
+| --- | --- |
+| `WeChatReBot-<版本>-Windows-x64-online-<sha12>.zip` 及 `.sha256` | 客户下载的外层 ZIP，内含 Inno 在线安装器 |
+| `WeChatReBot-<版本>-payload-<sha12>.wrb` 及 `.sha256` | 在线安装器下载的完整载荷 |
+| `wechatrebot-<版本>-update.zip` 及 `.sha256` | 已安装管理器的事务更新包 |
+| `wechatrebot-<版本>-manager-<sha12>.zip` 及 `.sha256` | 仅管理器改动时的增量更新包 |
+| `stable-<版本>.json` | 本次签名清单副本，回滚来源 |
 
-客户下载包与内部更新包用途不同：客户包是外层 ZIP，解压后包含原生 Windows 在线安装器；安装器下载并校验单独托管的 `payload.wrb`。内部更新包仅供已安装管理器验证并事务更新，不能把 `releases/` 中的 ZIP 当作客户安装包发送。客户下载文件名带 SHA-256 前缀，避免同版本重试发布时命中旧的不可变缓存。
+固定标签 `stable` 只有一个资产 `stable.json`；`package.url` 指向对应版本 Release 的更新包资产地址。单个资产上限 2 GB，当前载荷约 520 MB。国内网络访问 GitHub 资产可能较慢或失败，客户端的 SHA-256 校验保证内容完整，但不能保证下载成功。
+
+客户下载包与内部更新包用途不同：客户包是外层 ZIP，解压后包含原生 Windows 在线安装器；安装器下载并校验同一 Release 中的 `payload.wrb`。内部更新包仅供已安装管理器验证并事务更新，不能把更新 ZIP 当作客户安装包发送。资产文件名带 SHA-256 前缀，避免同版本重试时命中缓存。
 
 发布脚本会在包内载荷清单保留 `source_manifest_status: ready` 兼容标记。该字段仅用于让 0.8.3 及更早版本通过旧版更新入口升级；新版本不再用它判断载荷是否完整或可信，仍以签名、SHA-256、路径边界和逐文件清单为准。不要手工删除该字段，否则旧版会在下载完成后拒绝更新包。这个标记只解决旧版的载荷准入，不解决上述单文件 EXE 占用问题；从 0.8.2/0.8.3 升级到 0.8.7 仍应发布完整载荷。
 
@@ -129,7 +134,7 @@ OSS Object 始终使用私有 ACL。CDN 应开启“OSS 私有 Bucket 回源”�
 
 ## 发布纪律
 
-- 更新 ZIP 和清单可以放到 CDN/对象存储，私有源码仓库继续保持 private。
+- 更新 ZIP、安装包和签名清单放在本仓库的 GitHub Release；仓库为公开仓库，安全依赖签名、SHA-256 和激活码，不依赖地址保密。
 - 不允许使用可被客户提取的共享密钥或 HMAC 代替数字签名。
 - 不允许跳过 SHA-256 和更新清单签名校验；发布前仍建议完成代码签名及干净机升级/回滚测试。
 - 签名私钥轮换必须先通过旧密钥签发一个内置新公钥的过渡版本，再切换服务端签名；不能直接替换公钥。

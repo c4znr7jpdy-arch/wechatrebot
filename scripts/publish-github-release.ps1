@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$publisher = Join-Path $PSScriptRoot "publish_manager_update.py"
+$publisher = Join-Path $PSScriptRoot "publish_github_release.py"
 $publishExitCode = 1
 
 Push-Location -LiteralPath $projectRoot

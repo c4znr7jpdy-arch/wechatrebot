@@ -102,3 +102,9 @@ def test_online_installer_rejects_unpinned_or_non_https_payload(tmp_path: Path) 
 
     with pytest.raises(ValueError):
         build_native_installer.command_for(args, require_compiler=False)
+
+
+def test_installer_update_link_points_at_github_releases() -> None:
+    script = (Path(__file__).parents[1] / "installer" / "WeChatReBot.iss").read_text(encoding="utf-8")
+    assert "AppUpdatesURL=https://github.com/c4znr7jpdy-arch/wechatrebot/releases" in script
+    assert "wechatrebot-updates" not in script

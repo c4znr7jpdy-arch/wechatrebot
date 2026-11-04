@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
 import sys
 import zipfile
 
@@ -88,7 +87,7 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
         version="0.8.8",
         private_key_path=key_path,
         channel=channel,
-        base_url="https://updates.example.test/product",
+        asset_prefix="https://github.com/o/r/releases/download/v0.8.8",
         title="插件配置更新",
         notes=("修复高级页面",),
         minimum_supported_version="0.7.0",
@@ -120,6 +119,7 @@ def test_build_manager_update_creates_small_signed_delta(tmp_path: Path) -> None
     assert release is not None
     assert release.version == "0.8.8"
     assert release.package_url == result.package_url
+    assert result.package_url == f"https://github.com/o/r/releases/download/v0.8.8/{result.archive_path.name}"
     assert release.build == 42
     assert release.mandatory is True
     assert stable["package"]["payload_file_count"] == 1
@@ -139,27 +139,11 @@ def test_build_manager_update_rejects_tampered_manager(tmp_path: Path) -> None:
             version="0.8.8",
             private_key_path=key_path,
             channel=channel,
-            base_url="https://updates.example.test/product",
+            asset_prefix="https://github.com/o/r/releases/download/v0.8.8",
             title="update",
             notes=(),
             minimum_supported_version="0.7.0",
         )
-
-
-@pytest.mark.parametrize(
-    ("host", "remote_root"),
-    [
-        ("root@example.test;whoami", "/srv/updates"),
-        ("root@example.test", "/"),
-        ("root@example.test", "relative/path"),
-    ],
-)
-def test_remote_publish_inputs_reject_shell_metacharacters(
-    host: str, remote_root: str
-) -> None:
-    module = _publisher()
-    with pytest.raises(ValueError):
-        module._safe_remote_inputs(host, remote_root)
 
 
 def test_manager_delta_rejects_legacy_stable_base() -> None:
@@ -169,155 +153,3 @@ def test_manager_delta_rejects_legacy_stable_base() -> None:
         module._require_safe_delta_base("0.8.6")
 
     module._require_safe_delta_base("0.8.7")
-
-
-def test_publish_runs_after_switch_inside_manifest_rollback_boundary(
-    tmp_path: Path, monkeypatch
-) -> None:
-    module = _publisher()
-    archive = tmp_path / "update.zip"
-    archive.write_bytes(b"update")
-    manifest = tmp_path / "stable.json"
-    manifest.write_text("{}", encoding="utf-8")
-    release = module.BuiltManagerUpdate(
-        version="0.8.8",
-        archive_path=archive,
-        manifest_path=manifest,
-        package_url="https://updates.example.test/releases/update.zip",
-        package_size=archive.stat().st_size,
-        package_sha256=sha256_file(archive),
-    )
-    channel = UpdateChannel(
-        manifest_url="https://updates.example.test/stable.json",
-        channel="stable",
-        key_id="test",
-        public_key=b"0" * 32,
-    )
-    ssh_commands: list[str] = []
-    callbacks: list[str] = []
-    parsed = SimpleNamespace(
-        version=release.version,
-        package_sha256=release.package_sha256,
-        package_size=release.package_size,
-        package_url=release.package_url,
-    )
-    monkeypatch.setattr(module, "_ssh", lambda _host, command: ssh_commands.append(command))
-    monkeypatch.setattr(module, "_scp", lambda *_args: None)
-    monkeypatch.setattr(module, "_public_package_head", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(module, "_fetch_live_manifest", lambda _channel: {})
-    monkeypatch.setattr(module, "parse_update_manifest", lambda *_args, **_kwargs: parsed)
-
-    module._publish(
-        release,
-        channel=channel,
-        previous_version="0.8.7",
-        host="root@example.test",
-        remote_root="/srv/updates",
-        smoke_root=tmp_path / "smoke",
-        skip_remote_smoke=True,
-        after_switch=lambda: callbacks.append("activated"),
-    )
-
-    assert callbacks == ["activated"]
-    assert not any("rollback-" in command for command in ssh_commands[-1:])
-
-
-def test_publish_rolls_back_stable_manifest_when_after_switch_fails(
-    tmp_path: Path, monkeypatch
-) -> None:
-    module = _publisher()
-    archive = tmp_path / "update.zip"
-    archive.write_bytes(b"update")
-    manifest = tmp_path / "stable.json"
-    manifest.write_text("{}", encoding="utf-8")
-    release = module.BuiltManagerUpdate(
-        version="0.8.8",
-        archive_path=archive,
-        manifest_path=manifest,
-        package_url="https://updates.example.test/releases/update.zip",
-        package_size=archive.stat().st_size,
-        package_sha256=sha256_file(archive),
-    )
-    channel = UpdateChannel(
-        manifest_url="https://updates.example.test/stable.json",
-        channel="stable",
-        key_id="test",
-        public_key=b"0" * 32,
-    )
-    ssh_commands: list[str] = []
-    parsed = SimpleNamespace(
-        version=release.version,
-        package_sha256=release.package_sha256,
-        package_size=release.package_size,
-        package_url=release.package_url,
-    )
-    monkeypatch.setattr(module, "_ssh", lambda _host, command: ssh_commands.append(command))
-    monkeypatch.setattr(module, "_scp", lambda *_args: None)
-    monkeypatch.setattr(module, "_public_package_head", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(module, "_fetch_live_manifest", lambda _channel: {})
-    monkeypatch.setattr(module, "parse_update_manifest", lambda *_args, **_kwargs: parsed)
-
-    with pytest.raises(RuntimeError, match="download metadata failed"):
-        module._publish(
-            release,
-            channel=channel,
-            previous_version="0.8.7",
-            host="root@example.test",
-            remote_root="/srv/updates",
-            smoke_root=tmp_path / "smoke",
-            skip_remote_smoke=True,
-            after_switch=lambda: (_ for _ in ()).throw(
-                RuntimeError("download metadata failed")
-            ),
-        )
-
-    assert "stable.json.rollback-" in ssh_commands[-1]
-
-
-def test_publish_with_oss_only_copies_manifest_to_server(
-    tmp_path: Path, monkeypatch
-) -> None:
-    module = _publisher()
-    archive = tmp_path / "update.zip"
-    archive.write_bytes(b"update")
-    manifest = tmp_path / "stable.json"
-    manifest.write_text("{}", encoding="utf-8")
-    release = module.BuiltManagerUpdate(
-        version="0.8.8",
-        archive_path=archive,
-        manifest_path=manifest,
-        package_url="https://download.example.test/releases/update.zip",
-        package_size=archive.stat().st_size,
-        package_sha256=sha256_file(archive),
-    )
-    channel = UpdateChannel(
-        manifest_url="https://updates.example.test/stable.json",
-        channel="stable",
-        key_id="test",
-        public_key=b"0" * 32,
-    )
-    copied: list[Path] = []
-    parsed = SimpleNamespace(
-        version=release.version,
-        package_sha256=release.package_sha256,
-        package_size=release.package_size,
-        package_url=release.package_url,
-    )
-    monkeypatch.setattr(module, "_ssh", lambda *_args: None)
-    monkeypatch.setattr(module, "_scp", lambda path, *_args: copied.append(path))
-    monkeypatch.setattr(module, "_public_package_head", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(module, "_fetch_live_manifest", lambda _channel: {})
-    monkeypatch.setattr(module, "parse_update_manifest", lambda *_args, **_kwargs: parsed)
-
-    module._publish(
-        release,
-        channel=channel,
-        previous_version="0.8.7",
-        host="root@example.test",
-        remote_root="/srv/updates",
-        smoke_root=tmp_path / "smoke",
-        skip_remote_smoke=True,
-        upload_archive_to_server=False,
-    )
-
-    assert copied == [manifest]
