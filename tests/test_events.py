@@ -1,10 +1,13 @@
 import json
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from wechatrebot_manager import events
 from wechatrebot_manager.events import EventStore
 from wechatrebot_manager.customer_logs import ACTIVITY_RETENTION_SECONDS
 
@@ -190,3 +193,37 @@ def test_streaming_prune_failure_preserves_original_log(tmp_path, monkeypatch):
         store.prune()
     assert store.path.read_bytes() == original
     assert list(store.path.parent.glob("*.tmp")) == []
+
+def test_repeat_merge_outlives_a_second_boundary_race(tmp_path, monkeypatch):
+    """A writer whose timestamp was sampled before the record it repeats was stored
+    (the second-boundary race seen in CI run 41597708597) must still merge."""
+    class BoundaryClock(datetime):
+        calls = 0
+        base = datetime.now().astimezone()
+
+        @classmethod
+        def now(cls, tz=None):
+            cls.calls += 1
+            return cls.base + timedelta(seconds=cls.calls - 1)
+
+    monkeypatch.setattr("wechatrebot_manager.events.datetime", BoundaryClock)
+    store = EventStore(tmp_path)
+    merged_into_first = []
+    lock = events._STORE_LOCK
+    # Hold the store lock so the second writer blocks after sampling its timestamp,
+    # then let the clock move on before that writer reaches the critical section.
+    lock.acquire()
+    try:
+        writer = threading.Thread(target=lambda: merged_into_first.append(
+            store.emit("APP_ERROR", "failed", code="19001", message="same failure")))
+        writer.start()
+        deadline = time.time() + 0.5
+        while BoundaryClock.calls == 0 and time.time() < deadline:
+            time.sleep(0.005)
+        first = store.emit("APP_ERROR", "failed", code="19001", message="same failure")
+    finally:
+        lock.release()
+    writer.join()
+    rows = store.recent()
+    assert len(rows) == 1 and rows[0]["count"] == 2
+    assert merged_into_first[0].event_id == first.event_id

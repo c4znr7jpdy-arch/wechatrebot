@@ -213,17 +213,20 @@ class EventStore:
     ) -> EventRecord:
         if event not in EVENT_TYPES:
             raise ValueError(f"未知事件类型：{event}")
-        record = EventRecord(
-            time=datetime.now().astimezone().isoformat(timespec="seconds"),
-            event=event,
-            status=status,
-            code=str(code),
-            message=message,
-            details=details,
-            event_id=uuid4().hex,
-        )
-        line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
         with self._lock:
+            # Sample the timestamp inside the critical section: _merge_error only
+            # repeats a record against an equal or earlier stored timestamp, so the
+            # write order must never trail the clock order.
+            record = EventRecord(
+                time=datetime.now().astimezone().isoformat(timespec="seconds"),
+                event=event,
+                status=status,
+                code=str(code),
+                message=message,
+                details=details,
+                event_id=uuid4().hex,
+            )
+            line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
             if self.path.exists() and self.path.stat().st_size >= _MAX_LOG_BYTES:
                 self.path.replace(self.path.with_suffix(".jsonl.1"))
             self.prune()
