@@ -481,7 +481,7 @@ window.createPreviewApi = function (helpers) {
     const reminderSnapshot = () => {
       const item = {...reminderItem, closed_at: reminderClosed[0]?.closed_at || "", muted_at: reminderCategories[0].muted_at};
       item.hidden = Boolean(item.closed_at || item.muted_at);
-      return {items: reminderDemo ? [item] : [], categories: structuredClone(reminderCategories), closed: structuredClone(reminderClosed), session_id: "preview-manager-session", window_seconds: 3600, updated_at: new Date().toISOString()};
+      return {items: reminderDemo ? [item] : [], categories: structuredClone(reminderCategories), closed: structuredClone(reminderClosed), session_id: "example-manager-session", window_seconds: 3600, updated_at: new Date().toISOString()};
     };
     return {
       ...previewLicenseApi,
