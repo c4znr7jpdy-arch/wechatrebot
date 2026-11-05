@@ -464,7 +464,7 @@ def test_v1_database_migration_preserves_existing_code_and_preview(env, tmp_path
     reopened = LicenseStore(path)
     assert reopened.refresh(env.device, {"license_id": record["id"]}, env.now) == record
     with reopened.connection() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         assert db.execute("SELECT redeemed_replaces_id FROM codes WHERE id='old-code'").fetchone()[0] is None
 

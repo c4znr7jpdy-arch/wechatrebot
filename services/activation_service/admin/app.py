@@ -19,6 +19,7 @@ from wechatrebot_manager.licensing.protocol import LicenseError
 from ..contact import CONTACT_FILENAME, clear_contact, parse_expiry
 from ..store import LicenseStore
 from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
+from .codes import FILTERS, checked_reference, detail_html, history_html, reference_fields
 from .github import GitHubError, GitHubReleases
 from .upload import MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, UPLOAD_ROUTE, authenticate_upload, receive_candidate
 
@@ -115,7 +116,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         response.headers.update({
             "Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer", "Content-Security-Policy":
-                "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+                "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
         })
         return response
 
@@ -224,6 +225,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             action = str(form.get("action", ""))
             try:
                 if action == "issue":
+                    reference = checked_reference(form, session)
                     try:
                         days = int(str(form.get("valid_days", "")))
                     except ValueError:
@@ -231,11 +233,11 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                     if not 1 <= days <= 365:
                         raise LicenseError("invalid_data", "兑换期限须为 1 至 365 天。")
                     result = await asyncio.to_thread(store.issue_code, owner_ref=str(form.get("owner_ref", "")),
-                        reference=str(form.get("reference", "")), now=int(clock()), mode=str(form.get("mode", "")),
+                        reference=reference, now=int(clock()), mode=str(form.get("mode", "")),
                         plan=str(form.get("plan", "")) or None, license_id=str(form.get("license_id", "")),
                         target_device=str(form.get("device", "")), reset_account=form.get("reset_account") == "on",
                         redeem_by=int(clock()) + days * 86400, actor="admin-web")
-                    message = "请立即复制，激活码仅显示一次：\n" + result["code"] + "\n码编号：" + result["code_id"]
+                    return await redirect(request, "codes/" + result["code_id"], "激活码已生成，可复制交付客户。")
                 elif action == "revoke":
                     result = await asyncio.to_thread(store.revoke, now=int(clock()),
                         license_id=str(form.get("license_id", "")), code_id=str(form.get("code_id", "")), actor="admin-web")
@@ -253,7 +255,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                  '<option value="migration">迁移</option></select></label>'
                  '<label>套餐<select name="plan"><option value="month">月卡</option><option value="year">年卡</option>'
                  '<option value="trial">试用（仅新开通）</option><option value="">沿用原套餐（补领/迁移）</option></select></label>'
-                 + _field("owner_ref", "客户参考号") + _field("reference", "唯一人工业务编号")
+                 + _field("owner_ref", "客户参考号", extra='placeholder="例如 KH0001，同一客户始终沿用"')
+                 + reference_fields(session, int(clock()))
                  + _field("license_id", "原授权编号（续期/补领/迁移必填）", required=False)
                  + _field("device", "新设备指纹（迁移必填）", required=False)
                  + _field("valid_days", "激活码可兑换天数", kind="number", extra='value="30" min="1" max="365"')
@@ -268,7 +271,18 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         body = '<div class="grid"><section class="panel"><h2>人工发码</h2>' + _form(session, "codes", issue)
         body += '</section><div><section class="panel"><h2>撤销</h2>' + _form(session, "codes", revoke)
         body += '</section><section class="panel"><h2>查询</h2>' + _form(session, "codes", inspect) + '</section></div></div>'
-        return await render(request, "激活码", body)
+        filters = {key: request.query.get(key, "").strip() for key in (*FILTERS, "status")}
+        try:
+            page = int(request.query.get("page", "1"))
+        except ValueError:
+            raise LicenseError("invalid_data", "历史记录页码无效。")
+        history = await asyncio.to_thread(store.admin_code_history, now=int(clock()), page=page, **filters)
+        return await render(request, "激活码", body + history_html(history, filters))
+
+    async def code_detail(request):
+        record = await asyncio.to_thread(store.admin_code_detail, request.match_info["code_id"], now=int(clock()))
+        await audit("code_history_view", record["id"])
+        return await render(request, "激活码详情", detail_html(record))
 
     async def release_page(request):
         session = request["admin_session"]
@@ -361,6 +375,9 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     async def style(request):
         return web.Response(text=(_TEMPLATES / "style.css").read_text("utf-8"), content_type="text/css")
 
+    async def code_script(request):
+        return web.Response(text=(_TEMPLATES / "codes.js").read_text("utf-8"), content_type="application/javascript")
+
     # The upload handler enforces the package and metadata limits while
     # streaming. Keep aiohttp's outer limit aligned so it does not reject a
     # valid multi-gigabyte multipart request before the handler can inspect CSRF
@@ -368,6 +385,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     app = web.Application(middlewares=[boundary], client_max_size=MAX_UPLOAD_BYTES + 3 * MAX_METADATA_BYTES)
     app.router.add_get("/", overview)
     app.router.add_get("/style.css", style)
+    app.router.add_get("/codes.js", code_script)
+    app.router.add_get("/codes/{code_id}", code_detail)
     app.router.add_get("/contact/image", contact_image)
     for path, handler in (("login", login), ("contact", contact), ("codes", codes), ("releases", release_page)):
         app.router.add_get("/" + path, handler)

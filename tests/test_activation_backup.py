@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -302,3 +303,42 @@ def test_backup_includes_admin_credentials_but_never_sessions(source, tmp_path):
     assert not (snapshot / "admin-state.sqlite3").exists()
     status = json.loads((data / "backup-status.json").read_text())
     assert status["snapshot"] == snapshot.name and status["completed_at"] > 0
+
+
+def test_backup_restores_encrypted_code_history_with_its_private_key(tmp_path):
+    from services.activation_service.store import LicenseStore
+
+    data = tmp_path / "encrypted-data"
+    store = LicenseStore(data / backup.DATABASE)
+    (data / backup.PRIVATE_KEY).write_bytes(SECRET)
+    issued = store.issue_code(owner_ref="backup-customer", reference="backup-record", now=1000, plan="month")
+    snapshot = Path(backup.create_backup(data, tmp_path / "backups")["path"])
+    assert (snapshot / backup.HISTORY_KEY).read_bytes() == (data / backup.HISTORY_KEY).read_bytes()
+    assert backup.HISTORY_KEY in backup._complete_files(snapshot.parent, snapshot)
+    restore = tmp_path / "restored-data"
+    restore.mkdir()
+    for name in (backup.DATABASE, backup.PRIVATE_KEY, backup.HISTORY_KEY):
+        shutil.copyfile(snapshot / name, restore / name)
+    restored = LicenseStore(restore / backup.DATABASE)
+    detail = restored.admin_code_detail(issued["code_id"], now=1001)
+    assert detail["code"] == issued["code"]
+    assert detail["owner_ref"] == "backup-customer" and detail["reference"] == "backup-record"
+    assert issued["code"].encode() not in (snapshot / backup.DATABASE).read_bytes()
+
+
+@pytest.mark.parametrize("damage", ["missing", "short"])
+def test_encrypted_history_without_usable_key_is_never_labeled_complete(tmp_path, damage):
+    from services.activation_service.store import LicenseStore
+
+    data, root = tmp_path / "encrypted-data", tmp_path / "backups"
+    store = LicenseStore(data / backup.DATABASE)
+    (data / backup.PRIVATE_KEY).write_bytes(SECRET)
+    store.issue_code(owner_ref="backup-customer", reference="backup-record", now=1000, plan="month")
+    if damage == "missing":
+        (data / backup.HISTORY_KEY).unlink()
+    else:
+        (data / backup.HISTORY_KEY).write_bytes(b"short")
+    with pytest.raises(backup.BackupError, match="[Hh]istory key"):
+        backup.create_backup(data, root)
+    assert not completed(root)
+    assert not any(path.name.endswith(".partial") for path in root.iterdir())

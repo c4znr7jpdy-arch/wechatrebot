@@ -71,7 +71,15 @@ async def login(admin):
 
 
 async def post(admin, path, **fields):
+    if fields.get("action") == "issue" and "reference" not in fields:
+        fields.update(await issuance_fields(admin))
     return await admin.client.post(path, data={"csrf": admin.csrf, **fields}, cookies=admin.cookies, allow_redirects=False)
+
+
+async def issuance_fields(admin):
+    html = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    return {name: re.search(fr'name="{name}" value="([^"]+)"', html)[1]
+            for name in ("reference", "reference_signature")}
 
 
 @pytest.mark.asyncio
@@ -120,28 +128,35 @@ async def test_lockout_display_and_audit_are_generic(admin):
 
 
 @pytest.mark.asyncio
-async def test_issue_once_query_redacts_and_duplicate_reference_rejected(admin):
+async def test_issue_automatic_reference_history_reveal_and_duplicate_rejected(admin):
     await login(admin)
+    automatic = await issuance_fields(admin)
+    assert re.fullmatch(r"WRB-\d{14}-[A-F0-9]{16}", automatic["reference"])
     response = await post(admin, "/codes", action="issue", mode="new", plan="month", owner_ref="customer-one",
-                          reference="order-one", valid_days="30")
-    assert response.status == 303 and response.headers["Location"] == PREFIX + "codes"
-    first = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+                          valid_days="30", **automatic)
+    code_id = admin.store.inspect(owner_ref="customer-one")["codes"][0]["id"]
+    assert response.status == 303 and response.headers["Location"] == PREFIX + "codes/" + code_id
+    first = await (await admin.client.get("/codes/" + code_id, cookies=admin.cookies)).text()
     code = re.search(r"WRB-(?:[A-Z2-7]{8}-){3}[A-Z2-7]{8}", first)[0]
+    assert "复制激活码" in first and automatic["reference"] in first and "customer-one" in first
+    assert code in await (await admin.client.get("/codes/" + code_id, cookies=admin.cookies)).text()
     second = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
-    assert code not in second
+    assert code not in second and automatic["reference"] in second and "customer-one" in second
     await post(admin, "/codes", action="inspect", owner_ref="customer-one")
     queried = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
     assert code not in queried and "查询结果" in queried
     await post(admin, "/codes", action="issue", mode="new", plan="month", owner_ref="customer-one",
-               reference="order-one", valid_days="30")
+               valid_days="30", **automatic)
     assert "已经发过码" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
-    code_id = admin.store.inspect(owner_ref="customer-one")["codes"][0]["id"]
+    assert admin.store.inspect()["codes"] == 1
     await post(admin, "/codes", action="revoke", code_id=code_id)
     assert admin.store.inspect(owner_ref="customer-one")["codes"][0]["revoked_at"] == NOW
     with admin.store.connection() as db:
         rows = [dict(r) for r in db.execute("SELECT * FROM audit")]
     assert all(row["actor"] == "admin-web" for row in rows)
     assert code not in json.dumps(rows)
+    with AuthStore(admin.root).connection() as db:
+        assert code not in " ".join(row[0] for row in db.execute("SELECT flash FROM sessions"))
 
 
 @pytest.mark.asyncio
@@ -152,14 +167,84 @@ async def test_issue_existing_license_modes_reuse_store_validation(admin, env, m
     env.store = admin.store
     env.now = NOW
     original = redeem(env, issue(env, owner="customer-one"))
-    fields = {"action": "issue", "mode": mode, "owner_ref": "customer-one", "reference": "next-order",
+    fields = {"action": "issue", "mode": mode, "owner_ref": "customer-one",
               "valid_days": "30", "license_id": original["id"], "plan": "month" if mode == "renewal" else ""}
     if mode == "migration":
         fields.update(device="a" * 64, reset_account="on")
-    assert (await post(admin, "/codes", **fields)).status == 303
-    assert "请立即复制" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    response = await post(admin, "/codes", **fields)
+    assert response.status == 303
+    detail = response.headers["Location"].removeprefix(PREFIX.rstrip("/"))
+    assert "复制激活码" in await (await admin.client.get(detail, cookies=admin.cookies)).text()
     rows = admin.store.inspect(owner_ref="customer-one")["codes"]
     assert len(rows) == 2 and any(row["mode"] == mode for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_issue_requires_signed_system_reference_and_csrf(admin):
+    await login(admin)
+    original = await issuance_fields(admin)
+    fields = {"action": "issue", "mode": "new", "plan": "year", "owner_ref": "customer-one", "valid_days": "30"}
+    for reference in ({"reference": "manual-order"}, {**original, "reference": original["reference"][:-1] + "Z"},
+                      {**original, "reference_signature": "a" * 64}):
+        response = await post(admin, "/codes", **fields, **reference)
+        assert response.status == 303
+        assert "系统生成的业务编号" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    response = await admin.client.post("/codes", data={**fields, **original}, cookies=admin.cookies)
+    assert response.status == 403 and admin.store.inspect()["codes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_history_filters_escapes_details_and_requires_login(admin):
+    await login(admin)
+    response = await post(admin, "/codes", action="issue", mode="new", plan="year",
+                          owner_ref="<script>customer</script>", valid_days="30")
+    detail = response.headers["Location"].removeprefix(PREFIX.rstrip("/"))
+    code_id = detail.rsplit("/", 1)[1]
+    for path in (detail, "/codes.js"):
+        denied = await admin.client.get(path, allow_redirects=False)
+        assert denied.status == 303 and denied.headers["Location"] == PREFIX + "login"
+    html = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    assert "&lt;script&gt;customer&lt;/script&gt;" in html and "<script>customer" not in html
+    html = await (await admin.client.get("/codes", params={"owner_ref": "other"}, cookies=admin.cookies)).text()
+    assert "共 0 条记录" in html and code_id not in html
+    html = await (await admin.client.get("/codes", params={"code_id": code_id}, cookies=admin.cookies)).text()
+    assert "共 1 条记录" in html
+    await post(admin, "/codes", action="revoke", code_id=code_id)
+    html = await (await admin.client.get("/codes", params={"status": "revoked"}, cookies=admin.cookies)).text()
+    assert "共 1 条记录" in html and "已撤销" in html
+    response = await admin.client.get(detail, cookies=admin.cookies)
+    assert response.headers["Cache-Control"] == "no-store" and "script-src 'self'" in response.headers["Content-Security-Policy"]
+    html = await response.text()
+    assert "&lt;script&gt;customer&lt;/script&gt;" in html and "<script>customer" not in html
+    for params in ({"page": "-1"}, {"page": "bad"}, {"status": "unknown"}, {"owner_ref": "x" * 129}):
+        assert (await admin.client.get("/codes", params=params, cookies=admin.cookies)).status == 409
+
+
+@pytest.mark.asyncio
+async def test_legacy_code_detail_preserves_metadata_without_inventing_secrets(admin):
+    await login(admin)
+    record = admin.store.issue_code(owner_ref="old-customer", reference="old-order", now=NOW, plan="month")
+    with admin.store.connection(write=True) as db:
+        db.execute("UPDATE codes SET encrypted_payload='' WHERE id=?", (record["code_id"],))
+    html = await (await admin.client.get("/codes/" + record["code_id"], cookies=admin.cookies)).text()
+    assert "旧记录未保存" in html and "无法恢复" in html
+    assert record["code"] not in html and "old-customer" not in html and "old-order" not in html
+    assert "月卡" in html and record["code_id"] in html
+
+
+@pytest.mark.asyncio
+async def test_password_reset_invalidates_session_but_preserves_encrypted_codes(admin):
+    await login(admin)
+    response = await post(admin, "/codes", action="issue", mode="new", plan="month", owner_ref="customer-one", valid_days="30")
+    detail = response.headers["Location"].removeprefix(PREFIX.rstrip("/"))
+    original = await (await admin.client.get(detail, cookies=admin.cookies)).text()
+    code = re.search(r"WRB-(?:[A-Z2-7]{8}-){3}[A-Z2-7]{8}", original)[0]
+    admin.secret = initialize(admin.root, PASSWORD, reset=True)["secret"]
+    denied = await admin.client.get(detail, cookies=admin.cookies, allow_redirects=False)
+    assert denied.status == 303 and denied.headers["Location"] == PREFIX + "login"
+    admin.cookies = {}
+    await login(admin)
+    assert code in await (await admin.client.get(detail, cookies=admin.cookies)).text()
 
 
 @pytest.mark.asyncio
@@ -213,7 +298,8 @@ async def test_public_and_admin_listeners_share_store_but_not_routes(tmp_path, u
     _attach_admin(public, store, tmp_path, "127.0.0.1", unused_tcp_port)
     async with TestClient(TestServer(public)) as client:
         assert (await client.get("/health")).status == 200
-        assert (await client.get("/login")).status == 404
+        for path in ("/login", "/codes", "/codes/example", "/codes.js"):
+            assert (await client.get(path)).status == 404
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://127.0.0.1:{unused_tcp_port}/login") as response:
                 assert response.status == 503 and "未初始化" in await response.text()
