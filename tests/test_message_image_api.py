@@ -86,7 +86,7 @@ def test_message_image_api_maps_local_id_and_returns_only_display_data(tmp_path,
     history, local_id = image_history
     api = _api(tmp_path)
     api._history = history
-    api._history_data_identity = lambda: ("wxid_bot", False)
+    api._history_data_identity = lambda: "wxid_bot"
     read = Mock(return_value={"image_data_url": image_source, "quality": "original"})
     api._groups = SimpleNamespace(message_image=read)
     assert "get_message_image" in app_shell.PUBLIC_API_METHODS
@@ -96,13 +96,12 @@ def test_message_image_api_maps_local_id_and_returns_only_display_data(tmp_path,
     read.assert_called_once_with("wxid_bot", "456@chatroom", 1, 0)
 
 
-@pytest.mark.parametrize("account,offline,expected", [
-    ("", False, "wxid_bot"), ("wxid_other", False, "wxid_bot"),
-    ("wxid_bot", False, ""), ("wxid_bot", True, "wxid_bot"),
+@pytest.mark.parametrize("account,expected", [
+    ("", "wxid_bot"), ("wxid_other", "wxid_bot"), ("wxid_bot", ""),
 ])
-def test_image_api_requires_matching_live_account_before_reading(tmp_path, account, offline, expected):
+def test_image_api_requires_matching_live_account_before_reading(tmp_path, account, expected):
     api = _api(tmp_path)
-    api._history_data_identity = lambda: (account, offline)
+    api._history_data_identity = lambda: account
     api._history = SimpleNamespace(image_source_id=Mock())
     api._groups = SimpleNamespace(message_image=Mock())
     result = api.get_message_image("456@chatroom", 4, 0, expected)
@@ -115,7 +114,7 @@ def test_deleted_history_record_never_reaches_bridge(tmp_path, image_history):
     history, local_id = image_history
     api = _api(tmp_path)
     api._history = history
-    api._history_data_identity = lambda: ("wxid_bot", False)
+    api._history_data_identity = lambda: "wxid_bot"
     api._groups = SimpleNamespace(message_image=Mock())
     history.delete_conversation("456@chatroom", account_id="wxid_bot")
     assert api.get_message_image("456@chatroom", local_id, 0, "wxid_bot")["ok"] is False
@@ -124,7 +123,7 @@ def test_deleted_history_record_never_reaches_bridge(tmp_path, image_history):
 
 def test_image_api_database_failure_is_safe_and_does_not_disclose_paths(tmp_path):
     api = _api(tmp_path)
-    api._history_data_identity = lambda: ("wxid_bot", False)
+    api._history_data_identity = lambda: "wxid_bot"
     api._history = SimpleNamespace(image_source_id=Mock(side_effect=sqlite3.DatabaseError("private/database/path")))
     api._groups = SimpleNamespace(message_image=Mock())
     result = api.get_message_image("456@chatroom", 4, 0, "wxid_bot")

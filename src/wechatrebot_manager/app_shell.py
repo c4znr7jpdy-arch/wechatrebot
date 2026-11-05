@@ -496,17 +496,22 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def _status_data(self) -> dict:
-        view = self._lifecycle.refresh()
+    def _status_data(self, view=None) -> dict:
+        if view is None:
+            view = self._lifecycle.refresh()
         result = view.to_dict()
-        account = self._offline_history_account(view)
-        if account:
-            result.update(history_account=account, history_offline=True)
+        runtime = getattr(view, "runtime", None)
+        account = (
+            str(getattr(runtime, "wechat_identity", "") or "").strip()
+            if runtime is not None and getattr(runtime, "account_status_available", True) is not False
+            else ""
+        )
+        result["history_account"] = self._authorized_history_account(account)
         return result
 
     def check_environment(self) -> dict[str, object]:
         try:
-            return self._ok(self._lifecycle.check_environment().to_dict())
+            return self._ok(self._status_data(self._lifecycle.check_environment()))
         except (OSError, ValueError) as exc:
             return self._failed(exc, "11004")
 
@@ -594,7 +599,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                 item.path,
                 wechat_version=item.version,
             )
-            return self._ok(self._lifecycle.check_environment().to_dict())
+            return self._ok(self._status_data(self._lifecycle.check_environment()))
         except (OSError, ValueError) as exc:
             return self._failed(exc, "11002")
 

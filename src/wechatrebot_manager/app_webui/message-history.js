@@ -84,7 +84,7 @@ window.createMessageHistory = function (helpers) {
       state.historyConversationSnapshot = {query, data};
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
-      setHistoryActionsEnabled(data.offline === true || state.status?.history_offline === true || state.status?.runtime?.account_status_available !== false);
+      setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
       if (state.selectedConversation) {
         const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
         state.selectedConversation = refreshed || null;
@@ -92,7 +92,7 @@ window.createMessageHistory = function (helpers) {
       const summary = data.summary || {};
       const visible = state.conversations.length;
       const visibleMessages = state.conversations.reduce((sum, item) => sum + (item.message_count || 0), 0);
-      $("#historySummary").textContent = `${data.offline ? "离线记录 · " : ""}${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
+      $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
       if (state.selectedConversation) {
         await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
@@ -126,11 +126,13 @@ window.createMessageHistory = function (helpers) {
   function canEditHistory(accountId = state.historyAccount) {
     const runtime = state.status?.runtime || {};
     return Boolean(accountId && accountId === state.historyAccount && accountId === state.historyReadyAccount
-      && state.status?.history_offline !== true && runtime.account_status_available !== false
+      && runtime.account_status_available !== false
       && String(runtime.wechat_identity || "").trim() === accountId);
   }
 
   function setHistoryActionsEnabled(enabled) {
+    enabled = Boolean(enabled && state.historyAccount && state.historyReadyAccount === state.historyAccount
+      && state.status?.runtime?.account_status_available !== false);
     const exportButton = $("#exportHistory");
     if (exportButton) exportButton.disabled = !enabled;
     for (const id of ["#cleanHistory", "#deleteConversation"]) {
@@ -139,7 +141,7 @@ window.createMessageHistory = function (helpers) {
     }
     const refreshButton = $("#refreshHistory");
     if (refreshButton) {
-      refreshButton.disabled = !state.historyAccount || (state.status?.runtime?.account_status_available === false && !state.status?.history_offline) || state.historyManualRefresh;
+      refreshButton.disabled = !state.historyAccount || state.status?.runtime?.account_status_available === false || state.historyManualRefresh;
       refreshButton.textContent = state.historyManualRefresh ? "刷新中…" : "刷新";
     }
   }
@@ -167,13 +169,13 @@ window.createMessageHistory = function (helpers) {
 
   function renderHistoryAccountGate(accountId) {
     const pending = Boolean(String(accountId || "").trim());
-    const title = pending ? "正在确认当前微信账号" : "登录后查看聊天记录";
+    const title = pending ? "正在确认当前微信账号" : "授权并登录后查看聊天记录";
     const message = pending
       ? "账号切换完成后，将只显示这个机器人微信号的聊天记录。"
-      : "聊天记录只展示当前机器人微信账号的内容。";
-    $("#historySummary").textContent = pending ? "正在读取当前账号的聊天记录…" : "请先登录机器人微信账号";
+      : "请先完成订阅授权，并登录授权绑定的机器人微信账号。";
+    $("#historySummary").textContent = pending ? "正在读取当前账号的聊天记录…" : "请先完成授权并登录微信";
     $("#conversationList").innerHTML = `<div class="empty-state compact"><div class="empty-symbol">空</div><h2>${title}</h2><p>${message}</p></div>`;
-    $("#conversationHeader").textContent = pending ? "正在读取聊天记录…" : "尚未登录微信";
+    $("#conversationHeader").textContent = pending ? "正在读取聊天记录…" : "消息记录暂不可用";
     $("#messageList").removeAttribute("aria-busy");
     $("#messageList").innerHTML = `<div class="empty-state compact"><h2>${title}</h2><p>${message}</p></div>`;
     $("#olderMessagesStatus").hidden = true;
@@ -711,7 +713,7 @@ window.createMessageHistory = function (helpers) {
   async function pollHistory() {
     if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
         || state.historyConversationsLoading || state.historyMessagesLoading
-        || (state.status?.runtime?.account_status_available === false && !state.status?.history_offline)) return;
+        || !state.historyAccount || state.status?.runtime?.account_status_available === false) return;
     state.historyPolling = true;
     try {
       await loadConversations({silent: true});
@@ -726,7 +728,7 @@ window.createMessageHistory = function (helpers) {
     const cache = state.historyQrCache ||= new Map();
     button.disabled = true;
     button.textContent = "加载中";
-    if (!account || state.status?.history_offline) {
+    if (!account || state.status?.runtime?.account_status_available === false) {
       button.textContent = "未连接";
       button.title = "连接微信后可查看群二维码";
       return;
