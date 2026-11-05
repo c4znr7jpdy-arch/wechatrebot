@@ -110,8 +110,7 @@ def test_licensed_maintenance_stops_core_and_waits_for_wechat_before_bridge(tmp_
     assert controller.refresh().state == lifecycle.LifecycleState.STOP_WAIT_WECHAT
     assert controller.refresh().state == lifecycle.LifecycleState.STOPPED
     assert bridge.poll() == 0 and supervisor.running == []
-    # Ordinary license status polling may relabel the stopped installation.
-    assert controller.refresh().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert controller.refresh().state == lifecycle.LifecycleState.STOPPED
     assert controller.maintenance_stopped() is True
 
 
@@ -120,7 +119,7 @@ def test_licensed_user_pause_preserves_bridge_and_cannot_pass_maintenance_gate(t
     controller, supervisor, _ = _controller(tmp_path, monkeypatch, process=core, licensed=True)
     supervisor.running.append(launcher.RunningService(supervisor.specs[1], bridge, io.BytesIO()))
 
-    assert controller.request_stop().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert controller.request_stop().state == lifecycle.LifecycleState.LICENSE_READY
     assert core.poll() == 0 and bridge.poll() is None
     assert bridge.signals == []
     assert controller.maintenance_stopped() is False

@@ -3934,10 +3934,9 @@ html[data-skin="soft"] #page-subscription {
   max-width: 1180px;
 }
 
-/* Status card tints with its data-tone; the tag flips to a solid chip so it
-   stays legible on the tinted panel. */
+/* Keep subscription details on a calm surface; the status chip carries tone. */
 html[data-skin="soft"] #page-subscription .subscription-status {
-  padding: 26px;
+  padding: 20px 24px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -3951,25 +3950,21 @@ html[data-skin="soft"] #page-subscription .subscription-status[data-tone="neutra
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] {
   border-color: var(--green-line);
-  background: var(--green-100);
+  background: var(--surface);
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="warning"] {
   border-color: var(--amber-line);
-  background: var(--amber-100);
+  background: var(--surface);
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger"] {
   border-color: var(--red-line);
-  background: var(--red-100);
+  background: var(--surface);
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status-heading h2 {
-  letter-spacing: -.015em;
-}
-
-html[data-skin="soft"] #page-subscription .subscription-kicker {
-  color: var(--muted);
+  letter-spacing: 0;
 }
 
 html[data-skin="soft"] #page-subscription .subscription-tag {
@@ -3982,16 +3977,19 @@ html[data-skin="soft"] #page-subscription .subscription-tag {
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="success"] .subscription-tag {
   border-color: var(--green-line);
   color: var(--green-700);
+  background: var(--green-100);
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="warning"] .subscription-tag {
   border-color: var(--amber-line);
   color: var(--amber-700);
+  background: var(--amber-100);
 }
 
 html[data-skin="soft"] #page-subscription .subscription-status[data-tone="danger"] .subscription-tag {
   border-color: var(--red-line);
   color: var(--red-700);
+  background: var(--red-100);
 }
 
 html[data-skin="soft"] #page-subscription #licenseStateMessage {

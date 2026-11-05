@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
   <link rel="stylesheet" href="provider-settings.css?v=20261012">
-  <link rel="stylesheet" href="subscription.css?v=20261025">
+  <link rel="stylesheet" href="subscription.css?v=20261105">
   <link rel="stylesheet" href="activity.css?v=20261010">
   <link rel="stylesheet" href="runtime-alerts.css">
   <link rel="stylesheet" href="updates.css">
@@ -181,14 +181,14 @@
           </div>
           <p class="subscription-feedback" id="licenseFeedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
           <section class="subscription-status panel" id="licenseStatusPanel" aria-labelledby="licenseStateTitle" data-tone="neutral">
-            <div class="subscription-status-heading"><div><span class="subscription-kicker">当前授权</span><h2 id="licenseStateTitle">正在读取授权</h2></div><span class="subscription-tag" id="licenseStateTag">请稍候</span></div>
+            <div class="subscription-status-heading"><h2 id="licenseStateTitle">正在读取授权</h2><span class="subscription-tag" id="licenseStateTag">请稍候</span></div>
             <p id="licenseStateMessage">正在读取本机授权状态。</p>
             <dl class="subscription-facts">
               <div><dt>当前套餐</dt><dd id="licensePlan">未激活</dd></div>
               <div><dt>到期时间（北京时间）</dt><dd id="licenseExpires">—</dd><small id="licenseRemaining"></small></div>
               <div><dt>绑定微信</dt><dd id="licenseAccount">尚未绑定</dd></div>
             </dl>
-            <ol class="subscription-steps" aria-label="授权步骤">
+            <ol class="subscription-steps" id="licenseSteps" aria-label="授权步骤">
               <li id="licenseStepCode"><span>1</span>选择授权方式</li><li id="licenseStepRedeem"><span>2</span>激活授权</li><li id="licenseStepAccount"><span>3</span>确认微信账号</li>
             </ol>
             <div class="subscription-account" id="licenseCurrentAccountRow" hidden><span>当前登录微信</span><strong id="licenseCurrentAccount"></strong></div>
@@ -515,7 +515,7 @@
   <script src="date-range.js"></script>
   <script src="report-preview.js"></script>
   <script src="panel-layout.js"></script>
-  <script src="subscription.js?v=20261025"></script>
+  <script src="subscription.js?v=20261105"></script>
   <script src="features.js"></script>
   <script src="chat-profiles.js"></script>
   <script src="contact-profile.js"></script>

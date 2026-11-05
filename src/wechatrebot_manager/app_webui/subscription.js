@@ -3,7 +3,7 @@
   "use strict";
 
   window.createSubscriptionPage = function (helpers) {
-    const {api, escapeHtml: esc, confirmAction, copyText, navigate, openMaintenance, refreshRuntime} = helpers;
+    const {api, escapeHtml: esc, confirmAction, copyText, navigate, openMaintenance, refreshRuntime, toast} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const state = {snapshot: null, preview: null, runtime: null, busy: false, loading: false,
       epoch: 0, activePage: "home", plansKey: "", readError: "", expiredSeen: false, initialized: false,
@@ -25,7 +25,7 @@
       active: ["授权有效", "已授权", "success"],
       ready: ["授权有效", "已授权", "success"],
       running: ["授权有效", "已授权", "success"],
-      paused: ["授权有效，等待恢复", "已暂停", "warning"],
+      paused: ["授权有效", "已授权", "success"],
       offline: ["授权有效，等待联网验证", "离线可用", "warning"],
       expired: ["授权已到期", "已到期", "warning"],
       revoked: ["授权已撤销", "已暂停", "danger"],
@@ -134,9 +134,25 @@
       }
     }
 
-    function readyToStart() {
+    function hasValidAuthorization() {
       const data = state.snapshot;
-      return Boolean(data?.authorized && accountId(data.account) && accountId(data.account) === accountId(data.current_account));
+      return Boolean(data?.authorized && accountId(data.account) && !pausedStates.has(data.state));
+    }
+
+    function readyToStart() {
+      const current = accountId(state.snapshot?.current_account);
+      return hasValidAuthorization() && (!current || accountId(state.snapshot.account) === current);
+    }
+
+    function statusMessage() {
+      const data = state.snapshot;
+      if (hasValidAuthorization() && ["active", "ready", "paused"].includes(data.state)) {
+        return data.last_error === "service_unavailable"
+          ? "授权服务暂不可达，当前有效离线凭证仍可使用。可照常启动机器人。"
+          : "授权权益已生效，随时可以启动机器人。";
+      }
+      return data?.message || (data?.authorized ? "授权已生效。确认模型设置后，由你启动机器人。"
+        : !data?.enabled ? "此安装尚未启用商业授权，现有功能可按原方式使用。" : "领取激活码后，在下方查看并确认兑换。");
     }
 
     function expiryText(value) {
@@ -251,6 +267,9 @@
       if (!data) return ["授权状态暂未读取", "待读取", "neutral"];
       if (!data.enabled) return labels.disabled;
       if (!data.configured) return labels.unconfigured;
+      if (hasValidAuthorization() && ["active", "ready", "running", "paused"].includes(data.state)) {
+        return data.plan === "trial" ? ["免费试用已生效", "试用中", "success"] : ["订阅已生效", "已订阅", "success"];
+      }
       return labels[data.state] || (data.authorized ? labels.active : ["授权暂不可用", "需处理", "warning"]);
     }
 
@@ -302,14 +321,16 @@
     function renderHome() {
       const data = state.snapshot;
       const remaining = Number(data?.remaining_seconds);
-      const expiring = readyToStart() && Number.isFinite(remaining) && remaining > 0 && remaining <= 7 * 86400;
-      const visible = Boolean(data?.enabled && (!readyToStart() || expiring || state.readError || data.state === "offline" || data.last_error === "service_unavailable"));
+      const expiring = hasValidAuthorization() && Number.isFinite(remaining) && remaining > 0 && remaining <= 7 * 86400;
+      const visible = Boolean(data?.enabled && (!hasValidAuthorization() || expiring || state.readError || data.state === "offline" || data.last_error === "service_unavailable"));
       $("#homeLicenseNotice").hidden = !visible;
       if (!visible) return;
-      $("#homeLicenseTitle").textContent = state.readError ? "授权状态暂时无法读取" : expiring ? "授权即将到期" : description()[0];
+      const offline = data.state === "offline" || data.last_error === "service_unavailable";
+      $("#homeLicenseTitle").textContent = state.readError ? "授权状态暂时无法读取" : expiring ? "授权即将到期"
+        : offline && hasValidAuthorization() ? "当前使用离线授权" : description()[0];
       $("#homeLicenseMessage").textContent = state.readError || (expiring
         ? `有效期至 ${data.expires_text || expiryText(data.valid_until)}，可在“订阅与授权”兑换续期码。`
-        : data.message || "进入订阅与授权，查看下一步。配置和数据仍可访问。");
+        : statusMessage());
       $("#homeLicenseAction").textContent = ["expired", "subscription_expired"].includes(data.state) ? "兑换续期码" : "查看授权";
       $("#homeLicenseAction").disabled = false;
     }
@@ -362,7 +383,7 @@
       $("#licenseCopyDevice").disabled = !data?.device_id;
       $("#licensePrepareDevice").hidden = !ready || Boolean(data?.device_id);
       $("#licensePrepareDevice").disabled = busy || !ready;
-      $("#licenseConnect").hidden = !ready || !data.can_connect || Boolean(current);
+      $("#licenseConnect").hidden = !ready || !data.can_connect || Boolean(current) || hasValidAuthorization();
       $("#licenseConnect").disabled = busy || Boolean(state.runtime?.busy);
       $("#licenseBind").hidden = !ready || !data.can_connect || !data.license_id || Boolean(bound) || !current;
       $("#licenseBind").disabled = busy;
@@ -384,12 +405,11 @@
       const data = state.snapshot;
       if (!data) return;
       const [title, tag, tone] = description();
+      const authorized = hasValidAuthorization();
       $("#licenseStateTitle").textContent = title;
       $("#licenseStateTag").textContent = tag;
       $("#licenseStatusPanel").dataset.tone = tone;
-      $("#licenseStateMessage").textContent = data.message || (data.authorized
-        ? "授权已生效。确认模型设置后，由你启动机器人。"
-        : !data.enabled ? "此安装尚未启用商业授权，现有功能可按原方式使用。" : "领取激活码后，在下方查看并确认兑换。");
+      $("#licenseStateMessage").textContent = statusMessage();
       $("#licensePlan").textContent = planName(data.plan);
       $("#licenseExpires").textContent = data.expires_text || expiryText(data.valid_until);
       const seconds = Math.max(0, Math.floor(Number(data.remaining_seconds) || 0));
@@ -398,7 +418,9 @@
       $("#licenseIdText").textContent = data.license_id || "尚未激活";
       $("#licenseDeviceText").textContent = data.device_id || "尚未生成";
       $("#licenseCurrentAccount").textContent = accountId(data.current_account) || "尚未连接";
-      $("#licenseCurrentAccountRow").hidden = !data.enabled || (!data.license_id && !accountId(data.current_account));
+      $("#licenseCurrentAccountRow").hidden = !data.enabled || !accountId(data.current_account)
+        || (authorized && accountId(data.current_account) === accountId(data.account));
+      $("#licenseSteps").hidden = authorized;
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
       $("#licenseRedeemTitle").textContent = data.license_id ? "兑换续期码" : "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
@@ -561,8 +583,16 @@
       async beforeStart() {
         await load({silent: true});
         if (!state.snapshot || state.readError || (state.snapshot.enabled && !readyToStart())) {
+          const data = state.snapshot;
+          const current = accountId(data?.current_account);
+          const mismatched = data?.state === "account_mismatch" || (current && accountId(data?.account) && current !== accountId(data.account));
+          const message = state.readError || (mismatched ? "当前微信与授权绑定账号不一致，请先确认微信账号。"
+            : data && pausedStates.has(data.state) ? data.message || "授权暂不可用，请在“订阅与授权”查看并处理。"
+            : data?.authorized ? "请先在“订阅与授权”确认绑定微信账号。"
+            : data && !data.configured ? "授权服务尚未配置，请先检查授权状态。" : "尚未授权，请先完成授权后再启动。");
+          if (typeof toast === "function") toast(message, "error");
           await navigate("subscription");
-          if (state.readError) feedback(state.readError, "error");
+          feedback(message, "error");
           return false;
         }
         return true;

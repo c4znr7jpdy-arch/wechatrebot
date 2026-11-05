@@ -100,11 +100,11 @@ class LicensingApiMixin:
         status = client.snapshot()
         if not status["enabled"]:
             return
-        actual = self._license_account(required=True)
+        actual = self._license_account()
         status = client.snapshot(actual)
         if not status["authorized"]:
             raise LicenseError(status["state"], status["message"])
-        if not status["account"] or status["account"] != actual:
+        if not status["account"] or (actual and status["account"] != actual):
             raise LicenseError("account_mismatch", "请先连接并确认授权绑定的微信账号。")
 
     def connect_license_wechat(self) -> dict:
