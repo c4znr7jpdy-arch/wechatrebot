@@ -8,7 +8,7 @@ import pytest
 from services.activation_service.app import create_app
 from services.activation_service.store import LicenseStore
 from wechatrebot_manager.licensing.client import LicenseClient, http_transport
-from wechatrebot_manager.licensing.protocol import LicenseError
+from wechatrebot_manager.licensing.protocol import LicenseError, extend_period
 
 from test_license_client import setup  # Shared clock, channel and protected device fixture.
 
@@ -95,6 +95,116 @@ async def test_http_lost_redemption_response_can_be_recovered_without_extra_time
         assert result["authorized"] and result["license_id"] == first["id"]
         assert result["valid_until"] == first["valid_until"]
         assert store.inspect()["licenses"] == 1
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["none", "response_loss", "cache_write"])
+async def test_http_new_month_after_revoked_year_recovers_without_extra_time(setup, tmp_path, monkeypatch, failure):
+    client, service, clock, protection = setup
+    store = LicenseStore(tmp_path / "server/activation.db")
+    server = TestServer(create_app(store, service.key, "test", clock=lambda: clock.server))
+    await server.start_server()
+    drop_code = ""
+    dropped = False
+
+    def transport(url, request):
+        nonlocal dropped
+        action = url.rsplit("/", 1)[-1]
+        result = http_transport(str(server.make_url("/v1/" + action)), request)
+        if failure == "response_loss" and not dropped and action == "redeem" and request["body"]["code"] == drop_code:
+            dropped = True
+            raise OSError("response interrupted after server commit")
+        return result
+
+    try:
+        client.transport = transport
+        annual_code = store.issue_code(owner_ref="qq-owner", reference="annual-order", now=clock.server, plan="year")
+        _, annual = await exchange(client, annual_code["code"])
+        await asyncio.to_thread(client.bind, "wxid_http_customer")
+        old_run = client.authorize_run("wxid_http_customer")
+        store.revoke(now=clock.server, license_id=annual["license_id"])
+        assert (await asyncio.to_thread(client.refresh))["state"] == "revoked"
+        retired = store.inspect(license_id=annual["license_id"])["licenses"][0]
+        clock.advance(60)
+        month = store.issue_code(owner_ref="qq-owner", reference="monthly-order", now=clock.server, plan="month")
+        preview = await asyncio.to_thread(client.preview, month["code"])
+        assert preview["mode"] == "new" and preview["plan"] == "month" and not preview["already_redeemed"]
+        assert preview["valid_until"] == extend_period(clock.server, "month")
+        assert client.snapshot()["state"] == "revoked"  # A preview never grants or restores access.
+        drop_code = month["code"]
+        clock.advance(10)
+        expected_until = extend_period(clock.server, "month")
+
+        def unavailable_storage(_):
+            raise LicenseError("storage_error", "Local cache write failed")
+
+        if failure != "none":
+            if failure == "cache_write":
+                monkeypatch.setattr(client.cache, "write", unavailable_storage)
+            with pytest.raises(LicenseError) as error:
+                await asyncio.to_thread(client.redeem, month["code"], preview["preview_id"])
+            assert error.value.code == ("service_unavailable" if failure == "response_loss" else "storage_error")
+            committed = next(row for row in store.inspect(owner_ref="qq-owner")["licenses"]
+                             if row["id"] != annual["license_id"])
+            assert committed["valid_until"] == expected_until
+            clock.advance(301)
+            client = LicenseClient(client.root, transport=transport, clock=clock, protection=protection,
+                                   machine_id_source=lambda root: "a" * 64)
+            assert client.snapshot()["state"] == "revoked"
+        # Committed redemptions recover through their original preview even after its expiry.
+        result = await asyncio.to_thread(client.redeem, month["code"], preview["preview_id"])
+        assert result["authorized"] and result["state"] == "active_unbound" and not result["can_run"]
+        assert result["license_id"] != annual["license_id"] and result["plan"] == "month"
+        assert result["valid_until"] == expected_until < annual["valid_until"]
+        repeated = await asyncio.to_thread(client.redeem, month["code"], preview["preview_id"])
+        assert repeated["license_id"] == result["license_id"] and repeated["valid_until"] == expected_until
+        assert store.inspect(license_id=annual["license_id"])["licenses"][0] == retired
+        await asyncio.to_thread(client.bind, "wxid_http_customer")
+        assert not client.snapshot("wxid_http_customer")["can_run"]
+        assert not (await asyncio.to_thread(client.refresh))["can_run"]
+        resumed = client.authorize_run("wxid_http_customer")
+        assert resumed["can_run"] and resumed["run_id"] != old_run["run_id"]
+        clock.advance(60)
+        repeated_preview, repeated = await exchange(client, month["code"])
+        assert repeated_preview["already_redeemed"]
+        assert repeated["license_id"] == result["license_id"] and repeated["valid_until"] == result["valid_until"]
+        assert store.inspect()["licenses"] == 2
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_http_new_card_keeps_active_license_and_revoked_codes_protected(setup, tmp_path):
+    client, service, clock, _ = setup
+    store = LicenseStore(tmp_path / "server/activation.db")
+    server = TestServer(create_app(store, service.key, "test", clock=lambda: clock.server))
+    await server.start_server()
+    try:
+        client.transport = lambda url, request: http_transport(
+            str(server.make_url("/v1/" + url.rsplit("/", 1)[-1])), request,
+        )
+        annual_code = store.issue_code(owner_ref="qq-owner", reference="annual-order", now=clock.server, plan="year")
+        _, annual = await exchange(client, annual_code["code"])
+        renewal = store.issue_code(owner_ref="qq-owner", reference="renewal-order", now=clock.server,
+                                   plan="month", mode="renewal", license_id=annual["license_id"])
+        month = store.issue_code(owner_ref="qq-owner", reference="monthly-order", now=clock.server, plan="month")
+        with pytest.raises(LicenseError) as error:
+            await asyncio.to_thread(client.preview, month["code"])
+        assert error.value.code == "code_unavailable"
+        assert client.snapshot()["license_id"] == annual["license_id"]
+        store.revoke(now=clock.server, license_id=annual["license_id"])
+        assert (await asyncio.to_thread(client.refresh))["state"] == "revoked"
+        for code in (annual_code, renewal):
+            with pytest.raises(LicenseError) as error:
+                await asyncio.to_thread(client.preview, code["code"])
+            assert error.value.code == "license_revoked"
+        assert store.inspect()["licenses"] == 1
+        assert client.snapshot()["state"] in {"revoked", "license_revoked"}
+        history = store.inspect(owner_ref="qq-owner")["codes"]
+        assert next(row for row in history if row["id"] == month["code_id"])["redeemed_at"] is None
+        assert next(row for row in history if row["id"] == renewal["code_id"])["redeemed_at"] is None
     finally:
         await server.close()
 

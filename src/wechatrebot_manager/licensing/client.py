@@ -395,7 +395,10 @@ class LicenseClient:
             except LicenseError as exc:
                 if exc.code != "device_identity_unavailable":
                     raise
-            if payload:
+            # A signed revocation is terminal for that license. A new paid card
+            # opens an independent license instead of targeting the revoked one.
+            reactivating = bool(payload and payload["status"] == "revoked")
+            if payload and not reactivating:
                 body["license_id"] = payload["license_id"]
             data, _, _ = self._request(channel, device, state, "preview", body)
             try:
@@ -414,9 +417,18 @@ class LicenseClient:
                     raise ValueError()
             except (ValueError, TypeError, KeyError) as exc:
                 raise LicenseError("invalid_response", "激活码预览无效，请重新预览。") from exc
+            if reactivating and (
+                data["mode"] != "new" or data["plan"] not in {"month", "year"} or replaced
+                or data["license_id"] == payload["license_id"]
+                or bool(data["license_id"]) != data["already_redeemed"]
+            ):
+                raise LicenseError("code_unavailable", _ERROR_MESSAGES["code_unavailable"])
             result = {key: data[key] for key in (
                 "preview_id", "plan", "mode", "valid_until", "license_id", "already_redeemed", "expires_at",
             )} | {"message": str(data.get("message", ""))[:300], "replaces_license_id": replaced}
+            if reactivating and not data["already_redeemed"]:
+                result["message"] = ("旧授权保持撤销；确认后新开通授权，从本次兑换起算，不继承旧授权的剩余时长。"
+                                     "兑换后需重新绑定微信并手动恢复机器人。")
             if data["plan"] == "trial" and data["mode"] == "new" and not data["already_redeemed"] and "machine_id" not in body:
                 raise LicenseError("device_identity_unavailable", _ERROR_MESSAGES["device_identity_unavailable"])
             state["pending_preview"] = {
@@ -450,6 +462,18 @@ class LicenseClient:
         permitted_switch = bool(approved and approved["mode"] == "migration" and old
                                 and approved["replaces_license_id"] == old["license_id"]
                                 and approved["license_id"] == payload["license_id"])
+        if approved and approved["mode"] == "new" and old and old["status"] == "revoked":
+            permitted_switch = bool(
+                switching and approved["current_license_id"] == old["license_id"]
+                and not approved["replaces_license_id"] and approved["plan"] in {"month", "year"}
+                and payload["status"] == "active" and payload["plan"] == approved["plan"]
+                and (not approved["license_id"] or (
+                    payload["license_id"] == approved["license_id"]
+                    and payload["valid_until"] == approved["valid_until"]
+                ))
+            )
+            if not permitted_switch:
+                raise LicenseError("identity_mismatch", "返回的授权身份不匹配，请重新验证。")
         if approved and approved["mode"] == "trial":
             if (payload["plan"] != "trial" or payload["status"] != "active" or not payload["account"]
                     or not payload["issued_at"] < payload["valid_until"] <= payload["issued_at"] + 3600
