@@ -661,6 +661,8 @@ def main(argv: list[str] | None = None) -> int:
     if Version(version) < Version(live_version) or (Version(version) == Version(live_version) and not (args.dry_run or args.resume)):
         parser.error(f"项目版本 {version} 必须高于线上稳定版本 {live_version}；请先提升版本号")
     if args.manager_only:
+        if args.incremental_payload:
+            parser.error("--manager-only 不能与 --incremental-payload 同时使用；组件增量必须基于完整载荷发布")
         try:
             publisher._require_safe_delta_base(live_version)
         except ValueError as exc:

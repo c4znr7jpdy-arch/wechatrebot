@@ -453,6 +453,21 @@ def test_main_manager_only_uses_manager_delta_builder(tmp_path: Path, monkeypatc
     assert any(p.endswith("wechatrebot-0.9.9-manager-abc.zip") for p in upload)
 
 
+def test_main_manager_only_rejects_component_incremental_payload(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    with pytest.raises(SystemExit):
+        module.main([
+            "--manager-only",
+            "--incremental-payload",
+            str(tmp_path / "component.zip"),
+            "--output",
+            str(root / "artifacts" / "publish"),
+            "--yes",
+            "--skip-tests",
+        ])
+
+
 def test_main_manager_only_refuses_legacy_live_base(tmp_path: Path, monkeypatch) -> None:
     module = _module()
     root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.8.6")
