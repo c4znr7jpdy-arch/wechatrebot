@@ -422,7 +422,8 @@
         || (authorized && accountId(data.current_account) === accountId(data.account));
       $("#licenseSteps").hidden = authorized;
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
-      $("#licenseRedeemTitle").textContent = data.license_id ? "兑换续期码" : "兑换激活码";
+      $("#licenseRedeemTitle").textContent = data.license_id && !["revoked", "license_revoked"].includes(data.state)
+        ? "兑换续期码" : "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
         ? "授权服务尚未配置，暂时无法兑换激活码。" : "先查看套餐和有效期，确认后再兑换。";
       renderSteps(); renderPlans(); renderFreeTrialStatus(); renderControls(); renderHome();

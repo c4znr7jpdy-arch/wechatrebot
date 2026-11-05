@@ -122,3 +122,58 @@ def test_unactivated_entry_and_start_toast_return_to_subscription(browser, manag
         page.screenshot(path=str(tmp_path / "unactivated-start-toast.png"))
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}, {"width": 600, "height": 900}])
+def test_revoked_subscription_previews_new_month_without_automatic_start(browser, manager_url, viewport, tmp_path):
+    page = browser.new_page(viewport=viewport)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    url = manager_url + "&license=unactivated"
+    try:
+        page.goto(url)
+        expect(page.locator("#page-subscription")).to_be_visible()
+        page.evaluate("""async () => {
+          const api = window.pywebview.api;
+          const original = await api.get_license_status();
+          window.testActivationStarts = 0;
+          window.testActivationSnapshot = {...original.data, state: 'revoked', license_id: 'revoked-year',
+            plan: 'year', account: 'wxid_demo_account', current_account: 'wxid_demo_account',
+            authorized: false, can_connect: false, can_run: false,
+            plans: original.data.plans.map(plan => ({...plan,
+              id: {monthly: 'month', yearly: 'year'}[plan.id] || plan.id}))};
+          api.get_license_status = async () => ({ok: true, data: structuredClone(window.testActivationSnapshot)});
+          api.preview_activation_code = async () => ({ok: true, data: {preview_id: 'new-month', plan: 'month',
+            mode: 'new', valid_until: Math.floor(Date.now() / 1000) + 30 * 86400, license_id: '',
+            already_redeemed: false,
+            message: '旧授权保持撤销；确认后新开通授权，从本次兑换起算，不继承旧授权的剩余时长。兑换后需重新绑定微信并手动恢复机器人。'}});
+          api.redeem_activation_code = async () => {
+            Object.assign(window.testActivationSnapshot, {state: 'active_unbound', license_id: 'new-month',
+              plan: 'month', account: '', authorized: true, can_connect: true});
+            return {ok: true, data: structuredClone(window.testActivationSnapshot)};
+          };
+          api.start_robot = async () => { window.testActivationStarts += 1; throw new Error('unexpected start'); };
+        }""")
+        page.locator('.nav-item[data-page="home"]').click()
+        page.locator('.nav-item[data-page="subscription"]').click()
+        expect(page.locator("#licenseStateTitle")).to_have_text("授权已撤销")
+        expect(page.locator("#licenseRedeemTitle")).to_have_text("兑换激活码")
+        page.locator("#licenseCode").fill("NEW-MONTH-CODE")
+        page.locator("#licenseCodeForm button[type=submit]").click()
+        expect(page.locator("#licenseCodePreview")).to_be_visible()
+        expect(page.locator("#licenseCodePreviewDetails")).to_contain_text("月付")
+        expect(page.locator("#licenseCodePreviewDetails")).to_contain_text("新开通")
+        expect(page.locator("#licenseCodePreviewMessage")).to_contain_text("旧授权保持撤销")
+        expect(page.locator("#licenseCodePreviewMessage")).to_contain_text("从本次兑换起算")
+        expect(page.locator("#licenseCodePreviewMessage")).to_contain_text("手动恢复机器人")
+        page.screenshot(path=str(tmp_path / f"revoked-new-month-preview-{viewport['width']}.png"))
+        page.locator("#licenseConfirmRedeem").click()
+        expect(page.locator("#licenseBind")).to_be_visible()
+        expect(page.locator("#licenseFeedback")).to_contain_text("微信绑定")
+        assert page.evaluate("window.testActivationStarts") == 0
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert page.url == url and page.title()
+        assert not errors, errors
+    finally:
+        page.close()

@@ -170,6 +170,7 @@ async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
     assert.equal(h.element('#licenseStatusPanel').dataset.tone, 'success');
     assert.equal(h.element('#licenseStateTitle').textContent, '订阅已生效');
     assert.equal(h.element('#licenseStateTag').textContent, '已订阅');
+    assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换续期码');
     assert.doesNotMatch(h.element('#licenseStateMessage').textContent, /暂停|恢复/);
     assert.equal(h.element('#licenseSteps').hidden, true);
     assert.equal(h.element('#licenseCurrentAccountRow').hidden, true);
@@ -197,11 +198,42 @@ async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
   assert.match(offline.element('#licenseStateMessage').textContent, /离线凭证/);
 }
 
+async function revokedSubscriptionCanConfirmNewPaidActivationWithoutStarting() {
+  for (const state of ['revoked', 'license_revoked']) {
+    const h = harness({state, license_id: 'revoked-year', plan: 'year',
+      account: 'wxid_account_a', current_account: 'wxid_account_a'});
+    await h.ui.initialize();
+    assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换激活码');
+    h.handlers.preview_activation_code = async () => ({preview_id: 'new-month', plan: 'month', mode: 'new',
+      valid_until: 1800000000, license_id: '', already_redeemed: false,
+      message: '旧授权保持撤销；确认后新开通授权，从本次兑换起算，不继承旧授权的剩余时长。兑换后需重新绑定微信并手动恢复机器人。'});
+    await h.preview('NEW-MONTH-CODE');
+    assert.equal(h.element('#licenseCodePreview').hidden, false);
+    assert.match(h.element('#licenseCodePreviewDetails').innerHTML, /月付/);
+    assert.match(h.element('#licenseCodePreviewDetails').innerHTML, /新开通/);
+    assert.match(h.element('#licenseCodePreviewMessage').textContent, /旧授权保持撤销/);
+    assert.match(h.element('#licenseCodePreviewMessage').textContent, /从本次兑换起算/);
+    assert.match(h.element('#licenseCodePreviewMessage').textContent, /手动恢复机器人/);
+    assert.equal(h.calls.some(([method]) => method === 'redeem_activation_code'), false);
+    h.handlers.redeem_activation_code = async () => {
+      Object.assign(h.snapshot, {state: 'active_unbound', license_id: 'new-month', plan: 'month',
+        authorized: true, can_connect: true, account: ''});
+      return structuredClone(h.snapshot);
+    };
+    await h.click('#licenseConfirmRedeem');
+    assert.equal(h.calls.filter(([method]) => method === 'redeem_activation_code').length, 1);
+    assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
+    assert.equal(h.element('#licenseBind').hidden, false);
+    assert.match(h.element('#licenseFeedback').textContent, /微信绑定.*确认恢复机器人/);
+  }
+}
+
 async function expiryAndUnconfigured() {
   const h = harness({state: 'expired', license_id: 'license-one', account: 'wxid_account_a',
     current_account: 'wxid_account_a', message: '订阅已到期，自动化已暂停。'});
   await h.ui.initialize();
   assert.equal(h.element('#licensePausedInfo').hidden, false);
+  assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换续期码');
   assert.equal(h.element('#homeLicenseNotice').hidden, false);
   assert.equal(h.element('#licenseOpenHistory').disabled, false);
   assert.equal(h.element('#licenseOpenMaintenance').disabled, false);
@@ -594,6 +626,7 @@ async function paidRedemptionInvalidatesOutstandingTrialQuery() {
   await activationAndRecovery();
   await expiryAndUnconfigured();
   await validSubscriptionStaysActiveWhenStoppedOrDisconnected();
+  await revokedSubscriptionCanConfirmNewPaidActivationWithoutStarting();
   await rejectedStartIsNotReportedAsSuccess();
   await wechatContactHasItsOwnRefreshCycle();
   await wechatContactExpiryClearsTheImageAndExpansion();
