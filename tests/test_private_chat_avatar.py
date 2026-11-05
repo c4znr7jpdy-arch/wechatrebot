@@ -6,6 +6,7 @@ import pytest
 
 from wechatrebot_manager import contact_directory, group_directory
 from wechatrebot_manager.app_shell import ApplicationApi
+from test_app_shell import _api
 
 
 def _contact_service(tmp_path: Path, monkeypatch):
@@ -256,8 +257,8 @@ def test_network_profile_api_is_exposed_and_returns_actionable_failure():
     assert calls == [("test-account", "wxid_friend"), ("test-account", "wxid_failed")]
 
 
-def test_private_conversation_and_old_messages_use_current_contact_avatar() -> None:
-    api = ApplicationApi.__new__(ApplicationApi)
+def test_private_conversation_and_old_messages_use_current_contact_avatar(tmp_path: Path) -> None:
+    api = _api(tmp_path)
     api._lifecycle = SimpleNamespace(
         fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_bot")
     )
@@ -309,8 +310,8 @@ def test_private_conversation_and_old_messages_use_current_contact_avatar() -> N
     assert messages["data"][0]["wechat_name"] == "微信好友"
 
 
-def test_group_messages_use_member_wechat_id_and_profile_fallback() -> None:
-    api = ApplicationApi.__new__(ApplicationApi)
+def test_group_messages_use_member_wechat_id_and_profile_fallback(tmp_path: Path) -> None:
+    api = _api(tmp_path)
     api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_bot"))
     received: dict[str, object] = {}
 
@@ -356,8 +357,8 @@ def test_group_messages_use_member_wechat_id_and_profile_fallback() -> None:
     assert float(received["start_time"]) < float(received["end_time"])
 
 
-def test_group_member_cache_never_crosses_accounts() -> None:
-    api = ApplicationApi.__new__(ApplicationApi)
+def test_group_member_cache_never_crosses_accounts(tmp_path: Path) -> None:
+    api = _api(tmp_path)
     account = ["wxid_first"]
     api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity=account[0]))
     api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
@@ -368,8 +369,8 @@ def test_group_member_cache_never_crosses_accounts() -> None:
     assert list(api._history_group_members) == [("wxid_second", "room@chatroom")]
 
 
-def test_group_member_directory_for_different_account_is_not_used() -> None:
-    api = ApplicationApi.__new__(ApplicationApi)
+def test_group_member_directory_for_different_account_is_not_used(tmp_path: Path) -> None:
+    api = _api(tmp_path)
     api._lifecycle = SimpleNamespace(fresh_runtime_snapshot=lambda: SimpleNamespace(wechat_identity="wxid_current"))
     api._history = SimpleNamespace(messages=lambda *_args, **_kwargs: ({"role": "user", "sender_id": "wxid_member"},))
     api._groups = SimpleNamespace(members=lambda _group_id: {"account_id": "wxid_other", "items": [{"user_id": "wxid_member", "wechat_id": "other_alias"}]})
