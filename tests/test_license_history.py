@@ -106,7 +106,8 @@ def test_unowned_bridge_or_unknown_port_state_cannot_enable_offline_history(setu
     monkeypatch.setattr(launcher, "build_service_specs", lambda _root: (
         SimpleNamespace(argv=("python.exe",), ready_host="127.0.0.1", ready_port=5000),))
     monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_kwargs: iter(()))
-    def probe_port(_host, _port, *, strict):
+    def probe_port(_host, _port, *, timeout_seconds, strict):
+        assert timeout_seconds == 3
         assert strict
         if port_error:
             raise OSError("port state unavailable")
