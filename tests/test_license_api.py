@@ -149,6 +149,33 @@ def test_calling_lifecycle_start_directly_still_requires_signed_authorization(se
     assert not service.calls
 
 
+def test_bound_license_can_queue_start_to_reconnect_without_a_current_account(setup):
+    client, service, _, _ = setup
+    activate(client)
+    client.bind("wxid_bound")
+    api, _, actions = make_api(client)
+    calls = len(service.calls)
+
+    assert api.start_robot()["ok"]
+    assert actions == ["start"]
+    assert not client.snapshot()["can_run"]
+    assert len(service.calls) == calls
+
+
+@pytest.mark.parametrize("stage", ["unactivated", "unbound", "expired"])
+def test_missing_current_account_cannot_queue_unauthorized_reconnect(setup, stage):
+    client, _, clock, _ = setup
+    if stage != "unactivated":
+        activate(client)
+    if stage == "expired":
+        client.bind("wxid_bound")
+        clock.advance(3600)
+    api, _, actions = make_api(client)
+
+    assert not api.start_robot()["ok"]
+    assert not actions and not client.snapshot()["can_run"]
+
+
 def test_contact_api_reads_anonymous_data_without_license_or_runtime_side_effects(setup, monkeypatch):
     client, service, clock, _ = setup
     api, _, actions = make_api(client)

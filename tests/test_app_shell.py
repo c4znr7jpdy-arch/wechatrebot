@@ -1445,9 +1445,9 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
 def _downloadable_update(monkeypatch, tmp_path: Path):
     api = _api(tmp_path)
     release = UpdateRelease(
-        version="1.0.2", title="体验升级", notes=(),
+        version=app_shell.__version__, title="体验升级", notes=(),
         published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/1.0.2.zip",
+        package_url=f"https://updates.example.test/{app_shell.__version__}.zip",
         package_size=100, package_sha256="A" * 64, mandatory=False, build=1,
     )
     api._available_update = release
@@ -1615,10 +1615,12 @@ def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path)
     assert events == ["download", "download"]
 
 
-@pytest.mark.parametrize("installed_version", ["1.0.2", "1.0.3"])
-def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, installed_version):
+@pytest.mark.parametrize("newer_version", [False, True])
+def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, newer_version):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
     status = _download_ready(api)
+    major, minor, patch = map(int, prepared.release.version.split("."))
+    installed_version = f"{major}.{minor}.{patch + 1}" if newer_version else prepared.release.version
     (tmp_path / "config").mkdir()
     (tmp_path / "config/installed-payload.json").write_text(json.dumps({
         "schema_version": 1, "release_version": installed_version, "release_build": 1, "files": [],
@@ -1841,7 +1843,11 @@ const cases = [
   {state:"ERROR", title:"机器人启动失败", error:{title:"错误", message:"托管服务退出"}},
   {state:"STOP_WAIT_WECHAT", title:"请先关闭微信"},
   {state:"STOPPING", title:"正在停止机器人", busy:true, can_stop:false},
-  {error:{title:"错误", message:"连接失败"}}
+  {error:{title:"错误", message:"连接失败"}},
+  {state:"LICENSE_READY", title:"机器人未启动", can_start:true, runtime:{connection_ready:true}},
+  {state:"LICENSE_PAUSED", title:"自动化已暂停", can_start:true, runtime:{connection_ready:false}},
+  {state:"LICENSE_READY", title:"机器人未启动", can_start:true,
+    runtime:{connection_ready:true, account_status_available:true, wechat_identity:'wxid_current'}}
 ];
 process.stdout.write(JSON.stringify(cases.map(changes => {
   renderStatus({...base, ...changes});
@@ -1855,7 +1861,7 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
         ["node"], input=render + harness, text=True, encoding="utf-8",
         capture_output=True, check=True, timeout=10,
     )
-    pending, offline, online, stopped, error, waiting, stopping, failed = json.loads(result.stdout)
+    pending, offline, online, stopped, error, waiting, stopping, failed, retained, paused, logged_in = json.loads(result.stdout)
     assert pending["stateTitle"] == pending["sideHealthText"] == "正在确认连接"
     assert "正在确认连接" in pending["globalStatus"]
     assert "暂时无法确认" in pending["stateMessage"]
@@ -1871,6 +1877,10 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
     assert "再次点击" in waiting["stateMessage"]
     assert stopping["stateTitle"] == "正在停止机器人"
     assert failed["stateTitle"] != "正在确认连接"
+    assert retained["stageConnection"] == retained["signalMessage"] == "连接已保留"
+    assert "等待启动" in retained["globalStatus"]
+    assert paused["stageConnection"] == "未连接"
+    assert logged_in["signalMessage"] == "微信已登录，机器人未启动"
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
@@ -2286,7 +2296,7 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     assert '"启动中…"' in script
     assert "const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);" in script
     assert 'wechatLoggedIn ? "已登录"' in script
-    assert 'wechatLoggedIn ? "已登录，功能启动中"' in script
+    assert 'active ? "已登录，功能启动中" : "微信已登录，机器人未启动"' in script
     assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
     assert '.status-orbit[data-state="starting"] .power-button' in styles
 

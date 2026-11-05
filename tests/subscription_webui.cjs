@@ -12,12 +12,12 @@ const escapeHtml = value => String(value ?? '').replaceAll('&', '&amp;')
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function harness(overrides = {}) {
-  const elements = new Map(), calls = [], intervals = [], confirmations = [], routes = [];
+  const elements = new Map(), calls = [], intervals = [], confirmations = [], routes = [], toasts = [];
   const clock = {now: Date.now(), monotonic: 0}, timeouts = new Map(), documentListeners = {};
   let timerId = 0;
   function element(id) {
     if (!elements.has(id)) {
-      const child = {textContent: ''};
+      const child = {textContent: '', getAttribute: () => null};
       const attributes = {}, classes = new Set();
       const node = {id, value: '', hidden: false, disabled: false, innerHTML: '', textContent: '',
         dataset: {}, listeners: {}, lastChild: child,
@@ -61,9 +61,10 @@ function harness(overrides = {}) {
     confirmAction: config => confirmations.push(config),
     copyText: async (text, label) => calls.push(['copy', text, label]),
     navigate: async page => routes.push(page),
+    toast: (message, type) => toasts.push({message, type}),
     openMaintenance: async () => routes.push('maintenance'), refreshRuntime: async () => {},
   });
-  return {ui, snapshot, contact, handlers, calls, element, intervals, confirmations, routes, clock,
+  return {ui, snapshot, contact, handlers, calls, element, intervals, confirmations, routes, toasts, clock,
     documentListeners,
     async advance(ms) {
       clock.now += ms;
@@ -87,6 +88,9 @@ async function activationAndRecovery() {
   const h = harness();
   await h.ui.initialize();
   assert.equal(h.ui.needsEntry(), true);
+  assert.equal(await h.ui.beforeStart(), false);
+  assert.deepEqual(h.toasts.at(-1), {message: '尚未授权，请先完成授权后再启动。', type: 'error'});
+  assert.equal(h.routes.at(-1), 'subscription');
   assert.equal(h.element('#licenseQrFrame').hidden, false);
   assert.equal(h.element('#licenseGroupName').textContent, 'WXRebot');
   assert.equal(h.element('#licensePrepareDevice').hidden, false);
@@ -146,10 +150,51 @@ async function activationAndRecovery() {
   await h.ui.onNavigate('subscription');
   assert.equal(h.element('#licenseResume').hidden, false);
   assert.equal(h.element('#licenseResume').disabled, false);
+  assert.equal(h.element('#licenseStateTitle').textContent, '订阅已生效');
+  assert.equal(h.element('#licenseStatusPanel').dataset.tone, 'success');
+  assert.equal(h.element('#licensePausedInfo').hidden, true);
   assert.equal(await h.ui.beforeStart(), true, 'A valid matching lease need not already have a run grant');
   h.handlers.start_robot = async () => { h.snapshot.can_run = true; return structuredClone(h.snapshot); };
   await h.click('#licenseResume');
   assert.equal(h.calls.filter(([method]) => method === 'start_robot').length, 1);
+}
+
+async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
+  for (const current_account of ['', 'wxid_account_a']) {
+    const h = harness({state: 'paused', license_id: 'license-one', authorized: true,
+      can_connect: true, account: 'wxid_account_a', current_account, plan: 'year',
+      remaining_seconds: 86400 * 300, message: '授权有效，自动化已暂停；请手动启动恢复。'});
+    await h.ui.initialize();
+    assert.equal(h.ui.needsEntry(), false, 'A valid subscription does not require a live connection to enter home');
+    assert.equal(h.element('#homeLicenseNotice').hidden, true);
+    assert.equal(h.element('#licenseStatusPanel').dataset.tone, 'success');
+    assert.equal(h.element('#licenseStateTitle').textContent, '订阅已生效');
+    assert.equal(h.element('#licenseStateTag').textContent, '已订阅');
+    assert.doesNotMatch(h.element('#licenseStateMessage').textContent, /暂停|恢复/);
+    assert.equal(h.element('#licenseSteps').hidden, true);
+    assert.equal(h.element('#licenseCurrentAccountRow').hidden, true);
+    assert.equal(h.element('#licenseConnect').hidden, true);
+    assert.equal(h.element('#licenseResume').hidden, false);
+    assert.equal(await h.ui.beforeStart(), true, 'The backend reconnects and verifies the actual account before granting a run');
+    assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
+  }
+  const mismatch = harness({state: 'account_mismatch', license_id: 'license-one', authorized: true,
+    can_connect: true, account: 'wxid_account_a', current_account: 'wxid_account_b'});
+  await mismatch.ui.initialize();
+  assert.equal(mismatch.ui.needsEntry(), true);
+  assert.equal(await mismatch.ui.beforeStart(), false);
+  assert.match(mismatch.toasts.at(-1).message, /不一致/);
+  assert.equal(mismatch.element('#licenseStatusPanel').dataset.tone, 'warning');
+  assert.equal(mismatch.element('#licensePausedInfo').hidden, false);
+  const offline = harness({state: 'paused', license_id: 'license-one', authorized: true,
+    can_connect: true, account: 'wxid_account_a', current_account: '', plan: 'year',
+    remaining_seconds: 86400 * 300, last_error: 'service_unavailable',
+    message: '授权有效，自动化已暂停；请手动启动恢复。 授权服务暂不可达，当前有效离线凭证仍可使用。'});
+  await offline.ui.initialize();
+  assert.equal(offline.element('#homeLicenseNotice').hidden, false);
+  assert.equal(offline.element('#homeLicenseTitle').textContent, '当前使用离线授权');
+  assert.doesNotMatch(offline.element('#homeLicenseMessage').textContent, /暂停|恢复/);
+  assert.match(offline.element('#licenseStateMessage').textContent, /离线凭证/);
 }
 
 async function expiryAndUnconfigured() {
@@ -403,7 +448,7 @@ function runCenterCanStartWithBridgeConnected() {
   context.renderStatus(status);
   assert.equal(h.element('#primaryAction').dataset.action, 'start');
   assert.equal(h.element('#primaryAction').disabled, false);
-  assert.match(h.element('#globalStatus').innerHTML, /微信已连接/);
+  assert.match(h.element('#globalStatus').innerHTML, /等待启动/);
   context.renderStatus({...status, state: 'RUNNING', can_start: false, online: true});
   assert.equal(h.element('#primaryAction').dataset.action, 'stop');
   assert.equal(h.element('#primaryAction').disabled, false);
@@ -548,6 +593,7 @@ async function paidRedemptionInvalidatesOutstandingTrialQuery() {
 (async () => {
   await activationAndRecovery();
   await expiryAndUnconfigured();
+  await validSubscriptionStaysActiveWhenStoppedOrDisconnected();
   await rejectedStartIsNotReportedAsSuccess();
   await wechatContactHasItsOwnRefreshCycle();
   await wechatContactExpiryClearsTheImageAndExpansion();

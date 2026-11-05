@@ -5,24 +5,23 @@
 .license-notice p { margin: 4px 0 0; color: var(--muted); }
 .license-notice .button { flex-shrink: 0; }
 #page-subscription { max-width: 1180px; }
-#page-subscription h2, #page-subscription h3 { margin: 0; color: var(--ink); }
+#page-subscription h2, #page-subscription h3 { margin: 0; color: var(--ink); font-family: var(--font-body); }
 #page-subscription h2 { font-size: 19px; }
 #page-subscription h3 { font-size: 16px; }
 #page-subscription p { line-height: 1.7; }
 #page-subscription .button-row { flex-wrap: wrap; }
-.subscription-status { --license-tone: var(--muted); --license-tint: var(--surface-muted); padding: 24px; }
+.subscription-status { --license-tone: var(--muted); --license-tint: var(--surface-muted); padding: 20px 24px; }
 .subscription-status[data-tone="success"] { --license-tone: var(--green-700); --license-tint: var(--green-100); }
 .subscription-status[data-tone="warning"] { --license-tone: var(--amber-700); --license-tint: var(--amber-100); }
 .subscription-status[data-tone="danger"] { --license-tone: var(--red-700); --license-tint: var(--red-100); }
 .subscription-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.subscription-kicker { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
-#page-subscription .subscription-status h2 { font-size: 25px; }
+#page-subscription .subscription-status h2 { font-size: 20px; font-weight: 600; line-height: 1.5; letter-spacing: 0; }
 .subscription-tag { padding: 5px 11px; border-radius: 5px; color: var(--license-tone); background: var(--license-tint); white-space: nowrap; font-size: 12px; font-weight: 700; }
-#licenseStateMessage { margin: 10px 0 20px; color: var(--muted); }
-.subscription-facts { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 20px; margin: 0; padding: 18px 0; border-top: 1px solid var(--line); }
+#licenseStateMessage { margin: 6px 0 16px; color: var(--muted); font-size: 13px; }
+.subscription-facts { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 20px; margin: 0; padding: 14px 0; border-top: 1px solid var(--line); }
 .subscription-facts > div { min-width: 0; }
 .subscription-facts dt, .subscription-code-preview dt { color: var(--muted); font-size: 12px; }
-.subscription-facts dd { margin: 5px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.subscription-facts dd { margin: 5px 0 0; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .subscription-facts small { display: block; margin-top: 3px; color: var(--license-tone); }
 .subscription-steps { display: flex; flex-wrap: wrap; gap: 15px 28px; margin: 0; padding: 17px 0 0; border-top: 1px solid var(--line); list-style: none; }
 .subscription-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
@@ -31,12 +30,13 @@
 .subscription-steps .is-done span { color: var(--green-700); background: var(--green-100); }
 .subscription-steps [aria-current="step"] { color: var(--ink); font-weight: 700; }
 .subscription-steps [aria-current="step"] span { color: var(--blue-700); background: var(--blue-100); }
-.subscription-account { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-top: 18px; padding: 12px 15px; border-radius: 6px; background: var(--surface-muted); overflow-wrap: anywhere; }
+.subscription-account { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: var(--surface-muted); overflow-wrap: anywhere; }
 .subscription-account span { color: var(--muted); font-size: 12px; }
+.subscription-account strong { font-size: 14px; font-weight: 600; }
 .subscription-pause-note { padding: 12px 15px; border-radius: 6px; color: var(--amber-700); background: var(--amber-100); }
-.subscription-runtime-actions { margin-top: 18px; }
+.subscription-runtime-actions { margin-top: 14px; }
 .subscription-runtime-actions:has(> [hidden]):not(:has(> :not([hidden]))) { display: none; }
-.subscription-support { margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
+.subscription-support { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .subscription-support summary { width: fit-content; color: var(--muted); font-size: 13px; cursor: pointer; }
 .subscription-support summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 3px; }
 .subscription-support p { color: var(--muted); font-size: 13px; }
@@ -115,7 +115,7 @@
   #page-subscription .page-heading { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
   #page-subscription .page-heading h1 { font-size: 24px; }
   .subscription-status, .subscription-group, .subscription-redeem { padding: 18px; }
-  .subscription-status-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .subscription-status-heading { align-items: center; gap: 10px; }
   .subscription-plan-price strong { font-size: 29px; }
   .subscription-plan > p { grid-column: 1 / -1; }
   .subscription-plan-price { grid-row: 1; }

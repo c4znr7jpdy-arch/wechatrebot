@@ -558,9 +558,9 @@ def test_licensed_migration_resumes_offline_after_verified_stop(installation, mo
     assert not value.store.path.exists()
 
     # The user stops the formerly live runtime; account hints disappear and
-    # status polling presents the empty installation as a licensed pause.
+    # status polling keeps a valid, stopped installation in a neutral state.
     value.runtime.stop()
-    assert controller.refresh().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert controller.refresh().state == lifecycle.LifecycleState.STOPPED
     result = migration.commit(preview["token"])
 
     assert_paused_once(value, result)

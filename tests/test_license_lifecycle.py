@@ -8,7 +8,7 @@ from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
 from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
-from test_license_client import setup as license_setup
+from test_license_client import activate, setup as license_setup
 
 
 class License:
@@ -22,7 +22,8 @@ class License:
     def snapshot(self, account=""):
         return {"enabled": True, "authorized": self.valid, "can_connect": self.valid,
                 "can_run": self.valid and self.granted and bool(account) and account == self.bound,
-                "state": "ready" if self.valid else "expired", "message": "测试授权状态"}
+                "state": "ready" if self.valid else "expired", "message": "测试授权状态",
+                "account": self.bound}
 
     def authorize_run(self, account):
         if not self.valid or not self.bound or account != self.bound:
@@ -165,6 +166,132 @@ def test_expiry_preserves_wechat_and_renewal_requires_explicit_resume(tmp_path):
     assert holders[0].started.count("new-hook-bridge") == 1
 
 
+def test_valid_license_without_services_is_stopped_and_never_starts_itself(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+
+    for _ in range(2):
+        ready = controller.refresh()
+        assert ready.state == LifecycleState.STOPPED
+        assert ready.title == "机器人未启动"
+        assert ready.message == "授权有效，点击启动机器人即可运行。"
+        assert ready.can_start and not ready.can_stop and not ready.online
+    assert not holders and not license.granted
+    assert not world["core"] and not world["bridge"]
+
+
+def test_manual_stop_retains_connection_with_neutral_authorized_feedback(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+
+    stopped = controller.request_stop()
+    assert stopped.state == LifecycleState.LICENSE_READY
+    assert stopped.title == "机器人未启动"
+    assert stopped.message == "授权有效，点击启动机器人即可运行。"
+    assert stopped.can_start and stopped.can_stop and not stopped.online
+    assert not license.granted and not world["core"] and world["bridge"]
+    assert controller.refresh().state == LifecycleState.LICENSE_READY
+    assert holders[0].started.count("astrbot") == 1
+
+
+def test_signed_paused_run_grant_does_not_turn_valid_entitlement_into_a_warning(license_setup):
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_a")
+    controller, _, world, _ = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_a"
+    controller.start()
+
+    stopped = controller.request_stop()
+    assert client.snapshot("wxid_a")["state"] == "paused"
+    assert stopped.state == LifecycleState.LICENSE_READY
+    assert stopped.message == "授权有效，点击启动机器人即可运行。"
+    assert not stopped.online and not world["core"] and world["bridge"]
+
+
+def test_start_reconnects_bound_license_then_waits_for_real_login_without_grant(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+
+    waiting = controller.start()
+    assert holders[0].started == ["new-hook-bridge"]
+    assert world["bridge"] and not world["core"] and not license.granted
+    assert waiting.state == LifecycleState.WAITING_WECHAT
+    assert waiting.title == "等待登录微信"
+    assert not license.grants and not waiting.online
+
+    world["account"] = "wxid_a"
+    ready = controller.refresh()
+    assert ready.state == LifecycleState.LICENSE_READY
+    assert not world["core"] and not license.grants
+    assert controller.start().state == LifecycleState.RUNNING
+    assert holders[0].started == ["new-hook-bridge", "astrbot"]
+    assert license.grants == ["wxid_a"]
+
+
+@pytest.mark.parametrize("actual", ["wxid_a", "wxid_wrong"])
+def test_start_rechecks_actual_account_after_reconnecting(tmp_path, actual):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    original_connect = controller.connect_wechat
+
+    def connect():
+        result = original_connect()
+        world["account"] = actual
+        return result
+
+    controller.connect_wechat = connect
+    if actual != license.bound:
+        with pytest.raises(LicenseError):
+            controller.start()
+        assert holders[0].started == ["new-hook-bridge"]
+        assert not world["core"] and not license.grants
+    else:
+        assert controller.start().state == LifecycleState.RUNNING
+        assert license.grants == [actual]
+
+
+def test_invalid_or_mismatched_license_keeps_warning_without_services(tmp_path):
+    controller, license, _, _ = setup_controller(tmp_path)
+    license.valid = False
+    assert controller.refresh().state == LifecycleState.LICENSE_PAUSED
+
+    license.snapshot = lambda _account: {
+        "enabled": True, "authorized": True, "can_run": False,
+        "state": "account_mismatch", "message": "微信账号与授权不一致。",
+    }
+    mismatched = controller.refresh()
+    assert mismatched.state == LifecycleState.LICENSE_PAUSED
+    assert mismatched.message == "微信账号与授权不一致。"
+
+
+def test_update_after_user_stop_closes_retained_connection_without_waiting_for_wechat(tmp_path, monkeypatch):
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+    assert controller.request_stop().state == LifecycleState.LICENSE_READY
+    assert world["bridge"] and not world["core"]
+    shutdown_checks = []
+
+    def verify_shutdown(root):
+        assert root == tmp_path
+        assert not world["bridge"] and not world["core"]
+        assert not holders[0].running
+        shutdown_checks.append(root)
+        world["account"] = ""
+
+    monkeypatch.setattr("wechatrebot_manager.lifecycle.force_stop_update_processes", verify_shutdown)
+    stopped = controller.force_stop_for_update()
+    assert stopped.state == LifecycleState.STOPPED
+    assert shutdown_checks == [tmp_path]
+    assert not license.granted and not stopped.can_stop and not stopped.online
+    assert controller.refresh().state == LifecycleState.STOPPED
+
+
 def test_account_switch_pauses_and_does_not_bind_or_resume_automatically(tmp_path):
     controller, license, world, holders = setup_controller(tmp_path)
     controller.connect_wechat()
@@ -243,6 +370,6 @@ def test_reopen_accepts_existing_connection_only_processes(tmp_path, monkeypatch
         environment_checker=controller._environment_checker,
         snapshotter=controller._snapshotter, preflight=lambda _: ())
     view = reopened.refresh()
-    assert view.state == LifecycleState.LICENSE_READY
+    assert view.state == LifecycleState.WAITING_WECHAT
     assert view.error is None and view.can_start and view.can_stop
     assert world["bridge"] and not world["core"]
