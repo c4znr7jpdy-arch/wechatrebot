@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -13,7 +14,7 @@ import aiohttp
 from packaging.version import InvalidVersion, Version
 
 from wechatrebot_manager.updates import (
-    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel, parse_update_manifest,
+    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel,
 )
 from .auth import TOKEN_FILE, private_json, read_private_json
 
@@ -46,12 +47,13 @@ class GitHubReleases:
             raise GitHubError("GitHub 令牌配置无效，请在服务器本机重新设置。")
         return token
 
-    async def _api(self, method: str, path: str, *, payload=None, content: bytes | None = None):
-        token = self._token()
+    async def _api(self, method: str, path: str, *, payload=None, content: bytes | None = None,
+                   file_path: Path | None = None, missing_ok: bool = False, public: bool = False):
+        token = "" if public else self._token()
         if method != "GET" and not token:
             raise GitHubError("尚未配置 GitHub 写入令牌，请在服务器本机设置。")
         url = self.api + path
-        if content is not None:
+        if content is not None or file_path is not None:
             url = url.replace("https://api.github.com/", "https://uploads.github.com/", 1)
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
                    "User-Agent": "WeChatReBot-Admin"}
@@ -59,10 +61,22 @@ class GitHubReleases:
             headers["Authorization"] = f"Bearer {token}"
         if content is not None:
             headers["Content-Type"] = "application/json"
+        if file_path is not None:
+            headers.update({"Content-Type": "application/zip", "Content-Length": str(file_path.stat().st_size)})
+
+        async def file_chunks():
+            with file_path.open("rb") as handle:
+                while chunk := await asyncio.to_thread(handle.read, 64 * 1024):
+                    yield chunk
+
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=45)) as session:
-                async with session.request(method, url, headers=headers, json=payload, data=content,
+            timeout = aiohttp.ClientTimeout(total=3600 if file_path else 45, sock_connect=30, sock_read=60)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.request(method, url, headers=headers, json=payload,
+                                           data=file_chunks() if file_path is not None else content,
                                            allow_redirects=False) as response:
+                    if response.status == 404 and missing_ok:
+                        return None
                     if response.status not in {200, 201, 204}:
                         raise GitHubError(f"GitHub 请求失败（HTTP {response.status}），请检查网络和令牌权限。")
                     chunks, size = [], 0
@@ -83,34 +97,44 @@ class GitHubReleases:
                 or parsed.username or parsed.password or parsed.fragment):
             raise GitHubError("下载地址不在 GitHub 的 HTTPS 资产范围内。")
 
+    @asynccontextmanager
+    async def _public_response(self, session, method: str, url: str):
+        for _ in range(6):
+            self._public_url(url)
+            async with session.request(method, url, allow_redirects=False, headers={
+                "User-Agent": "WeChatReBot-Admin", "Cache-Control": "no-cache",
+            }) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    url = urllib.parse.urljoin(url, response.headers.get("Location", ""))
+                    continue
+                if response.status != 200:
+                    raise GitHubError(f"GitHub 公网资产读取失败（HTTP {response.status}）。")
+                yield response
+                return
+        raise GitHubError("GitHub 下载重定向次数过多。")
+
     async def _download(self, url: str, *, maximum: int, expected_size: int = 0,
                         expected_sha256: str = "") -> bytes:
         """Stream large packages without retaining them in the service's memory."""
         try:
             timeout = aiohttp.ClientTimeout(total=1800 if expected_size else 45, sock_read=30)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                for _ in range(6):
-                    self._public_url(url)
-                    async with session.get(url, allow_redirects=False, headers={
-                        "User-Agent": "WeChatReBot-Admin", "Cache-Control": "no-cache",
-                    }) as response:
-                        if response.status in {301, 302, 303, 307, 308}:
-                            url = urllib.parse.urljoin(url, response.headers.get("Location", ""))
-                            continue
-                        if response.status != 200:
-                            raise GitHubError(f"GitHub 公网资产读取失败（HTTP {response.status}）。")
-                        digest, count, chunks = hashlib.sha256(), 0, []
-                        async for chunk in response.content.iter_chunked(1024 * 1024):
-                            count += len(chunk)
-                            if count > maximum:
-                                raise GitHubError("GitHub 资产超过约定大小，已停止读取。")
-                            digest.update(chunk)
-                            if not expected_size:
-                                chunks.append(chunk)
-                        if expected_size and (count != expected_size or digest.hexdigest().lower() != expected_sha256.lower()):
-                            raise GitHubError("更新包大小或 SHA-256 与签名清单不一致。")
-                        return b"".join(chunks)
-                raise GitHubError("GitHub 下载重定向次数过多。")
+                if expected_size:
+                    async with self._public_response(session, "HEAD", url) as response:
+                        if response.headers.get("Content-Length") != str(expected_size):
+                            raise GitHubError("公网 HEAD 大小与签名清单不一致。")
+                async with self._public_response(session, "GET", url) as response:
+                    digest, count, chunks = hashlib.sha256(), 0, []
+                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                        count += len(chunk)
+                        if count > maximum:
+                            raise GitHubError("GitHub 资产超过约定大小，已停止读取。")
+                        digest.update(chunk)
+                        if not expected_size:
+                            chunks.append(chunk)
+                    if expected_size and (count != expected_size or digest.hexdigest().lower() != expected_sha256.lower()):
+                        raise GitHubError("更新包大小或 SHA-256 与签名清单不一致。")
+                    return b"".join(chunks)
         except (aiohttp.ClientError, TimeoutError):
             raise GitHubError("GitHub 下载中断，请稍后重试。") from None
 
@@ -119,18 +143,33 @@ class GitHubReleases:
             value = json.loads(raw)
             if not isinstance(value, dict):
                 raise ValueError("Manifest is not an object")
-            release = parse_update_manifest(value, self.channel, current_version="0.0.0")
+            packages = self.manifest_packages(value)
+            release = packages[0]
             if release is None or (version and release.version != str(Version(version))):
                 raise ValueError("Version mismatch")
-            prefix = f"https://github.com/{self.repo}/releases/download/v{release.version}/"
-            if not release.package_url.startswith(prefix):
-                raise ValueError("Package belongs to another release")
-            suffix = release.package_url[len(prefix):]
-            if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
-                raise ValueError("Unsafe asset name")
             return value, release
         except (UpdateError, ValueError, TypeError, KeyError):
             raise GitHubError("清单验签失败、版本不符或更新包不属于本仓库。") from None
+
+    def manifest_packages(self, payload: dict):
+        # Shared protocol owns signature validation and the complete default/incremental set.
+        from wechatrebot_manager.updates import manifest_package_releases
+
+        packages = manifest_package_releases(payload, self.channel)
+        if not packages:
+            raise ValueError("Manifest has no packages")
+        for release in packages:
+            prefix = f"https://github.com/{self.repo}/releases/download/v{release.version}/"
+            if not release.package_url.startswith(prefix):
+                raise ValueError("Package belongs to another release")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+\.zip", release.package_url[len(prefix):]):
+                raise ValueError("Unsafe update asset name")
+        return packages
+
+    async def upload_candidate(self, candidate: dict, manifest_raw: bytes, package_paths: dict[str, Path]) -> dict:
+        from .upload import publish_candidate
+
+        return await publish_candidate(self, candidate, manifest_raw, package_paths)
 
     async def stable(self) -> dict:
         raw = await self._download(self.channel.manifest_url, maximum=MAX_MANIFEST_BYTES)
@@ -210,8 +249,9 @@ class GitHubReleases:
                 # An interrupted previous operation is recovered before any new promotion.
                 await self._restore(read_private_json(recovery_path, maximum=2 * MAX_MANIFEST_BYTES + 4096))
             raw, release = await self.candidate(version)
-            await self._download(release.package_url, maximum=release.package_size,
-                                 expected_size=release.package_size, expected_sha256=release.package_sha256)
+            for package in self.manifest_packages(json.loads(raw)):
+                await self._download(package.package_url, maximum=package.package_size,
+                                     expected_size=package.package_size, expected_sha256=package.package_sha256)
             previous = await self._download(self.channel.manifest_url, maximum=MAX_MANIFEST_BYTES)
             _, old_release = self._manifest(previous)
             if hashlib.sha256(previous).hexdigest() != expected_digest:

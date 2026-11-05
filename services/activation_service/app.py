@@ -1,4 +1,4 @@
-"""Bounded public API; administrative operations are available only through CLI."""
+"""Bounded public API, separate from the authenticated administrator listener."""
 
 from __future__ import annotations
 

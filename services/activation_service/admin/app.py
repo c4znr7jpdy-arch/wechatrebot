@@ -20,6 +20,7 @@ from ..contact import CONTACT_FILENAME, clear_contact, parse_expiry
 from ..store import LicenseStore
 from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
 from .github import GitHubError, GitHubReleases
+from .upload import MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, UPLOAD_ROUTE, authenticate_upload, receive_candidate
 
 _LOG = logging.getLogger(__name__)
 _TEMPLATES = Path(__file__).parent / "templates"
@@ -69,6 +70,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     auth = AuthStore(data_dir)
     releases = github or GitHubReleases(data_dir)
     transactions: set[asyncio.Task] = set()
+    upload_lock = asyncio.Lock()
 
     async def audit(event: str, object_id: str = "", **details):
         await asyncio.to_thread(store.admin_audit, int(clock()), event, object_id, **details)
@@ -85,6 +87,9 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                 request["admin_token"], request["admin_session"] = token, session
                 if request.path not in {"/login", "/style.css"} and not (session and session["authenticated"]):
                     response = web.HTTPSeeOther(PREFIX + "login")
+                elif request.path == UPLOAD_ROUTE and request.method == "POST":
+                    # This route authenticates its first two multipart fields before reading files.
+                    response = await handler(request)
                 elif request.method not in {"GET", "HEAD"}:
                     form = await request.post()
                     submitted = form.get("csrf", "")
@@ -287,10 +292,17 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             task.add_done_callback(transactions.discard)
             message = await asyncio.shield(task)
             return await redirect(request, "releases", message)
+        upload_form = ('<section class="panel"><h2>上传已签名更新包</h2>'
+            '<p class="hint">选择本地发布入口生成的候选记录、签名清单和全部更新 ZIP。总大小最多 4 GiB。上传通过后，再在下方确认切换稳定版本才会通知客户端。</p>'
+            + _form(session, "releases/upload", _field("totp", "上传动态码", extra='inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"')
+                + _field("candidate", "发布候选记录", kind="file", extra='accept=".json"')
+                + _field("manifest", "签名稳定清单", kind="file", extra='accept=".json"')
+                + _field("packages", "更新 ZIP（选择清单要求的全部包）", kind="file", extra='accept=".zip" multiple')
+                + '<button type="submit">上传并验证</button>', multipart=True) + '</section>')
         try:
             stable, listing = await asyncio.gather(releases.stable(), releases.listing())
         except GitHubError as exc:
-            return await render(request, "发布版本", '<section class="panel"><p>' + escape(str(exc)) + '</p></section>')
+            return await render(request, "发布版本", upload_form + '<section class="panel"><p>' + escape(str(exc)) + '</p></section>')
         rows, options = [], []
         for item in listing:
             assets = '<br>'.join(f'{escape(str(a["name"]))} · {int(a["size"]):,} 字节' for a in item["assets"])
@@ -298,8 +310,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             rows.append(f'<tr><td>{escape(item["version"])}</td><td>{escape(item["published_at"])}</td><td>{assets}</td><td>{escape(verified)}</td></tr>')
             if item["verified"]:
                 options.append(f'<option value="{escape(item["version"], quote=True)}">{escape(item["version"])}</option>')
-        body = (f'<section class="panel"><p>当前稳定版本：<strong>{escape(stable["version"])}</strong> · 签名通过</p>'
-                '<p class="hint">选择较早版本即为回滚发布清单；已经升级的客户端不会自动降级。此处不接收安装包上传。</p>'
+        body = (upload_form + f'<section class="panel"><p>当前稳定版本：<strong>{escape(stable["version"])}</strong> · 签名通过</p>'
+                '<p class="hint">选择较早版本即为回滚发布清单；已经升级的客户端不会自动降级。</p>'
                 '<p class="hint">切换前会下载并校验更新包，可能需要几分钟。登录使用过的动态码不可重复使用。</p>'
                 + _form(session, "releases", f'<input type="hidden" name="stable_digest" value="{stable["digest"]}">'
                     + '<label>目标版本<select name="version">' + ''.join(options) + '</select></label>'
@@ -308,6 +320,36 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                 + '<section class="panel scroll"><h2>最近 100 个发布记录</h2><table><thead><tr><th>版本</th><th>发布时间</th><th>资产</th><th>签名</th></tr></thead><tbody>'
                 + ''.join(rows) + '</tbody></table></section>')
         return await render(request, "发布版本", body)
+
+    async def upload(request):
+        if upload_lock.locked():
+            return await redirect(request, "releases", "已有上传正在处理，请等待完成后重试。")
+        async with upload_lock:
+            try:
+                reader = await authenticate_upload(request, auth, clock, audit)
+                async with receive_candidate(request, reader, releases, data_dir, auth, clock) as (candidate, manifest, paths, release):
+                    async def publish_and_audit():
+                        try:
+                            result = await releases.upload_candidate(candidate, manifest, paths)
+                            await audit("release_upload", result["version"], source_commit=result["source_commit"], package_count=result["package_count"])
+                            return result
+                        except Exception:
+                            await audit("release_upload_failed", release.version)
+                            raise
+
+                    task = asyncio.create_task(publish_and_audit())
+                    transactions.add(task)
+                    task.add_done_callback(transactions.discard)
+                    try:
+                        result = await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        # Keep its files until an already-authorized GitHub operation ends.
+                        await task
+                        raise
+                    message = f'上传并公网验证完成：{result["version"]}。尚未通知客户端，请在下方确认切换稳定版本。'
+            except (GitHubError, OSError, ValueError) as exc:
+                message = str(exc) if isinstance(exc, GitHubError) else "上传未完成，临时文件已清理。请检查磁盘和文件后重试。"
+            return await redirect(request, "releases", message)
 
     async def logout(request):
         await asyncio.to_thread(auth.logout, request["admin_token"])
@@ -319,7 +361,11 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     async def style(request):
         return web.Response(text=(_TEMPLATES / "style.css").read_text("utf-8"), content_type="text/css")
 
-    app = web.Application(middlewares=[boundary], client_max_size=768 * 1024)
+    # The upload handler enforces the package and metadata limits while
+    # streaming. Keep aiohttp's outer limit aligned so it does not reject a
+    # valid multi-gigabyte multipart request before the handler can inspect CSRF
+    # and TOTP fields.
+    app = web.Application(middlewares=[boundary], client_max_size=MAX_UPLOAD_BYTES + 3 * MAX_METADATA_BYTES)
     app.router.add_get("/", overview)
     app.router.add_get("/style.css", style)
     app.router.add_get("/contact/image", contact_image)
@@ -327,6 +373,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         app.router.add_get("/" + path, handler)
         app.router.add_post("/" + path, handler)
     app.router.add_post("/logout", logout)
+    app.router.add_post(UPLOAD_ROUTE, upload)
     async def finish_transactions(application):
         if transactions:
             await asyncio.gather(*transactions, return_exceptions=True)
