@@ -20,10 +20,11 @@ from packaging.version import Version
 COMMERCIAL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = COMMERCIAL_ROOT / "scripts"
 SOURCE_ROOT = COMMERCIAL_ROOT / "src"
-for search_root in (SCRIPTS_ROOT, SOURCE_ROOT):
+for search_root in (COMMERCIAL_ROOT, SCRIPTS_ROOT, SOURCE_ROOT):
     if str(search_root) not in sys.path:
         sys.path.insert(0, str(search_root))
 
+from services.activation_service.release_urls import fresh_stable_manifest_url
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS, sha256_file
 from wechatrebot_manager.updates import (
     PRODUCT_ID,
@@ -219,7 +220,7 @@ def _run(argv: list[str], *, root: Path = COMMERCIAL_ROOT, env=None) -> None:
 
 def _fetch_live_manifest(channel: UpdateChannel) -> dict[str, object]:
     request = urllib.request.Request(
-        channel.manifest_url,
+        fresh_stable_manifest_url(channel.manifest_url),
         headers={
             "Accept": "application/json",
             "Cache-Control": "no-cache",

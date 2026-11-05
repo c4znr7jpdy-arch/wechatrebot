@@ -16,6 +16,7 @@ from packaging.version import InvalidVersion, Version
 from wechatrebot_manager.updates import (
     MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel,
 )
+from ..release_urls import fresh_stable_manifest_url
 from .auth import TOKEN_FILE, private_json, read_private_json
 
 _PUBLIC_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
@@ -116,6 +117,7 @@ class GitHubReleases:
     async def _download(self, url: str, *, maximum: int, expected_size: int = 0,
                         expected_sha256: str = "") -> bytes:
         """Stream large packages without retaining them in the service's memory."""
+        url = fresh_stable_manifest_url(url)
         try:
             timeout = aiohttp.ClientTimeout(total=1800 if expected_size else 45, sock_read=30)
             async with aiohttp.ClientSession(timeout=timeout) as session:

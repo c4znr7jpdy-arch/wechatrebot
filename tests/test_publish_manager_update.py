@@ -153,3 +153,27 @@ def test_manager_delta_rejects_legacy_stable_base() -> None:
         module._require_safe_delta_base("0.8.6")
 
     module._require_safe_delta_base("0.8.7")
+
+
+def test_live_manifest_does_not_reuse_cached_stable_redirect(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from urllib.parse import parse_qs, urlsplit
+    import io
+
+    module = _publisher()
+    channel, _key = _channel_and_key(tmp_path)
+    channel = replace(channel, manifest_url="https://github.com/o/r/releases/download/stable/stable.json")
+    seen = []
+
+    def cached_edge(request, **kwargs):
+        seen.append(request.full_url)
+        # The fixed URL still points to an old redirect, even with no-cache.
+        fresh = bool(parse_qs(urlsplit(request.full_url).query).get("_wrb_check"))
+        return io.BytesIO(json.dumps({"version": "1.0.1" if fresh else "1.0.0"}).encode())
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", cached_edge)
+    monkeypatch.setattr(module, "parse_update_manifest", lambda *args, **kwargs: None)
+    assert module._fetch_live_manifest(channel)["version"] == "1.0.1"
+    assert module._fetch_live_manifest(channel)["version"] == "1.0.1"
+    assert seen[0] != seen[1]
+    assert channel.manifest_url.endswith("/stable/stable.json")

@@ -245,3 +245,66 @@ async def test_api_reads_all_chunks_and_never_sends_token_on_redirect(tmp_path, 
     with pytest.raises(GitHubError, match="HTTP 302") as caught:
         await GitHubReleases._api(github, "GET", "/releases")
     assert "github_pat_" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_public_stable_readback_bypasses_cached_redirect(tmp_path, monkeypatch):
+    from services.activation_service.admin import github as module
+
+    seen = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, fresh):
+            self.content = self
+            self.raw = b"new stable" if fresh else b"cached old stable"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def iter_chunked(self, size):
+            yield self.raw
+
+    class Session:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        def request(self, method, url, **kwargs):
+            seen.append(url)
+            return Response(bool(parse_qs(urlsplit(url).query).get("_wrb_check")))
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", Session)
+    github = FakeGitHub(tmp_path)
+    for _ in range(2):
+        assert await GitHubReleases._download(github, github.channel.manifest_url, maximum=100) == b"new stable"
+    assert seen[0] != seen[1]
+
+
+@pytest.mark.parametrize("url", [
+    BASE + "v1.0.1/stable-1.0.1.json",
+    BASE + "v1.0.1/update.zip",
+    "https://release-assets.githubusercontent.com/asset?sig=opaque&token=unchanged",
+    "https://updates.example.test/stable.json",
+    "https://github.com.evil.test/o/r/releases/download/stable/stable.json",
+])
+def test_fresh_manifest_url_preserves_immutable_assets_and_other_hosts(url):
+    from services.activation_service.release_urls import fresh_stable_manifest_url
+
+    assert fresh_stable_manifest_url(url) == url
+
+
+def test_fresh_manifest_url_preserves_existing_query_bytes():
+    from services.activation_service.release_urls import fresh_stable_manifest_url
+
+    url = BASE + "stable/stable.json?download=1&name=a%2Fb"
+    assert fresh_stable_manifest_url(url).startswith(url + "&_wrb_check=")
