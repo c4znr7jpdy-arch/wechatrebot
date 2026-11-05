@@ -23,12 +23,17 @@
 
 运行环境为 Python 3.13，以及本目录 `requirements.txt` 中固定的依赖。以下是服务器本地管理命令说明，不会自动部署、上传客户包或执行支付。必须在仓库根目录调用模块；模块入口自行定位共享的 `src` 协议实现。
 
+版本上传由独立的管理员监听器处理：开发机先生成并签名候选，维护者在后台“发布版本”页上传候选记录、签名清单和全部更新 ZIP。服务只校验并上传已签名文件，不构建、不持有签名私钥，也不会在上传完成后自动切换 `stable.json`；切换稳定版本必须在后台使用下一组动态码再次确认。
+
 所有命令都使用 `python -m services.activation_service --data-dir <服务器私有目录> <子命令>`。服务账号应独占该目录：Unix 目录权限为 0700，私钥文件 0600；Windows 应由管理员为专用账号配置目录 ACL。不要使用客户安装目录、静态站点目录或版本库目录存储数据库/私钥。
 
 | 子命令 | 必需参数 | 行为 |
 | --- | --- | --- |
 | `init` | 无 | 首次创建数据库和独立授权私钥，只输出 `key_id` 和公钥等配置；拒绝覆盖已有私钥 |
-| `serve` | 无 | 默认监听 `127.0.0.1:8091`，仅开放客户 API；反向代理负责 HTTPS |
+| `serve` | 可选 `--admin-port 8092` | 默认客户接口监听 `127.0.0.1:8091`，维护者后台独立监听 `127.0.0.1:8092`；反向代理负责 HTTPS |
+| `admin-init` | 交互输入密码 | 首次设置至少 16 位密码，输出手机验证器二维码和手输密钥；已有配置拒绝覆盖 |
+| `admin-reset` | 交互输入新密码 | 重新生成 TOTP 密钥；旧密码、验证器和会话立即失效 |
+| `admin-set-github-token` | 交互输入细粒度令牌 | 仅保存到服务器私有目录，不在网页或日志回显 |
 | `set-contact` | `--image`、`--group-name`、`--expires-at` | 校验并原子替换固定的微信群二维码资料，下一次 GET 即生效 |
 | `clear-contact` | 无 | 仅移除固定二维码资料；不改变数据库、授权、激活码或签名私钥 |
 | `issue` | `--owner-ref`、`--reference`、`--plan trial/month/year` | 发新开通码；试用从首次兑换起恰好 3600 秒 |
@@ -70,7 +75,7 @@
 
 ## API
 
-公开接口是 `POST /v1/preview`、`/v1/redeem`、`/v1/refresh`、`/v1/bind`、`/v1/trial-status`、`/v1/trial-claim` 和只读的 `GET /v1/contact`，`GET /health` 仅用于存活检查。没有公网管理员接口，二维码不能经公网写入或清空。
+客户公开接口是 `POST /v1/preview`、`/v1/redeem`、`/v1/refresh`、`/v1/bind`、`/v1/trial-status`、`/v1/trial-claim` 和只读的 `GET /v1/contact`，`GET /health` 仅用于存活检查。管理操作使用独立 8092 监听器及 `/wechatrebot-admin/` HTTPS 前缀，必须先通过密码、动态码及 CSRF 校验，详见 [后台说明](../../docs/admin-console.md)。客户接口不提供管理写入。
 
 所有 POST 接口统一使用共享 `sign_request` 信封：`action` 等于路径末段，包含 `body`、服务器时间附近的 `timestamp`、随机 32 位十六进制 `nonce`、设备公钥和设备签名。允许时间误差 ±300 秒；同设备 nonce 保留 601 秒，SQLite 持久化阻止重放。禁止重复 JSON 字段和非有限数字；请求体上限 16 KiB。
 

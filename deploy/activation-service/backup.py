@@ -26,7 +26,8 @@ CONTACT = "wechat-contact.json"
 MANIFEST = "manifest.json"
 FORMAT = "wechatrebot-activation-backup-v1"
 _NAME = re.compile(r"backup-(\d{8}T\d{12}Z)-[0-9a-f]{12}")
-_CONTENT = {DATABASE, PRIVATE_KEY, CONTACT}
+ADMIN_FILES = {"admin-auth.json", "admin-github.json"}
+_CONTENT = {DATABASE, PRIVATE_KEY, CONTACT, *ADMIN_FILES}
 _STAGING_FILES = _CONTENT | {MANIFEST, *(DATABASE + suffix for suffix in ("-journal", "-wal", "-shm"))}
 
 
@@ -246,6 +247,9 @@ def create_backup(data_dir: Path = DEFAULT_DATA_DIR, backup_dir: Path = DEFAULT_
                 _snapshot_database(data / DATABASE, pending / DATABASE)
                 if (data / CONTACT).exists() or (data / CONTACT).is_symlink():
                     _copy_file(data / CONTACT, pending / CONTACT)
+                for admin_name in sorted(ADMIN_FILES):
+                    if (data / admin_name).exists() or (data / admin_name).is_symlink():
+                        _copy_file(data / admin_name, pending / admin_name)
                 names = {child.name for child in pending.iterdir()}
                 if names - _CONTENT or not {DATABASE, PRIVATE_KEY} <= names:
                     raise BackupError("Unexpected SQLite snapshot files")
@@ -274,6 +278,14 @@ def create_backup(data_dir: Path = DEFAULT_DATA_DIR, backup_dir: Path = DEFAULT_
                     completed.rename(pending)
                 _remove_flat(root, pending, _STAGING_FILES)
                 raise
+            status = data / (".backup-status-" + uuid.uuid4().hex)
+            try:
+                with _regular_file(status, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as descriptor:
+                    os.write(descriptor, json.dumps({"completed_at": int(time.time()), "snapshot": name}).encode("utf-8"))
+                    os.fsync(descriptor)
+                os.replace(status, data / "backup-status.json")
+            finally:
+                status.unlink(missing_ok=True)
             return {"path": str(completed), "retained_limit": RETAIN_BACKUPS, "removed_backups": removed}
     finally:
         os.umask(previous_umask)

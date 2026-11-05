@@ -95,7 +95,6 @@
     composing: false,
     availableUpdate: null,
     mandatoryUpdate: false,
-    mandatoryPromptVersion: "",
     updateChecking: false,
     updateCheckTimer: 0,
     settingsSection: "model",

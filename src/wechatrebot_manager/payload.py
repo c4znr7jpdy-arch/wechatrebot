@@ -677,7 +677,8 @@ def install_payload(
         if isinstance(release_build, int) and not isinstance(release_build, bool) and release_build >= 0:
             installed_manifest["release_build"] = release_build
         elif (
-            isinstance(previous_manifest.get("release_build"), int)
+            installed_manifest.get("release_version") == previous_manifest.get("release_version")
+            and isinstance(previous_manifest.get("release_build"), int)
             and not isinstance(previous_manifest.get("release_build"), bool)
             and previous_manifest["release_build"] >= 0
         ):

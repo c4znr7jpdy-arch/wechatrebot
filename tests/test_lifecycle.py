@@ -1,10 +1,12 @@
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from wechatrebot_manager.environment import WechatEnvironment
 from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
+from wechatrebot_manager import lifecycle
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
 
@@ -419,6 +421,36 @@ def test_force_stop_bypasses_wechat_wait_and_returns_to_stopped(tmp_path: Path) 
     assert stopped.can_stop is False
     assert stopped.can_start is True
     assert holder["supervisor"].forced is True
+
+
+@pytest.mark.parametrize("licensed", [False, True])
+def test_update_stop_closes_bridge_even_in_license_paused_state(tmp_path, monkeypatch, licensed):
+    events = []
+    client = SimpleNamespace(
+        snapshot=lambda _account: {"enabled": licensed, "can_run": False, "message": "paused"},
+        pause=lambda: events.append("pause_license"),
+    )
+    controller = LifecycleController(
+        tmp_path, environment_checker=lambda root: _environment(tmp_path),
+        snapshotter=lambda: RuntimeSnapshot(False, False, ""),
+        supervisor_factory=lambda progress: _Supervisor(progress), license_client=client,
+    )
+    supervisor = _Supervisor(lambda *args: None)
+    supervisor.running = [object()]
+    controller._supervisor = supervisor
+    controller.state = LifecycleState.LICENSE_PAUSED if licensed else LifecycleState.RUNNING
+
+    def stop_every_wechat(root):
+        assert supervisor.forced is True
+        assert supervisor.running == []
+        events.append("stop_all_wechat")
+
+    monkeypatch.setattr(lifecycle, "force_stop_update_processes", stop_every_wechat)
+    result = controller.force_stop_for_update()
+    assert result.state == LifecycleState.STOPPED
+    assert result.can_stop is False
+    assert controller._supervisor is None
+    assert events == (["pause_license"] if licensed else []) + ["stop_all_wechat"]
 
 
 def test_closing_personal_wechat_does_not_stop_bot_while_hook_is_alive(

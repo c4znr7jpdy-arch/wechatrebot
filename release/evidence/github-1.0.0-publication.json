@@ -1,0 +1,92 @@
+{
+  "assets": [
+    {
+      "name": "stable-1.0.0.json",
+      "size": 806,
+      "digest": "sha256:61c537a1e77d4ae96f01f319950a9e6490de3eeaf4a3d183c604f7ba23db7706",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/stable-1.0.0.json"
+    },
+    {
+      "name": "WeChatReBot-1.0.0-payload-3eb4e171874e.wrb",
+      "size": 519238653,
+      "digest": "sha256:3eb4e171874ed10105948512ed23d8bb7bbc24a17c243f514145f4d29f202074",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/WeChatReBot-1.0.0-payload-3eb4e171874e.wrb"
+    },
+    {
+      "name": "WeChatReBot-1.0.0-payload-3eb4e171874e.wrb.sha256",
+      "size": 110,
+      "digest": "sha256:c9e5285039d45d2d88550a0014b9cf107893820f6dd20a42c0c11a23ead4bca5",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/WeChatReBot-1.0.0-payload-3eb4e171874e.wrb.sha256"
+    },
+    {
+      "name": "wechatrebot-1.0.0-update.zip",
+      "size": 519814829,
+      "digest": "sha256:263bf6db737d878536372e062ee5328fc0d888421c9ed9037cb8e8e350d0fab8",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/wechatrebot-1.0.0-update.zip"
+    },
+    {
+      "name": "wechatrebot-1.0.0-update.zip.sha256",
+      "size": 96,
+      "digest": "sha256:891580b84266895391ae17c93f1bfa7e4b1d8907ac666b0c584161ad7bc0bb69",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/wechatrebot-1.0.0-update.zip.sha256"
+    },
+    {
+      "name": "WeChatReBot-1.0.0-Windows-x64-online-8314bbe599e2.zip",
+      "size": 37053339,
+      "digest": "sha256:8314bbe599e2f9959fdc1b353ad5f94e8f71df8d1a5c543e394013f0529822bf",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/WeChatReBot-1.0.0-Windows-x64-online-8314bbe599e2.zip"
+    },
+    {
+      "name": "WeChatReBot-1.0.0-Windows-x64-online-8314bbe599e2.zip.sha256",
+      "size": 121,
+      "digest": "sha256:6c2dd7143a1df267ff4141e47f5dee8ab7245dc8f14f03fd56517783d7ed6fae",
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/WeChatReBot-1.0.0-Windows-x64-online-8314bbe599e2.zip.sha256"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": false,
+  "publishedAt": "2026-11-04T09:30:39Z",
+  "tagName": "v1.0.0",
+  "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/tag/v1.0.0",
+  "schema_version": 1,
+  "recorded_at": "2026-11-05T01:16:04.652301+00:00",
+  "evidence_kind": "publication-observation-not-human-acceptance",
+  "source_commit": "979e033811ee73a18201d2e2b9539f93ed7bbcc5",
+  "stable_manifest_url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/stable/stable.json",
+  "stable_manifest": {
+    "schema_version": 1,
+    "product": "wechatrebot-desktop",
+    "channel": "stable",
+    "version": "1.0.0",
+    "minimum_supported_version": "0.7.0",
+    "published_at": "2026-11-04T06:48:24+00:00",
+    "title": "完整载荷更新",
+    "notes": [],
+    "mandatory": false,
+    "package": {
+      "url": "https://github.com/c4znr7jpdy-arch/wechatrebot/releases/download/v1.0.0/wechatrebot-1.0.0-update.zip",
+      "format": "zip",
+      "size": 519814829,
+      "sha256": "263BF6DB737D878536372E062EE5328FC0D888421C9ED9037CB8E8E350D0FAB8",
+      "payload_file_count": 36090,
+      "uncompressed_size": 1240533634
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "key_id": "59E10AD6E829BA64",
+      "value": "q49TrYFFdwYsJRHewFgrn2VeQj0ruKy73mALRTv21IR5XvOHSxT/wr3m4+HO8Go49vBAuVDhCM4zj1W+DINRCw=="
+    }
+  },
+  "stable_signature_verified": true,
+  "public_asset_full_download": {
+    "verified_at": "2026-11-04",
+    "source": "archived Claude task bgqm5ucpd.output, exit 0",
+    "result": "installer ZIP, payload and update ZIP sizes and SHA-256 matched local candidates",
+    "repeated_for_this_record": false
+  },
+  "promotion": {
+    "source": "archived Claude task bu03lo31h.output, exit 0",
+    "result": "stable manifest public readback verified"
+  },
+  "human_acceptance": "not asserted; real WeChat upgrade/rollback and QR image replacement remain pending"
+}

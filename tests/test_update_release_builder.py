@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from wechatrebot_manager.payload import sha256_file, verify_payload
-from wechatrebot_manager.updates import UpdateChannel, extract_update_archive, parse_update_manifest
+from wechatrebot_manager.updates import UpdateChannel, UpdateError, extract_update_archive, parse_update_manifest
 
 
 def _builder():
@@ -190,6 +190,64 @@ def test_update_release_builder_refuses_filtering_incremental_payload(tmp_path, 
         module.main([*arguments, "--include", relative])
     assert error.value.code == 2
     assert not list(output.glob("*.zip"))
+
+
+def _additional_delta(path: Path, base: str = "A" * 64, **fields) -> Path:
+    content = b"print('new plugin content')\n"
+    manifest = {"schema_version": 2, "update_kind": "incremental", "base_fingerprint": base,
+                "files": [{"path": "app/astrbot/data/plugins/fixture_plugin/main.py",
+                           "sha256": hashlib.sha256(content).hexdigest()}], "remove": [], **fields}
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("release-manifest.json", json.dumps(manifest))
+        archive.writestr(manifest["files"][0]["path"], content)
+    return path
+
+
+def test_builder_attaches_and_signs_all_component_candidates_without_changing_default(tmp_path, monkeypatch):
+    module, arguments, output, private, _, relative, content = _archive_release_fixture(
+        tmp_path, monkeypatch, schema=1,
+    )
+    deltas = [_additional_delta(tmp_path / "delta-a.zip"),
+              _additional_delta(tmp_path / "delta-b.zip", "B" * 64)]
+    assert module.main([*arguments, "--incremental-payload", str(deltas[0]),
+                        "--incremental-payload", str(deltas[1])]) == 0
+    manifest = json.loads((output / "stable.json").read_text("utf-8"))
+    public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    channel = UpdateChannel("https://updates.example.test/stable.json", "stable",
+                            hashlib.sha256(public).hexdigest().upper()[:16], public)
+    release = parse_update_manifest(manifest, channel, current_version="0.0.0")
+    assert release.package_sha256 == sha256_file(output / "wechatrebot-0.9.9-update.zip")
+    assert [p["base_fingerprint"] for p in manifest["incremental_packages"]] == ["A" * 64, "B" * 64]
+    for index, entry in enumerate(manifest["incremental_packages"]):
+        package = entry["package"]
+        archive = output / package["url"].rsplit("/", 1)[-1]
+        assert archive.stat().st_size == package["size"] and sha256_file(archive) == package["sha256"]
+        payload = extract_update_archive(archive, tmp_path / f"expanded-{index}")
+        verified = verify_payload(payload)
+        assert verified.manifest["base_fingerprint"] == entry["base_fingerprint"]
+        assert verified.manifest["release_version"] == "0.9.9"
+        assert verified.manifest["release_build"] == 18
+        assert (payload / relative).read_bytes() == content
+    manifest["incremental_packages"][0]["package"]["size"] += 1
+    with pytest.raises(UpdateError, match="签名"):
+        parse_update_manifest(manifest, channel, current_version="0.0.0")
+
+
+@pytest.mark.parametrize("case", ["duplicate", "version", "build", "schema", "limit"])
+def test_attaching_invalid_component_candidates_keeps_the_original_signed_manifest(tmp_path, monkeypatch, case):
+    module, arguments, output, _, _, _, _ = _archive_release_fixture(tmp_path, monkeypatch, schema=1)
+    assert module.main(arguments) == 0
+    manifest_path = output / "stable.json"
+    original = manifest_path.read_bytes()
+    fields = {"release_version": "1.0.0"} if case == "version" else (
+        {"release_build": 19} if case == "build" else ({"schema_version": 1} if case == "schema" else {}))
+    delta = _additional_delta(tmp_path / "delta.zip", **fields)
+    payloads = [delta, delta] if case == "duplicate" else ([delta] * 65 if case == "limit" else [delta])
+    with pytest.raises((ValueError, RuntimeError)):
+        module.attach_incremental_payloads(manifest_path, payloads,
+                                           private_key_path=Path(arguments[arguments.index("--private-key") + 1]))
+    assert manifest_path.read_bytes() == original
+    assert not list(output.glob("*-delta-*.zip"))
 
 
 def test_update_release_builder_can_create_selected_payload_archive(

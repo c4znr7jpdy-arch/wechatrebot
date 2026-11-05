@@ -48,7 +48,7 @@ ssh root@47.242.208.64 wechatrebot-activation-admin issue --owner-ref customer-0
 
 开发机一键入口：双击或在 PowerShell 运行 `scripts/deploy-activation-service.ps1`。入口先按 Dockerfile 实际 `COPY` 的文件集合（`services/activation_service/*.py` 与 `requirements.txt`、复用的 `wechatrebot_manager` 公共协议、二维码规则与原子 JSON 写入模块，加上 Dockerfile 本身）在本地生成确定性 tar（文本按 LF 规范化，与仓库存储及 Linux 检出一致，Windows 检出得到相同标识），取其 SHA-256 前 12 位作为内容标识并打印完整计划；输入 `UPGRADE` 确认后才连接服务器。随后通过 BatchMode SSH 把 tar 上传到 `/opt/wechatrebot-activation/releases/`，在服务器核对大小与 SHA-256 后原子解包为 `releases/<内容标识>`，执行 `docker build -t wechatrebot-activation:<内容标识>`；切换前先 `systemctl start wechatrebot-activation-backup.service` 并核对备份目录出现新快照，把当前 `ACTIVATION_IMAGE` 记录到 `/opt/wechatrebot-activation/previous-image`、环境文件副本保存到 `env-backups/`，再原子改写 `/etc/wechatrebot-activation.env`（只替换镜像行，读回核对）、把 `current` 指向新发布目录并 `systemctl restart wechatrebot-activation`。
 
-切换后入口从公网验证：容器 `running/healthy`；`GET /health` 返回 200 的健康 JSON；`POST /v1/trial-status` 空请求体返回 409 `invalid_data`（旧镜像返回 404 `invalid_endpoint`）；`POST /v1/preview` 以 `{}` 请求返回 401 `invalid_request`；`GET /v1/contact` 的 `data` 与升级前读到的内容一致。任一项失败都会自动改回旧镜像、重启并再次确认 `/health`，再明确报告失败原因；回滚本身失败时提示需要人工介入。`-Plan` 只计算内容标识并打印步骤，不连接服务器；`-Rollback` 显式回滚到记录的上一镜像，并把换下的镜像记为下一次回滚目标。服务器 `ACTIVATION_IMAGE` 已是目标镜像时入口拒绝重复切换。入口不读写数据目录、签名私钥和数据库文件，不覆盖服务器上独立存放的 `deploy/` 备份脚本，也不删除旧镜像或旧发布目录。
+切换后入口从公网验证：容器 `running/healthy`；`GET /health` 返回 200 的健康 JSON；`POST /v1/trial-status` 空请求体返回 409 `invalid_data`（旧镜像返回 404 `invalid_endpoint`）；`POST /v1/preview` 以 `{}` 请求返回 401 `invalid_request`；`GET /v1/contact` 的 `data` 与升级前读到的内容一致。任一项失败都会自动改回旧镜像、重启并再次确认 `/health`，再明确报告失败原因；回滚本身失败时提示需要人工介入。`-Plan` 只计算内容标识并打印步骤，不连接服务器；`-Rollback` 显式回滚到记录的上一镜像，并把换下的镜像记为下一次回滚目标。服务器 `ACTIVATION_IMAGE` 已是目标镜像时入口拒绝重复切换。入口不读取签名私钥或数据库内容，不删除旧镜像或旧发布目录。维护者后台升级会同步 systemd、备份脚本、管理命令和 nginx 支持片段，并保存原内容与权限用于自动/显式回滚。
 
 新版管理器的激活码预览附带 `machine_id`，旧服务会拒绝，因此必须先完成本节升级并通过上述验证，再分发新版客户端。手工升级仍按下一节的原则执行：使用新的内容标识镜像，保留旧镜像和一致的数据库备份，再更新 `/etc/wechatrebot-activation.env` 中的镜像并重启独立服务。
 
@@ -70,3 +70,14 @@ ssh root@47.242.208.64 wechatrebot-activation-admin issue --owner-ref customer-0
 - 切换前后原网站及稳定更新清单 HTTP 状态与正文 SHA-256 一致。
 
 真实微信登录、绑定、到期停用、续期后手动恢复和干净客户安装仍需验收；服务器上线不表示客户收费开关已经启用。
+
+
+## 维护者网页后台（本次新增，部署后启用）
+
+客户端接口保留 8091；后台使用同一进程的独立应用，新增宿主机回环绑定 `127.0.0.1:8092`。公网入口为 `https://ss.xiuxianjyj.xin/wechatrebot-admin/`。初始化、登录、发码、二维码及版本切换操作见 [后台使用说明](../../docs/admin-console.md)。
+
+一键升级入口现在同步本目录的 `wechatrebot-activation.service`、`backup.py`、`admin.sh`，以及 `deploy/nginx/wechatrebot-admin.conf` 和两个新增限流 zone。入口通过 `nginx -T` 唯一定位已启用的独立 `wechatrebot-license.conf` 与 HTTP 级 `wechatrebot-license-limits.conf`，追加后台 include；找不到或存在歧义时停止，先准备明确的独立 include，不自动猜测和修改主站配置。同步前保存原文件内容及权限，失败恢复，nginx 需通过 `nginx -t` 才 reload。
+
+升级后新增检查回环和公网后台登录页：未初始化返回 503 且显示“未初始化”，已经初始化返回 200 且包含密码表单，两种情况都必须带 `Cache-Control: no-store`、`X-Frame-Options: DENY` 和 CSP。初始化前不会显示登录表单。正式部署与真实手机动态码登录仍需现场验收。
+
+备份增加 `admin-auth.json` 和 `admin-github.json`，不备份会话数据库；成功后在数据目录写 `backup-status.json` 供概览显示时间。业务容器仍不挂载备份目录。GitHub 令牌不在网页回显，服务端不需要更新签名私钥。后台所需 `qrcode` 和 `packaging` 仅增加到服务器依赖和测试依赖，不改变客户运行时载荷。

@@ -322,7 +322,7 @@ class LicenseStore:
     def issue_code(
         self, *, owner_ref: str, reference: str, now: int, plan: str | None = None,
         mode: str = "new", license_id: str = "", target_device: str = "",
-        reset_account: bool = False, redeem_by: int | None = None,
+        reset_account: bool = False, redeem_by: int | None = None, actor: str = "admin",
     ) -> dict:
         owner_hash = _owner(owner_ref)
         reference_hash = _hash(_text(reference))
@@ -356,7 +356,7 @@ class LicenseStore:
                  target["revision"] if mode == "migration" else None,
                  int(reset_account), now, redeem_by),
             )
-            self._audit(db, now, "admin", "issue_code", code_id, mode=mode, plan=plan,
+            self._audit(db, now, actor, "issue_code", code_id, mode=mode, plan=plan,
                         license_id=license_id, target_device=target_device)
         return {"code_id": code_id, "code": code, "plan": plan, "mode": mode,
                 "license_id": license_id, "redeem_by": redeem_by}
@@ -580,7 +580,7 @@ class LicenseStore:
         cls._audit(db, now, device, "bind", record["id"])
         return dict(cls._license(db, record["id"]))
 
-    def revoke(self, *, now: int, license_id: str = "", code_id: str = "") -> dict:
+    def revoke(self, *, now: int, license_id: str = "", code_id: str = "", actor: str = "admin") -> dict:
         if bool(license_id) == bool(code_id):
             raise LicenseError("invalid_data", "请选择一个授权编号或未兑换的码编号。")
         with self.connection(write=True) as db:
@@ -588,14 +588,14 @@ class LicenseStore:
                 record = self._license(db, license_id)
                 if record["status"] != "revoked":
                     db.execute("UPDATE licenses SET status='revoked',revision=revision+1 WHERE id=?", (license_id,))
-                    self._audit(db, now, "admin", "revoke_license", license_id)
+                    self._audit(db, now, actor, "revoke_license", license_id)
             else:
                 code = db.execute("SELECT * FROM codes WHERE id=?", (code_id,)).fetchone()
                 if code is None or code["redeemed_at"] is not None:
                     raise LicenseError("code_unavailable", "码不存在或已兑换；已兑换权益请按授权编号停用。")
                 if code["revoked_at"] is None:
                     db.execute("UPDATE codes SET revoked_at=? WHERE id=?", (now, code_id))
-                    self._audit(db, now, "admin", "revoke_code", code_id)
+                    self._audit(db, now, actor, "revoke_code", code_id)
         return {"license_id": license_id, "code_id": code_id, "status": "revoked"}
 
     def inspect(self, *, license_id: str = "", owner_ref: str = "") -> dict:
@@ -618,6 +618,15 @@ class LicenseStore:
                 "FROM codes WHERE owner_hash=? ORDER BY issued_at DESC", (owner_hash,),
             )]
             return {"licenses": licenses, "codes": codes}
+
+    def admin_counts(self) -> dict[str, int]:
+        with self.connection() as db:
+            return {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+                    for name in ("licenses", "codes", "trials")}
+
+    def admin_audit(self, now: int, event: str, object_id: str = "", **details) -> None:
+        with self.connection(write=True) as db:
+            self._audit(db, now, "admin-web", event, object_id, **details)
 
 
 def lease_payload(record: dict, request_nonce: str, now: int) -> dict:

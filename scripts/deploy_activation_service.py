@@ -1,13 +1,13 @@
 """One-click upgrade of the activation service on the licensing server.
 
-The entry rebuilds, on the developer machine, exactly the file set the service
-Dockerfile copies into the image and derives a 12-hex content identity from a
-deterministic tar of those files. It uploads the tar with BatchMode SSH, unpacks
+The entry packages the service Dockerfile inputs and versioned host support
+files, deriving a 12-hex content identity from their deterministic tar. It uploads
+the tar with BatchMode SSH, unpacks
 it under ``/opt/wechatrebot-activation/releases/<identity>``, builds the image on
 the server, triggers the existing backup unit, records the current image as the
 rollback target, atomically rewrites ``/etc/wechatrebot-activation.env`` and the
-``current`` link, restarts the systemd unit and finally proves the result from
-the public entry. Any failed check rolls back to the recorded image and verifies
+``current`` link, updates the host support files, restarts the systemd unit and
+proves the public and admin entries. Failed checks restore the image and support files and verify
 ``/health`` again. ``--plan`` only prints the steps; ``--rollback`` restores the
 recorded previous image. The entry never reads or writes the data directory,
 the signing private key or the database.
@@ -29,6 +29,7 @@ import tarfile
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -38,6 +39,7 @@ sys.path.insert(0, str(ROOT))
 
 from wechatrebot_manager.licensing.config import PACKAGED_CHANNEL, _read_channel  # noqa: E402
 from wechatrebot_manager.licensing.contact import CONTACT_ENDPOINT  # noqa: E402
+from activation_deploy_support import SUPPORT_FILES  # noqa: E402
 
 DEFAULT_HOST = "root@47.242.208.64"
 DEFAULT_REMOTE_ROOT = "/opt/wechatrebot-activation"
@@ -170,14 +172,14 @@ class Payload:
 
 
 def build_payload(root: Path = ROOT, dockerfile: str = DOCKERFILE) -> Payload:
-    """Deterministic tar of the Dockerfile and every file it copies; identity = sha256[:12].
+    """Deterministic tar of image inputs and host support files; identity = sha256[:12].
 
     Text is normalized to LF, the form the repository stores and a Linux checkout
     produces, so a Windows CRLF checkout yields the same identity and the same image.
     """
     root = Path(root)
     text = (root / dockerfile).read_text("utf-8")
-    files = sorted(set(resolve_sources(root, copy_sources(text))) | {dockerfile})
+    files = sorted(set(resolve_sources(root, copy_sources(text))) | {dockerfile} | set(SUPPORT_FILES))
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
         for relative in files:
@@ -256,6 +258,41 @@ class Settings:
         return f"{self.remote_root}/previous-image"
 
     @property
+    def previous_support_file(self) -> str:
+        return f"{self.remote_root}/previous-support"
+
+    @property
+    def support_snapshot(self) -> str:
+        return f"{self.remote_root}/support-backups/{self.nonce}"
+
+    def read_support_command(self) -> list[str]:
+        return self.ssh(f"if [ -f {_q(self.previous_support_file)} ]; then cat {_q(self.previous_support_file)}; fi")
+
+    def support_command(self, operation: str, snapshot: str | None = None, *, release: str | None = None,
+                        previous: str | None = None, public: bool = False) -> list[str]:
+        snapshot = snapshot or self.support_snapshot
+        safe_remote_path(snapshot, "部署文件快照")
+        if str(PurePosixPath(snapshot).parent) != f"{self.remote_root}/support-backups":
+            raise ValueError("部署文件快照不在预期目录")
+        if previous:
+            safe_remote_path(previous, "部署文件快照")
+            if str(PurePosixPath(previous).parent) != f"{self.remote_root}/support-backups":
+                raise ValueError("部署文件快照不在预期目录")
+        helper = f"{release}/scripts/activation_deploy_support.py" if release else f"{previous or snapshot}/tool.py"
+        arguments = ["python3", helper, operation, "--root", self.remote_root, "--snapshot", snapshot]
+        if release:
+            arguments += ["--release", release, "--env-file", self.env_file, "--container", self.container]
+        if previous:
+            arguments += ["--previous", previous]
+        if public:
+            origin = urllib.parse.urlsplit(self.service_url)
+            arguments += ["--url", f"{origin.scheme}://{origin.netloc}/wechatrebot-admin/login"]
+        return self.ssh(" ".join(_q(value) for value in arguments))
+
+    def reload_nginx_command(self) -> list[str]:
+        return self.ssh("set -eu; nginx -t; systemctl reload nginx")
+
+    @property
     def env_backup_dir(self) -> str:
         return f"{self.remote_root}/env-backups"
 
@@ -299,10 +336,13 @@ class Settings:
                         f"test \"$(systemctl show -p Result --value {BACKUP_UNIT})\" = success; "
                         f"ls -1 {_q(self.backup_dir)}")
 
-    def record_command(self, previous_image: str) -> list[str]:
+    def record_command(self, previous_image: str, support_snapshot: str = "") -> list[str]:
         record, temporary = self.previous_image_file, f"{self.previous_image_file}.{self.nonce}"
+        support_temporary = f"{self.previous_support_file}.{self.nonce}"
         return self.ssh(f"set -eu; mkdir -p {_q(self.env_backup_dir)}; chmod 0700 {_q(self.env_backup_dir)}; "
                         f"cp -p {_q(self.env_file)} {_q(self.env_backup_file)}; chmod 0600 {_q(self.env_backup_file)}; "
+                        f"printf '%s\\n' {_q(support_snapshot)} > {_q(support_temporary)}; "
+                        f"mv -f {_q(support_temporary)} {_q(self.previous_support_file)}; "
                         f"printf '%s\\n' {_q(previous_image)} > {_q(temporary)}; mv -f {_q(temporary)} {_q(record)}")
 
     def install_env_command(self) -> list[str]:
@@ -498,6 +538,7 @@ def install_env(settings: Settings, run, text: str) -> None:
 def verify_upgrade(plan: Plan, run, probe, sleep, attempts: int, delay: float, baseline) -> str:
     wait_for_container(plan, run, sleep, attempts, delay)
     wait_for_health(plan, probe, sleep, attempts, delay)
+    wait_for_admin(plan, run, sleep, attempts, delay)
     observed = {}
     for label, method, path, body, status, code in UPGRADE_PROBES:
         result = probe(method, plan.url(path), body)
@@ -509,11 +550,34 @@ def verify_upgrade(plan: Plan, run, probe, sleep, attempts: int, delay: float, b
     return observed["trial-status"]
 
 
-def rollback_to(settings: Settings, run, probe, sleep, attempts: int, delay: float, image: str, env_text: str) -> None:
+def wait_for_admin(settings: Settings, run, sleep, attempts: int, delay: float, *, snapshot: str | None = None,
+                   restored: bool = False) -> None:
+    failure = None
+    operation = "probe-restored" if restored else "probe"
+    for attempt in range(attempts):
+        try:
+            run(settings.support_command(operation, snapshot))
+            run(settings.support_command(operation, snapshot, public=True))
+            return
+        except (RuntimeError, OSError, ValueError) as exc:
+            failure = exc
+            if attempt + 1 < attempts:
+                sleep(delay)
+    raise RuntimeError(f"管理端口和公网入口验证失败：{failure}")
+
+
+def rollback_to(settings: Settings, run, probe, sleep, attempts: int, delay: float, image: str, env_text: str,
+                support_snapshot: str = "") -> None:
+    if support_snapshot:
+        run(settings.support_command("restore", support_snapshot))
     install_env(settings, run, rewrite_env(env_text, image))
     run(settings.restart_command(identity_of(image), optional_link=True))
+    if support_snapshot:
+        run(settings.reload_nginx_command())
     wait_for_container(settings, run, sleep, attempts, delay)
     wait_for_health(settings, probe, sleep, attempts, delay)
+    if support_snapshot:
+        wait_for_admin(settings, run, sleep, attempts, delay, snapshot=support_snapshot, restored=True)
 
 
 # ---------------------------------------------------------------- flows
@@ -539,22 +603,25 @@ def execute(plan: Plan, run=run_command, probe=probe_http, log=print, sleep=time
     run(plan.unpack_command())
     log("[4/9] 在服务器构建镜像")
     run(plan.build_command())
-    log("[5/9] 切换前触发现有备份")
-    snapshot = run_backup(plan, run)
-    log(f"      新快照 {snapshot}")
-    log("[6/9] 记录回滚目标")
-    run(plan.record_command(previous))
-    log("[7/9] 原子改写镜像配置、更新 current 并重启")
+    log("[5/9] 定位 nginx 配置并保存部署文件恢复点")
+    run(plan.support_command("prepare", release=plan.release_dir))
+    log("[6/9] 记录镜像和部署文件回滚目标")
+    run(plan.record_command(previous, plan.support_snapshot))
+    log("[7/9] 同步部署文件、备份数据并切换镜像")
     try:
+        run(plan.support_command("apply"))
+        snapshot = run_backup(plan, run)
+        log(f"      新快照 {snapshot}")
         install_env(plan, run, rewrite_env(env_text, plan.image))
         run(plan.restart_command(plan.identity))
+        run(plan.reload_nginx_command())
         log("[8/9] 验证容器与公网接口")
         after = verify_upgrade(plan, run, probe, sleep, attempts, delay, baseline)
     except (RuntimeError, OSError, ValueError) as failure:
         log(f"      验证失败：{failure}")
         log(f"[9/9] 自动回滚到 {previous}")
         try:
-            rollback_to(plan, run, probe, sleep, attempts, delay, previous, env_text)
+            rollback_to(plan, run, probe, sleep, attempts, delay, previous, env_text, plan.support_snapshot)
         except (RuntimeError, OSError, ValueError) as rollback_failure:
             raise RuntimeError(
                 f"升级验证失败：{failure}\n回滚失败：{rollback_failure}\n"
@@ -580,12 +647,24 @@ def execute_rollback(settings: Settings, run=run_command, probe=probe_http, log=
     if current == target:
         log(f"      当前已是记录的镜像 {target}，无需回滚")
         return {"ok": True, "changed": False, "image": target, "replaced_image": target, "verified": False}
+    previous_support = run(settings.read_support_command()).strip()
+    if previous_support:
+        run(settings.support_command("capture", previous=previous_support))
     log(f"[3/5] 记录当前镜像 {current} 作为下一次回滚目标")
-    run(settings.record_command(current))
+    run(settings.record_command(current, settings.support_snapshot if previous_support else ""))
     log(f"[4/5] 切换到 {target} 并重启")
-    rollback_to(settings, run, probe, sleep, attempts, delay, target, env_text)
-    log("[5/5] 核对公网联系资料接口")
-    contact_data(*probe("GET", settings.contact_url))
+    try:
+        rollback_to(settings, run, probe, sleep, attempts, delay, target, env_text, previous_support)
+        log("[5/5] 核对公网联系资料接口")
+        contact_data(*probe("GET", settings.contact_url))
+    except (RuntimeError, OSError, ValueError) as failure:
+        try:
+            rollback_to(settings, run, probe, sleep, attempts, delay, current, env_text,
+                        settings.support_snapshot if previous_support else "")
+            run(settings.record_command(target, previous_support))
+        except (RuntimeError, OSError, ValueError) as recovery_failure:
+            raise RuntimeError(f"回滚验证失败：{failure}\n恢复当前版本失败：{recovery_failure}\n需要人工介入") from failure
+        raise RuntimeError(f"回滚验证失败：{failure}\n已恢复操作前镜像 {current} 和部署文件") from failure
     return {"ok": True, "changed": True, "image": target, "replaced_image": current, "verified": True}
 
 
@@ -604,15 +683,18 @@ def describe(plan: Plan) -> str:
     lines = [
         f"内容标识：{plan.identity}（tar SHA-256 {plan.payload.sha256[:16]}…，{plan.payload.size} 字节）",
         f"目标镜像：{plan.image}",
-        "镜像输入（与 Dockerfile COPY 一致）：",
+        "发布输入（Dockerfile COPY 与部署支持文件）：",
         *(f"  - {relative}" for relative in plan.payload.files),
         f"服务器：{plan.host}，发布目录 {plan.release_dir}，环境文件 {plan.env_file}",
         f"备份目录：{plan.backup_dir}，回滚记录 {plan.previous_image_file}",
+        f"部署文件恢复点：{plan.support_snapshot}；保留旧内容与权限，失败时恢复。",
         f"公网验证：{plan.service_url}",
         "切换后验证：容器 running/healthy；GET /health 200；"
         "POST /v1/trial-status（空请求体）409 invalid_data，旧版本为 404 invalid_endpoint；"
         "POST /v1/preview（{}）401 invalid_request；GET /v1/contact 的 data 与升级前一致。",
-        "任一验证失败自动回滚到记录的上一镜像并重新验证 /health；显式回滚使用 --rollback。",
+        "管理端口验证：127.0.0.1:8092/login 与公网 /wechatrebot-admin/login；未初始化 503 或登录页 200，须含安全响应头。",
+        "通过 nginx -T 定位已启用的独立授权 snippet 与限流文件；不能唯一定位时在切换前停止。",
+        "任一验证失败自动恢复部署文件与上一镜像并重新验证 /health；显式回滚使用 --rollback。",
         "将执行：",
     ]
     lines += _steps([
@@ -621,12 +703,17 @@ def describe(plan: Plan) -> str:
         ("上传发布 tar", plan.upload_command(f"<本地临时目录>/activation-{plan.identity}.tar")),
         ("校验摘要并原子解包到发布目录", plan.unpack_command()),
         ("在服务器构建镜像", plan.build_command()),
-        ("切换前触发现有备份并核对新快照", plan.backup_command()),
-        ("记录回滚目标并保存环境文件副本", plan.record_command("<上一镜像>")),
+        ("保存部署文件旧版本并准备新版本", plan.support_command("prepare", release=plan.release_dir)),
+        ("记录回滚目标并保存环境文件副本", plan.record_command("<上一镜像>", plan.support_snapshot)),
+        ("原子同步支持文件，验证 nginx 并重载 systemd 配置", plan.support_command("apply")),
+        ("切换前触发备份并核对新快照（包含管理凭据）", plan.backup_command()),
         ("上传改写后的环境文件", plan.scp("<本地临时目录>/wechatrebot-activation.env", plan.env_upload_path)),
         ("原子替换环境文件并读回核对", plan.install_env_command()),
         ("更新 current 链接并重启服务", plan.restart_command(plan.identity)),
+        ("验证并重载 nginx", plan.reload_nginx_command()),
         ("等待容器 running/healthy", plan.container_status_command()),
+        ("验证回环管理端口", plan.support_command("probe")),
+        ("验证公网管理入口", plan.support_command("probe", public=True)),
         ("公网验证 /health、/v1/trial-status、/v1/preview、/v1/contact", None),
     ])
     return "\n".join(lines)
@@ -635,13 +722,16 @@ def describe(plan: Plan) -> str:
 def describe_rollback(settings: Settings) -> str:
     lines = [
         f"服务器：{settings.host}，环境文件 {settings.env_file}，回滚记录 {settings.previous_image_file}",
+        f"部署文件回滚记录：{settings.previous_support_file}；有记录时同时恢复配置与脚本。",
         f"公网验证：{settings.service_url}",
         "回滚后验证：容器 running/healthy；GET /health 200；GET /v1/contact 200。",
+        "恢复点原本含 8092 管理端口时同时验证管理回环与公网入口；原始旧版没有后台时跳过该项。",
         "将执行：",
     ]
     lines += _steps([
         ("读取记录的回滚目标", settings.read_record_command()),
         ("读取服务器当前镜像", settings.read_env_command()),
+        ("读取部署文件恢复点并保存当前文件", settings.read_support_command()),
         ("记录当前镜像作为下一次回滚目标", settings.record_command("<当前镜像>")),
         ("上传改写后的环境文件", settings.scp("<本地临时目录>/wechatrebot-activation.env", settings.env_upload_path)),
         ("原子替换环境文件并读回核对", settings.install_env_command()),
