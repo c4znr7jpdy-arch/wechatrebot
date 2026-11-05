@@ -31,7 +31,8 @@ class UpdateApiMixin:
     @staticmethod
     def _release_id(release: UpdateRelease) -> str:
         identity = (release.version, release.build, release.package_url,
-                    release.package_sha256, release.package_size)
+                    release.package_sha256, release.package_size,
+                    release.package_kind, release.base_fingerprint)
         return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
 
     def _load_update_channel(self) -> UpdateChannel | None:
@@ -64,6 +65,7 @@ class UpdateApiMixin:
             "notes": list(release.notes),
             "published_at": release.published_at,
             "package_size": release.package_size,
+            "package_kind": release.package_kind,
             "mandatory": release.mandatory,
             "build": release.build,
             "minimum_supported_version": release.minimum_supported_version,
@@ -99,6 +101,7 @@ class UpdateApiMixin:
                 channel,
                 current_version=__version__,
                 current_build=getattr(self, "_build_number", 0),
+                install_root=self._install_root,
             )
             previous = self._available_update
             if (previous is not None and (release is None

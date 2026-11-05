@@ -1351,12 +1351,21 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
         "notes": ["聊天记录更易查找"],
         "published_at": "2026-09-03T00:00:00Z",
         "package_size": 1234,
+        "package_kind": "default",
         "mandatory": False,
         "build": None,
         "minimum_supported_version": "",
     }
     assert "package_url" not in result["data"]["release"]
     assert "package_sha256" not in result["data"]["release"]
+
+
+def test_check_update_provides_installation_root_for_incremental_selection(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    checked = []
+    monkeypatch.setattr(update_api, "check_for_update", lambda *_args, **kwargs: checked.append(kwargs))
+    assert api.check_update()["ok"] is True
+    assert checked[0]["install_root"] == api._install_root
 
 
 def test_unavailable_mandatory_update_keeps_robot_start_blocked(
@@ -1511,12 +1520,13 @@ def test_update_confirmation_waits_for_robot_action_and_can_retry(monkeypatch, t
     assert _wait_update_worker(api)["state"] == "restarting"
 
 
-@pytest.mark.parametrize("change", ["build", "package_url", "package_sha256", "package_size"])
+@pytest.mark.parametrize("change", ["build", "package_url", "package_sha256", "package_size", "package_kind", "base_fingerprint"])
 def test_update_cache_is_bound_to_exact_release(monkeypatch, tmp_path, change):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
     old_status = _download_ready(api)
     changes = {"build": 2, "package_url": "https://updates.example.test/repacked.zip",
-               "package_sha256": "B" * 64, "package_size": 200}
+               "package_sha256": "B" * 64, "package_size": 200,
+               "package_kind": "incremental", "base_fingerprint": "C" * 64}
     newer = replace(prepared.release, **{change: changes[change]})
     monkeypatch.setattr(update_api, "check_for_update", lambda *_a, **_kw: newer)
     assert api.check_update()["data"]["release"]["release_id"] != old_status["release_id"]

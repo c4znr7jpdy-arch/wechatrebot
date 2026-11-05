@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 from importlib import resources
@@ -30,7 +30,9 @@ from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
     _is_user_config,
+    _valid_digest,
     install_payload,
+    installed_payload_fingerprint,
     payload_relative_paths,
     payload_removed_paths,
     payload_requires_runtime_stop,
@@ -50,6 +52,7 @@ UPDATE_STARTUP_TIMEOUT_SECONDS = 90
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ARCHIVE_FILES = 200_000
 MAX_UNCOMPRESSED_BYTES = 8 * 1024**3
+MAX_INCREMENTAL_PACKAGES = 64
 ProgressCallback = Callable[[str, int, int], None]
 
 
@@ -89,6 +92,8 @@ class UpdateRelease:
     build: int | None = None
     minimum_supported_version: str = ""
     uncompressed_size: int = 0
+    package_kind: str = "default"
+    base_fingerprint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,13 +239,9 @@ def _verify_manifest_signature(
         raise UpdateError("更新清单数字签名校验失败。") from exc
 
 
-def parse_update_manifest(
-    payload: dict[str, object],
-    channel: UpdateChannel,
-    *,
-    current_version: str,
-    current_build: int = 0,
-) -> UpdateRelease | None:
+def _manifest_release_metadata(
+    payload: dict[str, object], channel: UpdateChannel
+) -> dict[str, object]:
     _verify_manifest_signature(payload, channel)
     if (
         payload.get("schema_version") != 1
@@ -253,7 +254,6 @@ def parse_update_manifest(
         raise UpdateError("更新说明格式错误。")
     try:
         latest_text = str(payload["version"]).strip()
-        current = Version(current_version)
         latest = Version(latest_text)
         minimum_text = str(payload.get("minimum_supported_version") or "0.0.0")
         minimum = Version(minimum_text)
@@ -268,58 +268,128 @@ def parse_update_manifest(
         raise UpdateError("更新构建号格式错误。") from exc
     if build is not None and build < 0:
         raise UpdateError("更新构建号无效。")
-    if current < minimum and latest <= current:
-        raise MandatoryUpdateUnavailable("当前版本低于最低支持版本，但更新清单未提供可用的新版本。")
-    if latest < current or (
-        latest == current and (build is None or build <= current_build)
-    ):
-        return None
-
-    package = payload.get("package")
-    if not isinstance(package, dict):
-        raise UpdateError("更新清单缺少安装包信息。")
-    if package.get("format") not in {None, "zip"}:
-        raise UpdateError("更新包格式不受支持。")
-    try:
-        package_size = int(package["size"])
-        package_sha256 = str(package["sha256"]).upper()
-        uncompressed_size = int(package.get("uncompressed_size", 0) or 0)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise UpdateError("更新安装包摘要格式错误。") from exc
-    if not (0 < package_size <= channel.max_package_bytes):
-        raise UpdateError("更新包大小超出允许范围。")
-    if len(package_sha256) != 64 or any(
-        character not in "0123456789ABCDEF" for character in package_sha256
-    ):
-        raise UpdateError("更新包 SHA-256 格式错误。")
-    if not (0 <= uncompressed_size <= MAX_UNCOMPRESSED_BYTES):
-        raise UpdateError("更新包展开体积无效。")
-    if build is not None and build < 0:
-        raise UpdateError("更新构建号无效。")
     if not isinstance(payload.get("mandatory", False), bool):
         raise UpdateError("强制更新标记格式错误。")
     notes: list[str] = []
-    for item in notes_value[:20]:
+    for item in notes_value:
         if not isinstance(item, str):
             raise UpdateError("更新说明格式错误。")
         normalized = item.strip()
         if normalized:
             notes.append(normalized[:500])
-    title = str(payload.get("title") or f"版本 {latest_text}").strip()[:100]
-    published_at = str(payload.get("published_at") or "").strip()[:64]
-    return UpdateRelease(
-        version=latest_text,
-        title=title,
-        notes=tuple(notes),
-        published_at=published_at,
-        package_url=_safe_https_url(package.get("url")),
-        package_size=package_size,
-        package_sha256=package_sha256,
-        mandatory=payload.get("mandatory") is True or current < minimum,
-        build=build,
-        minimum_supported_version=str(minimum),
-        uncompressed_size=uncompressed_size,
-    )
+    return {
+        "version": latest_text,
+        "title": str(payload.get("title") or f"版本 {latest_text}").strip()[:100],
+        "notes": tuple(notes[:20]),
+        "published_at": str(payload.get("published_at") or "").strip()[:64],
+        "mandatory": payload.get("mandatory") is True,
+        "build": build,
+        "minimum_supported_version": str(minimum),
+    }
+
+
+def _manifest_package_fields(
+    package: object, channel: UpdateChannel
+) -> dict[str, object]:
+    if not isinstance(package, dict):
+        raise UpdateError("更新清单缺少安装包信息。")
+    if package.get("format") not in (None, "zip"):
+        raise UpdateError("更新包格式不受支持。")
+    if (
+        type(package.get("size")) is not int
+        or type(package.get("uncompressed_size", 0)) is not int
+    ):
+        raise UpdateError("更新安装包大小格式错误。")
+    try:
+        package_size = int(package["size"])
+        package_sha256 = package["sha256"]
+        uncompressed_size = int(package.get("uncompressed_size", 0))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise UpdateError("更新安装包摘要格式错误。") from exc
+    if not (0 < package_size <= channel.max_package_bytes):
+        raise UpdateError("更新包大小超出允许范围。")
+    if not _valid_digest(package_sha256):
+        raise UpdateError("更新包 SHA-256 格式错误。")
+    if not (0 <= uncompressed_size <= MAX_UNCOMPRESSED_BYTES):
+        raise UpdateError("更新包展开体积无效。")
+    return {
+        "package_url": _safe_https_url(package.get("url")),
+        "package_size": package_size,
+        "package_sha256": package_sha256.upper(),
+        "uncompressed_size": uncompressed_size,
+    }
+
+
+def _manifest_package_releases(
+    payload: dict[str, object], channel: UpdateChannel, metadata: dict[str, object]
+) -> tuple[UpdateRelease, ...]:
+    releases = [UpdateRelease(
+        **metadata, **_manifest_package_fields(payload.get("package"), channel)
+    )]
+    candidates = payload.get("incremental_packages", [])
+    if not isinstance(candidates, list) or len(candidates) > MAX_INCREMENTAL_PACKAGES:
+        raise UpdateError("增量更新包列表格式错误或数量超限。")
+    fingerprints: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or not _valid_digest(candidate.get("base_fingerprint")):
+            raise UpdateError("增量更新包基线指纹格式错误。")
+        fingerprint = candidate["base_fingerprint"].upper()
+        if fingerprint in fingerprints:
+            raise UpdateError("增量更新包包含重复基线指纹。")
+        fingerprints.add(fingerprint)
+        releases.append(UpdateRelease(
+            **metadata, **_manifest_package_fields(candidate.get("package"), channel),
+            package_kind="incremental", base_fingerprint=fingerprint,
+        ))
+    return tuple(releases)
+
+
+def manifest_package_releases(
+    payload: dict[str, object], channel: UpdateChannel
+) -> tuple[UpdateRelease, ...]:
+    """Verify every advertised package, requiring a default package for legacy clients."""
+    metadata = _manifest_release_metadata(payload, channel)
+    return _manifest_package_releases(payload, channel, metadata)
+
+
+def parse_update_manifest(
+    payload: dict[str, object],
+    channel: UpdateChannel,
+    *,
+    current_version: str,
+    current_build: int = 0,
+    current_fingerprint: str = "",
+    install_root: str | Path | None = None,
+) -> UpdateRelease | None:
+    metadata = _manifest_release_metadata(payload, channel)
+    try:
+        current = Version(current_version)
+    except (TypeError, ValueError, InvalidVersion) as exc:
+        raise UpdateError("更新版本格式错误。") from exc
+    latest = Version(metadata["version"])
+    minimum = Version(metadata["minimum_supported_version"])
+    build = metadata["build"]
+    if current < minimum and latest <= current:
+        raise MandatoryUpdateUnavailable("当前版本低于最低支持版本，但更新清单未提供可用的新版本。")
+    if latest < current or (latest == current and (build is None or build <= current_build)):
+        return None
+    releases = _manifest_package_releases(payload, channel, metadata)
+    selected = releases[0]
+    if install_root is not None and len(releases) > 1:
+        try:
+            current_fingerprint = installed_payload_fingerprint(install_root)
+        except (OSError, PayloadError, ValueError):
+            # Without a readable inventory use the default; never scan runtime files.
+            current_fingerprint = ""
+    fingerprint = current_fingerprint.upper() if _valid_digest(current_fingerprint) else ""
+    for candidate in releases[1:]:
+        if (
+            candidate.base_fingerprint == fingerprint
+            and candidate.package_size < selected.package_size
+        ):
+            selected = candidate
+            break
+    return replace(selected, mandatory=selected.mandatory or current < minimum)
 
 
 def _read_limited(response, limit: int) -> bytes:
@@ -341,6 +411,7 @@ def check_for_update(
     *,
     current_version: str,
     current_build: int = 0,
+    install_root: str | Path | None = None,
 ) -> UpdateRelease | None:
     if not channel.enabled:
         return None
@@ -371,6 +442,7 @@ def check_for_update(
         channel,
         current_version=current_version,
         current_build=current_build,
+        install_root=install_root,
     )
 
 
@@ -626,6 +698,20 @@ def _ensure_update_disk_space(
         )
 
 
+def _validate_selected_package(release: UpdateRelease, manifest: dict[str, object]) -> None:
+    if release.package_kind != "incremental":
+        return
+    if (
+        not _valid_digest(release.base_fingerprint)
+        or manifest.get("schema_version") != 2
+        or manifest.get("update_kind") != "incremental"
+        or manifest.get("base_fingerprint", "").upper() != release.base_fingerprint
+        or manifest.get("release_version") != release.version
+        or (release.build is not None and manifest.get("release_build") != release.build)
+    ):
+        raise UpdateFailure("UPD-1003", "增量更新包的类型、基线或版本与签名清单不一致。")
+
+
 def prepare_update(
     release: UpdateRelease,
     channel: UpdateChannel,
@@ -702,6 +788,7 @@ def prepare_update(
             payload_root,
             progress_callback=progress_callback,
         )
+        _validate_selected_package(release, verified.manifest)
         _validate_update_baseline(payload_root, root)
         _ensure_update_disk_space(
             root,
@@ -772,6 +859,7 @@ def create_update_plan(
     if not _path_within(prepared.payload_root, working):
         raise UpdateError("更新计划引用了暂存目录之外的文件。")
     verified = verify_payload(prepared.payload_root)
+    _validate_selected_package(prepared.release, verified.manifest)
     _validate_update_baseline(prepared.payload_root, root)
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
@@ -1662,6 +1750,7 @@ __all__ = [
     "extract_update_archive",
     "launch_update_helper",
     "load_update_channel",
+    "manifest_package_releases",
     "parse_update_manifest",
     "prepare_update",
     "recover_interrupted_update",

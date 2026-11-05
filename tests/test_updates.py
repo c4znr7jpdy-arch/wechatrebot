@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -28,6 +29,7 @@ from wechatrebot_manager.updates import (
     consume_update_result,
     extract_update_archive,
     load_update_channel,
+    manifest_package_releases,
     MandatoryUpdateUnavailable,
     parse_update_manifest,
     prepare_update,
@@ -202,6 +204,114 @@ def test_signed_current_version_can_be_published_without_a_package() -> None:
     assert parse_update_manifest(payload, channel, current_version="0.8.0") is None
     with pytest.raises(UpdateError, match="缺少安装包"):
         parse_update_manifest(payload, channel, current_version="0.7.0")
+
+
+def _incremental_manifest(channel, private, *, size=100, fingerprint="B" * 64):
+    payload = _signed_manifest(channel, private)
+    payload["incremental_packages"] = [{
+        "base_fingerprint": fingerprint,
+        "package": {
+            "url": "https://updates.example.test/delta.zip", "format": "zip",
+            "size": size, "sha256": "C" * 64, "uncompressed_size": 300,
+        },
+    }]
+    return payload
+
+
+def _resign_manifest(payload, channel, private):
+    payload["signature"] = {
+        "algorithm": "ed25519", "key_id": channel.key_id,
+        "value": base64.b64encode(private.sign(canonical_manifest_bytes(payload))).decode("ascii"),
+    }
+    return payload
+
+
+@pytest.mark.parametrize("fingerprint,size,kind", [
+    ("B" * 64, 100, "incremental"), ("b" * 64, 100, "incremental"),
+    ("D" * 64, 100, "default"), ("", 100, "default"),
+    ("invalid", 100, "default"), ("B" * 64, 1234, "default"),
+    ("B" * 64, 2000, "default"),
+])
+def test_signed_manifest_selects_only_a_smaller_matching_delta(fingerprint, size, kind):
+    channel, private = _channel_and_key()
+    payload = _resign_manifest(_incremental_manifest(channel, private, size=size), channel, private)
+    release = parse_update_manifest(payload, channel, current_version="0.7.0", current_fingerprint=fingerprint)
+    assert release.package_kind == kind
+    assert release.base_fingerprint == ("B" * 64 if kind == "incremental" else "")
+    assert release.package_size == (size if kind == "incremental" else 1234)
+
+
+def test_all_package_helper_returns_unselected_candidates_and_requires_signature():
+    channel, private = _channel_and_key()
+    payload = _resign_manifest(_incremental_manifest(channel, private, size=2000), channel, private)
+    releases = manifest_package_releases(payload, channel)
+    assert [item.package_kind for item in releases] == ["default", "incremental"]
+    assert [item.package_size for item in releases] == [1234, 2000]
+    assert all(item.version == "0.8.0" for item in releases)
+    payload["incremental_packages"][0]["package"]["size"] = 100
+    with pytest.raises(UpdateError, match="签名校验失败"):
+        manifest_package_releases(payload, channel)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("url", "http://updates.example.test/delta.zip"),
+    ("url", "https://user:password@updates.example.test/delta.zip"),
+    ("size", 0), ("size", True), ("size", 10.5), ("size", "100"),
+    ("size", 3 * 1024**3), ("sha256", "invalid"), ("sha256", None),
+    ("uncompressed_size", -1), ("uncompressed_size", True),
+    ("uncompressed_size", "300"), ("uncompressed_size", 9 * 1024**3),
+    ("format", "exe"), ("format", []),
+])
+def test_invalid_unmatched_incremental_package_rejects_entire_manifest(field, value):
+    channel, private = _channel_and_key()
+    payload = _incremental_manifest(channel, private)
+    payload["incremental_packages"][0]["package"][field] = value
+    _resign_manifest(payload, channel, private)
+    with pytest.raises(UpdateError):
+        parse_update_manifest(payload, channel, current_version="0.7.0", current_fingerprint="D" * 64)
+    with pytest.raises(UpdateError):
+        manifest_package_releases(payload, channel)
+
+
+@pytest.mark.parametrize("candidates", [
+    None, {}, [None], [{"base_fingerprint": "invalid", "package": {}}],
+    [{"base_fingerprint": "B" * 64}],
+])
+def test_invalid_incremental_package_list_is_rejected(candidates):
+    channel, private = _channel_and_key()
+    payload = _signed_manifest(channel, private)
+    payload["incremental_packages"] = candidates
+    _resign_manifest(payload, channel, private)
+    with pytest.raises(UpdateError):
+        manifest_package_releases(payload, channel)
+
+
+@pytest.mark.parametrize("duplicate", [True, False])
+def test_incremental_package_list_rejects_duplicate_or_excessive_baselines(duplicate):
+    channel, private = _channel_and_key()
+    payload = _incremental_manifest(channel, private)
+    candidate = payload["incremental_packages"][0]
+    payload["incremental_packages"] = ([candidate, {**candidate, "base_fingerprint": "b" * 64}]
+        if duplicate else [{**candidate, "base_fingerprint": f"{index:064X}"} for index in range(65)])
+    _resign_manifest(payload, channel, private)
+    with pytest.raises(UpdateError, match="重复|超限"):
+        manifest_package_releases(payload, channel)
+
+
+def test_matching_incremental_preserves_mandatory_policy():
+    channel, private = _channel_and_key()
+    payload = _incremental_manifest(channel, private)
+    payload["minimum_supported_version"] = "0.7.5"
+    _resign_manifest(payload, channel, private)
+    release = parse_update_manifest(payload, channel, current_version="0.7.0", current_fingerprint="B" * 64)
+    assert release.package_kind == "incremental" and release.mandatory
+
+
+@pytest.mark.parametrize("current_version", [None, 123, "invalid"])
+def test_invalid_current_version_still_raises_update_error(current_version):
+    channel, private = _channel_and_key()
+    with pytest.raises(UpdateError, match="版本格式"):
+        parse_update_manifest(_signed_manifest(channel, private), channel, current_version=current_version)
 
 
 def test_update_archive_must_keep_every_file_under_payload(tmp_path: Path) -> None:
@@ -520,6 +630,81 @@ def _release_for_archive(content: bytes) -> UpdateRelease:
         hashlib.sha256(content).hexdigest().upper(),
         False,
     )
+
+
+@pytest.mark.parametrize("inventory", ["valid", "missing", "invalid"])
+def test_remote_check_selects_from_inventory_without_hashing_runtime(monkeypatch, tmp_path, inventory):
+    channel, private = _channel_and_key()
+    install = tmp_path / "install"
+    (install / "config").mkdir(parents=True)
+    manifest = install / "config/installed-payload.json"
+    if inventory == "valid":
+        # The inventoried runtime file need not exist: selection reads only the inventory.
+        manifest.write_text(json.dumps({"schema_version": 1, "files": [
+            {"path": "runtime/python/python.exe", "sha256": "A" * 64},
+        ]}), encoding="utf-8")
+        fingerprint = installed_payload_fingerprint(install)
+    else:
+        fingerprint = "B" * 64
+        if inventory == "invalid":
+            manifest.write_text("{invalid", encoding="utf-8")
+    payload = _resign_manifest(_incremental_manifest(channel, private, fingerprint=fingerprint), channel, private)
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", lambda *_a, **_kw: _DownloadResponse(json.dumps(payload).encode()))
+    def forbidden_hash(_path):
+        raise AssertionError("update selection must not hash runtime files")
+    monkeypatch.setattr(updates_module, "sha256_file", forbidden_hash)
+    release = updates_module.check_for_update(channel, current_version="0.7.0", install_root=install)
+    assert release.package_kind == ("incremental" if inventory == "valid" else "default")
+
+
+def test_bad_signature_is_rejected_before_reading_local_inventory(monkeypatch, tmp_path):
+    channel, private = _channel_and_key()
+    payload = _incremental_manifest(channel, private)
+    def forbidden_inventory(_root):
+        raise AssertionError("untrusted metadata must not consult the inventory")
+    monkeypatch.setattr(updates_module, "installed_payload_fingerprint", forbidden_inventory)
+    with pytest.raises(UpdateError, match="签名校验失败"):
+        parse_update_manifest(payload, channel, current_version="0.7.0", install_root=tmp_path)
+
+
+@pytest.mark.parametrize("change", [None, "schema", "base", "version", "build"])
+def test_selected_incremental_package_must_match_signed_baseline_and_release(monkeypatch, tmp_path, change):
+    install, prepared = _ready_incremental_update(tmp_path)
+    payload_manifest = prepared.payload_root / "release-manifest.json"
+    manifest = json.loads(payload_manifest.read_text(encoding="utf-8"))
+    fingerprint = manifest["base_fingerprint"]
+    manifest.update(release_version="0.8.0", release_build=18)
+    if change == "schema":
+        manifest = {"schema_version": 1, "release_version": "0.8.0", "files": manifest["files"]}
+    elif change == "base":
+        manifest["base_fingerprint"] = "A" * 64
+    elif change == "version":
+        manifest["release_version"] = "0.7.9"
+    elif change == "build":
+        manifest["release_build"] = 17
+    payload_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for source in prepared.payload_root.rglob("*"):
+            if source.is_file():
+                archive.write(source, "payload/" + source.relative_to(prepared.payload_root).as_posix())
+    content = buffer.getvalue()
+    release = replace(_release_for_archive(content), package_kind="incremental", base_fingerprint=fingerprint, build=18)
+    channel, _private = _channel_and_key()
+    requests = []
+    def download(request, **_kwargs):
+        requests.append(request.full_url)
+        return _DownloadResponse(content)
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", download)
+    if change is None:
+        actual = prepare_update(release, channel, install)
+        assert actual.release == release
+    else:
+        with pytest.raises(UpdateFailure) as error:
+            prepare_update(release, channel, install)
+        assert error.value.definition.code == "UPD-1003"
+        assert "签名清单" in error.value.detail
+    assert requests == [release.package_url]
 
 
 def test_download_hash_mismatch_is_rejected_and_partial_directory_removed(
