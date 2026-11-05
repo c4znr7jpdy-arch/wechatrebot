@@ -260,7 +260,7 @@ def test_installation_probe_requires_confirmed_process_absence(
     assert enumerations == [{"executable_names": frozenset({"python.exe"}), "strict": True}]
     if expected:
         assert {(host, port) for host, port, _ in ports} == {("127.0.0.1", 6200), ("127.0.0.1", 5000)}
-        assert all(kwargs == {"strict": True} for _, _, kwargs in ports)
+        assert all(kwargs == {"timeout_seconds": 3, "strict": True} for _, _, kwargs in ports)
     else:
         assert ports == []
 

@@ -643,6 +643,30 @@ class _DownloadResponse(io.BytesIO):
         self.close()
 
 
+def test_client_update_check_does_not_reuse_cached_stable_redirect(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    channel, private = _channel_and_key()
+    channel = replace(channel, manifest_url="https://github.com/o/r/releases/download/stable/stable.json")
+    current = _signed_manifest(channel, private)
+    old = dict(current, version="0.7.0")
+    old["signature"] = dict(current["signature"], value=base64.b64encode(
+        private.sign(canonical_manifest_bytes(old))
+    ).decode("ascii"))
+    seen = []
+
+    def cached_edge(request, **kwargs):
+        seen.append(request.full_url)
+        fresh = bool(parse_qs(urlsplit(request.full_url).query).get("_wrb_check"))
+        return _DownloadResponse(json.dumps(current if fresh else old).encode())
+
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", cached_edge)
+    for _ in range(2):
+        release = updates_module.check_for_update(channel, current_version="0.7.0")
+        assert release is not None and release.version == "0.8.0"
+    assert seen[0] != seen[1]
+
+
 def _release_for_archive(content: bytes) -> UpdateRelease:
     return UpdateRelease(
         "0.8.0",
