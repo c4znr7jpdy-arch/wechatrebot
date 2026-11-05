@@ -28,7 +28,7 @@
       paused: ["授权有效", "已授权", "success"],
       offline: ["授权有效，等待联网验证", "离线可用", "warning"],
       expired: ["授权已到期", "已到期", "warning"],
-      revoked: ["授权已撤销", "已暂停", "danger"],
+      revoked: ["授权已撤销", "已撤销", "danger"],
       suspended: ["授权已暂停", "已暂停", "warning"],
       offline_expired: ["请联网重新验证授权", "待验证", "warning"],
       lease_expired: ["请联网重新验证授权", "待验证", "warning"],
