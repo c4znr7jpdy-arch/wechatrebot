@@ -31,12 +31,14 @@ for search_root in (SCRIPTS_ROOT, SOURCE_ROOT):
 import publish_full_update as full
 from source_inputs import verify_source_inputs
 import publish_manager_update as publisher
+from build_update_release import attach_incremental_payloads
 from wechatrebot_manager.payload import sha256_file
 from wechatrebot_manager.updates import (
     UpdateChannel,
     UpdateError,
     canonical_manifest_bytes,
     load_update_channel,
+    manifest_package_releases,
     parse_update_manifest,
     prepare_update,
 )
@@ -296,9 +298,9 @@ def rollback_stable(repo: str, version: str, *, channel: UpdateChannel, work_roo
     downloaded = download_asset(repo, tag, name, work_root)
     manifest = _load_manifest(downloaded)
     _verify_signed_manifest(manifest, channel, version)
-    parsed = parse_update_manifest(manifest, channel, current_version="0.0.0")
-    verify_public_asset(parsed.package_url, expected_size=parsed.package_size,
-                        expected_sha256=parsed.package_sha256, timeout=channel.request_timeout_seconds)
+    for package in manifest_package_releases(manifest, channel):
+        verify_public_asset(package.package_url, expected_size=package.package_size,
+                            expected_sha256=package.package_sha256, timeout=channel.request_timeout_seconds)
     stable_copy = work_root / STABLE_MANIFEST_NAME
     shutil.copyfile(downloaded, stable_copy)
     upload_assets(repo, STABLE_TAG, [stable_copy])
@@ -364,9 +366,34 @@ def _verify_release_target(repo: str, tag: str, target: str, state: dict | None 
         raise ValueError(f"Release 标签/目标提交与原候选不一致：{tag}；拒绝发布")
 
 
+def _verify_web_candidate(marker: Path, *, assets: list[Path], repo: str,
+                          version: str, target: str, channel: UpdateChannel) -> None:
+    """Permit web-to-local resume only for the same signed package set and commit."""
+    manifest_path = next((p for p in assets if p.name == f"stable-{version}.json"), None)
+    if manifest_path is None or marker.stat().st_size > 1024 * 1024:
+        raise ValueError("网页候选缺少本地签名清单或标记文件过大")
+    manifest = _load_manifest(manifest_path)
+    _verify_signed_manifest(manifest, channel, version)
+    packages = {}
+    prefix = asset_prefix(repo, release_tag(version)) + "/"
+    for package in manifest_package_releases(manifest, channel):
+        name = package.package_url.removeprefix(prefix)
+        if not package.package_url.startswith(prefix) or not re.fullmatch(r"[A-Za-z0-9_.-]+\.zip", name):
+            raise ValueError("网页候选包地址不属于该版本 Release")
+        if name in packages and packages[name] != package:
+            raise ValueError("网页候选包文件名冲突")
+        packages[name] = package
+    expected = {"schema_version": 1, "version": version, "repo": repo, "target": target,
+                "manifest_sha256": sha256_file(manifest_path).lower(), "packages": [
+                    {"name": name, "size": package.package_size, "sha256": package.package_sha256.lower()}
+                    for name, package in sorted(packages.items())]}
+    if _load_manifest(marker) != expected:
+        raise ValueError("网页候选与本地签名包或目标提交不同，拒绝混合恢复")
+
+
 def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], version: str,
                     assets: list[Path], work_root: Path, timeout: int, resume: bool = False,
-                    target: str | None = None) -> None:
+                    target: str | None = None, channel: UpdateChannel | None = None) -> None:
     exists = release_exists(repo, tag)
     if exists and not resume:
         raise ValueError(f"Release {tag} 已存在；请用 --resume --output 原产物目录恢复同一候选")
@@ -386,6 +413,13 @@ def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], 
         _verify_release_target(repo, tag, target or _git_head(), remote)
         remote_assets = {a["name"]: a for a in remote.get("assets", [])}
         unexpected = set(remote_assets) - {p.name for p in all_assets}
+        if "publish-candidate.json" in unexpected:
+            if remote_assets["publish-candidate.json"].get("size", 1024 * 1024 + 1) > 1024 * 1024:
+                raise ValueError("网页候选标记文件过大")
+            marker = download_asset(repo, tag, "publish-candidate.json", work_root / "remote-check")
+            _verify_web_candidate(marker, assets=unique, repo=repo, version=version,
+                                  target=target or _git_head(), channel=channel or load_update_channel())
+            unexpected.remove("publish-candidate.json")
         if unexpected:
             raise ValueError(f"远端 Release 含本候选之外的资产，拒绝混合发布：{', '.join(sorted(unexpected))}")
         for path in all_assets:
@@ -449,8 +483,13 @@ def _load_candidate(output: Path, *, repo: str, version: str, channel: UpdateCha
     parsed = parse_update_manifest(manifest, channel, current_version="0.0.0")
     assets = [verified_path(item) for item in candidate["assets"]]
     expected_url = asset_prefix(repo, release_tag(version)) + "/"
-    if not parsed.package_url.startswith(expected_url):
-        raise ValueError("恢复候选更新地址不属于该版本 Release")
+    for package in manifest_package_releases(manifest, channel):
+        if not package.package_url.startswith(expected_url):
+            raise ValueError("恢复候选更新地址不属于该版本 Release")
+        asset = next((p for p in assets if asset_url(repo, release_tag(version), p.name) == package.package_url), None)
+        if (asset is None or asset.stat().st_size != package.package_size
+                or sha256_file(asset) != package.package_sha256):
+            raise ValueError("恢复候选更新包与签名清单不一致")
     archive = next((p for p in assets if asset_url(repo, release_tag(version), p.name) == parsed.package_url), None)
     if (archive is None or archive.stat().st_size != parsed.package_size
             or sha256_file(archive) != parsed.package_sha256):
@@ -535,6 +574,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--manager-build", type=Path, help="--manager-only 时复用已完成的管理器构建目录")
     parser.add_argument("--manager-only", action="store_true", help="只发布管理器增量包")
+    parser.add_argument("--incremental-payload", type=Path, action="append", default=[],
+                        help="附加按安装基线生成的组件差异载荷；可重复，每个基线一份")
     parser.add_argument("--rollback", metavar="VERSION", help="把 stable 清单回滚到该版本的签名副本")
     parser.add_argument("--skip-tests", action="store_true")
     parser.add_argument("--skip-remote-smoke", action="store_true")
@@ -584,6 +625,9 @@ def _build_candidate(args, *, version: str, channel: UpdateChannel, live_version
         if customer.payload_path is not None:
             assets.append(customer.payload_path)
 
+    assets.extend(attach_incremental_payloads(
+        release.manifest_path, args.incremental_payload, private_key_path=private_key,
+    ))
     return release, assets
 
 
@@ -672,7 +716,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _publish_assets(repo, tag, title=candidate["title"], notes=tuple(candidate["notes"]), version=version,
                         assets=[*assets, versioned], work_root=work_root, timeout=channel.request_timeout_seconds,
-                        resume=args.resume, target=candidate["target"])
+                        resume=args.resume, target=candidate["target"], channel=channel)
     except Exception as exc:
         receipt.update(status="failed_before_promotion", error=_safe_error(exc))
         _write_json(receipt_path, receipt)
