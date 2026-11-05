@@ -30,6 +30,7 @@ from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
     _is_user_config,
+    _read_installed_manifest_for_merge,
     _valid_digest,
     install_payload,
     installed_payload_fingerprint,
@@ -352,6 +353,35 @@ def manifest_package_releases(
     return _manifest_package_releases(payload, channel, metadata)
 
 
+def installed_release_identity(
+    install_root: str | Path, manager_version: str
+) -> tuple[str, int]:
+    """Read the installed component release without letting stale records downgrade the manager."""
+    fallback = (manager_version, 0)
+    try:
+        manifest = _read_installed_manifest_for_merge(Path(install_root).expanduser().resolve())
+        recorded = manifest.get("release_version")
+        if not isinstance(recorded, str):
+            return fallback
+        version = Version(recorded)
+        if str(version) != recorded or version < Version(manager_version):
+            return fallback
+        return recorded, manifest.get("release_build", 0)
+    except (OSError, PayloadError, TypeError, ValueError, InvalidVersion):
+        return fallback
+
+
+def is_newer_update(
+    version: str, build: int | None, *, current_version: str, current_build: int = 0
+) -> bool:
+    """Use the same version/build ordering for update offers and installation rechecks."""
+    try:
+        latest, current = Version(version), Version(current_version)
+    except (TypeError, ValueError, InvalidVersion) as exc:
+        raise UpdateError("更新版本格式错误。") from exc
+    return latest > current or (latest == current and build is not None and build > current_build)
+
+
 def parse_update_manifest(
     payload: dict[str, object],
     channel: UpdateChannel,
@@ -371,7 +401,7 @@ def parse_update_manifest(
     build = metadata["build"]
     if current < minimum and latest <= current:
         raise MandatoryUpdateUnavailable("当前版本低于最低支持版本，但更新清单未提供可用的新版本。")
-    if latest < current or (latest == current and (build is None or build <= current_build)):
+    if not is_newer_update(metadata["version"], build, current_version=current_version, current_build=current_build):
         return None
     releases = _manifest_package_releases(payload, channel, metadata)
     selected = releases[0]
@@ -1750,6 +1780,8 @@ __all__ = [
     "extract_update_archive",
     "launch_update_helper",
     "load_update_channel",
+    "installed_release_identity",
+    "is_newer_update",
     "manifest_package_releases",
     "parse_update_manifest",
     "prepare_update",

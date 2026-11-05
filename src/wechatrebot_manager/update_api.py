@@ -21,6 +21,8 @@ from .updates import (
     create_update_plan,
     launch_update_helper,
     load_update_channel,
+    installed_release_identity,
+    is_newer_update,
     prepare_update,
     assert_update_runtime_stopped,
 )
@@ -97,10 +99,11 @@ class UpdateApiMixin:
                     {"enabled": False, "current": True, "release": None},
                     message="当前未启用在线更新。",
                 )
+            current_version, current_build = installed_release_identity(self._install_root, __version__)
             release = check_for_update(
                 channel,
-                current_version=__version__,
-                current_build=getattr(self, "_build_number", 0),
+                current_version=current_version,
+                current_build=current_build,
                 install_root=self._install_root,
             )
             previous = self._available_update
@@ -118,7 +121,7 @@ class UpdateApiMixin:
             self._update_logger.write(
                 "check_completed",
                 state="available" if release else "current",
-                version=release.version if release else __version__,
+                version=release.version if release else current_version,
             )
             return self._ok(
                 {
@@ -316,9 +319,15 @@ class UpdateApiMixin:
     def _run_update_install(self, prepared: PreparedUpdate) -> None:
         succeeded = False
         try:
+            current_version, current_build = installed_release_identity(self._install_root, __version__)
+            if not is_newer_update(
+                prepared.release.version, prepared.release.build,
+                current_version=current_version, current_build=current_build,
+            ):
+                raise UpdateFailure("UPD-1003", "待安装更新不高于当前安装版本，请重新检查更新。")
             # Verify the staged files and installation baseline before closing anything.
             plan = create_update_plan(
-                prepared, self._install_root, current_version=__version__,
+                prepared, self._install_root, current_version=current_version,
             )
             self._set_update_status(
                 state="running", phase="stopping_services", percent=100,

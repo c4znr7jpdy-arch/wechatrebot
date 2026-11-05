@@ -29,6 +29,7 @@ from wechatrebot_manager.updates import (
     consume_update_result,
     extract_update_archive,
     load_update_channel,
+    installed_release_identity,
     manifest_package_releases,
     MandatoryUpdateUnavailable,
     parse_update_manifest,
@@ -312,6 +313,29 @@ def test_invalid_current_version_still_raises_update_error(current_version):
     channel, private = _channel_and_key()
     with pytest.raises(UpdateError, match="版本格式"):
         parse_update_manifest(_signed_manifest(channel, private), channel, current_version=current_version)
+
+
+@pytest.mark.parametrize("recorded,build,expected", [
+    ("1.0.1", 7, ("1.0.1", 7)), ("1.0.2", 1, ("1.0.2", 1)),
+    ("0.9.9", 999, ("1.0.1", 0)), ("invalid", 999, ("1.0.1", 0)),
+    ("v1.0.2", 999, ("1.0.1", 0)), ("01.0.2", 999, ("1.0.1", 0)),
+    (None, 999, ("1.0.1", 0)), ("1.0.2", True, ("1.0.2", 0)),
+    ("1.0.2", -1, ("1.0.2", 0)), ("1.0.2", "7", ("1.0.2", 0)),
+])
+def test_installed_release_identity_keeps_version_and_build_from_same_valid_record(tmp_path, recorded, build, expected):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/installed-payload.json").write_text(json.dumps({
+        "schema_version": 1, "files": [], "release_version": recorded, "release_build": build,
+    }), encoding="utf-8")
+    assert installed_release_identity(tmp_path, "1.0.1") == expected
+
+
+@pytest.mark.parametrize("contents", [None, "{invalid", '{"schema_version": 2, "files": []}'])
+def test_missing_or_invalid_inventory_uses_manager_version_without_an_unrelated_build(tmp_path, contents):
+    if contents is not None:
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config/installed-payload.json").write_text(contents, encoding="utf-8")
+    assert installed_release_identity(tmp_path, "1.0.1") == ("1.0.1", 0)
 
 
 def test_update_archive_must_keep_every_file_under_payload(tmp_path: Path) -> None:
