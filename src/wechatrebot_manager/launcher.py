@@ -375,7 +375,11 @@ def installation_services_stopped(install_root: str | Path) -> bool:
             if _normalized_executable(identity.executable) in executables:
                 return False
         addresses = {(spec.ready_host, spec.ready_port) for spec in specs}
-        return all(not port_accepting(host, port, strict=True) for host, port in addresses)
+        # Some Windows loopback stacks take about two seconds to return a TCP
+        # refusal after shutdown. Maintenance must wait for that conclusive
+        # response while still rejecting timeouts and other unknown errors.
+        return all(not port_accepting(host, port, timeout_seconds=3, strict=True)
+                   for host, port in addresses)
     except (OSError, ValueError, ServiceLaunchError):
         return False
 

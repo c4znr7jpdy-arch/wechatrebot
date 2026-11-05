@@ -298,13 +298,13 @@ async def test_public_stable_readback_bypasses_cached_redirect(tmp_path, monkeyp
     "https://github.com.evil.test/o/r/releases/download/stable/stable.json",
 ])
 def test_fresh_manifest_url_preserves_immutable_assets_and_other_hosts(url):
-    from services.activation_service.release_urls import fresh_stable_manifest_url
+    from wechatrebot_manager.updates import fresh_stable_manifest_url
 
     assert fresh_stable_manifest_url(url) == url
 
 
 def test_fresh_manifest_url_preserves_existing_query_bytes():
-    from services.activation_service.release_urls import fresh_stable_manifest_url
+    from wechatrebot_manager.updates import fresh_stable_manifest_url
 
     url = BASE + "stable/stable.json?download=1&name=a%2Fb"
     assert fresh_stable_manifest_url(url).startswith(url + "&_wrb_check=")

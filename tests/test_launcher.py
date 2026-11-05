@@ -310,6 +310,37 @@ def test_confirmed_update_requires_final_runtime_stop_verification(tmp_path, mon
     assert error.value.service_name == "new-hook-bridge"
 
 
+@pytest.mark.parametrize("port_state,expected", [
+    ("delayed_refusal", True), ("listening", False), ("timeout", False),
+])
+def test_maintenance_waits_for_windows_refusal_but_rejects_unknown_ports(
+    tmp_path, monkeypatch, port_state, expected,
+):
+    from contextlib import nullcontext
+
+    _layout(tmp_path)
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: ())
+
+    def connect(address, timeout):
+        if port_state == "listening":
+            return nullcontext()
+        if port_state == "timeout" or timeout < 2:
+            raise TimeoutError("Windows has not returned the loopback refusal yet")
+        raise ConnectionRefusedError("No listener after Windows completed its probe")
+
+    monkeypatch.setattr(launcher.socket, "create_connection", connect)
+    assert launcher.installation_services_stopped(tmp_path) is expected
+
+
+@pytest.mark.parametrize("identity", [None, "owned"])
+def test_maintenance_still_blocks_owned_or_unidentified_process(tmp_path, monkeypatch, identity):
+    _layout(tmp_path)
+    value = ProcessIdentity(str(tmp_path / "runtime/python/python.exe"), 123) if identity else None
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
+    monkeypatch.setattr(launcher, "process_identity", lambda _: value)
+    assert launcher.installation_services_stopped(tmp_path) is False
+
+
 def test_preflight_rejects_missing_hook_before_any_process_starts(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -24,12 +24,12 @@ for search_root in (COMMERCIAL_ROOT, SCRIPTS_ROOT, SOURCE_ROOT):
     if str(search_root) not in sys.path:
         sys.path.insert(0, str(search_root))
 
-from services.activation_service.release_urls import fresh_stable_manifest_url
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS, sha256_file
 from wechatrebot_manager.updates import (
     PRODUCT_ID,
     UpdateChannel,
     canonical_manifest_bytes,
+    fresh_stable_manifest_url,
     parse_update_manifest,
 )
 

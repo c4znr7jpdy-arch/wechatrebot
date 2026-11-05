@@ -14,9 +14,8 @@ import aiohttp
 from packaging.version import InvalidVersion, Version
 
 from wechatrebot_manager.updates import (
-    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel,
+    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, fresh_stable_manifest_url, load_update_channel,
 )
-from ..release_urls import fresh_stable_manifest_url
 from .auth import TOKEN_FILE, private_json, read_private_json
 
 _PUBLIC_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
