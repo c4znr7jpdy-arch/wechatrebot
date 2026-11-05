@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from wechatrebot_manager.licensing.protocol import (
     ACCOUNT_PATTERN, CODE_MODES, MAX_LEASE_SECONDS, PLANS, LicenseError, extend_period,
 )
+from .code_history import KEY_FILENAME, decrypt_payload, encrypt_payload, load_key
 
 PREVIEW_SECONDS = 300
 _CODE = re.compile(r"WRB[A-Z2-7]{32}")
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS codes (
     issued_at INTEGER NOT NULL, redeem_by INTEGER NOT NULL,
     revoked_at INTEGER, redeemed_at INTEGER,
     redeemed_license TEXT, redeemed_device TEXT, redeemed_replaces_id TEXT,
+    encrypted_payload TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(target_id) REFERENCES licenses(id),
     FOREIGN KEY(redeemed_license) REFERENCES licenses(id),
     FOREIGN KEY(redeemed_replaces_id) REFERENCES licenses(id)
@@ -78,6 +80,16 @@ CREATE TABLE IF NOT EXISTS audit (
     actor TEXT NOT NULL, event TEXT NOT NULL, object_id TEXT NOT NULL,
     details TEXT NOT NULL
 );
+"""
+
+_HISTORY_SELECT = """
+SELECT c.id,c.owner_hash,c.reference_hash,c.encrypted_payload,c.plan,c.mode,c.target_id,
+       c.target_device,c.reset_account,c.issued_at,c.redeem_by,c.revoked_at,c.redeemed_at,
+       c.redeemed_license,l.status AS linked_status,l.valid_until,l.account,l.device,
+       CASE WHEN c.redeemed_at IS NOT NULL THEN 'redeemed'
+            WHEN c.revoked_at IS NOT NULL THEN 'revoked'
+            WHEN c.redeem_by<=? THEN 'expired' ELSE 'unredeemed' END AS status
+FROM codes c LEFT JOIN licenses l ON l.id=COALESCE(c.redeemed_license,c.target_id)
 """
 
 
@@ -116,7 +128,7 @@ class LicenseStore:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2}:
+            if version not in {0, 1, 2, 3}:
                 raise ValueError("Unsupported activation database schema")
             if version == 1:
                 db.execute("ALTER TABLE codes ADD COLUMN redeemed_replaces_id TEXT REFERENCES licenses(id)")
@@ -127,7 +139,9 @@ class LicenseStore:
             for statement in _SCHEMA.split(";"):
                 if statement.strip():
                     db.execute(statement)
-            db.execute("PRAGMA user_version=2")
+            if "encrypted_payload" not in {row[1] for row in db.execute("PRAGMA table_info(codes)")}:
+                db.execute("ALTER TABLE codes ADD COLUMN encrypted_payload TEXT NOT NULL DEFAULT ''")
+            db.execute("PRAGMA user_version=3")
             db.execute("COMMIT")
 
     @contextmanager
@@ -347,14 +361,17 @@ class LicenseStore:
             encoded = base64.b32encode(secrets.token_bytes(20)).decode("ascii")
             code = "WRB-" + "-".join(encoded[i:i + 8] for i in range(0, len(encoded), 8))
             code_id = secrets.token_hex(16)
+            key = self._history_key(db, create=True)
+            encrypted = encrypt_payload(key, code_id, code=code, owner_ref=_text(owner_ref),
+                                        reference=_text(reference))
             db.execute(
                 "INSERT INTO codes(id,digest,reference_hash,owner_hash,plan,mode,target_id,"
-                "target_device,target_revision,reset_account,issued_at,redeem_by) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "target_device,target_revision,reset_account,issued_at,redeem_by,encrypted_payload) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (code_id, code_digest(code), reference_hash, owner_hash, plan, mode,
                  license_id or None, target_device,
                  target["revision"] if mode == "migration" else None,
-                 int(reset_account), now, redeem_by),
+                 int(reset_account), now, redeem_by, encrypted),
             )
             self._audit(db, now, actor, "issue_code", code_id, mode=mode, plan=plan,
                         license_id=license_id, target_device=target_device)
@@ -623,6 +640,72 @@ class LicenseStore:
         with self.connection() as db:
             return {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
                     for name in ("licenses", "codes", "trials")}
+
+    def _history_key(self, db, *, create: bool = False) -> bytes:
+        existing = db.execute("SELECT id,encrypted_payload FROM codes WHERE encrypted_payload<>'' LIMIT 1").fetchone()
+        key = load_key(self.path.parent / KEY_FILENAME, create=create and existing is None)
+        if existing is not None:
+            # Detect a replaced key before accepting new history under a different key.
+            decrypt_payload(key, existing["id"], existing["encrypted_payload"])
+        return key
+
+    @staticmethod
+    def _admin_history_item(row, key: bytes | None, now: int, *, include_code: bool = False) -> dict:
+        item = dict(row)
+        payload = item.pop("encrypted_payload")
+        item.pop("owner_hash")
+        item.pop("reference_hash")
+        linked_status = item.pop("linked_status")
+        item["license_status"] = ("" if linked_status is None else "revoked" if linked_status == "revoked"
+                                  else "expired" if item["valid_until"] <= now else "active")
+        item["history_available"] = bool(payload)
+        saved = decrypt_payload(key, item["id"], payload) if payload else {"code": "", "owner_ref": "", "reference": ""}
+        item.update(saved)
+        item["reset_account"] = bool(item["reset_account"])
+        for name in ("account", "device"):
+            item[name] = item[name] or ""
+        if not include_code:
+            item.pop("code")
+        return item
+
+    def admin_code_history(
+        self, *, now: int, owner_ref: str = "", reference: str = "", license_id: str = "",
+        code_id: str = "", status: str = "", page: int = 1, page_size: int = 20,
+    ) -> dict:
+        if (type(now) is not int or type(page) is not int or page < 1 or type(page_size) is not int
+                or not 1 <= page_size <= 100 or not isinstance(status, str)
+                or status not in {"", "unredeemed", "redeemed", "expired", "revoked"}):
+            raise LicenseError("invalid_data", "历史查询条件或分页参数无效。")
+        if (page - 1) * page_size > 2**63 - 1:
+            raise LicenseError("invalid_data", "历史查询页码超出范围。")
+        conditions, parameters = [], [now]
+        for value, column, convert in ((owner_ref, "owner_hash", _owner), (reference, "reference_hash", lambda x: _hash(_text(x))),
+                                       (code_id, "id", _text), (status, "status", _text)):
+            if value != "":
+                conditions.append(f"{column}=?")
+                parameters.append(convert(value))
+        if license_id != "":
+            conditions.append("(target_id=? OR redeemed_license=?)")
+            parameters.extend([_text(license_id)] * 2)
+        query = " FROM (" + _HISTORY_SELECT + ") WHERE " + (" AND ".join(conditions) or "1=1")
+        with self.connection() as db:
+            db.execute("BEGIN")
+            total = db.execute("SELECT COUNT(*)" + query, parameters).fetchone()[0]
+            rows = db.execute("SELECT *" + query + " ORDER BY issued_at DESC,id DESC LIMIT ? OFFSET ?",
+                              [*parameters, page_size, (page - 1) * page_size]).fetchall()
+            key = self._history_key(db) if any(row["encrypted_payload"] for row in rows) else None
+            items = [self._admin_history_item(row, key, now) for row in rows]
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    def admin_code_detail(self, code_id: str, *, now: int) -> dict:
+        if type(now) is not int:
+            raise LicenseError("invalid_data", "历史查询参数无效。")
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM (" + _HISTORY_SELECT + ") WHERE id=?", (now, _text(code_id))).fetchone()
+            if row is None:
+                raise LicenseError("code_unavailable", "码编号不存在，请核对历史记录。")
+            key = self._history_key(db) if row["encrypted_payload"] else None
+            return self._admin_history_item(row, key, now, include_code=True)
 
     def admin_audit(self, now: int, event: str, object_id: str = "", **details) -> None:
         with self.connection(write=True) as db:

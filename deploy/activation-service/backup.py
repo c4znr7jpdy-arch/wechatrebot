@@ -22,12 +22,13 @@ DEFAULT_BACKUP_DIR = Path("/var/backups/wechatrebot-activation")
 RETAIN_BACKUPS = 14
 DATABASE = "activation.sqlite3"
 PRIVATE_KEY = "licensing-private.pem"
+HISTORY_KEY = "activation-history.key"
 CONTACT = "wechat-contact.json"
 MANIFEST = "manifest.json"
 FORMAT = "wechatrebot-activation-backup-v1"
 _NAME = re.compile(r"backup-(\d{8}T\d{12}Z)-[0-9a-f]{12}")
 ADMIN_FILES = {"admin-auth.json", "admin-github.json"}
-_CONTENT = {DATABASE, PRIVATE_KEY, CONTACT, *ADMIN_FILES}
+_CONTENT = {DATABASE, PRIVATE_KEY, HISTORY_KEY, CONTACT, *ADMIN_FILES}
 _STAGING_FILES = _CONTENT | {MANIFEST, *(DATABASE + suffix for suffix in ("-journal", "-wal", "-shm"))}
 
 
@@ -156,6 +157,13 @@ def _snapshot_database(source: Path, target: Path) -> None:
         os.fsync(descriptor)
 
 
+def _history_key_required(database: Path) -> bool:
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+        if "encrypted_payload" not in {row[1] for row in db.execute("PRAGMA table_info(codes)")}:
+            return False
+        return db.execute("SELECT 1 FROM codes WHERE encrypted_payload<>'' LIMIT 1").fetchone() is not None
+
+
 def _complete_files(root: Path, path: Path) -> set[str] | None:
     """Recognize only our complete, flat, hash-verified snapshots for rotation."""
     match = _NAME.fullmatch(path.name)
@@ -183,8 +191,12 @@ def _complete_files(root: Path, path: Path) -> set[str] | None:
             return None
         if any(manifest["files"][name]["size"] == 0 for name in (DATABASE, PRIVATE_KEY)):
             return None
+        if _history_key_required(path / DATABASE) and HISTORY_KEY not in names:
+            return None
+        if HISTORY_KEY in names and manifest["files"][HISTORY_KEY]["size"] != 32:
+            return None
         return names
-    except (BackupError, OSError, ValueError, RecursionError):
+    except (BackupError, OSError, ValueError, RecursionError, sqlite3.Error):
         # Foreign, damaged or linked material is never a rotation target.
         return None
 
@@ -245,6 +257,10 @@ def create_backup(data_dir: Path = DEFAULT_DATA_DIR, backup_dir: Path = DEFAULT_
             try:
                 _copy_file(data / PRIVATE_KEY, pending / PRIVATE_KEY)
                 _snapshot_database(data / DATABASE, pending / DATABASE)
+                if (data / HISTORY_KEY).exists() or (data / HISTORY_KEY).is_symlink():
+                    _copy_file(data / HISTORY_KEY, pending / HISTORY_KEY)
+                elif _history_key_required(pending / DATABASE):
+                    raise BackupError("Encrypted code history requires its matching history key")
                 if (data / CONTACT).exists() or (data / CONTACT).is_symlink():
                     _copy_file(data / CONTACT, pending / CONTACT)
                 for admin_name in sorted(ADMIN_FILES):
@@ -256,9 +272,13 @@ def create_backup(data_dir: Path = DEFAULT_DATA_DIR, backup_dir: Path = DEFAULT_
                 files = {name: _file_info(pending / name) for name in sorted(names)}
                 if any(files[name]["size"] == 0 for name in (DATABASE, PRIVATE_KEY)):
                     raise BackupError("Database and private key must not be empty")
+                if HISTORY_KEY in names and files[HISTORY_KEY]["size"] != 32:
+                    raise BackupError("History key must contain exactly 32 bytes")
                 # A key changed during the snapshot cannot be paired reliably.
                 if files[PRIVATE_KEY] != _file_info(data / PRIVATE_KEY):
                     raise BackupError("Private key changed while creating the backup")
+                if HISTORY_KEY in names and files[HISTORY_KEY] != _file_info(data / HISTORY_KEY):
+                    raise BackupError("History key changed while creating the backup")
                 manifest = {"format": FORMAT, "id": name, "files": files}
                 with _regular_file(pending / MANIFEST, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as descriptor:
                     encoded = (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8")
