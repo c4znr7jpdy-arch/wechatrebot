@@ -329,6 +329,7 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
                     "/features.js",
                     "/preview.js",
                     "/updates.js",
+                    "/updates.css",
                     "/settings.js",
                     "/activity.js",
                     "/activity-errors.js",

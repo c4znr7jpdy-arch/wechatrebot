@@ -14,6 +14,7 @@ window.createPreviewApi = function (helpers) {
   } = helpers;
 
   function previewApi() {
+    let previewUpdateStatus = {state: "idle", phase: "idle", percent: 0};
     const status = {
       state: "RUNNING", title: "机器人可用", message: "微信连接和全部功能运行正常。", busy: false, online: true, can_start: false, can_stop: true, error: null,
       environment: {ready: true, code: "10000", title: "微信环境正常", message: "已检测到兼容微信。", solutions: [], path: "C:\\Program Files\\Tencent\\Weixin\\Weixin.exe", version: "4.1.8.27", process_running: true},
@@ -648,7 +649,19 @@ window.createPreviewApi = function (helpers) {
       save_skin: (skin) => ok({skin}),
       get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
       open_install_folder: () => ok({opened: true}), open_uninstaller: () => ok({opened: true}),
-      check_update: () => ok({enabled: true, current: true, release: null}), install_update: (version) => ok({accepted: true, version}),
+      check_update: () => ok({enabled: true, current: true, release: null}),
+      get_update_status: () => ok(structuredClone(previewUpdateStatus)),
+      download_update: (version, releaseId) => {
+        previewUpdateStatus = {state: "ready", phase: "ready_to_install", percent: 100,
+          version, release_id: releaseId, confirmation_token: `preview-${releaseId}`,
+          message: "预览更新包已校验；不会下载或修改本机程序。"};
+        return ok({accepted: true, version});
+      },
+      install_update: (version, token) => {
+        if (token !== previewUpdateStatus.confirmation_token) return {ok: false, error: {message: "请先下载并确认更新。"}};
+        previewUpdateStatus = {...previewUpdateStatus, state: "restarting", phase: "restarting"};
+        return ok({accepted: true, version});
+      },
     };
   }
 

@@ -1,0 +1,33 @@
+.update-card {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 90;
+  width: min(328px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .16);
+}
+.update-card[hidden] { display: none; }
+.update-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-card-heading strong { min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.update-card-heading span { color: var(--blue-700); font-weight: 700; font-variant-numeric: tabular-nums; }
+.update-card p { margin: 8px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.update-card-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--blue-100); }
+.update-card-progress span { display: block; height: 100%; border-radius: inherit; background: var(--blue-600); transition: width .2s ease; }
+.update-card-progress.is-indeterminate span { animation: update-progress-sweep 1.3s ease-in-out infinite alternate; }
+.update-card-action { display: flex; justify-content: flex-end; margin-top: 12px; }
+.update-card-action:has(button[hidden]) { display: none; }
+.update-card[data-state="failed"] .update-card-heading strong { color: var(--red-700); }
+body.has-update-card .toast-region { bottom: 228px; }
+@media (max-width: 600px) {
+  .update-card { right: 16px; bottom: 16px; }
+  body.has-update-card .toast-region { right: 16px; bottom: 222px; max-width: calc(100vw - 32px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-card-progress span { transition: none; }
+  .update-card-progress.is-indeterminate span { animation: none; }
+}
