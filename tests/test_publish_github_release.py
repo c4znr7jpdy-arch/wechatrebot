@@ -159,7 +159,7 @@ def test_release_lifecycle_uses_draft_then_publish_and_clobbers_assets(tmp_path:
     notes.write_text("- 修复", encoding="utf-8")
     asset = tmp_path / "a.zip"
     asset.write_bytes(b"a")
-    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh")})
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh", stderr="release not found")})
     monkeypatch.setattr(module, "_gh", gh)
 
     assert module.release_exists(REPO, "v0.9.9") is False
@@ -238,17 +238,17 @@ def test_promote_manifest_uploads_version_copy_then_overwrites_stable(tmp_path: 
     manifest_path = tmp_path / "update" / "stable.json"
     manifest_path.parent.mkdir()
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    gh = _FakeGh({("release", "view", "stable"): subprocess.CalledProcessError(1, "gh")})
+    gh = _FakeGh({("release", "view", "stable"): subprocess.CalledProcessError(1, "gh", stderr="release not found")})
     monkeypatch.setattr(module, "_gh", gh)
     monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: manifest)
 
+    monkeypatch.setattr(module, "verify_public_asset", lambda *a, **k: "https://github.com/verified")
     module.promote_manifest(REPO, "0.9.9", manifest_path, channel=channel, target="abc123",
                             work_root=tmp_path / "work", sleep=lambda _s: None)
 
     uploads = [c for c in gh.calls if c[:2] == ["release", "upload"]]
-    assert uploads[0][2] == "v0.9.9" and uploads[0][3].endswith("stable-0.9.9.json")
     assert any(c[:3] == ["release", "create", "stable"] and "--latest=false" in c for c in gh.calls)
-    assert uploads[1][2] == "stable" and uploads[1][3].endswith("stable.json") and "--clobber" in uploads[1]
+    assert uploads[0][2] == "stable" and uploads[0][3].endswith("stable.json") and "--clobber" in uploads[0]
     assert json.loads((tmp_path / "work" / "stable-0.9.9.json").read_text("utf-8")) == manifest
 
 
@@ -262,6 +262,7 @@ def test_promote_manifest_fails_when_public_manifest_differs(tmp_path: Path, mon
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(module, "_gh", _FakeGh({("release", "view", "stable"): "{}"}))
     monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: other)
+    monkeypatch.setattr(module, "verify_public_asset", lambda *a, **k: "https://github.com/verified")
     with pytest.raises(ValueError, match="稳定清单"):
         module.promote_manifest(REPO, "0.9.9", manifest_path, channel=channel, target="abc123",
                                 work_root=tmp_path / "work", attempts=2, sleep=lambda _s: None)
@@ -283,6 +284,7 @@ def test_rollback_stable_downloads_verifies_signature_and_republishes(tmp_path: 
     gh = _FakeGh({("release", "view", "stable"): "{}"})
     monkeypatch.setattr(module, "_gh", gh)
     monkeypatch.setattr(module, "download_asset", download)
+    monkeypatch.setattr(module, "verify_public_asset", lambda *a, **k: "https://github.com/verified")
     monkeypatch.setattr(module.publisher, "_fetch_live_manifest", lambda _c: previous)
     module.rollback_stable(REPO, "0.9.8", channel=channel, work_root=tmp_path / "work", sleep=lambda _s: None)
     upload = next(c for c in gh.calls if c[:2] == ["release", "upload"])
@@ -329,6 +331,23 @@ def _fake_build(root: Path, module, version: str, prefix: str):
     return release, package
 
 
+def _move_build(built, output):
+    from dataclasses import replace
+    import shutil
+    output.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for record in built:
+        changes = {}
+        for field in ("archive_path", "manifest_path", "checksum_path", "payload_path"):
+            path = getattr(record, field, None)
+            if path is not None:
+                destination = output / path.name
+                shutil.copyfile(path, destination)
+                changes[field] = destination
+        moved.append(replace(record, **changes))
+    return tuple(moved)
+
+
 def _common_main_patches(module, monkeypatch, tmp_path: Path, *, live_version: str | None):
     root = tmp_path / "commercial"
     (root / "artifacts").mkdir(parents=True)
@@ -345,6 +364,7 @@ def _common_main_patches(module, monkeypatch, tmp_path: Path, *, live_version: s
     monkeypatch.setattr(module, "repo_name_with_owner", lambda: REPO)
     monkeypatch.setattr(module, "ensure_gh_ready", lambda _repo: None)
     monkeypatch.setattr(module, "_git_head", lambda: "abc123")
+    monkeypatch.setattr(module, "_verify_release_target", lambda *a, **k: None)
     monkeypatch.setattr(module, "fetch_stable_manifest",
                         lambda _c: None if live_version is None else {"version": live_version})
     return root, channel
@@ -355,7 +375,7 @@ def test_main_dry_run_builds_without_touching_github(tmp_path: Path, monkeypatch
     root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
     prefix = module.asset_prefix(REPO, "v0.9.9")
     built = _fake_build(root, module, "0.9.9", prefix)
-    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda *_a, **_k: built)
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda options, **_k: _move_build(built, options.output))
     gh = _FakeGh()
     monkeypatch.setattr(module, "_gh", gh)
     assert module.main(["--dry-run", "--output", str(root / "artifacts" / "publish"), "--title", "t"]) == 0
@@ -367,8 +387,8 @@ def test_main_full_publish_creates_release_uploads_verifies_and_promotes(tmp_pat
     root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
     prefix = module.asset_prefix(REPO, "v0.9.9")
     built = _fake_build(root, module, "0.9.9", prefix)
-    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda *_a, **_k: built)
-    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh")})
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda options, **_k: _move_build(built, options.output))
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh", stderr="release not found")})
     monkeypatch.setattr(module, "_gh", gh)
     verified: list[str] = []
     monkeypatch.setattr(module, "verify_public_asset", lambda url, **k: verified.append(url) or url)
@@ -389,7 +409,8 @@ def test_main_full_publish_creates_release_uploads_verifies_and_promotes(tmp_pat
                              "WeChatReBot-0.9.9-payload-abc.wrb.sha256"}
     assert len(uploaded) == len(set(uploaded))
     assert ["release", "edit", "v0.9.9", "-R", REPO, "--draft=false"] in gh.calls
-    assert set(verified) == {built[0].package_url, built[1].package_url, built[1].payload_url}
+    assert set(verified) == {built[0].package_url, built[1].package_url, built[1].payload_url,
+                             module.asset_url(REPO, "v0.9.9", "stable-0.9.9.json")}
     assert promoted and promoted[0][0][:2] == (REPO, "0.9.9")
     assert smoked == ["0.9.9"]
 
@@ -417,8 +438,8 @@ def test_main_manager_only_uses_manager_delta_builder(tmp_path: Path, monkeypatc
                                                 package_url=f"{prefix}/{archive.name}", package_size=1,
                                                 package_sha256=hashlib.sha256(b"m").hexdigest())
     seen: dict = {}
-    monkeypatch.setattr(module.publisher, "build_manager_update", lambda **k: seen.update(k) or delta)
-    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh")})
+    monkeypatch.setattr(module.publisher, "build_manager_update", lambda **k: seen.update(k) or _move_build((delta,), k["output"].parent)[0])
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh", stderr="release not found")})
     monkeypatch.setattr(module, "_gh", gh)
     monkeypatch.setattr(module, "verify_public_asset", lambda url, **k: url)
     monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: None)
@@ -451,3 +472,231 @@ def test_main_rollback_calls_rollback_stable(tmp_path: Path, monkeypatch) -> Non
 def test_powershell_entry_forwards_all_arguments() -> None:
     script = (Path(__file__).parents[1] / "scripts" / "publish-github-release.ps1").read_text(encoding="utf-8")
     assert "publish_github_release.py" in script and "@args" in script and "py -3.13" in script
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timeout"), ConnectionResetError("reset"),
+                                  urllib.error.URLError(TimeoutError("wrapped timeout")),
+                                  __import__("ssl").SSLEOFError("EOF"),
+                                  __import__("http.client", fromlist=["IncompleteRead"]).IncompleteRead(b"part")])
+def test_public_asset_restarts_complete_verification_after_transport_failure(monkeypatch, error):
+    module = _module()
+    body = b"asset"
+    requests = []
+    def request(req, **kwargs):
+        requests.append(req.get_method())
+        if len(requests) == 2:
+            raise error
+        return _Response(body, final_url=req.full_url)
+    monkeypatch.setattr(module.urllib.request, "urlopen", request)
+    module.verify_public_asset("https://github.com/asset", expected_size=len(body),
+                               expected_sha256=hashlib.sha256(body).hexdigest(), timeout=1, sleep=lambda _: None)
+    assert requests == ["HEAD", "GET", "HEAD", "GET"]
+
+
+def test_integrity_and_certificate_failures_are_not_retried(monkeypatch):
+    import ssl
+    module = _module()
+    sleeps = []
+    def invalid(*a, **k):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("untrusted"))
+    monkeypatch.setattr(module.urllib.request, "urlopen", invalid)
+    with pytest.raises(ValueError):
+        module.verify_public_asset("https://github.com/a", expected_size=1, expected_sha256="0"*64,
+                                   timeout=1, sleep=sleeps.append)
+    assert sleeps == []
+
+
+@pytest.mark.parametrize("message", ["HTTP 401 unauthorized", "HTTP 500 server error", "TLS timeout"])
+def test_release_lookup_does_not_treat_network_or_auth_failure_as_missing(monkeypatch, message):
+    module = _module()
+    monkeypatch.setattr(module, "_gh", _FakeGh({("release", "view"): module.GitHubCommandError(message)}))
+    with pytest.raises(module.GitHubCommandError):
+        module.release_exists(REPO, "v1.0.1")
+
+
+def test_gh_write_failure_has_redacted_diagnostic_and_is_not_retried(monkeypatch):
+    module = _module()
+    calls = []
+    monkeypatch.setenv("GH_TOKEN", "super-secret")
+    def run(argv, **kwargs):
+        calls.append(argv)
+        raise subprocess.CalledProcessError(1, argv, stderr="TLS EOF token=super-secret ghp_1234567890")
+    monkeypatch.setattr(module.subprocess, "run", run)
+    with pytest.raises(module.GitHubCommandError) as caught:
+        module._gh(["release", "upload", "v1.0.1"])
+    assert len(calls) == 1 and "TLS EOF" in str(caught.value)
+    assert "super-secret" not in str(caught.value) and "ghp_1234567890" not in str(caught.value)
+
+
+def test_existing_draft_stable_release_is_published(monkeypatch, tmp_path):
+    module = _module()
+    gh = _FakeGh({("release", "view"): '{"isDraft":true}'})
+    monkeypatch.setattr(module, "_gh", gh)
+    module.ensure_stable_release(REPO, target="commit", work_root=tmp_path)
+    assert ["release", "edit", "stable", "-R", REPO, "--draft=false"] in gh.calls
+
+
+def _recoverable_candidate(module, output):
+    output.mkdir(parents=True)
+    key = Ed25519PrivateKey.generate()
+    channel, key_id = _channel(key)
+    archive = output / "update.zip"
+    archive.write_bytes(b"zip")
+    manifest = _signed_manifest("1.0.1", key, key_id, module.asset_url(REPO, "v1.0.1", archive.name))
+    manifest["package"]["sha256"] = hashlib.sha256(b"zip").hexdigest().upper()
+    manifest["signature"]["value"] = base64.b64encode(key.sign(canonical_manifest_bytes(manifest))).decode()
+    path = output / "stable.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    release = module.full.BuiltFullUpdate("1.0.1", archive, path, manifest["package"]["url"], 3,
+                                          manifest["package"]["sha256"])
+    module._save_candidate(output, release, [archive], repo=REPO, target="commit", title="title", notes=(), previous=None)
+    return channel, release
+
+
+def test_candidate_recovery_checks_signature_files_and_path_boundary(tmp_path):
+    module = _module()
+    output = tmp_path / "output"
+    channel, release = _recoverable_candidate(module, output)
+    candidate, recovered, assets = module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+    assert recovered == release and assets == [release.archive_path]
+    release.archive_path.write_bytes(b"bad")
+    with pytest.raises(ValueError, match="已改变"):
+        module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+    candidate["assets"][0]["path"] = "../outside.zip"
+    (tmp_path / "outside.zip").write_bytes(b"zip")
+    module._write_json(output / "publish-candidate.json", candidate)
+    with pytest.raises(ValueError, match="越界"):
+        module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+
+
+def test_resume_reuses_existing_matching_assets_without_clobber(tmp_path, monkeypatch):
+    module = _module()
+    archive = tmp_path / "a.zip"
+    archive.write_bytes(b"zip")
+    gh = _FakeGh({("release", "view"): json.dumps({"isDraft": True, "assets": [{"name": "a.zip", "size": 3}]})})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "download_asset", lambda *a: archive)
+    verified = []
+    monkeypatch.setattr(module, "verify_public_asset", lambda url, **kwargs: verified.append(url))
+    monkeypatch.setattr(module, "_verify_release_target", lambda *a, **k: None)
+    module._publish_assets(REPO, "v1.0.1", title="t", notes=(), version="1.0.1", assets=[archive],
+                            work_root=tmp_path, timeout=1, resume=True, target="commit")
+    upload = next(c for c in gh.calls if c[:2] == ["release", "upload"])
+    assert str(archive) not in upload and "--clobber" not in upload
+    assert str(archive) + ".sha256" in upload
+    assert verified == [module.asset_url(REPO, "v1.0.1", "a.zip")]
+
+
+def test_resume_rejects_different_remote_bytes_before_any_write(tmp_path, monkeypatch):
+    module = _module()
+    archive = tmp_path / "a.zip"
+    archive.write_bytes(b"zip")
+    other = tmp_path / "other.zip"
+    other.write_bytes(b"bad")
+    gh = _FakeGh({("release", "view"): json.dumps({"assets": [{"name": "a.zip", "size": 3}]})})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "download_asset", lambda *a: other)
+    monkeypatch.setattr(module, "_verify_release_target", lambda *a, **k: None)
+    with pytest.raises(ValueError, match="SHA-256"):
+        module._publish_assets(REPO, "v1.0.1", title="t", notes=(), version="1.0.1", assets=[archive],
+                                work_root=tmp_path, timeout=1, resume=True, target="commit")
+    assert all(c[:2] == ["release", "view"] for c in gh.calls)
+
+
+def test_resume_does_not_build_or_require_private_key(tmp_path, monkeypatch):
+    module = _module()
+    output = tmp_path / "artifacts" / "candidate"
+    channel, release = _recoverable_candidate(module, output)
+    monkeypatch.setattr(module, "COMMERCIAL_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_project_version", lambda: "1.0.1")
+    monkeypatch.setattr(module, "load_update_channel", lambda: channel)
+    monkeypatch.setattr(module, "repo_name_with_owner", lambda: REPO)
+    monkeypatch.setattr(module, "ensure_gh_ready", lambda _: None)
+    monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: None)
+    monkeypatch.setattr(module, "_build_candidate", lambda *a, **k: pytest.fail("rebuilt candidate"))
+    monkeypatch.setattr(module, "_publish_assets", lambda *a, **k: None)
+    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: None)
+    assert module.main(["--resume", "--output", str(output), "--yes"]) == 0
+
+
+def test_failed_smoke_restores_previous_signed_manifest_and_receipt(tmp_path, monkeypatch):
+    module = _module()
+    channel, release = _recoverable_candidate(module, tmp_path / "output")
+    key = Ed25519PrivateKey.generate()
+    previous_channel, key_id = _channel(key)
+    previous = _signed_manifest("1.0.0", key, key_id, module.asset_url(REPO, "v1.0.0", "update.zip"))
+    monkeypatch.setattr(module, "_verify_signed_manifest", lambda *a: None)
+    monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: previous)
+    monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: None)
+    monkeypatch.setattr(module, "smoke_update_from_github", lambda *a: (_ for _ in ()).throw(ValueError("smoke failed")))
+    uploads = []
+    monkeypatch.setattr(module, "upload_assets", lambda repo, tag, paths: uploads.append(json.loads(paths[0].read_text(encoding="utf-8"))))
+    monkeypatch.setattr(module, "verify_stable_manifest", lambda channel, manifest: None)
+    receipt = {}
+    with pytest.raises(ValueError, match="回滚状态：verified"):
+        module._finish_publication(REPO, release, channel=channel, work_root=tmp_path / "output" / "github",
+                                   target="commit", previous=previous, skip_smoke=False, receipt=receipt)
+    assert uploads == [previous] and receipt["rollback"] == "verified"
+    assert json.loads((tmp_path / "output" / "publication-receipt.json").read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_resume_missing_candidate_never_rebuilds(tmp_path, monkeypatch):
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    monkeypatch.setattr(module, "_build_candidate", lambda *a, **k: pytest.fail("must not build"))
+    with pytest.raises(SystemExit):
+        module.main(["--resume", "--output", str(root / "artifacts" / "missing"), "--yes"])
+
+
+def test_already_promoted_resume_failure_never_rolls_back_old_baseline(tmp_path, monkeypatch):
+    module = _module()
+    channel, release = _recoverable_candidate(module, tmp_path / "output")
+    expected = json.loads(release.manifest_path.read_text(encoding="utf-8"))
+    monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: expected)
+    monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: pytest.fail("must not write"))
+    monkeypatch.setattr(module, "upload_assets", lambda *a, **k: pytest.fail("must not roll back"))
+    monkeypatch.setattr(module, "verify_stable_manifest", lambda *a: (_ for _ in ()).throw(TimeoutError("timeout")))
+    receipt = {}
+    with pytest.raises(ValueError, match="本次未修改"):
+        module._finish_publication(REPO, release, channel=channel, work_root=tmp_path / "output" / "github",
+                                   target="commit", previous={"version": "1.0.0"}, skip_smoke=False, receipt=receipt)
+    assert receipt["rollback"] == "not_needed_existing_stable_unchanged"
+
+
+def test_pre_promotion_conflict_is_recorded_without_rollback(tmp_path, monkeypatch):
+    module = _module()
+    channel, release = _recoverable_candidate(module, tmp_path / "output")
+    monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: {"version": "9.0.0"})
+    monkeypatch.setattr(module, "upload_assets", lambda *a, **k: pytest.fail("must not write"))
+    receipt = {}
+    with pytest.raises(ValueError, match="其他发布"):
+        module._finish_publication(REPO, release, channel=channel, work_root=tmp_path / "output" / "github",
+                                   target="commit", previous=None, skip_smoke=False, receipt=receipt)
+    assert receipt["status"] == "failed_before_promotion"
+
+
+@pytest.mark.parametrize("draft", [True, False])
+def test_remote_release_target_must_match_candidate(monkeypatch, draft):
+    module = _module()
+    gh = _FakeGh({("api",): "different-commit"})
+    monkeypatch.setattr(module, "_gh", gh)
+    with pytest.raises(ValueError, match="目标提交"):
+        module._verify_release_target(REPO, "v1.0.1", "candidate-commit",
+                                      {"isDraft": draft, "targetCommitish": "master"})
+    ref = "master" if draft else "v1.0.1"
+    assert gh.calls == [["api", f"repos/{REPO}/commits/{ref}", "--jq", ".sha"]]
+
+
+def test_failed_promotion_will_not_restore_over_another_publish(tmp_path, monkeypatch):
+    module = _module()
+    channel, release = _recoverable_candidate(module, tmp_path / "output")
+    previous = {"version": "1.0.0"}
+    reads = iter([previous, {"version": "2.0.0"}])
+    monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: next(reads))
+    monkeypatch.setattr(module, "promote_manifest", lambda *a, **k: (_ for _ in ()).throw(ValueError("failed")))
+    monkeypatch.setattr(module, "upload_assets", lambda *a, **k: pytest.fail("must not overwrite another publish"))
+    receipt = {}
+    with pytest.raises(ValueError, match="回滚状态：failed"):
+        module._finish_publication(REPO, release, channel=channel, work_root=tmp_path / "output" / "github",
+                                   target="commit", previous=previous, skip_smoke=False, receipt=receipt)
+    assert "其他发布" in receipt["rollback_error"]

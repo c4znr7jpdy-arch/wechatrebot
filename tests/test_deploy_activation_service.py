@@ -51,6 +51,15 @@ def kind(argv, settings):
         return "read-env"
     if command == f"cat {settings.previous_image_file}":
         return "read-record"
+    if command == settings.read_support_command()[-1]:
+        return "read-support"
+    if "activation_deploy_support.py prepare" in command:
+        return "prepare-support"
+    for operation in ("apply", "restore", "capture", "probe-restored", "probe"):
+        if f"tool.py {operation}" in command:
+            return operation + "-support"
+    if command == settings.reload_nginx_command()[-1]:
+        return "reload-nginx"
     if "tar -xf" in command:
         return "unpack"
     if "docker build" in command:
@@ -73,10 +82,12 @@ def kind(argv, settings):
 class FakeServer:
     """Interprets the generated ssh/scp/HTTP calls against an in-memory server state."""
 
-    def __init__(self, settings, *, env_text=ENV_TEXT, record=None, after_switch=None, fail=None):
+    def __init__(self, settings, *, env_text=ENV_TEXT, record=None, support_record="", after_switch=None, fail=None):
         self.settings = settings
         self.env = env_text
         self.record = record
+        self.support_record = support_record
+        self.support_restored = False
         self.backups = ["backup-20261101T042000000000Z-aaaaaaaaaaaa"]
         self.calls, self.probes, self.uploads = [], [], {}
         self.switched, self.restarts = False, 0
@@ -101,6 +112,11 @@ class FakeServer:
             if self.record is None:
                 raise RuntimeError("命令失败（退出码 1）：ssh.exe\ncat: No such file or directory")
             return self.record + "\n"
+        if name == "read-support":
+            return self.support_record + "\n"
+        if name == "restore-support":
+            self.support_restored = True
+            return ""
         if name == "health":
             return "running healthy\n"
         if name == "list-backups":
@@ -110,7 +126,8 @@ class FakeServer:
                 self.backups.append("backup-20261103T100000000000Z-bbbbbbbbbbbb")
             return "\n".join(self.backups) + "\n"
         if name == "record":
-            self.record = re.search(r"printf '%s\\n' (\S+) >", command).group(1)
+            self.record = re.findall(r"printf '%s\\n' (\S+) >", command)[-1]
+            self.support_record = re.findall(r"printf '%s\\n' (\S+) >", command)[0].strip("'")
             return ""
         if name == "install-env":
             self.env = self.uploads[settings.env_upload_path].decode("utf-8")
@@ -163,11 +180,11 @@ def independent_copy_sources(text):
 def test_payload_files_match_dockerfile_copy_lines():
     dockerfile = ROOT / tool.DOCKERFILE
     payload = tool.build_payload()
-    assert set(payload.files) == independent_copy_sources(dockerfile.read_text("utf-8")) | {tool.DOCKERFILE}
+    assert set(payload.files) == independent_copy_sources(dockerfile.read_text("utf-8")) | {tool.DOCKERFILE} | set(tool.SUPPORT_FILES)
     assert list(payload.files) == sorted(payload.files)
 
 
-def test_payload_contains_exactly_the_image_inputs():
+def test_payload_contains_the_image_inputs_and_host_support():
     files = set(tool.build_payload().files)
     service = {p.relative_to(ROOT).as_posix() for p in (ROOT / "services/activation_service").glob("*.py")}
     assert service <= files and "services/activation_service/requirements.txt" in files
@@ -175,7 +192,8 @@ def test_payload_contains_exactly_the_image_inputs():
             "src/wechatrebot_manager/licensing/__init__.py", "src/wechatrebot_manager/licensing/protocol.py",
             "src/wechatrebot_manager/licensing/contact.py", "deploy/activation-service/Dockerfile"} <= files
     assert not any(p.startswith(("vendor/", "runtime/", "config/", "data/")) for p in files)
-    assert not any("README" in p or p.endswith(".service") or p.endswith("backup.py") for p in files)
+    assert set(tool.SUPPORT_FILES) <= files
+    assert not any("README" in p for p in files)
 
 
 def copy_inputs(destination):
@@ -267,8 +285,9 @@ def test_execute_runs_steps_in_order_and_verifies_from_public_entry():
     plan = plan_for()
     server = FakeServer(plan)
     summary = tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
-    assert server.kinds() == ["read-env", "upload-archive", "unpack", "build", "list-backups", "backup",
-                              "record", "upload-env", "install-env", "switch", "health"]
+    assert server.kinds() == ["read-env", "upload-archive", "unpack", "build", "prepare-support", "record",
+                              "apply-support", "list-backups", "backup", "upload-env", "install-env",
+                              "switch", "reload-nginx", "health", "probe-support", "probe-support"]
     assert [(m, p, switched) for m, p, _, switched in server.probes] == [
         ("GET", "/health", False), ("GET", "/v1/contact", False), ("POST", "/v1/trial-status", False),
         ("GET", "/health", True), ("POST", "/v1/trial-status", True), ("POST", "/v1/preview", True),
@@ -284,7 +303,8 @@ def test_execute_runs_steps_in_order_and_verifies_from_public_entry():
     assert f"docker build -t {plan.image} -f {plan.release_dir}/{tool.DOCKERFILE} {plan.release_dir}" in build
     assert "docker image inspect" in build
     assert server.env == new_env(plan.identity) and server.record == OLD_IMAGE
-    assert f"ln -sfn releases/{plan.identity}" in server.calls[9][-1]
+    assert f"ln -sfn releases/{plan.identity}" in server.calls[11][-1]
+    assert server.support_record == plan.support_snapshot
     assert summary == {
         "ok": True, "identity": plan.identity, "image": plan.image, "previous_image": OLD_IMAGE,
         "backup_snapshot": "backup-20261103T100000000000Z-bbbbbbbbbbbb", "verified": True, "rolled_back": False,
@@ -301,10 +321,12 @@ def test_verification_failure_rolls_back_to_previous_image_and_reports():
         tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
     message = str(failure.value)
     assert "已回滚" in message and OLD_IMAGE in message and "trial-status" in message and "invalid_endpoint" in message
-    assert server.kinds()[-6:] == ["switch", "health", "upload-env", "install-env", "switch", "health"]
+    assert server.kinds()[-8:] == ["restore-support", "upload-env", "install-env", "switch", "reload-nginx",
+                                  "health", "probe-restored-support", "probe-restored-support"]
     assert server.env == ENV_TEXT and server.record == OLD_IMAGE and server.restarts == 2
     assert server.probes[-1][:2] == ("GET", "/health")
-    assert "ln -sfn releases/acf59eb8e6c5" in server.calls[-2][-1]
+    assert "ln -sfn releases/acf59eb8e6c5" in server.calls[-5][-1]
+    assert server.support_restored
 
 
 def test_contact_mismatch_after_switch_rolls_back():
@@ -313,7 +335,7 @@ def test_contact_mismatch_after_switch_rolls_back():
     server = FakeServer(plan, after_switch={("GET", "/v1/contact"): (200, {"ok": True, "data": changed, "server_time": 1})})
     with pytest.raises(RuntimeError, match="联系资料"):
         tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
-    assert server.env == ENV_TEXT and server.kinds()[-1] == "health"
+    assert server.env == ENV_TEXT and server.kinds()[-1] == "probe-restored-support"
 
 
 def test_rollback_failure_demands_manual_intervention():
@@ -342,7 +364,8 @@ def test_backup_without_new_snapshot_stops_before_switching():
     server.backup_adds_snapshot = False
     with pytest.raises(RuntimeError, match="备份"):
         tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
-    assert server.kinds()[-1] == "backup" and server.env == ENV_TEXT and not server.switched
+    assert "apply-support" in server.kinds() and "restore-support" in server.kinds()
+    assert server.env == ENV_TEXT and server.restarts == 1
 
 
 def test_server_already_on_target_image_refuses_without_uploading():
@@ -370,13 +393,44 @@ def test_container_health_wait_retries_then_fails():
         tool.wait_for_container(plan, run=lambda argv: "running unhealthy\n", sleep=lambda _: None, attempts=2, delay=0)
 
 
+@pytest.mark.parametrize("stage", ["apply-support", "probe-support", "reload-nginx"])
+def test_support_or_admin_failure_restores_host_files_and_previous_image(stage):
+    plan = plan_for()
+    failures = []
+
+    def fail(argv):
+        if kind(argv, plan) == stage and not failures:
+            failures.append(stage)
+            raise RuntimeError(f"injected {stage} failure")
+
+    server = FakeServer(plan, fail=fail)
+    with pytest.raises(RuntimeError, match="已回滚"):
+        tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None, attempts=1)
+    assert server.support_restored and server.env == ENV_TEXT
+    assert server.kinds().index("restore-support") < len(server.kinds()) - 1
+
+
+def test_nginx_discovery_failure_changes_neither_support_nor_environment():
+    plan = plan_for()
+
+    def fail(argv):
+        if kind(argv, plan) == "prepare-support":
+            raise RuntimeError("Cannot uniquely locate nginx snippets")
+
+    server = FakeServer(plan, fail=fail)
+    with pytest.raises(RuntimeError, match="uniquely"):
+        tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None)
+    assert server.env == ENV_TEXT and not server.switched
+    assert "apply-support" not in server.kinds() and "record" not in server.kinds()
+
+
 # ---------------------------------------------------------------- explicit rollback
 
 def test_explicit_rollback_restores_recorded_image():
     plan = plan_for()
     server = FakeServer(plan, env_text=new_env(plan.identity), record=OLD_IMAGE)
     summary = tool.execute_rollback(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
-    assert server.kinds() == ["read-record", "read-env", "record", "upload-env", "install-env", "switch", "health"]
+    assert server.kinds() == ["read-record", "read-env", "read-support", "record", "upload-env", "install-env", "switch", "health"]
     assert [(m, p) for m, p, _, _ in server.probes] == [("GET", "/health"), ("GET", "/v1/contact")]
     assert server.env == ENV_TEXT and server.record == plan.image
     assert summary == {"ok": True, "changed": True, "image": OLD_IMAGE, "replaced_image": plan.image, "verified": True}
@@ -395,6 +449,36 @@ def test_explicit_rollback_without_record_explains():
     server = FakeServer(plan, record=None)
     with pytest.raises(RuntimeError, match="回滚目标"):
         tool.execute_rollback(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
+
+
+def test_explicit_rollback_restores_and_records_host_support_snapshot():
+    plan = plan_for()
+    previous = f"{plan.remote_root}/support-backups/aaaaaaaaaaaaaaaa"
+    server = FakeServer(plan, env_text=new_env(plan.identity), record=OLD_IMAGE, support_record=previous)
+    tool.execute_rollback(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
+    assert server.support_restored and server.support_record == plan.support_snapshot
+    assert server.kinds().index("capture-support") < server.kinds().index("record")
+    restore = next(argv[-1] for argv in server.calls if kind(argv, plan) == "restore-support")
+    assert previous in restore
+
+
+def test_explicit_rollback_failure_recovers_original_support_and_image():
+    plan = plan_for()
+    previous = f"{plan.remote_root}/support-backups/aaaaaaaaaaaaaaaa"
+    failures = []
+
+    def fail(argv):
+        if kind(argv, plan) == "switch" and not failures:
+            failures.append(True)
+            raise RuntimeError("old version restart failed")
+
+    server = FakeServer(plan, env_text=new_env(plan.identity), record=OLD_IMAGE, support_record=previous, fail=fail)
+    with pytest.raises(RuntimeError, match="已恢复操作前"):
+        tool.execute_rollback(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
+    assert server.env == new_env(plan.identity)
+    assert server.record == OLD_IMAGE and server.support_record == previous
+    restores = [argv[-1] for argv in server.calls if kind(argv, plan) == "restore-support"]
+    assert len(restores) == 2 and plan.support_snapshot in restores[-1]
 
 
 # ---------------------------------------------------------------- boundaries
@@ -433,7 +517,7 @@ def test_commands_never_touch_data_private_key_or_containers_directly():
     tool.execute(plan, run=server.run, probe=server.probe, log=lambda *_: None, sleep=lambda _: None)
     text = "\n".join(subprocess.list2cmdline(argv) for argv in server.calls) + tool.describe(plan)
     for forbidden in (DATA_DIR, "licensing-private", "activation.sqlite3", "wechat-contact.json", "docker exec",
-                      "docker rm", "docker rmi", "rm -r", "generate-key", "/deploy/activation-service/backup.py"):
+                      "docker rm", "docker rmi", "rm -r", "generate-key"):
         assert forbidden not in text, forbidden
     assert all(argv[0] in {"ssh.exe", "scp.exe"} for argv in server.calls)
     assert all("BatchMode=yes" in argv for argv in server.calls)

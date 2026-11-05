@@ -241,7 +241,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._update_channel_error = ""
         self._available_update: UpdateRelease | None = None
         self._prepared_update = None
-        self._install_requested = ""
+        self._update_confirmation_token = ""
+        self._update_installing = False
         self._mandatory_update = False
         self._update_result = None
         if not development:
@@ -519,6 +520,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             return self._failed(exc, "11004")
 
     def start_robot(self) -> dict[str, object]:
+        if getattr(self, "_update_installing", False):
+            return self._ok({"accepted": False}, message="更新正在安装，请稍候。")
         if self._mandatory_update:
             return self._update_failed(
                 UpdateFailure("UPD-1016", "当前版本已低于最低支持版本。")
@@ -538,6 +541,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
     def _queue_robot_action(self, action: str, message: str, error_code: str = "19000") -> dict[str, object]:
         if not self._action_lock.acquire(blocking=False):
             return self._ok({"accepted": False}, message="正在处理上一个操作。")
+        if getattr(self, "_update_installing", False):
+            self._action_lock.release()
+            return self._ok({"accepted": False}, message="更新正在安装，请稍候。")
         if action in {"start", "connect_wechat"}:
             try:
                 if (has_pending_migrations(self._install_root)

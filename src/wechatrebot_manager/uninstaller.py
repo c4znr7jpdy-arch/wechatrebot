@@ -435,7 +435,7 @@ def _process_module_paths(pid: int) -> tuple[Path, ...]:
     return tuple(values)
 
 
-def _terminate_windows_process(pid: int) -> bool:
+def _terminate_windows_process(pid: int, *, expected_creation_time: int | None = None) -> bool:
     if os.name != "nt" or pid <= 0 or pid == os.getpid():
         return False
     import ctypes
@@ -450,14 +450,30 @@ def _terminate_windows_process(pid: int) -> bool:
     kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
+    rights = 0x0001 | 0x00100000
+    if expected_creation_time is not None:
+        rights |= 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+    handle = kernel32.OpenProcess(rights, False, pid)
     if not handle:
         return False
     try:
+        if expected_creation_time is not None:
+            kernel32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (
+                ctypes.POINTER(wintypes.FILETIME),
+            ) * 4
+            kernel32.GetProcessTimes.restype = wintypes.BOOL
+            created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            if not kernel32.GetProcessTimes(
+                handle, ctypes.byref(created), ctypes.byref(exited),
+                ctypes.byref(kernel), ctypes.byref(user),
+            ):
+                return False
+            actual = (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+            if actual != expected_creation_time:
+                return False
         if not kernel32.TerminateProcess(handle, 0):
             return False
-        kernel32.WaitForSingleObject(handle, 10_000)
-        return True
+        return kernel32.WaitForSingleObject(handle, 10_000) == 0
     finally:
         kernel32.CloseHandle(handle)
 

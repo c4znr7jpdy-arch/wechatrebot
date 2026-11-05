@@ -2,6 +2,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from typing import Any
@@ -16,6 +17,7 @@ from wechatrebot_manager.launcher import (
     _normalized_executable,
     build_service_specs,
 )
+from wechatrebot_manager import launcher, uninstaller
 
 
 class _FakeProcess:
@@ -230,6 +232,84 @@ def test_supervisor_force_stop_kills_services_in_reverse_order(
     assert supervisor.running == []
 
 
+def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    processes = {
+        987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
+        987652: ProcessIdentity(str(tmp_path / "other/Weixin.exe"), 102),
+        987653: ProcessIdentity(str(tmp_path / "runtime/python/python.exe"), 103),
+        987654: ProcessIdentity(str(tmp_path / "other/python.exe"), 104),
+    }
+    calls = []
+
+    def snapshot(*, executable_names, strict):
+        assert executable_names == frozenset({"weixin.exe", "wechat.exe", "python.exe"})
+        assert strict is True
+        return tuple(processes)
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == processes[pid].creation_time
+        calls.append(pid)
+        del processes[pid]
+        return True
+
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", snapshot)
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    monkeypatch.setattr(launcher, "process_identity", processes.get)
+    monkeypatch.setattr(launcher, "installation_services_stopped", lambda root: True)
+    monkeypatch.setattr(launcher.time, "sleep", lambda _: None)
+    launcher.force_stop_update_processes(tmp_path)
+    assert calls == [987651, 987652, 987653]
+    assert list(processes) == [987654]
+
+
+@pytest.mark.parametrize("query_error", [False, True])
+def test_confirmed_update_blocks_on_unknown_live_process(tmp_path, monkeypatch, query_error):
+    _layout(tmp_path)
+    calls = []
+
+    def identity(_pid):
+        if query_error:
+            raise OSError("access denied")
+        return None
+
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(launcher, "process_identity", identity)
+    with pytest.raises((ServiceStopError, OSError)):
+        launcher.force_stop_update_processes(tmp_path)
+    assert calls == []
+
+
+def test_confirmed_update_allows_process_that_exited_during_inspection(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    snapshots = iter(((987651,), ()))
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: next(snapshots))
+    monkeypatch.setattr(launcher, "process_identity", lambda _pid: None)
+    monkeypatch.setattr(launcher, "installation_services_stopped", lambda root: True)
+    launcher.force_stop_update_processes(tmp_path)
+
+
+def test_confirmed_update_blocks_on_failed_termination(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    identity = ProcessIdentity(str(tmp_path / "Weixin.exe"), 123)
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
+    monkeypatch.setattr(launcher, "process_identity", lambda _pid: identity)
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", lambda *a, **kw: False)
+    with pytest.raises(ServiceStopError) as error:
+        launcher.force_stop_update_processes(tmp_path)
+    assert error.value.service_name == "wechat"
+
+
+def test_confirmed_update_requires_final_runtime_stop_verification(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: ())
+    monkeypatch.setattr(launcher, "installation_services_stopped", lambda root: False)
+    with pytest.raises(ServiceStopError) as error:
+        launcher.force_stop_update_processes(tmp_path)
+    assert error.value.service_name == "new-hook-bridge"
+
+
 def test_preflight_rejects_missing_hook_before_any_process_starts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -320,8 +400,9 @@ def test_preflight_rejects_tampered_hook_before_any_process_starts(
     assert starts == []
 
 
+@pytest.mark.parametrize("stop_method", ["stop", "force_stop"])
 def test_supervisor_persists_and_readopts_owned_processes(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, stop_method
 ) -> None:
     _layout(tmp_path)
     specs = build_service_specs(tmp_path)
@@ -362,9 +443,62 @@ def test_supervisor_persists_and_readopts_owned_processes(
     assert adopted.adoption_complete is True
     assert [running.process.pid for running in adopted.running] == [101, 102]
 
-    monkeypatch.setattr(os, "kill", lambda pid, sig: identities.pop(pid, None))
-    adopted.stop()
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("unsafe PID-only signal"))
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    getattr(adopted, stop_method)()
     assert not state_path.exists()
+    assert terminated == [102, 101]
+
+
+@pytest.mark.parametrize("method", ["terminate", "kill", "send_signal"])
+def test_adopted_process_does_not_kill_reused_pid(monkeypatch, method):
+    original = ProcessIdentity("owned/python.exe", 1001)
+    current = {987651: original}
+    process = launcher.AdoptedProcess(987651, original, current.get)
+    assert process.poll() is None
+    # Exit and PID reuse happen after the supervisor's poll, before termination.
+    current[987651] = ProcessIdentity("other/program.exe", 2002)
+    checked = []
+    terminated = []
+
+    def guarded_terminate(pid, *, expected_creation_time):
+        checked.append((pid, expected_creation_time))
+        if current[pid].creation_time != expected_creation_time:
+            return False
+        terminated.append(pid)
+        return True
+
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("unsafe PID-only signal"))
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", guarded_terminate)
+    getattr(process, method)(*([signal.SIGTERM] if method == "send_signal" else []))
+    assert checked == [(987651, 1001)]
+    assert terminated == []
+    assert process.poll() is not None
+
+
+def test_adopted_process_reports_failed_termination_of_original_process(monkeypatch):
+    identity = ProcessIdentity("owned/python.exe", 1001)
+    process = launcher.AdoptedProcess(987651, identity, lambda _: identity)
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", lambda *a, **kw: False)
+    with pytest.raises(OSError, match="无法停止"):
+        process.kill()
+    assert process.poll() is None
+
+
+def test_adopted_process_rejects_console_signal_without_pid_only_call(monkeypatch):
+    identity = ProcessIdentity("owned/python.exe", 1001)
+    process = launcher.AdoptedProcess(987651, identity, lambda _: identity)
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("unsafe PID-only signal"))
+    with pytest.raises(OSError, match="控制台信号"):
+        process.send_signal(signal.SIGINT)
 
 
 def test_partial_start_failure_and_core_stop_keep_owned_bridge(tmp_path, monkeypatch):

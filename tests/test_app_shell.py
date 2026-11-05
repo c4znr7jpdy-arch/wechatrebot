@@ -1,5 +1,6 @@
 from webui_source import manager_script
 import copy
+from dataclasses import replace
 from io import BytesIO
 import json
 from pathlib import Path
@@ -50,7 +51,8 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     }
     value._available_update = None
     value._prepared_update = None
-    value._install_requested = ""
+    value._update_confirmation_token = ""
+    value._update_installing = False
     value._mandatory_update = False
     value._update_channel_error = ""
     value._update_result = None
@@ -1343,6 +1345,7 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
 
     assert result["ok"] is True
     assert result["data"]["release"] == {
+        "release_id": api._release_id(release),
         "version": "0.9.0",
         "title": "体验升级",
         "notes": ["聊天记录更易查找"],
@@ -1384,229 +1387,235 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
     assert result["error"]["code"] == "UPD-1016"
 
 
-@pytest.mark.parametrize("runtime_stop", [True, False])
-def test_install_update_runs_in_background_and_reports_progress(
-    monkeypatch, tmp_path: Path, runtime_stop
-) -> None:
+def _downloadable_update(monkeypatch, tmp_path: Path):
+    api = _api(tmp_path)
     release = UpdateRelease(
-        version="0.9.0",
-        title="体验升级",
-        notes=(),
+        version="0.9.0", title="体验升级", notes=(),
         published_at="2026-09-03T00:00:00Z",
         package_url="https://updates.example.test/0.9.0.zip",
-        package_size=100,
-        package_sha256="A" * 64,
-        mandatory=False,
+        package_size=100, package_sha256="A" * 64, mandatory=False, build=1,
     )
-    api = _api(tmp_path)
     api._available_update = release
-    api._lifecycle.refresh = lambda: SimpleNamespace(
-        state=SimpleNamespace(value="STOPPED"), online=False, can_stop=False
-    )
-    stops = []
-    api._lifecycle.request_stop = lambda: stops.append(True)
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    archive = tmp_path / "update.zip"
+    archive.write_bytes(b"verified fixture")
+    prepared = SimpleNamespace(release=release, payload_root=payload, archive_path=archive)
+    events = []
     monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
-    launched = threading.Event()
-    prepared = SimpleNamespace(payload_root=tmp_path / "payload")
-    monkeypatch.setattr(update_api, "payload_requires_runtime_stop", lambda path: runtime_stop)
 
-    def fake_prepare(*_args, progress_callback, **_kwargs):
+    def prepare(*_args, progress_callback, **_kwargs):
+        events.append("download")
         progress_callback("download", 50, 100)
         progress_callback("verify", 4, 4)
         return prepared
 
-    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
-    monkeypatch.setattr(update_api, "create_update_plan", lambda *_args, **_kwargs: "plan")
-    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: launched.set())
+    monkeypatch.setattr(update_api, "prepare_update", prepare)
+    monkeypatch.setattr(update_api, "create_update_plan", lambda *_a, **_kw: events.append("verify_plan") or "plan")
+    monkeypatch.setattr(update_api, "assert_update_runtime_stopped", lambda *_a: events.append("verify_stopped"))
+    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: events.append("launch"))
+    api._lifecycle.force_stop_for_update = lambda: events.append("stop_all")
+    return api, prepared, events
 
-    result = api.install_update("0.9.0")
 
-    assert result["ok"] is True
-    assert result["data"]["accepted"] is True
-    assert launched.wait(2)
-    assert api._update_lock.acquire(timeout=2)
+def _wait_update_worker(api):
+    assert api._update_lock.acquire(timeout=3)
     api._update_lock.release()
-    status = api.get_update_status()
-    assert status["ok"] is True
-    assert status["data"]["state"] == "restarting"
-    assert status["data"]["percent"] == 100
-    assert bool(stops) is runtime_stop
+    return api.get_update_status()["data"]
 
 
-def test_background_download_waits_for_owned_wechat_before_stopping_services(
-    monkeypatch, tmp_path: Path
-) -> None:
-    release = UpdateRelease(
-        version="0.9.0",
-        title="体验升级",
-        notes=(),
-        published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/0.9.0.zip",
-        package_size=100,
-        package_sha256="A" * 64,
-        mandatory=False,
-    )
-    api = _api(tmp_path)
-    api._available_update = release
-    states = iter(("STOP_WAIT_WECHAT", "STOPPED", "STOPPED"))
-    observed_states = []
-    api._lifecycle.request_stop = lambda: None
-
-    def refresh_lifecycle():
-        try:
-            state = next(states)
-        except StopIteration:
-            state = "STOPPED"
-        observed_states.append(state)
-        return SimpleNamespace(
-            state=SimpleNamespace(value=state), online=False, can_stop=False
-        )
-
-    api._lifecycle.refresh = refresh_lifecycle
-    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(update_api.time, "sleep", lambda _seconds: None)
-    launched = threading.Event()
-    launch_states = []
-    prepared = SimpleNamespace()
-
-    def fake_prepare(*_args, progress_callback, **_kwargs):
-        progress_callback("download", 100, 100)
-        return prepared
-
-    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
-    monkeypatch.setattr(update_api, "create_update_plan", lambda *_args, **_kwargs: "plan")
-
-    def fake_launch(_plan):
-        launch_states.append(api._lifecycle.refresh().state.value)
-        launched.set()
-
-    monkeypatch.setattr(update_api, "launch_update_helper", fake_launch)
-    result = api.install_update("0.9.0")
-
-    assert result["data"]["accepted"] is True
-    assert launched.wait(2)
-    assert observed_states[:2] == ["STOP_WAIT_WECHAT", "STOPPED"]
-    assert launch_states == ["STOPPED"]
-    assert "waiting_wechat" in (tmp_path / "logs" / "update.log").read_text(encoding="utf-8")
-
-
-def test_optional_update_download_does_not_stop_running_robot(
-    monkeypatch, tmp_path: Path
-) -> None:
-    release = UpdateRelease(
-        version="0.9.0",
-        title="体验升级",
-        notes=(),
-        published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/0.9.0.zip",
-        package_size=100,
-        package_sha256="A" * 64,
-        mandatory=False,
-    )
-    api = _api(tmp_path)
-    api._available_update = release
-    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
-    prepared = SimpleNamespace(release=release)
-    started = threading.Event()
-
-    def fake_prepare(*_args, progress_callback, **_kwargs):
-        progress_callback("download", 100, 100)
-        started.set()
-        return prepared
-
-    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
-
-    result = api.download_update("0.9.0")
-
-    assert result["ok"] is True
-    assert result["data"]["accepted"] is True
-    assert started.wait(2)
-    assert api._update_lock.acquire(timeout=2)
-    api._update_lock.release()
-    status = api.get_update_status()["data"]
+def _download_ready(api):
+    release = api._available_update
+    result = api.download_update(release.version, api._release_id(release))
+    assert result["ok"] is True and result["data"]["accepted"] is True
+    status = _wait_update_worker(api)
     assert status["state"] == "ready"
     assert status["phase"] == "ready_to_install"
-    assert not hasattr(api._lifecycle, "request_stop")
+    assert status["confirmation_token"]
+    return status
+
+
+def test_update_download_waits_for_explicit_confirmation(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    close_timers = []
+    api._window = SimpleNamespace()
+    monkeypatch.setattr(
+        update_api.threading, "Timer",
+        lambda delay, callback: SimpleNamespace(start=lambda: close_timers.append((delay, callback))),
+    )
+    status = _download_ready(api)
+    assert events == ["download"]
+    assert status["percent"] == 100
+    assert status["release_id"] == api._release_id(prepared.release)
+    assert status["version"] == prepared.release.version
+    assert api._update_installing is False
+    assert close_timers == []
+
+    result = api.install_update(prepared.release.version, status["confirmation_token"])
+    assert result["data"]["accepted"] is True
+    assert _wait_update_worker(api)["state"] == "restarting"
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
+    assert api.get_update_status()["data"]["confirmation_token"] == ""
+    assert api._update_installing is True
+    assert close_timers == [(0.35, api._close_window_for_update)]
+    assert api.start_robot()["data"]["accepted"] is False
+    assert api._queue_robot_action("connect_wechat", "连接")["data"]["accepted"] is False
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is False
+    assert api._update_installing is True
+    assert events.count("launch") == 1
+
+
+@pytest.mark.parametrize("token", ["", "wrong", "错误确认"])
+def test_update_rejects_missing_or_invalid_confirmation(monkeypatch, tmp_path, token):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    _download_ready(api)
+    result = api.install_update(prepared.release.version, token)
+    assert result["ok"] is False
+    assert events == ["download"]
+    assert api.get_update_status()["data"]["state"] == "ready"
+    assert api._update_installing is False
+
+
+def test_install_request_while_downloading_never_queues_shutdown(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    started, finish = threading.Event(), threading.Event()
+
+    def prepare(*_args, **_kwargs):
+        started.set()
+        assert finish.wait(3)
+        return prepared
+
+    monkeypatch.setattr(update_api, "prepare_update", prepare)
+    try:
+        assert api.download_update(prepared.release.version)["data"]["accepted"] is True
+        assert started.wait(2)
+        result = api.install_update(prepared.release.version, "premature-confirmation")
+        assert result["data"]["accepted"] is False
+    finally:
+        finish.set()
+    status = _wait_update_worker(api)
+    assert status["state"] == "ready"
+    assert events == []
+    assert api._update_installing is False
+
+
+def test_update_confirmation_waits_for_robot_action_and_can_retry(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    with api._action_lock:
+        result = api.install_update(prepared.release.version, status["confirmation_token"])
+        assert result["data"]["accepted"] is False
+        assert api._update_installing is False
+    assert events == ["download"]
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is True
+    assert _wait_update_worker(api)["state"] == "restarting"
+
+
+@pytest.mark.parametrize("change", ["build", "package_url", "package_sha256", "package_size"])
+def test_update_cache_is_bound_to_exact_release(monkeypatch, tmp_path, change):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    old_status = _download_ready(api)
+    changes = {"build": 2, "package_url": "https://updates.example.test/repacked.zip",
+               "package_sha256": "B" * 64, "package_size": 200}
+    newer = replace(prepared.release, **{change: changes[change]})
+    monkeypatch.setattr(update_api, "check_for_update", lambda *_a, **_kw: newer)
+    assert api.check_update()["data"]["release"]["release_id"] != old_status["release_id"]
+    assert api.get_update_status()["data"]["confirmation_token"] == ""
+    assert api.install_update(newer.version, old_status["confirmation_token"])["ok"] is False
+    assert api.download_update(newer.version, old_status["release_id"])["ok"] is False
+    assert events == ["download"]
+    prepared.release = newer
+    _download_ready(api)
+    assert events == ["download", "download"]
+
+
+def test_ready_cache_refresh_replaces_confirmation_token(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    first = _download_ready(api)
+    second = _download_ready(api)
+    assert first["confirmation_token"] != second["confirmation_token"]
+    assert events == ["download"]
+    assert api.install_update(prepared.release.version, first["confirmation_token"])["ok"] is False
+
+
+def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+
+    def corrupt_payload(*_args, **_kwargs):
+        raise PayloadError("下载后文件被修改")
+
+    monkeypatch.setattr(update_api, "create_update_plan", corrupt_payload)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is True
+    result = _wait_update_worker(api)
+    assert result["state"] == "failed"
+    assert result["error"]["code"] == "UPD-1003"
+    assert events == ["download"]
+    assert api._update_installing is False
+    assert api._action_lock.acquire(blocking=False)
+    api._action_lock.release()
+    assert api._prepared_update is None
+    _download_ready(api)
+    assert events == ["download", "download"]
 
 
 @pytest.mark.parametrize(
     ("service_name", "error_code"),
-    [("new-hook-bridge", "UPD-1006"), ("astrbot", "UPD-1011")],
+    [("new-hook-bridge", "UPD-1006"), ("astrbot", "UPD-1011"), ("wechat", "UPD-1014")],
 )
-def test_update_maps_managed_service_stop_failures(
-    monkeypatch, tmp_path: Path, service_name: str, error_code: str
-) -> None:
-    release = UpdateRelease(
-        version="0.9.0",
-        title="体验升级",
-        notes=(),
-        published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/0.9.0.zip",
-        package_size=100,
-        package_sha256="A" * 64,
-        mandatory=False,
-    )
-    api = _api(tmp_path)
-    api._available_update = release
-    api._lifecycle.request_stop = lambda: (_ for _ in ()).throw(
-        ServiceStopError(service_name, service_name)
-    )
-    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
-    prepared = SimpleNamespace(release=release)
-    monkeypatch.setattr(
-        update_api,
-        "prepare_update",
-        lambda *_args, **_kwargs: prepared,
-    )
+def test_update_maps_managed_service_stop_failures(monkeypatch, tmp_path, service_name, error_code):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
 
-    result = api.install_update("0.9.0")
+    def cannot_stop():
+        raise ServiceStopError(service_name, service_name)
 
-    assert result["ok"] is True
-    assert api._update_lock.acquire(timeout=2)
-    api._update_lock.release()
-    status = api.get_update_status()["data"]
+    api._lifecycle.force_stop_for_update = cannot_stop
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is True
+    result = _wait_update_worker(api)
+    assert result["state"] == "failed"
+    assert result["error"]["code"] == error_code
+    assert events == ["download", "verify_plan"]
+    assert api._update_installing is False
+
+
+@pytest.mark.parametrize("error,code", [(PayloadError("坏文件"), "UPD-1003"),
+                                      (PermissionError("目录只读"), "UPD-1015")])
+def test_update_download_failure_never_stops_robot(monkeypatch, tmp_path, error, code):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+
+    def failed(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(update_api, "prepare_update", failed)
+    assert api.download_update(prepared.release.version)["data"]["accepted"] is True
+    status = _wait_update_worker(api)
     assert status["state"] == "failed"
-    assert status["error"]["code"] == error_code
+    assert status["error"]["code"] == code
+    assert status["confirmation_token"] == ""
+    assert events == []
 
 
-def test_install_update_surfaces_background_verification_failure(
-    monkeypatch, tmp_path: Path
-) -> None:
-    release = UpdateRelease(
-        version="0.9.0",
-        title="体验升级",
-        notes=(),
-        published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/0.9.0.zip",
-        package_size=100,
-        package_sha256="A" * 64,
-        mandatory=False,
-    )
-    api = _api(tmp_path)
-    api._available_update = release
-    api._lifecycle.refresh = lambda: SimpleNamespace(
-        state=SimpleNamespace(value="STOPPED"), online=False, can_stop=False
-    )
-    monkeypatch.setattr(update_api.sys, "frozen", True, raising=False)
-    failed = threading.Event()
+@pytest.mark.parametrize("operation", ["install", "download"])
+def test_update_worker_start_failure_releases_both_locks(monkeypatch, tmp_path, operation):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
 
-    def fake_prepare(*_args, **_kwargs):
-        try:
-            raise PayloadError("载荷校验失败")
-        finally:
-            failed.set()
+    def cannot_start(_thread):
+        raise RuntimeError("cannot start thread")
 
-    monkeypatch.setattr(update_api, "prepare_update", fake_prepare)
-
-    result = api.install_update("0.9.0")
-
-    assert result["ok"] is True
-    assert failed.wait(2)
-    assert api._update_lock.acquire(timeout=2)
-    api._update_lock.release()
-    status = api.get_update_status()["data"]
-    assert status["state"] == "failed"
-    assert status["error"]["code"] == "UPD-1003"
+    monkeypatch.setattr(update_api.threading.Thread, "start", cannot_start)
+    if operation == "install":
+        result = api.install_update(prepared.release.version, status["confirmation_token"])
+    else:
+        api._prepared_update = None
+        result = api.download_update(prepared.release.version)
+    assert result["ok"] is False
+    assert _wait_update_worker(api)["state"] == "failed"
+    assert api._update_installing is False
+    assert api._action_lock.acquire(blocking=False)
+    api._action_lock.release()
+    assert events == ["download"]
 
 
 def test_public_api_allowlist_matches_frontend_calls() -> None:

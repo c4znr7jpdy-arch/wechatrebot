@@ -289,3 +289,16 @@ def test_script_runs_without_project_imports_and_supports_python310_syntax(sourc
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["ok"] is True
     assert SECRET.decode() not in result.stdout + result.stderr
+
+
+def test_backup_includes_admin_credentials_but_never_sessions(source, tmp_path):
+    data, _ = source
+    for name in backup.ADMIN_FILES:
+        (data / name).write_text('{"test_secret":"private-admin-material"}', encoding="utf-8")
+    (data / "admin-state.sqlite3").write_bytes(b"session cookie and flash code")
+    snapshot = Path(backup.create_backup(data, tmp_path / "backups")["path"])
+    for name in backup.ADMIN_FILES:
+        assert (snapshot / name).read_bytes() == (data / name).read_bytes()
+    assert not (snapshot / "admin-state.sqlite3").exists()
+    status = json.loads((data / "backup-status.json").read_text())
+    assert status["snapshot"] == snapshot.name and status["completed_at"] > 0

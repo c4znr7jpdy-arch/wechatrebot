@@ -224,7 +224,7 @@ def test_serve_wires_only_the_fixed_operator_contact_path(tmp_path, monkeypatch,
 
     def capture_app(*args, **kwargs):
         seen.update(kwargs)
-        return object()
+        return web.Application()
 
     monkeypatch.setattr(app_module, "create_app", capture_app)
     monkeypatch.setattr(web, "run_app", lambda *args, **kwargs: None)

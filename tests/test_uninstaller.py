@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -236,3 +237,52 @@ def test_unrelated_untrusted_process_path_does_not_block_stop(monkeypatch, tmp_p
     )
 
     assert uninstaller.stop_installation_processes(root) == 0
+
+
+@pytest.mark.parametrize(
+    "actual_time,query_ok,wait_result,expected,terminated",
+    [(123, True, 0, True, True), (456, True, 0, False, False),
+     (123, False, 0, False, False), (123, True, 258, False, True)],
+)
+def test_update_termination_rechecks_identity_on_same_handle_and_waits(
+    monkeypatch, actual_time, query_ok, wait_result, expected, terminated,
+):
+    import ctypes
+
+    calls = []
+
+    class Function:
+        def __init__(self, run):
+            self.run = run
+
+        def __call__(self, *args):
+            return self.run(*args)
+
+    def open_process(rights, inherit, pid):
+        assert rights & 0x1000  # Query the handle that will be terminated.
+        assert pid == 987651
+        calls.append("open")
+        return 7654
+
+    def times(handle, created, *args):
+        assert handle == 7654
+        calls.append("query")
+        created._obj.dwLowDateTime = actual_time
+        return query_ok
+
+    def terminate(handle, code):
+        assert handle == 7654
+        calls.append("terminate")
+        return True
+
+    kernel32 = SimpleNamespace(
+        OpenProcess=Function(open_process), GetProcessTimes=Function(times),
+        TerminateProcess=Function(terminate),
+        WaitForSingleObject=Function(lambda handle, timeout: wait_result),
+        CloseHandle=Function(lambda handle: calls.append("close")),
+    )
+    monkeypatch.setattr(uninstaller, "os", SimpleNamespace(name="nt", getpid=lambda: 1234))
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **kw: kernel32, raising=False)
+    assert uninstaller._terminate_windows_process(987651, expected_creation_time=123) is expected
+    assert ("terminate" in calls) is terminated
+    assert calls[-1] == "close"

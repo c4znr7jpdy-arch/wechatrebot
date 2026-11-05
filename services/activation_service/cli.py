@@ -1,8 +1,9 @@
-"""Local administrator commands. No HTTP administrator credentials exist."""
+"""Local operator setup and public/admin applications with separate listeners."""
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 from pathlib import Path
@@ -22,10 +23,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", required=True, type=Path, help="服务器专用私有数据目录")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="初始化数据库及独立授权私钥；已存在时拒绝覆盖")
-    serve = commands.add_parser("serve", help="运行仅含客户接口的授权服务")
+    serve = commands.add_parser("serve", help="运行客户接口和独立端口的维护者后台")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8091)
+    serve.add_argument("--admin-port", type=int, default=8092)
     serve.add_argument("--rate-per-minute", type=int, default=120)
+    commands.add_parser("admin-init", help="本机初始化管理密码和 TOTP；已存在时拒绝覆盖")
+    commands.add_parser("admin-reset", help="本机重置管理密码和 TOTP，立即使旧会话失效")
+    commands.add_parser("admin-set-github-token", help="本机设置仅限本仓库的细粒度 GitHub 令牌")
     contact = commands.add_parser("set-contact", help="原子替换微信群二维码，下次请求即时生效")
     contact.add_argument("--image", required=True, type=Path, help="PNG 或 JPEG 二维码图片文件")
     contact.add_argument("--group-name", required=True, help="管理器显示的微信群名称")
@@ -72,13 +77,52 @@ def _initialize(data_dir: Path) -> dict:
             "private_key_file": str(key_file), "service_configured": False}
 
 
+def _admin_setup(data_dir: Path, command: str) -> dict:
+    from .admin.auth import initialize, set_github_token
+
+    if command == "admin-set-github-token":
+        set_github_token(data_dir, getpass.getpass("GitHub 细粒度令牌（仅本仓库 Contents 读写，不回显）："))
+        return {"github_token_configured": True}
+    password = getpass.getpass("管理密码（至少 16 个字符，不回显）：")
+    if password != getpass.getpass("再次输入管理密码："):
+        raise LicenseError("password_mismatch", "两次密码不一致，未修改管理员配置。")
+    # Import before saving credentials, so a broken service install cannot hide the enrollment key.
+    import qrcode
+
+    result = initialize(data_dir, password, reset=command == "admin-reset")
+    qr = qrcode.QRCode(border=4)
+    qr.add_data(result["provisioning_uri"])
+    qr.print_ascii(invert=True)
+    print("请用手机验证器扫描二维码。手输密钥：" + result["secret"])
+    print("请妥善保存验证器密钥；切勿把本次终端输出发给他人。")
+    return {"admin_configured": True, "old_sessions_invalidated": command == "admin-reset"}
+
+
+def _attach_admin(app, store, data_dir: Path, host: str, port: int) -> None:
+    from aiohttp import web
+    from .admin.app import create_admin_app
+
+    async def admin_listener(public_app):
+        runner = web.AppRunner(create_admin_app(store, data_dir), access_log=None)
+        await runner.setup()
+        try:
+            await web.TCPSite(runner, host=host, port=port).start()
+            yield
+        finally:
+            await runner.cleanup()
+
+    app.cleanup_ctx.append(admin_listener)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     data_dir = args.data_dir.expanduser().resolve()
     try:
         now = int(time.time())
-        if args.command == "set-contact":
+        if args.command.startswith("admin-"):
+            result = _admin_setup(data_dir, args.command)
+        elif args.command == "set-contact":
             result = set_contact(data_dir, args.image.expanduser(), args.group_name, args.expires_at, now)
         elif args.command == "clear-contact":
             result = clear_contact(data_dir)
@@ -96,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
                     raise LicenseError("invalid_key", "授权服务必须使用独立的 Ed25519 私钥。")
                 app = create_app(store, key, fingerprint(public_key(key))[:16],
                                  rate_requests=args.rate_per_minute, contact_path=data_dir / CONTACT_FILENAME)
+                if not 1 <= args.admin_port <= 65535 or args.admin_port == args.port:
+                    raise LicenseError("invalid_port", "管理端口须为 1 至 65535，并与客户接口端口不同。")
+                _attach_admin(app, store, data_dir, args.host, args.admin_port)
                 web.run_app(app, host=args.host, port=args.port, access_log=None)
                 return 0
             elif args.command == "revoke":

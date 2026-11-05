@@ -18,7 +18,7 @@ from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
 from .launcher import (
     ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
-    build_service_specs, installation_services_stopped,
+    build_service_specs, installation_services_stopped, force_stop_update_processes,
 )
 from .licensing.client import LicenseClient
 from .licensing.protocol import LicenseError
@@ -534,6 +534,18 @@ class LifecycleController:
             self.state = LifecycleState.STOPPED
             self._running_events_emitted = False
             self._wechat_closed_confirmations = 0
+            return self.view()
+
+    def force_stop_for_update(self) -> LifecycleView:
+        """Force-stop owned services and every running WeChat process.
+
+        This is separate from the normal emergency-stop button: the update
+        confirmation explicitly authorizes closing all WeChat windows.
+        """
+        with self._lock:
+            self.force_stop()
+            force_stop_update_processes(self.install_root)
+            self._runtime = self._snapshotter()
             return self.view()
 
     def _bot_wechat_active(self) -> bool:
