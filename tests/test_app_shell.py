@@ -1627,6 +1627,7 @@ def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch,
     result = _wait_update_worker(api)
     assert result["state"] == "failed" and result["error"]["code"] == "UPD-1003"
     assert events == ["download"]
+    assert api._prepared_update is None
 
 
 @pytest.mark.parametrize(

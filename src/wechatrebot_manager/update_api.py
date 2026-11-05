@@ -324,6 +324,7 @@ class UpdateApiMixin:
                 prepared.release.version, prepared.release.build,
                 current_version=current_version, current_build=current_build,
             ):
+                self._prepared_update = None
                 raise UpdateFailure("UPD-1003", "待安装更新不高于当前安装版本，请重新检查更新。")
             # Verify the staged files and installation baseline before closing anything.
             plan = create_update_plan(
