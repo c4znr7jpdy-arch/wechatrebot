@@ -118,6 +118,46 @@ async def test_switch_stream_verifies_package_before_mutation_and_keeps_old_asse
 
 
 @pytest.mark.asyncio
+async def test_switch_verifies_every_signed_incremental_asset_before_mutation(tmp_path):
+    github = FakeGitHub(tmp_path)
+    manifest = json.loads(github.target)
+    delta = b"verified delta bytes"
+    manifest["incremental_packages"] = [{
+        "base_fingerprint": "A" * 64,
+        "package": {
+            "url": BASE + "v1.0.1/component.zip",
+            "size": len(delta),
+            "sha256": hashlib.sha256(delta).hexdigest(),
+            "format": "zip",
+        },
+    }]
+    manifest["signature"]["value"] = base64.b64encode(
+        github.signer.sign(canonical_manifest_bytes(manifest))
+    ).decode("ascii")
+    github.target = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+    original_download = github._download
+
+    async def download(url, *, maximum, expected_size=0, expected_sha256=""):
+        if url.endswith("/component.zip"):
+            github.downloads.append(url)
+            assert expected_size == len(delta)
+            assert expected_sha256 == hashlib.sha256(delta).hexdigest().upper()
+            return b""
+        return await original_download(
+            url,
+            maximum=maximum,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+
+    github._download = download
+    result = await github.switch("1.0.1", hashlib.sha256(github.previous).hexdigest())
+    assert result["changed"]
+    assert any(url.endswith("/update.zip") for url in github.downloads)
+    assert any(url.endswith("/component.zip") for url in github.downloads)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["package", "page_stale", "remote_race"])
 async def test_failed_preflight_never_changes_stable(tmp_path, failure):
     github = FakeGitHub(tmp_path)

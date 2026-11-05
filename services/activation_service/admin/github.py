@@ -13,7 +13,8 @@ import aiohttp
 from packaging.version import InvalidVersion, Version
 
 from wechatrebot_manager.updates import (
-    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel, parse_update_manifest,
+    MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, load_update_channel,
+    manifest_package_releases, parse_update_manifest,
 )
 from .auth import TOKEN_FILE, private_json, read_private_json
 
@@ -123,11 +124,12 @@ class GitHubReleases:
             if release is None or (version and release.version != str(Version(version))):
                 raise ValueError("Version mismatch")
             prefix = f"https://github.com/{self.repo}/releases/download/v{release.version}/"
-            if not release.package_url.startswith(prefix):
-                raise ValueError("Package belongs to another release")
-            suffix = release.package_url[len(prefix):]
-            if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
-                raise ValueError("Unsafe asset name")
+            for package in manifest_package_releases(value, self.channel):
+                if not package.package_url.startswith(prefix):
+                    raise ValueError("Package belongs to another release")
+                suffix = package.package_url[len(prefix):]
+                if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
+                    raise ValueError("Unsafe asset name")
             return value, release
         except (UpdateError, ValueError, TypeError, KeyError):
             raise GitHubError("清单验签失败、版本不符或更新包不属于本仓库。") from None
@@ -210,8 +212,14 @@ class GitHubReleases:
                 # An interrupted previous operation is recovered before any new promotion.
                 await self._restore(read_private_json(recovery_path, maximum=2 * MAX_MANIFEST_BYTES + 4096))
             raw, release = await self.candidate(version)
-            await self._download(release.package_url, maximum=release.package_size,
-                                 expected_size=release.package_size, expected_sha256=release.package_sha256)
+            manifest, _ = self._manifest(raw, version)
+            for package in manifest_package_releases(manifest, self.channel):
+                await self._download(
+                    package.package_url,
+                    maximum=package.package_size,
+                    expected_size=package.package_size,
+                    expected_sha256=package.package_sha256,
+                )
             previous = await self._download(self.channel.manifest_url, maximum=MAX_MANIFEST_BYTES)
             _, old_release = self._manifest(previous)
             if hashlib.sha256(previous).hexdigest() != expected_digest:

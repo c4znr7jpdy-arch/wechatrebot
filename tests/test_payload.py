@@ -170,7 +170,7 @@ def test_incremental_update_merges_prior_installed_file_manifest(
         updated_manager.read_bytes()
     ).hexdigest().upper()
     assert installed["release_version"] == "0.9.9"
-    assert installed["release_build"] == 7
+    assert "release_build" not in installed
 
 
 def test_legacy_payload_status_does_not_block_verification(tmp_path: Path) -> None:
@@ -385,6 +385,25 @@ def _incremental_payload(
         "remove": [{"path": path, "sha256": digest} for path, digest in (remove or {}).items()],
     }), encoding="utf-8")
     return root
+
+
+@pytest.mark.parametrize("new_version,expected_build", [("0.9.9", 999), ("1.0.1", 0)])
+def test_component_update_only_preserves_build_within_the_same_version(tmp_path, new_version, expected_build):
+    install = tmp_path / "install"
+    _installed_tree(install, {"app/shared/main.py": b"old"})
+    installed_manifest = install / "config/installed-payload.json"
+    previous = json.loads(installed_manifest.read_text(encoding="utf-8"))
+    previous["release_build"] = 999
+    installed_manifest.write_text(json.dumps(previous), encoding="utf-8")
+    delta = _incremental_payload(tmp_path / "delta", install, files={"app/shared/main.py": b"new"})
+    manifest_path = delta / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["release_version"] = new_version
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    install_payload(delta, install)
+    result = json.loads(installed_manifest.read_text(encoding="utf-8"))
+    assert result["release_version"] == new_version
+    assert result.get("release_build", 0) == expected_build
 
 
 @pytest.mark.parametrize("packed", [False, True])

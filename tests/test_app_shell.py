@@ -1351,12 +1351,67 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
         "notes": ["聊天记录更易查找"],
         "published_at": "2026-09-03T00:00:00Z",
         "package_size": 1234,
+        "package_kind": "default",
         "mandatory": False,
         "build": None,
         "minimum_supported_version": "",
     }
     assert "package_url" not in result["data"]["release"]
     assert "package_sha256" not in result["data"]["release"]
+
+
+def test_check_update_provides_installation_root_for_incremental_selection(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    checked = []
+    monkeypatch.setattr(update_api, "check_for_update", lambda *_args, **kwargs: checked.append(kwargs))
+    assert api.check_update()["ok"] is True
+    assert checked[0]["install_root"] == api._install_root
+
+
+def test_component_only_install_advances_checks_and_display_without_replacing_manager(monkeypatch, tmp_path):
+    import base64
+    import hashlib
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from wechatrebot_manager.payload import install_payload, installed_payload_fingerprint, sha256_file
+    from wechatrebot_manager.updates import PRODUCT_ID, canonical_manifest_bytes, parse_update_manifest
+
+    api = _api(tmp_path)
+    api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
+    files = {"manager/WeChatReBot.exe": b"unchanged manager", "app/shared/main.py": b"old plugin"}
+    for relative, content in files.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    (tmp_path / "config").mkdir()
+    inventory = tmp_path / "config/installed-payload.json"
+    inventory.write_text(json.dumps({"schema_version": 1, "release_version": app_shell.__version__, "release_build": 999,
+        "files": [{"path": name, "sha256": sha256_file(tmp_path / name)} for name in files]}), encoding="utf-8")
+    private = Ed25519PrivateKey.generate()
+    public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    channel = replace(api._update_channel, public_key=public, key_id=hashlib.sha256(public).hexdigest().upper()[:16])
+    api._update_channel = channel
+    metadata = {"schema_version": 1, "product": PRODUCT_ID, "channel": "stable", "version": "2.0.0",
+        "package": {"url": "https://updates.example.test/component.zip", "size": 100, "sha256": "A" * 64}}
+    metadata["signature"] = {"algorithm": "ed25519", "key_id": channel.key_id,
+        "value": base64.b64encode(private.sign(canonical_manifest_bytes(metadata))).decode("ascii")}
+    monkeypatch.setattr(update_api, "check_for_update", lambda channel, **kwargs: parse_update_manifest(metadata, channel, **kwargs))
+    assert api.check_update()["data"]["release"]["version"] == "2.0.0"
+
+    delta = tmp_path / "candidate"
+    changed = delta / "app/shared/main.py"
+    changed.parent.mkdir(parents=True)
+    changed.write_bytes(b"new plugin")
+    (delta / "release-manifest.json").write_text(json.dumps({
+        "schema_version": 2, "update_kind": "incremental", "release_version": "2.0.0",
+        "base_fingerprint": installed_payload_fingerprint(tmp_path),
+        "files": [{"path": "app/shared/main.py", "sha256": sha256_file(changed)}],
+    }), encoding="utf-8")
+    install_payload(delta, tmp_path)
+    assert (tmp_path / "manager/WeChatReBot.exe").read_bytes() == files["manager/WeChatReBot.exe"]
+    assert api.check_update()["data"]["release"] is None
+    boot = api.bootstrap()["data"]
+    assert boot["version"] == "2.0.0" and boot["update"]["build"] == 0
 
 
 def test_unavailable_mandatory_update_keeps_robot_start_blocked(
@@ -1390,9 +1445,9 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
 def _downloadable_update(monkeypatch, tmp_path: Path):
     api = _api(tmp_path)
     release = UpdateRelease(
-        version="0.9.0", title="体验升级", notes=(),
+        version="1.0.2", title="体验升级", notes=(),
         published_at="2026-09-03T00:00:00Z",
-        package_url="https://updates.example.test/0.9.0.zip",
+        package_url="https://updates.example.test/1.0.2.zip",
         package_size=100, package_sha256="A" * 64, mandatory=False, build=1,
     )
     api._available_update = release
@@ -1511,12 +1566,13 @@ def test_update_confirmation_waits_for_robot_action_and_can_retry(monkeypatch, t
     assert _wait_update_worker(api)["state"] == "restarting"
 
 
-@pytest.mark.parametrize("change", ["build", "package_url", "package_sha256", "package_size"])
+@pytest.mark.parametrize("change", ["build", "package_url", "package_sha256", "package_size", "package_kind", "base_fingerprint"])
 def test_update_cache_is_bound_to_exact_release(monkeypatch, tmp_path, change):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
     old_status = _download_ready(api)
     changes = {"build": 2, "package_url": "https://updates.example.test/repacked.zip",
-               "package_sha256": "B" * 64, "package_size": 200}
+               "package_sha256": "B" * 64, "package_size": 200,
+               "package_kind": "incremental", "base_fingerprint": "C" * 64}
     newer = replace(prepared.release, **{change: changes[change]})
     monkeypatch.setattr(update_api, "check_for_update", lambda *_a, **_kw: newer)
     assert api.check_update()["data"]["release"]["release_id"] != old_status["release_id"]
@@ -1557,6 +1613,21 @@ def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path)
     assert api._prepared_update is None
     _download_ready(api)
     assert events == ["download", "download"]
+
+
+@pytest.mark.parametrize("installed_version", ["1.0.2", "1.0.3"])
+def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, installed_version):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/installed-payload.json").write_text(json.dumps({
+        "schema_version": 1, "release_version": installed_version, "release_build": 1, "files": [],
+    }), encoding="utf-8")
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is True
+    result = _wait_update_worker(api)
+    assert result["state"] == "failed" and result["error"]["code"] == "UPD-1003"
+    assert events == ["download"]
+    assert api._prepared_update is None
 
 
 @pytest.mark.parametrize(

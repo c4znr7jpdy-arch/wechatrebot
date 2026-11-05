@@ -453,6 +453,21 @@ def test_main_manager_only_uses_manager_delta_builder(tmp_path: Path, monkeypatc
     assert any(p.endswith("wechatrebot-0.9.9-manager-abc.zip") for p in upload)
 
 
+def test_main_manager_only_rejects_component_incremental_payload(tmp_path: Path, monkeypatch) -> None:
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    with pytest.raises(SystemExit):
+        module.main([
+            "--manager-only",
+            "--incremental-payload",
+            str(tmp_path / "component.zip"),
+            "--output",
+            str(root / "artifacts" / "publish"),
+            "--yes",
+            "--skip-tests",
+        ])
+
+
 def test_main_manager_only_refuses_legacy_live_base(tmp_path: Path, monkeypatch) -> None:
     module = _module()
     root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.8.6")
@@ -567,6 +582,86 @@ def test_candidate_recovery_checks_signature_files_and_path_boundary(tmp_path):
     module._write_json(output / "publish-candidate.json", candidate)
     with pytest.raises(ValueError, match="越界"):
         module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+
+
+def _add_candidate_delta(module, output, *, bad_url=False, missing=False):
+    channel, release = _recoverable_candidate(module, output)
+    key = Ed25519PrivateKey.generate()
+    channel, key_id = _channel(key)
+    manifest = json.loads(release.manifest_path.read_text("utf-8"))
+    delta = output / "component.zip"
+    delta.write_bytes(b"delta")
+    manifest["incremental_packages"] = [{"base_fingerprint": "A" * 64, "package": {
+        "url": "https://other.example/component.zip" if bad_url else module.asset_url(REPO, "v1.0.1", delta.name),
+        "size": delta.stat().st_size, "sha256": hashlib.sha256(delta.read_bytes()).hexdigest().upper(),
+    }}]
+    manifest["signature"].update(key_id=key_id, value=base64.b64encode(key.sign(canonical_manifest_bytes(manifest))).decode())
+    release.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    module._save_candidate(output, release, [release.archive_path] if missing else [release.archive_path, delta],
+                           repo=REPO, target="commit", title="title", notes=(), previous=None)
+    return channel, release, delta
+
+
+@pytest.mark.parametrize("case", ["valid", "missing", "foreign_url"])
+def test_candidate_recovery_requires_every_signed_delta_asset(tmp_path, case):
+    module = _module()
+    output = tmp_path / "candidate"
+    channel, _, delta = _add_candidate_delta(module, output, bad_url=case == "foreign_url", missing=case == "missing")
+    if case == "valid":
+        _, _, assets = module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+        assert delta in assets
+    else:
+        with pytest.raises(ValueError, match="不一致|不属于"):
+            module._load_candidate(output, repo=REPO, version="1.0.1", channel=channel)
+
+
+def test_rollback_verifies_all_signed_delta_assets_before_stable_write(tmp_path, monkeypatch):
+    module = _module()
+    channel, release, _ = _add_candidate_delta(module, tmp_path / "candidate")
+    verified, uploaded = [], []
+    monkeypatch.setattr(module, "download_asset", lambda *a: release.manifest_path)
+    def verify(url, **kwargs):
+        verified.append(url)
+        if url.endswith("component.zip"):
+            raise ValueError("delta digest mismatch")
+    monkeypatch.setattr(module, "verify_public_asset", verify)
+    monkeypatch.setattr(module, "upload_assets", lambda *a: uploaded.append(a))
+    with pytest.raises(ValueError, match="delta digest"):
+        module.rollback_stable(REPO, "1.0.1", channel=channel, work_root=tmp_path / "work")
+    assert len(verified) == 2 and uploaded == []
+
+
+@pytest.mark.parametrize("changed", [None, "target", "manifest_sha256", "packages"])
+def test_resume_from_web_upload_requires_matching_public_candidate(tmp_path, monkeypatch, changed):
+    module = _module()
+    channel, release, delta = _add_candidate_delta(module, tmp_path / "candidate")
+    versioned = release.manifest_path.with_name("stable-1.0.1.json")
+    versioned.write_bytes(release.manifest_path.read_bytes())
+    packages = module.manifest_package_releases(json.loads(versioned.read_text("utf-8")), channel)
+    marker = tmp_path / "publish-candidate.json"
+    value = {"schema_version": 1, "version": "1.0.1", "repo": REPO, "target": "commit",
+             "manifest_sha256": module.sha256_file(versioned).lower(), "packages": sorted([
+                 {"name": p.package_url.rsplit("/", 1)[-1], "size": p.package_size,
+                  "sha256": p.package_sha256.lower()} for p in packages], key=lambda p: p["name"])}
+    if changed:
+        value[changed] = [] if changed == "packages" else "changed"
+    marker.write_text(json.dumps(value), encoding="utf-8")
+    gh = _FakeGh({("release", "view"): json.dumps({"isDraft": False, "assets": [
+        {"name": marker.name, "size": marker.stat().st_size}]})})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "download_asset", lambda *a: marker)
+    monkeypatch.setattr(module, "_verify_release_target", lambda *a, **k: None)
+    monkeypatch.setattr(module, "verify_public_asset", lambda *a, **k: None)
+    kwargs = dict(title="t", notes=(), version="1.0.1", assets=[release.archive_path, delta, versioned],
+                  work_root=tmp_path / "work", timeout=1, resume=True, target="commit", channel=channel)
+    if changed:
+        with pytest.raises(ValueError, match="混合恢复"):
+            module._publish_assets(REPO, "v1.0.1", **kwargs)
+        assert all(call[:2] == ["release", "view"] for call in gh.calls)
+    else:
+        module._publish_assets(REPO, "v1.0.1", **kwargs)
+        upload = next(call for call in gh.calls if call[:2] == ["release", "upload"])
+        assert str(delta) in upload and str(marker) not in upload and "--clobber" not in upload
 
 
 def test_resume_reuses_existing_matching_assets_without_clobber(tmp_path, monkeypatch):

@@ -217,4 +217,3 @@ async def test_public_and_admin_listeners_share_store_but_not_routes(tmp_path, u
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://127.0.0.1:{unused_tcp_port}/login") as response:
                 assert response.status == 503 and "未初始化" in await response.text()
-

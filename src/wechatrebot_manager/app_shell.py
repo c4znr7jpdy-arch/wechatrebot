@@ -59,6 +59,7 @@ from .updates import (
     UpdateRelease,
     cleanup_stale_update_workdirs,
     consume_update_result,
+    installed_release_identity,
     recover_interrupted_update,
 )
 from .update_errors import UpdateFailure
@@ -192,7 +193,6 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
-        self._build_number = self._installed_build_number(self._install_root)
         self._update_logger = UpdateLogger(self._install_root)
         self._startup_update_id = os.environ.get("WECHATREBOT_UPDATE_ID", "").strip()
         self._startup_update_from = os.environ.get("WECHATREBOT_UPDATE_FROM", "").strip()
@@ -257,16 +257,6 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         status = self._lifecycle.refresh()
         state = getattr(getattr(status, "state", ""), "value", getattr(status, "state", ""))
         return str(state) != "STOPPED"
-
-    @staticmethod
-    def _installed_build_number(install_root: Path) -> int:
-        manifest_path = install_root / "config" / "installed-payload.json"
-        try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-            value = payload.get("release_build") if isinstance(payload, dict) else None
-            return max(0, int(value)) if value is not None and not isinstance(value, bool) else 0
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            return 0
 
     def _runtime_online(self) -> bool:
         return bool(getattr(self._lifecycle.refresh(), "online", False))
@@ -453,9 +443,10 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             experienced = time.perf_counter()
             readiness = self._onboarding_readiness(view=status, provider_services=providers)
             ready = time.perf_counter()
+            current_version, current_build = installed_release_identity(self._install_root, __version__)
             return self._ok(
                 {
-                    "version": __version__,
+                    "version": current_version,
                     "install_root": str(self._install_root),
                     "status": status,
                     "brand": {
@@ -488,7 +479,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                     "update": {
                         "enabled": bool(channel and channel.enabled),
                         "channel": channel.channel if channel else "stable",
-                        "build": getattr(self, "_build_number", 0),
+                        "build": current_build,
                         "check_interval_seconds": (
                             channel.check_interval_seconds if channel else None
                         ),
