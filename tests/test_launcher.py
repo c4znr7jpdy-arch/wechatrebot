@@ -267,6 +267,7 @@ def test_confirmed_update_closes_only_captured_wechat_and_this_robot_runtime(tmp
 
 @pytest.mark.parametrize("required", [False, True])
 def test_capture_update_wechat_uses_exact_installation_hook_before_shutdown(tmp_path, monkeypatch, required):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
     hook = tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
     processes = {
         987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
@@ -305,6 +306,7 @@ def test_capture_update_wechat_refuses_ambiguous_or_unreadable_ownership(tmp_pat
 
 
 def test_capture_update_without_robot_wechat_keeps_personal_wechat(tmp_path, monkeypatch):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
     monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
     monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: ())
     monkeypatch.setattr(launcher, "process_identity", lambda _: ProcessIdentity("personal/WeChat.exe", 101))
@@ -313,6 +315,7 @@ def test_capture_update_without_robot_wechat_keeps_personal_wechat(tmp_path, mon
 
 @pytest.mark.parametrize("phase", ["capture", "stop", "terminate"])
 def test_confirmed_update_never_closes_a_reused_wechat_pid(tmp_path, monkeypatch, phase):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
     _layout(tmp_path)
     original = ProcessIdentity(str(tmp_path / "Weixin.exe"), 101)
     replacement = ProcessIdentity(original.executable, 102)

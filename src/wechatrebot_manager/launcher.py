@@ -12,7 +12,7 @@ from typing import Callable, IO, Mapping, Protocol
 
 from .json_io import write_json_atomic
 from .runtime_config import RuntimePorts
-from .payload import sha256_file
+from .payload import PayloadError, _checked_target, sha256_file
 
 
 class ProcessLike(Protocol):
@@ -390,23 +390,27 @@ def capture_update_wechat_process(
     """Capture the unique WeChat using this installation's injected HOOK.
 
     The bridge can choose a dynamic API port, so a process name or the default
-    port cannot establish ownership. The exact loaded DLL path can. Capture
+    port cannot establish ownership. The exact loaded DLL path can. Image
+    mappings absent from ToolHelp are checked with Restart Manager. Capture
     before stopping the bridge and retain the creation time through shutdown.
     """
     from .uninstaller import _iter_windows_process_ids, _process_module_paths
 
-    hook_dll = _normalized_executable(
-        Path(install_root) / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
-    )
     names = frozenset({"weixin.exe", "wechat.exe"})
     candidates = []
     try:
+        hook_dll = _normalized_executable(_checked_target(
+            Path(install_root).expanduser().resolve(),
+            Path("app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"),
+        ))
         for pid in _iter_windows_process_ids(executable_names=names, strict=True):
             identity = process_identity(pid)
             if identity is None or not identity.executable:
                 if pid not in _iter_windows_process_ids(executable_names=names, strict=True):
                     continue
                 raise OSError("微信进程身份无法读取。")
+            if Path(identity.executable).name.casefold() not in names:
+                continue
             try:
                 modules = _process_module_paths(pid, strict=True)
             except OSError:
@@ -416,7 +420,17 @@ def capture_update_wechat_process(
             owns_hook = any(_normalized_executable(path) == hook_dll for path in modules)
             if owns_hook and process_identity(pid) == identity:
                 candidates.append((pid, identity))
-    except OSError as exc:
+        from .windows_file_holders import file_holders
+
+        by_pid = dict(candidates)
+        for pid, identity in file_holders((hook_dll,)):
+            if Path(identity.executable).name.casefold() not in names:
+                continue
+            if pid in by_pid and by_pid[pid] != identity:
+                raise OSError("微信进程身份在查询过程中发生变化。")
+            by_pid[pid] = identity
+        candidates = list(by_pid.items())
+    except (OSError, PayloadError) as exc:
         raise ServiceStopError("wechat", "机器人连接的微信（无法确认进程归属）") from exc
     if len(candidates) > 1:
         raise ServiceStopError("wechat", "本安装连接的多个微信进程")

@@ -1,5 +1,6 @@
 """Exercise startup through the delivered asset routes without starting a robot."""
 from http.server import ThreadingHTTPServer
+import json
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -14,7 +15,13 @@ from wechatrebot_manager.plugin_center import _handler
 @pytest.fixture(scope="module")
 def manager_url(tmp_path_factory):
     service = SimpleNamespace(install_root=tmp_path_factory.mktemp("manager-install"))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(service, manager_assets=_asset_root()))
+    class PreviewHandler(_handler(service, manager_assets=_asset_root())):
+        # Hundreds of isolated browser contexts cannot share their HTTP cache.
+        # All asset responses have Content-Length; keep-alive avoids creating a
+        # Windows TIME_WAIT socket for every stylesheet, script and image.
+        protocol_version = "HTTP/1.1"
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), PreviewHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -30,8 +37,14 @@ def manager_url(tmp_path_factory):
 def browser():
     with sync_playwright() as runtime:
         instance = runtime.chromium.launch()
-        yield instance
-        instance.close()
+        try:
+            yield instance
+        finally:
+            try:
+                for context in instance.contexts:
+                    context.close()
+            finally:
+                instance.close()
 
 
 @pytest.mark.parametrize("viewport", [{"width": 1380, "height": 860}, {"width": 1080, "height": 680}])
@@ -204,3 +217,30 @@ def test_manager_reports_missing_startup_dependency(browser, manager_url, missin
         page.screenshot(path=str(tmp_path / "startup-error.png"))
     finally:
         page.close()
+
+
+def test_browser_failure_evidence_survives_early_assertion(browser, manager_url, tmp_path):
+    page = browser.new_page()
+    page.route("**/settings.js*", lambda route: route.abort("failed"))
+    with pytest.raises(AssertionError, match="synthetic early assertion"):
+        try:
+            page.goto(manager_url)
+            expect(page.locator("#stateTitle")).to_have_text("软件未能完成初始化")
+            page.evaluate("""() => {
+              console.error('synthetic browser diagnostic');
+              setTimeout(() => { window.evidenceErrorRaised = true; throw new Error('synthetic page error'); }, 0);
+            }""")
+            page.wait_for_function("window.evidenceErrorRaised === true")
+            raise AssertionError("synthetic early assertion")
+        finally:
+            page.close()
+
+    evidence_root = tmp_path / "browser-failure/1"
+    evidence = json.loads((evidence_root / "browser.json").read_text(encoding="utf-8"))
+    assert (evidence_root / "page.png").is_file()
+    assert evidence["url"] == manager_url
+    assert evidence["state"]["text"]["stateTitle"] == "软件未能完成初始化"
+    assert any(item["kind"] == "requestfailed" and "/settings.js" in item["url"] for item in evidence["events"])
+    assert any(item["kind"] == "console" and item["text"] == "synthetic browser diagnostic" for item in evidence["events"])
+    assert any(item["kind"] == "pageerror" and "synthetic page error" in item["text"] for item in evidence["events"])
+    assert any("资源缺失" in item["message"] for item in evidence["state"]["reportedErrors"])
