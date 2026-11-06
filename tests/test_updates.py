@@ -556,6 +556,106 @@ def test_plugin_incremental_update_uses_current_helper_and_only_backs_up_changes
     assert not (install / "启动机器人.exe").exists()
 
 
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("blocked", ["result", "journal", "backup", "flag"])
+def test_confirmed_update_cleanup_failure_never_rolls_back(
+    tmp_path: Path, monkeypatch, blocked: str, restart: bool,
+) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    manager = prepared.payload_root / "manager/WeChatReBot.exe"
+    manager.parent.mkdir()
+    manager.write_bytes(b"new-manager")
+    manifest_path = prepared.payload_root / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].append({"path": "manager/WeChatReBot.exe", "sha256": sha256_file(manager)})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    plan = create_update_plan(
+        prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0,
+    )
+    update_id = json.loads(plan.plan_path.read_text(encoding="utf-8"))["update_id"]
+    journal = install / "updates/update-journal.json"
+    flag = install / "updates" / f"startup-success-{update_id}.json"
+    backup = install / "updates" / f".rollback-{update_id}"
+    result_path = install / "updates/update-result.json"
+    unlink = Path.unlink
+    rmtree = updates_module.shutil.rmtree
+    write_json = updates_module.write_json_atomic
+
+    def locked_unlink(path, *args, **kwargs):
+        if path == {"journal": journal, "flag": flag}.get(blocked):
+            raise PermissionError("file in use")
+        return unlink(path, *args, **kwargs)
+
+    def locked_rmtree(path, *args, **kwargs):
+        if blocked == "backup" and Path(path) == updates_module._extended_windows_path(backup):
+            raise PermissionError("backup in use")
+        return rmtree(path, *args, **kwargs)
+
+    def locked_result(path, payload):
+        if blocked == "result" and path == result_path:
+            raise PermissionError("result in use")
+        return write_json(path, payload)
+
+    def confirmed(path, update_id, _process):
+        write_json(path, {"update_id": update_id, "ok": True})
+
+    def forbidden_rollback(*_args):
+        raise AssertionError("confirmed manager must not be stopped or rolled back")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
+        patch.setattr(updates_module, "_restart_manager", lambda *_args, **_kwargs: object())
+        patch.setattr(updates_module, "_wait_for_startup_confirmation", confirmed)
+        patch.setattr(updates_module, "_stop_restarted_manager", forbidden_rollback)
+        patch.setattr(updates_module, "_restore_update_targets", forbidden_rollback)
+        # Arm the lock only after installation, so the final cleanup fails.
+        def complete_with_locked_files(*args, **kwargs):
+            patch.setattr(Path, "unlink", locked_unlink)
+            patch.setattr(updates_module.shutil, "rmtree", locked_rmtree)
+            patch.setattr(updates_module, "write_json_atomic", locked_result)
+            return complete(*args, **kwargs)
+        complete = updates_module._complete_successful_update
+        patch.setattr(updates_module, "_complete_successful_update", complete_with_locked_files)
+        assert apply_update_plan(plan.plan_path, restart=restart) == 0
+        if blocked in {"result", "journal"}:
+            assert updates_module.recover_interrupted_update(install) is False
+            assert journal.is_file() and flag.is_file() and backup.is_dir()
+
+    assert (install / "manager/WeChatReBot.exe").read_bytes() == b"new-manager"
+    assert (install / "启动机器人.exe").read_bytes() == b"new-manager"
+    assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"new-plugin"
+    assert flag.is_file()
+    if blocked in {"result", "journal"}:
+        assert journal.is_file() and backup.is_dir()
+        assert updates_module.recover_interrupted_update(install) is False
+        assert not journal.exists() and not flag.exists() and not backup.exists()
+    assert json.loads(result_path.read_text(encoding="utf-8"))["ok"] is True
+    events = [json.loads(line)["event"] for line in (install / "logs/update.log").read_text(encoding="utf-8").splitlines()]
+    assert "cleanup_deferred" in events
+    assert "apply_failed" not in events
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_startup_recovery_leaves_active_helpers_journal_and_proof_alone(
+    tmp_path: Path, monkeypatch, confirmed: bool,
+) -> None:
+    updates = tmp_path / "updates"
+    updates.mkdir()
+    journal = updates / "update-journal.json"
+    journal.write_text("locked helper journal", encoding="utf-8")
+    flag = updates / f"startup-success-{'a' * 32}.json"
+    if confirmed:
+        flag.write_text(json.dumps({"update_id": "a" * 32, "ok": True}), encoding="utf-8")
+    with updates_module.SingleInstanceLock(f"update-helper:{tmp_path}"):
+        monkeypatch.setattr(
+            updates_module, "_read_json_object",
+            lambda _path: (_ for _ in ()).throw(AssertionError("must acquire helper lock before reading")),
+        )
+        assert updates_module.recover_interrupted_update(tmp_path) is False
+    assert journal.read_text(encoding="utf-8") == "locked helper journal"
+    assert flag.is_file() == confirmed
+
+
 def test_incremental_helper_rechecks_baseline_before_touching_files(tmp_path: Path) -> None:
     install, prepared = _ready_incremental_update(tmp_path)
     plan = create_update_plan(

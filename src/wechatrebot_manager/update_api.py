@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-import shutil
 import sys
 import threading
 
@@ -238,25 +237,9 @@ class UpdateApiMixin:
                 state="success",
                 version=self._startup_update_to,
             )
-            journal_path = self._install_root / "updates" / "update-journal.json"
-            try:
-                journal = json.loads(journal_path.read_text(encoding="utf-8-sig"))
-                if (
-                    isinstance(journal, dict)
-                    and journal.get("update_id") == update_id
-                    and journal.get("state") == "awaiting_startup"
-                ):
-                    rollback = (
-                        self._install_root
-                        / str(journal.get("rollback_root") or "")
-                    ).resolve()
-                    rollback.relative_to((self._install_root / "updates").resolve())
-                    shutil.rmtree(rollback, ignore_errors=True)
-                    journal_path.unlink(missing_ok=True)
-            except (OSError, ValueError, json.JSONDecodeError):
-                # The detached updater also performs this cleanup after seeing
-                # the handshake; leave its recovery journal alone on mismatch.
-                pass
+            # The helper owns the transaction and its backups. Reading or
+            # deleting them here races its commit and can trigger a rollback
+            # after this window has already confirmed a successful startup.
         except OSError as exc:
             self._update_logger.write(
                 "startup_confirmation_failed",
