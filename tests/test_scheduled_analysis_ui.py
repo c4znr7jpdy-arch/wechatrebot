@@ -25,6 +25,59 @@ def open_schedules(page, url):
     expect(page.locator("#refreshSchedules")).to_be_enabled()
 
 
+def test_uncertain_test_send_keeps_warning_and_requires_informed_retry(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1080, "height": 680})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        open_schedules(page, manager_url)
+        page.locator("#newScheduledTask").click()
+        page.locator("#scheduledAction").select_option("text")
+        page.locator("#scheduledArg-text").fill("仅用于本地预览的测试文字")
+        page.locator("#scheduledTargetChoices input").first.check()
+        page.evaluate("""() => {
+          window.reviewSendCalls = 0;
+          window.reviewOutcome = 'unknown';
+          window.pywebview.api.test_scheduled_task = async () => {
+            window.reviewSendCalls++;
+            return {ok: true, data: {status: window.reviewOutcome,
+              message: window.reviewOutcome === 'unknown' ? '发送结果未确认，消息可能已提交微信。' : '新测试已提交微信。'}};
+          };
+        }""")
+        page.locator("#scheduledTestButton").click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        feedback = page.locator("#scheduledTestResult")
+        expect(feedback).to_contain_text("结果待确认")
+        expect(feedback).to_contain_text("请先核对微信聊天，避免重复发送")
+        expect(feedback).to_have_class("schedule-notice warning")
+        expect(page.locator("#scheduledTestButton")).to_have_text("先核对聊天再重试")
+        expect(page.locator("#scheduledTestButton")).to_be_enabled()
+        # Feedback survives normal edits and the transient toast lifetime.
+        page.locator("#scheduledName").fill("保留待确认结果的任务")
+        page.wait_for_timeout(4500)
+        expect(feedback).to_be_visible()
+        page.screenshot(path=str(tmp_path / "scheduled-uncertain-result.png"))
+        page.locator("#scheduledTestButton").click()
+        expect(page.locator("#modalTitle")).to_have_text("已核对微信，仍要再次测试？")
+        expect(page.locator("#modalMessage")).to_contain_text("避免重复消息")
+        expect(page.locator("#modalConfirm")).to_have_text("已核对，仍要发送")
+        page.locator("#modalCancel").click()
+        assert page.evaluate("window.reviewSendCalls") == 1
+        expect(feedback).to_be_visible()
+        page.evaluate("window.reviewOutcome = 'submitted'")
+        page.locator("#scheduledTestButton").click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(feedback).to_contain_text("已提交微信")
+        expect(feedback).not_to_have_class("schedule-notice warning")
+        expect(page.locator("#scheduledTestButton")).to_have_text("发送测试消息")
+        assert page.evaluate("window.reviewSendCalls") == 2
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 def test_schedule_restore_keeps_cached_rows_and_unsaved_editor(browser, manager_url, tmp_path):
     page = browser.new_page(viewport={"width": 1380, "height": 860})
     errors = []

@@ -758,6 +758,10 @@
     $("#modalError").textContent = "";
     backdrop.dataset.busy = "false";
     backdrop.hidden = false;
+    const body = $("#modalBody");
+    body.scrollTop = 0;
+    const updateScrollFocus = () => { body.tabIndex = body.scrollHeight > body.clientHeight ? 0 : -1; };
+    updateScrollFocus();
     cancel.disabled = false;
     confirm.disabled = false;
     let complete;
@@ -793,6 +797,7 @@
         $("#modalMessage").textContent = message;
         $("#modalError").textContent = detail;
         $("#modalError").hidden = false;
+        updateScrollFocus();
         reportError(error);
       } finally {
         backdrop.dataset.busy = "false";
@@ -1175,7 +1180,7 @@
     });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const targets = $$("button:not(:disabled), input:not(:disabled), select:not(:disabled)", $("#modalBackdrop"));
+      const targets = $$("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex='0']", $("#modalBackdrop"));
       const first = targets[0], last = targets[targets.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }

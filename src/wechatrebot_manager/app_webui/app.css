@@ -702,7 +702,9 @@ tbody tr:hover { background: #fbfdff; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(4,17,31,.48); }
 .modal-backdrop[hidden] { display: none; }
-.modal { width: min(440px,100%); padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.22); }
+.modal { display: flex; flex-direction: column; width: min(440px,100%); max-height: calc(100dvh - 40px); padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.22); overflow-wrap: anywhere; }
+.modal > h2, .modal > .modal-actions { flex-shrink: 0; }
+.modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .modal h2 { margin: 0 0 10px; font-size: 19px; }
 .modal-subject { margin: 16px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; }
 .modal-subject dt { color: var(--muted); font-size: 12px; }

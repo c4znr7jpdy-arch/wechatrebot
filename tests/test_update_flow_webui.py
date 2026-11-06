@@ -349,3 +349,39 @@ def test_update_card_fits_viewport_and_theme(update_page, tmp_path, width, theme
     assert card.evaluate("node => getComputedStyle(node).position") == "fixed"
     assert not page.locator(".app-shell").evaluate("node => node.inert")
     page.screenshot(path=str(tmp_path / f"update-card-{width}-{theme}.png"), animations="disabled")
+
+
+@pytest.mark.parametrize("width,height", [(1380, 860), (1080, 680)])
+def test_long_update_notes_scroll_with_actions_visible_and_keyboard_escape(update_page, tmp_path, width, height):
+    page = update_page
+    page.set_viewport_size({"width": width, "height": height})
+    page.evaluate("""() => {
+      window.testRelease.notes = Array.from({length: 20}, (_, index) =>
+        `${index + 1}. 修复账号切换后的缓存隔离，完善环境检查、消息回执与自动撤回、失败提示和重试体验。`);
+    }""")
+    _check_automatically(page)
+    body = page.locator("#modalBody")
+    expect(body).to_have_attribute("tabindex", "0")
+    for selector in ["#modalTitle", "#modalCancel", "#modalConfirm"]:
+        bounds = page.locator(selector).bounding_box()
+        assert bounds and bounds["y"] >= 20 and bounds["y"] + bounds["height"] <= height - 20
+    assert body.evaluate("node => node.scrollHeight > node.clientHeight")
+    page.locator("#modalConfirm").focus()
+    page.keyboard.press("Tab")
+    expect(body).to_be_focused()
+    page.keyboard.press("End")
+    page.wait_for_timeout(150)
+    assert body.evaluate("node => node.scrollTop > 0")
+    page.keyboard.press("Shift+Tab")
+    expect(page.locator("#modalConfirm")).to_be_focused()
+    page.screenshot(path=str(tmp_path / f"update-long-notes-{width}.png"))
+    page.keyboard.press("Escape")
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert not page.locator(".app-shell").evaluate("node => node.inert")
+    assert page.evaluate("window.updateCalls.download") == []
+    _open_update_settings(page)
+    page.locator("#checkUpdate").click()
+    expect(page.locator("#modalBackdrop")).to_be_visible()
+    assert body.evaluate("node => node.scrollTop") == 0
+    page.locator("#modalCancel").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()

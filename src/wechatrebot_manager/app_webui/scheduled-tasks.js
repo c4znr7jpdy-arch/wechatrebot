@@ -18,6 +18,8 @@ window.createScheduledTasks = function (helpers) {
     toast,
   } = helpers;
 
+  let scheduledTestResult = null;
+
   async function loadSchedules(options = {}) {
     const background = options?.background === true;
     if (background && (state.scheduledBusy || state.legacyMigrationLoading || !$("#modalBackdrop").hidden
@@ -435,7 +437,7 @@ window.createScheduledTasks = function (helpers) {
         ${analysisTask ? "" : `<details class="schedule-command"><summary>从已有命令填写</summary><label for="scheduledCommand">命令</label><div><input id="scheduledCommand" placeholder="例如：/青岛天气"><button class="button secondary small" id="scheduledParseCommand" type="button">识别并填写</button></div><small>只识别并填写，不发送消息。</small><p class="schedule-command-catalog">${escapeHtml(scheduledCommandCatalogText())}</p></details>`}</section>
         <section class="panel scheduled-form-section"><h3><span>2</span>发给谁</h3><p class="subtle">${targetIntro}</p><div class="scheduled-selected" id="scheduledSelected"></div>${targetTabs}<div class="form-field"><label for="scheduledTargetSearch">搜索聊天</label><label class="search-box wide" id="scheduledTargetSearchBox"><svg><use href="#i-search"/></svg><input id="scheduledTargetSearch" type="search" placeholder="搜索群名、昵称或备注" autocomplete="off"><button type="button" class="clear-search" aria-label="清空聊天搜索">×</button></label></div><div id="scheduledTargetChoices" class="scheduled-target-choices"></div></section>
         <section class="panel scheduled-form-section"><h3><span>3</span>什么时候</h3>${scheduledTimingMarkup(editor.schedule)}</section>
-      </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">${analysisTask ? "日报需通过群聊分析权限。" : "发送仍受聊天权限、安静时段和每日上限限制。"}</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div class="scheduled-editor-actions"><button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button><button class="button primary" id="scheduledSaveEnabled" type="button">${editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>预览只在这里显示；测试发送必须再明确选择一个聊天。</small></aside></div>`;
+      </form><aside class="schedule-summary panel"><span class="eyebrow">确认你的安排</span><h3 id="scheduledSummaryName"></h3><p id="scheduledSummaryText" aria-live="polite"></p><div class="schedule-next-times"><strong>未来执行时间 · 北京时间</strong><ol id="scheduledNextTimes"><li>正在计算…</li></ol></div><p class="subtle">${analysisTask ? "日报需通过群聊分析权限。" : "发送仍受聊天权限、安静时段和每日上限限制。"}</p><div id="scheduledPreview" class="scheduled-preview" hidden></div><div id="scheduledTaskError" class="modal-error" role="alert" hidden></div><div id="scheduledTestResult" class="schedule-notice" role="status" aria-live="polite" hidden></div><div class="scheduled-editor-actions"><button class="button secondary" id="scheduledPreviewButton" type="button">预览内容</button><button class="button secondary" id="scheduledTestButton" type="button">发送测试消息</button><button class="button ghost" id="scheduledSaveDraft" type="button">保存草稿</button><button class="button primary" id="scheduledSaveEnabled" type="button">${editor.revision ? "保存并启用" : "创建并启用"}</button></div><small>预览只在这里显示；测试发送必须再明确选择一个聊天。</small></aside></div>`;
     $("#scheduledBack").addEventListener("click", () => { if (!guardScheduledDraft(showScheduledList)) { state.scheduledEditor = null; showScheduledList(); } });
     $("#scheduledTaskForm").addEventListener("submit", (event) => event.preventDefault());
     $("#scheduledName").addEventListener("input", (event) => { editor.name = event.target.value; scheduledChanged(false); });
@@ -575,6 +577,20 @@ window.createScheduledTasks = function (helpers) {
     if (saveDraft) saveDraft.disabled = !editor.account_id || editor.account_id !== state.scheduledContext?.account_id || state.scheduledBusy;
     if (previewButton) previewButton.disabled = state.scheduledBusy;
     if (testButton) testButton.disabled = !ready.ready || !editor.targets.length || state.scheduledBusy;
+    renderScheduledTestResult();
+  }
+
+  function renderScheduledTestResult() {
+    const box = $("#scheduledTestResult");
+    if (!box) return;
+    const result = scheduledTestResult?.editor === state.scheduledEditor
+      && scheduledAccountMatches(state.scheduledEditor?.account_id)
+      && state.scheduledContext?.account_id === state.scheduledEditor?.account_id
+      ? scheduledTestResult : null;
+    box.hidden = !result;
+    box.textContent = result?.message || "";
+    box.classList.toggle("warning", Boolean(result && result.status !== "submitted"));
+    $("#scheduledTestButton").textContent = result?.status === "unknown" ? "先核对聊天再重试" : "发送测试消息";
   }
 
   async function previewScheduledTimes() {
@@ -653,10 +669,11 @@ window.createScheduledTasks = function (helpers) {
       value: `${target.type}:${target.id}`,
       label: `${target.type === "group" ? "群聊" : "私聊"} · ${target.name || target.id}`,
     }));
+    const uncertain = scheduledTestResult?.editor === editor && scheduledTestResult.status === "unknown";
     confirmAction({
-      title: "发送一条测试消息？",
-      message: "测试只发送给下面选择的一个聊天，并计入该聊天的每日推送上限。发送结果不确定时不会自动重试。",
-      confirmText: "发送测试消息",
+      title: uncertain ? "已核对微信，仍要再次测试？" : "发送一条测试消息？",
+      message: `${uncertain ? "上次发送结果尚未确认。请先检查微信聊天，确认确实需要再次发送，避免重复消息。" : ""}测试只发送给下面选择的一个聊天，并计入该聊天的每日推送上限。发送结果不确定时不会自动重试。`,
+      confirmText: uncertain ? "已核对，仍要发送" : "发送测试消息",
       pendingText: "正在测试发送…",
       intent: "primary",
       field: {label: "测试发送到", type: "select", value: options[0].value, options},
@@ -664,7 +681,15 @@ window.createScheduledTasks = function (helpers) {
         const target = editor.targets.find((item) => `${item.type}:${item.id}` === value);
         if (!target) throw new Error("测试发送对象已经变化，请重新选择。 ");
         const result = await api("test_scheduled_task", {...scheduledPayload(false), test_target: {type: target.type, id: target.id}});
-        toast(result.message || "测试发送已结束。", result.status === "failed" ? "error" : "");
+        if (state.scheduledEditor !== editor || state.scheduledContext?.account_id !== editor.account_id
+            || !scheduledAccountMatches(editor.account_id)) {
+          throw new Error("微信账号或当前任务已变化，请先核对微信聊天中的发送结果。 ");
+        }
+        scheduledTestResult = {editor, status: result.status, message: result.status === "unknown"
+          ? `结果待确认：${result.message || "未收到明确发送结果。"} 请先核对微信聊天，避免重复发送。`
+          : `${SCHEDULED_RESULTS[result.status] || "测试发送已结束"}：${result.message || "请在微信聊天中核对。"}`};
+        renderScheduledTestResult();
+        if (result.status !== "unknown") toast(result.message || "测试发送已结束。", result.status === "failed" ? "error" : "");
       },
     });
   }
