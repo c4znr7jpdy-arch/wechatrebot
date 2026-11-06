@@ -614,7 +614,10 @@
     const leavingGroupManagement = state.activePage === "groups" && page !== "groups";
     const content = $(".content-scroll");
     if (content && retainedPageScroll.has(state.activePage)) retainedPageScroll.set(state.activePage, content.scrollTop);
-    if (state.activePage === "settings" && page !== "settings") clearProviderTest();
+    if (state.activePage === "settings" && page !== "settings") {
+      clearProviderTest();
+      clearProviderModels();
+    }
     state.activePage = page;
     if (leavingGroupManagement) {
       window.clearTimeout(state.groupRefreshRetryTimer);
@@ -1044,7 +1047,13 @@
       state.webSearchClearKey = false;
       updateWebSearchProviderCopy();
     });
-    $("#webSearchForm").addEventListener("input", () => { state.webSearchDirty = true; });
+    $("#webSearchForm").addEventListener("input", (event) => {
+      state.webSearchDirty = true;
+      if (event.target.name === "key" && event.target.value.trim()) {
+        state.webSearchClearKey = false;
+        $("#webSearchNote").textContent = "新密钥将在保存时替换当前服务商密钥。";
+      }
+    });
     $("#webSearchForm").addEventListener("change", (event) => {
       state.webSearchDirty = true;
       if (event.target.name === "enabled") {
@@ -1339,7 +1348,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
@@ -1360,6 +1369,7 @@
     SETTINGS_SECTIONS,
     api: (...args) => api(...args),
     applyBrand: (...args) => applyBrand(...args),
+    clearProviderModels: (...args) => clearProviderModels(...args),
     clearProviderTest: (...args) => clearProviderTest(...args),
     confirmAction: (...args) => confirmAction(...args),
     escapeHtml,

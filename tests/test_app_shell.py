@@ -786,6 +786,7 @@ def test_model_discovery_reuses_saved_key_without_exposing_it(
     api = _api(tmp_path)
     selected = SimpleNamespace(
         provider_id="deepseek/deepseek-chat",
+        api_base="https://api.deepseek.com/v1",
         api_key="saved-secret",
     )
     captured = {}
@@ -808,6 +809,89 @@ def test_model_discovery_reuses_saved_key_without_exposing_it(
     assert result["ok"] is True
     assert result["data"]["items"] == ["deepseek-chat", "deepseek-reasoner"]
     assert captured["api_key"] == "saved-secret"
+
+
+@pytest.mark.parametrize("operation,editing,endpoint", [
+    ("save_provider", False, "https://other.example.test/v1"),
+    ("save_provider", False, "https://saved.example.test/v1"),
+    ("save_provider", True, "https://other.example.test/v1"),
+    ("discover_provider_models", True, "https://other.example.test/v1"),
+])
+def test_model_credentials_are_not_inherited_by_new_or_changed_endpoints(
+    monkeypatch, tmp_path: Path, operation: str, editing: bool, endpoint: str,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="saved/chat", source_id="saved", display_name="Saved",
+        api_base="https://saved.example.test/v1", model="chat",
+        api_key="synthetic-saved-secret", is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: model_api.OpenAIProviderProfile(
+        api_key=selected.api_key, api_base=selected.api_base,
+        model=selected.model, source_id=selected.source_id,
+    ))
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    calls = []
+
+    def save(_root, profile, **kwargs):
+        calls.append(profile.api_key)
+        return profile.normalized()
+
+    def discover(**values):
+        calls.append(values["api_key"])
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id if editing else "",
+        "api_base": endpoint, "api_key": "", "model": "chat",
+    })
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15004"
+    assert "API Key / Token Plan" in result["error"]["message"]
+    assert calls == []
+    assert selected.api_key not in json.dumps(result)
+    assert selected.api_key not in repr(api._lifecycle.events.items)
+
+
+@pytest.mark.parametrize("operation", ["save_provider", "discover_provider_models"])
+@pytest.mark.parametrize("changed_endpoint", [False, True])
+def test_model_credentials_reuse_requires_same_endpoint_or_explicit_key(
+    monkeypatch, tmp_path: Path, operation: str, changed_endpoint: bool,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="saved/chat", source_id="saved", display_name="Saved",
+        api_base="https://saved.example.test/v1", model="chat",
+        api_key="synthetic-saved-secret", is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    keys = []
+
+    def save(_root, profile, **kwargs):
+        keys.append(profile.api_key)
+        return profile.normalized()
+
+    def discover(**values):
+        keys.append(values["api_key"])
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id,
+        "api_base": "https://other.example.test/v1" if changed_endpoint else f"{selected.api_base}/",
+        "api_key": "synthetic-new-secret" if changed_endpoint else "",
+        "model": "chat",
+    })
+
+    assert result["ok"] is True
+    assert keys == ["synthetic-new-secret" if changed_endpoint else selected.api_key]
 
 
 def test_model_discovery_explains_missing_key_without_echoing_misplaced_credentials(

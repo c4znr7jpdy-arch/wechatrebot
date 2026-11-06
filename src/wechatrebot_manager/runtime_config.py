@@ -13,6 +13,7 @@ from .json_io import write_json_atomic
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
+    normalize_service_kind,
     with_thinking_mode,
 )
 from .retired_plugins import purge_retired_plugins
@@ -53,9 +54,9 @@ class RuntimePorts:
         errors: list[str] = []
         values = asdict(self)
         for name, value in values.items():
-            if not 1 <= value <= 65535:
+            if type(value) is not int or not 1 <= value <= 65535:
                 errors.append(f"{name} 端口超出范围。")
-        if len(set(values.values())) != len(values):
+        if not errors and len(set(values.values())) != len(values):
             errors.append("各本地服务端口不能重复。")
         return tuple(errors)
 
@@ -474,14 +475,26 @@ def _sync_living_memory_config(
             },
         },
     )
-    if provider_profile is not None:
+    if provider_profile is not None and provider_profile.service_kind == "chat":
         provider_settings = payload.get("provider_settings")
         if not isinstance(provider_settings, dict):
             provider_settings = {}
             payload["provider_settings"] = provider_settings
-        provider_settings.setdefault(
-            "llm_provider_id", provider_profile.normalized().model_id
-        )
+        current_id = provider_settings.get("llm_provider_id")
+        engine = _load_object(astrbot_data_root / "cmd_config.json")
+        models = engine.get("provider")
+        current = next(
+            (item for item in models if isinstance(item, dict) and item.get("id") == current_id),
+            None,
+        ) if isinstance(models, list) else None
+        try:
+            current_kind = normalize_service_kind(
+                current.get("service_kind") or current.get("provider_type") or current.get("type")
+            ) if current is not None else "chat"
+        except ValueError:
+            current_kind = "chat"  # Preserve a customer binding to an unknown adapter.
+        if not current_id or current_kind != "chat":
+            provider_settings["llm_provider_id"] = provider_profile.normalized().model_id
     write_json_atomic(path, payload)
 
 
@@ -557,7 +570,7 @@ def write_runtime_configs(
     wechat_exe_path: str | Path | None = None,
     *,
     wechat_version: str | None = None,
-    ports: RuntimePorts = RuntimePorts(),
+    ports: RuntimePorts | None = None,
     brand_profile: BrandProfile | None = None,
     apply_brand_persona: bool = True,
     provider_profile: OpenAIProviderProfile | None = None,
@@ -565,6 +578,19 @@ def write_runtime_configs(
     admin_id: str | None = None,
 ) -> None:
     root = Path(install_root).expanduser().resolve()
+    manager_path = root / "config" / "manager.json"
+    manager_payload = _load_object(manager_path)
+    if ports is None:
+        saved_ports = manager_payload.get("ports", {})
+        if not isinstance(saved_ports, dict):
+            raise ValueError("现有本地服务端口配置格式不正确。")
+        try:
+            ports = RuntimePorts(**saved_ports)
+        except TypeError as exc:
+            raise ValueError("现有本地服务端口配置格式不正确。") from exc
+    errors = ports.validate()
+    if errors:
+        raise ValueError("；".join(errors))
     bridge_config = root / "app" / "bridge" / "config.json"
     bridge_payload = _load_object(bridge_config)
     bridge_payload.update(bridge_config_payload(wechat_exe_path, ports=ports))
@@ -657,8 +683,6 @@ def write_runtime_configs(
     )
     _sync_living_memory_config(astrbot_data_root, provider_profile)
     _sync_emotion_config(astrbot_data_root)
-    manager_path = root / "config" / "manager.json"
-    manager_payload = _load_object(manager_path)
     manager_payload.update(
         {
             "schema_version": 1,

@@ -6,6 +6,7 @@ import subprocess
 from typing import Callable
 
 from .brand import BrandProfile, install_brand_profile
+from .customer_config import load_robot_settings
 from .install_paths import (
     INSTALL_MARKER,
     prepare_install_layout,
@@ -21,7 +22,7 @@ from .payload import (
     payload_relative_paths,
 )
 from .provider import OpenAIProviderProfile
-from .runtime_config import write_runtime_configs
+from .runtime_config import _load_object, write_runtime_configs
 from .runtime_config import normalize_admin_id
 from .shortcuts import create_windows_shortcuts
 from .uninstaller import provision_uninstaller
@@ -78,12 +79,24 @@ def perform_install(
     save_locator: bool = True,
     create_shortcuts: bool = True,
     create_entrypoints: bool = True,
+    preserve_existing_settings: bool = False,
 ) -> VerifiedPayload | None:
     errors = request.validate()
     if errors:
         raise ValueError("；".join(errors))
 
     root = request.install_root.expanduser().resolve()
+    existing_settings = load_robot_settings(root) if preserve_existing_settings else None
+    existing_manager = _load_object(root / "config/manager.json") if preserve_existing_settings else {}
+    existing_engine = (
+        _load_object(root / "app/astrbot/data/cmd_config.json") if preserve_existing_settings else {}
+    )
+    existing_brand = preserve_existing_settings and (root / "config/brand.json").is_file()
+    wechat_path = request.wechat.path if request.wechat is not None else None
+    wechat_version = request.wechat.version if request.wechat is not None else None
+    if existing_manager:
+        wechat_path = str(existing_manager.get("wechat_exe_path") or "") or None
+        wechat_version = str(existing_manager.get("wechat_version") or "") or None
     prepare_install_layout(root)
     write_json_atomic(
         root / INSTALL_MARKER,
@@ -96,19 +109,23 @@ def perform_install(
                 request.payload_root,
                 root,
                 progress_callback=progress_callback,
+                preserve_existing_user_config=preserve_existing_settings,
             )
         if progress_callback is not None:
             progress_callback("configure", 0, 1)
-        normalized_brand = install_brand_profile(root, request.brand)
+        normalized_brand = (
+            existing_settings.profile if existing_brand and existing_settings is not None
+            else install_brand_profile(root, request.brand)
+        )
+        # Omitting identity updates preserves custom personas and the complete
+        # administrator list; the editor's RobotSettings exposes only its first ID.
         write_runtime_configs(
             root,
-            request.wechat.path if request.wechat is not None else None,
-            wechat_version=(
-                request.wechat.version if request.wechat is not None else None
-            ),
-            brand_profile=normalized_brand,
+            wechat_path,
+            wechat_version=wechat_version,
+            brand_profile=None if existing_engine else normalized_brand,
             provider_profile=request.provider,
-            admin_id=request.admin_id,
+            admin_id=None if existing_engine else request.admin_id,
         )
         write_json_atomic(
             root / INSTALL_MARKER,

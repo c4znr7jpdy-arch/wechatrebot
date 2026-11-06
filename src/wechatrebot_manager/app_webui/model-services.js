@@ -19,6 +19,10 @@ window.createModelServices = function (helpers) {
   let providerGridMotion;
   let providerTestGeneration = 0;
   let providerTestBusy = false;
+  let providerModelDiscoveryGeneration = 0;
+  let resetProviderModelDiscovery = null;
+  let providerEditorGeneration = 0;
+  let providerSaveBusy = false;
 
   function clearProviderTest() {
     providerTestGeneration += 1;
@@ -55,8 +59,12 @@ window.createModelServices = function (helpers) {
     }
   }
 
-  function updateProviderDirty() {
+  function updateProviderDirty(event) {
     if (state.providerScreen !== "editor") return;
+    if (["api_base", "api_key"].includes(event?.target?.name)) {
+      clearProviderModels();
+      $("#providerModelHint").textContent = "地址或密钥已修改，可重新获取可用模型。";
+    }
     clearProviderTest();
     syncProviderIcon();
     const form = $("#providerForm");
@@ -68,7 +76,9 @@ window.createModelServices = function (helpers) {
   }
 
   function showProviderOverview(focus = false) {
+    providerEditorGeneration += 1;
     clearProviderTest();
+    clearProviderModels();
     state.providerScreen = "overview";
     state.providerDirty = false;
     $("#providerOverview").hidden = false;
@@ -77,6 +87,7 @@ window.createModelServices = function (helpers) {
   }
 
   function showProviderEditor(focus = true) {
+    providerEditorGeneration += 1;
     clearProviderTest();
     state.providerScreen = "editor";
     $("#providerOverview").hidden = true;
@@ -106,14 +117,20 @@ window.createModelServices = function (helpers) {
   async function saveProvider(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    if (!requiredValues(form)) return;
+    if (providerSaveBusy || !requiredValues(form)) return;
+    const generation = providerEditorGeneration;
+    const submitted = Object.fromEntries(new FormData(form));
+    const unchanged = () => generation === providerEditorGeneration
+      && state.providerScreen === "editor"
+      && JSON.stringify(Object.fromEntries(new FormData(form))) === JSON.stringify(submitted);
     const button = $('button[type="submit"]', form);
     const originalText = button.textContent;
+    providerSaveBusy = true;
     button.disabled = true;
     button.textContent = "正在保存并应用…";
     $("#providerNote").textContent = "正在更新统一模型配置…";
     try {
-      const values = Object.fromEntries(new FormData(form));
+      const values = {...submitted};
       if (values.service_kind === "chat") {
         values.thinking_enabled = form.elements.thinking_enabled.checked;
       } else {
@@ -132,18 +149,32 @@ window.createModelServices = function (helpers) {
       state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || data;
       state.featureDetails = {};
       getCoreSettings().invalidate();
-      $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
-      form.elements.api_key.value = "";
       renderProviderServices();
-      markProviderClean();
-      showProviderOverview(true);
+      if (unchanged()) {
+        $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
+        form.elements.api_key.value = "";
+        markProviderClean();
+        showProviderOverview(true);
+      } else if (generation === providerEditorGeneration && state.providerScreen === "editor") {
+        if (form.elements.provider_id.value === submitted.provider_id) {
+          form.elements.provider_id.value = data.id;
+        }
+        updateProviderDirty();
+        $("#providerNote").textContent = "提交时的配置已保存；之后的修改仍未保存，请再次保存。";
+      }
       toast(data.is_default
         ? (data.apply_state === "applied"
           ? "模型服务已保存，并已设为当前回复模型。"
           : "模型服务已保存，机器人启动时会使用它。")
         : "模型服务已保存，当前回复模型保持不变。");
-    } catch (error) { reportError(error); $("#providerNote").textContent = error.message; }
-    finally { button.disabled = false; button.textContent = originalText; }
+    } catch (error) {
+      reportError(error);
+      if (generation === providerEditorGeneration) $("#providerNote").textContent = error.message;
+    } finally {
+      providerSaveBusy = false;
+      button.disabled = false;
+      if (generation === providerEditorGeneration || state.providerScreen === "overview") button.textContent = originalText;
+    }
   }
 
   function providerPresetFor(service) {
@@ -517,12 +548,23 @@ window.createModelServices = function (helpers) {
   async function discoverProviderModels() {
     const form = $("#providerForm");
     const button = $("#discoverProviderModels");
+    if (button.disabled) return;
+    const generation = ++providerModelDiscoveryGeneration;
+    const values = Object.fromEntries(new FormData(form));
+    const current = () => generation === providerModelDiscoveryGeneration
+      && state.activePage === "settings" && state.settingsSection === "model"
+      && state.providerScreen === "editor"
+      && ["provider_id", "preset", "service_kind", "api_base", "api_key"].every(
+        (name) => form.elements[name].value === values[name],
+      );
     const original = button.textContent;
+    resetProviderModelDiscovery = () => { button.disabled = false; button.textContent = original; };
     button.disabled = true;
     button.textContent = "读取中…";
     $("#providerModelHint").textContent = "正在验证地址和密钥，并读取模型列表…";
     try {
-      const data = await api("discover_provider_models", Object.fromEntries(new FormData(form)));
+      const data = await api("discover_provider_models", values);
+      if (!current()) return;
       const items = Array.isArray(data.items) ? data.items : [];
       state.providerModels = [...new Set(items.map((model) => String(model).trim()).filter(Boolean))];
       state.providerModelFiltering = false;
@@ -530,15 +572,21 @@ window.createModelServices = function (helpers) {
       renderProviderModelOptions(true);
       $("#providerModelHint").textContent = `已读取 ${state.providerModels.length} 个模型；可从下方完整列表选择，也可以继续手动填写。`;
     } catch (error) {
+      if (!current()) return;
       reportError(error);
       $("#providerModelHint").textContent = error.message;
     } finally {
-      button.disabled = false;
-      button.textContent = original;
+      if (generation === providerModelDiscoveryGeneration) {
+        resetProviderModelDiscovery?.();
+        resetProviderModelDiscovery = null;
+      }
     }
   }
 
   function clearProviderModels() {
+    providerModelDiscoveryGeneration += 1;
+    resetProviderModelDiscovery?.();
+    resetProviderModelDiscovery = null;
     state.providerModels = [];
     state.providerModelFiltering = false;
     state.providerModelFocus = -1;
@@ -644,7 +692,10 @@ window.createModelServices = function (helpers) {
     options.addEventListener("mousedown", (event) => event.preventDefault());
     options.addEventListener("click", (event) => {
       const option = event.target.closest("[data-model]");
-      if (option) chooseProviderModel(option.dataset.model);
+      if (option) {
+        event.preventDefault();
+        chooseProviderModel(option.dataset.model);
+      }
     });
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#providerModelCombobox")) renderProviderModelOptions(false);
@@ -712,6 +763,7 @@ window.createModelServices = function (helpers) {
     applyProviderPreset,
     beginNewProvider,
     bindProviderModelCombobox,
+    clearProviderModels,
     clearProviderTest,
     deleteProvider,
     deleteSelectedProvider,

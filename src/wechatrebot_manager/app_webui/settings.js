@@ -7,6 +7,7 @@ window.createManagerSettings = function (helpers) {
     SETTINGS_SECTIONS,
     api,
     applyBrand,
+    clearProviderModels,
     clearProviderTest,
     confirmAction,
     escapeHtml,
@@ -75,7 +76,10 @@ window.createManagerSettings = function (helpers) {
   function setSettingsSection(section, focus = false) {
     if (!SETTINGS_SECTIONS.has(section)) return;
     const changed = state.settingsSection !== section;
-    if (changed) clearProviderTest();
+    if (changed) {
+      clearProviderTest();
+      clearProviderModels();
+    }
     state.settingsSection = section;
     const page = $("#page-settings");
     page.dataset.settingsSection = section;
@@ -98,28 +102,36 @@ window.createManagerSettings = function (helpers) {
     if (changed) window.managerMotion?.enter($(`[data-settings-section="${section}"]`, page));
   }
 
-  function renderWebSearch(settings) {
+  function renderWebSearch(settings, preserveDraft = false) {
     state.webSearch = settings || {enabled: false, provider: "tavily", link_enabled: false, providers: {}};
-    state.webSearchDirty = false;
-    state.webSearchClearKey = false;
     const form = $("#webSearchForm");
     if (!form) return;
     const providerSelect = form.elements.provider;
+    const requestedProvider = preserveDraft ? providerSelect.value : (state.webSearch.provider || "tavily");
     const providers = state.webSearch.providers || {};
     providerSelect.innerHTML = Object.values(providers).map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.configured ? " · 已配置" : ""}</option>`).join("");
-    const requestedProvider = state.webSearch.provider || "tavily";
     providerSelect.value = providers[requestedProvider] ? requestedProvider : (Object.keys(providers)[0] || "");
-    form.elements.enabled.checked = Boolean(state.webSearch.enabled);
-    $("#webSearchDetails").hidden = !state.webSearch.enabled;
-    $("#clearWebSearchKey").hidden = !state.webSearch.enabled;
-    form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
-    updateToggleCopy({currentTarget: form.elements.enabled});
+    if (!preserveDraft) {
+      state.webSearchDirty = false;
+      state.webSearchClearKey = false;
+      form.elements.key.value = "";
+      form.elements.key.type = "password";
+      $("#revealWebSearchKey").textContent = "显示";
+      $("#revealWebSearchKey").setAttribute("aria-pressed", "false");
+      form.elements.enabled.checked = Boolean(state.webSearch.enabled);
+      $("#webSearchDetails").hidden = !state.webSearch.enabled;
+      $("#clearWebSearchKey").hidden = !state.webSearch.enabled;
+      form.elements.link_enabled.value = String(Boolean(state.webSearch.link_enabled));
+      updateToggleCopy({currentTarget: form.elements.enabled});
+    }
     updateWebSearchProviderCopy();
     $("#webSearchStatus").textContent = state.webSearch.enabled ? "已启用" : "未启用";
     $("#webSearchStatus").classList.toggle("online", Boolean(state.webSearch.enabled));
-    $("#webSearchNote").textContent = state.webSearch.enabled
-      ? "服务商已选择；保存后会在需要时调用。"
-      : "联网搜索当前关闭。保存后机器人不会发起搜索请求。";
+    if (!preserveDraft) {
+      $("#webSearchNote").textContent = state.webSearch.enabled
+        ? "服务商已选择；保存后会在需要时调用。"
+        : "联网搜索当前关闭。保存后机器人不会发起搜索请求。";
+    }
   }
 
   function updateWebSearchProviderCopy() {
@@ -148,6 +160,9 @@ window.createManagerSettings = function (helpers) {
     event.preventDefault();
     const form = event.currentTarget;
     const button = form.querySelector("button[type='submit']");
+    if (button.disabled) return;
+    const snapshot = () => JSON.stringify([Object.fromEntries(new FormData(form)), Boolean(state.webSearchClearKey)]);
+    const submitted = snapshot();
     const note = $("#webSearchNote");
     button.disabled = true;
     button.textContent = "正在保存…";
@@ -161,8 +176,10 @@ window.createManagerSettings = function (helpers) {
         clear_key: Boolean(state.webSearchClearKey),
       };
       const saved = await api("save_web_search_settings", values);
-      renderWebSearch(saved);
-      note.textContent = saved.apply_state === "applied" ? "已热更新，下一条消息使用新配置。" : "已保存，机器人下次启动时使用。";
+      const preserveDraft = snapshot() !== submitted;
+      renderWebSearch(saved, preserveDraft);
+      note.textContent = preserveDraft ? "提交时的设置已保存；之后的修改仍未保存，请再次保存。"
+        : saved.apply_state === "applied" ? "已热更新，下一条消息使用新配置。" : "已保存，机器人下次启动时使用。";
       toast(note.textContent);
     } catch (error) {
       note.textContent = error.message || "联网搜索设置保存失败。";
