@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .customer_config import (
+    ProviderService,
     delete_provider_profile,
     delete_provider_thinking_preference,
     apply_web_search_values,
@@ -40,6 +41,23 @@ class AnalysisModelBindingError(PluginCenterError):
     """A provider was saved, but its dependent analysis binding was not confirmed."""
 
 
+def _provider_api_key(values: dict[str, Any], selected: ProviderService | None) -> str:
+    """Reuse a saved secret only when editing its unchanged API endpoint."""
+    api_key = str(values.get("api_key") or "").strip()
+    if api_key:
+        return api_key
+    if selected is not None:
+        api_base = str(values.get("api_base") or "").strip().rstrip("/")
+        if api_base != selected.api_base.strip().rstrip("/"):
+            raise ProviderTestError(
+                "API 地址已更改，请重新填写此地址对应的 API Key / Token Plan。",
+                code="15004",
+            )
+        if selected.api_key:
+            return selected.api_key
+    raise ProviderTestError("模型 API Key / Token Plan 不能为空。", code="15004")
+
+
 class ModelApiMixin:
     def save_provider(self, values: dict[str, Any]) -> dict[str, object]:
         try:
@@ -65,11 +83,7 @@ class ModelApiMixin:
                 not chat_services or bool(selected is not None and selected.is_default)
             )
             current = load_provider_profile(self._install_root)
-            api_key = str(values.get("api_key") or "").strip()
-            if not api_key and selected is not None:
-                api_key = selected.api_key
-            elif not api_key and not original_id and current is not None:
-                api_key = current.api_key
+            api_key = _provider_api_key(values, selected)
             api_base = str(values.get("api_base") or "").strip()
             model = str(values.get("model") or "").strip()
             profile = OpenAIProviderProfile(
@@ -165,6 +179,10 @@ class ModelApiMixin:
                     else "模型服务已保存，当前回复模型保持不变。"
                 ),
             )
+        except ProviderTestError as exc:
+            result = self._failed(exc, exc.error_code)
+            result["error"].update(message=str(exc), detail=str(exc))
+            return result
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
@@ -389,9 +407,7 @@ class ModelApiMixin:
                 ),
                 None,
             )
-            api_key = str(values.get("api_key") or "").strip()
-            if not api_key and selected is not None:
-                api_key = selected.api_key
+            api_key = _provider_api_key(values, selected)
             models = discover_openai_models(
                 api_key=api_key,
                 api_base=str(values.get("api_base") or "").strip(),

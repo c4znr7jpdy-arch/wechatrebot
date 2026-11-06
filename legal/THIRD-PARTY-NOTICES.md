@@ -13,15 +13,16 @@
 | delivered-plugin | astrbot_plugin_livingmemory | 2.6.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_mimo_tts_clone | 0.7.2 | MIT |
 | delivered-plugin | astrbot_plugin_music | 2.1.1 | MIT |
+| delivered-plugin | astrbot_plugin_office_assistant | 1.9.2 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_parser | 1.5.6 | MIT |
 | delivered-plugin | astrbot_plugin_patch_at_wxid | UNKNOWN | Proprietary |
 | delivered-plugin | astrbot_plugin_proactive_chat | 1.2.4 | AGPL-3.0-only |
-| delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 5.7.4 | MIT |
+| delivered-plugin | astrbot_plugin_qq_group_daily_analysis | 5.7.4 # 插件版本号。格式：v1.1.1 或者 v1.1 | MIT |
 | delivered-plugin | astrbot_plugin_self_iterative_core | 1.1.1 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_self_learning | 3.4.5 | AGPL-3.0-only |
 | delivered-plugin | astrbot_plugin_twitter | 1.12.0 | AGPL-3.0-only |
 | delivered-plugin | jiang_capability_router | 1.1.0 | Proprietary |
-| delivered-plugin | jiang_commands | 1.1.2 | Proprietary |
+| delivered-plugin | jiang_commands | UNKNOWN | Proprietary |
 | delivered-plugin | jiang_group_notice | 1.0.0 | Proprietary |
 | delivered-plugin | jiang_image | 2.1.0 | Proprietary |
 | delivered-plugin | jiang_mimo_emoji_voice | 0.1.0 | Proprietary |
@@ -98,6 +99,7 @@
 | runtime | diskcache | 5.6.3 | Apache-2.0 |
 | runtime | distro | 1.9.0 | Apache-2.0 |
 | runtime | docstring_parser | 0.18.0 | MIT |
+| runtime | docx2pdf | 0.1.8 | MIT |
 | runtime | edge-tts | 7.2.8 | LGPL-3.0-only |
 | runtime | emoji | 2.15.0 | BSD License |
 | runtime | et_xmlfile | 2.0.0 | MIT |
@@ -108,7 +110,9 @@
 | runtime | FFmpeg | n8.1.2-50-g1a748fe2cd | LGPL-3.0-or-later |
 | runtime | filelock | 3.29.0 | MIT |
 | runtime | filetype | 1.2.0 | MIT |
+| runtime | fire | 0.7.1 | Apache-2.0 |
 | runtime | Flask | 3.1.3 | BSD-3-Clause |
+| runtime | fonttools | 4.66.1 | MIT |
 | runtime | frozenlist | 1.8.0 | Apache-2.0 |
 | runtime | gallery_dl | 1.32.9 | GPL-2.0-only |
 | runtime | gmssl | 3.2.2 | BSD |
@@ -162,12 +166,16 @@
 | runtime | Node.js (Playwright bundled) | 24.15.0 | MIT |
 | runtime | numpy | 2.2.6 | BSD License |
 | runtime | openai | 2.37.0 | Apache-2.0 |
+| runtime | opencv-python-headless | 5.0.0.93 | Apache-2.0 |
 | runtime | openpyxl | 3.1.5 | MIT |
 | runtime | optionaldict | 0.1.2 | MIT |
 | runtime | orjson | 3.11.9 | MPL-2.0 AND (Apache-2.0 OR MIT) |
 | runtime | ormsgpack | 1.12.2 | Apache-2.0 OR MIT |
 | runtime | packaging | 26.2 | Apache-2.0 OR BSD-2-Clause |
 | runtime | pandas | 2.3.3 | BSD License |
+| runtime | pdf2docx | 0.5.13 | MIT |
+| runtime | pdfminer.six | 20260107 | MIT |
+| runtime | pdfplumber | 0.11.10 | MIT |
 | runtime | pilk | 0.2.4 | GPL-3.0-only |
 | runtime | pillow | 12.2.0 | MIT-CMU |
 | runtime | pip | 25.2 | MIT |
@@ -196,6 +204,7 @@
 | runtime | Pygments | 2.20.0 | BSD-2-Clause |
 | runtime | PyJWT | 2.12.1 | MIT |
 | runtime | pymilvus | 2.6.15 | Apache-2.0 |
+| runtime | pymupdf | 1.28.2 | Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License |
 | runtime | PyMySQL | 1.2.0 | MIT |
 | runtime | PyOTP | 2.10.0 | MIT |
 | runtime | pypdf | 6.11.0 | BSD-3-Clause |
@@ -204,8 +213,10 @@
 | runtime | pyromark | 0.9.10 | NOASSERTION |
 | runtime | PySocks | 1.7.1 | BSD |
 | runtime | python-dateutil | 2.9.0.post0 | BSD License |
+| runtime | python-docx | 1.2.0 | MIT |
 | runtime | python-dotenv | 1.2.2 | BSD-3-Clause |
 | runtime | python-multipart | 0.0.29 | Apache-2.0 |
+| runtime | python-pptx | 1.0.2 | MIT |
 | runtime | python-ripgrep | 0.0.8 | MIT |
 | runtime | python-socks | 2.8.1 | Apache-2.0 |
 | runtime | python-telegram-bot | 22.7 | LGPL-3.0-only |
@@ -242,9 +253,11 @@
 | runtime | sqlmodel | 0.0.38 | MIT |
 | runtime | sse-starlette | 3.4.4 | BSD-3-Clause |
 | runtime | starlette | 1.3.1 | BSD-3-Clause |
+| runtime | tabula-py | 2.10.0 | MIT |
 | runtime | tabulate | 0.10.0 | MIT |
 | runtime | telegramify-markdown | 1.1.5 | MIT |
 | runtime | tenacity | 9.1.4 | Apache-2.0 |
+| runtime | termcolor | 3.3.0 | MIT |
 | runtime | threadpoolctl | 3.6.0 | BSD-3-Clause |
 | runtime | tiktoken | 0.13.0 | NOASSERTION |
 | runtime | tqdm | 4.67.3 | MPL-2.0 AND MIT |

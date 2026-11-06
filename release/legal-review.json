@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "status": "review-required",
-  "runtime_component_count": 223,
+  "runtime_component_count": 235,
   "shared_runtime_component_count": 2,
   "manager_build_component_count": 18,
-  "delivered_plugin_count": 24,
+  "delivered_plugin_count": 25,
   "unresolved_license_components": [
     "apilmoji 0.3.1",
     "pyromark 0.9.10",
@@ -20,6 +20,7 @@
     "mutagen 1.48.1",
     "pilk 0.2.4",
     "pyinstaller 6.22.2",
+    "astrbot_plugin_office_assistant 1.9.2",
     "astrbot_plugin_angel_heart 2.2.2",
     "astrbot_plugin_livingmemory 2.6.1",
     "astrbot_plugin_self_learning 3.4.5",
@@ -36,15 +37,15 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "EA02E4F54495932D6468C2992AC355602C84C1E4EA5AF1451FEAD2625BD8BBBF"
+      "sha256": "39F2DDB6EB328F8380A0A47DB59F70331B428CC85C226BE243A994182862DD30"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
-      "sha256": "024F4875117EC38A0C7AA24820D706ADCDB53BA9A2B446C04F79234C3E77BD3D"
+      "sha256": "883D2E7903DF4745363BA11DAA202297579A9BD5808F8559A4639795C4113121"
     },
     "license_texts": {
       "path": "legal/THIRD-PARTY-LICENSES.txt",
-      "sha256": "F8DD3292F91AA6405519364866612EA20E4505A037F1475883A741032E2D5676"
+      "sha256": "1B1415928D85B0179E80C81E82B032805498A0D75E94F893A283B5344C70C439"
     },
     "corresponding_source": {
       "path": "legal/CORRESPONDING-SOURCE.md",
