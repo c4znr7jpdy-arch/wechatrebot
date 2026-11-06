@@ -534,7 +534,8 @@ class LifecycleController:
             self.state = LifecycleState.STOPPED
             self._error = None
             return self.view()
-        self._runtime = self._snapshotter()
+        if not self._refresh_runtime_for_view():
+            return self.view()
         if self._bot_wechat_active():
             self.state = LifecycleState.STOP_WAIT_WECHAT
             self._error = self.catalog.get("12003")
@@ -612,10 +613,10 @@ class LifecycleController:
                 # the production supervisor down without a grace period.
                 supervisor.stop(timeout_seconds=0)
             self._supervisor = None
-            self._runtime = self._snapshotter()
             self.state = LifecycleState.STOPPED
             self._running_events_emitted = False
             self._wechat_closed_confirmations = 0
+            self._refresh_runtime_for_view()
             return self.view()
 
     def force_stop_for_update(self) -> LifecycleView:
@@ -653,10 +654,10 @@ class LifecycleController:
             self._supervisor = None
         self.events.emit("CONNECTION_STOP", "success")
         self.events.emit("CORE_STOP", "success")
-        self._runtime = self._snapshotter()
         self.state = LifecycleState.STOPPED
         self._running_events_emitted = False
         self._wechat_closed_confirmations = 0
+        self._refresh_runtime_for_view()
         return self.view()
 
     def view(self) -> LifecycleView:
