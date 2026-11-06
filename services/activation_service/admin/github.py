@@ -20,6 +20,7 @@ from .auth import TOKEN_FILE, private_json, read_private_json
 
 _PUBLIC_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
 _RECOVERY_FILE = "admin-release-recovery.json"
+_LISTING_CONCURRENCY = 4
 
 
 class GitHubError(RuntimeError):
@@ -183,10 +184,14 @@ class GitHubReleases:
         except InvalidVersion:
             raise GitHubError("版本号无效。") from None
         item = await self._api("GET", f"/releases/tags/v{version}")
+        return await self._candidate_manifest(item, version)
+
+    async def _candidate_manifest(self, item: dict, version: str) -> tuple[bytes, object]:
         if not isinstance(item, dict) or item.get("draft") or item.get("prerelease") or item.get("tag_name") != f"v{version}":
             raise GitHubError("只能选择已经公开发布的正式版本。")
         name = f"stable-{version}.json"
-        if not any(asset.get("name") == name for asset in item.get("assets", [])):
+        assets = item.get("assets", [])
+        if not isinstance(assets, list) or not any(isinstance(asset, dict) and asset.get("name") == name for asset in assets):
             raise GitHubError("该版本缺少签名清单。")
         raw = await self._download(f"https://github.com/{self.repo}/releases/download/v{version}/{name}", maximum=MAX_MANIFEST_BYTES)
         _, release = self._manifest(raw, version)
@@ -196,21 +201,37 @@ class GitHubReleases:
         values = await self._api("GET", "/releases?per_page=100")
         if not isinstance(values, list):
             raise GitHubError("GitHub 发布列表格式无效。")
-        result = []
-        for item in values:
-            tag = item.get("tag_name", "")
-            if not tag.startswith("v") or item.get("draft") or item.get("prerelease"):
-                continue
-            entry = {"version": tag[1:], "published_at": item.get("published_at", ""),
-                     "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)} for a in item.get("assets", [])],
-                     "verified": False, "error": ""}
+        semaphore = asyncio.Semaphore(_LISTING_CONCURRENCY)
+
+        async def entry(item):
+            tag = item["tag_name"]
+            assets = item.get("assets", [])
+            result = {"version": tag[1:], "published_at": item.get("published_at", ""),
+                      "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)}
+                                 for a in assets if isinstance(a, dict)] if isinstance(assets, list) else [],
+                      "verified": False, "error": ""}
             try:
-                await self.candidate(tag[1:])
-                entry["verified"] = True
+                version = str(Version(tag[1:]))
+                async with semaphore:
+                    # The list already contains the release metadata. Actual
+                    # promotion still calls candidate() for a fresh tag lookup.
+                    await self._candidate_manifest(item, version)
+                result["verified"] = True
+            except InvalidVersion:
+                result["error"] = "版本号无效。"
             except GitHubError as exc:
-                entry["error"] = str(exc)
-            result.append(entry)
-        return result
+                result["error"] = str(exc)
+            return result
+
+        candidates = []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            tag = item.get("tag_name", "")
+            if not isinstance(tag, str) or not tag.startswith("v") or item.get("draft") or item.get("prerelease"):
+                continue
+            candidates.append(entry(item))
+        return list(await asyncio.gather(*candidates))
 
     async def _readback(self, expected: bytes, *, attempts: int = 10) -> None:
         failure = None

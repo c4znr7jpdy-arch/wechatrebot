@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import copy
 import hashlib
@@ -105,6 +106,118 @@ async def test_signed_manifest_verification_rejects_tampering_cross_repo_and_non
     for url in ("http://github.com/a", "https://127.0.0.1/a", "https://github.com@evil.invalid/a", "https://github.com:444/a"):
         with pytest.raises(GitHubError):
             github._public_url(url)
+
+
+@pytest.mark.asyncio
+async def test_listing_reuses_metadata_with_bounded_concurrency_and_original_order(tmp_path, monkeypatch):
+    github = FakeGitHub(tmp_path)
+    versions = [f"1.0.{index}" for index in range(6)]
+    releases = [{"tag_name": "v" + version, "draft": False, "prerelease": False,
+                 "published_at": version, "assets": [{"name": f"stable-{version}.json", "size": 100}]}
+                for version in versions]
+    calls, started, finished = [], [], []
+    gate, first, four_started, others_finished = (asyncio.Event() for _ in range(4))
+    active = peak = 0
+
+    async def api(method, path, **kwargs):
+        calls.append((method, path))
+        assert (method, path) == ("GET", "/releases?per_page=100")
+        return releases
+
+    async def download(url, **kwargs):
+        nonlocal active, peak
+        version = urlsplit(url).path.rsplit("/", 1)[-1].removeprefix("stable-").removesuffix(".json")
+        active += 1
+        peak = max(peak, active)
+        started.append(version)
+        if len(started) == 4:
+            four_started.set()
+        try:
+            await gate.wait()
+            if version == versions[0]:
+                await first.wait()
+            finished.append(version)
+            if len(finished) == 5:
+                others_finished.set()
+            return signed(github.signer, version)
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(github, "_api", api)
+    monkeypatch.setattr(github, "_download", download)
+    task = asyncio.create_task(github.listing())
+    try:
+        await asyncio.wait_for(four_started.wait(), timeout=1)
+        assert len(started) == 4 and not task.done()
+        gate.set()
+        await asyncio.wait_for(others_finished.wait(), timeout=1)
+        first.set()
+        result = await asyncio.wait_for(task, timeout=1)
+    finally:
+        gate.set()
+        first.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert peak == 4 and finished[-1] == versions[0]
+    assert [item["version"] for item in result] == versions
+    assert all(item["verified"] and not item["error"] for item in result)
+    assert calls == [("GET", "/releases?per_page=100")]
+
+
+@pytest.mark.asyncio
+async def test_listing_isolates_invalid_missing_tampered_and_failed_candidates(tmp_path, monkeypatch):
+    github = FakeGitHub(tmp_path)
+
+    def item(version, **changes):
+        return {"tag_name": "v" + version, "assets": [{"name": f"stable-{version}.json"}], **changes}
+
+    releases = [item("1.0.0"), item("../../unsafe"), item("1.0.1", assets=[]),
+                item("1.0.2"), item("1.0.3"), item("1.0.4"), item("1.0.05"),
+                item("9.0.0", draft=True), item("9.0.1", prerelease=True),
+                {"tag_name": "stable"}, None, {"tag_name": None}]
+    downloads = []
+
+    async def api(method, path, **kwargs):
+        assert (method, path) == ("GET", "/releases?per_page=100")
+        return releases
+
+    async def download(url, **kwargs):
+        downloads.append(url)
+        version = urlsplit(url).path.rsplit("/", 1)[-1].removeprefix("stable-").removesuffix(".json")
+        if version == "1.0.3":
+            raise GitHubError("GitHub 下载中断，请稍后重试。")
+        raw = signed(github.signer, version)
+        return raw.replace(b"1.0.2", b"1.0.9") if version == "1.0.2" else raw
+
+    monkeypatch.setattr(github, "_api", api)
+    monkeypatch.setattr(github, "_download", download)
+    result = await github.listing()
+    assert [entry["version"] for entry in result] == ["1.0.0", "../../unsafe", "1.0.1", "1.0.2", "1.0.3", "1.0.4", "1.0.05"]
+    assert [entry["verified"] for entry in result] == [True, False, False, False, False, True, False]
+    assert "版本号无效" in result[1]["error"]
+    assert "缺少签名清单" in result[2]["error"]
+    assert "验签" in result[3]["error"]
+    assert "下载中断" in result[4]["error"]
+    assert "正式版本" in result[6]["error"]
+    assert {urlsplit(url).path.rsplit("/", 1)[-1] for url in downloads} == {
+        "stable-1.0.0.json", "stable-1.0.2.json", "stable-1.0.3.json", "stable-1.0.4.json"}
+
+
+@pytest.mark.asyncio
+async def test_candidate_still_fetches_current_tag_metadata_before_verification(tmp_path, monkeypatch):
+    github = FakeGitHub(tmp_path)
+    raw, release = await github.candidate("1.0.1")
+    assert raw == github.target and release.version == "1.0.1"
+    assert github.calls == [("GET", "/releases/tags/v1.0.1", None)]
+
+    async def api(method, path, **kwargs):
+        return {"tag_name": "v1.0.1", "draft": True, "assets": [{"name": "stable-1.0.1.json"}]}
+
+    monkeypatch.setattr(github, "_api", api)
+    with pytest.raises(GitHubError, match="正式版本"):
+        await github.candidate("1.0.1")
+    assert len(github.downloads) == 1
 
 
 @pytest.mark.asyncio
