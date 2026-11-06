@@ -159,7 +159,7 @@ class ScheduleService:
         self._account_hint = account_hint or self._runtime_account
 
     def _runtime_account(self) -> str:
-        snapshot = runtime_snapshot()
+        snapshot = runtime_snapshot(install_root=self.install_root)
         return snapshot.wechat_identity if snapshot.account_status_available else ""
 
     @staticmethod

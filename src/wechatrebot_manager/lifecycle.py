@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 import threading
@@ -105,7 +105,7 @@ class LifecycleController:
         *,
         environment_checker: Callable[[Path], WechatEnvironment] | None = None,
         environment_saver: Callable[[Path, WechatEnvironment], None] | None = None,
-        snapshotter: Callable[[], RuntimeSnapshot] = runtime_snapshot,
+        snapshotter: Callable[[], RuntimeSnapshot] | None = None,
         process_probe: Callable[[], tuple[str, ...]] = running_wechat_processes,
         preflight: Callable[[Path], tuple[str, ...]] = _default_preflight,
         supervisor_factory: Callable[
@@ -122,7 +122,9 @@ class LifecycleController:
             lambda root: inspect_wechat_environment(root)
         )
         self._environment_saver = environment_saver or save_wechat_environment
-        self._snapshotter = snapshotter
+        self._snapshotter = snapshotter or (
+            lambda: runtime_snapshot(install_root=self.install_root)
+        )
         self._process_probe = process_probe
         self._preflight = preflight
         self._uses_default_supervisor = supervisor_factory is None
@@ -143,16 +145,18 @@ class LifecycleController:
         self._lock = threading.RLock()
         self.state = LifecycleState.STOPPED
         self._error: ErrorDefinition | None = None
+        self._runtime_config_error: ErrorDefinition | None = None
         self._supervisor: SupervisorLike | None = None
         self._environment = self._environment_checker(self.install_root)
-        self._runtime = self._snapshotter()
+        self._runtime = RuntimeSnapshot(False, False, "", account_status_available=False)
         self._running_events_emitted = False
         self._wechat_closed_confirmations = 0
         self._start_in_progress = False
         self._maintenance_processes: list[ProcessLike] = []
         self._license_pause_failed = False
         self.events.emit("APP_START", "success")
-        if self._uses_default_supervisor:
+        runtime_available = self._refresh_runtime_for_view()
+        if self._uses_default_supervisor and runtime_available:
             try:
                 candidate = self._supervisor_factory(self._on_progress)
                 adopter = getattr(candidate, "adopt", None)
@@ -180,6 +184,31 @@ class LifecycleController:
                         self._error = None
             except (OSError, ServiceLaunchError, ValueError):
                 self._supervisor = None
+
+    def _refresh_runtime_for_view(self) -> bool:
+        """Keep the window usable on invalid config without probing other ports."""
+        try:
+            self._runtime = self._snapshotter()
+        except (OSError, ValueError):
+            self._runtime = RuntimeSnapshot(False, False, "", account_status_available=False)
+            self.state = LifecycleState.ERROR
+            if self._runtime_config_error is None:
+                self._runtime_config_error = replace(
+                    self.catalog.get("13001"),
+                    title="本地服务配置需要检查",
+                    message="本地服务端口配置无效或无法读取，暂时无法确认机器人状态。",
+                    solutions=("请恢复此前有效的本地服务端口配置，修复后会自动重新检查。",
+                               "如不确定如何修复，请导出诊断信息并联系技术支持。"),
+                )
+                self.events.emit("APP_ERROR", "failed", code="13001", message=self._runtime_config_error.message)
+            self._error = self._runtime_config_error
+            return False
+        if self._runtime_config_error is not None:
+            if self._error is None or self._error == self._runtime_config_error:
+                self._error = None
+                self.state = LifecycleState.STOPPED
+            self._runtime_config_error = None
+        return True
 
     def _set_error(self, code: str, *, detail: str = "") -> LifecycleView:
         self.state = LifecycleState.ERROR
@@ -395,7 +424,8 @@ class LifecycleController:
         with self._lock:
             # Environment discovery is expensive and belongs to the explicit
             # check/start paths. Polling still probes runtime and account state.
-            self._runtime = self._snapshotter()
+            if not self._refresh_runtime_for_view():
+                return self.view()
             if self._start_in_progress:
                 if self._runtime.online:
                     self._mark_running()
@@ -630,6 +660,8 @@ class LifecycleController:
         return self.view()
 
     def view(self) -> LifecycleView:
+        if self._runtime_config_error is not None:
+            self.state = LifecycleState.ERROR
         titles = {
             LifecycleState.STOPPED: ("机器人未启动", "环境就绪后即可启动机器人。"),
             LifecycleState.CHECKING: ("正在检查环境", "正在确认微信和运行文件。"),
@@ -649,6 +681,8 @@ class LifecycleController:
             LifecycleState.ERROR: ("机器人启动失败", "请根据错误提示处理后重试。"),
         }
         title, message = titles[self.state]
+        if self._runtime_config_error is not None:
+            title, message = self._runtime_config_error.title, self._runtime_config_error.message
         if (
             self._start_in_progress
             and self._runtime.wechat_identity
@@ -701,12 +735,13 @@ class LifecycleController:
             online=online,
             can_start=(
                 self._environment.ready
+                and self._runtime_config_error is None
                 and not busy
                 and (not owned or licensed)
                 and not online
             ),
             can_stop=owned and not busy,
-            error=self._error,
+            error=self._runtime_config_error or self._error,
             environment=self._environment,
             runtime=self._runtime,
         )

@@ -435,7 +435,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         try:
             started = time.perf_counter()
             settings = load_robot_settings(self._install_root)
-            providers = load_provider_services(self._install_root)
+            providers = load_provider_services(
+                self._install_root, allow_unreadable_preferences=True,
+            )
             provider = load_provider_profile(self._install_root, services=providers)
             channel = self._load_update_channel()
             configured = time.perf_counter()
@@ -702,6 +704,10 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         runtime = view.get("runtime") if isinstance(view, dict) else {}
         environment = environment if isinstance(environment, dict) else {}
         runtime = runtime if isinstance(runtime, dict) else {}
+        if provider_services is None:
+            provider_services = load_provider_services(
+                self._install_root, allow_unreadable_preferences=True,
+            )
         provider = load_provider_profile(self._install_root, services=provider_services)
         account_id = str(runtime.get("wechat_identity") or "").strip()
         if runtime.get("account_status_available") is False:

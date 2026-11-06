@@ -880,7 +880,11 @@ class ControlCenter:
         if not getattr(sys, "frozen", False):
             self.update_dialog.set_error("开发运行方式不执行自更新，请使用冻结后的客户程序验证")
             return
-        snapshot = runtime_snapshot()
+        try:
+            snapshot = runtime_snapshot(install_root=self.install_root)
+        except (OSError, ValueError) as exc:
+            self.update_dialog.set_error(sanitize_log_text(str(exc)))
+            return
         if snapshot.engine_ready or snapshot.connection_ready:
             if self.supervisor is None or not self.supervisor.running:
                 messagebox.showwarning(
@@ -1047,7 +1051,11 @@ class ControlCenter:
         self.root.after(1000, self._timer)
 
     def _refresh_status(self) -> None:
-        snapshot = runtime_snapshot()
+        try:
+            snapshot = runtime_snapshot(install_root=self.install_root)
+        except (OSError, ValueError):
+            self.start_phase = "error"
+            snapshot = RuntimeSnapshot(False, False, "", account_status_available=False)
         self.last_snapshot = snapshot
         any_ready = snapshot.engine_ready or snapshot.connection_ready
         owned = self.supervisor is not None and bool(self.supervisor.running)
@@ -1323,6 +1331,10 @@ class ControlCenter:
             messagebox.showerror("导出失败", str(exc), parent=self.root)
 
     def _runtime_ports_used(self) -> bool:
+        try:
+            self.last_snapshot = runtime_snapshot(install_root=self.install_root)
+        except (OSError, ValueError):
+            return True
         return self.last_snapshot.engine_ready or self.last_snapshot.connection_ready
 
     def _backup(self) -> None:

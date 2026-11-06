@@ -13,6 +13,7 @@ import threading
 from typing import Callable
 from urllib.request import ProxyHandler, Request, build_opener
 
+from ..port_config import load_runtime_ports
 from .client import LicenseClient, _NoRedirect
 from .config import load_channel
 from .protocol import ACCOUNT_PATTERN, LicenseError, parse_json
@@ -51,10 +52,11 @@ def resolve_install_root(module_file: str | Path = __file__, environ=None) -> Pa
     return Path(configured).expanduser().resolve() if configured else None
 
 
-def probe_account() -> str:
+def probe_account(install_root: str | Path | None = None) -> str:
     """Read the bridge's actual identity, independently of the manager window."""
-    request = Request("http://127.0.0.1:5000/api/health", method="GET")
     try:
+        port = load_runtime_ports(install_root).bridge_callback if install_root is not None else 5000
+        request = Request(f"http://127.0.0.1:{port}/api/health", method="GET")
         # Match the manager's health budget: a fresh response can take longer
         # than 0.5s while the bridge verifies HOOK connectivity during startup.
         with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=2.0) as response:
@@ -79,7 +81,7 @@ class RuntimeGuard:
         # accepted once the bundled commercial channel is enabled.
         self._channel_root = self.root or Path(__file__).resolve().parents[1]
         self.client = client or LicenseClient(self._channel_root)
-        self.account_source: Callable[[], str] = account_source or probe_account
+        self.account_source: Callable[[], str] = account_source or (lambda: probe_account(self.root))
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
         self._refresh_lock = threading.Lock()

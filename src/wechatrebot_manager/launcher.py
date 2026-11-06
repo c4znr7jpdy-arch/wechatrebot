@@ -11,7 +11,7 @@ import time
 from typing import Callable, IO, Mapping, Protocol
 
 from .json_io import write_json_atomic
-from .runtime_config import RuntimePorts
+from .runtime_config import RuntimePorts, load_runtime_ports
 from .payload import PayloadError, _checked_target, sha256_file
 
 
@@ -270,12 +270,14 @@ def _hook_integrity_files(root: Path) -> tuple[tuple[Path, str], ...]:
 def build_service_specs(
     install_root: str | Path,
     *,
-    ports: RuntimePorts = RuntimePorts(),
+    ports: RuntimePorts | None = None,
 ) -> tuple[ServiceSpec, ServiceSpec]:
+    root = Path(install_root).expanduser().resolve()
+    if ports is None:
+        ports = load_runtime_ports(root)
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    root = Path(install_root).expanduser().resolve()
     python_exe = root / "runtime" / "python" / "python.exe"
     astrbot_root = root / "app" / "astrbot"
     bridge_root = root / "app" / "bridge"
