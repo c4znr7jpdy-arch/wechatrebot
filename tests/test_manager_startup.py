@@ -244,3 +244,58 @@ def test_browser_failure_evidence_survives_early_assertion(browser, manager_url,
     assert any(item["kind"] == "console" and item["text"] == "synthetic browser diagnostic" for item in evidence["events"])
     assert any(item["kind"] == "pageerror" and "synthetic page error" in item["text"] for item in evidence["events"])
     assert any("资源缺失" in item["message"] for item in evidence["state"]["reportedErrors"])
+
+
+@pytest.mark.parametrize("failure", ["directory", "write", "report"])
+def test_browser_evidence_failure_keeps_original_assertion_and_closes_page(tmp_path, monkeypatch, failure):
+    from conftest import manager_browser_failure_evidence
+
+    calls = []
+
+    class FakePage:
+        url = "http://127.0.0.1:1/?preview=1"
+        closed = False
+
+        def add_init_script(self, _source): pass
+        def on(self, _event, _handler): pass
+        def is_closed(self): return self.closed
+        def evaluate(self, _source): return {"synthetic": True}
+        def screenshot(self, **_kwargs): pass
+
+        def close(self):
+            calls.append("close")
+            self.closed = True
+            raise RuntimeError("synthetic page close failed")
+
+    page = FakePage()
+    browser = SimpleNamespace(new_page=lambda: page)
+
+    def report(*args):
+        calls.append("report")
+        if failure == "report":
+            raise RuntimeError("synthetic report failed")
+
+    request = SimpleNamespace(
+        fixturenames=["browser", "manager_url"],
+        getfixturevalue=lambda name: browser if name == "browser" else tmp_path,
+        node=SimpleNamespace(add_report_section=report),
+    )
+    manager_browser_failure_evidence.__wrapped__(request, monkeypatch)
+    observed = browser.new_page()
+    denied = lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("synthetic diagnostic write denied"))
+    if failure == "directory":
+        monkeypatch.setattr(Path, "mkdir", denied)
+    elif failure == "write":
+        monkeypatch.setattr(Path, "write_text", denied)
+    original = AssertionError("original early assertion")
+    with pytest.raises(AssertionError) as caught:
+        try:
+            raise original
+        finally:
+            observed.close()
+    assert caught.value is original
+    assert observed.closed
+    assert calls.count("close") == 1
+    assert "report" in calls
+    with pytest.raises(RuntimeError, match="synthetic page close failed"):
+        observed.close()
