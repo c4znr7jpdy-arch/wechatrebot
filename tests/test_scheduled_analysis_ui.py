@@ -78,6 +78,47 @@ def test_uncertain_test_send_keeps_warning_and_requires_informed_retry(browser, 
         page.close()
 
 
+@pytest.mark.parametrize("change", ["account-unconfirmed", "replacement-editor"])
+def test_test_send_confirmation_rechecks_editor_and_account_before_api(browser, manager_url, change):
+    page = browser.new_page(viewport={"width": 1080, "height": 680})
+    page.add_init_script("""(() => {
+      Object.defineProperty(window, 'createScheduledTasks', {configurable: true, set(create) {
+        Object.defineProperty(window, 'createScheduledTasks', {value: helpers => {
+          window.reviewScheduledState = helpers.state;
+          return create(helpers);
+        }});
+      }});
+    })();""")
+    try:
+        open_schedules(page, manager_url)
+        page.locator("#newScheduledTask").click()
+        page.locator("#scheduledAction").select_option("text")
+        page.locator("#scheduledArg-text").fill("仅用于本地预览的测试文字")
+        page.locator("#scheduledTargetChoices input").first.check()
+        page.evaluate("""() => {
+          window.reviewSendCalls = 0;
+          window.pywebview.api.test_scheduled_task = async () => {
+            window.reviewSendCalls++;
+            return {ok: true, data: {status: 'submitted', message: '不应调用'}};
+          };
+        }""")
+        page.locator("#scheduledTestButton").click()
+        expect(page.locator("#modalBackdrop")).to_be_visible()
+        page.evaluate("""change => {
+          const state = window.reviewScheduledState;
+          if (change === 'account-unconfirmed') state.status.runtime.account_status_available = false;
+          else state.scheduledEditor = {...state.scheduledEditor, id: 'replacement-task'};
+        }""", change)
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalError")).to_contain_text("微信账号或当前任务已变化")
+        assert page.evaluate("window.reviewSendCalls") == 0
+        expect(page.locator("#modalCancel")).to_be_enabled()
+        page.locator("#modalCancel").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+    finally:
+        page.close()
+
+
 def test_schedule_restore_keeps_cached_rows_and_unsaved_editor(browser, manager_url, tmp_path):
     page = browser.new_page(viewport={"width": 1380, "height": 860})
     errors = []

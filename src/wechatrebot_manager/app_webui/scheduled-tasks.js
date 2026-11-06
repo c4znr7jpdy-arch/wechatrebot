@@ -670,6 +670,8 @@ window.createScheduledTasks = function (helpers) {
       label: `${target.type === "group" ? "群聊" : "私聊"} · ${target.name || target.id}`,
     }));
     const uncertain = scheduledTestResult?.editor === editor && scheduledTestResult.status === "unknown";
+    const currentEditor = () => state.scheduledEditor === editor
+      && state.scheduledContext?.account_id === editor.account_id && scheduledAccountMatches(editor.account_id);
     confirmAction({
       title: uncertain ? "已核对微信，仍要再次测试？" : "发送一条测试消息？",
       message: `${uncertain ? "上次发送结果尚未确认。请先检查微信聊天，确认确实需要再次发送，避免重复消息。" : ""}测试只发送给下面选择的一个聊天，并计入该聊天的每日推送上限。发送结果不确定时不会自动重试。`,
@@ -678,11 +680,13 @@ window.createScheduledTasks = function (helpers) {
       intent: "primary",
       field: {label: "测试发送到", type: "select", value: options[0].value, options},
       onConfirm: async (value) => {
+        if (!currentEditor()) throw new Error("微信账号或当前任务已变化，请重新读取任务后再测试。 ");
+        const readiness = scheduledReadiness();
+        if (!readiness.ready) throw new Error(readiness.message);
         const target = editor.targets.find((item) => `${item.type}:${item.id}` === value);
         if (!target) throw new Error("测试发送对象已经变化，请重新选择。 ");
         const result = await api("test_scheduled_task", {...scheduledPayload(false), test_target: {type: target.type, id: target.id}});
-        if (state.scheduledEditor !== editor || state.scheduledContext?.account_id !== editor.account_id
-            || !scheduledAccountMatches(editor.account_id)) {
+        if (!currentEditor()) {
           throw new Error("微信账号或当前任务已变化，请先核对微信聊天中的发送结果。 ");
         }
         scheduledTestResult = {editor, status: result.status, message: result.status === "unknown"
