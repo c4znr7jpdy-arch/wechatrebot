@@ -1,0 +1,63 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index 007bc44..586ebd3 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1221,6 +1221,7 @@ class OneBotClient:
+         self._self_id = ""
+         self._nickname = ""
+         self._closed = False
++        self._close_cancelled_run = False
+         self._closed_event = asyncio.Event()
+         self._run_task: asyncio.Task[None] | None = None
+         self._send_lock = asyncio.Lock()
+@@ -1323,7 +1324,19 @@ class OneBotClient:
+             for task in tasks:
+                 if not task.done():
+                     task.cancel()
+-            await asyncio.gather(*tasks, return_exceptions=True)
++            cleanup = asyncio.gather(*tasks, return_exceptions=True)
++            if self._close_cancelled_run:
++                try:
++                    await asyncio.shield(cleanup)
++                except asyncio.CancelledError:
++                    # close() supplied the first cancellation. Preserve cleanup
++                    # for the first external request, and retain a second force.
++                    if asyncio.current_task().cancelling() != 2:
++                        cleanup.cancel()
++                    await cleanup
++                    raise
++            else:
++                await cleanup
+ 
+     async def run(self) -> None:
+         self._run_task = asyncio.current_task()
+@@ -1352,7 +1365,8 @@ class OneBotClient:
+                         logger.info("AstrBot WebSocket connected successfully: %s", self.url)
+                         await self._run_connection(connection)
+                 except asyncio.CancelledError:
+-                    if self._closed:
++                    if (self._close_cancelled_run
++                            and asyncio.current_task().cancelling() == 1):
+                         break
+                     raise
+                 except (OSError, ConnectionError, websockets.WebSocketException) as exc:
+@@ -1423,9 +1437,17 @@ class OneBotClient:
+         return bool(baseline and now - baseline <= grace)
+ 
+     async def close(self) -> None:
++        if self._closed:
++            return
+         self._closed = True
+         self._closed_event.set()
++        # Closing the socket cannot interrupt an action already being handled.
++        # The run owner collects all connection children in its existing finally.
++        # Cancel it only once, and never await it from a possible child caller.
++        owner = self._run_task
++        if (owner is not None and owner is not asyncio.current_task()
++                and not owner.done() and not owner.cancelling()):
++            self._close_cancelled_run = True
++            owner.cancel()
+         if self._connection is not None:
+             await self._connection.close(code=1000, reason="bridge stopping")
+-        elif self._run_task is not None and self._run_task is not asyncio.current_task():
+-            self._run_task.cancel()
