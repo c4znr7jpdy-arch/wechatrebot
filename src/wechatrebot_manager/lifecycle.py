@@ -624,7 +624,7 @@ class LifecycleController:
             LifecycleState.VERIFYING_CONNECTION: ("正在确认连接", "正在检查消息通信是否正常。"),
             LifecycleState.RUNNING: ("机器人可用", "微信连接和全部功能运行正常。"),
             LifecycleState.LICENSE_READY: ("机器人未启动", "微信连接已保留，点击启动机器人。"),
-            LifecycleState.LICENSE_PAUSED: ("自动化已暂停", "客户数据已保留，可前往订阅与授权继续处理。"),
+            LifecycleState.LICENSE_PAUSED: ("未授权", "客户数据已保留，可前往订阅与授权继续处理。"),
             LifecycleState.STOP_WAIT_WECHAT: ("请先关闭微信", "检测到微信关闭后会自动继续停止。"),
             LifecycleState.STOPPING: ("正在停止机器人", "正在安全结束后台服务。"),
             LifecycleState.ERROR: ("机器人启动失败", "请根据错误提示处理后重试。"),
@@ -652,7 +652,21 @@ class LifecycleController:
         if licensed and self.state in {
             LifecycleState.STOPPED, LifecycleState.LICENSE_READY, LifecycleState.LICENSE_PAUSED,
         }:
+            if self.state == LifecycleState.LICENSE_PAUSED:
+                title = {
+                    "unactivated": "未授权",
+                    "configuration_pending": "授权服务待配置",
+                    "expired": "订阅已到期",
+                    "subscription_expired": "订阅已到期",
+                    "revoked": "授权已撤销",
+                    "license_revoked": "授权已撤销",
+                    "license_unavailable": "授权不可用",
+                    "offline_expired": "授权待验证",
+                    "clock_error": "授权待验证",
+                    "account_mismatch": "授权账号不匹配",
+                }.get(licensing.get("state"), "授权待验证")
             if self._license_pause_failed:
+                title = "机器人未启动"
                 message = "授权暂停未能写入，已停止后台服务；请稍后重新连接微信。"
             elif self.state != LifecycleState.LICENSE_PAUSED and licensing.get("state") in {"paused", "ready", "running"}:
                 message = "授权有效，点击启动机器人即可运行。"
