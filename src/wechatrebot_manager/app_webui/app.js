@@ -102,6 +102,7 @@
     settingsSection: "model",
     webSearch: null,
     webSearchDirty: false,
+    webSearchSaving: false,
     providerScreen: "overview",
     providerDirty: false,
     providerBaseline: "",
@@ -1166,7 +1167,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.webSearchDirty || state.webSearchSaving || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {

@@ -1,0 +1,58 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -1573,7 +1573,10 @@
+                 )
+ 
+     async def _wait_for_stop_or_runtime_failure(self) -> None:
+-        watchers = {
++        critical_tasks = {
++            task for task in (self._ws_task, self._consumer_task) if task is not None
++        }
++        watchers = critical_tasks | {
+             task
+             for task in (self._injector_watch_task, self._hook_watch_task)
+             if task is not None
+@@ -1592,7 +1595,15 @@
+                 completed_watchers = done & watchers
+                 for watcher in completed_watchers:
+                     watchers.remove(watcher)
++                    if watcher.cancelled():
++                        raise RuntimeError(
++                            f"bridge task was unexpectedly cancelled: {watcher.get_name()}"
++                        )
+                     await watcher
++                    if watcher in critical_tasks:
++                        raise RuntimeError(
++                            f"bridge task stopped unexpectedly: {watcher.get_name()}"
++                        )
+             await stop_wait
+         finally:
+             if not stop_wait.done():
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1144,14 +1144,15 @@
+             asyncio.create_task(self._sender_loop()),
+             asyncio.create_task(self._heartbeat_loop()),
+         }
+-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+-        for task in pending:
+-            task.cancel()
+-        await asyncio.gather(*pending, return_exceptions=True)
+-        for task in done:
+-            exception = task.exception()
+-            if exception is not None:
+-                raise exception
++        try:
++            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
++            for task in done:
++                await task
++        finally:
++            for task in tasks:
++                if not task.done():
++                    task.cancel()
++            await asyncio.gather(*tasks, return_exceptions=True)
+ 
+     async def run(self) -> None:
+         self._run_task = asyncio.current_task()

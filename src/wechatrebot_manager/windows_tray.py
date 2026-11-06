@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+import logging
 import os
 from pathlib import Path
 import sys
 import threading
 from typing import Any
 import uuid
+
+
+_BEFORE_UNLOAD_SCRIPT = """(() => {
+    const event = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+})()"""
+_DRAFT_CHECK_TIMEOUT_SECONDS = 3.0
 
 
 def _tray_icon_path() -> Path | None:
@@ -33,6 +42,9 @@ class WindowsTrayController:
         self._hwnd: int | None = None
         self._available = False
         self._exit_requested = False
+        self._exit_check_pending = False
+        self._exit_generation = 0
+        self._draft_check: threading.Event | None = None
         self._notified = False
         self._notify_data: Any | None = None
         self._shell_notify_icon: Any | None = None
@@ -65,11 +77,13 @@ class WindowsTrayController:
         if self._exit_requested:
             return None
         if not self._ensure_available():
-            return None
+            self.request_exit()
+            return False
         try:
             self._window.hide()
         except Exception:
-            return None
+            self.request_exit()
+            return False
         self._show_minimized_notification_once()
         return False
 
@@ -81,15 +95,92 @@ class WindowsTrayController:
             return
 
     def request_exit(self) -> None:
-        self._exit_requested = True
-        self.stop()
+        # Native closing callbacks run on the UI thread; evaluating JavaScript
+        # there would deadlock WebView2. Cancel that close and check off-thread.
+        with self._lock:
+            if self._exit_requested or self._exit_check_pending:
+                return
+            self._exit_check_pending = True
+            self._exit_generation += 1
+            generation = self._exit_generation
         try:
+            threading.Thread(target=self._finish_exit, args=(generation,), daemon=True, name="wechatrebot-exit").start()
+        except RuntimeError:
+            with self._lock:
+                if generation == self._exit_generation:
+                    self._exit_check_pending = False
+            logging.getLogger(__name__).exception("Could not start manager exit check")
+
+    def _check_window_drafts(self) -> bool | None:
+        with self._lock:
+            # A hung renderer keeps at most one daemon probe. A later exit can
+            # still use the explicit confirmation without waiting on that probe.
+            if self._draft_check is not None and not self._draft_check.is_set():
+                return None
+            completed = threading.Event()
+            self._draft_check = completed
+        result: list[Any] = []
+
+        def probe() -> None:
+            try:
+                result.append(self._window.evaluate_js(_BEFORE_UNLOAD_SCRIPT))
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Could not check manager drafts: %s", type(exc).__name__)
+            finally:
+                completed.set()
+
+        threading.Thread(target=probe, daemon=True, name="wechatrebot-draft-check").start()
+        if not completed.wait(_DRAFT_CHECK_TIMEOUT_SECONDS):
+            logging.getLogger(__name__).warning("Manager draft check timed out")
+            return None
+        return result[0] if result and isinstance(result[0], bool) else None
+
+    def _exit_check_current(self, generation: int) -> bool:
+        with self._lock:
+            return generation == self._exit_generation and not self._exit_requested
+
+    def _finish_exit(self, generation: int) -> None:
+        try:
+            if not self._exit_check_current(generation):
+                return
+            needs_confirmation = self._check_window_drafts()
+            if not self._exit_check_current(generation):
+                return
+            if needs_confirmation is not False:
+                self.restore_window()
+                if not self._exit_check_current(generation):
+                    return
+                message = (
+                    "仍有未保存的设置，或保存尚未完成。确认退出会丢失未保存修改，并可能中断保存。取消可返回管理器继续编辑。"
+                    if needs_confirmation is True else
+                    "暂时无法确认设置是否已保存。确认退出可能丢失未保存修改，取消可返回管理器检查。"
+                )
+                if not self._window.create_confirmation_dialog("退出管理器？", message):
+                    return
+            with self._lock:
+                if generation != self._exit_generation or self._exit_requested:
+                    return
+                self._exit_requested = True
             self._window.destroy()
-        except Exception:
-            return
+            self.stop()
+        except Exception as exc:
+            with self._lock:
+                current = generation == self._exit_generation
+                if current:
+                    self._exit_requested = False
+            if current:
+                self.restore_window()
+            logging.getLogger(__name__).warning("Could not close manager window: %s", type(exc).__name__)
+        finally:
+            with self._lock:
+                if generation == self._exit_generation:
+                    self._exit_check_pending = False
 
     def permit_programmatic_close(self) -> None:
-        self._exit_requested = True
+        with self._lock:
+            self._exit_generation += 1
+            self._exit_requested = True
+            self._exit_check_pending = False
         self.stop()
 
     def stop(self) -> None:

@@ -387,11 +387,14 @@ class ModelApiMixin:
         try:
             client = EngineApiClient(self._install_root)
             if not client.is_available():
-                raise EngineUnavailableError("请先启动机器人，再测试模型服务。")
+                raise ProviderTestError(
+                    "回复引擎尚未就绪。请先到运行中心启动机器人，待服务就绪后再返回测试模型。",
+                    code="13002",
+                )
             return self._ok(client.test_provider(provider_id))
         except ProviderTestError as exc:
             result = self._failed(exc, exc.error_code)
-            result["error"]["detail"] = str(exc)
+            result["error"].update(message=str(exc), detail=str(exc))
             return result
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")

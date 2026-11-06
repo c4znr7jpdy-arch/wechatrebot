@@ -13,7 +13,7 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_4
 +                    raw = raw.decode("utf-8")
                  request = json.loads(raw)
 -            except json.JSONDecodeError:
-+            except (UnicodeDecodeError, json.JSONDecodeError):
++            except (ValueError, RecursionError):
                  logger.warning("ignored invalid JSON from AstrBot")
                  continue
              if not isinstance(request, Mapping) or not request.get("action"):

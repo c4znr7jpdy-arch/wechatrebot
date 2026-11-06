@@ -780,6 +780,80 @@ def test_adding_extra_model_keeps_analysis_on_default_chat(
     assert config.get("analyzer_model", "") == (default.model_id if kind == "chat" else "")
 
 
+def test_model_test_explains_how_to_start_robot_and_recovers_after_start(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+    online = False
+    calls = []
+    probe_calls = []
+    expected = {
+        "id": "test/chat", "model": "chat", "status": "available",
+        "test_kind": "chat", "response_text": "测试回复", "elapsed_ms": 12,
+    }
+
+    def available():
+        probe_calls.append(online)
+        return online
+
+    def test(provider_id):
+        calls.append(provider_id)
+        return expected
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=available, test_provider=test,
+    ))
+
+    stopped = api.test_provider("test/chat")
+
+    assert stopped["ok"] is False
+    assert stopped["error"]["code"] == "13002"
+    assert "运行中心" in stopped["error"]["message"]
+    assert "启动机器人" in stopped["error"]["message"]
+    assert "测试模型" in stopped["error"]["message"]
+    assert stopped["error"]["detail"] == stopped["error"]["message"]
+    assert stopped["error"]["retryable"] is True
+    assert calls == []
+    assert probe_calls == [False]
+
+    online = True
+    started = api.test_provider("test/chat")
+
+    assert started["ok"] is True
+    assert started["data"] == expected
+    assert calls == ["test/chat"]
+    assert probe_calls == [False, True]
+
+
+def test_model_test_preserves_provider_failure_codes_and_hides_unexpected_errors(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+
+    def denied(_provider_id):
+        raise model_api.ProviderTestError("API Key 未通过验证，请检查密钥。", code="16002")
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=lambda: True, test_provider=denied,
+    ))
+    result = api.test_provider("test/chat")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "16002"
+    assert "API Key" in result["error"]["detail"]
+
+    def broken_probe():
+        raise ValueError("synthetic-private-configuration")
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=broken_probe, test_provider=denied,
+    ))
+    unexpected = api.test_provider("test/chat")
+    assert unexpected["ok"] is False
+    assert unexpected["error"]["code"] == "19000"
+    assert "detail" not in unexpected["error"]
+    assert "synthetic-private-configuration" not in json.dumps(unexpected)
+
+
 def test_model_discovery_reuses_saved_key_without_exposing_it(
     monkeypatch, tmp_path: Path
 ) -> None:

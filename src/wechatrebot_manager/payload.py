@@ -628,6 +628,13 @@ def install_payload(
                 if progress_callback is not None:
                     progress_callback("install", index, file_count)
                 continue
+            # Identical binaries can still be mapped by Windows. The incoming
+            # bytes were verified during preparation, so no replacement is needed.
+            if target.is_file() and sha256_file(target) == item.sha256:
+                installed_files.append(item)
+                if progress_callback is not None:
+                    progress_callback("install", index, file_count)
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             backup: Path | None = None
             if target.exists():

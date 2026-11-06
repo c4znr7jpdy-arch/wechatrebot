@@ -30,6 +30,7 @@ from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
+    _checked_target,
     _is_user_config,
     _read_installed_manifest_for_merge,
     _valid_digest,
@@ -615,16 +616,20 @@ def assert_update_runtime_stopped(
         raise UpdateError("当前平台无法确认机器人运行状态，已取消运行时更新。")
     from .launcher import process_identity
     from .uninstaller import _iter_windows_process_ids, _process_module_paths
+    from .windows_file_holders import file_holders
 
     processes = _iter_windows_process_ids()
     if not processes:
         raise UpdateError("无法检查机器人进程状态，已取消运行时更新。")
-    changed_binaries = {
-        os.path.normcase(str((root / relative).resolve()))
-        for relative in _update_target_paths(payload)
-        if relative.suffix.casefold() in {".dll", ".pyd", ".exe"}
-        and relative.parts[0].casefold() in {"app", "runtime"}
-    }
+    try:
+        changed_binaries = {
+            os.path.normcase(str(_checked_target(root, relative)))
+            for relative in _update_target_paths(payload)
+            if relative.suffix.casefold() in {".dll", ".pyd", ".exe"}
+            and relative.parts[0].casefold() in {"app", "runtime"}
+        }
+    except PayloadError as exc:
+        raise UpdateError("更新文件路径无法安全校验，已取消运行时更新。") from exc
     blockers: list[int] = []
     for pid in processes:
         if pid in {0, os.getpid()}:
@@ -643,6 +648,13 @@ def assert_update_runtime_stopped(
         )
         if in_runtime or holds_binary:
             blockers.append(pid)
+    try:
+        # ToolHelp omits some image/resource mappings. Register only the exact
+        # binaries in this update, then validate each native process identity.
+        blockers.extend(pid for pid, _identity in file_holders(changed_binaries))
+    except OSError as exc:
+        raise UpdateError("无法确认更新文件的占用状态，已取消运行时更新。") from exc
+    blockers = sorted(set(blockers))
     if blockers:
         raise UpdateFailure(
             "UPD-1005",
@@ -1182,11 +1194,10 @@ def _restore_update_targets(
     journal: dict[str, object], install_root: Path
 ) -> None:
     rollback_relative = Path(*PurePosixPath(str(journal.get("rollback_root") or "")).parts)
-    rollback_root = (install_root / rollback_relative).resolve()
     try:
-        rollback_root.relative_to(install_root)
-    except ValueError as exc:
-        raise UpdateFailure("UPD-1010", "回滚目录越过安装根目录。") from exc
+        rollback_root = _checked_target(install_root, rollback_relative, allow_directory=True)
+    except PayloadError as exc:
+        raise UpdateFailure("UPD-1010", str(exc)) from exc
     files = journal.get("files")
     if not isinstance(files, list):
         raise UpdateFailure("UPD-1010", "回滚清单格式无效。")
@@ -1196,20 +1207,20 @@ def _restore_update_targets(
             if not isinstance(entry, dict):
                 raise OSError("回滚文件条目无效")
             relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
-            target = (install_root / relative).resolve()
-            target.relative_to(install_root)
+            target = _checked_target(install_root, relative)
             if entry.get("existed") is True:
-                backup = (rollback_root / str(entry.get("backup") or "")).resolve()
-                backup.relative_to(rollback_root)
+                backup = _checked_target(rollback_root, Path(str(entry.get("backup") or "")))
                 if not backup.is_file():
                     raise OSError(f"回滚备份缺失：{relative.as_posix()}")
+                if target.is_file() and sha256_file(target) == sha256_file(backup):
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 staged = target.with_name(f".{target.name}.restore-{uuid.uuid4().hex}")
                 shutil.copy2(backup, staged)
                 os.replace(staged, target)
             else:
                 target.unlink(missing_ok=True)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, PayloadError) as exc:
             failures.append(str(exc))
     if failures:
         raise UpdateFailure("UPD-1010", "；".join(failures[:5]))
