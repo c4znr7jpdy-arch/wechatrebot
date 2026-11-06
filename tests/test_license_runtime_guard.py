@@ -1,9 +1,12 @@
 import asyncio
 import importlib
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
+from urllib.request import Request
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
@@ -12,6 +15,45 @@ from wechatrebot_manager.licensing.protocol import LicenseError, public_key
 from wechatrebot_manager.licensing.runtime_guard import RuntimeGuard, guard_provider_class, resolve_install_root
 
 module = importlib.import_module("wechatrebot_manager.licensing.runtime_guard")
+
+
+def test_delayed_bridge_health_reads_current_account_without_caching(monkeypatch):
+    payload = {
+        "service_ready": True, "status_available": True, "hook_ready": True,
+        "wechat_logged_in": True, "wechat_identity": "wxid_current",
+    }
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            # A healthy bridge can reply outside the old 0.5s deadline.
+            time.sleep(.65)
+            raw = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(module, "Request", lambda _url, **kwargs: Request(
+        f"http://127.0.0.1:{server.server_port}/api/health", **kwargs,
+    ))
+    try:
+        assert module.probe_account() == "wxid_current"
+        # A cached identity must never turn an authoritative logout into access.
+        payload.update(wechat_logged_in=False, wechat_identity="")
+        assert module.probe_account() == ""
+        assert requests == ["/api/health", "/api/health"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 class FakeClient:

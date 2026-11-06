@@ -55,7 +55,9 @@ def probe_account() -> str:
     """Read the bridge's actual identity, independently of the manager window."""
     request = Request("http://127.0.0.1:5000/api/health", method="GET")
     try:
-        with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=0.5) as response:
+        # Match the manager's health budget: a fresh response can take longer
+        # than 0.5s while the bridge verifies HOOK connectivity during startup.
+        with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=2.0) as response:
             raw = response.read(16_385)
         if len(raw) > 16_384:
             return ""
