@@ -14,7 +14,12 @@ from wechatrebot_manager.plugin_center import _handler
 @pytest.fixture(scope="module")
 def manager_url(tmp_path_factory):
     service = SimpleNamespace(install_root=tmp_path_factory.mktemp("manager-install"))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(service, manager_assets=_asset_root()))
+    class PreviewHandler(_handler(service, manager_assets=_asset_root())):
+        # Reuse asset connections so the Windows suite does not exhaust sockets.
+        protocol_version = "HTTP/1.1"
+        timeout = 5
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), PreviewHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
