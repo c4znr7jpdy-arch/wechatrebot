@@ -434,10 +434,19 @@ def save_robot_settings(
     return RobotSettings(profile=profile, admin_id=normalized_admin)
 
 
-def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
+def load_provider_services(
+    root: str | Path, *, allow_unreadable_preferences: bool = False,
+) -> tuple[ProviderService, ...]:
     install, _, engine_path = _paths(root)
     engine = _object(engine_path)
-    thinking_preferences = _provider_thinking_preferences(root)
+    try:
+        thinking_preferences = _provider_thinking_preferences(root)
+    except (OSError, ValueError):
+        if not allow_unreadable_preferences:
+            raise
+        # Bootstrap must still display the lifecycle's configuration error.
+        # Model mutations keep the strict default and cannot overwrite damage.
+        thinking_preferences = {}
     settings = engine.get("provider_settings")
     default_id = (
         str(settings.get("default_provider_id", ""))

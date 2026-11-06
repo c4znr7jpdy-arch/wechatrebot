@@ -276,7 +276,7 @@ def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monk
     api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
     loaded = []
 
-    def services(_root):
+    def services(_root, **_options):
         model = f"model-{len(loaded)}"
         loaded.append(model)
         return (ProviderService(
@@ -300,8 +300,6 @@ def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monk
 
 
 def test_independent_readiness_still_loads_current_provider_settings(monkeypatch, tmp_path):
-    from wechatrebot_manager import customer_config
-
     api = _api(tmp_path)
     refreshes = []
     loads = []
@@ -311,7 +309,7 @@ def test_independent_readiness_still_loads_current_provider_settings(monkeypatch
         return SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
 
     api._lifecycle.refresh = refresh
-    monkeypatch.setattr(customer_config, "load_provider_services", lambda root: loads.append(root) or ())
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda root, **_options: loads.append(root) or ())
     assert api.get_onboarding_readiness()["ok"] is True
     assert refreshes == [True]
     assert loads == [tmp_path]

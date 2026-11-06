@@ -103,7 +103,7 @@ def _load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return None, "文件不存在"
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return None, f"无法读取：{exc}"
     if not isinstance(payload, dict):
         return None, "JSON 根节点不是对象"

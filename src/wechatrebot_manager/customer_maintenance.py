@@ -71,8 +71,8 @@ class MaintenanceBusyError(MaintenanceError):
     """Raised when a mutating maintenance action conflicts with runtime activity."""
 
 
-def _default_runtime_active() -> bool:
-    snapshot = runtime_snapshot()
+def _default_runtime_active(install_root: Path) -> bool:
+    snapshot = runtime_snapshot(install_root=install_root)
     return bool(
         snapshot.engine_ready
         or snapshot.connection_ready
@@ -166,7 +166,7 @@ class CustomerMaintenanceService:
         self.install_root = Path(install_root).expanduser().resolve()
         self.backup_root = self.install_root / "backups"
         self.diagnostic_root = self.install_root / "logs"
-        self._is_running = is_running or _default_runtime_active
+        self._is_running = is_running or (lambda: _default_runtime_active(self.install_root))
         self._mutation_lock = threading.Lock()
 
     def _runtime_active(self) -> bool:

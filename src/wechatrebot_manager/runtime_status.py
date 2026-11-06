@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .launcher import port_accepting
-from .runtime_config import RuntimePorts
+from .runtime_config import RuntimePorts, load_runtime_ports
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +154,14 @@ class RuntimeSnapshot:
         return "idle"
 
 
-def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
+def runtime_snapshot(
+    ports: RuntimePorts | None = None, *, install_root: str | Path | None = None,
+) -> RuntimeSnapshot:
+    if ports is None:
+        ports = load_runtime_ports(install_root) if install_root is not None else RuntimePorts()
+    errors = ports.validate()
+    if errors:
+        raise ValueError("；".join(errors))
     engine = port_accepting("127.0.0.1", ports.astrbot_ws)
     connection = port_accepting("127.0.0.1", ports.bridge_callback)
     health = probe_bridge_health(port=ports.bridge_callback) if connection else BridgeHealth()

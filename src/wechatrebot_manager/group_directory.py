@@ -13,6 +13,7 @@ from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 from .error_catalog import AccountStatusUnavailableError
+from .port_config import load_runtime_ports
 from .runtime_status import probe_bridge_health
 from .portrait_cache import PortraitCache
 
@@ -49,7 +50,7 @@ class GroupDirectoryService:
     def _connection(self):
         try:
             config = json.loads((self.root / "app/bridge/config.json").read_text("utf-8-sig"))
-            port = config.get("callback_port", 5000)
+            port = config.get("callback_port", load_runtime_ports(self.root).bridge_callback)
             token = config.get("manager_query_token", "")
             if config.get("callback_host", "127.0.0.1") not in {"127.0.0.1", "localhost", "::1"}:
                 raise ValueError()

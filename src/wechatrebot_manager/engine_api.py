@@ -18,6 +18,7 @@ from .plugin_configuration import _dashboard_path, _json_revision, _read_object,
 from .plugin_errors import ConfigConflictError, EngineUnavailableError, PluginCenterError, ProviderTestError
 from .customer_logs import sanitize_log_text
 from .error_catalog import provider_error_code
+from .port_config import load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
@@ -55,10 +56,10 @@ class EngineApiClient:
         secret = str(dashboard.get("jwt_secret") or "").strip()
         username = str(dashboard.get("username") or "local-console").strip()
         try:
-            port = int(dashboard.get("port") or 6185)
+            port = dashboard.get("port", load_runtime_ports(self.install_root).dashboard)
         except (TypeError, ValueError) as exc:
             raise EngineUnavailableError("回复引擎的本地控制接口尚未就绪。") from exc
-        if not secret or not 1 <= port <= 65535:
+        if not secret or type(port) is not int or not 1 <= port <= 65535:
             raise EngineUnavailableError("回复引擎的本地控制接口尚未就绪。")
         return secret, username, port
 
