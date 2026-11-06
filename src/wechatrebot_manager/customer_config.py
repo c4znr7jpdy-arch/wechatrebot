@@ -147,7 +147,11 @@ def _object(path: Path) -> dict[str, Any]:
 
 
 def load_ui_theme(root: str | Path) -> str:
-    preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    try:
+        preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    except (OSError, ValueError):
+        # Optional appearance settings must not prevent the recovery UI opening.
+        return ""
     theme = preferences.get("theme")
     return theme if theme in ("light", "dark") else ""
 

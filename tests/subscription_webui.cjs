@@ -59,6 +59,7 @@ function harness(overrides = {}) {
       calls.push([method, ...args]);
       if (handlers[method]) return handlers[method](...args);
       if (method === 'get_license_status') return structuredClone(snapshot);
+      if (method === 'check_environment' || method === 'get_status') return {state: 'STOPPED', environment: {ready: true}};
       if (method === 'get_license_contact') return structuredClone(contact);
       if (method === 'get_license_binding_status') {
         const plan = snapshot.plan?.id || snapshot.plan;
@@ -1111,6 +1112,54 @@ async function freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded() {
     'Signed local expiry must render without another remote eligibility query');
 }
 
+async function connectionFailuresReturnToTheRuntimeGuidance() {
+  for (const problem of [
+    {code: '11001', title: '未检测到微信', message: '尚未安装可用的微信。', solutions: ['下载安装微信客户端']},
+    {code: '11001', title: '微信路径无效', message: '原微信程序已不存在。', solutions: ['重新选择微信主程序']},
+    {code: '11002', title: '微信版本不兼容', message: '当前版本无法连接。', solutions: ['安装兼容版本后重新检测']},
+  ]) {
+    const h = harness({can_connect: true});
+    h.handlers.check_environment = () => ({state: 'STOPPED', environment: {...problem, ready: false}});
+    await h.ui.initialize();
+    const pending = clickTrial(h);
+    await flush();
+    await h.confirmations[0].confirm();
+    await pending;
+    assert.deepEqual(h.routes, ['home']);
+    assert.match(h.element('#licenseFeedback').textContent, new RegExp(problem.message));
+    assert.match(h.element('#licenseFeedback').textContent, new RegExp(problem.solutions[0]));
+    assert.equal(h.confirmations.length, 1, 'An unusable environment must not ask the user to log in');
+    assert.equal(h.calls.some(([method]) => ['connect_license_wechat', 'activate_free_trial', 'bind_license_account', 'start_robot'].includes(method)), false);
+    assert.equal(h.element('#licenseActivateTrial').disabled, false, 'The user can retry after repairing the environment');
+  }
+
+  const queued = harness({can_connect: true});
+  queued.handlers.connect_license_wechat = () => ({accepted: true});
+  queued.handlers.get_status = () => ({state: 'ERROR', environment: {ready: true},
+    error: {code: '12001', title: '微信连接失败', message: '连接服务未能启动。', solutions: ['检查后重试']}});
+  await queued.ui.initialize();
+  const attempted = clickTrial(queued);
+  await flush(); await queued.confirmations[0].confirm(); await attempted;
+  assert.equal(queued.calls.filter(([method]) => method === 'connect_license_wechat').length, 1);
+  assert.equal(queued.confirmations.length, 1, 'Queue acceptance is not proof that a WeChat window exists');
+  assert.deepEqual(queued.routes, ['home']);
+  assert.match(queued.element('#licenseFeedback').textContent, /连接服务未能启动/);
+
+  const later = harness({can_connect: true});
+  later.handlers.connect_license_wechat = () => ({accepted: true});
+  await later.ui.initialize();
+  const waiting = clickTrial(later);
+  await flush(); await later.confirmations[0].confirm(); await flush();
+  assert.match(later.confirmations[1].message, /请求已提交.*等待微信窗口打开/);
+  assert.doesNotMatch(later.confirmations[1].message, /已发起微信连接/);
+  later.handlers.get_status = () => ({state: 'ERROR', environment: {ready: true},
+    error: {code: '13001', title: '本地服务配置需要检查', message: '服务配置无法读取。'}});
+  await assert.rejects(later.confirmations[1].confirm(), /服务配置无法读取/);
+  assert.deepEqual(later.routes, ['home']);
+  assert.equal(later.calls.some(([method]) => ['get_trial_status', 'activate_free_trial', 'start_robot'].includes(method)), false);
+  await later.confirmations[1].cancel(); await waiting;
+}
+
 async function freeTrialStatesFailuresAndAccountChanges() {
   for (const trialState of ['used', 'ended', 'paid']) {
     const h = harness({current_account: 'wxid_trial'});
@@ -1318,6 +1367,7 @@ const completionTimer = setTimeout(() => {
   await invalidOrBrokenQrImagesAreHidden();
   await validBundledFallbackShowsTheRefreshWarning();
   await freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded();
+  await connectionFailuresReturnToTheRuntimeGuidance();
   await freeTrialStatesFailuresAndAccountChanges();
   await trialCancellationAndChangedConsentCannotActivate();
   await trialConnectionAwaitsEligibilityAndRecoversFromFailure();

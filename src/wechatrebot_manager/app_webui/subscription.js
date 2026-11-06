@@ -612,20 +612,38 @@
       return state.snapshot;
     }
 
+    async function checkConnectionRuntime(checkEnvironment = false) {
+      const runtime = await api(checkEnvironment ? "check_environment" : "get_status");
+      state.runtime = runtime;
+      const environment = runtime?.environment;
+      const problem = environment?.ready === false ? environment
+        : runtime?.state === "ERROR" ? runtime.error : null;
+      if (!problem) return;
+      await navigate("home");
+      await refreshRuntime();
+      const message = [problem.title, problem.message, ...(problem.solutions || [])].filter(Boolean).join(" ");
+      const error = new Error(message || "微信连接未完成，请在运行中心检查错误提示后重试。");
+      error.product = {...problem, message: error.message};
+      throw error;
+    }
+
     async function connectAccount({differentFrom = ""} = {}) {
       await readForAction();
       if (!differentFrom && accountId(state.snapshot.current_account)) return accountId(state.snapshot.current_account);
       if (!accountId(state.snapshot.current_account)) {
+        await checkConnectionRuntime(true);
         const response = await api("connect_license_wechat");
         if (response?.accepted === false) throw new Error(response.message || "微信连接尚未开始，请稍后重试。");
         await refreshRuntime();
+        await checkConnectionRuntime();
         await readForAction();
       }
       if (differentFrom || !accountId(state.snapshot.current_account)) {
         const confirmed = await confirmAction({title: differentFrom ? "请切换微信账号" : "请登录微信",
           message: differentFrom ? "请在微信窗口切换并登录新的微信账号，再继续读取。取消不会更改绑定或扣除换绑次数。"
-            : "已发起微信连接。请在微信窗口完成登录，然后继续读取实际账号；取消不会绑定账号或启动机器人。",
+            : "微信连接请求已提交。请等待微信窗口打开，完成登录后再继续读取实际账号；取消不会绑定账号或启动机器人。",
           confirmText: differentFrom ? "已切换，继续" : "已登录，继续", intent: "primary", onConfirm: async () => {
+            await checkConnectionRuntime();
             await readForAction();
             if (!accountId(state.snapshot.current_account)) throw new Error("尚未读取到登录的微信账号，请完成登录后重试。");
             if (accountId(state.snapshot.current_account) === differentFrom) throw new Error("仍是原绑定微信，请切换到新的微信账号后重试。");
