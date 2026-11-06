@@ -1476,6 +1476,54 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
     assert result["error"]["code"] == "UPD-1016"
 
 
+@pytest.mark.parametrize("journal_locked", [False, True])
+def test_update_startup_confirmation_leaves_transaction_cleanup_to_helper(
+    monkeypatch, tmp_path: Path, journal_locked: bool,
+) -> None:
+    api = _api(tmp_path)
+    update_id = "a" * 32
+    api._startup_update_id = update_id
+    api._startup_update_from = "1.0.4"
+    api._startup_update_to = "1.0.5"
+    updates = tmp_path / "updates"
+    rollback = updates / f".rollback-{update_id}"
+    rollback.mkdir(parents=True)
+    backup = rollback / "old-manager"
+    backup.write_bytes(b"previous manager")
+    journal = updates / "update-journal.json"
+    journal.write_text(json.dumps({
+        "update_id": update_id,
+        "state": "awaiting_startup",
+        "rollback_root": rollback.relative_to(tmp_path).as_posix(),
+    }), encoding="utf-8")
+    original_journal = journal.read_bytes()
+    read_attempts = []
+    original_read_text = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == journal:
+            read_attempts.append(path)
+            if journal_locked:
+                raise PermissionError("update helper owns the journal")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    api.confirm_update_startup()
+
+    assert read_attempts == []
+    assert journal.read_bytes() == original_journal
+    assert backup.read_bytes() == b"previous manager"
+    flag = updates / f"startup-success-{update_id}.json"
+    assert json.loads(flag.read_text(encoding="utf-8")) == {
+        "schema_version": 1, "update_id": update_id, "ok": True, "version": "1.0.5",
+    }
+    assert api._update_result == {
+        "schema_version": 1, "ok": True, "status": "success",
+        "from_version": "1.0.4", "version": "1.0.5", "message": "更新已完成。",
+    }
+
+
 def _downloadable_update(monkeypatch, tmp_path: Path):
     api = _api(tmp_path)
     release = UpdateRelease(
