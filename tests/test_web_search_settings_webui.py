@@ -5,6 +5,7 @@ import pytest
 from playwright.sync_api import expect
 
 from test_manager_startup import browser, manager_url  # noqa: F401
+from wechatrebot_manager.windows_tray import _BEFORE_UNLOAD_SCRIPT
 
 
 @pytest.mark.parametrize("replace,width", [(False, 1380), (True, 760)])
@@ -104,5 +105,83 @@ def test_search_save_preserves_newer_draft(browser, manager_url, tmp_path, chang
         expect(page.locator("#webSearchKey")).to_have_value("")
         assert page.evaluate("window.searchSaveCalls[1].key") == "preview-only-newer-draft"
         assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("change", ["enabled", "key", "clear", "provider", "links"])
+def test_search_draft_protects_browser_and_native_exit(browser, manager_url, tmp_path, change):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        expect(page.locator("#webSearchProvider option")).not_to_have_count(0)
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        enabled = page.locator('#webSearchForm [name="enabled"]')
+        if change == "enabled":
+            enabled.set_checked(not enabled.is_checked(), force=True)
+        else:
+            enabled.check(force=True)
+            if change == "key":
+                page.locator("#webSearchKey").fill("preview-only-draft")
+            elif change == "clear":
+                page.locator("#clearWebSearchKey").click()
+            elif change == "provider":
+                page.locator("#webSearchProvider").select_option("tavily")
+            else:
+                page.locator('#webSearchForm [name="link_enabled"]').select_option("true")
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.locator('[data-settings-tab="skin"]').click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.locator('[data-settings-tab="search"]').click()
+        if change == "key":
+            expect(page.locator("#webSearchKey")).to_have_value("preview-only-draft")
+            with page.expect_event("dialog") as pending:
+                page.evaluate("setTimeout(() => location.reload(), 0)")
+            dialog = pending.value
+            assert dialog.type == "beforeunload"
+            dialog.dismiss()
+            expect(page.locator("#webSearchKey")).to_have_value("preview-only-draft")
+        page.locator('#webSearchForm button[type="submit"]').click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        page.screenshot(path=str(tmp_path / f"search-exit-{change}.png"), animations="disabled")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+def test_search_save_in_progress_remains_protected(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        expect(page.locator("#webSearchProvider option")).not_to_have_count(0)
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        page.evaluate("""() => {
+          const save = window.pywebview.api.save_web_search_settings;
+          window.pywebview.api.save_web_search_settings = async values => {
+            const result = await save(values);
+            return new Promise(resolve => { window.finishSearchSave = () => resolve(result); });
+          };
+        }""")
+        button = page.locator('#webSearchForm button[type="submit"]')
+        button.click()
+        expect(button).to_be_disabled()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.evaluate("window.finishSearchSave()")
+        expect(button).to_be_enabled()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
     finally:
         page.close()

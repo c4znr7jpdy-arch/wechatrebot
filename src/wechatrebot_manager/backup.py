@@ -22,6 +22,10 @@ BACKUP_ROOTS = (
     "app/astrbot/data/plugin_data/astrbot_plugin_angel_heart",
     "app/astrbot/data/self_learning_data",
 )
+BACKUP_FILES = (
+    "app/astrbot/data/cmd_config.json",
+    "app/bridge/config.json",
+)
 MAX_RESTORE_BYTES = 10 * 1024**3
 MAX_RESTORE_FILES = 100_000
 
@@ -54,12 +58,15 @@ def backup_source_files(install_root: str | Path) -> tuple[tuple[Path, Path], ..
         raise BackupError("当前安装未处于可备份状态。")
 
     files: list[tuple[Path, Path]] = []
-    for name in BACKUP_ROOTS:
+    for name in (*BACKUP_ROOTS, *BACKUP_FILES):
         try:
-            source_root = _checked_target(root, Path(name), allow_directory=True)
+            source_root = _checked_target(root, Path(name), allow_directory=name in BACKUP_ROOTS)
         except PayloadError as exc:
             raise BackupError(str(exc)) from exc
         if not source_root.exists():
+            continue
+        if name in BACKUP_FILES:
+            files.append((source_root, source_root.relative_to(root)))
             continue
         if not source_root.is_dir() or _is_link(source_root):
             raise BackupError(f"备份目录不是安全的普通目录：{name}")
@@ -89,7 +96,7 @@ def create_customer_backup(
     target = Path(destination).expanduser().resolve()
     if target.suffix.casefold() != ".zip":
         raise BackupError("备份文件必须使用 .zip 扩展名。")
-    for name in BACKUP_ROOTS:
+    for name in (*BACKUP_ROOTS, *BACKUP_FILES):
         managed_root = root.joinpath(*PurePosixPath(name).parts)
         try:
             target.relative_to(managed_root)
@@ -128,7 +135,7 @@ def create_customer_backup(
                 "manager_version": __version__,
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),
                 "contains_sensitive_configuration": True,
-                "roots": list(BACKUP_ROOTS),
+                "roots": [*BACKUP_ROOTS, *BACKUP_FILES],
                 "files": manifest_files,
             }
             archive.writestr(
@@ -157,6 +164,7 @@ def _safe_restore_path(value: object) -> Path:
         raise BackupError("备份清单包含无效文件路径。")
     posix = PurePosixPath(value)
     windows = PureWindowsPath(value)
+    normalized_parts = tuple(part.casefold() for part in posix.parts)
     if (
         posix.is_absolute()
         or windows.is_absolute()
@@ -164,10 +172,16 @@ def _safe_restore_path(value: object) -> Path:
         or any(part in {"", ".", ".."} for part in posix.parts)
         or any(os.path.isreserved(part) for part in posix.parts)
         or _license_path(posix.parts)
-        or not any(
-            tuple(part.casefold() for part in posix.parts[: len(PurePosixPath(root).parts)])
-            == tuple(part.casefold() for part in PurePosixPath(root).parts)
-            for root in BACKUP_ROOTS
+        or not (
+            any(
+                normalized_parts[: len(PurePosixPath(root).parts)]
+                == tuple(part.casefold() for part in PurePosixPath(root).parts)
+                for root in BACKUP_ROOTS
+            )
+            or any(
+                normalized_parts == tuple(part.casefold() for part in PurePosixPath(name).parts)
+                for name in BACKUP_FILES
+            )
         )
     ):
         raise BackupError(f"备份清单包含不安全路径：{value}")
@@ -249,7 +263,7 @@ def restore_customer_backup(
     source = Path(backup_path).expanduser().resolve()
     if not source.is_file():
         raise BackupError("所选备份文件不存在。")
-    for name in BACKUP_ROOTS:
+    for name in (*BACKUP_ROOTS, *BACKUP_FILES):
         managed_root = root.joinpath(*PurePosixPath(name).parts)
         try:
             source.relative_to(managed_root)
@@ -335,6 +349,7 @@ def restore_customer_backup(
 
 
 __all__ = [
+    "BACKUP_FILES",
     "BACKUP_ROOTS",
     "BackupError",
     "backup_source_files",

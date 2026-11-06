@@ -1,3 +1,3 @@
 """Commercial bootstrap and release helpers for WeChat ReBot."""
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"

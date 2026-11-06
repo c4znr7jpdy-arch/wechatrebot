@@ -164,6 +164,7 @@ window.createManagerSettings = function (helpers) {
     const snapshot = () => JSON.stringify([Object.fromEntries(new FormData(form)), Boolean(state.webSearchClearKey)]);
     const submitted = snapshot();
     const note = $("#webSearchNote");
+    state.webSearchSaving = true;
     button.disabled = true;
     button.textContent = "正在保存…";
     note.textContent = "正在保存并确认联网搜索设置…";
@@ -185,6 +186,7 @@ window.createManagerSettings = function (helpers) {
       note.textContent = error.message || "联网搜索设置保存失败。";
       reportError(error);
     } finally {
+      state.webSearchSaving = false;
       button.disabled = false;
       button.textContent = "保存联网搜索";
     }
