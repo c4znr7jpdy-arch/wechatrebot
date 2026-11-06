@@ -92,6 +92,7 @@
     activityItems: [],
     activityPage: 1,
     polling: false,
+    lastRuntimeStatus: null,
     startPending: false,
     startPreparing: false,
     composing: false,
@@ -360,7 +361,7 @@
   function reconcileStartPending(status) {
     if (!state.startPending) return status;
     const current = status?.state || "STOPPED";
-    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy) {
+    if (["STOPPED", "LICENSE_READY"].includes(current) && !status?.busy && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
@@ -371,7 +372,8 @@
     return status;
   }
 
-  function renderStatus(rawStatus) {
+  function renderStatus(rawStatus, {optimistic = false} = {}) {
+    if (!optimistic) state.lastRuntimeStatus = rawStatus;
     const wasOnline = Boolean(state.status?.online);
     const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
     const status = reconcileStartPending(rawStatus);
@@ -529,8 +531,11 @@
   async function refreshStatus() {
     if (state.polling) return;
     state.polling = true;
+    const preparing = state.startPreparing, pending = state.startPending;
     try {
-      renderStatus(await api("get_status"));
+      const status = await api("get_status");
+      // A poll begun before login confirmation must not undo its start state.
+      if (preparing === state.startPreparing && pending === state.startPending) renderStatus(status);
     } catch (error) {
       reportError(error);
     } finally {
@@ -548,12 +553,13 @@
     }
     button.disabled = true;
     state.startPreparing = action === "start";
+    const showStarting = () => {
+      state.startPending = true;
+      renderStatus(startingStatus(state.status), {optimistic: true});
+    };
     try {
-      if (action === "start" && !await subscription.beforeStart()) return;
-      if (action === "start") {
-        state.startPending = true;
-        renderStatus(startingStatus(state.status));
-      }
+      if (action === "start" && !await subscription.beforeStart(showStarting)) return;
+      if (action === "start") showStarting();
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
       if (action === "start" && result?.accepted === false) state.startPending = false;
       window.setTimeout(refreshStatus, 250);
@@ -563,7 +569,7 @@
       await refreshStatus();
     } finally {
       state.startPreparing = false;
-      renderStatus(state.status);
+      renderStatus(state.startPending ? state.status : state.lastRuntimeStatus || state.status, {optimistic: true});
     }
   }
 

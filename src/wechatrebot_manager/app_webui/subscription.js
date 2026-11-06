@@ -730,7 +730,7 @@
       },
       updateRuntime(runtime) { state.runtime = runtime; if (state.initialized) renderControls(); },
       needsEntry() { return Boolean(state.snapshot?.enabled && !hasValidAuthorization()); },
-      async beforeStart() {
+      async beforeStart(onStarting = () => {}) {
         if (state.busy || state.preparing) return false;
         state.preparing = true; renderControls();
         try {
@@ -766,6 +766,7 @@
           if (!account) return false;
           if (state.snapshot.license_id !== license || !hasValidAuthorization()) throw new Error("授权状态已变化，请重新启动并确认。");
           if (bound && bound !== account) throw new Error(statusMessage({...state.snapshot, state: "account_mismatch"}));
+          onStarting();
           if (!bound) {
             if (accountId(state.snapshot.account)) throw new Error("授权绑定已变化，请重新启动并确认。");
             await transact(() => api("bind_license_account", account));

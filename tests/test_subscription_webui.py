@@ -327,6 +327,136 @@ def test_start_waits_for_login_and_recovers_from_connect_or_binding_failure(brow
         page.close()
 
 
+def prepare_delayed_login_start(page, manager_url):
+    """Keep login, binding, and service readiness independently controllable."""
+    url = manager_url + "&license=pending&style=soft"
+    page.goto(url)
+    expect(page.locator("#stateTitle")).to_have_text("机器人尚未启动")
+    if page.locator("#onboardingRecommended").is_visible():
+        page.locator("#onboardingRecommended").click()
+    page.evaluate("""() => {
+      const api = window.pywebview.api;
+      const read = api.get_status, connect = api.connect_license_wechat, bind = api.bind_license_account;
+      const flow = window.startFlow = {phase: 'LICENSE_READY', busy: false, polls: 0,
+        bindingRequests: 0, startRequests: 0, outcome: 'accepted', titles: []};
+      flow.login = connect;
+      api.connect_license_wechat = async () => ({ok: true, data: {accepted: true}});
+      api.get_status = async () => {
+        const result = structuredClone(await read()), status = result.data;
+        const online = flow.phase === 'RUNNING', starting = flow.phase === 'CORE_STARTING';
+        Object.assign(status, {state: flow.phase, title: online ? '机器人可用'
+          : starting ? '正在启动机器人' : '机器人未启动',
+          message: online ? '微信连接和全部功能运行正常。' : starting ? '正在准备机器人功能。' : '点击启动机器人。',
+          busy: flow.busy || starting, online, can_start: !online && !starting && !flow.busy,
+          can_stop: online || starting, error: null});
+        Object.assign(status.runtime, {engine_ready: online, hook_ready: Boolean(status.runtime.wechat_identity),
+          upstream_connected: online, heartbeat_fresh: online});
+        flow.polls++;
+        document.body.dataset.startFlowPolls = String(flow.polls);
+        return result;
+      };
+      api.bind_license_account = async (...args) => {
+        flow.bindingRequests++;
+        document.body.dataset.startFlowBinding = String(flow.bindingRequests);
+        const result = await new Promise(resolve => { flow.finishBinding = resolve; });
+        return result === 'failed' ? {ok: false, error: {message: '绑定服务暂时不可达'}} : bind(...args);
+      };
+      api.start_robot = async () => {
+        flow.startRequests++;
+        document.body.dataset.startFlowStarts = String(flow.startRequests);
+        flow.busy = flow.outcome === 'accepted';
+        return {ok: true, data: {accepted: flow.outcome !== 'rejected'}, message: '启动请求未完成，请重试。'};
+      };
+    }""")
+    page.locator("#primaryAction").click()
+    expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+    page.evaluate("window.startFlow.login()")
+
+
+@pytest.mark.parametrize("viewport", [{"width": 1380, "height": 860}, {"width": 600, "height": 900}])
+def test_login_confirmation_keeps_starting_until_services_are_online(browser, manager_url, viewport):
+    page = browser.new_page(viewport=viewport)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        prepare_delayed_login_start(page, manager_url)
+        page.locator("#modalConfirm").click()
+        expect(page.locator("body")).to_have_attribute("data-start-flow-binding", "1")
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#stateTitle")).to_contain_text("正在启动")
+        expect(page.locator("#signalMessage")).to_have_text("已登录，功能启动中")
+        expect(page.locator("#primaryAction")).to_have_text("启动中…")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("""() => {
+          const title = document.querySelector('#stateTitle');
+          new MutationObserver(() => window.startFlow.titles.push(title.textContent))
+            .observe(title, {childList: true, subtree: true, characterData: true});
+        }""")
+        for phase in ("STOPPED", "LICENSE_READY"):
+            reads = page.evaluate("phase => { window.startFlow.phase = phase; return window.startFlow.polls; }", phase)
+            expect(page.locator("body")).not_to_have_attribute("data-start-flow-polls", str(reads))
+            expect(page.locator("#stateTitle")).to_contain_text("正在启动")
+            expect(page.locator("#globalStatus")).to_have_text("正在启动")
+        output = Path(tempfile.gettempdir()) / "login-start-progress-qa"
+        output.mkdir(exist_ok=True)
+        page.screenshot(path=str(output / f"binding-starting-{viewport['width']}.png"))
+        assert page.evaluate("window.startFlow.startRequests") == 0
+        page.evaluate("window.startFlow.finishBinding('success')")
+        expect(page.locator("body")).to_have_attribute("data-start-flow-starts", "1")
+        for phase in ("LICENSE_READY", "STOPPED"):
+            reads = page.evaluate("phase => { window.startFlow.phase = phase; return window.startFlow.polls; }", phase)
+            expect(page.locator("body")).not_to_have_attribute("data-start-flow-polls", str(reads))
+            expect(page.locator("#stateTitle")).to_contain_text("正在启动")
+            expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("window.startFlow.phase = 'CORE_STARTING'")
+        expect(page.locator("#stateMessage")).to_have_text("正在准备机器人功能。")
+        page.evaluate("Object.assign(window.startFlow, {phase: 'RUNNING', busy: false})")
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        expect(page.locator("#signalMessage")).to_have_text("通信正常")
+        expect(page.locator("#primaryAction")).to_have_text("停止运行")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        assert all("未启动" not in title for title in page.evaluate("window.startFlow.titles"))
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert page.url.startswith(manager_url) and "license=pending" in page.url and page.title()
+        assert not errors, errors
+        page.screenshot(path=str(output / f"running-{viewport['width']}.png"))
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "binding-failed", "rejected", "idle"])
+def test_login_start_restores_idle_after_cancel_failure_or_rejection(browser, manager_url, outcome):
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        prepare_delayed_login_start(page, manager_url)
+        if outcome == "cancelled":
+            page.locator("#modalCancel").click()
+        else:
+            page.evaluate("outcome => { window.startFlow.outcome = outcome; }", outcome)
+            page.locator("#modalConfirm").click()
+            expect(page.locator("body")).to_have_attribute("data-start-flow-binding", "1")
+            expect(page.locator("#stateTitle")).to_contain_text("正在启动")
+            page.evaluate("outcome => window.startFlow.finishBinding(outcome === 'binding-failed' ? 'failed' : 'success')", outcome)
+            if outcome == "binding-failed":
+                expect(page.locator("#toastRegion")).to_contain_text("绑定服务暂时不可达")
+            else:
+                expect(page.locator("body")).to_have_attribute("data-start-flow-starts", "1")
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        expect(page.locator("#signalMessage")).to_have_text("微信已登录，机器人未启动")
+        expect(page.locator("#primaryAction")).to_have_text("启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        assert page.evaluate("window.startFlow.startRequests") == (0 if outcome in {"cancelled", "binding-failed"} else 1)
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}, {"width": 600, "height": 900}])
 def test_self_service_rebind_requires_new_account_and_keeps_robot_stopped(browser, manager_url, viewport):
     page = browser.new_page(viewport=viewport)

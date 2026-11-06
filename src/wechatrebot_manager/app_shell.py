@@ -499,9 +499,11 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             return self._failed(exc)
 
     def _status_data(self, view=None) -> dict:
+        action_busy = self._action_lock.locked()
         if view is None:
             view = self._lifecycle.refresh()
         result = view.to_dict()
+        result["busy"] = bool(result.get("busy") or action_busy or self._action_lock.locked())
         runtime = getattr(view, "runtime", None)
         account = (
             str(getattr(runtime, "wechat_identity", "") or "").strip()

@@ -252,6 +252,40 @@ def test_bootstrap_exposes_update_check_interval(monkeypatch, tmp_path: Path) ->
     }
 
 
+@pytest.mark.parametrize("current,lifecycle_busy", [("LICENSE_READY", False), ("STOPPED", False), ("CORE_STARTING", True)])
+def test_status_stays_busy_until_the_background_action_finishes(tmp_path, current, lifecycle_busy):
+    api = _api(tmp_path)
+    api._lifecycle.refresh = lambda: SimpleNamespace(
+        to_dict=lambda: {"state": current, "busy": lifecycle_busy}
+    )
+    api._authorized_history_account = lambda _account: ""
+
+    with api._action_lock:
+        result = api.get_status()["data"]
+        assert result["state"] == current
+        assert result["busy"] is True
+
+    assert api.get_status()["data"]["busy"] is lifecycle_busy
+
+
+def test_status_does_not_pair_an_old_idle_snapshot_with_a_finished_action(tmp_path):
+    api = _api(tmp_path)
+    api._authorized_history_account = lambda _account: ""
+
+    def refresh():
+        api._action_lock.release()
+        return SimpleNamespace(to_dict=lambda: {"state": "LICENSE_READY", "busy": False})
+
+    api._lifecycle.refresh = refresh
+    api._action_lock.acquire()
+    try:
+        assert api.get_status()["data"]["busy"] is True
+        assert not api._action_lock.locked()
+    finally:
+        if api._action_lock.locked():
+            api._action_lock.release()
+
+
 def test_bootstrap_reuses_status_and_reports_stage_timings(monkeypatch, tmp_path):
     api = _api(tmp_path)
     calls = []
@@ -2302,6 +2336,50 @@ def test_open_uninstaller_provisions_and_launches(monkeypatch, tmp_path: Path) -
 
     assert result["ok"] is True
     assert [name for name, _value in calls] == ["provision", "launch"]
+
+
+def test_status_poll_discards_idle_response_when_start_advances() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    refresh = script[script.index("  async function refreshStatus()"):script.index("  async function runPrimaryAction()")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {polling:false, startPreparing:true, startPending:false};
+const rendered = [];
+const renderStatus = status => rendered.push(status);
+const reportError = error => {throw error;};
+let finish;
+const api = () => new Promise(resolve => {finish = resolve;});
+(async () => {
+  const idle = {state:'LICENSE_READY', busy:false};
+  let poll = refreshStatus();
+  state.startPending = true; // Login was confirmed while this request was in flight.
+  finish(idle);
+  await poll;
+  assert.deepEqual(rendered, []);
+  assert.equal(state.polling, false);
+  poll = refreshStatus();
+  state.startPreparing = false; // The start request has now been accepted.
+  finish(idle);
+  await poll;
+  assert.deepEqual(rendered, []);
+  poll = refreshStatus();
+  finish({state:'CORE_STARTING', busy:true});
+  await poll;
+  assert.deepEqual(rendered, [{state:'CORE_STARTING', busy:true}]);
+  poll = refreshStatus();
+  finish(idle); // A completed background action must be allowed to return to idle.
+  await poll;
+  assert.equal(rendered.at(-1), idle);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(
+        ["node"], input=refresh + harness, text=True, encoding="utf-8",
+        capture_output=True, check=True, timeout=10,
+    )
+    assert result.stdout == "ok"
 
 
 def test_start_action_shows_pending_state_before_bridge_returns() -> None:
