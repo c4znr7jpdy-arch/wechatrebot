@@ -440,17 +440,48 @@ def test_update_stop_closes_bridge_even_in_license_paused_state(tmp_path, monkey
     controller._supervisor = supervisor
     controller.state = LifecycleState.LICENSE_PAUSED if licensed else LifecycleState.RUNNING
 
-    def stop_every_wechat(root):
+    captured = object()
+
+    def capture(root, *, required):
+        assert root == tmp_path
+        assert supervisor.running
+        events.append("capture_wechat")
+        return captured
+
+    def stop_robot_wechat(root, *, wechat_process):
         assert supervisor.forced is True
         assert supervisor.running == []
-        events.append("stop_all_wechat")
+        assert wechat_process is captured
+        events.append("stop_robot_wechat")
 
-    monkeypatch.setattr(lifecycle, "force_stop_update_processes", stop_every_wechat)
+    monkeypatch.setattr(lifecycle, "capture_update_wechat_process", capture)
+    monkeypatch.setattr(lifecycle, "force_stop_update_processes", stop_robot_wechat)
     result = controller.force_stop_for_update()
     assert result.state == LifecycleState.STOPPED
     assert result.can_stop is False
     assert controller._supervisor is None
-    assert events == (["pause_license"] if licensed else []) + ["stop_all_wechat"]
+    assert events == ["capture_wechat"] + (["pause_license"] if licensed else []) + ["stop_robot_wechat"]
+
+
+def test_update_does_not_stop_services_when_wechat_ownership_is_unknown(tmp_path, monkeypatch):
+    controller = LifecycleController(
+        tmp_path, environment_checker=lambda root: _environment(tmp_path),
+        snapshotter=lambda: RuntimeSnapshot(False, True, "wxid_bot", True, False, False),
+        supervisor_factory=lambda progress: _Supervisor(progress),
+    )
+    supervisor = _Supervisor(lambda *args: None)
+    supervisor.running = [object()]
+    controller._supervisor = supervisor
+
+    def unknown(root, *, required):
+        assert required is True
+        raise lifecycle.ServiceLaunchError("无法确认机器人连接的微信进程")
+
+    monkeypatch.setattr(lifecycle, "capture_update_wechat_process", unknown)
+    with pytest.raises(lifecycle.ServiceLaunchError, match="无法确认"):
+        controller.force_stop_for_update()
+    assert supervisor.running
+    assert supervisor.stopped is False
 
 
 def test_closing_personal_wechat_does_not_stop_bot_while_hook_is_alive(

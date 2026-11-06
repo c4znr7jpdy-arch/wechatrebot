@@ -277,13 +277,22 @@ def test_update_after_user_stop_closes_retained_connection_without_waiting_for_w
     assert world["bridge"] and not world["core"]
     shutdown_checks = []
 
-    def verify_shutdown(root):
+    target = object()
+
+    def capture(root, *, required):
+        assert required is True
+        assert world["bridge"] and world["account"] == "wxid_a"
+        return target
+
+    def verify_shutdown(root, *, wechat_process):
         assert root == tmp_path
+        assert wechat_process is target
         assert not world["bridge"] and not world["core"]
         assert not holders[0].running
         shutdown_checks.append(root)
         world["account"] = ""
 
+    monkeypatch.setattr("wechatrebot_manager.lifecycle.capture_update_wechat_process", capture)
     monkeypatch.setattr("wechatrebot_manager.lifecycle.force_stop_update_processes", verify_shutdown)
     stopped = controller.force_stop_for_update()
     assert stopped.state == LifecycleState.STOPPED

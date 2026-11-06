@@ -232,7 +232,7 @@ def test_supervisor_force_stop_kills_services_in_reverse_order(
     assert supervisor.running == []
 
 
-def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path, monkeypatch):
+def test_confirmed_update_closes_only_captured_wechat_and_this_robot_runtime(tmp_path, monkeypatch):
     _layout(tmp_path)
     processes = {
         987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
@@ -242,10 +242,12 @@ def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path
     }
     calls = []
 
+    target = (987652, processes[987652])
+
     def snapshot(*, executable_names, strict):
-        assert executable_names == frozenset({"weixin.exe", "wechat.exe", "python.exe"})
+        assert executable_names == frozenset({"python.exe"})
         assert strict is True
-        return tuple(processes)
+        return tuple(pid for pid, identity in processes.items() if Path(identity.executable).name == "python.exe")
 
     def terminate(pid, *, expected_creation_time):
         assert expected_creation_time == processes[pid].creation_time
@@ -258,9 +260,84 @@ def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path
     monkeypatch.setattr(launcher, "process_identity", processes.get)
     monkeypatch.setattr(launcher, "installation_services_stopped", lambda root: True)
     monkeypatch.setattr(launcher.time, "sleep", lambda _: None)
-    launcher.force_stop_update_processes(tmp_path)
-    assert calls == [987651, 987652, 987653]
-    assert list(processes) == [987654]
+    launcher.force_stop_update_processes(tmp_path, wechat_process=target)
+    assert calls == [987652, 987653]
+    assert list(processes) == [987651, 987654]
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_capture_update_wechat_uses_exact_installation_hook_before_shutdown(tmp_path, monkeypatch, required):
+    hook = tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
+    processes = {
+        987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
+        987652: ProcessIdentity(str(tmp_path / "Weixin.exe"), 102),
+        987653: ProcessIdentity(str(tmp_path / "elsewhere/Weixin.exe"), 103),
+    }
+    modules = {987651: (), 987652: (hook,), 987653: (tmp_path / "other" / hook.name,)}
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: tuple(processes))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: modules[pid])
+    monkeypatch.setattr(launcher, "process_identity", processes.get)
+    assert launcher.capture_update_wechat_process(tmp_path, required=required) == (987652, processes[987652])
+
+
+@pytest.mark.parametrize("failure", ["multiple", "missing", "modules", "identity", "enumeration"])
+def test_capture_update_wechat_refuses_ambiguous_or_unreadable_ownership(tmp_path, monkeypatch, failure):
+    hook = tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
+    identity = ProcessIdentity(str(tmp_path / "Weixin.exe"), 101)
+
+    def snapshot(**_):
+        if failure == "enumeration":
+            raise OSError("incomplete process list")
+        return (987651, 987652) if failure == "multiple" else (987651,)
+
+    def modules(_pid, *, strict):
+        assert strict is True
+        if failure == "modules":
+            raise OSError("incomplete module list")
+        return () if failure == "missing" else (hook,)
+
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", snapshot)
+    monkeypatch.setattr(uninstaller, "_process_module_paths", modules)
+    monkeypatch.setattr(launcher, "process_identity", lambda _: None if failure == "identity" else identity)
+    with pytest.raises(ServiceStopError, match="微信") as error:
+        launcher.capture_update_wechat_process(tmp_path, required=True)
+    assert error.value.service_name == "wechat"
+
+
+def test_capture_update_without_robot_wechat_keeps_personal_wechat(tmp_path, monkeypatch):
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: ())
+    monkeypatch.setattr(launcher, "process_identity", lambda _: ProcessIdentity("personal/WeChat.exe", 101))
+    assert launcher.capture_update_wechat_process(tmp_path) is None
+
+
+@pytest.mark.parametrize("phase", ["capture", "stop", "terminate"])
+def test_confirmed_update_never_closes_a_reused_wechat_pid(tmp_path, monkeypatch, phase):
+    _layout(tmp_path)
+    original = ProcessIdentity(str(tmp_path / "Weixin.exe"), 101)
+    replacement = ProcessIdentity(original.executable, 102)
+    identities = iter((original, replacement)) if phase == "capture" else iter(
+        (original, replacement) if phase == "terminate" else (replacement,)
+    )
+    calls = []
+    monkeypatch.setattr(launcher, "process_identity", lambda _: next(identities))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: (
+        tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
+    ))
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **kw: (987651,) if phase == "capture" else ())
+    monkeypatch.setattr(launcher, "installation_services_stopped", lambda _: True)
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == original.creation_time
+        calls.append(pid)
+        return False  # The real handle-level guard rejects the new creation time.
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    if phase == "capture":
+        assert launcher.capture_update_wechat_process(tmp_path) is None
+    else:
+        launcher.force_stop_update_processes(tmp_path, wechat_process=(987651, original))
+    assert calls == ([987651] if phase == "terminate" else [])
 
 
 @pytest.mark.parametrize("query_error", [False, True])
@@ -297,7 +374,7 @@ def test_confirmed_update_blocks_on_failed_termination(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "process_identity", lambda _pid: identity)
     monkeypatch.setattr(uninstaller, "_terminate_windows_process", lambda *a, **kw: False)
     with pytest.raises(ServiceStopError) as error:
-        launcher.force_stop_update_processes(tmp_path)
+        launcher.force_stop_update_processes(tmp_path, wechat_process=(987651, identity))
     assert error.value.service_name == "wechat"
 
 
