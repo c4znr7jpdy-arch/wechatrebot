@@ -59,6 +59,50 @@ def test_preview_free_trial_connects_and_activates_without_start(browser, manage
         page.close()
 
 
+@pytest.mark.parametrize("code,title,message,solution", [
+    ("11001", "未检测到微信", "这台电脑尚未安装可用的微信客户端。", "下载安装微信客户端"),
+    ("11001", "微信路径无效", "此前选择的微信主程序已不存在。", "重新选择微信主程序"),
+    ("11002", "微信版本不兼容", "当前微信版本无法连接。", "安装兼容版本后重新检测"),
+])
+def test_trial_connection_shows_environment_guidance_before_login(
+    browser, manager_url, code, title, message, solution,
+):
+    page = browser.new_page(viewport={"width": 1080, "height": 680})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url + "&demo=subscription&license=unactivated")
+        expect(page.locator("#licenseActivateTrial")).to_be_enabled()
+        page.evaluate("""problem => {
+          const api = window.pywebview.api, status = api.get_status;
+          window.connectionAttempts = 0;
+          api.get_status = async () => {
+            const result = structuredClone(await status());
+            result.data.environment = {...result.data.environment, ...problem, ready: false};
+            result.data.can_start = false;
+            return result;
+          };
+          api.check_environment = api.get_status;
+          api.connect_license_wechat = async () => {
+            window.connectionAttempts += 1;
+            return {ok: true, data: {accepted: true}};
+          };
+        }""", {"code": code, "title": title, "message": message, "solutions": [solution]})
+        page.locator("#licenseActivateTrial").click()
+        expect(page.locator("#modalTitle")).to_have_text("确认激活免费试用")
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#page-home")).to_be_visible()
+        expect(page.locator("#environmentAlert")).to_be_visible()
+        expect(page.locator("#environmentTitle")).to_have_text(title)
+        expect(page.locator("#environmentMessage")).to_have_text(message)
+        expect(page.locator("#environmentSolutions")).to_contain_text(solution)
+        assert page.evaluate("window.connectionAttempts") == 0
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("state", ["trial-ended", "trial-used"])
 def test_preview_trial_end_message_is_exact(browser, manager_url, state):
     page = browser.new_page()

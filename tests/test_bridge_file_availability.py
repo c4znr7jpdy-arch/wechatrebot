@@ -14,6 +14,7 @@ from test_office_integration import office_bridge
 
 def _native_app(office_bridge, tmp_path, *, max_bytes=100, timeout=0.2):
     app = object.__new__(office_bridge.app.BridgeApplication)
+    app.state = office_bridge.app.BridgeState(600, 256)
     app._active_native_downloads = 0
     app._native_download_generation = 0
     app.settings = SimpleNamespace(
