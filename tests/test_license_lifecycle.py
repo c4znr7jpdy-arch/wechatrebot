@@ -47,6 +47,9 @@ class Supervisor:
         self.adoption_complete = False
 
     def start_missing(self, names):
+        exited = tuple(item.spec.name for item in self.running if item.process.poll() is not None)
+        if exited:
+            self.stop_names(exited)
         for name in names:
             if any(item.spec.name == name for item in self.running):
                 continue
@@ -252,6 +255,64 @@ def test_start_rechecks_actual_account_after_reconnecting(tmp_path, actual):
     else:
         assert controller.start().state == LifecycleState.RUNNING
         assert license.grants == [actual]
+
+
+def test_logged_in_account_without_owned_bridge_still_connects_before_start(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    world["account"] = license.bound = "wxid_a"
+    world["bridge"] = True  # A previous or external connection exposes the same account.
+    original_connect = controller.connect_wechat
+    connections = []
+
+    def connect():
+        assert not license.grants and not world["core"]
+        connections.append(True)
+        world["account"] = ""  # The newly opened bot WeChat must confirm its own login.
+        return original_connect()
+
+    controller.connect_wechat = connect
+    waiting = controller.start()
+
+    assert connections == [True]
+    assert holders[0].started == ["new-hook-bridge"]
+    assert waiting.state == LifecycleState.WAITING_WECHAT
+    assert not license.grants and not world["core"]
+    world["account"] = "wxid_a"
+    assert controller.start().state == LifecycleState.RUNNING
+    assert holders[0].started == ["new-hook-bridge", "astrbot"]
+
+
+def test_start_reaps_exited_bridge_and_reconnects_in_one_attempt(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    bridge = holders[0].running[0]
+    bridge.process.code = 1
+    world["bridge"] = False
+    world["account"] = ""
+
+    waiting = controller.start()
+
+    assert waiting.state == LifecycleState.WAITING_WECHAT and waiting.error is None
+    assert holders[0].started == ["new-hook-bridge", "new-hook-bridge"]
+    assert len(holders) == 1 and holders[0].running[0] is not bridge
+    assert world["bridge"] and not world["core"] and not license.grants
+    world["account"] = "wxid_a"
+    assert controller.start().state == LifecycleState.RUNNING
+
+
+def test_account_signal_without_ready_hook_never_grants_or_starts_core(tmp_path):
+    controller, license, _, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    license.bound = "wxid_a"
+    controller._snapshotter = lambda: RuntimeSnapshot(
+        False, True, "wxid_a", hook_ready=False, account_status_available=True,
+    )
+
+    result = controller.start()
+
+    assert not result.online and not license.grants
+    assert holders[0].started == ["new-hook-bridge"]
 
 
 def test_invalid_or_mismatched_license_keeps_warning_without_services(tmp_path):

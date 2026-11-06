@@ -270,8 +270,7 @@ class LifecycleController:
             if self._start_in_progress:
                 return self.view()
             self._runtime = self._snapshotter()
-            account = self._runtime.wechat_identity if self._runtime.account_status_available else ""
-            reconnect = not self._runtime.connection_ready or not account
+            reconnect = not self._connected_account()
             if reconnect:
                 status = self._license_snapshot()
                 if not status["authorized"]:
@@ -284,8 +283,8 @@ class LifecycleController:
                 return connection
         with self._lock:
             self._runtime = self._snapshotter()
-            account = self._runtime.wechat_identity if self._runtime.account_status_available else ""
-            if not self._runtime.connection_ready or not account:
+            account = self._connected_account()
+            if not account:
                 # Connecting does not grant automation. The user can finish
                 # login and click Start again once the actual account is known.
                 return self.refresh()
@@ -299,13 +298,32 @@ class LifecycleController:
             self._pause_license()
             raise
 
+    def _connected_account(self) -> str:
+        """Only a live, owned bridge can supply the account used to start a run."""
+        if self._supervisor is None or not any(
+            item.spec.name == "new-hook-bridge" and item.process.poll() is None
+            for item in self._supervisor.running
+        ):
+            return ""
+        if (
+            not self._runtime.connection_ready
+            or self._runtime.hook_ready is not True
+            or not self._runtime.account_status_available
+        ):
+            return ""
+        return self._runtime.wechat_identity
+
     def _start_services(self, names: tuple[str, ...] | None = None) -> LifecycleView:
         with self._lock:
             if self._start_in_progress:
                 return self.view()
             existing = self._supervisor
             if existing is not None and existing.running:
-                owned = {getattr(getattr(item, "spec", None), "name", "") for item in existing.running}
+                owned = {
+                    getattr(getattr(item, "spec", None), "name", "")
+                    for item in existing.running
+                    if getattr(item, "process", None) is None or item.process.poll() is None
+                }
                 if names is None or set(names) <= owned:
                     return self.refresh()
             environment = self.check_environment()
