@@ -384,8 +384,51 @@ def installation_services_stopped(install_root: str | Path) -> bool:
         return False
 
 
-def force_stop_update_processes(install_root: str | Path) -> None:
-    """Close all WeChat instances and surviving services of this installation.
+def capture_update_wechat_process(
+    install_root: str | Path, *, required: bool = False,
+) -> tuple[int, ProcessIdentity] | None:
+    """Capture the unique WeChat using this installation's injected HOOK.
+
+    The bridge can choose a dynamic API port, so a process name or the default
+    port cannot establish ownership. The exact loaded DLL path can. Capture
+    before stopping the bridge and retain the creation time through shutdown.
+    """
+    from .uninstaller import _iter_windows_process_ids, _process_module_paths
+
+    hook_dll = _normalized_executable(
+        Path(install_root) / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
+    )
+    names = frozenset({"weixin.exe", "wechat.exe"})
+    candidates = []
+    try:
+        for pid in _iter_windows_process_ids(executable_names=names, strict=True):
+            identity = process_identity(pid)
+            if identity is None or not identity.executable:
+                if pid not in _iter_windows_process_ids(executable_names=names, strict=True):
+                    continue
+                raise OSError("微信进程身份无法读取。")
+            try:
+                modules = _process_module_paths(pid, strict=True)
+            except OSError:
+                if pid not in _iter_windows_process_ids(executable_names=names, strict=True):
+                    continue
+                raise
+            owns_hook = any(_normalized_executable(path) == hook_dll for path in modules)
+            if owns_hook and process_identity(pid) == identity:
+                candidates.append((pid, identity))
+    except OSError as exc:
+        raise ServiceStopError("wechat", "机器人连接的微信（无法确认进程归属）") from exc
+    if len(candidates) > 1:
+        raise ServiceStopError("wechat", "本安装连接的多个微信进程")
+    if not candidates and required:
+        raise ServiceStopError("wechat", "机器人连接的微信（无法确认进程归属）")
+    return candidates[0] if candidates else None
+
+
+def force_stop_update_processes(
+    install_root: str | Path, *, wechat_process: tuple[int, ProcessIdentity] | None = None,
+) -> None:
+    """Close the captured robot WeChat and surviving installation services.
 
     Called only after the update's explicit shutdown confirmation. Process
     creation times are rechecked on the termination handle to avoid PID reuse.
@@ -394,8 +437,19 @@ def force_stop_update_processes(install_root: str | Path) -> None:
 
     specs = build_service_specs(install_root)
     executables = {_normalized_executable(spec.argv[0]) for spec in specs}
-    wechat_names = frozenset({"weixin.exe", "wechat.exe"})
-    names = wechat_names | {Path(path).name.casefold() for path in executables}
+    names = frozenset(Path(path).name.casefold() for path in executables)
+    if wechat_process is not None:
+        pid, identity = wechat_process
+        current = process_identity(pid)
+        if current is None:
+            if pid in _iter_windows_process_ids(strict=True):
+                raise ServiceStopError("wechat", "机器人连接的微信")
+        elif current == identity:
+            if not _terminate_windows_process(pid, expected_creation_time=identity.creation_time):
+                current = process_identity(pid)
+                if current == identity or (current is None and pid in _iter_windows_process_ids(strict=True)):
+                    raise ServiceStopError("wechat", "机器人连接的微信")
+
     for attempt in range(3):
         candidates = []
         for pid in _iter_windows_process_ids(executable_names=frozenset(names), strict=True):
@@ -407,22 +461,20 @@ def force_stop_update_processes(install_root: str | Path) -> None:
                 # inaccessible process; unknown live state blocks installation.
                 if pid not in _iter_windows_process_ids(executable_names=frozenset(names), strict=True):
                     continue
-                raise ServiceStopError("wechat", "微信或机器人进程")
-            is_wechat = Path(identity.executable).name.casefold() in wechat_names
-            if is_wechat or _normalized_executable(identity.executable) in executables:
-                candidates.append((pid, identity, is_wechat))
+                raise ServiceStopError("new-hook-bridge", "机器人后台服务")
+            if _normalized_executable(identity.executable) in executables:
+                candidates.append((pid, identity))
         if not candidates:
             if not installation_services_stopped(install_root):
                 raise ServiceStopError("new-hook-bridge", "机器人后台服务")
             return
         if attempt == 2:
-            name = "wechat" if any(item[2] for item in candidates) else "new-hook-bridge"
-            raise ServiceStopError(name, "微信或机器人进程")
-        for pid, identity, is_wechat in candidates:
+            raise ServiceStopError("new-hook-bridge", "机器人后台服务")
+        for pid, identity in candidates:
             if not _terminate_windows_process(pid, expected_creation_time=identity.creation_time):
                 current = process_identity(pid)
                 if current is not None:
-                    raise ServiceStopError("wechat" if is_wechat else "new-hook-bridge", "微信或机器人进程")
+                    raise ServiceStopError("new-hook-bridge", "机器人后台服务")
         time.sleep(0.2)
 
 

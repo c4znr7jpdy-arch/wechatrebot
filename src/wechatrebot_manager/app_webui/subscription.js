@@ -5,10 +5,11 @@
   window.createSubscriptionPage = function (helpers) {
     const {api, escapeHtml: esc, confirmAction, copyText, navigate, openMaintenance, refreshRuntime, toast} = helpers;
     const $ = (selector) => document.querySelector(selector);
-    const state = {snapshot: null, preview: null, runtime: null, busy: false, loading: false,
-      epoch: 0, activePage: "home", plansKey: "", readError: "", expiredSeen: false, initialized: false,
+    const state = {snapshot: null, preview: null, runtime: null, busy: false, loading: false, preparing: false, authorizedView: null,
+      epoch: 0, activePage: "home", plansKey: "", readError: "", initialized: false,
       contact: null, contactLoading: false, contactReadAt: 0, contactExpanded: false, contactExpiryTimer: null,
-      trial: null, trialAccount: null, trialLoading: false, trialEpoch: 0, trialError: ""};
+      binding: null, bindingPromise: null, bindingError: "", bindingEpoch: 0,
+      trial: null, trialAccount: null, trialLoading: false, trialPromise: null, trialEpoch: 0, trialError: ""};
     const contactRefreshMs = 60000;
     const monotonicNow = () => typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now() : Date.now();
@@ -19,9 +20,9 @@
       unconfigured: ["授权服务待配置", "待配置", "warning"],
       unactivated: ["选择试用或兑换授权", "未激活", "neutral"],
       missing: ["选择试用或兑换授权", "未激活", "neutral"],
-      pending_account: ["请连接并确认微信账号", "待绑定", "warning"],
-      pending: ["请连接并确认微信账号", "待绑定", "warning"],
-      active_unbound: ["请连接并确认微信账号", "待绑定", "warning"],
+      pending_account: ["订阅已生效", "已订阅", "success"],
+      pending: ["订阅已生效", "已订阅", "success"],
+      active_unbound: ["订阅已生效", "已订阅", "success"],
       active: ["授权有效", "已授权", "success"],
       ready: ["授权有效", "已授权", "success"],
       running: ["授权有效", "已授权", "success"],
@@ -29,7 +30,7 @@
       offline: ["授权有效，等待联网验证", "离线可用", "warning"],
       expired: ["授权已到期", "已到期", "warning"],
       revoked: ["授权已撤销", "已撤销", "danger"],
-      suspended: ["授权已暂停", "已暂停", "warning"],
+      suspended: ["授权暂不可用", "不可用", "warning"],
       offline_expired: ["请联网重新验证授权", "待验证", "warning"],
       lease_expired: ["请联网重新验证授权", "待验证", "warning"],
       account_mismatch: ["当前微信与授权不一致", "需处理", "warning"],
@@ -45,10 +46,72 @@
       return String(value?.wxid || value?.account_id || value?.wechat_identity || value?.id || "").trim();
     }
 
+    function bindingQuotaText(binding) {
+      return `剩余可换绑 ${binding.rebind_remaining} 次（已用 ${binding.rebind_used} / ${binding.rebind_limit} 次）。首次绑定不扣换绑次数。`;
+    }
+
+    function renderBindingStatus() {
+      const data = state.snapshot;
+      const available = Boolean(data?.enabled && data?.configured && data?.license_id);
+      const trial = (typeof data?.plan === "object" ? data.plan?.id : data?.plan) === "trial";
+      const description = state.bindingError || (state.binding ? bindingQuotaText(state.binding)
+        : state.bindingPromise ? "正在读取换绑次数…" : available ? "请读取当前套餐的换绑次数。" : "激活后可查看换绑次数。");
+      $("#licenseRebindSummary").hidden = !available;
+      $("#licenseRebindSummary").title = description;
+      $("#licenseRebindQuota").textContent = state.binding ? String(state.binding.rebind_remaining) : "—";
+      $("#licenseRebindQuota").setAttribute("aria-label", description);
+      $("#licenseRebindHint").textContent = state.bindingError || (trial ? "试用不支持换绑" : "");
+      $("#licenseRebindHint").hidden = !state.bindingError && !trial;
+      $("#licenseRebindHint").dataset.tone = state.bindingError ? "error" : "neutral";
+      $("#licenseRebindRefresh").hidden = !available;
+      $("#licenseRebindRefresh").disabled = state.busy || state.preparing || Boolean(state.bindingPromise);
+      $("#licenseRebind").hidden = !available || trial || !accountId(data?.account);
+      $("#licenseRebind").disabled = state.busy || state.preparing || Boolean(state.bindingPromise) || !state.binding?.can_rebind;
+    }
+
+    async function loadBindingStatus({force = false, required = false} = {}) {
+      const data = state.snapshot;
+      if (!data?.enabled || !data.configured || !data.license_id) {
+        if (required) throw new Error("当前授权尚未就绪，无法读取换绑次数。");
+        return null;
+      }
+      if (!state.bindingPromise && (force || !state.binding)) {
+        const epoch = state.bindingEpoch, license = data.license_id, account = accountId(data.account);
+        state.bindingError = "";
+        state.bindingPromise = (async () => {
+          try {
+            const result = await api("get_license_binding_status");
+            if (epoch !== state.bindingEpoch) return;
+            if (result?.license_id !== license || accountId(result.account) !== account
+              || typeof result.can_rebind !== "boolean" || result.revision === undefined
+              || ![result.rebind_limit, result.rebind_used, result.rebind_remaining].every((value) => Number.isInteger(value) && value >= 0)) {
+              throw new Error("授权或换绑次数已变化，请重新读取后再试。");
+            }
+            state.binding = result;
+          } catch (error) {
+            if (epoch === state.bindingEpoch) {
+              state.binding = null;
+              state.bindingError = statusMessage(error?.product || {message: error?.message || "换绑次数暂时无法读取，请重试。"});
+            }
+          } finally { state.bindingPromise = null; renderBindingStatus(); }
+        })();
+        renderBindingStatus();
+      }
+      await state.bindingPromise;
+      if (required && !state.binding) throw new Error(state.bindingError || "授权已变化，请重新读取换绑次数。");
+      return state.binding;
+    }
+
     function planName(plan, snapshot = state.snapshot) {
       if (plan && typeof plan === "object") return String(plan.name || plan.id || "未激活");
       const plans = Array.isArray(snapshot?.plans) ? snapshot.plans : [];
       return plans.find((item) => item.id === plan)?.name || String(plan || "未激活");
+    }
+
+    function planDescription(plan) {
+      const description = String(plan?.description || (plan?.id === "trial"
+        ? "每台设备和微信账号限用一次，激活后连续计时 1 小时。" : "1 个机器人账号，含订阅期内更新。"));
+      return description.includes("模型费用自理") ? description : `${description} 模型费用自理。`;
     }
 
     function freeTrial(snapshot = state.snapshot) {
@@ -57,7 +120,7 @@
       if (plan && plan !== "trial" && snapshot?.authorized) return {state: "paid"};
       if (plan === "trial") {
         if (["expired", "subscription_expired"].includes(snapshot.state)) return {state: "ended"};
-        if (snapshot.authorized && account && account === accountId(snapshot?.account)) return {state: "active", valid_until: snapshot.valid_until,
+        if (snapshot.authorized && (!account || account === accountId(snapshot?.account))) return {state: "active", valid_until: snapshot.valid_until,
           remaining_seconds: snapshot.remaining_seconds};
       }
       return snapshot?.free_trial || (state.trialAccount === account ? state.trial : null) || {};
@@ -81,7 +144,6 @@
       if (status === "ended") return "你的试用已结束，可联系群主购买";
       if (status === "used") return "当前设备或微信账号已领取过试用，可联系群主购买";
       if (status === "paid") return "当前已有付费授权。";
-      if (!accountId(snapshot?.current_account)) return "请先连接微信，再激活免费试用。";
       if (state.trialLoading && status === "unavailable") return "正在查询免费试用资格…";
       if (state.trialError && status === "unavailable") return state.trialError;
       if (status === "active") {
@@ -91,6 +153,7 @@
         if (remaining) return `免费试用进行中，剩余 ${Math.floor(remaining / 60)} 分 ${remaining % 60} 秒。`;
         return "免费试用进行中。";
       }
+      if (!accountId(snapshot?.current_account)) return "激活时先确认试用提示，再登录用于试用的微信账号。";
       return status === "eligible" ? "可激活 1 小时免费试用，激活后立即开始计时。" : "免费试用资格暂未读取。";
     }
 
@@ -107,51 +170,77 @@
     async function loadFreeTrial({force = false} = {}) {
       const data = state.snapshot;
       const account = accountId(data?.current_account);
-      if (!data?.enabled || !data?.configured || !account || state.trialLoading
+      if (state.trialLoading) return state.trialPromise;
+      if (!data?.enabled || !data?.configured || !account
         || (!force && state.trialAccount === account)) return;
       const epoch = ++state.trialEpoch;
       state.trialLoading = true; state.trialError = "";
       renderFreeTrialStatus(); renderControls();
-      try {
-        const result = await api("get_trial_status");
-        if (epoch !== state.trialEpoch || account !== accountId(state.snapshot?.current_account)) return;
-        if (!result?.free_trial || typeof result.free_trial !== "object") throw new Error("免费试用资格未能读取，请重试。");
-        if (accountId(result.free_trial.account) && accountId(result.free_trial.account) !== account) {
-          throw new Error("微信登录账号已变化，请重新查询试用资格。");
-        }
-        state.trial = result.free_trial;
-        state.trialAccount = account;
-      } catch (error) {
-        if (epoch === state.trialEpoch) {
-          state.trialError = error?.product?.message || error?.message || "免费试用资格未能读取，请重试。";
+      state.trialPromise = (async () => {
+        try {
+          const result = await api("get_trial_status");
+          if (epoch !== state.trialEpoch || account !== accountId(state.snapshot?.current_account)) return;
+          if (!result?.free_trial || typeof result.free_trial !== "object") throw new Error("免费试用资格未能读取，请重试。");
+          if (accountId(result.free_trial.account) && accountId(result.free_trial.account) !== account) {
+            throw new Error("微信登录账号已变化，请重新查询试用资格。");
+          }
+          state.trial = result.free_trial;
           state.trialAccount = account;
+        } catch (error) {
+          if (epoch === state.trialEpoch) {
+            state.trialError = statusMessage(error?.product || {message: error?.message || "免费试用资格未能读取，请重试。"});
+            state.trialAccount = account;
+          }
+        } finally {
+          if (epoch === state.trialEpoch) {
+            state.trialLoading = false;
+            state.trialPromise = null;
+            renderFreeTrialStatus(); renderPlans(); renderControls();
+          }
         }
-      } finally {
-        if (epoch === state.trialEpoch) {
-          state.trialLoading = false;
-          renderFreeTrialStatus(); renderPlans(); renderControls();
-        }
-      }
+      })();
+      return state.trialPromise;
     }
 
-    function hasValidAuthorization() {
-      const data = state.snapshot;
-      return Boolean(data?.authorized && accountId(data.account) && !pausedStates.has(data.state));
+    function hasValidAuthorization(data = state.snapshot) {
+      return Boolean(data?.authorized && !pausedStates.has(data.state));
     }
 
     function readyToStart() {
       const current = accountId(state.snapshot?.current_account);
-      return hasValidAuthorization() && (!current || accountId(state.snapshot.account) === current);
+      return hasValidAuthorization() && Boolean(current) && accountId(state.snapshot.account) === current;
     }
 
-    function statusMessage() {
-      const data = state.snapshot;
-      if (hasValidAuthorization() && ["active", "ready", "paused"].includes(data.state)) {
+    function statusMessage(data = state.snapshot, fallback = "") {
+      const original = String(fallback || data?.message || "").replaceAll("自动化已暂停", "机器人未运行");
+      if (fallback && (!data || hasValidAuthorization(data) || fallback !== data.message)) return original;
+      if (hasValidAuthorization(data) && ["active", "ready", "paused", "running"].includes(data.state)) {
         return data.last_error === "service_unavailable"
           ? "授权服务暂不可达，当前有效离线凭证仍可使用。可照常启动机器人。"
-          : "授权权益已生效，随时可以启动机器人。";
+          : data.state === "running" ? "授权权益已生效，机器人可正常运行。" : "授权权益已生效，随时可以启动机器人。";
       }
-      return data?.message || (data?.authorized ? "授权已生效。确认模型设置后，由你启动机器人。"
+      const code = String(data?.state || data?.code || "").replace(/^LIC-/, "");
+      const reason = ({subscription_expired: "expired", license_revoked: "revoked", lease_expired: "offline_expired",
+        missing: "unactivated", pending_account: "active_unbound", pending: "active_unbound"})[code] || code;
+      const plan = typeof data?.plan === "object" ? data.plan?.id : data?.plan;
+      const messages = {
+        unactivated: "当前未授权。请激活免费试用或兑换付费激活码，再启动机器人。",
+        configuration_pending: "授权服务尚未配置。请联系管理员完成配置后重新读取授权状态。",
+        expired: plan === "trial" ? "免费试用已结束，当前未授权。请联系管理员购买付费激活码后兑换。"
+          : "订阅已到期，机器人未运行。请兑换续期码，续期后点击“启动机器人”。",
+        revoked: "授权已撤销，当前未授权。请联系管理员或兑换新的付费激活码。",
+        suspended: "授权暂不可用，机器人未运行。请联系管理员处理后重新验证。",
+        license_unavailable: "当前设备授权不可用，机器人未运行。请联系管理员恢复或迁移授权。",
+        offline_expired: "离线授权已过期，机器人未运行。请联网后点击“重新验证”，验证通过后再启动机器人。",
+        clock_error: "系统时间或启动会话校验异常，机器人未运行。请校准时间并联网重新验证授权。",
+        boot_identity: "无法确认系统启动会话，机器人未运行。请检查系统环境后联网重新验证授权。",
+        account_mismatch: "当前微信与授权绑定账号不一致，机器人未运行。请切回已绑定的微信账号，确认后启动机器人。",
+        active_unbound: "订阅已生效。首次在运行中心启动时，先确认绑定提示，再登录微信。",
+        account_required: "请在运行中心点击“启动”，先确认绑定提示，再登录微信。",
+        service_unavailable: "暂时无法连接授权服务。请检查网络后重新验证；有效的离线授权仍可使用。",
+        invalid: "授权暂不可用，机器人未运行。请重新验证；仍无法使用时联系管理员。",
+      };
+      return messages[reason] || original || (data?.enabled === undefined ? "" : data?.authorized ? "授权已生效。确认模型设置后，由你启动机器人。"
         : !data?.enabled ? "此安装尚未启用商业授权，现有功能可按原方式使用。" : "领取激活码后，在下方查看并确认兑换。");
     }
 
@@ -267,7 +356,7 @@
       if (!data) return ["授权状态暂未读取", "待读取", "neutral"];
       if (!data.enabled) return labels.disabled;
       if (!data.configured) return labels.unconfigured;
-      if (hasValidAuthorization() && ["active", "ready", "running", "paused"].includes(data.state)) {
+      if (hasValidAuthorization()) {
         return data.plan === "trial" ? ["免费试用已生效", "试用中", "success"] : ["订阅已生效", "已订阅", "success"];
       }
       return labels[data.state] || (data.authorized ? labels.active : ["授权暂不可用", "需处理", "warning"]);
@@ -282,7 +371,7 @@
     }
 
     function showError(error, field = false) {
-      feedback(error?.product?.message || error?.message || "操作未完成，请稍后重试。", "error", field);
+      feedback(statusMessage(error?.product || {message: error?.message || "操作未完成，请稍后重试。"}), "error", field);
     }
 
     function updateSnapshot(data) {
@@ -290,13 +379,15 @@
       const accountChanged = accountId(state.snapshot?.current_account) !== accountId(data.current_account);
       const licenseChanged = String(state.snapshot?.license_id || "") !== String(data.license_id || "")
         || String(state.snapshot?.plan?.id || state.snapshot?.plan || "") !== String(data.plan?.id || data.plan || "");
+      if (licenseChanged || accountId(state.snapshot?.account) !== accountId(data.account)) {
+        state.binding = null; state.bindingError = ""; state.bindingEpoch += 1;
+      }
       state.snapshot = data;
       state.readError = "";
       if (accountChanged || licenseChanged) {
         state.trial = null; state.trialAccount = null; state.trialError = "";
         state.trialEpoch += 1; state.trialLoading = false;
       }
-      if (["expired", "subscription_expired"].includes(data.state)) state.expiredSeen = true;
       render();
       if (accountChanged && state.activePage === "subscription") void loadFreeTrial();
     }
@@ -310,7 +401,7 @@
         if (epoch === state.epoch) updateSnapshot(data);
       } catch (error) {
         if (epoch === state.epoch) {
-          state.readError = error?.message || "暂时无法读取授权状态。";
+          state.readError = statusMessage(error?.product || {message: error?.message || "暂时无法读取授权状态。"});
           if (!silent || !state.snapshot) showError(error);
           renderHome();
         }
@@ -335,19 +426,6 @@
       $("#homeLicenseAction").disabled = false;
     }
 
-    function renderSteps() {
-      const data = state.snapshot;
-      const hasCode = Boolean($("#licenseCode").value.trim() || data?.license_id);
-      const done = [hasCode, Boolean(data?.license_id), Boolean(accountId(data?.account))];
-      ["#licenseStepCode", "#licenseStepRedeem", "#licenseStepAccount"].forEach((id, index) => {
-        const node = $(id);
-        node.classList.toggle("is-done", done[index]);
-        node.querySelector("span").textContent = done[index] ? "✓" : String(index + 1);
-        if (!done[index] && (index === 0 || done[index - 1])) node.setAttribute("aria-current", "step");
-        else node.removeAttribute("aria-current");
-      });
-    }
-
     function renderPlans() {
       const data = state.snapshot;
       const plans = Array.isArray(data?.plans) ? data.plans : [];
@@ -363,15 +441,14 @@
         const trialButton = isTrial
           ? '<p class="subscription-trial-status" id="licenseTrialStatus" role="status" aria-live="polite"></p><button class="button ghost small" id="licenseTrialRetry" data-trial-retry type="button" hidden>重新查询试用资格</button><button class="button ghost" id="licenseActivateTrial" data-free-trial type="button" disabled>激活免费试用</button>'
           : `<button class="button secondary" data-license-plan type="button">扫码入群领取</button>`;
-        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(plan.description || (isTrial ? "每台设备和微信账号限用一次，激活后连续计时 1 小时。" : "1 个机器人账号，含订阅期内更新。"))}</p>${trialButton}</article>`;
+        return `<article class="subscription-plan panel" data-plan="${esc(plan.id)}"><h3 class="subscription-plan-name">${esc(plan.name)}</h3><div class="subscription-plan-price">${knownPrice ? "<span>¥</span>" : ""}<strong>${esc(price)}</strong><small>${esc(unit)}</small></div><p>${esc(planDescription(plan))}</p>${trialButton}</article>`;
       }).join("") || '<p class="subtle">套餐暂时无法读取，请重新读取授权状态。</p>';
     }
 
     function renderControls() {
       const data = state.snapshot;
       const ready = Boolean(data?.enabled && data?.configured);
-      const busy = state.busy;
-      const bound = accountId(data?.account);
+      const busy = state.busy || state.preparing;
       const current = accountId(data?.current_account);
       $("#licenseRefresh").disabled = busy || state.loading;
       $("#licenseRefresh").textContent = busy ? "处理中…" : ready ? "重新验证" : "重新读取";
@@ -383,22 +460,16 @@
       $("#licenseCopyDevice").disabled = !data?.device_id;
       $("#licensePrepareDevice").hidden = !ready || Boolean(data?.device_id);
       $("#licensePrepareDevice").disabled = busy || !ready;
-      $("#licenseConnect").hidden = !ready || !data.can_connect || Boolean(current) || hasValidAuthorization();
-      $("#licenseConnect").disabled = busy || Boolean(state.runtime?.busy);
-      $("#licenseBind").hidden = !ready || !data.can_connect || !data.license_id || Boolean(bound) || !current;
-      $("#licenseBind").disabled = busy;
-      const running = Boolean(state.runtime?.online && data?.can_run);
-      $("#licenseResume").hidden = !ready || !readyToStart();
-      $("#licenseResume").disabled = busy || running || Boolean(state.runtime?.busy);
-      $("#licenseResume").textContent = running ? "自动化运行中" : state.expiredSeen ? "恢复机器人" : "启动机器人";
       const trialButton = $("#licenseActivateTrial");
       if (trialButton) {
         const trial = freeTrial(data), status = freeTrialState(data);
-        trialButton.disabled = busy || state.trialLoading || !ready || !current || !(trial.eligible || trial.recoverable);
+        trialButton.disabled = busy || state.trialLoading || !ready
+          || (current ? !(trial.eligible || trial.recoverable) : !data.can_connect || ["paid", "active", "ended", "used"].includes(status));
         trialButton.textContent = busy ? "处理中…" : trial.recoverable ? "恢复免费试用"
           : status === "active" ? "试用进行中" : status === "ended" ? "试用已结束" : status === "used" ? "已领取试用"
           : status === "paid" ? "已订阅" : "激活免费试用";
       }
+      renderBindingStatus();
     }
 
     function render() {
@@ -411,22 +482,26 @@
       $("#licenseStatusPanel").dataset.tone = tone;
       $("#licenseStateMessage").textContent = statusMessage();
       $("#licensePlan").textContent = planName(data.plan);
+      const currentPlan = typeof data.plan === "object" ? data.plan
+        : (Array.isArray(data.plans) ? data.plans : []).find((plan) => plan.id === data.plan);
+      $("#licensePlanDescription").textContent = data.plan ? planDescription(currentPlan || {id: data.plan}) : "";
       $("#licenseExpires").textContent = data.expires_text || expiryText(data.valid_until);
       const seconds = Math.max(0, Math.floor(Number(data.remaining_seconds) || 0));
       $("#licenseRemaining").textContent = seconds > 0 && seconds <= 3600 ? `剩余 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : "";
       $("#licenseAccount").textContent = accountId(data.account) || "尚未绑定";
       $("#licenseIdText").textContent = data.license_id || "尚未激活";
       $("#licenseDeviceText").textContent = data.device_id || "尚未生成";
-      $("#licenseCurrentAccount").textContent = accountId(data.current_account) || "尚未连接";
-      $("#licenseCurrentAccountRow").hidden = !data.enabled || !accountId(data.current_account)
-        || (authorized && accountId(data.current_account) === accountId(data.account));
-      $("#licenseSteps").hidden = authorized;
+      if (state.authorizedView !== authorized) {
+        $("#licenseOptions").open = !authorized;
+        state.authorizedView = authorized;
+      }
+      $("#licenseOptionsTitle").textContent = authorized ? "续期或更换套餐" : "激活授权";
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
       $("#licenseRedeemTitle").textContent = data.license_id && !["revoked", "license_revoked"].includes(data.state)
         ? "兑换续期码" : "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
-        ? "授权服务尚未配置，暂时无法兑换激活码。" : "先查看套餐和有效期，确认后再兑换。";
-      renderSteps(); renderPlans(); renderFreeTrialStatus(); renderControls(); renderHome();
+        ? "授权服务尚未配置，暂时无法兑换激活码。" : "请复制发码详情中的完整激活码，业务编号不能用于兑换。先查看套餐和有效期，确认后再兑换。";
+      renderPlans(); renderFreeTrialStatus(); renderControls(); renderHome();
     }
 
     async function transact(action, message = "") {
@@ -452,13 +527,33 @@
     }
 
     async function activateFreeTrial() {
-      const trial = freeTrial();
-      if (state.busy || state.trialLoading || !(trial.eligible || trial.recoverable)) return;
-      const account = accountId(state.snapshot?.current_account);
-      if (!account) return;
-      await execute(() => api("activate_free_trial", account), trial.recoverable
-        ? "免费试用已恢复，结束时间不变。" : "免费试用已激活，连续计时 1 小时。请确认模型设置后启动机器人。");
-      await loadFreeTrial({force: true});
+      if (state.busy || state.preparing || state.trialLoading || ["paid", "ended", "used"].includes(freeTrialState())) return;
+      state.preparing = true; renderControls();
+      try {
+        await readForAction();
+        const authorization = JSON.stringify([state.snapshot.license_id, state.snapshot.plan, state.snapshot.authorized]);
+        const confirmed = await confirmAction({title: "确认激活免费试用",
+          message: "接下来登录的微信号将用于免费试用。激活后立即连续计时 1 小时，每台设备和微信账号限领一次；恢复已有试用时，结束时间不变。",
+          confirmText: "同意并继续", intent: "primary", onConfirm: async () => {
+            await readForAction();
+            if (authorization !== JSON.stringify([state.snapshot.license_id, state.snapshot.plan, state.snapshot.authorized])) {
+              throw new Error("授权已变化，请取消后重新激活。");
+            }
+          }});
+        if (!confirmed) return;
+        const account = await connectAccount();
+        if (!account) return;
+        if (authorization !== JSON.stringify([state.snapshot.license_id, state.snapshot.plan, state.snapshot.authorized])) {
+          throw new Error("授权已变化，请重新激活并确认。");
+        }
+        await loadFreeTrial({force: true});
+        const trial = freeTrial();
+        if (!(trial.eligible || trial.recoverable)) throw new Error(state.trialError || freeTrialStatusText());
+        await transact(() => api("activate_free_trial", account), trial.recoverable
+          ? "免费试用已恢复，结束时间不变。" : "免费试用已激活。请在运行中心启动机器人。");
+        await loadFreeTrial({force: true});
+      } catch (error) { showError(error); }
+      finally { state.preparing = false; renderControls(); }
     }
 
     function clearPreview() {
@@ -472,6 +567,11 @@
       const code = $("#licenseCode").value.trim();
       if (!code || state.busy) return;
       clearPreview(); feedback("", "neutral", true);
+      if (/^WRB-\d{14}-[A-F0-9]{16}$/i.test(code)) {
+        feedback("这是业务编号，请复制详情中的完整激活码。", "error", true);
+        $("#licenseCode").focus();
+        return;
+      }
       try {
         const data = await transact(() => api("preview_activation_code", code));
         if (!data?.preview_id) throw new Error("激活码预览未完成，请重新查看。");
@@ -502,28 +602,74 @@
           $("#licenseCode").value = "";
           clearPreview(); feedback("", "neutral", true);
           return result;
-        }, "激活码已兑换。请根据授权状态完成微信绑定，或确认恢复机器人。");
-        const next = ["#licenseConnect", "#licenseBind", "#licenseResume"].map($).find((button) => !button.hidden && !button.disabled);
-        next?.focus();
+        }, "订阅已生效。请在运行中心点击“启动”；首次启动时先确认绑定提示，再登录微信。");
       } catch (error) { showError(error, true); }
     }
 
-    function bindAccount() {
-      const account = accountId(state.snapshot?.current_account);
-      if (!account || state.busy) return;
-      confirmAction({title: "确认授权微信账号", message: `将当前设备的授权绑定到微信账号 ${account}。请核对这是你要用于机器人的账号。`,
-        confirmText: "确认绑定此账号", intent: "primary", onConfirm: async () => {
-          await transact(() => api("bind_license_account", account), "微信账号已绑定。确认模型设置后，可以启动机器人。");
-        }});
+    async function readForAction() {
+      state.epoch += 1;
+      updateSnapshot(await api("get_license_status"));
+      return state.snapshot;
     }
 
-    async function runtimeAction(method, message) {
-      const result = await execute(async () => {
-        const response = await api(method);
-        if (response?.accepted === false) throw new Error("操作尚未开始，请按运行提示完成处理后重试。");
-        return response;
-      }, message);
-      if (result !== null) { await refreshRuntime(); await load({silent: true}); }
+    async function connectAccount({differentFrom = ""} = {}) {
+      await readForAction();
+      if (!differentFrom && accountId(state.snapshot.current_account)) return accountId(state.snapshot.current_account);
+      if (!accountId(state.snapshot.current_account)) {
+        const response = await api("connect_license_wechat");
+        if (response?.accepted === false) throw new Error(response.message || "微信连接尚未开始，请稍后重试。");
+        await refreshRuntime();
+        await readForAction();
+      }
+      if (differentFrom || !accountId(state.snapshot.current_account)) {
+        const confirmed = await confirmAction({title: differentFrom ? "请切换微信账号" : "请登录微信",
+          message: differentFrom ? "请在微信窗口切换并登录新的微信账号，再继续读取。取消不会更改绑定或扣除换绑次数。"
+            : "已发起微信连接。请在微信窗口完成登录，然后继续读取实际账号；取消不会绑定账号或启动机器人。",
+          confirmText: differentFrom ? "已切换，继续" : "已登录，继续", intent: "primary", onConfirm: async () => {
+            await readForAction();
+            if (!accountId(state.snapshot.current_account)) throw new Error("尚未读取到登录的微信账号，请完成登录后重试。");
+            if (accountId(state.snapshot.current_account) === differentFrom) throw new Error("仍是原绑定微信，请切换到新的微信账号后重试。");
+          }});
+        if (!confirmed) return "";
+      }
+      return accountId(state.snapshot.current_account);
+    }
+
+    async function rebindAccount() {
+      if (state.busy || state.preparing) return;
+      state.preparing = true; renderControls();
+      try {
+        await readForAction();
+        const binding = await loadBindingStatus({force: true, required: true});
+        if (!binding.can_rebind || !accountId(binding.account)) throw new Error("当前套餐暂不支持换绑或剩余次数不足，请查看换绑次数。");
+        const previous = accountId(binding.account), license = binding.license_id;
+        const confirmed = await confirmAction({title: "更换套餐绑定微信", subject: {label: "当前绑定微信", value: previous},
+          message: `接下来登录的新微信号将绑定当前套餐。${bindingQuotaText(binding)} 同意后将停止机器人回复功能，保留微信供你切换账号；换绑成功后请到运行中心启动。`,
+          confirmText: "同意并切换账号", intent: "primary", onConfirm: async () => {
+            await readForAction();
+            const latest = await loadBindingStatus({force: true, required: true});
+            if (latest.license_id !== license || latest.revision !== binding.revision
+              || accountId(latest.account) !== previous || !latest.can_rebind) {
+              throw new Error("授权或换绑次数已变化，请取消后重新办理。");
+            }
+          }});
+        if (!confirmed) return;
+        const stopped = await api("stop_robot");
+        if (stopped?.accepted === false) throw new Error(stopped.message || "机器人正在处理其他操作，请完成停止后重试换绑。");
+        await refreshRuntime();
+        const account = await connectAccount({differentFrom: previous});
+        if (!account) {
+          feedback("已取消换绑，原绑定和换绑次数保留。机器人保持停止，可到运行中心启动。", "neutral");
+          return;
+        }
+        if (state.snapshot.license_id !== license || accountId(state.snapshot.account) !== previous) {
+          throw new Error("授权绑定已变化，请重新办理换绑。");
+        }
+        await transact(() => api("rebind_license_account", account, previous, binding.revision), "微信换绑已完成。机器人保持停止，请到运行中心点击“启动”。");
+        await loadBindingStatus({force: true});
+        await refreshRuntime();
+      } catch (error) { showError(error); }
+      finally { state.preparing = false; renderControls(); }
     }
 
     async function initialize() {
@@ -533,12 +679,9 @@
       $("#licenseRefresh").addEventListener("click", () => state.snapshot?.enabled && state.snapshot?.configured
         ? execute(() => api("refresh_license"), "已重新验证授权状态。") : load());
       $("#licenseCodeForm").addEventListener("submit", (event) => { event.preventDefault(); void previewCode(); });
-      $("#licenseCode").addEventListener("input", () => { clearPreview(); feedback("", "neutral", true); renderSteps(); });
+      $("#licenseCode").addEventListener("input", () => { clearPreview(); feedback("", "neutral", true); });
       $("#licenseConfirmRedeem").addEventListener("click", redeemCode);
       $("#licenseCancelRedeem").addEventListener("click", () => { clearPreview(); $("#licenseCode").focus(); });
-      $("#licenseConnect").addEventListener("click", () => runtimeAction("connect_license_wechat", "请在微信完成登录，然后在此确认实际账号。"));
-      $("#licenseBind").addEventListener("click", bindAccount);
-      $("#licenseResume").addEventListener("click", () => runtimeAction("start_robot", "已提交启动请求，请在运行中心查看启动进度。"));
       $("#licenseQrRefresh").addEventListener("click", () => loadContact(true));
       $("#licenseQrToggle").addEventListener("click", () => {
         renderContact();
@@ -556,6 +699,8 @@
       $("#licenseCopyId").addEventListener("click", () => copyText(state.snapshot?.license_id, "授权编号"));
       $("#licenseCopyDevice").addEventListener("click", () => copyText(state.snapshot?.device_id, "设备编号"));
       $("#licensePrepareDevice").addEventListener("click", () => execute(() => api("prepare_license_device"), "本机设备编号已生成，可复制给群管理员办理授权迁移。"));
+      $("#licenseRebindRefresh").addEventListener("click", () => loadBindingStatus({force: true}));
+      $("#licenseRebind").addEventListener("click", rebindAccount);
       $("#licensePlans").addEventListener("click", (event) => {
         if (event.target.closest("[data-trial-retry]")) return loadFreeTrial({force: true});
         if (event.target.closest("[data-free-trial]")) return activateFreeTrial();
@@ -578,25 +723,59 @@
 
     return {
       initialize,
-      async onNavigate(page) { state.activePage = page; if (page === "subscription") { refreshContactIfNeeded(); await load(); await loadFreeTrial(); } },
+      formatMessage: statusMessage,
+      async onNavigate(page) {
+        state.activePage = page;
+        if (page === "subscription") { refreshContactIfNeeded(); await load(); await Promise.all([loadFreeTrial(), loadBindingStatus()]); }
+      },
       updateRuntime(runtime) { state.runtime = runtime; if (state.initialized) renderControls(); },
-      needsEntry() { return Boolean(state.snapshot?.enabled && !readyToStart()); },
+      needsEntry() { return Boolean(state.snapshot?.enabled && !hasValidAuthorization()); },
       async beforeStart() {
-        await load({silent: true});
-        if (!state.snapshot || state.readError || (state.snapshot.enabled && !readyToStart())) {
-          const data = state.snapshot;
-          const current = accountId(data?.current_account);
-          const mismatched = data?.state === "account_mismatch" || (current && accountId(data?.account) && current !== accountId(data.account));
-          const message = state.readError || (mismatched ? "当前微信与授权绑定账号不一致，请先确认微信账号。"
-            : data && pausedStates.has(data.state) ? data.message || "授权暂不可用，请在“订阅与授权”查看并处理。"
-            : data?.authorized ? "请先在“订阅与授权”确认绑定微信账号。"
-            : data && !data.configured ? "授权服务尚未配置，请先检查授权状态。" : "尚未授权，请先完成授权后再启动。");
-          if (typeof toast === "function") toast(message, "error");
-          await navigate("subscription");
-          feedback(message, "error");
-          return false;
-        }
-        return true;
+        if (state.busy || state.preparing) return false;
+        state.preparing = true; renderControls();
+        try {
+          await readForAction();
+          if (!state.snapshot || state.readError || (state.snapshot.enabled && !hasValidAuthorization())) {
+            const data = state.snapshot;
+            const current = accountId(data?.current_account);
+            const mismatched = data?.state === "account_mismatch" || (current && accountId(data?.account) && current !== accountId(data.account));
+            const message = state.readError || (mismatched ? statusMessage({...data, state: "account_mismatch"})
+              : data && pausedStates.has(data.state) ? statusMessage()
+              : data && !data.configured ? statusMessage({...data, state: "configuration_pending"}) : statusMessage());
+            if (typeof toast === "function") toast(message, "error");
+            await navigate("subscription");
+            feedback(message, "error");
+            return false;
+          }
+          if (!state.snapshot.enabled) return true;
+          const license = state.snapshot.license_id;
+          const bound = accountId(state.snapshot.account);
+          if (!bound) {
+            const binding = await loadBindingStatus({force: true, required: true});
+            const confirmed = await confirmAction({title: "确认绑定当前套餐",
+              message: `接下来登录的微信号将绑定当前套餐。${bindingQuotaText(binding)} 同意后将连接微信，登录完成后绑定并启动机器人。`,
+              confirmText: "同意并继续", intent: "primary", onConfirm: async () => {
+                await readForAction();
+                if (state.snapshot.license_id !== license || !hasValidAuthorization() || accountId(state.snapshot.account)) {
+                  throw new Error("授权状态已变化，请取消后重新启动并确认。");
+                }
+              }});
+            if (!confirmed) return false;
+          }
+          const account = await connectAccount();
+          if (!account) return false;
+          if (state.snapshot.license_id !== license || !hasValidAuthorization()) throw new Error("授权状态已变化，请重新启动并确认。");
+          if (bound && bound !== account) throw new Error(statusMessage({...state.snapshot, state: "account_mismatch"}));
+          if (!bound) {
+            if (accountId(state.snapshot.account)) throw new Error("授权绑定已变化，请重新启动并确认。");
+            await transact(() => api("bind_license_account", account));
+          }
+          await readForAction();
+          if (state.snapshot.license_id !== license || !readyToStart() || accountId(state.snapshot.current_account) !== account) {
+            throw new Error("微信账号或授权已变化，请重新启动并确认。");
+          }
+          return true;
+        } finally { state.preparing = false; renderControls(); }
       },
     };
   };

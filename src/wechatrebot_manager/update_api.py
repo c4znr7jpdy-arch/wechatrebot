@@ -332,7 +332,7 @@ class UpdateApiMixin:
             )
             self._set_update_status(
                 state="running", phase="stopping_services", percent=100,
-                message="正在强制关闭机器人程序和所有微信窗口", error=None,
+                message="正在关闭机器人程序及当前连接的微信", error=None,
             )
             try:
                 self._lifecycle.force_stop_for_update()

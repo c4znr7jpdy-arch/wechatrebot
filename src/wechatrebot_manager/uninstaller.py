@@ -381,8 +381,10 @@ def _iter_windows_process_ids(
     return tuple(values)
 
 
-def _process_module_paths(pid: int) -> tuple[Path, ...]:
+def _process_module_paths(pid: int, *, strict: bool = False) -> tuple[Path, ...]:
     if os.name != "nt" or pid <= 0:
+        if strict:
+            raise OSError("当前平台无法确认 Windows 进程模块。")
         return ()
     import ctypes
     from ctypes import wintypes
@@ -418,7 +420,9 @@ def _process_module_paths(pid: int) -> tuple[Path, ...]:
     kernel32.CloseHandle.restype = wintypes.BOOL
     invalid_handle = ctypes.c_void_p(-1).value
     snapshot = kernel32.CreateToolhelp32Snapshot(0x00000008 | 0x00000010, pid)
-    if snapshot == invalid_handle:
+    if not snapshot or snapshot == invalid_handle:
+        if strict:
+            raise OSError(ctypes.get_last_error(), "无法读取进程模块。")
         return ()
     entry = MODULEENTRY32W()
     entry.dwSize = ctypes.sizeof(entry)
@@ -429,7 +433,11 @@ def _process_module_paths(pid: int) -> tuple[Path, ...]:
                 if entry.szExePath:
                     values.append(Path(entry.szExePath))
                 if not kernel32.Module32NextW(snapshot, ctypes.byref(entry)):
+                    if strict and ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                        raise OSError(ctypes.get_last_error(), "进程模块未能完整读取。")
                     break
+        elif strict and ctypes.get_last_error() != 18:
+            raise OSError(ctypes.get_last_error(), "无法读取进程模块。")
     finally:
         kernel32.CloseHandle(snapshot)
     return tuple(values)

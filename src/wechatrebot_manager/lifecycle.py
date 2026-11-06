@@ -18,7 +18,8 @@ from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
 from .launcher import (
     ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
-    build_service_specs, installation_services_stopped, force_stop_update_processes,
+    build_service_specs, capture_update_wechat_process, installation_services_stopped,
+    force_stop_update_processes,
 )
 from .licensing.client import LicenseClient
 from .licensing.protocol import LicenseError
@@ -588,14 +589,14 @@ class LifecycleController:
             return self.view()
 
     def force_stop_for_update(self) -> LifecycleView:
-        """Force-stop owned services and every running WeChat process.
-
-        This is separate from the normal emergency-stop button: the update
-        confirmation explicitly authorizes closing all WeChat windows.
-        """
+        """Force-stop owned services and only this robot's connected WeChat."""
         with self._lock:
+            self._runtime = self._snapshotter()
+            wechat_process = capture_update_wechat_process(
+                self.install_root, required=self._bot_wechat_active(),
+            )
             self.force_stop()
-            force_stop_update_processes(self.install_root)
+            force_stop_update_processes(self.install_root, wechat_process=wechat_process)
             self._runtime = self._snapshotter()
             return self.view()
 
@@ -688,6 +689,8 @@ class LifecycleController:
                 message = "授权暂停未能写入，已停止后台服务；请稍后重新连接微信。"
             elif self.state != LifecycleState.LICENSE_PAUSED and licensing.get("state") in {"paused", "ready", "running"}:
                 message = "授权有效，点击启动机器人即可运行。"
+            elif licensing.get("state") == "active_unbound":
+                message = "订阅已生效，点击启动后确认微信账号。"
             else:
                 message = licensing["message"]
         return LifecycleView(

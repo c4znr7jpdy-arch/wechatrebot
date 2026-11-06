@@ -124,7 +124,7 @@ def test_update_download_then_explicit_shutdown_consent(update_page, tmp_path: P
     assert page.evaluate("window.updateCalls.effects") == []
     page.evaluate("window.finishUpdateDownload()")
     expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
-    expect(page.locator("#modalMessage")).to_contain_text("更新会强制关闭机器人程序和所有微信窗口，是否确认？")
+    expect(page.locator("#modalMessage")).to_contain_text("更新会强制关闭机器人程序及当前连接的微信，是否确认？")
     expect(page.locator("#modalMessage")).to_contain_text("自动打开新版管理器")
     expect(page.locator("#modalConfirm")).to_be_enabled()
     assert page.evaluate("window.updateCalls.effects") == []

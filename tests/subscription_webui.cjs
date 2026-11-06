@@ -5,6 +5,8 @@ const vm = require('node:vm');
 
 const script = fs.readFileSync(path.join(__dirname,
   '../src/wechatrebot_manager/app_webui/subscription.js'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(__dirname,
+  '../src/wechatrebot_manager/app_webui/index.html'), 'utf8');
 const bundledContact = JSON.parse(fs.readFileSync(path.join(__dirname,
   '../src/wechatrebot_manager/licensing-contact.json'), 'utf8'));
 const escapeHtml = value => String(value ?? '').replaceAll('&', '&amp;')
@@ -20,8 +22,9 @@ function harness(overrides = {}) {
       const child = {textContent: '', getAttribute: () => null};
       const attributes = {}, classes = new Set();
       const node = {id, value: '', hidden: false, disabled: false, innerHTML: '', textContent: '',
-        dataset: {}, listeners: {}, lastChild: child,
+        dataset: {}, listeners: {}, lastChild: child, style: {},
         classList: {toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
+          add: name => classes.add(name), remove: name => classes.delete(name),
           contains: name => classes.has(name)},
         querySelector: () => child, focus() { node.focused = true; }, scrollIntoView() { node.scrolled = true; },
         setAttribute: (name, value) => { attributes[name] = value; },
@@ -37,6 +40,7 @@ function harness(overrides = {}) {
     plan: '', valid_until: 0, remaining_seconds: 0,
     plans: [{id: 'trial', name: '一小时试用', price_fen: 0},
       {id: 'month', name: '月付', price_fen: 6900}, {id: 'year', name: '年付', price_fen: 69900}], ...overrides};
+  const bindingStatus = {revision: 17, rebind_limit: 5, rebind_used: 2, rebind_remaining: 3, can_rebind: true};
   const contact = {state: 'ready', group_name: bundledContact.group_name,
     expires_at: Math.floor(clock.now / 1000) + 3600, remaining_seconds: 3600,
     image_data_url: `data:${bundledContact.mime_type};base64,${bundledContact.image_base64}`, source: 'bundled', message: ''};
@@ -56,15 +60,39 @@ function harness(overrides = {}) {
       if (handlers[method]) return handlers[method](...args);
       if (method === 'get_license_status') return structuredClone(snapshot);
       if (method === 'get_license_contact') return structuredClone(contact);
+      if (method === 'get_license_binding_status') {
+        const plan = snapshot.plan?.id || snapshot.plan;
+        return structuredClone({...bindingStatus, license_id: snapshot.license_id,
+          account: snapshot.account, plan,
+          ...(plan === 'trial' ? {rebind_limit: 0, rebind_used: 0, rebind_remaining: 0, can_rebind: false} : {})});
+      }
       throw new Error(`Unexpected API call: ${method}`);
     },
-    confirmAction: config => confirmations.push(config),
+    confirmAction: config => new Promise(resolve => {
+      const dialog = {...config, settled: false, busy: false,
+        async confirm() {
+          if (dialog.settled || dialog.busy) return;
+          dialog.busy = true;
+          try {
+            await config.onConfirm?.();
+            dialog.settled = true;
+            resolve(true);
+          } finally { dialog.busy = false; }
+        },
+        async cancel() {
+          if (dialog.settled || dialog.busy) return;
+          dialog.settled = true;
+          try { await config.onCancel?.(); } finally { resolve(false); }
+        },
+      };
+      confirmations.push(dialog);
+    }),
     copyText: async (text, label) => calls.push(['copy', text, label]),
     navigate: async page => routes.push(page),
     toast: (message, type) => toasts.push({message, type}),
     openMaintenance: async () => routes.push('maintenance'), refreshRuntime: async () => {},
   });
-  return {ui, snapshot, contact, handlers, calls, element, intervals, confirmations, routes, toasts, clock,
+  return {ui, snapshot, contact, bindingStatus, handlers, calls, element, intervals, confirmations, routes, toasts, clock,
     documentListeners,
     async advance(ms) {
       clock.now += ms;
@@ -89,7 +117,7 @@ async function activationAndRecovery() {
   await h.ui.initialize();
   assert.equal(h.ui.needsEntry(), true);
   assert.equal(await h.ui.beforeStart(), false);
-  assert.deepEqual(h.toasts.at(-1), {message: '尚未授权，请先完成授权后再启动。', type: 'error'});
+  assert.deepEqual(h.toasts.at(-1), {message: '当前未授权。请激活免费试用或兑换付费激活码，再启动机器人。', type: 'error'});
   assert.equal(h.routes.at(-1), 'subscription');
   assert.equal(h.element('#licenseQrFrame').hidden, false);
   assert.equal(h.element('#licenseGroupName').textContent, 'WXRebot');
@@ -131,32 +159,18 @@ async function activationAndRecovery() {
   release(); await redeem;
   assert.equal(h.element('#licenseCode').value, '');
   assert.equal(h.element('#licenseCodePreview').hidden, true);
-  assert.equal(h.element('#licenseConnect').hidden, false);
-  assert.equal(h.ui.needsEntry(), true, 'An unbound but valid lease still needs account confirmation');
+  assert.equal(h.element('#licenseOptions').open, false);
+  assert.equal(h.ui.needsEntry(), false, 'A valid unbound lease is confirmed from the run center');
   assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
-
-  Object.assign(h.snapshot, {current_account: 'wxid_account_a'});
-  await h.ui.onNavigate('subscription');
-  h.click('#licenseBind');
-  assert.match(h.confirmations[0].message, /wxid_account_a/);
-  h.snapshot.current_account = 'wxid_account_b';
-  h.handlers.bind_license_account = async account => {
-    assert.equal(account, 'wxid_account_a', 'The confirmed account must be sent to reject identity races');
-    throw new Error('微信账号已变化，请重新确认。');
-  };
-  await assert.rejects(h.confirmations[0].onConfirm(), /账号已变化/);
 
   Object.assign(h.snapshot, {state: 'ready', account: 'wxid_account_a', current_account: 'wxid_account_a'});
   await h.ui.onNavigate('subscription');
-  assert.equal(h.element('#licenseResume').hidden, false);
-  assert.equal(h.element('#licenseResume').disabled, false);
   assert.equal(h.element('#licenseStateTitle').textContent, '订阅已生效');
   assert.equal(h.element('#licenseStatusPanel').dataset.tone, 'success');
   assert.equal(h.element('#licensePausedInfo').hidden, true);
   assert.equal(await h.ui.beforeStart(), true, 'A valid matching lease need not already have a run grant');
-  h.handlers.start_robot = async () => { h.snapshot.can_run = true; return structuredClone(h.snapshot); };
-  await h.click('#licenseResume');
-  assert.equal(h.calls.filter(([method]) => method === 'start_robot').length, 1);
+  assert.equal(h.confirmations.length, 0, 'An already-bound matching account requires no repeated consent');
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
 }
 
 async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
@@ -172,11 +186,14 @@ async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
     assert.equal(h.element('#licenseStateTag').textContent, '已订阅');
     assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换续期码');
     assert.doesNotMatch(h.element('#licenseStateMessage').textContent, /暂停|恢复/);
-    assert.equal(h.element('#licenseSteps').hidden, true);
-    assert.equal(h.element('#licenseCurrentAccountRow').hidden, true);
-    assert.equal(h.element('#licenseConnect').hidden, true);
-    assert.equal(h.element('#licenseResume').hidden, false);
+    assert.equal(h.element('#licenseOptions').open, false);
+    h.handlers.connect_license_wechat = () => {
+      h.snapshot.current_account = 'wxid_account_a';
+      return {accepted: true};
+    };
     assert.equal(await h.ui.beforeStart(), true, 'The backend reconnects and verifies the actual account before granting a run');
+    assert.equal(h.confirmations.length, 0);
+    assert.equal(h.calls.filter(([method]) => method === 'connect_license_wechat').length, current_account ? 0 : 1);
     assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
   }
   const mismatch = harness({state: 'account_mismatch', license_id: 'license-one', authorized: true,
@@ -223,8 +240,8 @@ async function revokedSubscriptionCanConfirmNewPaidActivationWithoutStarting() {
     await h.click('#licenseConfirmRedeem');
     assert.equal(h.calls.filter(([method]) => method === 'redeem_activation_code').length, 1);
     assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
-    assert.equal(h.element('#licenseBind').hidden, false);
-    assert.match(h.element('#licenseFeedback').textContent, /微信绑定.*确认恢复机器人/);
+    assert.equal(h.element('#licenseOptions').open, false);
+    assert.match(h.element('#licenseFeedback').textContent, /运行中心.*首次启动.*先确认绑定提示，再登录微信/);
   }
 }
 
@@ -251,8 +268,7 @@ async function expiryAndUnconfigured() {
     return structuredClone(h.snapshot);
   };
   await h.click('#licenseConfirmRedeem');
-  assert.equal(h.element('#licenseResume').textContent, '恢复机器人');
-  assert.equal(h.element('#licenseResume').disabled, false);
+  assert.equal(h.element('#licenseOptions').open, false);
   assert.equal(h.calls.some(([method]) => method === 'start_robot'), false, 'Renewal must not start automation');
 
   const off = harness({enabled: false, configured: false, state: 'legacy'});
@@ -268,15 +284,444 @@ async function expiryAndUnconfigured() {
   assert.equal(pending.element('#licenseStateTitle').textContent, '授权服务待配置');
 }
 
-async function rejectedStartIsNotReportedAsSuccess() {
-  const h = harness({state: 'active', license_id: 'license-one', authorized: true,
-    can_connect: true, account: 'wxid_account_a', current_account: 'wxid_account_a'});
+function startupHarness(overrides = {}) {
+  return harness({state: 'active_unbound', license_id: 'license-one', plan: 'month',
+    authorized: true, can_connect: true, current_account: 'wxid_account_a', ...overrides});
+}
+
+async function startupConsentPrecedesAccountConnection() {
+  const h = startupHarness({current_account: ''});
   await h.ui.initialize();
-  h.handlers.start_robot = async () => ({accepted: false});
-  await h.click('#licenseResume');
-  assert.equal(h.element('#licenseFeedback').dataset.tone, 'error');
-  assert.match(h.element('#licenseFeedback').textContent, /操作尚未开始/);
-  assert.equal(h.snapshot.can_run, false);
+  const pending = h.ui.beforeStart();
+  await flush();
+  assert.equal(h.confirmations.length, 1);
+  const dialog = h.confirmations[0];
+  assert.equal(dialog.title, '确认绑定当前套餐');
+  assert.equal(dialog.subject, undefined, 'Consent before login must not predict a WeChat account');
+  assert.equal(dialog.confirmText, '同意并继续');
+  assert.match(dialog.message, /接下来登录的微信号将绑定当前套餐/);
+  assert.equal(h.calls.some(([method]) => method === 'get_license_binding_status'), true,
+    'The first binding consent must read the server binding policy');
+  assert.equal(h.calls.some(([method]) => ['connect_license_wechat', 'bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(await h.ui.beforeStart(), false, 'A pending confirmation must reject a duplicate start attempt');
+  assert.equal(h.confirmations.length, 1);
+  h.handlers.connect_license_wechat = () => {
+    h.snapshot.current_account = 'wxid_account_a';
+    return {accepted: true};
+  };
+  h.handlers.bind_license_account = account => {
+    assert.equal(account, 'wxid_account_a');
+    Object.assign(h.snapshot, {state: 'ready', account});
+    return structuredClone(h.snapshot);
+  };
+  await dialog.confirm();
+  assert.equal(await pending, true);
+  assert.equal(h.calls.filter(([method]) => method === 'bind_license_account').length, 1);
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false,
+    'The subscription gate returns permission; only the run center starts the robot');
+  assert.equal(await h.ui.beforeStart(), true);
+  assert.equal(h.confirmations.length, 1, 'A bound matching account must not ask again');
+  assert.equal(h.element('#licenseRefresh').disabled, false);
+
+  const canceled = startupHarness({current_account: ''});
+  await canceled.ui.initialize();
+  const stopped = canceled.ui.beforeStart();
+  await flush();
+  await canceled.confirmations[0].cancel();
+  assert.equal(await stopped, false);
+  assert.equal(canceled.calls.some(([method]) => ['connect_license_wechat', 'bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(canceled.element('#licenseRefresh').disabled, false);
+}
+
+async function startupBindingQuotaMustBeLiveAndFailClosed() {
+  const h = startupHarness({current_account: ''});
+  await h.ui.initialize();
+  const initialReads = h.calls.filter(([method]) => method === 'get_license_binding_status').length;
+  const pending = h.ui.beforeStart();
+  await flush();
+  assert.ok(h.calls.filter(([method]) => method === 'get_license_binding_status').length > initialReads);
+  assert.match(h.confirmations[0].message, /剩余(?:可换绑)?\s*3\s*次/);
+  await h.confirmations[0].cancel();
+  assert.equal(await pending, false);
+  Object.assign(h.bindingStatus, {revision: 18, rebind_used: 4, rebind_remaining: 1});
+  const retried = h.ui.beforeStart();
+  await flush();
+  assert.match(h.confirmations[1].message, /剩余(?:可换绑)?\s*1\s*次/,
+    'Each attempt must display the latest response rather than cached quota');
+  await h.confirmations[1].cancel();
+  assert.equal(await retried, false);
+
+  h.handlers.get_license_binding_status = () => { throw new Error('换绑次数读取失败'); };
+  await assert.rejects(h.ui.beforeStart(), /换绑次数读取失败/);
+  assert.equal(h.confirmations.length, 2, 'Unavailable quota must not offer consent with invented counts');
+  assert.equal(h.calls.some(([method]) => ['connect_license_wechat', 'bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(h.element('#licenseRefresh').disabled, false);
+
+  const mismatched = startupHarness({current_account: ''});
+  await mismatched.ui.initialize();
+  mismatched.handlers.get_license_binding_status = () => ({...mismatched.bindingStatus,
+    license_id: mismatched.snapshot.license_id, plan: mismatched.snapshot.plan, account: 'wxid_old_binding'});
+  await assert.rejects(mismatched.ui.beforeStart(), /授权或换绑次数已变化/);
+  assert.equal(mismatched.confirmations.length, 0,
+    'An old binding returned for an unbound lease must not be presented as the next actual account');
+  assert.equal(mismatched.calls.some(([method]) => ['connect_license_wechat', 'bind_license_account', 'start_robot'].includes(method)), false);
+}
+
+async function startupConnectionFailuresAndLoginCancellation() {
+  for (const response of [{accepted: false, message: '微信连接暂未开始'}, new Error('连接请求失败')]) {
+    const h = startupHarness({current_account: ''});
+    await h.ui.initialize();
+    h.handlers.connect_license_wechat = () => {
+      if (response instanceof Error) throw response;
+      return response;
+    };
+    const pending = h.ui.beforeStart();
+    const rejected = assert.rejects(pending, /连接暂未开始|连接请求失败/);
+    await flush();
+    assert.equal(h.calls.some(([method]) => method === 'connect_license_wechat'), false);
+    await h.confirmations[0].confirm();
+    await rejected;
+    assert.equal(h.confirmations.length, 1);
+    assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+    assert.equal(h.element('#licenseRefresh').disabled, false);
+  }
+
+  const h = startupHarness({current_account: ''});
+  await h.ui.initialize();
+  h.handlers.connect_license_wechat = () => ({accepted: true});
+  const pending = h.ui.beforeStart();
+  await flush();
+  await h.confirmations[0].cancel();
+  assert.equal(await pending, false);
+  assert.equal(h.calls.some(([method]) => method === 'connect_license_wechat'), false);
+
+  const waiting = h.ui.beforeStart();
+  await flush();
+  await h.confirmations[1].confirm();
+  await flush();
+  assert.equal(h.confirmations[2].title, '请登录微信');
+  assert.equal(h.confirmations[2].subject, undefined, 'No cached account may be offered for binding');
+  await assert.rejects(h.confirmations[2].confirm(), /尚未读取到登录的微信账号/);
+  assert.equal(h.confirmations[2].settled, false, 'An unsuccessful login check leaves cancellation available');
+  await h.confirmations[2].cancel();
+  assert.equal(await waiting, false);
+  assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(h.element('#licenseRefresh').disabled, false);
+
+  h.handlers.connect_license_wechat = () => {
+    h.snapshot.current_account = 'wxid_account_a';
+    return {accepted: true};
+  };
+  const retried = h.ui.beforeStart();
+  await flush();
+  assert.equal(h.confirmations[3].title, '确认绑定当前套餐');
+  await h.confirmations[3].cancel();
+  assert.equal(await retried, false, 'Cancellation must release the gate for another attempt');
+}
+
+async function startupRejectsIdentityOrLicenseChanges() {
+  for (const change of [
+    {license_id: 'license-two'},
+    {account: 'wxid_account_b'},
+    {state: 'revoked', authorized: false},
+  ]) {
+    const h = startupHarness();
+    await h.ui.initialize();
+    const pending = h.ui.beforeStart();
+    await flush();
+    Object.assign(h.snapshot, change);
+    await assert.rejects(h.confirmations[0].confirm(), /授权状态已变化/);
+    assert.equal(h.calls.some(([method]) => ['connect_license_wechat', 'bind_license_account', 'start_robot'].includes(method)), false);
+    await h.confirmations[0].cancel();
+    assert.equal(await pending, false);
+    assert.equal(h.element('#licenseRefresh').disabled, false);
+  }
+
+  const h = startupHarness();
+  await h.ui.initialize();
+  const pending = h.ui.beforeStart();
+  const rejected = assert.rejects(pending, /账号或授权已变化/);
+  await flush();
+  h.handlers.bind_license_account = account => {
+    Object.assign(h.snapshot, {account, current_account: 'wxid_account_b'});
+    return structuredClone(h.snapshot);
+  };
+  await h.confirmations[0].confirm();
+  await rejected;
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false,
+    'A switch during the remote bind must be rejected by the final fresh read');
+
+  const failed = startupHarness();
+  await failed.ui.initialize();
+  failed.handlers.bind_license_account = () => { throw new Error('绑定请求失败'); };
+  const attempted = failed.ui.beforeStart();
+  const bindingFailure = assert.rejects(attempted, /绑定请求失败/);
+  await flush();
+  await failed.confirmations[0].confirm();
+  await bindingFailure;
+  assert.equal(failed.confirmations[0].settled, true, 'Binding happens after consent has completed');
+  assert.equal(failed.element('#licenseRefresh').disabled, false);
+  const retried = failed.ui.beforeStart();
+  await flush();
+  await failed.confirmations[1].cancel();
+  assert.equal(await retried, false);
+}
+
+async function startupFreshReadCannotRaceAnotherEntry() {
+  const h = startupHarness({account: 'wxid_account_a'});
+  await h.ui.initialize();
+  let release;
+  h.handlers.get_license_status = () => new Promise(resolve => { release = resolve; });
+  const pending = h.ui.beforeStart();
+  await flush();
+  assert.equal(await h.ui.beforeStart(), false, 'The first fresh read must hold the gate');
+  await clickTrial(h);
+  assert.equal(h.confirmations.length, 0);
+  h.handlers.get_license_status = () => structuredClone(h.snapshot);
+  release(structuredClone(h.snapshot));
+  assert.equal(await pending, true);
+
+  h.handlers.get_license_status = () => { throw new Error('实时账号读取失败'); };
+  await assert.rejects(h.ui.beforeStart(), /实时账号读取失败/);
+  assert.equal(h.element('#licenseRefresh').disabled, false);
+  assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+}
+
+async function subscriptionOptionsFollowEntitlementAndPreserveExpansion() {
+  for (const id of ['licenseConnect', 'licenseBind', 'licenseResume', 'licenseSteps', 'licenseCurrentAccountRow']) {
+    assert.doesNotMatch(indexHtml, new RegExp(`id=["']${id}["']`), `${id} must not remain in the subscription page`);
+    assert.doesNotMatch(script, new RegExp(`#${id}\\b`), `${id} must have no stale renderer or listener`);
+  }
+  const h = startupHarness();
+  await h.ui.initialize();
+  assert.equal(h.element('#licenseOptions').open, false);
+  assert.equal(h.element('#licenseOptionsTitle').textContent, '续期或更换套餐');
+  h.element('#licenseOptions').open = true;
+  await h.ui.onNavigate('subscription');
+  assert.equal(h.element('#licenseOptions').open, true, 'A background refresh must preserve user expansion');
+  Object.assign(h.snapshot, {state: 'expired', authorized: false});
+  await h.ui.onNavigate('subscription');
+  assert.equal(h.element('#licenseOptions').open, true);
+  assert.equal(h.element('#licenseOptionsTitle').textContent, '激活授权');
+}
+
+async function rebindConsentCanBeRefusedWithoutRuntimeChanges() {
+  const h = startupHarness({state: 'ready', account: 'wxid_account_a'});
+  await h.ui.initialize();
+  await h.ui.onNavigate('subscription');
+  assert.equal(h.element('#licenseRebind').hidden, false);
+  assert.equal(h.element('#licenseRebind').disabled, false);
+  assert.equal(h.element('#licenseRebindQuota').textContent, '3');
+  assert.match(h.element('#licenseRebindQuota').getAttribute('aria-label'), /剩余可换绑\s*3\s*次/);
+  const pending = h.click('#licenseRebind');
+  await flush();
+  const dialog = h.confirmations[0];
+  assert.equal(dialog.title, '更换套餐绑定微信');
+  assert.equal(dialog.subject.value, 'wxid_account_a');
+  assert.match(dialog.message, /接下来登录的新微信号将绑定当前套餐/);
+  assert.match(dialog.message, /剩余可换绑\s*3\s*次/);
+  assert.equal(h.calls.some(([method]) => ['stop_robot', 'connect_license_wechat', 'rebind_license_account', 'start_robot'].includes(method)), false);
+  await dialog.cancel();
+  await pending;
+  assert.equal(h.calls.some(([method]) => ['stop_robot', 'connect_license_wechat', 'rebind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(h.bindingStatus.rebind_remaining, 3);
+  assert.equal(h.element('#licenseRebind').disabled, false);
+}
+
+async function rebindWaitsForADifferentActualAccountAndDoesNotStart() {
+  const h = startupHarness({state: 'ready', account: 'wxid_account_a'});
+  await h.ui.initialize();
+  await h.ui.onNavigate('subscription');
+  h.handlers.stop_robot = () => ({accepted: true});
+  h.handlers.rebind_license_account = (account, previous, revision) => {
+    assert.equal(account, 'wxid_account_b');
+    assert.equal(previous, 'wxid_account_a');
+    assert.equal(revision, 17);
+    Object.assign(h.snapshot, {account, current_account: account, can_run: false});
+    Object.assign(h.bindingStatus, {revision: 18, rebind_used: 3, rebind_remaining: 2});
+    return structuredClone(h.snapshot);
+  };
+  const pending = h.click('#licenseRebind');
+  await flush();
+  await h.confirmations[0].confirm();
+  await flush();
+  assert.equal(h.calls.filter(([method]) => method === 'stop_robot').length, 1);
+  assert.equal(h.confirmations[1].title, '请切换微信账号');
+  await assert.rejects(h.confirmations[1].confirm(), /仍是原绑定微信/);
+  assert.equal(h.calls.some(([method]) => method === 'rebind_license_account'), false);
+  assert.equal(h.bindingStatus.rebind_remaining, 3);
+  h.snapshot.current_account = 'wxid_account_b';
+  await h.confirmations[1].confirm();
+  await pending;
+  assert.equal(h.calls.filter(([method]) => method === 'rebind_license_account').length, 1);
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
+  assert.match(h.element('#licenseFeedback').textContent, /换绑已完成.*保持停止.*运行中心/);
+  assert.equal(h.element('#licenseRebindQuota').textContent, '2');
+  assert.equal(h.element('#licenseRebind').disabled, false);
+
+  const canceled = startupHarness({state: 'ready', account: 'wxid_account_a'});
+  await canceled.ui.initialize();
+  canceled.handlers.stop_robot = () => ({accepted: true});
+  const waiting = canceled.click('#licenseRebind');
+  await flush();
+  await canceled.confirmations[0].confirm();
+  await flush();
+  await canceled.confirmations[1].cancel();
+  await waiting;
+  assert.equal(canceled.calls.some(([method]) => ['bind_license_account', 'rebind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(canceled.bindingStatus.rebind_remaining, 3);
+  assert.equal(canceled.element('#licenseRefresh').disabled, false);
+}
+
+async function rebindInvalidQuotaOrChangedRevisionBlocksRuntimeActions() {
+  for (const failure of ['quota', 'read', 'trial']) {
+    const h = startupHarness({state: 'ready', account: 'wxid_account_a', plan: failure === 'trial' ? 'trial' : 'month'});
+    await h.ui.initialize();
+    if (failure === 'quota') Object.assign(h.bindingStatus, {rebind_used: 5, rebind_remaining: 0, can_rebind: false});
+    if (failure === 'read') h.handlers.get_license_binding_status = () => { throw new Error('换绑次数读取失败'); };
+    await h.ui.onNavigate('subscription');
+    assert.equal(h.element('#licenseRebind').hidden, failure === 'trial');
+    await h.click('#licenseRebind');
+    assert.equal(h.confirmations.length, 0);
+    assert.equal(h.calls.some(([method]) => ['stop_robot', 'connect_license_wechat', 'rebind_license_account', 'start_robot'].includes(method)), false);
+    assert.match(h.element('#licenseFeedback').textContent, /次数不足|不支持换绑|换绑次数读取失败/);
+    assert.equal(h.element('#licenseRefresh').disabled, false);
+  }
+
+  for (const change of [{revision: 18}, {rebind_remaining: 0, can_rebind: false}]) {
+    const h = startupHarness({state: 'ready', account: 'wxid_account_a'});
+    await h.ui.initialize();
+    const pending = h.click('#licenseRebind');
+    await flush();
+    Object.assign(h.bindingStatus, change);
+    await assert.rejects(h.confirmations[0].confirm(), /授权或换绑次数已变化/);
+    await h.confirmations[0].cancel();
+    await pending;
+    assert.equal(h.calls.some(([method]) => ['stop_robot', 'connect_license_wechat', 'rebind_license_account', 'start_robot'].includes(method)), false);
+  }
+}
+
+async function rebindStopOrWriteFailurePreservesTheOldBinding() {
+  const stopped = startupHarness({state: 'ready', account: 'wxid_account_a'});
+  await stopped.ui.initialize();
+  stopped.handlers.stop_robot = () => ({accepted: false, message: '正在停止，请稍后重试'});
+  const rejected = stopped.click('#licenseRebind');
+  await flush();
+  await stopped.confirmations[0].confirm();
+  await rejected;
+  assert.match(stopped.element('#licenseFeedback').textContent, /正在停止/);
+  assert.equal(stopped.calls.some(([method]) => ['connect_license_wechat', 'rebind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(stopped.element('#licenseRefresh').disabled, false);
+
+  const h = startupHarness({state: 'ready', account: 'wxid_account_a'});
+  await h.ui.initialize();
+  h.handlers.stop_robot = () => ({accepted: true});
+  h.handlers.rebind_license_account = () => { throw new Error('换绑请求失败'); };
+  const pending = h.click('#licenseRebind');
+  await flush();
+  await h.confirmations[0].confirm();
+  await flush();
+  h.snapshot.current_account = 'wxid_account_b';
+  await h.confirmations[1].confirm();
+  await pending;
+  assert.match(h.element('#licenseFeedback').textContent, /换绑请求失败/);
+  assert.equal(h.snapshot.account, 'wxid_account_a');
+  assert.equal(h.bindingStatus.rebind_remaining, 3);
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
+  assert.equal(h.element('#licenseRebind').disabled, false);
+}
+
+async function authorizationMessagesExplainTheReasonAcrossEveryEntry() {
+  const cases = [
+    ['revoked', /授权已撤销.*当前未授权.*付费激活码/],
+    ['license_revoked', /授权已撤销.*当前未授权.*付费激活码/],
+    ['expired', /订阅已到期.*兑换续期码/],
+    ['subscription_expired', /订阅已到期.*兑换续期码/],
+    ['offline_expired', /离线授权已过期.*重新验证/],
+    ['lease_expired', /离线授权已过期.*重新验证/],
+    ['clock_error', /校准时间.*重新验证/],
+    ['account_mismatch', /绑定账号不一致.*切回已绑定/],
+    ['license_unavailable', /当前设备授权不可用.*恢复或迁移授权/],
+    ['suspended', /授权暂不可用.*联系管理员/],
+    ['invalid', /授权暂不可用.*重新验证/],
+  ];
+  for (const [state, expected] of cases) {
+    const h = harness({state, license_id: 'old-license', plan: 'month', account: 'wxid_a',
+      current_account: state === 'account_mismatch' ? 'wxid_b' : 'wxid_a',
+      authorized: state === 'account_mismatch', message: '旧客户端提示：自动化已暂停。'});
+    await h.ui.initialize();
+    const message = h.element('#licenseStateMessage').textContent;
+    assert.match(message, expected, state);
+    assert.doesNotMatch(message, /自动化|暂停/);
+    assert.equal(h.element('#homeLicenseMessage').textContent, message);
+    assert.equal(h.ui.formatMessage(undefined, h.snapshot.message), message);
+    const pauseFailure = '授权暂停未能写入，已停止后台服务；请稍后重新连接微信。';
+    assert.equal(h.ui.formatMessage(undefined, pauseFailure), pauseFailure,
+      'A distinct runtime failure must not be replaced by the stored entitlement state');
+    assert.equal(await h.ui.beforeStart(), false);
+    assert.equal(h.toasts.at(-1).message, message);
+    assert.equal(h.element('#licenseFeedback').textContent, message);
+    for (const code of [state, `LIC-${state}`]) {
+      h.handlers.refresh_license = () => { throw Object.assign(new Error('自动化已暂停'),
+        {product: {code, message: '旧客户端提示：自动化已暂停。'}}); };
+      await h.click('#licenseRefresh');
+      assert.equal(h.element('#licenseFeedback').textContent, message, code);
+      assert.equal(h.ui.formatMessage({code, message: '自动化已暂停'}), message, code);
+    }
+  }
+  const trial = harness({state: 'expired', plan: 'trial'});
+  await trial.ui.initialize();
+  assert.match(trial.element('#licenseStateMessage').textContent, /免费试用已结束.*付费激活码/);
+  const unknown = harness({state: 'storage_error', message: '授权存储暂不可用，请稍后重试。'});
+  await unknown.ui.initialize();
+  assert.equal(unknown.ui.formatMessage(undefined, '授权暂停未能写入，已停止后台服务。'),
+    '授权暂停未能写入，已停止后台服务。', 'Unknown runtime failures retain their actual detail');
+  assert.equal(unknown.ui.formatMessage({code: 'LIC-code_unavailable', message: '激活码不可用，请检查输入。'}),
+    '激活码不可用，请检查输入。');
+  assert.equal(unknown.ui.formatMessage({code: '19000', message: ''}), '');
+  const markup = fs.readFileSync(path.join(__dirname, '../src/wechatrebot_manager/app_webui/index.html'), 'utf8');
+  assert.match(markup, /id="licensePausedInfo" hidden>机器人未运行。微信和本机数据保留，处理授权问题后可手动启动；未运行期间的任务不会补发。<\/p>/);
+}
+
+async function globalErrorsReuseAuthorizationMessagesAndRetainErrorCodes() {
+  const h = harness();
+  await h.ui.initialize();
+  const source = fs.readFileSync(path.join(__dirname, '../src/wechatrebot_manager/app_webui/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('  function reportError('), source.indexOf('  function debounce('));
+  const messages = [];
+  const report = new Function('subscription', 'toast', 'window', 'state', `${body}; return reportError;`)(
+    h.ui, (message, type) => messages.push({message, type}), {}, {});
+  for (const code of ['LIC-revoked', 'LIC-license_revoked']) {
+    report({product: {code, message: '授权已撤销，自动化已暂停，请联系管理员。', recorded: true}});
+    assert.match(messages.at(-1).message, /授权已撤销.*当前未授权.*付费激活码/);
+    assert.ok(messages.at(-1).message.includes(`（${code}）`));
+    assert.doesNotMatch(messages.at(-1).message, /自动化|暂停/);
+  }
+  report({product: {code: '19000', detail: '原始诊断详情', recorded: true}});
+  assert.equal(messages.at(-1).message, '操作未完成：原始诊断详情（19000）');
+  const beforeInitialize = new Function('toast', 'window', 'state', `${body}; const result = reportError;
+    result({product: {code: '19000', message: '初始化资源未就绪', recorded: true}}); let subscription;`);
+  beforeInitialize((message) => messages.push({message}), {}, {});
+  assert.equal(messages.at(-1).message, '操作未完成：初始化资源未就绪（19000）');
+}
+
+async function businessNumbersCannotBeSubmittedAsActivationCodes() {
+  const h = harness();
+  await h.ui.initialize();
+  const initialCalls = h.calls.length;
+  assert.match(h.element('#licenseCodeHelp').textContent, /完整激活码.*业务编号不能用于兑换/);
+  for (const code of ['WRB-20991231235959-0123456789ABCDEF', ' wrb-20991231235959-0123456789abcdef ']) {
+    await h.preview(code);
+    assert.equal(h.element('#licenseCodeFeedback').textContent, '这是业务编号，请复制详情中的完整激活码。');
+    assert.equal(h.element('#licenseCodeFeedback').dataset.tone, 'error');
+    assert.equal(h.element('#licenseCode').value, code);
+    assert.equal(h.element('#licenseCodePreview').hidden, true);
+    assert.equal(h.calls.length, initialCalls, 'A business number must not make an API request');
+  }
+  h.handlers.preview_activation_code = () => ({preview_id: 'actual-code', plan: 'month', mode: 'new'});
+  await h.preview('WRB-ABCDEFGH-ABCDEFGH-ABCDEFGH-ABCDEFGH');
+  assert.equal(h.element('#licenseCodePreview').hidden, false);
+  assert.equal(h.calls.filter(([method]) => method === 'preview_activation_code').length, 1);
 }
 
 async function wechatContactHasItsOwnRefreshCycle() {
@@ -481,9 +926,121 @@ function runCenterCanStartWithBridgeConnected() {
   assert.equal(h.element('#primaryAction').dataset.action, 'start');
   assert.equal(h.element('#primaryAction').disabled, false);
   assert.match(h.element('#globalStatus').innerHTML, /等待启动/);
+  context.state.startPreparing = true;
+  context.renderStatus(status);
+  assert.equal(h.element('#primaryAction').disabled, true,
+    'Runtime polling must not unlock the start button during account confirmation');
+  context.state.startPreparing = false;
   context.renderStatus({...status, state: 'RUNNING', can_start: false, online: true});
   assert.equal(h.element('#primaryAction').dataset.action, 'stop');
   assert.equal(h.element('#primaryAction').disabled, false);
+}
+
+async function runCenterStartCancellationAndFailureUnlockTheButton() {
+  const app = require('./js/webui_source.cjs').managerScript(path.join(__dirname, '../src/wechatrebot_manager/app_webui'));
+  const start = app.indexOf('  async function runPrimaryAction(');
+  const end = app.indexOf('  function runForceStop(', start);
+  assert.ok(start >= 0 && end > start);
+  const h = harness(), errors = [], calls = [];
+  const stopped = {state: 'STOPPED', can_start: true, can_stop: false, busy: false};
+  const state = {status: stopped, startPreparing: false, startPending: false};
+  let release, beforeCalls = 0, gate = () => new Promise(resolve => { release = resolve; });
+  let action = () => ({accepted: true});
+  h.element('#primaryAction').dataset.action = 'start';
+  const renderStatus = status => {
+    state.status = status;
+    h.element('#primaryAction').disabled = Boolean(state.startPreparing || status.busy);
+  };
+  const context = vm.createContext({state, $: h.element,
+    subscription: {beforeStart: () => { beforeCalls += 1; return gate(); }},
+    api: async method => { calls.push(method); return action(); },
+    startingStatus: status => ({...status, state: 'CORE_STARTING', busy: true}),
+    renderStatus, reportError: error => errors.push(error),
+    refreshStatus: async () => { calls.push('get_status'); renderStatus(stopped); },
+    window: {setTimeout() {}},
+  });
+  vm.runInContext(app.slice(start, end), context);
+  const pending = context.runPrimaryAction();
+  assert.equal(h.element('#primaryAction').disabled, true);
+  await context.runPrimaryAction();
+  assert.equal(beforeCalls, 1, 'Repeated starts must share a single pending gate');
+  release(false); await pending;
+  assert.equal(h.element('#primaryAction').disabled, false);
+  assert.equal(state.startPreparing, false);
+  assert.equal(state.startPending, false);
+  assert.deepEqual(calls, []);
+
+  gate = () => { throw new Error('确认账号读取失败'); };
+  await context.runPrimaryAction();
+  assert.equal(errors.at(-1).message, '确认账号读取失败');
+  assert.equal(h.element('#primaryAction').disabled, false);
+  assert.equal(state.startPreparing, false);
+  assert.equal(state.startPending, false);
+  assert.deepEqual(calls, ['get_status']);
+
+  gate = () => true;
+  action = () => ({accepted: false});
+  await context.runPrimaryAction();
+  assert.equal(state.startPending, false, 'A rejected queue request must not retain a pending startup');
+  action = () => { throw new Error('启动请求失败'); };
+  await context.runPrimaryAction();
+  assert.equal(errors.at(-1).message, '启动请求失败');
+  assert.equal(state.startPreparing, false);
+  assert.equal(state.startPending, false);
+  assert.equal(h.element('#primaryAction').disabled, false);
+}
+
+async function confirmationPromiseSettlesOnCancelAndAllowsFailureRecovery() {
+  const app = require('./js/webui_source.cjs').managerScript(path.join(__dirname, '../src/wechatrebot_manager/app_webui'));
+  const start = app.indexOf('  let modalResolve = null;');
+  const end = app.indexOf('  function requiredValues(', start);
+  assert.ok(start >= 0 && end > start);
+  const h = harness(), errors = [];
+  const focus = {focus() { focus.restored = true; }};
+  const context = vm.createContext({$: h.element, escapeHtml, document: {activeElement: focus},
+    reportError: error => errors.push(error)});
+  vm.runInContext(app.slice(start, end), context);
+  const resolve = confirmed => vm.runInContext(`modalResolve(${confirmed})`, context);
+  let canceled = 0;
+  const cancel = context.confirmAction({title: '确认账号', message: '请核对',
+    onConfirm: async () => assert.fail('Cancellation must not run the confirmed operation'),
+    onCancel: () => { canceled += 1; }});
+  assert.equal(h.element('.app-shell').inert, true);
+  await resolve(false);
+  assert.equal(await cancel, false);
+  assert.equal(canceled, 1);
+  assert.equal(h.element('#modalBackdrop').hidden, true);
+  assert.equal(h.element('.app-shell').inert, false);
+  assert.equal(focus.restored, true);
+
+  let settled = false;
+  const failed = context.confirmAction({title: '确认账号', message: '原始说明',
+    onConfirm: async () => { throw new Error('微信账号已变化'); }});
+  failed.then(() => { settled = true; });
+  await resolve(true);
+  assert.equal(settled, false, 'Failure must leave a pending decision with retry and cancel available');
+  assert.equal(h.element('#modalError').hidden, false);
+  assert.match(h.element('#modalError').textContent, /微信账号已变化/);
+  assert.equal(h.element('#modalConfirm').disabled, false);
+  assert.equal(h.element('#modalCancel').disabled, false);
+  assert.equal(h.element('#modalBackdrop').dataset.busy, 'false');
+  assert.equal(errors.length, 1);
+  await resolve(false);
+  assert.equal(await failed, false);
+
+  let release;
+  const confirmed = context.confirmAction({title: '确认账号', message: '请核对',
+    subject: {label: '微信账号', value: 'wxid_account_a'},
+    onConfirm: () => new Promise(done => { release = done; })});
+  const confirming = resolve(true);
+  assert.equal(h.element('#modalSubjectValue').textContent, 'wxid_account_a');
+  assert.equal(h.element('#modalConfirm').disabled, true);
+  assert.equal(h.element('#modalCancel').disabled, true);
+  await resolve(false);
+  assert.equal(h.element('#modalBackdrop').hidden, false, 'An accepted write cannot be canceled halfway through');
+  release(); await confirming;
+  assert.equal(await confirmed, true);
+  assert.equal(h.element('#modalBackdrop').hidden, true);
 }
 
 function clickTrial(h) {
@@ -502,24 +1059,26 @@ async function freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded() {
   const h = harness({can_connect: true});
   await h.ui.initialize();
   await h.ui.onNavigate('subscription');
-  assert.equal(h.element('#licenseConnect').hidden, false, 'An unactivated install must allow connecting WeChat');
-  assert.equal(h.element('#licenseActivateTrial').disabled, true);
-  assert.match(h.element('#licenseTrialStatus').textContent, /请先连接微信/);
+  assert.equal(h.element('#licenseActivateTrial').disabled, false,
+    'The free-trial button connects WeChat when no account is logged in');
+  assert.match(h.element('#licenseTrialStatus').textContent, /激活时先确认试用提示，再登录/);
   assert.equal(h.calls.some(([method]) => method === 'get_trial_status'), false);
 
   h.handlers.get_trial_status = async () => ({free_trial: {
     state: 'eligible', eligible: true, recoverable: false, account: h.snapshot.current_account,
   }});
-  h.snapshot.current_account = 'wxid_trial_a';
-  h.intervals.find(fn => fn.delay === 4000)(); await flush();
-  assert.equal(h.element('#licenseActivateTrial').disabled, false);
-  assert.equal(h.element('#licenseActivateTrial').textContent, '激活免费试用');
-  assert.equal(h.element('#licenseCurrentAccountRow').hidden, false);
-  await h.ui.onNavigate('subscription');
-  h.intervals.find(fn => fn.delay === 4000)(); await flush();
-  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 1,
-    'Repeated navigation and the four-second local status poll must not query trial eligibility');
-
+  h.handlers.connect_license_wechat = () => ({accepted: true});
+  const pending = clickTrial(h);
+  await flush();
+  assert.equal(h.confirmations[0].title, '确认激活免费试用');
+  assert.equal(h.confirmations[0].subject, undefined);
+  assert.equal(h.confirmations[0].confirmText, '同意并继续');
+  assert.match(h.confirmations[0].message, /接下来登录的微信号将用于免费试用/);
+  assert.equal(h.calls.some(([method]) => ['connect_license_wechat', 'get_trial_status', 'activate_free_trial'].includes(method)), false);
+  await h.confirmations[0].confirm();
+  await flush();
+  assert.equal(h.confirmations[1].title, '请登录微信');
+  assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false);
   let release;
   h.handlers.activate_free_trial = async account => {
     assert.equal(account, 'wxid_trial_a');
@@ -528,22 +1087,27 @@ async function freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded() {
       license_id: 'trial-license', account, plan: 'trial', valid_until: 1800000000, remaining_seconds: 3600});
     return structuredClone(h.snapshot);
   };
-  const pending = clickTrial(h);
+  h.snapshot.current_account = 'wxid_trial_a';
+  const confirmed = h.confirmations[1].confirm();
+  await flush();
   await clickTrial(h);
   assert.equal(h.element('#licenseActivateTrial').disabled, true);
   assert.equal(h.calls.filter(([method]) => method === 'activate_free_trial').length, 1);
-  assert.equal(h.confirmations.length, 0, 'Self-service trial activation must not show a confirmation dialog');
-  release(); await pending;
+  release(); await confirmed; await pending;
   assert.equal(h.element('#licenseActivateTrial').textContent, '试用进行中');
   assert.match(h.element('#licenseTrialStatus').textContent, /免费试用进行中，结束时间/);
   assert.equal(h.calls.some(([method]) => method === 'start_robot'), false, 'Trial activation must not start automation');
-  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 2);
+  const trialQueries = h.calls.filter(([method]) => method === 'get_trial_status').length;
+  await h.ui.onNavigate('subscription');
+  h.intervals.find(fn => fn.delay === 4000)(); await flush();
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, trialQueries,
+    'Repeated navigation and the four-second local poll must not query trial eligibility');
 
   Object.assign(h.snapshot, {state: 'expired', authorized: false, remaining_seconds: 0});
   h.intervals.find(fn => fn.delay === 4000)(); await flush();
   assert.equal(h.element('#licenseTrialStatus').textContent, '你的试用已结束，可联系群主购买');
   assert.equal(h.element('#licenseActivateTrial').disabled, true);
-  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 2,
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, trialQueries,
     'Signed local expiry must render without another remote eligibility query');
 }
 
@@ -575,9 +1139,14 @@ async function freeTrialStatesFailuresAndAccountChanges() {
   assert.equal(h.element('#licenseActivateTrial').textContent, '恢复免费试用');
   assert.equal(h.element('#licenseActivateTrial').disabled, false);
   h.handlers.activate_free_trial = () => { throw new Error('微信登录账号已变化'); };
-  await clickTrial(h);
+  const failedActivation = clickTrial(h);
+  await flush();
+  assert.equal(h.confirmations[0].title, '确认激活免费试用');
+  await h.confirmations[0].confirm();
+  await failedActivation;
   assert.match(h.element('#licenseFeedback').textContent, /微信登录账号已变化/);
   assert.equal(h.element('#licenseFeedback').dataset.tone, 'error');
+  assert.equal(h.element('#licenseActivateTrial').disabled, false);
 
   let releaseOld, releaseNew;
   h.snapshot.current_account = 'wxid_trial_b';
@@ -592,6 +1161,103 @@ async function freeTrialStatesFailuresAndAccountChanges() {
   releaseNew({free_trial: {state: 'used', eligible: false, account: 'wxid_trial_c'}}); await flush();
   assert.equal(h.element('#licenseTrialStatus').textContent, '当前设备或微信账号已领取过试用，可联系群主购买');
   assert.equal(h.element('#licenseActivateTrial').disabled, true);
+}
+
+async function trialCancellationAndChangedConsentCannotActivate() {
+  const setup = async overrides => {
+    const h = harness({can_connect: true, current_account: 'wxid_trial_a', ...overrides});
+    h.handlers.get_trial_status = () => ({free_trial: {state: 'eligible', eligible: true,
+      account: h.snapshot.current_account}});
+    await h.ui.initialize();
+    await h.ui.onNavigate('subscription');
+    return h;
+  };
+  const canceled = await setup();
+  const pendingCancel = clickTrial(canceled);
+  await flush();
+  await canceled.confirmations[0].cancel();
+  await pendingCancel;
+  assert.equal(canceled.calls.some(([method]) => ['connect_license_wechat', 'activate_free_trial', 'bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(canceled.element('#licenseActivateTrial').disabled, false);
+
+  for (const change of [
+    {license_id: 'paid-license', plan: 'month', authorized: true, state: 'ready'},
+  ]) {
+    const h = await setup();
+    const pending = clickTrial(h);
+    await flush();
+    Object.assign(h.snapshot, change);
+    await assert.rejects(h.confirmations[0].confirm(), /授权.*变化/);
+    assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false);
+    await h.confirmations[0].cancel();
+    await pending;
+    assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+  }
+
+  const loginCanceled = harness({can_connect: true});
+  await loginCanceled.ui.initialize();
+  loginCanceled.handlers.connect_license_wechat = () => ({accepted: true});
+  const waiting = clickTrial(loginCanceled);
+  await flush();
+  await loginCanceled.confirmations[0].confirm();
+  await flush();
+  assert.equal(loginCanceled.confirmations[1].title, '请登录微信');
+  await loginCanceled.confirmations[1].cancel();
+  await waiting;
+  assert.equal(loginCanceled.calls.some(([method]) => ['get_trial_status', 'activate_free_trial', 'start_robot'].includes(method)), false);
+  assert.equal(loginCanceled.element('#licenseActivateTrial').disabled, false);
+}
+
+async function trialConnectionAwaitsEligibilityAndRecoversFromFailure() {
+  const h = harness({can_connect: true});
+  await h.ui.initialize();
+  await h.ui.onNavigate('subscription');
+  h.handlers.connect_license_wechat = () => {
+    h.snapshot.current_account = 'wxid_trial_a';
+    return {accepted: true};
+  };
+  let release;
+  h.handlers.get_trial_status = () => new Promise(resolve => { release = resolve; });
+  const pending = clickTrial(h);
+  await flush();
+  assert.equal(h.calls.some(([method]) => method === 'connect_license_wechat'), false);
+  await h.confirmations[0].confirm();
+  await flush();
+  assert.equal(h.confirmations.length, 1, 'Account discovery must await its in-flight eligibility request');
+  assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 1,
+    'Automatic account discovery and the trial action must share the pending eligibility request');
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+  h.handlers.activate_free_trial = account => {
+    assert.equal(account, 'wxid_trial_a');
+    Object.assign(h.snapshot, {state: 'ready', authorized: true, plan: 'trial',
+      account, license_id: 'trial-license', valid_until: 1800000000});
+    return structuredClone(h.snapshot);
+  };
+  h.handlers.get_trial_status = () => ({free_trial: {state: 'active', account: 'wxid_trial_a'}});
+  release({free_trial: {state: 'eligible', eligible: true, account: 'wxid_trial_a'}});
+  await pending;
+  assert.equal(h.confirmations.length, 1, 'The accepted trial consent must not be asked again after login');
+  assert.equal(h.calls.filter(([method]) => method === 'activate_free_trial').length, 1);
+  assert.equal(h.element('#licenseActivateTrial').disabled, true);
+
+  for (const response of [{accepted: false, message: '微信连接正在处理'}, new Error('微信连接失败')]) {
+    const failed = harness({can_connect: true});
+    await failed.ui.initialize();
+    failed.handlers.connect_license_wechat = () => {
+      if (response instanceof Error) throw response;
+      return response;
+    };
+    const attempted = clickTrial(failed);
+    await flush();
+    assert.equal(failed.calls.some(([method]) => method === 'connect_license_wechat'), false);
+    await failed.confirmations[0].confirm();
+    await attempted;
+    assert.match(failed.element('#licenseFeedback').textContent, /微信连接正在处理|微信连接失败/);
+    assert.equal(failed.element('#licenseFeedback').dataset.tone, 'error');
+    assert.equal(failed.element('#licenseActivateTrial').disabled, false);
+    assert.equal(failed.confirmations.length, 1);
+    assert.equal(failed.calls.some(([method]) => ['get_trial_status', 'activate_free_trial', 'start_robot'].includes(method)), false);
+  }
 }
 
 async function paidRedemptionInvalidatesOutstandingTrialQuery() {
@@ -622,12 +1288,29 @@ async function paidRedemptionInvalidatesOutstandingTrialQuery() {
   assert.equal(ended.element('#licenseTrialStatus').textContent, '你的试用已结束，可联系群主购买');
 }
 
+const completionTimer = setTimeout(() => {
+  console.error('Subscription UI checks did not finish; a confirmation or API promise may be unresolved.');
+  process.exitCode = 1;
+}, 10000);
+
 (async () => {
   await activationAndRecovery();
   await expiryAndUnconfigured();
   await validSubscriptionStaysActiveWhenStoppedOrDisconnected();
   await revokedSubscriptionCanConfirmNewPaidActivationWithoutStarting();
-  await rejectedStartIsNotReportedAsSuccess();
+  await startupConsentPrecedesAccountConnection();
+  await startupBindingQuotaMustBeLiveAndFailClosed();
+  await startupConnectionFailuresAndLoginCancellation();
+  await startupRejectsIdentityOrLicenseChanges();
+  await startupFreshReadCannotRaceAnotherEntry();
+  await subscriptionOptionsFollowEntitlementAndPreserveExpansion();
+  await rebindConsentCanBeRefusedWithoutRuntimeChanges();
+  await rebindWaitsForADifferentActualAccountAndDoesNotStart();
+  await rebindInvalidQuotaOrChangedRevisionBlocksRuntimeActions();
+  await rebindStopOrWriteFailurePreservesTheOldBinding();
+  await authorizationMessagesExplainTheReasonAcrossEveryEntry();
+  await globalErrorsReuseAuthorizationMessagesAndRetainErrorCodes();
+  await businessNumbersCannotBeSubmittedAsActivationCodes();
   await wechatContactHasItsOwnRefreshCycle();
   await wechatContactExpiryClearsTheImageAndExpansion();
   await qrExpiryUsesElapsedTimeInsteadOfTheLocalClock();
@@ -636,7 +1319,11 @@ async function paidRedemptionInvalidatesOutstandingTrialQuery() {
   await validBundledFallbackShowsTheRefreshWarning();
   await freeTrialRequiresLiveAccountAndQueriesOnlyWhenNeeded();
   await freeTrialStatesFailuresAndAccountChanges();
+  await trialCancellationAndChangedConsentCannotActivate();
+  await trialConnectionAwaitsEligibilityAndRecoversFromFailure();
   await paidRedemptionInvalidatesOutstandingTrialQuery();
   runCenterCanStartWithBridgeConnected();
+  await runCenterStartCancellationAndFailureUnlockTheButton();
+  await confirmationPromiseSettlesOnCancelAndAllowsFailureRecovery();
   process.stdout.write('Subscription UI activation, expiry, confirmation and WeChat QR checks passed.\n');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(completionTimer));

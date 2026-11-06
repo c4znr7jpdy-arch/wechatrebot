@@ -22,6 +22,7 @@ from wechatrebot_manager.licensing.protocol import (
     ACCOUNT_PATTERN, CODE_MODES, MAX_LEASE_SECONDS, PLANS, LicenseError, extend_period,
 )
 from .code_history import KEY_FILENAME, decrypt_payload, encrypt_payload, load_key
+from .rebinding import REBINDING_SCHEMA, RebindingMixin
 
 PREVIEW_SECONDS = 300
 _CODE = re.compile(r"WRB[A-Z2-7]{32}")
@@ -120,7 +121,7 @@ def _validate_body(body: dict, required: set[str], optional: set[str] | None = N
         raise LicenseError("invalid_data", "请求参数无效。")
 
 
-class LicenseStore:
+class LicenseStore(RebindingMixin):
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +137,7 @@ class LicenseStore:
                 db.execute("ALTER TABLE previews ADD COLUMN replaces_revision INTEGER NOT NULL DEFAULT 0")
             # Execute individually: executescript would commit before the schema
             # and version change, exposing a half-upgraded database to workers.
-            for statement in _SCHEMA.split(";"):
+            for statement in (_SCHEMA + REBINDING_SCHEMA).split(";"):
                 if statement.strip():
                     db.execute(statement)
             if "encrypted_payload" not in {row[1] for row in db.execute("PRAGMA table_info(codes)")}:
