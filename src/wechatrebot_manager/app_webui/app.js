@@ -509,14 +509,16 @@
     const connectionStarting = current === "CONNECTION_STARTING";
     const connectionWaiting = ["WAITING_WECHAT", "VERIFYING_CONNECTION"].includes(current);
     const connectionRetained = licenseWaiting && runtime.connection_ready;
-    const connectionMode = online || wechatLoggedIn || connectionRetained ? "done" : confirmingConnection || connectionWaiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
-    setStage($("#stageConnection"), connectionMode, online ? "已连接" : confirmingConnection ? "确认中" : wechatLoggedIn ? "已登录" : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
+    const messageConnected = online || Boolean(runtime.connection_ready && runtime.hook_ready
+      && wechatLoggedIn && runtime.upstream_connected && runtime.heartbeat_fresh);
+    const connectionMode = messageConnected ? "done" : confirmingConnection || connectionWaiting || connectionStarting || wechatLoggedIn || connectionRetained ? "current" : problem && coreStarted ? "problem" : "";
+    setStage($("#stageConnection"), connectionMode, messageConnected ? "已连接" : confirmingConnection ? "确认中" : wechatLoggedIn ? (active ? "连接中" : "待启动") : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     const wechatConnection = !accountStatusAvailable && (active || runtime.connection_ready) ? "状态待确认" : runtime.hook_ready || wechatLoggedIn ? "已连接" : "待连接";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${wechatConnection}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : confirmingConnection ? "状态待确认" : active ? "正在启动" : "未启动";
-    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : wechatLoggedIn ? (active ? "已登录，功能启动中" : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
+    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : wechatLoggedIn ? (active ? (coreStarted ? "正在连接消息服务" : "已登录，功能启动中") : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
     $("#wechatPath").textContent = environment.path || "尚未选择";
   }
 

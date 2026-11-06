@@ -1830,7 +1830,7 @@ const reportError = error => { throw error; };
 const setHistoryActionsEnabled = () => {};
 const escapeHtml = value => value;
 const icon = () => "";
-const setStage = (node, mode, label) => {node.textContent = label;};
+const setStage = (node, mode, label) => {node.textContent = label; node.mode = mode;};
 const base = {
   state:"RUNNING", title:"机器人可用", message:"微信连接和全部功能运行正常。",
   online:false, busy:false, can_start:false, can_stop:true,
@@ -1848,21 +1848,34 @@ const cases = [
   {state:"LICENSE_READY", title:"机器人未启动", can_start:true, runtime:{connection_ready:true}},
   {state:"LICENSE_PAUSED", title:"自动化已暂停", can_start:true, runtime:{connection_ready:false}},
   {state:"LICENSE_READY", title:"机器人未启动", can_start:true,
-    runtime:{connection_ready:true, account_status_available:true, wechat_identity:'wxid_current'}}
+    runtime:{connection_ready:true, account_status_available:true, wechat_identity:'wxid_current'}},
+  {state:"CORE_STARTING", busy:true, runtime:{connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+  {state:"CORE_READY", busy:true, runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+  {runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:false}},
+  {runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}},
+  {state:"CORE_STARTING", busy:true, runtime:{connection_ready:true, hook_ready:false,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}}
 ];
 process.stdout.write(JSON.stringify(cases.map(changes => {
   renderStatus({...base, ...changes});
-  return Object.fromEntries([
+  return {...Object.fromEntries([
     "stateTitle", "stateMessage", "globalStatus", "sideHealthText",
     "stageConnection", "signalMessage", "primaryAction"
-  ].map(id => [id, $("#" + id).textContent || $("#" + id).innerHTML]));
+  ].map(id => [id, $("#" + id).textContent || $("#" + id).innerHTML])),
+    connectionMode: $('#stageConnection').mode};
 })));
 """
     result = subprocess.run(
         ["node"], input=render + harness, text=True, encoding="utf-8",
         capture_output=True, check=True, timeout=10,
     )
-    pending, offline, online, stopped, error, waiting, stopping, failed, retained, paused, logged_in = json.loads(result.stdout)
+    (pending, offline, online, stopped, error, waiting, stopping, failed, retained,
+     paused, logged_in, core_starting, core_ready, stale_heartbeat, connected,
+     hook_missing) = json.loads(result.stdout)
     assert pending["stateTitle"] == pending["sideHealthText"] == "正在确认连接"
     assert "正在确认连接" in pending["globalStatus"]
     assert "暂时无法确认" in pending["stateMessage"]
@@ -1879,9 +1892,19 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
     assert stopping["stateTitle"] == "正在停止机器人"
     assert failed["stateTitle"] != "正在确认连接"
     assert retained["stageConnection"] == retained["signalMessage"] == "连接已保留"
+    assert retained["connectionMode"] == "current"
     assert "等待启动" in retained["globalStatus"]
     assert paused["stageConnection"] == "未连接"
     assert logged_in["signalMessage"] == "微信已登录，机器人未启动"
+    assert logged_in["stageConnection"] == "待启动"
+    assert logged_in["connectionMode"] == "current"
+    assert core_starting["stageConnection"] == core_ready["stageConnection"] == "连接中"
+    assert core_starting["signalMessage"] == "已登录，功能启动中"
+    assert core_ready["signalMessage"] == "正在连接消息服务"
+    for incomplete in (core_starting, core_ready, stale_heartbeat, hook_missing):
+        assert incomplete["connectionMode"] == "current"
+    assert connected["connectionMode"] == "done"
+    assert connected["stageConnection"] == "已连接"
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
@@ -2296,8 +2319,8 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     assert '["STOPPED", "LICENSE_READY"].includes(current) && status?.environment?.ready' in script
     assert '"启动中…"' in script
     assert "const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);" in script
-    assert 'wechatLoggedIn ? "已登录"' in script
-    assert 'active ? "已登录，功能启动中" : "微信已登录，机器人未启动"' in script
+    assert 'wechatLoggedIn ? (active ? "连接中" : "待启动")' in script
+    assert 'coreStarted ? "正在连接消息服务" : "已登录，功能启动中"' in script
     assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
     assert '.status-orbit[data-state="starting"] .power-button' in styles
 
