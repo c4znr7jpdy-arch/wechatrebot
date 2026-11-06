@@ -50,6 +50,7 @@
     privatePolicies: {},
     contactLoad: 0,
     historyKind: "all",
+    historyAccessAccount: undefined,
     historyAccount: "",
     historyReadyAccount: "",
     historyConversationSnapshot: null,
@@ -387,16 +388,19 @@
       || (current === "RUNNING" && !online && !accountStatusAvailable));
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
-    const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
-      ? String(status.history_account || "").trim() : "";
-    // A failed probe is not a logout. Keep the displayed account snapshot,
-    // while the backend independently refuses unverified reads and mutations.
-    const historyAccount = offlineHistory || (accountStatusAvailable
-      ? String(runtime.wechat_identity || "").trim() : state.historyAccount);
+    // The backend verifies both the entitlement and the current WeChat account.
+    // Preview fixtures without this field continue to use their runtime identity.
+    if (Object.hasOwn(status, "history_account")) {
+      state.historyAccessAccount = String(status.history_account || "").trim();
+    }
+    const historyAccount = state.historyAccessAccount === undefined
+      ? (accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : state.historyAccount)
+      : (wechatLoggedIn && String(runtime.wechat_identity).trim() === state.historyAccessAccount ? state.historyAccessAccount : "");
 
     if (historyAccount !== state.historyAccount) {
       state.historyAccount = historyAccount;
       invalidateHistoryState();
+      renderHistoryAccountGate(historyAccount);
       invalidateScheduledContext();
       invalidateChatManagementContext();
       if (state.activePage === "schedules") void loadSchedules();
@@ -405,14 +409,13 @@
         else void loadContacts(false);
       }
       if (state.activePage === "history") {
-        renderHistoryAccountGate(historyAccount);
         if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
       }
     } else if (wasAccountUnavailable && accountStatusAvailable) {
       void refreshVisibleChatData().catch(reportError);
     }
     setHistoryActionsEnabled(
-      (wechatLoggedIn || Boolean(offlineHistory)) && state.historyReadyAccount === historyAccount
+      wechatLoggedIn && Boolean(historyAccount) && state.historyReadyAccount === historyAccount
     );
 
     // Details prefetched while the engine is starting can carry a stale

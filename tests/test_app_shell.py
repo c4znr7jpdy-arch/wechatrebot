@@ -1822,6 +1822,7 @@ const subscription = {updateRuntime(){}};
 const contactProfile = {updateAccount(){}};
 const reconcileStartPending = status => status;
 const invalidateHistoryState = () => {};
+const renderHistoryAccountGate = () => {};
 const invalidateScheduledContext = () => {};
 const invalidateChatManagementContext = () => {};
 const refreshVisibleChatData = async () => {};
@@ -2135,7 +2136,7 @@ def test_message_center_clears_data_when_the_robot_account_changes() -> None:
     assert 'api("delete_conversation", item.conversation_id, accountId)' in script
     assert 'api("delete_history_before", value, accountId)' in script
     assert 'api("export_history", "csv", accountId)' in script
-    assert "聊天记录只展示当前机器人微信账号的内容" in script
+    assert "请先完成订阅授权，并登录授权绑定的机器人微信账号" in script
     assert 'setHistoryActionsEnabled(false);' in script
 
 
