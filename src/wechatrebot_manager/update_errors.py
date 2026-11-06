@@ -24,7 +24,7 @@ UPDATE_ERRORS = {
     "UPD-1011": UpdateErrorDefinition("UPD-1011", "回复引擎无法停止", "回复引擎未能安全停止，本次更新已取消。"),
     "UPD-1012": UpdateErrorDefinition("UPD-1012", "更新包解压失败", "更新包无法展开，请重新下载。"),
     "UPD-1013": UpdateErrorDefinition("UPD-1013", "更新配置错误", "更新信息格式异常，请联系技术支持。"),
-    "UPD-1014": UpdateErrorDefinition("UPD-1014", "等待微信退出超时", "微信仍在运行，请退出微信后重试。"),
+    "UPD-1014": UpdateErrorDefinition("UPD-1014", "无法安全关闭机器人微信", "无法确认机器人连接的微信已安全退出，请手动退出该微信后重试更新。"),
     "UPD-1015": UpdateErrorDefinition("UPD-1015", "更新目录不可写", "更新目录无法写入，请检查磁盘和目录权限。"),
     "UPD-1016": UpdateErrorDefinition("UPD-1016", "需要完成更新", "当前版本已停止支持，请完成更新后再启动机器人。"),
 }

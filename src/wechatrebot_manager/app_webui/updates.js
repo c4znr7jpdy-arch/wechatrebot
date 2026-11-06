@@ -150,12 +150,12 @@ window.createUpdateNotifications = function (helpers) {
     promptedReadyToken = ready.confirmation_token;
     confirmAction({
       title: `安装 v${release.version}？`,
-      message: "更新包已下载并校验完成。更新会强制关闭机器人程序和所有微信窗口，是否确认？正在处理的消息和微信中未发送的内容可能丢失。安装完成后会自动打开新版管理器。",
+      message: "更新包已下载并校验完成。更新会强制关闭机器人程序及当前连接的微信，是否确认？该微信中正在处理的消息和未发送的内容可能丢失。安装完成后会自动打开新版管理器。",
       confirmText: "确认关闭并安装",
       cancelText: "稍后安装",
       intent: "danger",
       pendingText: "正在安装…",
-      pendingMessage: "正在关闭机器人程序和微信，准备安装更新。请保持管理器打开。",
+      pendingMessage: "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
         const accepted = await api("install_update", release.version, ready.confirmation_token);
         if (!accepted?.accepted) throw new Error("更新任务已经在处理中。 ");
@@ -168,7 +168,7 @@ window.createUpdateNotifications = function (helpers) {
     const mandatory = Boolean(release.mandatory);
     confirmAction({
       title: mandatory ? `必须更新到 v${release.version}` : `发现新版本 v${release.version}`,
-      message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${formatBytes(release.package_size)}。点击更新后开始下载，下载完成后会请你确认关闭机器人和微信，再安装更新。`,
+      message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${formatBytes(release.package_size)}。点击更新后开始下载，下载完成后会请你确认关闭机器人及当前连接的微信，再安装更新。`,
       confirmText: "立即更新",
       cancelText: mandatory ? "稍后更新" : "稍后提醒",
       intent: "primary",

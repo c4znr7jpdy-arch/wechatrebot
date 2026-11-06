@@ -671,6 +671,8 @@ class LifecycleController:
                 message = "授权暂停未能写入，已停止后台服务；请稍后重新连接微信。"
             elif self.state != LifecycleState.LICENSE_PAUSED and licensing.get("state") in {"paused", "ready", "running"}:
                 message = "授权有效，点击启动机器人即可运行。"
+            elif licensing.get("state") == "active_unbound":
+                message = "订阅已生效，点击启动后确认微信账号。"
             else:
                 message = licensing["message"]
         return LifecycleView(

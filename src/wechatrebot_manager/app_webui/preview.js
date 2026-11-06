@@ -374,6 +374,9 @@ window.createPreviewApi = function (helpers) {
     }
     const previewCodes = new Map();
     const redeemedPreviewCodes = new Set();
+    let previewBindingRevision = previewLicense.account ? 2 : 1;
+    let previewRebindUsed = 0;
+    const previewRebindLimit = () => ({monthly: 1, month: 1, yearly: 10, year: 10, trial: 0}[previewLicense.plan] || 0);
     if (licenseDemo) {
       setPreviewRuntime(false);
       if (!["active", "expired", "offline"].includes(previewLicenseState)) status.runtime.wechat_identity = "";
@@ -385,15 +388,15 @@ window.createPreviewApi = function (helpers) {
       const configured = !["disabled", "unconfigured"].includes(previewLicenseState);
       const validLicense = Boolean(previewLicense.license_id) && previewLicense.valid_until > Date.now() / 1000;
       const canConnect = configured && (previewLicenseState === "unactivated" || validLicense);
-      const authorized = validLicense && Boolean(previewLicense.account);
+      const authorized = validLicense;
       const messages = {
         disabled: "此安装尚未启用商业授权，现有功能可按原方式使用。",
         unconfigured: "授权服务尚未配置，请联系软件提供者。",
         unactivated: "连接微信后可激活免费试用；已有激活码可在此查看并确认兑换。",
-        pending: "激活码已兑换，请连接微信并确认实际登录账号。",
+        pending: "订阅已生效，首次启动时确认微信账号。",
         active: "授权已生效，由你确认启动机器人。",
-        paused: "授权有效，自动化已暂停；请手动启动恢复。",
-        expired: "自动化已暂停。可兑换续期码，微信与本机数据保留。",
+        paused: "授权有效，机器人未运行；请手动启动。",
+        expired: "订阅已到期。可兑换续期码，微信与本机数据保留。",
         offline: "暂时无法连接授权服务，现有授权仍在离线有效期内。",
       };
       return {...previewLicense, enabled, configured, state: previewLicenseState, authorized, can_connect: canConnect,
@@ -412,6 +415,14 @@ window.createPreviewApi = function (helpers) {
     };
     const previewLicenseApi = {
       get_license_status: () => ok(licenseSnapshot()),
+      get_license_binding_status: () => {
+        if (!previewLicense.license_id) return licenseError("unactivated", "请先激活订阅后再查看换绑次数。");
+        const limit = previewRebindLimit();
+        const remaining = Math.max(0, limit - previewRebindUsed);
+        return ok({license_id: previewLicense.license_id, account: previewLicense.account, plan: previewLicense.plan,
+          revision: previewBindingRevision, rebind_limit: limit, rebind_used: previewRebindUsed,
+          rebind_remaining: remaining, can_rebind: Boolean(licenseSnapshot().authorized && previewLicense.account && remaining)});
+      },
       get_trial_status: () => status.runtime.wechat_identity ? ok({free_trial: trialSnapshot()})
         : licenseError("account_required", "请先连接微信，再激活免费试用。"),
       activate_free_trial: (expectedAccount) => {
@@ -467,11 +478,27 @@ window.createPreviewApi = function (helpers) {
       connect_license_wechat: () => {
         if (!licenseSnapshot().can_connect) return licenseError("NOT_AUTHORIZED", "请先激活授权。");
         status.runtime.wechat_identity = "wxid_demo_account";
+        status.runtime.connection_ready = true;
         return ok(licenseSnapshot());
       },
       bind_license_account: (expectedAccount) => {
         if (!licenseSnapshot().can_connect || expectedAccount !== status.runtime.wechat_identity) return licenseError("ACCOUNT_CHANGED", "微信账号已变化，请重新确认。");
+        if (previewLicense.account && previewLicense.account !== expectedAccount) return licenseError("account_bound", "请使用自助换绑入口。");
+        if (!previewLicense.account) previewBindingRevision++;
         previewLicense.account = expectedAccount; previewLicenseState = "active";
+        return ok(licenseSnapshot());
+      },
+      rebind_license_account: (newAccount, previousAccount, revision) => {
+        if (status.runtime.engine_ready) return licenseError("robot_running", "请先停止机器人，再更换绑定微信。");
+        if (!newAccount || newAccount !== status.runtime.wechat_identity) return licenseError("account_changed", "微信登录账号已变化，请重新读取。");
+        if (!licenseSnapshot().authorized) return licenseError("subscription_expired", "订阅暂不可用，请先处理授权问题。");
+        const limit = previewRebindLimit();
+        if (!previewLicense.account || !limit) return licenseError("rebind_unavailable", "当前套餐不支持换绑。");
+        if (newAccount === previewLicense.account) return ok(licenseSnapshot());
+        if (previousAccount !== previewLicense.account || revision !== previewBindingRevision) return licenseError("binding_changed", "授权绑定已变化，请重新读取。");
+        if (previewRebindUsed >= limit) return licenseError("rebind_exhausted", "当前套餐的换绑次数已用完。");
+        previewRebindUsed++; previewBindingRevision++;
+        previewLicense.account = newAccount; previewLicense.can_run = false; previewLicenseState = "active";
         return ok(licenseSnapshot());
       },
     };
@@ -504,6 +531,7 @@ window.createPreviewApi = function (helpers) {
       get_status: () => ok(status), check_environment: () => ok(status),
       start_robot: () => {
         if (licenseSnapshot().enabled && !licenseSnapshot().authorized) return licenseError("NOT_AUTHORIZED", "请完成授权后再启动。");
+        if (licenseSnapshot().enabled && (!previewLicense.account || (status.runtime.wechat_identity && status.runtime.wechat_identity !== previewLicense.account))) return licenseError("account_mismatch", "请先确认授权绑定的微信账号。");
         if (licenseSnapshot().enabled) status.runtime.wechat_identity = previewLicense.account;
         previewLicense.can_run = true; setPreviewRuntime(true); return ok({accepted: true});
       },

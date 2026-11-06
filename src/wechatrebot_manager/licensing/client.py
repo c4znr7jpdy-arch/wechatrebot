@@ -36,7 +36,10 @@ _ERROR_MESSAGES = {
     "license_unavailable": "当前设备授权不可用，请联系管理员恢复或迁移授权。",
     "license_revoked": "授权已撤销，自动化已暂停，请联系管理员。",
     "subscription_expired": "订阅已到期，请微信扫码入群领取续期码。",
-    "account_bound": "授权已绑定其他微信账号，请联系管理员处理换绑。",
+    "account_bound": "授权已绑定其他微信账号，请在“订阅与授权”使用自助换绑。",
+    "rebind_unavailable": "当前套餐不支持自助换绑微信账号。",
+    "rebind_exhausted": "当前套餐的换绑次数已用完。",
+    "binding_changed": "授权绑定或套餐已变化，请重新读取换绑次数并确认。",
     "account_unavailable": "此微信账号无法绑定当前授权，请联系管理员。",
     "active_license_conflict": "本机已有有效付费授权，请联系管理员处理，不能直接替换。",
     "invalid_account": "请先连接微信并确认实际登录账号。",
@@ -320,7 +323,7 @@ class LicenseClient:
             code = error.get("code") if isinstance(error, dict) else None
             if not isinstance(code, str) or code not in _ERROR_MESSAGES:
                 code = "service_unavailable"
-            if code in _REMOTE_DENIALS and action in {"refresh", "bind"}:
+            if code in _REMOTE_DENIALS and action in {"refresh", "bind", "rebind"}:
                 state.update(remote_denial=code, run_grant=None, pause_reason=code)
                 self.cache.write(state)
             raise LicenseError(code, _ERROR_MESSAGES[code])
@@ -600,6 +603,52 @@ class LicenseClient:
             data, nonce, elapsed = self._request(channel, device, state, "bind", {
                 "license_id": payload["license_id"], "account": account,
             })
+            return self._accept(channel, device, state, payload, data, nonce, elapsed, account=account)
+
+    def binding_status(self) -> dict:
+        """Read server-owned counters without connecting WeChat or granting a run."""
+        with self._locked():
+            channel, device, state, payload = self._load()
+            self._channel_required(channel)
+            if not device or payload is None:
+                raise LicenseError("unactivated", "请先激活订阅后再查看换绑次数。")
+            data, _, _ = self._request(channel, device, state, "binding-status", {"license_id": payload["license_id"]})
+            try:
+                if (data["license_id"] != payload["license_id"] or data["plan"] not in PLANS
+                        or not isinstance(data["account"], str)
+                        or (data["account"] and not ACCOUNT_PATTERN.fullmatch(data["account"]))
+                        or type(data["can_rebind"]) is not bool):
+                    raise ValueError()
+                for field in ("revision", "rebind_limit", "rebind_used", "rebind_remaining"):
+                    integer(data[field])
+                if (data["revision"] < state["revision"]
+                        or data["rebind_remaining"] != max(0, data["rebind_limit"] - data["rebind_used"])
+                        or (data["can_rebind"] and (not data["account"] or not data["rebind_remaining"]))):
+                    raise ValueError()
+            except (KeyError, TypeError, ValueError) as exc:
+                raise LicenseError("invalid_response", "换绑次数暂时无法读取，请重新查询。") from exc
+            return {field: data[field] for field in ("license_id", "account", "plan", "revision",
+                    "rebind_limit", "rebind_used", "rebind_remaining", "can_rebind")}
+
+    def rebind(self, account: str, *, expected_account: str, expected_revision: int) -> dict:
+        account, expected_account = self._account(account), self._account(expected_account)
+        integer(expected_revision)
+        with self._locked():
+            channel, device, state, payload = self._load()
+            self._channel_required(channel)
+            if not device or payload is None:
+                raise LicenseError("unactivated", "请先激活订阅后再换绑。")
+            # Rebinding never preserves an old account's automation session.
+            state.update(run_grant=None, pause_reason="rebind")
+            self.cache.write(state)
+            data, nonce, elapsed = self._request(channel, device, state, "rebind", {
+                "license_id": payload["license_id"], "account": account,
+                "expected_account": expected_account, "expected_revision": expected_revision,
+            })
+            rebound, _ = self._response_payload(channel, device, state, payload, data, nonce, account, None)
+            if (rebound["plan"] != payload["plan"] or rebound["valid_until"] != payload["valid_until"]
+                    or rebound["status"] != "active"):
+                raise LicenseError("invalid_lease", "换绑后的套餐权益不一致，请重新验证授权。")
             return self._accept(channel, device, state, payload, data, nonce, elapsed, account=account)
 
     def authorize_run(self, account: str) -> dict:

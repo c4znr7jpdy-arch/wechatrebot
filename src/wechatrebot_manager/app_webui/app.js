@@ -93,6 +93,7 @@
     activityPage: 1,
     polling: false,
     startPending: false,
+    startPreparing: false,
     composing: false,
     availableUpdate: null,
     mandatoryUpdate: false,
@@ -281,8 +282,10 @@
   function reportError(error) {
     const product = error?.product;
     const title = product?.title || "操作未完成";
-    const detail = (typeof product?.detail === "string" ? product.detail.trim() : "")
+    const originalDetail = (typeof product?.detail === "string" ? product.detail.trim() : "")
       || (typeof product?.message === "string" ? product.message.trim() : "");
+    const detail = String(product?.code || "").startsWith("LIC-")
+      ? subscription?.formatMessage?.({...product, message: originalDetail}) || originalDetail : originalDetail;
     const message = product
       ? `${title}${detail && detail !== title ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
       : (error?.message || "操作未完成，请稍后重试。 ");
@@ -440,7 +443,8 @@
     $("#stateTitle").textContent = confirmingConnection ? "正在确认连接" : status.title;
     $("#stateMessage").textContent = current === "STOP_WAIT_WECHAT"
       ? "关闭微信后会自动完成停止，也可再次点击“停止运行”立即结束机器人服务。"
-      : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。" : status.message;
+      : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。"
+      : current === "LICENSE_PAUSED" ? subscription.formatMessage?.(undefined, status.message) || status.message : status.message;
     $("#accountText").textContent = !accountStatusAvailable ? (active || runtime.connection_ready ? "正在确认微信连接…" : "尚未连接")
       : runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
     $("#lastCheckText").textContent = `检查于 ${new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})}`;
@@ -473,7 +477,7 @@
     const primaryLabel = starting ? "启动中…" : stopMode ? "停止运行" : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = Boolean(status.busy)
+    primary.disabled = Boolean(status.busy || state.startPreparing)
       || (!status.can_start && !status.can_stop)
       || (state.mandatoryUpdate && !stopMode);
     primary.setAttribute("aria-busy", String(Boolean(status.busy)));
@@ -533,6 +537,7 @@
   }
 
   async function runPrimaryAction() {
+    if (state.startPreparing) return;
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
     if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
@@ -540,12 +545,13 @@
       return;
     }
     button.disabled = true;
-    if (action === "start" && !await subscription.beforeStart()) { renderStatus(state.status); return; }
-    if (action === "start") {
-      state.startPending = true;
-      renderStatus(startingStatus(state.status));
-    }
+    state.startPreparing = action === "start";
     try {
+      if (action === "start" && !await subscription.beforeStart()) return;
+      if (action === "start") {
+        state.startPending = true;
+        renderStatus(startingStatus(state.status));
+      }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
       if (action === "start" && result?.accepted === false) state.startPending = false;
       window.setTimeout(refreshStatus, 250);
@@ -553,6 +559,9 @@
       if (action === "start") state.startPending = false;
       reportError(error);
       await refreshStatus();
+    } finally {
+      state.startPreparing = false;
+      renderStatus(state.status);
     }
   }
 
@@ -720,7 +729,7 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
+  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm, onCancel}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
@@ -744,6 +753,9 @@
     backdrop.dataset.busy = "false";
     backdrop.hidden = false;
     cancel.disabled = false;
+    confirm.disabled = false;
+    let complete;
+    const completed = new Promise((resolve) => { complete = resolve; });
     const restoreFocus = document.activeElement;
     const shell = $(".app-shell");
     if (shell) shell.inert = true;
@@ -753,6 +765,8 @@
       if (!confirmed) {
         if (backdrop.dataset.busy === "true") return;
         close();
+        try { await onCancel?.(); }
+        finally { complete(false); }
         return;
       }
       backdrop.dataset.busy = "true";
@@ -764,6 +778,7 @@
       try {
         await onConfirm(field ? $("#modalInput").value : undefined);
         close();
+        complete(true);
       } catch (error) {
         const product = error?.product;
         const detail = product
@@ -780,6 +795,7 @@
         cancel.disabled = false;
       }
     };
+    return completed;
   }
 
   function requiredValues(form) {
