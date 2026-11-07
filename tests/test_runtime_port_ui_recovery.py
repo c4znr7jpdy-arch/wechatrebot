@@ -134,6 +134,14 @@ def test_readopted_services_keep_stop_control_across_configuration_recovery(
     assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
     assert controller.refresh().can_stop is True
     assert built_ports == [[16200, 15000]]
+    if not service_ready:
+        manager.write_text("{broken", encoding="utf-8")
+        assert controller.refresh().error.code == "13001"
+        manager.write_text(valid_config, encoding="utf-8")
+        recovered = controller.refresh()
+        assert recovered.error is not None and recovered.error.code == "13002"
+        assert recovered.can_stop and not recovered.can_start
+        assert built_ports == [[16200, 15000]]
     terminated = []
 
     def terminate(pid, *, expected_creation_time):

@@ -150,6 +150,7 @@ class LifecycleController:
         self.state = LifecycleState.STOPPED
         self._error: ErrorDefinition | None = None
         self._stop_error: ErrorDefinition | None = None
+        self._adoption_error: ErrorDefinition | None = None
         self._runtime_config_error: ErrorDefinition | None = None
         self._supervisor: SupervisorLike | None = None
         self._environment = self._environment_checker(self.install_root)
@@ -181,6 +182,7 @@ class LifecycleController:
                 elif not bool(getattr(candidate, "adoption_complete", False)):
                     self.state = LifecycleState.ERROR
                     self._error = self.catalog.get("13002")
+                    self._adoption_error = self._error
                     self.events.emit(
                         "APP_ERROR",
                         "failed",
@@ -200,9 +202,8 @@ class LifecycleController:
 
     def _has_incomplete_adoption(self) -> bool:
         return (
-            self.state == LifecycleState.ERROR and self._error is not None
-            and self._error.code == "13002" and self._supervisor is not None
-            and not bool(getattr(self._supervisor, "adoption_complete", True))
+            self._adoption_error is not None and self._supervisor is not None
+            and bool(self._supervisor.running)
         )
 
     def _refresh_runtime_for_view(self) -> bool:
@@ -263,6 +264,8 @@ class LifecycleController:
             self._set_error("13008", detail=str(exc))
             raise
         self._stop_error = None
+        if supervisor is None or not supervisor.running:
+            self._adoption_error = None
 
     def _on_progress(self, event: str, spec: ServiceSpec) -> None:
         with self._lock:
@@ -573,7 +576,7 @@ class LifecycleController:
                 if self._wechat_closed_confirmations >= 2:
                     return self._finish_stop()
                 return self.view()
-            adoption_error = self._error if self._has_incomplete_adoption() else None
+            adoption_error = self._adoption_error if self._has_incomplete_adoption() else None
             try:
                 licensed_view = self._refresh_licensed()
             except Exception:
@@ -848,6 +851,9 @@ class LifecycleController:
         elif self._stop_error is not None:
             self.state = LifecycleState.ERROR
             self._error = self._stop_error
+        elif self._has_incomplete_adoption():
+            self.state = LifecycleState.ERROR
+            self._error = self._adoption_error
         titles = {
             LifecycleState.STOPPED: ("机器人未启动", "环境就绪后即可启动机器人。"),
             LifecycleState.CHECKING: ("正在检查环境", "正在确认微信和运行文件。"),
