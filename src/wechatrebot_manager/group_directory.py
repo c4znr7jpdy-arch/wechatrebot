@@ -13,6 +13,7 @@ from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 from .error_catalog import AccountStatusUnavailableError
+from .licensing.protocol import LicenseError
 from .port_config import load_runtime_ports
 from .runtime_status import probe_bridge_health
 from .portrait_cache import PortraitCache
@@ -117,6 +118,22 @@ class GroupDirectoryService:
                     raise ValueError()
                 body = json.loads(raw.decode("utf-8"))
         except HTTPError as exc:
+            if (exc.code == 403 and path.startswith("/api/manager/groups/")
+                    and path.endswith("/qrcode")):
+                try:
+                    with exc:
+                        denied = exc.read(4097)
+                    failure = json.loads(denied.decode("utf-8")) if len(denied) <= 4096 else None
+                except (OSError, ValueError, UnicodeError, RecursionError):
+                    failure = None
+                error = failure.get("error") if isinstance(failure, dict) else None
+                if (isinstance(error, dict) and failure.get("ok") is False
+                        and error.get("code") == "LIC-automation_paused"
+                        and error.get("retryable") is False):
+                    raise LicenseError(
+                        "automation_paused",
+                        "自动化已暂停，群二维码暂不可用。请在运行中心点击启动机器人后重试。",
+                    ) from None
             if exc.code == 409:
                 self._clear_current_account(account, state_locked=state_locked)
                 raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。") from None

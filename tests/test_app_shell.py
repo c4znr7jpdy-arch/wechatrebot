@@ -16,6 +16,7 @@ from wechatrebot_manager import app_shell, chat_api, group_directory, model_api,
 from wechatrebot_manager.customer_config import ProviderService
 from wechatrebot_manager.error_catalog import load_error_catalog
 from wechatrebot_manager.launcher import ServiceStopError
+from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.payload import PayloadError
 from wechatrebot_manager.updates import UpdateChannel, UpdateRelease
 from wechatrebot_manager.update_logger import UpdateLogger
@@ -99,6 +100,22 @@ def test_group_qrcode_api_preserves_account_scope_and_reports_errors(tmp_path):
     result = api.get_group_qrcode("wxid_bot", "room@chatroom")
     assert result["ok"] is False
     assert "群二维码读取失败" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("code,recorded", [("automation_paused", False), ("license_revoked", True)])
+def test_group_qrcode_license_denial_reuses_license_response_and_only_silences_manual_pause(tmp_path, code, recorded):
+    api = _api(tmp_path)
+
+    def denied(*_args):
+        raise LicenseError(code, "请在运行中心启动机器人后重试。")
+
+    api._groups = SimpleNamespace(qrcode=denied)
+    result = api.get_group_qrcode("wxid_bot", "room@chatroom")
+    assert result["ok"] is False and result["error"]["code"] == f"LIC-{code}"
+    assert result["error"]["recorded"] is recorded
+    assert bool(api._lifecycle.events.items) is recorded
+    if not recorded:
+        assert result["error"]["retryable"] is False
 
 
 def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
