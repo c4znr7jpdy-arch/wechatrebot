@@ -332,7 +332,13 @@ class UpdateApiMixin:
                 state="running", phase="launching", percent=100,
                 message="正在安装更新并启动新版客户端", error=None,
             )
-            launch_update_helper(plan)
+            try:
+                launch_update_helper(plan)
+            except (OSError, ValueError) as exc:
+                raise UpdateFailure(
+                    "UPD-1007", str(exc),
+                    public_message="更新安装程序未能启动，原版本文件未更改。机器人和当前连接的微信已停止；可重试更新，或回到运行中心手动启动机器人。",
+                ) from exc
             self._set_update_status(
                 state="restarting", phase="restarting", completed=1, total=1,
                 percent=100, message="更新已准备完成，客户端正在重启", error=None,

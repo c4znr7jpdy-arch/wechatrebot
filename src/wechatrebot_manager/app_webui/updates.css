@@ -19,8 +19,8 @@
 .update-card-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--blue-100); }
 .update-card-progress span { display: block; height: 100%; border-radius: inherit; background: var(--blue-600); transition: width .2s ease; }
 .update-card-progress.is-indeterminate span { animation: update-progress-sweep 1.3s ease-in-out infinite alternate; }
-.update-card-action { display: flex; justify-content: flex-end; margin-top: 12px; }
-.update-card-action:has(button[hidden]) { display: none; }
+.update-card-action { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.update-card-action:has(#updateCardAction[hidden]) { display: none; }
 .update-card[data-state="failed"] .update-card-heading strong { color: var(--red-700); }
 body.has-update-card .toast-region { bottom: 228px; }
 @media (max-width: 600px) {

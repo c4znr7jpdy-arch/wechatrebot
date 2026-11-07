@@ -1906,6 +1906,34 @@ def test_update_maps_managed_service_stop_failures(monkeypatch, tmp_path, servic
     assert api._update_installing is False
 
 
+def test_update_helper_start_failure_keeps_manager_open_with_accurate_retry_feedback(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+
+    def cannot_launch(_plan):
+        events.append("helper_failed")
+        raise OSError("synthetic process startup failure")
+
+    monkeypatch.setattr(update_api, "launch_update_helper", cannot_launch)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1007"
+    assert "安装程序未能启动" in failed["error"]["message"]
+    assert "原版本文件未更改" in failed["error"]["message"]
+    assert "手动启动机器人" in failed["error"]["message"]
+    assert "恢复原版本" not in failed["error"]["message"]
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "helper_failed"]
+    assert not closes and not api._update_installing
+    assert api._prepared_update is prepared
+    assert api._action_lock.acquire(blocking=False)
+    api._action_lock.release()
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    assert events.count("download") == 1
+
+
 @pytest.mark.parametrize("error,code", [(PayloadError("坏文件"), "UPD-1003"),
                                       (PermissionError("目录只读"), "UPD-1015")])
 def test_update_download_failure_never_stops_robot(monkeypatch, tmp_path, error, code):

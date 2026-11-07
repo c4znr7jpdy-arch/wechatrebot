@@ -756,6 +756,15 @@
   }
 
   let modalResolve = null;
+  function managerCloseState() {
+    return {
+      dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
+        || state.scheduledDirty || coreSettings.dirty || hasGroupDrafts()),
+      busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
+        || coreSettings.busy || isProviderSaving() || state.historyExporting),
+    };
+  }
+
   function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm, onCancel}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
@@ -1196,7 +1205,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.webSearchDirty || state.webSearchSaving || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { const pending = managerCloseState(); if (pending.dirty || pending.busy) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
@@ -1379,7 +1388,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
@@ -1447,6 +1456,7 @@
     api: (...args) => api(...args),
     confirmAction: (...args) => confirmAction(...args),
     formatBytes: (...args) => formatBytes(...args),
+    managerCloseState,
     renderStatus: (...args) => renderStatus(...args),
     reportError: (...args) => reportError(...args),
     state,
