@@ -873,7 +873,7 @@ class LifecycleController:
                 and (not owned or licensed)
                 and not online
             ),
-            can_stop=owned and not busy,
+            can_stop=owned and (not busy or pending_start),
             error=self._runtime_config_error or self._error,
             environment=self._environment,
             runtime=self._runtime,

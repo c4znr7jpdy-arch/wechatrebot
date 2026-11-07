@@ -316,7 +316,7 @@ def test_environment_recheck_preserves_pending_start_without_launching_core(tmp_
     assert "自动继续，无需再次点击" in checked.message
     assert checked.start_pending and not checked.can_start
     assert checked.busy is logged_in
-    assert checked.can_stop is not logged_in
+    assert checked.can_stop
     assert checked.error is None and not checked.online
     assert holders[0].started == ["new-hook-bridge"]
     assert not license.grants and not world["core"]
@@ -492,6 +492,7 @@ def test_api_queue_acceptance_is_busy_before_start_worker_runs(tmp_path, monkeyp
         status = api.get_status()["data"]
         assert status["start_pending"] and status["busy"]
         assert status["state"] == "CORE_STARTING" and not status["can_start"]
+        assert status["can_stop"]
         assert not api.start_robot()["data"]["accepted"]
     assert len(workers) == 1 and not license.grants
     workers.pop()()
@@ -770,6 +771,9 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
     assert api.start_robot()["data"]["accepted"]
     try:
         assert started.wait(2)
+        starting = api.get_status()["data"]
+        assert starting["start_pending"] and starting["busy"] and starting["can_stop"]
+        assert controller.view().can_stop
         assert api.stop_robot()["data"]["accepted"]
         assert not license.granted
         assert not api.start_robot()["data"]["accepted"]
@@ -782,6 +786,40 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
     assert not license.granted and not world["core"] and world["bridge"]
     assert holders[0].started == ["new-hook-bridge", "astrbot"]
     assert holders[0].stopped == ["astrbot"]
+
+
+def test_api_stop_projection_stays_busy_after_queue_switches_to_teardown(tmp_path):
+    from test_app_shell import _api
+
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    api = _api(tmp_path)
+    api._lifecycle = controller
+    entered, finish = threading.Event(), threading.Event()
+    stop = controller.request_stop
+
+    def delayed_stop():
+        entered.set()
+        assert finish.wait(3)
+        return stop()
+
+    controller.request_stop = delayed_stop
+    assert api.stop_robot()["data"]["accepted"]
+    try:
+        assert entered.wait(2)
+        assert api._robot_action == "request_stop" and not api._robot_stop_action
+        for _ in range(2):
+            status = api.get_status()["data"]
+            assert status["state"] == "STOPPING" and status["busy"]
+            assert not status["can_stop"] and not status["can_start"] and not status["start_pending"]
+        assert not api.stop_robot()["data"]["accepted"]
+    finally:
+        finish.set()
+        assert api._action_lock.acquire(timeout=3)
+        api._action_lock.release()
+    assert not api.get_status()["data"]["busy"]
+    assert holders[0].started == ["new-hook-bridge"]
 
 
 @pytest.mark.parametrize("action", ["stop_robot", "force_stop_robot"])
@@ -877,6 +915,8 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
     try:
         assert api.start_robot()["data"]["accepted"]
         assert waiting.wait(2)
+        starting = api.get_status()["data"]
+        assert starting["start_pending"] and starting["busy"] and starting["can_stop"]
         assert getattr(api, action)()["data"]["accepted"]
         release.set()
         # No readiness release or timeout advance: production's default waiter

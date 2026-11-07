@@ -358,7 +358,7 @@ def test_start_remains_single_and_explains_login_continuation(browser, manager_u
         page.evaluate("window.finishStartRequest()")
         expect(page.locator("#stateTitle")).to_have_text("等待登录微信")
         expect(page.locator("#stateMessage")).to_contain_text("自动继续启动")
-        expect(page.locator("#primaryAction")).to_have_text("停止运行")
+        expect(page.locator("#primaryAction")).to_have_text("取消启动")
         expect(page.locator("#primaryAction")).to_be_enabled()
 
         if outcome == "stop":
@@ -428,6 +428,9 @@ def test_start_preparation_restores_raw_status_when_followup_reads_fail(
         page.locator("#primaryAction").click()
         if outcome != "start_rejected":
             expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
+            expect(page.locator("#primaryAction")).to_be_disabled()
+            page.locator("#primaryAction").dispatch_event("click")
+            assert page.evaluate("window.preparationStarts") == 0
             # A real status poll must render the preparation projection before it is cancelled.
             expect(page.locator("#stateTitle")).to_have_text("正在准备启动机器人")
             page.evaluate("window.failPreparationStatus = true")
@@ -448,6 +451,82 @@ def test_start_preparation_restores_raw_status_when_followup_reads_fail(
             expect(page.locator("#primaryAction")).to_be_enabled()
             assert page.evaluate("window.preparationStarts") == 0
         assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("response", ["accepted", "rejected", "failure"])
+def test_slow_start_can_cancel_once_and_recovers_from_rejected_stop(browser, manager_url, tmp_path, response):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async () => {
+          const api = window.pywebview.api, base = structuredClone((await api.get_status()).data);
+          window.cancelPhase = 'idle'; window.cancelStarts = 0; window.cancelStops = 0; window.cancelReads = 0;
+          api.get_status = async () => {
+            document.body.dataset.cancelReads = String(++window.cancelReads);
+            const status = structuredClone(base), phase = window.cancelPhase;
+            Object.assign(status, {state: {idle:'LICENSE_READY', loading:'CORE_STARTING', stopping:'STOPPING'}[phase],
+              title: {idle:'机器人未启动', loading:'正在启动机器人', stopping:'正在取消启动'}[phase],
+              message:'', start_pending:phase === 'loading', busy:phase !== 'idle', online:false,
+              can_start:phase === 'idle', can_stop:phase === 'loading', error:null});
+            Object.assign(status.runtime, {engine_ready:false, connection_ready:true,
+              account_status_available:true, wechat_identity:'wxid_demo_account'});
+            return {ok:true, data:status};
+          };
+          api.start_robot = async () => {
+            window.cancelStarts++; window.cancelPhase = 'loading';
+            return {ok:true, data:{accepted:true}};
+          };
+          api.stop_robot = () => {
+            window.cancelStops++;
+            return new Promise(resolve => { window.finishCancel = response => resolve(response === 'failure'
+              ? {ok:false, error:{message:'模拟取消失败'}} : {ok:true, data:{accepted:response !== 'rejected'}}); });
+          };
+        }""")
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.locator("#primaryAction").click()
+        expect(page.locator("#primaryAction")).to_have_text("取消启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        expect(page.locator("#primaryAction")).to_have_attribute("aria-busy", "true")
+        page.locator("#primaryAction").click()
+        expect(page.locator("#primaryAction")).to_have_text("正在停止…")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        reads = page.evaluate("window.cancelReads")
+        expect(page.locator("body")).not_to_have_attribute("data-cancel-reads", str(reads))
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.cancelStops") == 1
+        page.evaluate("response => window.finishCancel(response)", response)
+        if response != "accepted":
+            expect(page.locator("#primaryAction")).to_have_text("取消启动")
+            expect(page.locator("#primaryAction")).to_be_enabled()
+            expect(page.locator("#toastRegion")).to_contain_text("模拟取消失败" if response == "failure" else "停止请求未被接受")
+            page.locator("#primaryAction").click()
+            assert page.evaluate("window.cancelStops") == 2
+            page.evaluate("window.finishCancel('accepted')")
+        reads = page.evaluate("window.cancelReads")
+        expect(page.locator("body")).not_to_have_attribute("data-cancel-reads", str(reads))
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        expect(page.locator("#primaryAction")).to_have_text("正在停止…")
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.cancelStops") == (1 if response == "accepted" else 2)
+        page.evaluate("window.cancelPhase = 'stopping'")
+        expect(page.locator("#stateTitle")).to_have_text("正在取消启动")
+        expect(page.locator("#globalStatus")).to_have_text("正在停止")
+        expect(page.locator("#primaryAction")).to_have_text("正在停止…")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("window.cancelPhase = 'idle'")
+        expect(page.locator("#primaryAction")).to_have_text("启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        assert page.evaluate("window.cancelStarts") == 1
+        assert not errors, errors
+        page.screenshot(path=str(tmp_path / f"slow-start-cancel-{response}.png"))
     finally:
         page.close()
 

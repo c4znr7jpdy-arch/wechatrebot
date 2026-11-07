@@ -98,6 +98,7 @@
     startActionRevision: 0,
     startPending: false,
     startPreparing: false,
+    stopPending: false,
     composing: false,
     availableUpdate: null,
     mandatoryUpdate: false,
@@ -392,7 +393,13 @@
   }
 
   function renderStatus(rawStatus, {optimistic = false} = {}) {
-    if (!optimistic) state.lastRuntimeStatus = rawStatus;
+    if (!optimistic) {
+      state.lastRuntimeStatus = rawStatus;
+      const stopped = ["STOPPED", "LICENSE_READY", "LICENSE_PAUSED", "ERROR", "STOP_WAIT_WECHAT"].includes(rawStatus?.state);
+      if (rawStatus?.state === "STOPPING" || (stopped && !rawStatus?.start_pending && !rawStatus?.busy)) {
+        state.stopPending = false;
+      }
+    }
     const wasOnline = Boolean(state.status?.online);
     const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
     const status = reconcileStartPending(rawStatus, {optimistic});
@@ -472,7 +479,7 @@
 
     const global = $("#globalStatus");
     global.className = `status-badge ${online ? "online" : problem ? "error" : waiting ? "warning" : "checking"}`;
-    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? "正在启动" : environment.ready ? "等待启动" : "环境未就绪")}`;
+    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
     $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
@@ -495,16 +502,18 @@
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
-    const primaryLabel = stopMode ? "停止运行" : starting ? "启动中…" : "启动";
-    primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
+    const cancelStart = stopMode && status.start_pending && !online;
+    const stopping = state.stopPending || current === "STOPPING";
+    const primaryLabel = stopping ? "正在停止…" : cancelStart ? "取消启动" : stopMode ? "停止运行" : starting ? "启动中…" : "启动";
+    primary.innerHTML = `${icon(stopping || (starting && !cancelStart) ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = Boolean(status.busy || state.startPreparing)
+    primary.disabled = Boolean(state.startPreparing || state.stopPending || (status.busy && !cancelStart))
       || (!status.can_start && !status.can_stop)
       || (state.mandatoryUpdate && !stopMode);
-    primary.setAttribute("aria-busy", String(Boolean(status.busy)));
+    primary.setAttribute("aria-busy", String(Boolean(status.busy || state.stopPending)));
     primary.setAttribute("aria-label", primaryLabel);
     primary.title = current === "STOP_WAIT_WECHAT" ? "立即停止机器人，保留微信窗口"
-      : stopMode ? "安全停止机器人" : primaryLabel;
+      : cancelStart ? "取消本次启动，停止机器人功能" : stopMode ? "安全停止机器人" : primaryLabel;
     const stopRetainedConnection = $("#stopRetainedConnection");
     const canStopRetainedConnection = licenseWaiting && status.can_start && status.can_stop && !status.busy;
     stopRetainedConnection.hidden = !canStopRetainedConnection;
@@ -563,17 +572,20 @@
   }
 
   async function runPrimaryAction() {
-    if (state.startPreparing || state.status?.busy) return;
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
+    const cancelStart = action === "stop" && state.status?.start_pending && state.status?.can_stop;
+    if (state.startPreparing || state.stopPending || (state.status?.busy && !cancelStart)) return;
     if (action === "start" && state.status?.start_pending) return;
-    if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
+    if (action === "stop" && !cancelStart && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
       runForceStop();
       return;
     }
     button.disabled = true;
     state.startActionRevision += 1;
     state.startPreparing = action === "start";
+    state.stopPending = action === "stop";
+    if (state.stopPending) renderStatus(state.status, {optimistic: true});
     try {
       if (action === "start" && !await subscription.beforeStart()) return;
       if (action === "start") {
@@ -581,6 +593,9 @@
         renderStatus(startingStatus(state.lastRuntimeStatus || state.status), {optimistic: true});
       }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
+      if (action === "stop" && result?.accepted === false) {
+        throw new Error("停止请求未被接受，请稍后重试。");
+      }
       if (action === "start" && result?.accepted === false) {
         state.startPending = false;
         await refreshStatus();
@@ -588,6 +603,7 @@
       window.setTimeout(refreshStatus, 250);
     } catch (error) {
       if (action === "start") state.startPending = false;
+      if (action === "stop") state.stopPending = false;
       reportError(error);
       await refreshStatus();
     } finally {
@@ -604,9 +620,21 @@
       confirmText: "停止运行",
       pendingText: "正在停止…",
       onConfirm: async () => {
-        const result = await api("force_stop_robot");
-        if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
-        window.setTimeout(refreshStatus, 150);
+        if (state.stopPending) return;
+        state.stopPending = true;
+        state.startActionRevision += 1;
+        renderStatus(state.status, {optimistic: true});
+        try {
+          const result = await api("force_stop_robot");
+          if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
+          window.setTimeout(refreshStatus, 150);
+        } catch (error) {
+          state.stopPending = false;
+          throw error;
+        } finally {
+          state.startActionRevision += 1;
+          renderStatus(state.lastRuntimeStatus || state.status, {optimistic: true});
+        }
       },
     });
   }
