@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
@@ -370,3 +371,44 @@ def test_all_shipped_declarations_validate_and_are_packaged(tmp_path):
     assert gateway == [{"origin": "commercial", "source": "runtime/jiang_capability_router",
                         "target": "app/astrbot/data/plugins/jiang_capability_router"}]
     assert not (ROOT / "patches/astrbot-plugin-jiang_capability_router--zz-command-cleanup.patch").exists()
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError, TimeoutError])
+def test_natural_capability_failure_keeps_internal_details_private(caplog, error_type):
+    from test_hot_config_runtime import _runtime_function
+
+    secret = "synthetic-private-content-key"
+
+    async def fail(_arguments):
+        raise error_type("upstream rejected https://example.invalid/api?key=" + secret)
+
+    capability = NS(capability_id="info.weather", name="天气预报", permission="public", handler=fail)
+
+    async def discover_current(*_args):
+        return {"stars": [], "registered_commands": []}
+
+    async def commands():
+        return []
+
+    source = (ROOT / "runtime/jiang_capability_router/main.py").read_text("utf-8")
+    invoke = _runtime_function(source, "capability_invoke_tool", {
+        "_session": lambda event: event.unified_msg_origin,
+        "get_latest_action": lambda _session: None,
+        "resolve_capability": lambda *_args: NS(capability=capability, reason="explicit"),
+        "discover": discover_current,
+        "list_commands": commands,
+        "natural_available": lambda *_args: True,
+        "is_explicit_write_intent": lambda *_args: True,
+        "parse_arguments": lambda _value: {},
+        "enrich_arguments": lambda _capability, _intent, arguments: arguments,
+        "merge_recent_arguments": lambda arguments, _details, **_kwargs: arguments,
+        "missing_arguments": lambda *_args: [],
+        "logger": logging.getLogger("capability_failure_test"),
+    })
+    with caplog.at_level(logging.INFO, logger="capability_failure_test"):
+        result = asyncio.run(invoke(NS(context=object()), Event("查询成都天气"), intent="查询成都天气"))
+
+    assert "天气预报" in result and "稍后重试" in result
+    assert secret not in result and secret not in caplog.text
+    assert "example.invalid" not in result and "example.invalid" not in caplog.text
+    assert "info.weather" in caplog.text and error_type.__name__ in caplog.text
