@@ -41,6 +41,8 @@ window.createFeatureController = function (helpers) {
   }
 
   async function refreshFeatures() {
+    if (state.featureSaving) return;
+    if (state.featureDirty) { discardFeatureChanges(refreshFeatures); return; }
     state.featurePrefetch += 1;
     state.featuresLoaded = false;
     state.selectedFeature = null;
@@ -163,6 +165,10 @@ window.createFeatureController = function (helpers) {
     } catch (error) {
       if (load !== state.featureLoad) return;
       if (!cached) $("#featureDetail").innerHTML = '<div class="empty-state"><h2>设置暂时无法读取</h2><p>机器人未启动时仍可修改大部分基础设置，请稍后重试。</p></div>';
+      else if (state.featureDirty) {
+        const note = $("#featureNote");
+        if (note) note.textContent = "最新设置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。";
+      }
       else {
         useFeatureDetail(cached, afterSave, preserveTab);
         renderFeatureDetail();
