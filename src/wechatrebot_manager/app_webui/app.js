@@ -68,6 +68,7 @@
     historyLoadingOlder: false,
     historyManualRefresh: false,
     historyExporting: false,
+    historyActionNotice: null,
     historyOlderLoad: 0,
     historyMessageQuery: "",
     historyMessageCache: new Map(),
@@ -1055,11 +1056,7 @@
       setHistoryActionsEnabled(canEditHistory());
       try {
         const result = await api("export_history", "csv", accountId);
-        if (result?.requires_login || result?.account_changed || accountId !== state.historyAccount) {
-          invalidateHistoryState();
-          renderHistoryAccountGate(state.historyAccount);
-          return;
-        }
+        if (handleHistoryActionDenied(result, accountId, "导出")) return;
         if (!result?.cancelled) toast(`已导出到 ${result.path}`);
       } catch (error) { reportError(error); }
       finally {
@@ -1185,13 +1182,9 @@
         confirmText: "开始清理",
         field: {label: "保留此日期及之后的记录", type: "date", value: ""},
         onConfirm: async (value) => {
-          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "清理"); return; }
           const result = await api("delete_history_before", value, accountId);
-          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
-            invalidateHistoryState();
-            renderHistoryAccountGate(state.historyAccount);
-            return;
-          }
+          if (handleHistoryActionDenied(result, accountId, "清理")) return;
           toast(`已清理 ${result.deleted} 条记录。 `);
           // Cleanup is opened from settings: refresh the retained records even
           // while the history page is hidden, including its directory snapshot.
@@ -1347,7 +1340,7 @@
     updatePolicyToggle: (...args) => updatePolicyToggle(...args),
   });
 
-  const { canEditHistory, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
+  const { canEditHistory, handleHistoryActionDenied, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
     $,
     $$,
     HISTORY_MESSAGE_CACHE_LIMIT,
@@ -1363,6 +1356,7 @@
     copyText: (...args) => copyText(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
+    navigate: (...args) => navigate(...args),
     reportError: (...args) => reportError(...args),
     state,
     toast: (...args) => toast(...args),
