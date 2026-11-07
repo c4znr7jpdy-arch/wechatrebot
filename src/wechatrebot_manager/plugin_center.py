@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from http.server import ThreadingHTTPServer
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -688,8 +689,11 @@ def launch_plugin_center(
     install_root: str | Path, feature_id: str | None = None
 ) -> subprocess.Popen[bytes]:
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    environment = os.environ.copy()
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     process = subprocess.Popen(
         plugin_center_command(install_root, feature_id),
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

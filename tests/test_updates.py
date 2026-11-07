@@ -427,6 +427,54 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     }
 
 
+@pytest.mark.parametrize("phase", ["plan", "helper"])
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager executable ownership guard")
+def test_manager_only_update_checks_independent_windows_before_changes(tmp_path, monkeypatch, phase):
+    from wechatrebot_manager import windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    install = tmp_path / "install"
+    target = install / "manager/WeChatReBot.exe"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old-manager")
+    (install / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+    )
+    working = install / "updates/.pending-manager"
+    payload = _ready_payload(working / "payload")
+    (payload / "app/feature.txt").unlink()
+    manifest = payload / "release-manifest.json"
+    content = json.loads(manifest.read_text(encoding="utf-8"))
+    content["files"] = [entry for entry in content["files"] if entry["path"].startswith("manager/")]
+    manifest.write_text(json.dumps(content), encoding="utf-8")
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease("0.8.0", "update", (), "", "https://example.test/update.zip", 7, "A" * 64, False)
+    prepared = PreparedUpdate(release, working, payload, archive)
+    queries = []
+    blocked = [phase == "plan"]
+
+    def holders(files):
+        queries.append(tuple(files))
+        return ((123, ProcessIdentity(str(target), 456)),) if blocked[0] else ()
+
+    monkeypatch.setattr(windows_file_holders, "file_holders", holders)
+    if phase == "plan":
+        with pytest.raises(UpdateFailure) as error:
+            create_update_plan(prepared, install, executable=target, parent_pid=0)
+        assert error.value.definition.code == "UPD-1005"
+        assert not (working / "WeChatReBot-Updater.exe").exists()
+        assert not (working / "update-plan.json").exists()
+    else:
+        plan = create_update_plan(prepared, install, executable=target, parent_pid=0)
+        blocked[0] = True
+        assert apply_update_plan(plan.plan_path, restart=False) == 1
+        assert not (install / "updates/update-journal.json").exists()
+    assert queries and all(files == (target,) for files in queries)
+    assert target.read_bytes() == b"old-manager"
+    assert archive.is_file() and prepared.payload_root.is_dir()
+
+
 def test_startup_failure_restores_previous_manager_and_payload(
     monkeypatch, tmp_path: Path
 ) -> None:

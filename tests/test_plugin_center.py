@@ -1171,6 +1171,20 @@ def test_plugin_center_launch_reports_an_existing_window_that_cannot_be_focused(
         plugin_center.launch_plugin_center(tmp_path, "feature-0123456789abcdef")
 
 
+def test_plugin_center_launch_has_independent_bundle_environment(tmp_path, monkeypatch):
+    captured = []
+    monkeypatch.setenv("PYINSTALLER_RESET_ENVIRONMENT", "0")
+    monkeypatch.setenv("WECHATREBOT_TEST_CONTEXT", "preserved")
+    monkeypatch.setattr(plugin_center.subprocess, "Popen", lambda *args, **kwargs:
+                        captured.append(kwargs) or SimpleNamespace(wait=lambda **_: 0))
+
+    plugin_center.launch_plugin_center(tmp_path)
+
+    assert captured[0]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert captured[0]["env"]["WECHATREBOT_TEST_CONTEXT"] == "preserved"
+    assert plugin_center.os.environ["PYINSTALLER_RESET_ENVIRONMENT"] == "0"
+
+
 def test_meme_market_requests_wait_for_install_and_other_posts_keep_short_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1922,6 +1922,42 @@ def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path)
     assert events == ["download", "download"]
 
 
+def test_independent_configuration_window_blocks_shutdown_and_reuses_download(monkeypatch, tmp_path):
+    from wechatrebot_manager import updates, windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    blocked = [True]
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: (
+        ((123, ProcessIdentity(str(tmp_path / "manager/WeChatReBot.exe"), 456)),) if blocked[0] else ()
+    ))
+
+    def plan(*_args, **_kwargs):
+        updates._assert_manager_executable_available(prepared.payload_root, tmp_path)
+        events.append("verify_plan")
+        return "plan"
+
+    monkeypatch.setattr(update_api, "create_update_plan", plan)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1005"
+    assert "配置窗口" in failed["error"]["message"]
+    assert events == ["download"] and not closes
+    assert api._prepared_update is prepared and not api._update_installing
+    blocked[0] = False
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    api._window = None
+    assert api.install_update(prepared.release.version, retry["confirmation_token"])["data"]["accepted"]
+    assert _wait_update_worker(api)["state"] == "restarting"
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
+
+
 @pytest.mark.parametrize("newer_version", [False, True])
 def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, newer_version):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
