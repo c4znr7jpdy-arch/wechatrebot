@@ -78,6 +78,21 @@ def test_skin_save_failure_keeps_previous_skin_and_allows_retry(browser, manager
         page.close()
 
 
+def test_skin_keyboard_selection_restores_focus_after_async_save(browser, manager_url):
+    page = browser.new_page()
+    try:
+        open_skin_settings(page, manager_url)
+        default = page.locator('[data-skin-option][value="default"]')
+        default.focus()
+        page.keyboard.press("ArrowRight")
+        expect(page.locator('[data-skin-option][value="soft"]')).to_be_checked()
+        expect(page.locator("#skinStatus")).to_contain_text("已应用")
+        assert page.evaluate("document.activeElement?.matches('[data-skin-option]')")
+        assert page.evaluate("document.activeElement?.value") == "soft"
+    finally:
+        page.close()
+
+
 def test_native_caption_receives_current_palette_at_startup_and_after_skin_or_mode_changes(browser, manager_url):
     page = browser.new_page()
     preview_source = (Path(__file__).resolve().parents[1] / "src/wechatrebot_manager/app_webui/preview.js").read_text(encoding="utf-8")

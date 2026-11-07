@@ -38,6 +38,10 @@ window.createManagerSettings = function (helpers) {
       });
       status.textContent = skins.failure || `已应用：${skins.entries.find((entry) => entry.id === skins.current).name}`;
     }
+    function restoreSkinFocus(wasFocused) {
+      if (!wasFocused || document.activeElement !== document.body) return;
+      $$("[data-skin-option]", options).find((input) => input.value === skins.current)?.focus();
+    }
     options.insertAdjacentHTML("beforeend", skins.entries.map((entry) => `
       <label class="skin-option"><input type="radio" name="manager-skin" data-skin-option disabled value="${escapeHtml(entry.id)}">
         <span><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.description)}</small></span>
@@ -45,13 +49,16 @@ window.createManagerSettings = function (helpers) {
     options.addEventListener("change", async (event) => {
       if (!event.target.matches("[data-skin-option]")) return;
       const id = event.target.value;
+      const wasFocused = document.activeElement === event.target;
       $$("[data-skin-option]", options).forEach((input) => { input.disabled = true; });
       status.textContent = "正在保存皮肤…";
       try {
         await skins.save(id, (value) => api("save_skin", value));
         renderSelection();
+        restoreSkinFocus(wasFocused);
       } catch (error) {
         renderSelection();
+        restoreSkinFocus(wasFocused);
         status.textContent = "皮肤未能保存，请重试。";
         reportError(error);
       }
