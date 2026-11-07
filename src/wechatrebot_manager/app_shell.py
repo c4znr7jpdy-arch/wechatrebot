@@ -503,7 +503,21 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
     def _status_data(self, view=None) -> dict:
         if view is None:
             view = self._lifecycle.refresh()
+        resume_ready = getattr(self._lifecycle, "pending_start_ready", None)
+        if callable(resume_ready) and resume_ready():
+            self._queue_robot_action("resume_pending_start", "正在继续启动机器人。", "13001")
         result = view.to_dict()
+        if getattr(self, "_robot_action", "") in {"start", "resume_pending_start"}:
+            # Queue acceptance precedes the worker's first lifecycle transition.
+            # Keep that interval busy too, so polling cannot re-enable Start.
+            result.update(start_pending=True, busy=True, can_start=False, can_stop=False)
+            if not view.busy:
+                result.update(state="CORE_STARTING", title="正在启动机器人",
+                              message="启动请求已接收，正在检查账号和准备机器人功能。")
+        if getattr(self, "_robot_stop_action", ""):
+            result.update(state="STOPPING", title="正在取消启动", busy=True,
+                          can_start=False, can_stop=False, start_pending=False,
+                          message="停止请求已接收，当前启动步骤结束后会立即停止机器人。")
         runtime = getattr(view, "runtime", None)
         account = (
             str(getattr(runtime, "wechat_identity", "") or "").strip()
@@ -539,32 +553,82 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         return self._queue_robot_action("force_stop", "正在强制停止机器人。")
 
     def _queue_robot_action(self, action: str, message: str, error_code: str = "19000") -> dict[str, object]:
+        action_state_lock = self.__dict__.setdefault("_robot_action_state_lock", threading.Lock())
         if not self._action_lock.acquire(blocking=False):
+            if action in {"request_stop", "force_stop"}:
+                with action_state_lock:
+                    if getattr(self, "_robot_action", "") in {"start", "resume_pending_start"}:
+                        previous = getattr(self, "_robot_stop_action", "")
+                        self._robot_stop_action = "force_stop" if "force_stop" in {previous, action} else action
+                        self._lifecycle.cancel_start_request()
+                    else:
+                        return self._ok({"accepted": False}, message="正在处理上一个操作。")
+                return self._ok({"accepted": True}, message="停止请求已接收，正在取消本次启动。")
             return self._ok({"accepted": False}, message="正在处理上一个操作。")
         if getattr(self, "_update_installing", False):
             self._action_lock.release()
             return self._ok({"accepted": False}, message="更新正在安装，请稍候。")
-        if action in {"start", "connect_wechat"}:
+        if action in {"start", "connect_wechat", "resume_pending_start"}:
             try:
                 if (has_pending_migrations(self._install_root)
                         or has_pending_group_analysis_migration(self._install_root)):
+                    if action == "resume_pending_start":
+                        self._lifecycle.cancel_pending_start()
                     self._action_lock.release()
                     return self._ok({"accepted": False}, message="请先在定时任务页完成中断的旧任务迁移，再启动机器人。")
             except (OSError, ValueError, sqlite3.Error, PayloadError):
+                if action == "resume_pending_start":
+                    self._lifecycle.cancel_pending_start()
                 self._action_lock.release()
                 return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
 
-        def worker() -> None:
+        with action_state_lock:
+            self._robot_action = action
+            self._robot_stop_action = ""
+
+        def perform(current_action: str) -> None:
             try:
-                getattr(self._lifecycle, action)()
+                getattr(self._lifecycle, current_action)()
             except LicenseError as exc:
+                if current_action in {"start", "resume_pending_start"}:
+                    self._lifecycle.cancel_pending_start()
                 self._lifecycle.events.emit("APP_ERROR", "failed", code=f"LIC-{exc.code}", message=str(exc))
             except Exception as exc:  # pragma: no cover - final UI safety net
+                if current_action in {"start", "resume_pending_start"}:
+                    self._lifecycle.cancel_pending_start()
                 self._failed(exc, error_code)
-            finally:
-                self._action_lock.release()
 
-        threading.Thread(target=worker, daemon=True).start()
+        def worker() -> None:
+            released = False
+            current_action = action
+            try:
+                while True:
+                    with action_state_lock:
+                        current_action = self._robot_stop_action or current_action
+                        self._robot_stop_action = ""
+                        self._robot_action = current_action
+                    perform(current_action)
+                    with action_state_lock:
+                        if not self._robot_stop_action:
+                            self._robot_action = ""
+                            self._action_lock.release()
+                            released = True
+                            return
+            finally:
+                if not released:
+                    with action_state_lock:
+                        self._robot_action = self._robot_stop_action = ""
+                        self._action_lock.release()
+
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except (OSError, RuntimeError) as exc:
+            if action == "resume_pending_start":
+                self._lifecycle.cancel_pending_start()
+            with action_state_lock:
+                self._robot_action = self._robot_stop_action = ""
+                self._action_lock.release()
+            return self._failed(exc, error_code)
         return self._ok({"accepted": True}, message=message)
 
     def select_wechat(self, value: str = "") -> dict[str, object]:

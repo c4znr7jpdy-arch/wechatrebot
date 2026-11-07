@@ -68,6 +68,7 @@ class LifecycleView:
     error: ErrorDefinition | None
     environment: WechatEnvironment
     runtime: RuntimeSnapshot
+    start_pending: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -78,6 +79,7 @@ class LifecycleView:
             "online": self.online,
             "can_start": self.can_start,
             "can_stop": self.can_stop,
+            "start_pending": self.start_pending,
             "error": self.error.to_dict() if self.error is not None else None,
             "environment": self.environment.to_dict(),
             "runtime": {
@@ -152,6 +154,8 @@ class LifecycleController:
         self._running_events_emitted = False
         self._wechat_closed_confirmations = 0
         self._start_in_progress = False
+        self._pending_start_account = ""
+        self._start_generation = 0
         self._maintenance_processes: list[ProcessLike] = []
         self._license_pause_failed = False
         self.events.emit("APP_START", "success")
@@ -190,6 +194,7 @@ class LifecycleController:
         try:
             self._runtime = self._snapshotter()
         except (OSError, ValueError):
+            self.cancel_pending_start()
             self._runtime = RuntimeSnapshot(False, False, "", account_status_available=False)
             self.state = LifecycleState.ERROR
             if self._runtime_config_error is None:
@@ -211,6 +216,7 @@ class LifecycleController:
         return True
 
     def _set_error(self, code: str, *, detail: str = "") -> LifecycleView:
+        self.cancel_pending_start()
         self.state = LifecycleState.ERROR
         self._error = self.catalog.get(code)
         self.events.emit(
@@ -296,8 +302,9 @@ class LifecycleController:
         if not self._license_snapshot()["enabled"]:
             return self._start_services()
         with self._lock:
-            if self._start_in_progress:
+            if self._start_in_progress or self._pending_start_account:
                 return self.view()
+            generation = self._start_generation
             self._runtime = self._snapshotter()
             reconnect = not self._connected_account()
             if reconnect:
@@ -306,26 +313,76 @@ class LifecycleController:
                     raise LicenseError(status["state"], status["message"])
                 if not status.get("account"):
                     raise LicenseError("account_required", "请先连接微信并确认绑定实际账号。")
+                self._pending_start_account = status["account"]
         if reconnect:
-            connection = self.connect_wechat()
+            try:
+                connection = self.connect_wechat()
+            except Exception:
+                self.cancel_pending_start()
+                raise
             if connection.state == LifecycleState.ERROR or not connection.environment.ready:
+                self.cancel_pending_start()
                 return connection
         with self._lock:
             self._runtime = self._snapshotter()
             account = self._connected_account()
             if not account:
-                # Connecting does not grant automation. The user can finish
-                # login and click Start again once the actual account is known.
+                # Retain only this explicit start request. Status polling can
+                # resume it after the owned bridge confirms the bound account.
                 return self.refresh()
-            self.licenses.authorize_run(account)
+            self._pending_start_account = account
+        return self._start_authorized(account, generation)
+
+    def _start_authorized(self, account: str, generation: int) -> LifecycleView:
         try:
-            result = self._start_services(("astrbot", "new-hook-bridge"))
+            result = self._start_services(
+                ("astrbot", "new-hook-bridge"), authorize_account=account,
+                start_generation=generation,
+            )
             if result.state == LifecycleState.ERROR or not result.environment.ready:
                 self._pause_license()
-            return result
         except Exception:
             self._pause_license()
             raise
+        finally:
+            self.cancel_pending_start(generation)
+        return self.view()
+
+    def cancel_pending_start(self, generation: int | None = None) -> None:
+        with self._lock:
+            if generation is not None and generation != self._start_generation:
+                return
+            self._pending_start_account = ""
+            self._start_generation += 1
+
+    def pending_start_ready(self) -> bool:
+        with self._lock:
+            return bool(not self._start_in_progress and self._pending_start_account
+                        and self._connected_account() == self._pending_start_account)
+
+    def cancel_start_request(self) -> None:
+        """Revoke automation now; the action queue owns service teardown."""
+        with self._lock:
+            self.cancel_pending_start()
+            if self._license_snapshot()["enabled"]:
+                self._pause_license(stop_on_error=False)
+
+    def resume_pending_start(self) -> LifecycleView:
+        """Continue one explicit start through the application's action queue."""
+        with self._lock:
+            expected = self._pending_start_account
+            generation = self._start_generation
+            if not expected:
+                return self.view()
+            self._runtime = self._snapshotter()
+            status = self._license_snapshot()
+            account = self._connected_account()
+            if not status["authorized"] or status.get("account") != expected or (account and account != expected):
+                self.cancel_pending_start()
+                return self.refresh()
+            if not account:
+                return self.refresh()
+        return self._start_authorized(account, generation)
 
     def _connected_account(self) -> str:
         """Only a live, owned bridge can supply the account used to start a run."""
@@ -342,10 +399,23 @@ class LifecycleController:
             return ""
         return self._runtime.wechat_identity
 
-    def _start_services(self, names: tuple[str, ...] | None = None) -> LifecycleView:
+    def _start_services(
+        self, names: tuple[str, ...] | None = None, *, authorize_account: str = "",
+        start_generation: int | None = None,
+    ) -> LifecycleView:
         with self._lock:
             if self._start_in_progress:
                 return self.view()
+            if start_generation is not None and start_generation != self._start_generation:
+                return self.view()
+            if authorize_account:
+                self._runtime = self._snapshotter()
+                if self._connected_account() != authorize_account:
+                    raise LicenseError("account_changed", "微信登录账号已变化，请确认后重新启动。")
+                # Keep the run grant and start guard under the same lock. A
+                # status poll must not revoke a fresh grant before core launch.
+                self.licenses.authorize_run(authorize_account)
+                self._pending_start_account = authorize_account
             existing = self._supervisor
             if existing is not None and existing.running:
                 owned = {
@@ -472,6 +542,16 @@ class LifecycleController:
         if not status["enabled"]:
             return None
         supervisor = self._supervisor
+        if self._pending_start_account and (
+            not status["authorized"] or status.get("account") != self._pending_start_account
+            or (self._runtime.account_status_available and self._runtime.wechat_identity
+                and self._runtime.wechat_identity != self._pending_start_account)
+            or (supervisor is not None and any(
+                item.spec.name == "new-hook-bridge" and item.process.poll() is not None
+                for item in supervisor.running
+            ))
+        ):
+            self.cancel_pending_start()
         if not supervisor or not supervisor.running:
             if self.state != LifecycleState.ERROR:
                 self.state = self._licensed_idle_state(status)
@@ -494,8 +574,9 @@ class LifecycleController:
             if status["can_run"]:
                 self._pause_license()
             self.state = (
-                LifecycleState.WAITING_WECHAT
-                if status["authorized"] and self._runtime.login_required
+                LifecycleState.CORE_STARTING if self.pending_start_ready()
+                else LifecycleState.WAITING_WECHAT
+                if self._pending_start_account or (status["authorized"] and self._runtime.login_required)
                 else self._licensed_idle_state(status)
             )
             self._error = None
@@ -518,6 +599,7 @@ class LifecycleController:
 
     def request_stop(self) -> LifecycleView:
         with self._lock:
+            self.cancel_pending_start()
             status = self._license_snapshot()
             if status["enabled"]:
                 self._pause_license()
@@ -596,6 +678,7 @@ class LifecycleController:
     def force_stop(self) -> LifecycleView:
         """Stop owned services immediately, without waiting for WeChat."""
         with self._lock:
+            self.cancel_pending_start()
             if self._license_snapshot()["enabled"]:
                 self._pause_license(stop_on_error=False)
             supervisor = self._supervisor
@@ -682,6 +765,10 @@ class LifecycleController:
             LifecycleState.ERROR: ("机器人启动失败", "请根据错误提示处理后重试。"),
         }
         title, message = titles[self.state]
+        pending_start = bool(self._pending_start_account)
+        if pending_start and not self._start_in_progress:
+            title = "微信已登录，正在启动机器人功能" if self._connected_account() else "等待登录微信"
+            message = "本次启动会在确认微信登录和授权账号后自动继续，无需再次点击。"
         if self._runtime_config_error is not None:
             title, message = self._runtime_config_error.title, self._runtime_config_error.message
         if (
@@ -738,6 +825,7 @@ class LifecycleController:
                 self._environment.ready
                 and self._runtime_config_error is None
                 and not busy
+                and not pending_start
                 and (not owned or licensed)
                 and not online
             ),
@@ -745,6 +833,7 @@ class LifecycleController:
             error=self._runtime_config_error or self._error,
             environment=self._environment,
             runtime=self._runtime,
+            start_pending=pending_start,
         )
 
 
