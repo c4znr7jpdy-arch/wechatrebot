@@ -360,9 +360,24 @@
   }
 
   function reconcileStartPending(status) {
-    if (!state.startPending) return status;
     const current = status?.state || "STOPPED";
-    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy) {
+    if (state.startPreparing && ["STOPPED", "LICENSE_READY"].includes(current)
+      && status?.environment?.ready && !status?.error) {
+      const loggedIn = status.runtime?.account_status_available !== false && Boolean(status.runtime?.wechat_identity);
+      return {...startingStatus(status),
+        title: loggedIn ? "微信已登录，正在确认启动" : "正在准备启动机器人",
+        message: loggedIn ? "正在核对当前账号与授权，确认后会继续启动，无需再次点击启动。" : "正在检查授权与微信连接，请按提示完成确认。"};
+    }
+    if (status?.start_pending === true) {
+      state.startPending = false;
+      return status;
+    }
+    if (Object.hasOwn(status || {}, "start_pending") && !state.startPreparing) {
+      state.startPending = false;
+      return status;
+    }
+    if (!state.startPending) return status;
+    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
@@ -476,7 +491,7 @@
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
-    const primaryLabel = starting ? "启动中…" : stopMode ? "停止运行" : "启动";
+    const primaryLabel = stopMode ? "停止运行" : starting ? "启动中…" : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
     primary.disabled = Boolean(status.busy || state.startPreparing)
@@ -541,9 +556,10 @@
   }
 
   async function runPrimaryAction() {
-    if (state.startPreparing) return;
+    if (state.startPreparing || state.status?.busy) return;
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
+    if (action === "start" && state.status?.start_pending) return;
     if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
       runForceStop();
       return;
@@ -557,7 +573,10 @@
         renderStatus(startingStatus(state.status));
       }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
-      if (action === "start" && result?.accepted === false) state.startPending = false;
+      if (action === "start" && result?.accepted === false) {
+        state.startPending = false;
+        await refreshStatus();
+      }
       window.setTimeout(refreshStatus, 250);
     } catch (error) {
       if (action === "start") state.startPending = false;

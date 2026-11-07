@@ -299,3 +299,91 @@ def test_browser_evidence_failure_keeps_original_assertion_and_closes_page(tmp_p
     assert "report" in calls
     with pytest.raises(RuntimeError, match="synthetic page close failed"):
         observed.close()
+
+
+@pytest.mark.parametrize("outcome", ["running", "stop", "failure"])
+def test_start_remains_single_and_explains_login_continuation(browser, manager_url, tmp_path, outcome):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async () => {
+          const api = window.pywebview.api;
+          const base = structuredClone((await api.get_status()).data);
+          window.startRequests = 0; window.stopRequests = 0; window.startStatusReads = 0;
+          window.startPhase = 'idle';
+          api.get_status = async () => {
+            document.body.dataset.startStatusReads = String(++window.startStatusReads);
+            const status = structuredClone(base), phase = window.startPhase;
+            Object.assign(status, {start_pending: ['login', 'loading'].includes(phase),
+              busy: phase === 'loading', online: phase === 'running',
+              can_start: ['idle', 'failure'].includes(phase), can_stop: phase !== 'loading',
+              state: {idle:'LICENSE_READY', login:'WAITING_WECHAT', loading:'CORE_STARTING',
+                running:'RUNNING', failure:'ERROR'}[phase],
+              title: {idle:'机器人未启动', login:'等待登录微信', loading:'微信已登录，正在启动机器人功能',
+                running:'机器人可用', failure:'机器人启动失败'}[phase],
+              message: phase === 'login' ? '请在微信窗口完成登录；登录后会自动继续启动，无需再次点击启动。'
+                : phase === 'loading' ? '账号连接成功，剩余功能正在后台加载。' : '',
+              error: phase === 'failure' ? {code:'13001', title:'机器人启动失败', message:'模拟启动失败', solutions:[]} : null});
+            Object.assign(status.runtime, {account_status_available:true, connection_ready:true, hook_ready:true,
+              wechat_identity: phase === 'login' ? '' : 'wxid_preview_start',
+              engine_ready: phase === 'running', upstream_connected:phase === 'running', heartbeat_fresh:phase === 'running'});
+            return {ok:true, data:status};
+          };
+          api.start_robot = () => {
+            window.startRequests++;
+            return new Promise(resolve => { window.finishStartRequest = () => {
+              window.startPhase = 'login'; resolve({ok:true, data:{accepted:true}});
+            }; });
+          };
+          api.stop_robot = async () => {
+            window.stopRequests++; window.startPhase = 'idle';
+            return {ok:true, data:{accepted:true}};
+          };
+        }""")
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.locator("#primaryAction").click()
+        page.wait_for_function("() => window.startRequests === 1")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.startRequests") == 1
+        reads_before_next_poll = page.evaluate("window.startStatusReads")
+        expect(page.locator("body")).not_to_have_attribute("data-start-status-reads", str(reads_before_next_poll))
+        expect(page.locator("#stateTitle")).to_have_text("微信已登录，正在确认启动")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("window.finishStartRequest()")
+        expect(page.locator("#stateTitle")).to_have_text("等待登录微信")
+        expect(page.locator("#stateMessage")).to_contain_text("自动继续启动")
+        expect(page.locator("#primaryAction")).to_have_text("停止运行")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+
+        if outcome == "stop":
+            page.locator("#primaryAction").click()
+            expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+            expect(page.locator("#primaryAction")).to_have_text("启动")
+            expect(page.locator("#primaryAction")).to_be_enabled()
+            assert page.evaluate("window.stopRequests") == 1
+        else:
+            page.evaluate("window.startPhase = 'loading'")
+            expect(page.locator("#stateTitle")).to_have_text("微信已登录，正在启动机器人功能")
+            expect(page.locator("#globalStatus")).to_have_text("正在启动")
+            expect(page.locator("#stageCore em")).to_have_text("启动中")
+            expect(page.locator("#primaryAction")).to_have_text("启动中…")
+            expect(page.locator("#primaryAction")).to_be_disabled()
+            page.locator("#primaryAction").dispatch_event("click")
+            assert page.evaluate("window.startRequests") == 1
+            page.screenshot(path=str(tmp_path / "login-continues-without-second-start.png"))
+            page.evaluate("phase => { window.startPhase = phase; }", "running" if outcome == "running" else "failure")
+            expect(page.locator("#stateTitle")).to_have_text("机器人可用" if outcome == "running" else "机器人启动失败")
+            expect(page.locator("#primaryAction")).to_be_enabled()
+            expect(page.locator("#primaryAction")).to_have_text("停止运行" if outcome == "running" else "启动")
+        assert page.evaluate("window.startRequests") == 1
+        assert not errors, errors
+        assert page.url == manager_url and "管理" in page.title()
+        expect(page.locator("#page-home")).to_be_visible()
+    finally:
+        page.close()
