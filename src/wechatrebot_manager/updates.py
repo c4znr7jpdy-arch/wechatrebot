@@ -604,6 +604,37 @@ def _validate_update_baseline(payload_root: Path, install_root: Path) -> None:
     validate_incremental_base(payload_root, install_root)
 
 
+def _assert_manager_executable_available(
+    payload_root: Path, install_root: Path, *, source_executable: Path | None = None,
+) -> None:
+    """Leave independent configuration windows open and ask for an explicit close."""
+    if os.name != "nt" or Path("manager/WeChatReBot.exe") not in payload_relative_paths(payload_root):
+        return
+    from .launcher import _normalized_executable, process_identity
+    from .windows_file_holders import file_holders
+
+    retry_hint = "；已下载的更新会保留。" if source_executable is not None else "。"
+    try:
+        allowed = {}
+        if source_executable is not None:
+            for pid in _update_wait_pids(source_executable, os.getpid(), include_bootloader=True):
+                identity = process_identity(pid)
+                if identity is not None and identity.executable == _normalized_executable(source_executable):
+                    allowed[pid] = identity
+        target = _checked_target(install_root, Path("manager/WeChatReBot.exe"))
+        blockers = [pid for pid, identity in file_holders((target,)) if allowed.get(pid) != identity]
+    except (OSError, PayloadError) as exc:
+        raise UpdateFailure(
+            "UPD-1005", str(exc),
+            public_message="暂时无法确认客户端文件占用，请关闭独立配置窗口后重试更新" + retry_hint,
+        ) from exc
+    if blockers:
+        raise UpdateFailure(
+            "UPD-1005", "客户端文件仍被进程占用：" + ", ".join(map(str, blockers)),
+            public_message="请先关闭独立的功能配置窗口及其他客户端窗口，再重试更新" + retry_hint,
+        )
+
+
 def assert_update_runtime_stopped(
     payload_root: str | Path, install_root: str | Path
 ) -> None:
@@ -920,6 +951,7 @@ def create_update_plan(
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
+    _assert_manager_executable_available(prepared.payload_root, root, source_executable=source_executable)
     helper = working / "WeChatReBot-Updater.exe"
     helper_source = prepared.payload_root / "manager" / "WeChatReBot.exe"
     if not helper_source.is_file():
@@ -1127,7 +1159,10 @@ def _restart_manager(
         ("WECHATREBOT_UPDATE_FROM", current_version),
         ("WECHATREBOT_UPDATE_TO", version),
     ):
-        if value:
+        # A failed update restarts the previous manager without a handshake.
+        # Never inherit a successful earlier update's confirmation into it.
+        environment.pop(name, None)
+        if update_id and value:
             environment[name] = value
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return subprocess.Popen(
@@ -1355,6 +1390,7 @@ def apply_update_plan(
         verify_payload(payload_root)
         _validate_update_baseline(payload_root, root)
         assert_update_runtime_stopped(payload_root, root)
+        _assert_manager_executable_available(payload_root, root)
         rollback_root = root / "updates" / f".rollback-{update_id}"
         rollback_root.mkdir(parents=True, exist_ok=False)
         journal = _snapshot_update_targets(

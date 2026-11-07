@@ -303,11 +303,21 @@ class Main(star.Star):
                 if isinstance(extra_details, dict):
                     record_details.update(extra_details)
         except Exception as exc:
-            logger.exception(
-                "[CAPABILITY] invoke failed capability=%s",
+            # HTTP and plugin exceptions can contain credential-bearing URLs.
+            logger.warning(
+                "[CAPABILITY] invoke failed capability=%s (%s)",
                 capability.capability_id,
+                type(exc).__name__,
             )
-            return f"{capability.name}这哈没调成功：{exc}"
+            if capability.side_effect == "write":
+                return (
+                    f"{capability.name}的结果尚未确认，请先查询当前状态；"
+                    "不要自动重复提交。"
+                )
+            return (
+                f"{capability.name}暂时未能完成，请稍后重试；"
+                "如果持续失败，请联系管理员检查功能配置和网络连接。"
+            )
 
         if isinstance(result, CapabilityMediaResult):
             if not result.text.strip():

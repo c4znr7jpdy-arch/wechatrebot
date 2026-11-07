@@ -564,6 +564,59 @@ def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_pat
     assert captured["values"]["provider"] == "tavily"
 
 
+@pytest.mark.parametrize("ignored", ["web_search", "websearch_provider", "web_search_link", "websearch_bocha_key"])
+def test_web_search_hot_apply_requires_requested_values_in_readback(monkeypatch, tmp_path, ignored):
+    api = _api(tmp_path)
+    config = {"provider_settings": {
+        "web_search": False, "websearch_provider": "tavily", "web_search_link": False,
+        "websearch_bocha_key": ["synthetic-old-key"],
+    }}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                previous = config["provider_settings"][ignored]
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"][ignored] = previous
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({
+        "enabled": True, "provider": "bocha", "link_enabled": True,
+        "key": "synthetic-new-key",
+    })
+    assert result["ok"] is False
+    assert "synthetic" not in str(result)
+
+
+def test_web_search_hot_apply_preserves_unspecified_secrets_and_unrelated_changes(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    config = {"provider_settings": {"websearch_bocha_key": ["synthetic-saved-key"]}}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"]["unrelated_setting"] = "changed"
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({"enabled": True, "provider": "bocha", "link_enabled": False})
+    assert result["ok"] is True
+    assert result["data"]["providers"]["bocha"]["configured"] is True
+    assert "synthetic" not in str(result)
+
+
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     provider_id = "custom_mimo/mimo-v2.5"
@@ -1869,6 +1922,46 @@ def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path)
     assert events == ["download", "download"]
 
 
+def test_independent_configuration_window_blocks_shutdown_and_reuses_download(monkeypatch, tmp_path):
+    from wechatrebot_manager import updates, windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    blocked = [True]
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt", getpid=lambda: 999))
+    monkeypatch.setattr(updates, "_update_wait_pids", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: (
+        ((123, ProcessIdentity(str(tmp_path / "manager/WeChatReBot.exe"), 456)),) if blocked[0] else ()
+    ))
+
+    def plan(*_args, **_kwargs):
+        updates._assert_manager_executable_available(
+            prepared.payload_root, tmp_path, source_executable=tmp_path / "manager/WeChatReBot.exe",
+        )
+        events.append("verify_plan")
+        return "plan"
+
+    monkeypatch.setattr(update_api, "create_update_plan", plan)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1005"
+    assert "配置窗口" in failed["error"]["message"]
+    assert "已下载的更新会保留" in failed["error"]["message"]
+    assert events == ["download"] and not closes
+    assert api._prepared_update is prepared and not api._update_installing
+    blocked[0] = False
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    api._window = None
+    assert api.install_update(prepared.release.version, retry["confirmation_token"])["data"]["accepted"]
+    assert _wait_update_worker(api)["state"] == "restarting"
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
+
+
 @pytest.mark.parametrize("newer_version", [False, True])
 def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, newer_version):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
@@ -3032,3 +3125,29 @@ def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:
     api._close_window_for_update()
 
     assert calls == ["permit", "destroy"]
+
+
+@pytest.mark.parametrize("code", ["13001", "13002", "13008"])
+def test_failed_stop_reuses_force_stop_confirmation_before_retrying(code) -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    action = script[script.index("  async function runPrimaryAction()"):script.index("  function runForceStop()")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {status:{state:'ERROR', can_start:false, can_stop:true,
+  error:{code:'13008'}}, startPreparing:false, stopPending:false};
+const $ = () => ({dataset:{action:'stop'}});
+let confirmations = 0;
+const runForceStop = () => {confirmations++;};
+const api = () => {throw new Error('a retry requires explicit force-stop confirmation');};
+(async () => {
+  await runPrimaryAction();
+  assert.equal(confirmations, 1);
+  assert.equal(state.stopPending, false);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=action + harness.replace("13008", code), text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
+    assert result.stdout == "ok"

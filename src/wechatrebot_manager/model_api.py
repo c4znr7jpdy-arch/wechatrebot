@@ -265,12 +265,22 @@ class ModelApiMixin:
                 config = system.get("config") if isinstance(system, dict) else None
                 if not isinstance(config, dict):
                     raise PluginCenterError("无法读取当前机器人核心配置，请刷新后重试。")
+                # Build the expected patch with the same validation used for
+                # saving. An empty key intentionally leaves saved secrets alone.
+                expected = {"provider_settings": {}}
+                apply_web_search_values(expected, values)
                 apply_web_search_values(config, values)
                 client.request("PUT", "/api/v1/system-config", config)
                 verified = client.request("GET", "/api/v1/system-config")
                 verified_config = verified.get("config") if isinstance(verified, dict) else None
                 if not isinstance(verified_config, dict):
                     raise PluginCenterError("联网搜索设置已提交，但没有收到生效确认，请刷新后重试。")
+                verified_settings = verified_config.get("provider_settings")
+                if not isinstance(verified_settings, dict) or any(
+                    verified_settings.get(key) != value
+                    for key, value in expected["provider_settings"].items()
+                ):
+                    raise PluginCenterError("联网搜索设置已提交，但未能确认生效，请刷新后重试。")
                 saved = web_search_settings_from_config(verified_config)
             else:
                 saved = save_web_search_settings(self._install_root, values)

@@ -292,3 +292,51 @@ def test_update_guard_accepts_confirmed_empty_file_usage(tmp_path, monkeypatch):
     root = configure_guard(tmp_path, monkeypatch)
     monkeypatch.setattr(holders, "_restart_manager_processes", lambda files: ())
     updates.assert_update_runtime_stopped(tmp_path, root)
+
+
+@pytest.mark.parametrize("holder", ["self", "parent", "independent", "different-parent", "reused-parent", "unavailable"])
+def test_manager_update_guard_excludes_only_current_manager_and_verified_parent(tmp_path, monkeypatch, holder):
+    target = tmp_path / "manager/WeChatReBot.exe"
+    normalized = launcher._normalized_executable(target)
+    identities = {123: ProcessIdentity(normalized, 456), 234: ProcessIdentity(normalized, 789),
+                  345: ProcessIdentity(normalized, 987)}
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt", path=os.path, getpid=lambda: 123, getppid=lambda: 234))
+    monkeypatch.setattr(updates.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updates, "_process_executable", lambda pid: target if holder != "different-parent" else tmp_path / "other.exe")
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
+    monkeypatch.setattr(launcher, "process_identity", identities.get)
+    queried = []
+
+    def query(files):
+        queried.append(tuple(files))
+        if holder == "unavailable":
+            raise OSError("query unavailable")
+        pid = 123 if holder == "self" else 345 if holder == "independent" else 234
+        identity = identities[pid]
+        if holder == "reused-parent":
+            identity = ProcessIdentity(normalized, 1000)
+        return ((pid, identity),)
+
+    monkeypatch.setattr(holders, "file_holders", query)
+    if holder in {"self", "parent"}:
+        updates._assert_manager_executable_available(tmp_path, tmp_path, source_executable=target)
+    else:
+        with pytest.raises(UpdateFailure) as failure:
+            updates._assert_manager_executable_available(tmp_path, tmp_path, source_executable=target)
+        assert failure.value.definition.code == "UPD-1005"
+        assert "配置窗口" in failure.value.to_public_dict()["message"]
+    assert queried == [(target,)]
+
+
+def test_helper_manager_guard_does_not_exclude_previous_manager_pid(tmp_path, monkeypatch):
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
+    monkeypatch.setattr(holders, "file_holders", lambda _: ((os.getpid(), ProcessIdentity("old.exe", 456)),))
+    with pytest.raises(UpdateFailure):
+        updates._assert_manager_executable_available(tmp_path, tmp_path)
+
+
+def test_component_only_update_does_not_query_unchanged_manager(tmp_path, monkeypatch):
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("app/bridge/main.py"),))
+    monkeypatch.setattr(holders, "file_holders", lambda _: pytest.fail("manager is unchanged"))
+    updates._assert_manager_executable_available(tmp_path, tmp_path)

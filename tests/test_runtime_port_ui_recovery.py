@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from wechatrebot_manager import environment, lifecycle, runtime_status
+from wechatrebot_manager import environment, launcher, lifecycle, runtime_config, runtime_status, uninstaller
 from wechatrebot_manager.app_shell import ApplicationApi
 from wechatrebot_manager.customer_config import (
     load_provider_services, save_provider_thinking_preference,
@@ -69,3 +69,166 @@ def test_damaged_manager_config_bootstraps_without_default_probes(tmp_path, monk
     assert repaired["state"] == "STOPPED" and repaired["error"] is None
     assert repaired["can_start"] is True
     assert probes == [16200, 15000]
+
+
+@pytest.mark.parametrize("service_ready", [False, True])
+@pytest.mark.parametrize("repair_configuration", [False, True])
+@pytest.mark.parametrize("licensed", [False, True])
+def test_readopted_services_keep_stop_control_across_configuration_recovery(
+    tmp_path, monkeypatch, service_ready, repair_configuration, licensed,
+):
+    ports = runtime_config.RuntimePorts(astrbot_ws=16200, bridge_callback=15000)
+    monkeypatch.setattr(launcher, "_hook_integrity_files", lambda _: ())
+    specs = launcher.build_service_specs(tmp_path, ports=ports)
+    identities = {
+        pid: launcher.ProcessIdentity(launcher._normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state = tmp_path / "data/manager/service-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({
+        "schema_version": 1,
+        "complete": True,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    manager = tmp_path / "config/manager.json"
+    manager.parent.mkdir()
+    valid_config = json.dumps({"ports": {"astrbot_ws": 16200, "bridge_callback": 15000}})
+    manager.write_text("{broken" if repair_configuration else valid_config, encoding="utf-8")
+    built_ports = []
+
+    def supervisor(specs, **kwargs):
+        built_ports.append([spec.ready_port for spec in specs])
+        return launcher.ProcessSupervisor(
+            specs, **kwargs, identity_probe=identities.get,
+            readiness_probe=lambda _host, _port: service_ready,
+        )
+
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda _host, _port: service_ready)
+    monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_: runtime_status.BridgeHealth(
+        True, True, True, True, "wxid_owned", True, True,
+    ))
+    from test_license_lifecycle import License
+    license_client = License() if licensed else None
+    if license_client is not None:
+        license_client.bound, license_client.granted = "wxid_owned", True
+    controller = lifecycle.LifecycleController(
+        tmp_path, environment_checker=lambda _: environment.WechatEnvironment(True, "10000", "", "", ()),
+        license_client=license_client,
+    )
+    if repair_configuration:
+        assert controller.view().state == lifecycle.LifecycleState.ERROR
+        assert built_ports == [] and controller._supervisor is None
+        manager.write_text(valid_config, encoding="utf-8")
+
+    repaired = controller.refresh()
+    assert repaired.state == (lifecycle.LifecycleState.RUNNING if service_ready else lifecycle.LifecycleState.ERROR)
+    assert repaired.can_stop is True
+    assert repaired.can_start is False
+    assert built_ports == [[16200, 15000]]
+    assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
+    assert controller.refresh().can_stop is True
+    assert built_ports == [[16200, 15000]]
+    if not service_ready:
+        manager.write_text("{broken", encoding="utf-8")
+        assert controller.refresh().error.code == "13001"
+        manager.write_text(valid_config, encoding="utf-8")
+        recovered = controller.refresh()
+        assert recovered.error is not None and recovered.error.code == "13002"
+        assert recovered.can_stop and not recovered.can_start
+        assert built_ports == [[16200, 15000]]
+        from unittest.mock import Mock
+        start_missing = Mock(side_effect=AssertionError("must stop incomplete recovery before starting"))
+        monkeypatch.setattr(controller._supervisor, "start_missing", start_missing)
+        monkeypatch.setattr(controller, "_snapshotter", Mock(side_effect=AssertionError("must reject before probing")))
+        rejected = controller._start_services(("astrbot",))
+        assert rejected.error.code == "13002" and not rejected.can_start
+        start_missing.assert_not_called()
+        monkeypatch.setattr(controller, "_snapshotter", lambda: runtime_status.RuntimeSnapshot(False, False, ""))
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    controller.force_stop()
+    assert terminated == [102, 101]
+    assert not state.exists()
+
+
+@pytest.mark.parametrize("failure", ["state_oserror", "state_launcherror", "first_log", "second_log"])
+def test_adoption_io_failure_preserves_verified_process_control(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr(launcher, "_hook_integrity_files", lambda _: ())
+    specs = launcher.build_service_specs(tmp_path)
+    identities = {
+        pid: launcher.ProcessIdentity(launcher._normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state = tmp_path / "data/manager/service-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({
+        "schema_version": 1,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    original_open = type(state).open
+    blocked_log = specs[0 if failure == "first_log" else 1].log_file
+
+    def open_file(path, mode="r", *args, **kwargs):
+        if failure.endswith("log") and path == blocked_log and mode == "ab":
+            raise PermissionError("synthetic-private-storage-details")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(type(state), "open", open_file)
+    candidates = []
+
+    def supervisor(specs, **kwargs):
+        candidate = launcher.ProcessSupervisor(
+            specs, **kwargs, identity_probe=identities.get,
+            readiness_probe=lambda *_args: True,
+        )
+        if failure.startswith("state_"):
+            def persist():
+                error = OSError if failure == "state_oserror" else launcher.ServiceLaunchError
+                raise error("synthetic-private-storage-details")
+            candidate._persist_state = persist
+        candidates.append(candidate)
+        return candidate
+
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    controller = lifecycle.LifecycleController(
+        tmp_path, environment_checker=lambda _: environment.WechatEnvironment(True, "10000", "", "", ()),
+        snapshotter=lambda: runtime_status.RuntimeSnapshot(False, False, ""),
+    )
+    recovered = controller.refresh()
+    assert controller._supervisor is candidates[0]
+    assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
+    assert recovered.state == lifecycle.LifecycleState.ERROR
+    assert recovered.error.code == "13002" and recovered.can_stop and not recovered.can_start
+    assert "synthetic-private" not in json.dumps(recovered.to_dict())
+    assert "synthetic-private" not in (tmp_path / "logs/lifecycle-events.jsonl").read_text("utf-8")
+    handles = [item.log_handle for item in controller._supervisor.running]
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    controller.force_stop()
+    assert terminated == [102, 101]
+    assert all(handle.closed for handle in handles)
+    assert not state.exists()

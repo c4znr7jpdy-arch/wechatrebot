@@ -427,6 +427,120 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     }
 
 
+@pytest.mark.parametrize("phase", ["plan", "helper"])
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager executable ownership guard")
+def test_manager_only_update_checks_independent_windows_before_changes(tmp_path, monkeypatch, phase):
+    from wechatrebot_manager import windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    install = tmp_path / "install"
+    target = install / "manager/WeChatReBot.exe"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old-manager")
+    (install / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+    )
+    working = install / "updates/.pending-manager"
+    payload = _ready_payload(working / "payload")
+    (payload / "app/feature.txt").unlink()
+    manifest = payload / "release-manifest.json"
+    content = json.loads(manifest.read_text(encoding="utf-8"))
+    content["files"] = [entry for entry in content["files"] if entry["path"].startswith("manager/")]
+    manifest.write_text(json.dumps(content), encoding="utf-8")
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease("0.8.0", "update", (), "", "https://example.test/update.zip", 7, "A" * 64, False)
+    prepared = PreparedUpdate(release, working, payload, archive)
+    queries = []
+    blocked = [phase == "plan"]
+
+    def holders(files):
+        queries.append(tuple(files))
+        return ((123, ProcessIdentity(str(target), 456)),) if blocked[0] else ()
+
+    monkeypatch.setattr(windows_file_holders, "file_holders", holders)
+    if phase == "plan":
+        with pytest.raises(UpdateFailure) as error:
+            create_update_plan(prepared, install, executable=target, parent_pid=0)
+        assert error.value.definition.code == "UPD-1005"
+        assert not (working / "WeChatReBot-Updater.exe").exists()
+        assert not (working / "update-plan.json").exists()
+    else:
+        plan = create_update_plan(prepared, install, executable=target, parent_pid=0)
+        blocked[0] = True
+        assert apply_update_plan(plan.plan_path, restart=False) == 1
+        assert not (install / "updates/update-journal.json").exists()
+    assert queries and all(files == (target,) for files in queries)
+    assert target.read_bytes() == b"old-manager"
+    assert archive.is_file() and prepared.payload_root.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager executable ownership guard")
+def test_helper_window_failure_clears_inherited_update_handshake_before_restart(tmp_path, monkeypatch):
+    from test_app_shell import _api
+    from wechatrebot_manager import windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    target = tmp_path / "manager/WeChatReBot.exe"
+    target.parent.mkdir()
+    target.write_bytes(b"old-manager")
+    (tmp_path / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+    )
+    working = tmp_path / "updates/.pending-manager"
+    payload = _ready_payload(working / "payload")
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease("0.8.0", "update", (), "", "https://example.test/update.zip", 7, "A" * 64, False)
+    prepared = PreparedUpdate(release, working, payload, archive)
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: ())
+    plan = create_update_plan(prepared, tmp_path, executable=target, parent_pid=0, current_version="0.7.9")
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: ((123, ProcessIdentity(str(target), 456)),))
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_: None)
+    for name, value in (("ID", "a" * 32), ("FROM", "0.7.8"), ("TO", "0.7.9")):
+        monkeypatch.setenv(f"WECHATREBOT_UPDATE_{name}", value)
+    launches = []
+    monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
+                        launches.append((args, kwargs)) or object())
+
+    assert apply_update_plan(plan.plan_path) == 1
+
+    assert target.read_bytes() == b"old-manager"
+    assert not (tmp_path / "updates/update-journal.json").exists()
+    failure = consume_update_result(tmp_path)
+    assert failure["error_code"] == "UPD-1005"
+    assert "配置窗口" in failure["message"] and "保留" not in failure["message"]
+    assert len(launches) == 1 and launches[0][0][0] == [str(target)]
+    environment = launches[0][1]["env"]
+    assert not any(f"WECHATREBOT_UPDATE_{suffix}" in environment for suffix in ("ID", "FROM", "TO"))
+    api = _api(tmp_path)
+    api._update_result = failure
+    api._startup_update_id = environment.get("WECHATREBOT_UPDATE_ID", "")
+    api._startup_update_from = environment.get("WECHATREBOT_UPDATE_FROM", "")
+    api._startup_update_to = environment.get("WECHATREBOT_UPDATE_TO", "")
+    api.confirm_update_startup()
+    assert api._update_result is failure and api._update_result["status"] == "failed"
+    assert not (tmp_path / "updates" / f"startup-success-{'a' * 32}.json").exists()
+    assert archive.is_file() and payload.is_dir()
+
+
+def test_successful_restart_uses_only_current_update_handshake(tmp_path, monkeypatch):
+    target = tmp_path / "WeChatReBot.exe"
+    target.write_bytes(b"manager")
+    launches = []
+    for name, value in (("ID", "a" * 32), ("FROM", "0.7.8"), ("TO", "0.7.9")):
+        monkeypatch.setenv(f"WECHATREBOT_UPDATE_{name}", value)
+    monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
+                        launches.append(kwargs) or object())
+
+    updates_module._restart_manager(target, tmp_path, update_id="b" * 32, version="0.8.0")
+
+    environment = launches[0]["env"]
+    assert environment["WECHATREBOT_UPDATE_ID"] == "b" * 32
+    assert environment["WECHATREBOT_UPDATE_TO"] == "0.8.0"
+    assert environment.get("WECHATREBOT_UPDATE_FROM") is None
+
+
 def test_startup_failure_restores_previous_manager_and_payload(
     monkeypatch, tmp_path: Path
 ) -> None:
