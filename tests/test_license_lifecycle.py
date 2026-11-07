@@ -452,10 +452,10 @@ def test_status_poll_during_connect_preparation_keeps_explicit_start_request(tmp
     connect = controller.connect_wechat
     results = []
 
-    def delayed_connect():
+    def delayed_connect(**kwargs):
         connect_ready.set()
         assert finish_connect.wait(3)
-        return connect()
+        return connect(**kwargs)
 
     controller.connect_wechat = delayed_connect
     worker = threading.Thread(target=lambda: results.append(controller.start()))
@@ -675,8 +675,8 @@ def test_cancellation_during_initial_connect_cannot_restore_pending_start(tmp_pa
     connect = controller.connect_wechat
     results = []
 
-    def delayed_connect():
-        result = connect()
+    def delayed_connect(**kwargs):
+        result = connect(**kwargs)
         world["account"] = "wxid_a"
         entered.set()
         assert finish.wait(3)
@@ -786,16 +786,18 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
 
 @pytest.mark.parametrize("action", ["stop_robot", "force_stop_robot"])
 @pytest.mark.parametrize("pause_error", [False, True])
-def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_path, monkeypatch, action, pause_error):
+@pytest.mark.parametrize("boundary", ["readiness", "first_snapshot", "connect_handoff"])
+def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_path, monkeypatch, action, pause_error, boundary):
     from test_app_shell import _api
     from test_launcher import _FakeProcess, _layout
     from wechatrebot_manager import launcher, lifecycle
 
     _layout(tmp_path)
     processes, stop_threads, supervisors = {}, [], []
-    waiting = threading.Event()
+    waiting, release = threading.Event(), threading.Event()
     ready = False
     core_worker = []
+    start_worker = []
     license = License()
     license.bound = "wxid_a"
     executable = launcher._normalized_executable(tmp_path / "runtime/python/python.exe")
@@ -845,7 +847,30 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
     controller = LifecycleController(tmp_path, license_client=license,
         environment_checker=lambda _: environment, environment_saver=lambda *_: None,
         snapshotter=snapshot, process_probe=lambda: (), preflight=lambda _: ())
-    controller.connect_wechat()
+    if boundary != "connect_handoff":
+        controller.connect_wechat()
+    if boundary == "first_snapshot":
+        snapshot_license = license.snapshot
+        main_thread = threading.get_ident()
+
+        def delayed_snapshot(account=""):
+            if threading.get_ident() != main_thread and not start_worker:
+                start_worker.append(threading.get_ident())
+                waiting.set()
+                assert release.wait(3)
+            return snapshot_license(account)
+
+        monkeypatch.setattr(license, "snapshot", delayed_snapshot)
+    elif boundary == "connect_handoff":
+        connect = controller.connect_wechat
+
+        def delayed_connect(**kwargs):
+            start_worker.append(threading.get_ident())
+            waiting.set()
+            assert release.wait(3)
+            return connect(**kwargs)
+
+        monkeypatch.setattr(controller, "connect_wechat", delayed_connect)
     license.pause_error = pause_error
     api = _api(tmp_path)
     api._lifecycle = controller
@@ -853,17 +878,23 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
         assert api.start_robot()["data"]["accepted"]
         assert waiting.wait(2)
         assert getattr(api, action)()["data"]["accepted"]
+        release.set()
         # No readiness release or timeout advance: production's default waiter
         # must wake on cancellation and the same worker owns all teardown.
         assert api._action_lock.acquire(timeout=2)
         api._action_lock.release()
-        assert stop_threads and set(stop_threads) == {core_worker[0]}
+        if boundary == "readiness":
+            assert stop_threads and set(stop_threads) == {core_worker[0]}
+        else:
+            assert not core_worker
+            assert not stop_threads or set(stop_threads) == {start_worker[0]}
         assert not live("astrbot")
-        assert live("new-hook-bridge") is (action == "stop_robot" and not pause_error)
-        assert license.granted is pause_error
+        assert live("new-hook-bridge") is (boundary != "connect_handoff" and action == "stop_robot" and not pause_error)
+        assert license.granted is (boundary == "readiness" and pause_error)
         assert not controller._start_in_progress
         records = controller.events.recent()
-        assert any(record["event"] == "CORE_STOP" and record["status"] == "cancelled" for record in records)
+        if boundary == "readiness":
+            assert any(record["event"] == "CORE_STOP" and record["status"] == "cancelled" for record in records)
         assert not [record for record in records if record.get("code") in {"13001", "12001"}]
 
         # A fresh user request clears the old signal, reuses/recreates the
@@ -876,6 +907,7 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
         assert controller.refresh().state == LifecycleState.RUNNING
         assert live("astrbot") and live("new-hook-bridge") and license.granted
     finally:
+        release.set()
         controller.cancel_start_request()
         assert api._action_lock.acquire(timeout=3)
         api._action_lock.release()
@@ -889,8 +921,8 @@ def test_start_rechecks_actual_account_after_reconnecting(tmp_path, actual):
     license.bound = "wxid_a"
     original_connect = controller.connect_wechat
 
-    def connect():
-        result = original_connect()
+    def connect(**kwargs):
+        result = original_connect(**kwargs)
         world["account"] = actual
         return result
 
@@ -912,11 +944,11 @@ def test_logged_in_account_without_owned_bridge_still_connects_before_start(tmp_
     original_connect = controller.connect_wechat
     connections = []
 
-    def connect():
+    def connect(**kwargs):
         assert not license.grants and not world["core"]
         connections.append(True)
         world["account"] = ""  # The newly opened bot WeChat must confirm its own login.
-        return original_connect()
+        return original_connect(**kwargs)
 
     controller.connect_wechat = connect
     waiting = controller.start()

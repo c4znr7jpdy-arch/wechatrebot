@@ -285,11 +285,11 @@ class LifecycleController:
                 self._supervisor.stop(timeout_seconds=0)
                 self._runtime = self._snapshotter()
 
-    def connect_wechat(self) -> LifecycleView:
+    def connect_wechat(self, *, start_generation: int | None = None) -> LifecycleView:
         """Connect WeChat for identity checks or binding, without reply plugins."""
         status = self._license_snapshot()
         if not status["enabled"]:
-            return self.start()
+            return self._start_services(start_generation=start_generation)
         if not status["can_connect"]:
             raise LicenseError(status["state"], status["message"])
         owned_core = self._supervisor and any(
@@ -301,15 +301,17 @@ class LifecycleController:
             # its pause. Reconnecting must never resume bridge automation.
             self.licenses.pause()
             self._license_pause_failed = False
-        return self._start_services(("new-hook-bridge",))
+        return self._start_services(("new-hook-bridge",), start_generation=start_generation)
 
     def start(self) -> LifecycleView:
-        if not self._license_snapshot()["enabled"]:
-            return self._start_services()
         with self._lock:
-            if self._start_in_progress or self._pending_start_account:
-                return self.view()
             generation = self._start_generation
+        if not self._license_snapshot()["enabled"]:
+            return self._start_services(start_generation=generation)
+        with self._lock:
+            if (generation != self._start_generation
+                    or self._start_in_progress or self._pending_start_account):
+                return self.view()
             self._runtime = self._snapshotter()
             reconnect = not self._connected_account()
             if reconnect:
@@ -321,7 +323,7 @@ class LifecycleController:
                 self._pending_start_account = status["account"]
         if reconnect:
             try:
-                connection = self.connect_wechat()
+                connection = self.connect_wechat(start_generation=generation)
             except Exception:
                 self.cancel_pending_start()
                 raise
