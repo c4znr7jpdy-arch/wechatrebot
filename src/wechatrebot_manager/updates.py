@@ -613,6 +613,7 @@ def _assert_manager_executable_available(
     from .launcher import _normalized_executable, process_identity
     from .windows_file_holders import file_holders
 
+    retry_hint = "；已下载的更新会保留。" if source_executable is not None else "。"
     try:
         allowed = {}
         if source_executable is not None:
@@ -625,12 +626,12 @@ def _assert_manager_executable_available(
     except (OSError, PayloadError) as exc:
         raise UpdateFailure(
             "UPD-1005", str(exc),
-            public_message="暂时无法确认客户端文件占用，请关闭独立配置窗口后重试更新；已下载的更新会保留。",
+            public_message="暂时无法确认客户端文件占用，请关闭独立配置窗口后重试更新" + retry_hint,
         ) from exc
     if blockers:
         raise UpdateFailure(
             "UPD-1005", "客户端文件仍被进程占用：" + ", ".join(map(str, blockers)),
-            public_message="请先关闭独立的功能配置窗口及其他客户端窗口，再重试更新；已下载的更新会保留。",
+            public_message="请先关闭独立的功能配置窗口及其他客户端窗口，再重试更新" + retry_hint,
         )
 
 
@@ -1158,7 +1159,10 @@ def _restart_manager(
         ("WECHATREBOT_UPDATE_FROM", current_version),
         ("WECHATREBOT_UPDATE_TO", version),
     ):
-        if value:
+        # A failed update restarts the previous manager without a handshake.
+        # Never inherit a successful earlier update's confirmation into it.
+        environment.pop(name, None)
+        if update_id and value:
             environment[name] = value
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return subprocess.Popen(

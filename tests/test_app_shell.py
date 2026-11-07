@@ -1931,14 +1931,17 @@ def test_independent_configuration_window_blocks_shutdown_and_reuses_download(mo
     blocked = [True]
     closes = []
     api._window = SimpleNamespace(destroy=lambda: closes.append(True))
-    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt", getpid=lambda: 999))
+    monkeypatch.setattr(updates, "_update_wait_pids", lambda *_args, **_kwargs: ())
     monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
     monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: (
         ((123, ProcessIdentity(str(tmp_path / "manager/WeChatReBot.exe"), 456)),) if blocked[0] else ()
     ))
 
     def plan(*_args, **_kwargs):
-        updates._assert_manager_executable_available(prepared.payload_root, tmp_path)
+        updates._assert_manager_executable_available(
+            prepared.payload_root, tmp_path, source_executable=tmp_path / "manager/WeChatReBot.exe",
+        )
         events.append("verify_plan")
         return "plan"
 
@@ -1947,6 +1950,7 @@ def test_independent_configuration_window_blocks_shutdown_and_reuses_download(mo
     failed = _wait_update_worker(api)
     assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1005"
     assert "配置窗口" in failed["error"]["message"]
+    assert "已下载的更新会保留" in failed["error"]["message"]
     assert events == ["download"] and not closes
     assert api._prepared_update is prepared and not api._update_installing
     blocked[0] = False
