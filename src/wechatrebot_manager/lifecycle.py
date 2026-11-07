@@ -324,6 +324,8 @@ class LifecycleController:
                 self.cancel_pending_start()
                 return connection
         with self._lock:
+            if generation != self._start_generation:
+                return self.view()
             self._runtime = self._snapshotter()
             account = self._connected_account()
             if not account:

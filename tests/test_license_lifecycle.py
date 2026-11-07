@@ -610,6 +610,50 @@ def test_api_stop_wins_over_resume_worker_that_has_not_started(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("change", ["stop", "expired", "account"])
+def test_cancellation_during_initial_connect_cannot_restore_pending_start(tmp_path, change):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    entered, finish = threading.Event(), threading.Event()
+    connect = controller.connect_wechat
+    results = []
+
+    def delayed_connect():
+        result = connect()
+        world["account"] = "wxid_a"
+        entered.set()
+        assert finish.wait(3)
+        return result
+
+    controller.connect_wechat = delayed_connect
+    worker = threading.Thread(target=lambda: results.append(controller.start()))
+    worker.start()
+    try:
+        assert entered.wait(2)
+        if change == "stop":
+            controller.cancel_start_request()
+        elif change == "expired":
+            license.valid = False
+            controller.refresh()
+            license.valid = True
+        else:
+            world["account"] = "wxid_other"
+            controller.refresh()
+            world["account"] = "wxid_a"
+    finally:
+        finish.set()
+        worker.join(3)
+    assert not worker.is_alive() and len(results) == 1
+    assert not results[0].start_pending
+    assert not controller.refresh().start_pending
+    assert not controller.pending_start_ready()
+    assert not controller.resume_pending_start().start_pending
+    assert not license.grants and not world["core"]
+    assert holders[0].started == ["new-hook-bridge"]
+    assert controller.start().state == LifecycleState.RUNNING
+    assert license.grants == ["wxid_a"] and world["core"]
+
+
+@pytest.mark.parametrize("change", ["stop", "expired", "account"])
 def test_cancellation_during_authorized_handoff_cannot_revive_old_request(tmp_path, change):
     controller, license, world, holders = setup_controller(tmp_path)
     license.bound = "wxid_a"
