@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -297,6 +298,63 @@ def test_start_reconnects_then_retains_one_request_until_real_login(tmp_path):
     assert not controller.view().start_pending
     assert holders[0].started == ["new-hook-bridge", "astrbot"]
     assert license.grants == ["wxid_a"]
+
+
+@pytest.mark.parametrize("logged_in", [False, True])
+def test_environment_recheck_preserves_pending_start_without_launching_core(tmp_path, logged_in):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().state == LifecycleState.WAITING_WECHAT
+    if logged_in:
+        world["account"] = "wxid_a"
+        assert controller.refresh().state == LifecycleState.CORE_STARTING
+
+    checked = controller.check_environment()
+
+    assert checked.state == (LifecycleState.CORE_STARTING if logged_in else LifecycleState.WAITING_WECHAT)
+    assert checked.title == ("微信已登录，正在启动机器人功能" if logged_in else "等待登录微信")
+    assert "自动继续，无需再次点击" in checked.message
+    assert checked.start_pending and not checked.can_start
+    assert checked.busy is logged_in
+    assert checked.can_stop is not logged_in
+    assert checked.error is None and not checked.online
+    assert holders[0].started == ["new-hook-bridge"]
+    assert not license.grants and not world["core"]
+
+
+@pytest.mark.parametrize("state", [LifecycleState.STOPPED, LifecycleState.LICENSE_READY])
+def test_pending_start_message_is_not_replaced_by_licensed_idle_copy(tmp_path, state):
+    controller, license, _, _ = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().start_pending
+    controller.state = state
+
+    waiting = controller.view()
+
+    assert waiting.title == "等待登录微信"
+    assert "自动继续，无需再次点击" in waiting.message
+    assert waiting.start_pending and waiting.can_stop and not waiting.can_start
+
+
+@pytest.mark.parametrize("failure", ["environment", "authorization"])
+def test_environment_recheck_does_not_project_failed_pending_start_as_starting(tmp_path, failure):
+    controller, license, _, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().start_pending
+    if failure == "environment":
+        controller._environment_checker = lambda _: replace(controller._environment, ready=False, code="11001")
+    else:
+        license.valid = False
+
+    checked = controller.check_environment()
+
+    assert checked.state == LifecycleState.STOPPED
+    assert not checked.busy and not checked.online and not checked.can_start
+    assert holders[0].started == ["new-hook-bridge"] and not license.grants
+    if failure == "environment":
+        assert checked.error is not None and checked.error.code == "11001"
+    else:
+        assert checked.error is None and checked.message == "测试授权状态"
 
 
 @pytest.mark.parametrize("action", ["request_stop", "force_stop"])

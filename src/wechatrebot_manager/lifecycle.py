@@ -259,6 +259,9 @@ class LifecycleController:
                     if self._runtime.online
                     else LifecycleState.STOPPED
                 )
+                if self._pending_start_account and self._license_snapshot()["authorized"]:
+                    self.state = (LifecycleState.CORE_STARTING if self.pending_start_ready()
+                                  else LifecycleState.WAITING_WECHAT)
             else:
                 self.state = LifecycleState.STOPPED
                 self._error = self.catalog.get(self._environment.code)
@@ -828,9 +831,10 @@ class LifecycleController:
         licensing = self._license_snapshot()
         licensed = licensing["enabled"]
         online = self._runtime.online and (not licensed or licensing["can_run"])
-        if licensed and self.state in {
+        if (licensed and self.state in {
             LifecycleState.STOPPED, LifecycleState.LICENSE_READY, LifecycleState.LICENSE_PAUSED,
-        }:
+        } and not (pending_start and licensing["authorized"]
+                   and self._environment.ready and self._error is None)):
             if self.state == LifecycleState.LICENSE_PAUSED:
                 title = {
                     "unactivated": "未授权",
