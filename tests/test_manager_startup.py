@@ -387,3 +387,121 @@ def test_start_remains_single_and_explains_login_continuation(browser, manager_u
         expect(page.locator("#page-home")).to_be_visible()
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "connect_failure", "start_rejected"])
+def test_start_preparation_restores_raw_status_when_followup_reads_fail(
+    browser, manager_url, tmp_path, outcome,
+):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url + ("&license=pending" if outcome != "start_rejected" else ""))
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async () => {
+          const api = window.pywebview.api, idle = (await api.get_status()).data;
+          Object.assign(idle, {state:'LICENSE_READY', title:'机器人未启动', message:'可以启动机器人。',
+            busy:false, online:false, can_start:true, can_stop:false, start_pending:false, error:null});
+          Object.assign(idle.runtime, {wechat_identity:'', account_status_available:true,
+            connection_ready:false, engine_ready:false, hook_ready:false});
+          idle.environment.ready = true;
+          window.preparationStarts = 0; window.failPreparationStatus = false;
+          api.get_status = async () => {
+            if (window.failPreparationStatus) {
+              document.body.dataset.preparationReadFailed = 'true';
+              return {ok:false, error:{code:'15001', message:'模拟状态读取失败'}};
+            }
+            return {ok:true, data:structuredClone(idle)};
+          };
+          api.check_environment = async () => ({ok:true, data:structuredClone(idle)});
+          api.connect_license_wechat = async () => ({ok:false, error:{message:'模拟连接失败'}});
+          api.start_robot = async () => {
+            window.preparationStarts++; window.failPreparationStatus = true;
+            return {ok:true, data:{accepted:false}};
+          };
+        }""")
+        page.locator('.nav-item[data-page="home"]').click()
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.locator("#primaryAction").click()
+        if outcome != "start_rejected":
+            expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
+            # A real status poll must render the preparation projection before it is cancelled.
+            expect(page.locator("#stateTitle")).to_have_text("正在准备启动机器人")
+            page.evaluate("window.failPreparationStatus = true")
+            page.locator("#modalCancel" if outcome == "cancel" else "#modalConfirm").click()
+            expect(page.locator("#modalBackdrop")).to_be_hidden()
+            if outcome == "connect_failure":
+                expect(page.locator("#toastRegion")).to_contain_text("模拟连接失败")
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        expect(page.locator("#primaryAction")).to_have_attribute("aria-busy", "false")
+        expect(page.locator("body")).to_have_attribute("data-preparation-read-failed", "true")
+        assert page.evaluate("window.preparationStarts") == (1 if outcome == "start_rejected" else 0)
+        page.screenshot(path=str(tmp_path / f"preparation-{outcome}-raw-status-restored.png"))
+        if outcome != "start_rejected":
+            page.locator("#primaryAction").click()
+            expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
+            page.locator("#modalCancel").click()
+            expect(page.locator("#primaryAction")).to_be_enabled()
+            assert page.evaluate("window.preparationStarts") == 0
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+def test_late_idle_poll_cannot_undo_an_accepted_start(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async () => {
+          const api = window.pywebview.api, idle = (await api.get_status()).data;
+          Object.assign(idle, {state:'LICENSE_READY', title:'机器人未启动', message:'可以启动机器人。',
+            busy:false, online:false, can_start:true, can_stop:false, start_pending:false, error:null});
+          Object.assign(idle.runtime, {engine_ready:false, connection_ready:true,
+            account_status_available:true, wechat_identity:'wxid_demo_account'});
+          window.delayIdlePoll = false; window.acceptedStarts = 0; window.acceptedStart = false;
+          api.get_status = () => {
+            if (window.delayIdlePoll) {
+              window.delayIdlePoll = false;
+              document.body.dataset.idlePollHeld = 'true';
+              return new Promise(resolve => { window.releaseIdlePoll = () => resolve({ok:true, data:structuredClone(idle)}); });
+            }
+            const status = structuredClone(idle);
+            if (window.acceptedStart) Object.assign(status, {state:'CORE_STARTING',
+              title:'微信已登录，正在启动机器人功能', busy:true, can_start:false, start_pending:true});
+            return Promise.resolve({ok:true, data:status});
+          };
+          api.start_robot = async () => {
+            window.acceptedStarts++; window.acceptedStart = true;
+            document.body.dataset.startAccepted = 'true';
+            return {ok:true, data:{accepted:true}};
+          };
+          window.titlesAfterStart = [];
+          new MutationObserver(() => {
+            if (window.acceptedStart) window.titlesAfterStart.push(document.querySelector('#stateTitle').textContent);
+          }).observe(document.querySelector('#stateTitle'), {childList:true});
+        }""")
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.evaluate("window.delayIdlePoll = true")
+        expect(page.locator("body")).to_have_attribute("data-idle-poll-held", "true")
+        page.locator("#primaryAction").click()
+        expect(page.locator("body")).to_have_attribute("data-start-accepted", "true")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("window.releaseIdlePoll()")
+        expect(page.locator("#stateTitle")).to_have_text("微信已登录，正在启动机器人功能")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        expect(page.locator("#primaryAction")).to_have_attribute("aria-busy", "true")
+        assert "机器人未启动" not in page.evaluate("window.titlesAfterStart")
+        assert page.evaluate("window.acceptedStarts") == 1
+        assert not errors, errors
+        page.screenshot(path=str(tmp_path / "late-idle-poll-preserves-accepted-start.png"))
+    finally:
+        page.close()

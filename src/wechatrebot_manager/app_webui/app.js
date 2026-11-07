@@ -94,6 +94,8 @@
     activityItems: [],
     activityPage: 1,
     polling: false,
+    lastRuntimeStatus: null,
+    startActionRevision: 0,
     startPending: false,
     startPreparing: false,
     composing: false,
@@ -360,7 +362,7 @@
     };
   }
 
-  function reconcileStartPending(status) {
+  function reconcileStartPending(status, {optimistic = false} = {}) {
     const current = status?.state || "STOPPED";
     if (state.startPreparing && ["STOPPED", "LICENSE_READY"].includes(current)
       && status?.environment?.ready && !status?.error) {
@@ -373,12 +375,12 @@
       state.startPending = false;
       return status;
     }
-    if (Object.hasOwn(status || {}, "start_pending") && !state.startPreparing) {
+    if (!optimistic && Object.hasOwn(status || {}, "start_pending") && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
     if (!state.startPending) return status;
-    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy && !state.startPreparing) {
+    if (!optimistic && current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
@@ -389,10 +391,11 @@
     return status;
   }
 
-  function renderStatus(rawStatus) {
+  function renderStatus(rawStatus, {optimistic = false} = {}) {
+    if (!optimistic) state.lastRuntimeStatus = rawStatus;
     const wasOnline = Boolean(state.status?.online);
     const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
-    const status = reconcileStartPending(rawStatus);
+    const status = reconcileStartPending(rawStatus, {optimistic});
     state.status = status;
     subscription.updateRuntime(status);
     const runtime = status.runtime || {};
@@ -547,8 +550,11 @@
   async function refreshStatus() {
     if (state.polling) return;
     state.polling = true;
+    const revision = state.startActionRevision;
     try {
-      renderStatus(await api("get_status"));
+      const status = await api("get_status");
+      // A read started before the current action cannot restore its old idle state.
+      if (revision === state.startActionRevision) renderStatus(status);
     } catch (error) {
       reportError(error);
     } finally {
@@ -566,12 +572,13 @@
       return;
     }
     button.disabled = true;
+    state.startActionRevision += 1;
     state.startPreparing = action === "start";
     try {
       if (action === "start" && !await subscription.beforeStart()) return;
       if (action === "start") {
         state.startPending = true;
-        renderStatus(startingStatus(state.status));
+        renderStatus(startingStatus(state.lastRuntimeStatus || state.status), {optimistic: true});
       }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
       if (action === "start" && result?.accepted === false) {
@@ -585,7 +592,8 @@
       await refreshStatus();
     } finally {
       state.startPreparing = false;
-      renderStatus(state.status);
+      state.startActionRevision += 1;
+      renderStatus(state.startPending ? state.status : state.lastRuntimeStatus || state.status, {optimistic: true});
     }
   }
 
@@ -1457,7 +1465,7 @@
     confirmAction: (...args) => confirmAction(...args),
     formatBytes: (...args) => formatBytes(...args),
     managerCloseState,
-    renderStatus: (...args) => renderStatus(...args),
+    renderStatus: (status) => renderStatus(status, {optimistic: true}),
     reportError: (...args) => reportError(...args),
     state,
     toast: (...args) => toast(...args),
