@@ -6,6 +6,7 @@ window.createUpdateNotifications = function (helpers) {
     api,
     confirmAction,
     formatBytes,
+    managerCloseState,
     renderStatus,
     reportError,
     state,
@@ -14,6 +15,7 @@ window.createUpdateNotifications = function (helpers) {
 
   let promptedReleaseId = "";
   let promptedReadyToken = "";
+  let dismissedReadyToken = "";
   let pendingPrompt = null;
   let promptTimer = 0;
   let latestStatus = null;
@@ -33,10 +35,11 @@ window.createUpdateNotifications = function (helpers) {
   function renderUpdateCard(release, progress) {
     const card = $("#updateCard");
     const matching = matchesRelease(release, progress);
-    card.hidden = !matching || !["running", "ready", "failed", "restarting"].includes(progress.state);
+    const ready = isReadyForRelease(release, progress);
+    card.hidden = !matching || !["running", "ready", "failed", "restarting"].includes(progress.state)
+      || (ready && dismissedReadyToken === progress.confirmation_token);
     document.body.classList.toggle("has-update-card", !card.hidden);
     if (card.hidden) return;
-    const ready = isReadyForRelease(release, progress);
     const failed = progress.state === "failed" || (progress.state === "ready" && !ready);
     const percent = Math.min(100, Math.max(0, Number(progress.percent) || 0));
     const indeterminate = ["starting", "stopping_services", "waiting_wechat", "launching"].includes(progress.phase);
@@ -53,6 +56,7 @@ window.createUpdateNotifications = function (helpers) {
     bar.setAttribute("aria-valuetext", failed ? "更新未完成" : `${progress.message || "更新进度"} ${percent}%`);
     $("#updateCardProgressBar").style.width = `${indeterminate ? 36 : percent}%`;
     const action = $("#updateCardAction");
+    $("#updateCardDismiss").hidden = !ready;
     action.hidden = !ready && !failed;
     action.disabled = downloadStarting;
     action.textContent = ready ? "立即安装" : "重试下载";
@@ -147,16 +151,21 @@ window.createUpdateNotifications = function (helpers) {
   }
 
   function showInstallConfirmation(release, ready) {
+    dismissedReadyToken = "";
+    renderUpdateCard(release, ready);
     promptedReadyToken = ready.confirmation_token;
     confirmAction({
       title: `安装 v${release.version}？`,
-      message: "更新包已下载并校验完成。更新会强制关闭机器人程序及当前连接的微信，是否确认？该微信中正在处理的消息和未发送的内容可能丢失。安装完成后会自动打开新版管理器。",
+      message: "更新包已下载并校验完成。更新会强制关闭机器人程序及当前连接的微信，是否确认？该微信中正在处理的消息和未发送的内容可能丢失。管理器会关闭并重新打开；请先保存正在编辑的设置。安装完成后会自动打开新版管理器。",
       confirmText: "确认关闭并安装",
       cancelText: "稍后安装",
       intent: "danger",
       pendingText: "正在安装…",
       pendingMessage: "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
+        const pending = managerCloseState();
+        if (pending.busy) throw new Error("设置仍在读取、保存或记录正在导出，请稍候；也可选择“稍后安装”，更新包会保留。");
+        if (pending.dirty) throw new Error("有设置尚未保存。请选择“稍后安装”，保存或处理修改后再安装；更新包会保留，无需重新下载。");
         const accepted = await api("install_update", release.version, ready.confirmation_token);
         if (!accepted?.accepted) throw new Error("更新任务已经在处理中。 ");
         await waitForUpdate(release, "restarting");
@@ -289,6 +298,13 @@ window.createUpdateNotifications = function (helpers) {
       try { await beginUpdateDownload(release); }
       catch (error) { reportError(error); }
     }
+  });
+
+  $("#updateCardDismiss").addEventListener("click", () => {
+    if (!isReadyForRelease(state.availableUpdate, latestStatus)) return;
+    dismissedReadyToken = latestStatus.confirmation_token;
+    renderUpdateCard(state.availableUpdate, latestStatus);
+    toast("更新包已保留，可在“机器人总设置 → 系统与更新”中点击“安装更新”。");
   });
 
   return {

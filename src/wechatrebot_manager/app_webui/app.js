@@ -68,6 +68,7 @@
     historyLoadingOlder: false,
     historyManualRefresh: false,
     historyExporting: false,
+    historyActionNotice: null,
     historyOlderLoad: 0,
     historyMessageQuery: "",
     historyMessageCache: new Map(),
@@ -93,6 +94,8 @@
     activityItems: [],
     activityPage: 1,
     polling: false,
+    lastRuntimeStatus: null,
+    startActionRevision: 0,
     startPending: false,
     startPreparing: false,
     composing: false,
@@ -359,10 +362,25 @@
     };
   }
 
-  function reconcileStartPending(status) {
-    if (!state.startPending) return status;
+  function reconcileStartPending(status, {optimistic = false} = {}) {
     const current = status?.state || "STOPPED";
-    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy) {
+    if (state.startPreparing && ["STOPPED", "LICENSE_READY"].includes(current)
+      && status?.environment?.ready && !status?.error) {
+      const loggedIn = status.runtime?.account_status_available !== false && Boolean(status.runtime?.wechat_identity);
+      return {...startingStatus(status),
+        title: loggedIn ? "微信已登录，正在确认启动" : "正在准备启动机器人",
+        message: loggedIn ? "正在核对当前账号与授权，确认后会继续启动，无需再次点击启动。" : "正在检查授权与微信连接，请按提示完成确认。"};
+    }
+    if (status?.start_pending === true) {
+      state.startPending = false;
+      return status;
+    }
+    if (!optimistic && Object.hasOwn(status || {}, "start_pending") && !state.startPreparing) {
+      state.startPending = false;
+      return status;
+    }
+    if (!state.startPending) return status;
+    if (!optimistic && current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
@@ -373,10 +391,11 @@
     return status;
   }
 
-  function renderStatus(rawStatus) {
+  function renderStatus(rawStatus, {optimistic = false} = {}) {
+    if (!optimistic) state.lastRuntimeStatus = rawStatus;
     const wasOnline = Boolean(state.status?.online);
     const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
-    const status = reconcileStartPending(rawStatus);
+    const status = reconcileStartPending(rawStatus, {optimistic});
     state.status = status;
     subscription.updateRuntime(status);
     const runtime = status.runtime || {};
@@ -476,7 +495,7 @@
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
-    const primaryLabel = starting ? "启动中…" : stopMode ? "停止运行" : "启动";
+    const primaryLabel = stopMode ? "停止运行" : starting ? "启动中…" : "启动";
     primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
     primary.disabled = Boolean(status.busy || state.startPreparing)
@@ -531,8 +550,11 @@
   async function refreshStatus() {
     if (state.polling) return;
     state.polling = true;
+    const revision = state.startActionRevision;
     try {
-      renderStatus(await api("get_status"));
+      const status = await api("get_status");
+      // A read started before the current action cannot restore its old idle state.
+      if (revision === state.startActionRevision) renderStatus(status);
     } catch (error) {
       reportError(error);
     } finally {
@@ -541,23 +563,28 @@
   }
 
   async function runPrimaryAction() {
-    if (state.startPreparing) return;
+    if (state.startPreparing || state.status?.busy) return;
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
+    if (action === "start" && state.status?.start_pending) return;
     if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
       runForceStop();
       return;
     }
     button.disabled = true;
+    state.startActionRevision += 1;
     state.startPreparing = action === "start";
     try {
       if (action === "start" && !await subscription.beforeStart()) return;
       if (action === "start") {
         state.startPending = true;
-        renderStatus(startingStatus(state.status));
+        renderStatus(startingStatus(state.lastRuntimeStatus || state.status), {optimistic: true});
       }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
-      if (action === "start" && result?.accepted === false) state.startPending = false;
+      if (action === "start" && result?.accepted === false) {
+        state.startPending = false;
+        await refreshStatus();
+      }
       window.setTimeout(refreshStatus, 250);
     } catch (error) {
       if (action === "start") state.startPending = false;
@@ -565,7 +592,8 @@
       await refreshStatus();
     } finally {
       state.startPreparing = false;
-      renderStatus(state.status);
+      state.startActionRevision += 1;
+      renderStatus(state.startPending ? state.status : state.lastRuntimeStatus || state.status, {optimistic: true});
     }
   }
 
@@ -736,6 +764,15 @@
   }
 
   let modalResolve = null;
+  function managerCloseState() {
+    return {
+      dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
+        || state.scheduledDirty || coreSettings.dirty || hasGroupDrafts()),
+      busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
+        || coreSettings.busy || isProviderSaving() || state.historyExporting),
+    };
+  }
+
   function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm, onCancel}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
@@ -1036,11 +1073,7 @@
       setHistoryActionsEnabled(canEditHistory());
       try {
         const result = await api("export_history", "csv", accountId);
-        if (result?.requires_login || result?.account_changed || accountId !== state.historyAccount) {
-          invalidateHistoryState();
-          renderHistoryAccountGate(state.historyAccount);
-          return;
-        }
+        if (handleHistoryActionDenied(result, accountId, "导出")) return;
         if (!result?.cancelled) toast(`已导出到 ${result.path}`);
       } catch (error) { reportError(error); }
       finally {
@@ -1166,13 +1199,9 @@
         confirmText: "开始清理",
         field: {label: "保留此日期及之后的记录", type: "date", value: ""},
         onConfirm: async (value) => {
-          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "清理"); return; }
           const result = await api("delete_history_before", value, accountId);
-          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
-            invalidateHistoryState();
-            renderHistoryAccountGate(state.historyAccount);
-            return;
-          }
+          if (handleHistoryActionDenied(result, accountId, "清理")) return;
           toast(`已清理 ${result.deleted} 条记录。 `);
           // Cleanup is opened from settings: refresh the retained records even
           // while the history page is hidden, including its directory snapshot.
@@ -1184,7 +1213,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.webSearchDirty || state.webSearchSaving || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { const pending = managerCloseState(); if (pending.dirty || pending.busy) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
@@ -1328,7 +1357,7 @@
     updatePolicyToggle: (...args) => updatePolicyToggle(...args),
   });
 
-  const { canEditHistory, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
+  const { canEditHistory, handleHistoryActionDenied, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
     $,
     $$,
     HISTORY_MESSAGE_CACHE_LIMIT,
@@ -1344,6 +1373,7 @@
     copyText: (...args) => copyText(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
+    navigate: (...args) => navigate(...args),
     reportError: (...args) => reportError(...args),
     state,
     toast: (...args) => toast(...args),
@@ -1366,7 +1396,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
@@ -1434,7 +1464,8 @@
     api: (...args) => api(...args),
     confirmAction: (...args) => confirmAction(...args),
     formatBytes: (...args) => formatBytes(...args),
-    renderStatus: (...args) => renderStatus(...args),
+    managerCloseState,
+    renderStatus: (status) => renderStatus(status, {optimistic: true}),
     reportError: (...args) => reportError(...args),
     state,
     toast: (...args) => toast(...args),

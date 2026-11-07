@@ -8,6 +8,16 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+def contrast_ratio(foreground, background):
+    def luminance(value):
+        channels = [int(channel) / 255 for channel in re.findall(r"\d+", value)[:3]]
+        linear = [channel / 12.92 if channel <= .04045 else ((channel + .055) / 1.055) ** 2.4
+                  for channel in channels]
+        return sum(channel * weight for channel, weight in zip(linear, [.2126, .7152, .0722]))
+    brighter, darker = sorted([luminance(foreground), luminance(background)], reverse=True)
+    return (brighter + .05) / (darker + .05)
+
+
 def open_skin_settings(page, url):
     page.goto(url)
     expect(page).to_have_title(re.compile("机器人管理$"))
@@ -28,7 +38,7 @@ def test_skins_switch_independently_of_mode_and_survive_reload(browser, manager_
     page.on("response", lambda response: failures.append(response.url) if response.status >= 400 else None)
     try:
         open_skin_settings(page, manager_url)
-        for skin in ("soft", "default"):
+        for skin in ("soft", "sea-salt", "apricot", "default"):
             page.locator(f'[data-skin-option][value="{skin}"]').check()
             expect(page.locator("#skinStatus")).to_contain_text("已应用")
             expect(page.locator(f'[data-skin-option][value="{skin}"]')).to_be_checked()
@@ -36,7 +46,7 @@ def test_skins_switch_independently_of_mode_and_survive_reload(browser, manager_
                 if page.locator("html").get_attribute("data-theme") != theme:
                     page.locator("#themeToggle").click()
                 expect(page.locator("html")).to_have_attribute("data-theme", theme)
-                assert page.locator("html").get_attribute("data-skin") == ("soft" if skin == "soft" else None)
+                assert page.locator("html").get_attribute("data-skin") == (None if skin == "default" else skin)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 page.screenshot(path=str(tmp_path / f"skin-{skin}-{theme}-{width}.png"), animations="disabled")
             open_skin_settings(page, manager_url)
@@ -64,6 +74,21 @@ def test_skin_save_failure_keeps_previous_skin_and_allows_retry(browser, manager
         page.locator('[data-skin-option][value="soft"]').check()
         expect(page.locator("#skinStatus")).to_contain_text("已应用")
         expect(page.locator("html")).to_have_attribute("data-skin", "soft")
+    finally:
+        page.close()
+
+
+def test_skin_keyboard_selection_restores_focus_after_async_save(browser, manager_url):
+    page = browser.new_page()
+    try:
+        open_skin_settings(page, manager_url)
+        default = page.locator('[data-skin-option][value="default"]')
+        default.focus()
+        page.keyboard.press("ArrowRight")
+        expect(page.locator('[data-skin-option][value="soft"]')).to_be_checked()
+        expect(page.locator("#skinStatus")).to_contain_text("已应用")
+        assert page.evaluate("document.activeElement?.matches('[data-skin-option]')")
+        assert page.evaluate("document.activeElement?.value") == "soft"
     finally:
         page.close()
 
@@ -103,7 +128,7 @@ def test_native_caption_receives_current_palette_at_startup_and_after_skin_or_mo
     try:
         open_skin_settings(page, manager_url)
         assert_current_palette()
-        for skin in ("soft", "default"):
+        for skin in ("soft", "sea-salt", "apricot", "default"):
             previous = page.evaluate("captionUpdates.length")
             page.locator(f'[data-skin-option][value="{skin}"]').check()
             expect(page.locator("#skinStatus")).to_contain_text("已应用")
@@ -138,15 +163,16 @@ def test_skin_storage_fallback_and_legacy_migration(browser, manager_url, storag
         page.close()
 
 
-def test_unavailable_skin_styles_fall_back_to_default(browser, manager_url):
+@pytest.mark.parametrize("skin", ["soft", "sea-salt", "apricot"])
+def test_unavailable_skin_styles_fall_back_to_default(browser, manager_url, skin):
     page = browser.new_page()
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.route("**/soft-theme.css", lambda route: route.abort())
+    page.route(f"**/{skin}-theme.css", lambda route: route.abort())
     try:
-        open_skin_settings(page, manager_url + "&style=soft")
+        open_skin_settings(page, manager_url + f"&style={skin}")
         expect(page.locator('[data-skin-option][value="default"]')).to_be_checked()
-        expect(page.locator('[data-skin-option][value="soft"]')).to_be_disabled()
+        expect(page.locator(f'[data-skin-option][value="{skin}"]')).to_be_disabled()
         expect(page.locator("#skinStatus")).to_contain_text("默认皮肤")
         assert page.locator("html").get_attribute("data-skin") is None
         assert not errors, errors
@@ -271,5 +297,80 @@ def test_soft_typography_matches_default_on_dynamic_pages(browser, manager_url):
             assert not differences, differences
             assert page.evaluate("document.fonts.check('700 16px \"Alimama ShuHei\"')")
             assert page.evaluate("document.fonts.check('400 14px \"Alibaba PuHuiTi 2\"')")
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("skin", ["sea-salt", "apricot"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_palette_skins_preserve_layout_and_readable_controls(browser, manager_url, tmp_path, skin, theme):
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    errors, failures = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("response", lambda response: failures.append(response.url) if response.status >= 400 else None)
+    try:
+        open_skin_settings(page, manager_url)
+        page.locator(f'[data-skin-option][value="{skin}"]').check()
+        expect(page.locator("#skinStatus")).to_contain_text("已应用")
+        if page.locator("html").get_attribute("data-theme") != theme:
+            page.locator("#themeToggle").click()
+        for section in ("home", "history", "settings"):
+            page.locator(f'.nav-item[data-page="{section}"]').click()
+            if section == "history":
+                expect(page.locator("#messageList .message-bubble").first).to_be_visible()
+            elif section == "settings":
+                page.locator('[data-settings-tab="skin"]').click()
+            page.evaluate("document.fonts.ready")
+            comparison = page.evaluate("""() => {
+              const root = document.documentElement, skin = root.dataset.skin;
+              const elements = [...document.querySelectorAll('.app-shell *')].filter(el => el.getClientRects().length);
+              const geometry = el => {
+                const box = el.getBoundingClientRect(), css = getComputedStyle(el);
+                return [box.x, box.y, box.width, box.height, css.fontFamily, css.fontSize,
+                  css.fontWeight, css.borderRadius, css.padding, css.gap].join('|');
+              };
+              const palette = elements.map(geometry);
+              delete root.dataset.skin;
+              const differences = elements.flatMap((el, i) => geometry(el) === palette[i] ? [] : [el.id || el.className]);
+              root.dataset.skin = skin;
+              return differences;
+            }""")
+            assert not comparison, comparison
+            # Restoring the skin starts the shared color transition; measure its final colors.
+            page.evaluate("""async () => {
+              getComputedStyle(document.querySelector('.nav-item.active')).backgroundColor;
+              await Promise.all(document.getAnimations().filter(animation =>
+                animation.playState === 'running' && animation.effect.getComputedTiming().iterations !== Infinity
+              ).map(animation => animation.finished.catch(() => {})));
+            }""")
+            colors = page.evaluate("""() => {
+              const css = getComputedStyle(document.documentElement);
+              const token = name => {
+                const span = document.createElement('span');
+                span.style.color = css.getPropertyValue(name); document.body.append(span);
+                const color = getComputedStyle(span).color; span.remove(); return color;
+              };
+              const colors = {body:[token('--ink'),token('--surface')],muted:[token('--muted'),token('--surface')],
+                secondary:[token('--blue-700'),token('--blue-100')]};
+              for (const selector of ['.nav-item.active', '#page-home .home-status-icon', '#page-home .stage-index',
+                '#page-history .message.assistant .message-avatar']) {
+                const element = document.querySelector(selector);
+                if (!element || !element.getClientRects().length) continue;
+                const css = getComputedStyle(element);
+                colors[selector] = [css.color, css.backgroundColor];
+              }
+              return colors;
+            }""")
+            for name, pair in colors.items():
+                assert contrast_ratio(*pair) >= 4.5, (skin, theme, section, name, pair)
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.mouse.move(1400, 20)
+            page.screenshot(path=str(tmp_path / f"{skin}-{theme}-{section}-1440.png"), animations="disabled")
+        page.set_viewport_size({"width": 1080, "height": 680})
+        page.screenshot(path=str(tmp_path / f"{skin}-{theme}-settings-1080.png"), animations="disabled")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert not errors, errors
+        assert not failures, failures
     finally:
         page.close()

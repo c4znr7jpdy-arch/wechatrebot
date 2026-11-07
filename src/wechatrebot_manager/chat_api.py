@@ -10,6 +10,7 @@ from .error_catalog import AccountStatusUnavailableError
 from .customer_config import load_robot_settings
 from .group_policy import GroupPolicyError
 from .private_policy import PrivatePolicyError
+from .licensing.protocol import LicenseError
 
 
 class ChatApiMixin:
@@ -208,6 +209,12 @@ class ChatApiMixin:
     def get_group_qrcode(self, account_id: str, group_id: str) -> dict[str, object]:
         try:
             return self._ok(self._groups.qrcode(account_id, group_id))
+        except LicenseError as exc:
+            paused = exc.code == "automation_paused"
+            result = self._license_failed(exc, record=not paused)
+            if paused:
+                result["error"]["retryable"] = False
+            return result
         except GroupDirectoryError as exc:
             return {"ok": False, "error": {"title": "群二维码暂不可用", "message": str(exc)}}
 

@@ -16,6 +16,7 @@ window.createMessageHistory = function (helpers) {
     copyText,
     escapeHtml,
     fullTime,
+    navigate,
     openContactProfile,
     reportError,
     state,
@@ -81,6 +82,7 @@ window.createMessageHistory = function (helpers) {
         return;
       }
       saveSelectedHistoryMessages();
+      state.historyActionNotice = null;
       state.historyConversationSnapshot = {query, data};
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
@@ -173,19 +175,39 @@ window.createMessageHistory = function (helpers) {
 
   function renderHistoryAccountGate(accountId) {
     const pending = Boolean(String(accountId || "").trim());
-    const title = pending ? "正在确认当前微信账号" : "授权并登录后查看聊天记录";
-    const message = pending
+    const notice = state.historyActionNotice;
+    const title = notice?.title || (pending ? "正在确认当前微信账号" : "授权并登录后查看聊天记录");
+    const message = notice?.message || (pending
       ? "账号切换完成后，将只显示这个机器人微信号的聊天记录。"
-      : "请先完成订阅授权，并登录授权绑定的机器人微信账号。";
-    $("#historySummary").textContent = pending ? "正在读取当前账号的聊天记录…" : "请先完成授权并登录微信";
+      : "请先完成订阅授权，并登录授权绑定的机器人微信账号。");
+    $("#historySummary").textContent = notice?.message || (pending ? "正在读取当前账号的聊天记录…" : "请先完成授权并登录微信");
     $("#conversationList").innerHTML = `<div class="empty-state compact"><div class="empty-symbol">空</div><h2>${title}</h2><p>${message}</p></div>`;
-    $("#conversationHeader").textContent = pending ? "正在读取聊天记录…" : "消息记录暂不可用";
+    $("#conversationHeader").textContent = notice || !pending ? "消息记录暂不可用" : "正在读取聊天记录…";
     $("#messageList").removeAttribute("aria-busy");
-    $("#messageList").innerHTML = `<div class="empty-state compact"><h2>${title}</h2><p>${message}</p></div>`;
+    const recovery = notice || !pending ? `<div class="button-row"><button class="button secondary small" type="button" data-history-recovery="home">查看登录状态</button><button class="button ghost small" type="button" data-history-recovery="subscription">查看授权</button></div>` : "";
+    $("#messageList").innerHTML = `<div class="empty-state compact"><h2>${title}</h2><p>${message}</p>${recovery}</div>`;
+    $$('[data-history-recovery]', $("#messageList")).forEach((button) => button.addEventListener("click", () => {
+      void navigate(button.dataset.historyRecovery).catch(reportError);
+    }));
     $("#olderMessagesStatus").hidden = true;
     $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><p class="subtle">${message}</p>`;
     $("#newMessageButton").hidden = true;
     setHistoryActionsEnabled(false);
+  }
+
+  function handleHistoryActionDenied(result, accountId, action) {
+    const denied = result?.requires_login || result?.account_changed;
+    if (!denied && accountId === state.historyAccount) return false;
+    invalidateHistoryState();
+    state.historyActionNotice = {
+      title: "请检查微信登录与授权",
+      message: denied
+        ? `微信登录或授权状态已变化，本次${action}未执行。请检查后刷新消息中心再试。`
+        : "操作期间微信账号已变化，请核对操作结果，检查当前账号后刷新消息中心。",
+    };
+    renderHistoryAccountGate(result?.requires_login ? "" : state.historyAccount);
+    toast(state.historyActionNotice.message, "error");
+    return true;
   }
 
   function historyFilters() {
@@ -749,7 +771,7 @@ window.createMessageHistory = function (helpers) {
         entry.expires = Date.now() + 5 * 60 * 1000;
       }).catch((error) => {
         entry.error = error.message || "群二维码暂不可用";
-        entry.expires = Date.now() + 15000;
+        entry.expires = error.product?.retryable === false ? Infinity : Date.now() + 15000;
       });
       cache.set(key, entry);
       while (cache.size > 32) cache.delete(cache.keys().next().value);
@@ -830,13 +852,9 @@ window.createMessageHistory = function (helpers) {
       confirmAction({
         title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
         onConfirm: async () => {
-          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "删除"); return; }
           const result = await api("delete_conversation", item.conversation_id, accountId);
-          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
-            invalidateHistoryState();
-            renderHistoryAccountGate(state.historyAccount);
-            return;
-          }
+          if (handleHistoryActionDenied(result, accountId, "删除")) return;
           clearHistoryMessageCache();
           state.messageLoad += 1;
           state.historyMessagesLoading = false;
@@ -858,6 +876,7 @@ window.createMessageHistory = function (helpers) {
   return {
     canEditHistory,
     clearHistoryMessageCache,
+    handleHistoryActionDenied,
     invalidateHistoryState,
     loadConversations,
     loadOlderMessages,

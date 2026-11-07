@@ -16,6 +16,7 @@ from wechatrebot_manager import app_shell, chat_api, group_directory, model_api,
 from wechatrebot_manager.customer_config import ProviderService
 from wechatrebot_manager.error_catalog import load_error_catalog
 from wechatrebot_manager.launcher import ServiceStopError
+from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.payload import PayloadError
 from wechatrebot_manager.updates import UpdateChannel, UpdateRelease
 from wechatrebot_manager.update_logger import UpdateLogger
@@ -99,6 +100,55 @@ def test_group_qrcode_api_preserves_account_scope_and_reports_errors(tmp_path):
     result = api.get_group_qrcode("wxid_bot", "room@chatroom")
     assert result["ok"] is False
     assert "群二维码读取失败" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("code,recorded", [("automation_paused", None), ("license_revoked", True)])
+def test_group_qrcode_license_denial_reuses_license_response_and_only_silences_manual_pause(tmp_path, code, recorded):
+    api = _api(tmp_path)
+
+    def denied(*_args):
+        raise LicenseError(code, "请在运行中心启动机器人后重试。")
+
+    api._groups = SimpleNamespace(qrcode=denied)
+    result = api.get_group_qrcode("wxid_bot", "room@chatroom")
+    assert result["ok"] is False and result["error"]["code"] == f"LIC-{code}"
+    assert result["error"]["recorded"] is recorded
+    assert bool(api._lifecycle.events.items) is bool(recorded)
+    if recorded is None:
+        assert result["error"]["retryable"] is False
+
+
+def test_group_qrcode_expected_pause_does_not_show_ui_recording_failure(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the delivered API error handler")
+    api = _api(tmp_path)
+    error = LicenseError("automation_paused", "请在运行中心启动机器人后重试。")
+    responses = [api._license_failed(error, record=False)]
+    api._record_error = lambda *_args, **_kwargs: ("", False)
+    responses.append(api._license_failed(error))
+    script = manager_script()
+    source = script[script.index("  async function api(method, ...args)"):script.index("  function debounce(fn, wait = 280)")]
+    probe = r"""
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const run = new Function('window', 'toast', 'subscription', 'state', payload.source +
+  '\nreturn api("get_group_qrcode", "wxid_bot", "room@chatroom").catch(reportError);');
+(async () => {
+  const messages = [];
+  for (const response of payload.responses) {
+    const toasts = [];
+    await run({pywebview:{api:{get_group_qrcode:async () => response}}},
+      message => toasts.push(message), {formatMessage: error => error.message}, {activePage:'history'});
+    messages.push(toasts);
+  }
+  process.stdout.write(JSON.stringify(messages));
+})();
+"""
+    result = subprocess.run([node, "-e", probe], input=json.dumps({"source": source, "responses": responses}),
+                            capture_output=True, text=True, encoding="utf-8", check=True)
+    expected_pause, failed_recording = json.loads(result.stdout)
+    assert len(expected_pause) == 1 and "运行中心" in expected_pause[0]
+    assert len(failed_recording) == 2 and "错误记录未能保存" in failed_recording[1]
 
 
 def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
@@ -1854,6 +1904,34 @@ def test_update_maps_managed_service_stop_failures(monkeypatch, tmp_path, servic
     assert result["error"]["code"] == error_code
     assert events == ["download", "verify_plan"]
     assert api._update_installing is False
+
+
+def test_update_helper_start_failure_keeps_manager_open_with_accurate_retry_feedback(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+
+    def cannot_launch(_plan):
+        events.append("helper_failed")
+        raise OSError("synthetic process startup failure")
+
+    monkeypatch.setattr(update_api, "launch_update_helper", cannot_launch)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1007"
+    assert "安装程序未能启动" in failed["error"]["message"]
+    assert "原版本文件未更改" in failed["error"]["message"]
+    assert "手动启动机器人" in failed["error"]["message"]
+    assert "恢复原版本" not in failed["error"]["message"]
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "helper_failed"]
+    assert not closes and not api._update_installing
+    assert api._prepared_update is prepared
+    assert api._action_lock.acquire(blocking=False)
+    api._action_lock.release()
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    assert events.count("download") == 1
 
 
 @pytest.mark.parametrize("error,code", [(PayloadError("坏文件"), "UPD-1003"),

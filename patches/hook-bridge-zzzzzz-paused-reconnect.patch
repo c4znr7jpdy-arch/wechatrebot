@@ -1,0 +1,33 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index a5d35f2..a7e9e8e 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1396,7 +1396,27 @@ class OneBotClient:
+                     raise
+                 except (OSError, ConnectionError, websockets.WebSocketException) as exc:
+                     if not self._closed:
+-                        logger.warning(
++                        log_failure = logger.warning
++                        if ((isinstance(exc, ConnectionRefusedError)
++                                 or getattr(exc, "winerror", None) == 1225)
++                                and self._connection is None and self._self_id):
++                            try:
++                                state = runtime_guard().status(self._self_id)
++                            except Exception as status_error:
++                                # A diagnostic lookup must neither stop retries
++                                # nor conceal the original connection failure.
++                                logger.debug("Reply engine pause status unavailable (%s)",
++                                             type(status_error).__name__)
++                                state = {}
++                            if (state.get("enabled") is True
++                                    and state.get("authorized") is True
++                                    and state.get("can_run") is False
++                                    and state.get("state") == "paused"
++                                    and state.get("account") == self._self_id):
++                                # The manager retains the bridge after a stop;
++                                # its reply engine is intentionally absent.
++                                log_failure = logger.debug
++                        log_failure(
+                             "AstrBot WebSocket disconnected: %s; retrying in %.1fs "
+                             "(retrying indefinitely)",
+                             exc,

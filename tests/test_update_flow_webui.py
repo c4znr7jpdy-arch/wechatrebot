@@ -155,6 +155,172 @@ def test_cancel_install_keeps_ready_package_and_manual_retry_skips_download(upda
     assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
 
 
+@pytest.mark.parametrize("editor", ["core", "provider", "feature", "schedule", "search", "group"])
+def test_install_preserves_unsaved_settings_and_the_downloaded_package(update_page, tmp_path, editor):
+    page = update_page
+    if editor == "core":
+        page.set_viewport_size({"width": 1080, "height": 680})
+    _check_automatically(page)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    if editor in {"core", "provider", "search"}:
+        page.locator('.nav-item[data-page="settings"]').click()
+        if editor == "core":
+            page.locator('[data-settings-tab="core"]').click()
+            field = page.locator('#coreForm [name="robot_name"]')
+            expect(field).to_have_value("小妹")
+            field.fill("尚未保存的核心设置")
+        elif editor == "provider":
+            page.locator('[data-provider-create]').click()
+            field = page.locator('#providerModelInput')
+            field.fill("unsaved-test-model")
+        else:
+            page.locator('[data-settings-tab="search"]').click()
+            field = page.locator('#webSearchForm [name="enabled"]')
+            page.locator('label[for="webSearchEnabled"]').click()
+    elif editor == "feature":
+        page.evaluate("""() => {
+          const read = window.pywebview.api.get_feature;
+          window.pywebview.api.get_feature = async (...args) => {
+            const result = await read(...args);
+            // This test exercises the schema draft, without an optional native page.
+            if (result.data) result.data.pages = [];
+            return result;
+          };
+        }""")
+        page.locator('.nav-item[data-page="features"]').click()
+        page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
+        field = page.locator('#config-basic--analysis_days')
+        field.fill("7")
+    elif editor == "schedule":
+        page.locator('.nav-item[data-page="schedules"]').click()
+        page.locator('#newScheduledTask').click()
+        field = page.locator('#scheduledName')
+        field.fill("尚未保存的定时任务")
+    else:
+        page.locator('.nav-item[data-page="groups"]').click()
+        page.locator('#groupRows .group-row').first.click()
+        field = page.locator('#groupPolicyForm [name="reply_mode"]')
+        field.select_option("off")
+    saved_value = field.is_checked() if editor == "search" else field.input_value()
+    page.evaluate("window.finishUpdateDownload(); window.updateTestController.pollUpdateStatus()")
+    expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("有设置尚未保存")
+    expect(page.locator("#modalError")).to_contain_text("无需重新下载")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.screenshot(path=str(tmp_path / f"update-keeps-{editor}-draft.png"), animations="disabled")
+    page.locator("#modalCancel").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert (field.is_checked() if editor == "search" else field.input_value()) == saved_value
+    expect(page.locator("#updateCardAction")).to_have_text("立即安装")
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+    assert page.evaluate("window.testUpdateStatus.state") == "ready"
+    if editor == "core":
+        page.locator('#updateCardDismiss').click()
+        expect(page.locator('#updateCard')).to_be_hidden()
+        page.evaluate("window.updateTestController.pollUpdateStatus()")
+        expect(page.locator('#updateCard')).to_be_hidden()
+        page.screenshot(path=str(tmp_path / 'update-card-dismissed-core-save.png'), animations="disabled")
+        page.locator('#saveCore').click()
+        expect(page.locator('#coreNote')).to_contain_text("已更新")
+        expect(page.locator('#saveCore')).to_be_enabled()
+        page.locator('[data-settings-tab="system"]').click()
+        page.locator('#checkUpdate').click()
+        expect(page.locator('#modalTitle')).to_have_text("安装 v1.0.1？")
+        page.locator('#modalConfirm').click()
+        expect(page.locator('#modalBackdrop')).to_be_hidden()
+        assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+        assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
+@pytest.mark.parametrize("width,theme", [(1380, "light"), (600, "dark")])
+def test_ready_card_can_be_dismissed_without_hiding_a_new_confirmation(update_page, tmp_path, width, theme):
+    page = update_page
+    page.set_viewport_size({"width": width, "height": 820})
+    if page.locator("html").get_attribute("data-theme") != theme:
+        page.locator("#themeToggle").click()
+    _download_and_wait_for_consent(page)
+    page.locator('#modalCancel').click()
+    expect(page.locator('#updateCardDismiss')).to_be_visible()
+    page.screenshot(path=str(tmp_path / f'update-ready-card-{width}-{theme}.png'), animations="disabled")
+    page.locator('#updateCardDismiss').click()
+    page.evaluate("window.updateTestController.pollUpdateStatus()")
+    expect(page.locator('#updateCard')).to_be_hidden()
+    assert page.evaluate("window.testUpdateStatus.state") == "ready"
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("""() => {
+      window.testUpdateStatus.confirmation_token = 'new-confirmation-token';
+      return window.updateTestController.pollUpdateStatus();
+    }""")
+    expect(page.locator('#modalTitle')).to_have_text("安装 v1.0.1？")
+    expect(page.locator('#modalBackdrop')).to_be_visible()
+    expect(page.locator('#updateCard')).to_be_visible()
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
+@pytest.mark.parametrize("busy", ["featureSaving", "webSearchSaving", "scheduledBusy", "historyExporting"])
+def test_install_rechecks_work_in_progress_then_reuses_ready_package(update_page, busy):
+    page = update_page
+    _download_and_wait_for_consent(page)
+    page.evaluate("name => { window.updateTestState[name] = true; }", busy)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("请稍候")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("name => { window.updateTestState[name] = false; }", busy)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
+@pytest.mark.parametrize("operation", ["core_read", "provider_save"])
+def test_install_waits_for_real_settings_controller_operation(update_page, operation):
+    page = update_page
+    _check_automatically(page)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    page.locator('.nav-item[data-page="settings"]').click()
+    if operation == "core_read":
+        page.locator('[data-settings-tab="core"]').click()
+        expect(page.locator('#coreForm [name="robot_name"]')).to_have_value("小妹")
+        page.evaluate("""() => {
+          const read = window.pywebview.api.get_robot_core;
+          window.pywebview.api.get_robot_core = async () => {
+            const result = await read();
+            return new Promise(resolve => { window.finishSettingsOperation = () => resolve(result); });
+          };
+        }""")
+        page.locator('#refreshCore').click()
+        expect(page.locator('#refreshCore')).to_be_disabled()
+    else:
+        page.locator('[data-provider-create]').click()
+        page.locator('#providerModelInput').fill("pending-save-model")
+        page.locator('#providerApiKey').fill("synthetic-key")
+        page.evaluate("""() => {
+          const save = window.pywebview.api.save_provider;
+          window.pywebview.api.save_provider = (...args) => new Promise(resolve => {
+            window.finishSettingsOperation = async () => resolve(await save(...args));
+          });
+        }""")
+        page.locator('#saveProvider').click()
+        expect(page.locator('#saveProvider')).to_have_text("正在保存并应用…")
+    page.evaluate("window.finishUpdateDownload(); window.updateTestController.pollUpdateStatus()")
+    expect(page.locator('#modalTitle')).to_have_text("安装 v1.0.1？")
+    page.locator('#modalConfirm').click()
+    expect(page.locator('#modalError')).to_contain_text("请稍候")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("window.finishSettingsOperation()")
+    if operation == "core_read":
+        expect(page.locator('#refreshCore')).to_be_enabled()
+    else:
+        expect(page.locator('#providerEditorPage')).to_be_hidden()
+    page.locator('#modalConfirm').click()
+    expect(page.locator('#modalBackdrop')).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
 def test_same_version_new_package_needs_new_download_and_consent(update_page):
     page = update_page
     _download_and_wait_for_consent(page)

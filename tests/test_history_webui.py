@@ -97,6 +97,65 @@ def test_long_absence_keeps_visible_history_until_latest_is_requested(
         page.close()
 
 
+def test_history_denial_during_pending_export_keeps_export_locked_until_dialog_returns(
+    browser, manager_url, tmp_path,
+):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.add_init_script("""(() => {
+      const schedule = window.setInterval;
+      window.setInterval = (callback, ...args) => ['refreshStatus','pollHistory'].includes(callback.name)
+        ? 0 : schedule(callback, ...args);
+    })();""")
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api;
+          window.overlappingExports = 0;
+          api.export_history = () => {
+            overlappingExports++;
+            return new Promise(resolve => { window.finishOverlappingExport = resolve; });
+          };
+          api.delete_conversation = async () => ({ok:true,data:{deleted:0,requires_login:true}});
+        }""")
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#messageList .message-bubble").first).to_be_visible()
+        button = page.locator("#exportHistory")
+        button.click()
+        expect(button).to_have_attribute("aria-busy", "true")
+        page.locator("#deleteConversation").click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#toastRegion .toast.error")).to_contain_text("本次删除未执行")
+        expect(page.locator("#messageList .message-bubble")).to_have_count(0)
+        expect(button).to_be_disabled()
+        expect(button).to_have_text("导出中…")
+        expect(button).to_have_attribute("aria-busy", "true")
+        button.dispatch_event("click")
+        assert page.evaluate("window.overlappingExports") == 1
+        page.set_viewport_size({"width": 1080, "height": 860})
+        page.screenshot(path=str(tmp_path / "history-denial-while-export-pending-1080.png"), animations="disabled")
+        page.locator("#refreshHistory").click()
+        expect(page.locator("#messageList .message-bubble").first).to_be_visible()
+        expect(button).to_be_disabled()
+        expect(button).to_have_attribute("aria-busy", "true")
+        button.dispatch_event("click")
+        assert page.evaluate("window.overlappingExports") == 1
+        page.evaluate("window.finishOverlappingExport({ok:true,data:{cancelled:true}})")
+        expect(button).to_be_enabled()
+        expect(button).to_have_text("导出记录")
+        expect(button).not_to_have_attribute("aria-busy", "true")
+        expect(page.locator("#toastRegion")).not_to_contain_text("已导出到")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("width", [1380, 1080])
 @pytest.mark.parametrize("denied", ["unlicensed", "logged_out", "both"])
 def test_history_access_loss_clears_private_data_and_rejects_late_responses(
@@ -310,7 +369,134 @@ def test_history_export_pending_blocks_duplicates_and_restores_current_access(
             expect(button).to_be_disabled()
             button.dispatch_event("click")
             assert page.evaluate("window.exportCalls.length") == 1
-            expect(page.locator("#toastRegion .toast")).to_have_count(0)
+            if outcome == "status_unknown":
+                expect(page.locator("#toastRegion .toast")).to_have_count(0)
+            else:
+                expect(page.locator("#toastRegion .toast.error")).to_contain_text("微信")
+                expect(page.locator("#toastRegion .toast")).not_to_contain_text("已导出到")
+        assert page.url == manager_url and page.title().startswith("消息中心")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("operation", ["export", "delete", "cleanup"])
+@pytest.mark.parametrize("outcome", ["requires_login", "account_changed", "local_account_change", "before_confirm"])
+def test_history_denied_action_explains_result_and_offers_recovery(
+    browser, manager_url, tmp_path, operation, outcome,
+):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.add_init_script("""(() => {
+      const schedule = window.setInterval;
+      window.setInterval = (callback, ...args) => {
+        if (callback.name === 'refreshStatus') { window.refreshDeniedStatus = callback; return 0; }
+        if (callback.name === 'pollHistory') { window.pollDeniedHistory = callback; return 0; }
+        return schedule(callback, ...args);
+      };
+    })();""")
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, status = api.get_status;
+          window.deniedAccount = 'wxid_demo_account'; window.deniedRead = '';
+          window.deniedCalls = [];
+          api.get_status = async () => {
+            const result = structuredClone(await status());
+            result.data.history_account = deniedAccount;
+            result.data.runtime.wechat_identity = deniedAccount;
+            result.data.runtime.account_status_available = true;
+            return result;
+          };
+          api.get_conversations = async () => ({ok:true, data:deniedRead
+            ? {account_id:'', items:[], summary:{}, [deniedRead]:true}
+            : {account_id:deniedAccount, items:[{conversation_id:'denied-chat', display_name:'原账号会话',
+              type:'private', message_count:1, last_timestamp:1}], summary:{}}});
+          api.get_messages = async () => ({ok:true, data:{account_id:deniedAccount, has_more:false,
+            items:[{id:1, timestamp:1793200001, content:'原账号私密消息', role:'user', sender_id:'private-member'}]}});
+          for (const method of ['export_history','delete_conversation','delete_history_before']) {
+            api[method] = (...args) => {
+              deniedCalls.push({method,args});
+              return new Promise(resolve => { window.finishDeniedAction = resolve; });
+            };
+          }
+        }""")
+        page.evaluate("window.refreshDeniedStatus()")
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#messageList .message-bubble")).to_have_text("原账号私密消息")
+        page.evaluate("document.querySelector('#toastRegion').replaceChildren()")
+        if operation == "export":
+            page.locator("#exportHistory").click()
+        elif operation == "delete":
+            page.locator("#deleteConversation").click()
+            if outcome == "before_confirm":
+                page.evaluate("window.deniedAccount = ''; window.refreshDeniedStatus()")
+            page.locator("#modalConfirm").click()
+        else:
+            page.locator('.nav-item[data-page="settings"]').click()
+            page.locator('[data-settings-tab="system"]').click()
+            page.locator("#cleanHistory").click()
+            page.locator("#modalInput").fill("2026-10-01")
+            if outcome == "before_confirm":
+                page.evaluate("window.deniedAccount = ''; window.refreshDeniedStatus()")
+            page.locator("#modalConfirm").click()
+        before_confirm = outcome == "before_confirm" and operation != "export"
+        if not before_confirm:
+            page.wait_for_function("typeof window.finishDeniedAction === 'function'")
+        if outcome == "local_account_change":
+            page.evaluate("window.deniedAccount = ''; window.refreshDeniedStatus()")
+        action = {"export": "导出", "delete": "删除", "cleanup": "清理"}[operation]
+        result = {"path": "preview.csv"} if operation == "export" else {"deleted": 1}
+        if outcome != "local_account_change":
+            result = {"cancelled": True, "deleted": 0,
+                      "requires_login" if outcome == "before_confirm" else outcome: True}
+        if not before_confirm:
+            page.evaluate("data => window.finishDeniedAction({ok:true,data})", result)
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#toastRegion .toast.error")).to_be_visible()
+        expect(page.locator("#toastRegion .toast")).not_to_contain_text("已导出到")
+        expect(page.locator("#toastRegion .toast")).not_to_contain_text("已清理")
+        expect(page.locator("#toastRegion .toast")).not_to_contain_text("已删除")
+        if outcome == "local_account_change":
+            expect(page.locator("#toastRegion .toast")).to_contain_text("核对")
+            expect(page.locator("#toastRegion .toast")).not_to_contain_text("未执行")
+        else:
+            expect(page.locator("#toastRegion .toast")).to_contain_text(f"本次{action}未执行")
+        if operation == "cleanup":
+            expect(page.locator("#page-settings")).to_be_visible()
+            page.screenshot(path=str(tmp_path / f"cleanup-denied-visible-{outcome}.png"), animations="disabled")
+        expect(page.locator("#messageList .message-bubble")).to_have_count(0)
+        expect(page.locator("#conversationList")).not_to_contain_text("原账号会话")
+        expect(page.locator("#exportHistory")).to_be_disabled()
+        expect(page.locator("#cleanHistory")).to_be_disabled()
+        page.evaluate("window.refreshDeniedStatus()")
+        expect(page.locator("#exportHistory")).to_be_disabled()
+        page.evaluate("mode => { window.deniedRead = mode; return window.pollDeniedHistory(); }",
+                      "requires_login" if outcome in {"local_account_change", "before_confirm"} else outcome)
+        if operation == "cleanup":
+            page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#historySummary")).not_to_contain_text("正在读取")
+        expect(page.locator("#toastRegion")).to_have_attribute("aria-live", "polite")
+        expect(page.locator('#messageList [data-history-recovery="home"]')).to_be_visible()
+        expect(page.locator('#messageList [data-history-recovery="subscription"]')).to_be_visible()
+        page.screenshot(path=str(tmp_path / f"history-action-denied-{operation}-{outcome}.png"), animations="disabled")
+        page.locator('#messageList [data-history-recovery="home"]').click()
+        expect(page.locator("#page-home")).to_be_visible()
+        page.locator('.nav-item[data-page="history"]').click()
+        page.locator('#messageList [data-history-recovery="subscription"]').click()
+        expect(page.locator("#page-subscription")).to_be_visible()
+        page.evaluate("window.deniedAccount = 'wxid_demo_account'; window.deniedRead = ''; window.refreshDeniedStatus()")
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#messageList .message-bubble")).to_have_text("原账号私密消息")
+        expect(page.locator("#exportHistory")).to_be_enabled()
+        expect(page.locator("#historySummary")).not_to_contain_text("未执行")
+        expect(page.locator("#historySummary")).not_to_contain_text("核对")
+        assert page.evaluate("window.deniedCalls.length") == (0 if before_confirm else 1)
         assert page.url == manager_url and page.title().startswith("消息中心")
         assert not errors, errors
     finally:

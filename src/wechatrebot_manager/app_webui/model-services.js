@@ -770,6 +770,7 @@ window.createModelServices = function (helpers) {
     discoverProviderModels,
     editProvider,
     guardProviderDraft,
+    isProviderSaving: () => providerSaveBusy,
     inferProviderModalities,
     providerCapabilityLabel,
     providerThinkingSupported,

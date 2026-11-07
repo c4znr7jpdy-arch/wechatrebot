@@ -17,8 +17,8 @@ class LicensingApiMixin:
             self._licenses = client = LicenseClient(self._install_root)
         return client
 
-    def _license_failed(self, exc: LicenseError) -> dict:
-        event_id, saved = self._record_error(exc, f"LIC-{exc.code}", operation="subscription")
+    def _license_failed(self, exc: LicenseError, *, record: bool = True) -> dict:
+        event_id, saved = self._record_error(exc, f"LIC-{exc.code}", operation="subscription") if record else ("", None)
         return {"ok": False, "error": {"code": f"LIC-{exc.code}", "message": str(exc), "event_id": event_id, "recorded": saved}}
 
     def _license_operation(self, action: Callable[[], dict]) -> dict:
