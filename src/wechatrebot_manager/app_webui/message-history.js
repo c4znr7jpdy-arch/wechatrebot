@@ -771,7 +771,7 @@ window.createMessageHistory = function (helpers) {
         entry.expires = Date.now() + 5 * 60 * 1000;
       }).catch((error) => {
         entry.error = error.message || "群二维码暂不可用";
-        entry.expires = Date.now() + 15000;
+        entry.expires = error.product?.retryable === false ? Infinity : Date.now() + 15000;
       });
       cache.set(key, entry);
       while (cache.size > 32) cache.delete(cache.keys().next().value);
