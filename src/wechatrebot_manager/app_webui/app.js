@@ -99,6 +99,7 @@
     startPending: false,
     startPreparing: false,
     stopPending: false,
+    stopRequestPending: false,
     composing: false,
     availableUpdate: null,
     mandatoryUpdate: false,
@@ -396,7 +397,9 @@
     if (!optimistic) {
       state.lastRuntimeStatus = rawStatus;
       const stopped = ["STOPPED", "LICENSE_READY", "LICENSE_PAUSED", "ERROR", "STOP_WAIT_WECHAT"].includes(rawStatus?.state);
-      if (rawStatus?.state === "STOPPING" || (stopped && !rawStatus?.start_pending && !rawStatus?.busy)) {
+      // A status read may finish before the stop request's own response.
+      if (!state.stopRequestPending && (rawStatus?.state === "STOPPING"
+        || (stopped && !rawStatus?.start_pending && !rawStatus?.busy))) {
         state.stopPending = false;
       }
     }
@@ -585,6 +588,7 @@
     state.startActionRevision += 1;
     state.startPreparing = action === "start";
     state.stopPending = action === "stop";
+    state.stopRequestPending = action === "stop";
     if (state.stopPending) renderStatus(state.status, {optimistic: true});
     try {
       if (action === "start" && !await subscription.beforeStart()) return;
@@ -608,6 +612,7 @@
       await refreshStatus();
     } finally {
       state.startPreparing = false;
+      state.stopRequestPending = false;
       state.startActionRevision += 1;
       renderStatus(state.startPending ? state.status : state.lastRuntimeStatus || state.status, {optimistic: true});
     }
@@ -622,6 +627,7 @@
       onConfirm: async () => {
         if (state.stopPending) return;
         state.stopPending = true;
+        state.stopRequestPending = true;
         state.startActionRevision += 1;
         renderStatus(state.status, {optimistic: true});
         try {
@@ -632,6 +638,7 @@
           state.stopPending = false;
           throw error;
         } finally {
+          state.stopRequestPending = false;
           state.startActionRevision += 1;
           renderStatus(state.lastRuntimeStatus || state.status, {optimistic: true});
         }
@@ -640,15 +647,19 @@
   }
 
   async function checkEnvironment() {
-    try { renderStatus(await api("check_environment")); }
-    catch (error) { reportError(error); }
+    const revision = state.startActionRevision;
+    try {
+      const status = await api("check_environment");
+      if (revision === state.startActionRevision) renderStatus(status);
+    } catch (error) { reportError(error); }
   }
 
   async function chooseWechat() {
+    const revision = state.startActionRevision;
     try {
       const result = await api("select_wechat", "");
       if (!result?.cancelled) {
-        renderStatus(result);
+        if (revision === state.startActionRevision) renderStatus(result);
         toast("微信路径已保存。 ");
       }
     } catch (error) { reportError(error); }

@@ -2100,6 +2100,51 @@ const select = (current, can_start=true, can_stop=true, busy=false) => {
     assert result.stdout == "ok"
 
 
+def test_environment_actions_render_only_responses_from_the_current_robot_action() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    actions = script[script.index("  async function checkEnvironment()"):script.index("  const PAGE_TITLES =")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {startActionRevision:0};
+const rendered = [], errors = [], notices = [];
+const renderStatus = status => rendered.push(status);
+const reportError = error => errors.push(error.message);
+const toast = message => notices.push(message);
+let complete;
+const api = () => new Promise((resolve, reject) => {complete = {resolve, reject};});
+(async () => {
+  for (const run of [checkEnvironment, chooseWechat]) {
+    const before = rendered.length;
+    const stale = run();
+    state.startActionRevision++;
+    complete.resolve({state:'CORE_STARTING', start_pending:true});
+    await stale;
+    assert.equal(rendered.length, before, 'an environment response from before stop must be ignored');
+    const current = run();
+    complete.resolve({state:'STOPPED'});
+    await current;
+    assert.equal(rendered.length, before + 1, 'a current response must still render');
+    assert.equal(rendered.at(-1).state, 'STOPPED');
+    const failed = run();
+    complete.reject(new Error('expected environment failure'));
+    await failed;
+    assert.equal(errors.at(-1), 'expected environment failure');
+  }
+  const before = rendered.length;
+  const cancelled = chooseWechat();
+  complete.resolve({cancelled:true});
+  await cancelled;
+  assert.equal(rendered.length, before);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=actions + harness, text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
+    assert result.stdout == "ok"
+
+
 def test_running_status_distinguishes_an_unverified_connection_from_a_restart() -> None:
     if shutil.which("node") is None:
         pytest.skip("Node.js is unavailable")

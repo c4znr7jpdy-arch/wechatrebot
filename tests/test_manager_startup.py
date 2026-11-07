@@ -531,6 +531,89 @@ def test_slow_start_can_cancel_once_and_recovers_from_rejected_stop(browser, man
         page.close()
 
 
+@pytest.mark.parametrize("method, control", [
+    ("check_environment", "#settingsCheckWechat"),
+    ("select_wechat", "#settingsChooseWechat"),
+])
+def test_late_environment_response_cannot_restore_cancelled_start(browser, manager_url, tmp_path, method, control):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async method => {
+          const api = window.pywebview.api, base = structuredClone((await api.get_status()).data);
+          window.environmentPhase = 'idle'; window.environmentStarts = 0; window.environmentStops = 0;
+          const snapshot = () => {
+            const status = structuredClone(base), phase = window.environmentPhase;
+            Object.assign(status, {state:{idle:'LICENSE_READY', loading:'CORE_STARTING', stopping:'STOPPING'}[phase],
+              title:{idle:'机器人未启动', loading:'正在启动机器人', stopping:'正在取消启动'}[phase],
+              message:'', start_pending:phase === 'loading', busy:phase !== 'idle', online:false,
+              can_start:phase === 'idle', can_stop:phase === 'loading', error:null});
+            Object.assign(status.runtime, {engine_ready:false, connection_ready:true,
+              account_status_available:true, wechat_identity:'wxid_demo_account'});
+            return {ok:true, data:status};
+          };
+          api.get_status = async () => snapshot();
+          api.start_robot = async () => {
+            window.environmentStarts++; window.environmentPhase = 'loading';
+            return {ok:true, data:{accepted:true}};
+          };
+          api.stop_robot = () => {
+            window.environmentStops++; window.environmentPhase = 'stopping';
+            return new Promise(resolve => { window.finishEnvironmentStop = () => resolve({ok:true, data:{accepted:true}}); });
+          };
+          api[method] = () => {
+            const stale = snapshot(); document.body.dataset.environmentHeld = 'true';
+            return new Promise(resolve => { window.releaseEnvironment = () => {
+              resolve(stale);
+              window.setTimeout(() => { document.body.dataset.environmentReleased = 'true'; }, 0);
+            }; });
+          };
+        }""", method)
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.locator("#primaryAction").click()
+        expect(page.locator("#primaryAction")).to_have_text("取消启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="system"]').click()
+        page.locator(control).click()
+        expect(page.locator("body")).to_have_attribute("data-environment-held", "true")
+        page.locator('.nav-item[data-page="home"]').click()
+        page.locator("#primaryAction").click()
+        expect(page.locator("#stateTitle")).to_have_text("正在取消启动")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.evaluate("""() => {
+          window.titlesAfterEnvironmentRelease = [];
+          new MutationObserver(() => window.titlesAfterEnvironmentRelease.push(document.querySelector('#stateTitle').textContent))
+            .observe(document.querySelector('#stateTitle'), {childList:true});
+          window.releaseEnvironment();
+        }""")
+        expect(page.locator("body")).to_have_attribute("data-environment-released", "true")
+        expect(page.locator("#stateTitle")).to_have_text("正在取消启动")
+        expect(page.locator("#primaryAction")).to_have_text("正在停止…")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        page.evaluate("window.environmentPhase = 'idle'")
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        expect(page.locator("#primaryAction")).to_have_text("正在停止…")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.environmentStarts") == 1
+        assert page.evaluate("window.environmentStops") == 1
+        assert "正在启动机器人" not in page.evaluate("window.titlesAfterEnvironmentRelease")
+        page.evaluate("window.finishEnvironmentStop()")
+        expect(page.locator("#primaryAction")).to_have_text("启动")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        assert not errors, errors
+        page.screenshot(path=str(tmp_path / f"late-{method}-preserves-stop.png"))
+    finally:
+        page.close()
+
+
 def test_late_idle_poll_cannot_undo_an_accepted_start(browser, manager_url, tmp_path):
     page = browser.new_page(viewport={"width": 1380, "height": 860})
     errors = []
