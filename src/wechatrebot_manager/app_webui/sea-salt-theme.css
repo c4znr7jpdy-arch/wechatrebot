@@ -1,0 +1,75 @@
+/* Palette only: use the shared manager layout and independent light/dark mode. */
+html[data-skin="sea-salt"] {
+  --navy-950: #e6eef0;
+  --navy-900: #fbfdfd;
+  --navy-800: #d5e2e7;
+  --blue-700: #24586d;
+  --blue-600: #2d687e;
+  --blue-100: #e0edf2;
+  --ink: #26363d;
+  --muted: #536872;
+  --subtle: #687d87;
+  --line: #d7e2e7;
+  --line-strong: #a7bcc6;
+  --surface: #fbfdfd;
+  --surface-2: #f3f8fa;
+  --surface-muted: #eaf1f4;
+  --surface-inset: #f1f7f9;
+  --surface-hover: #eaf3f7;
+  --surface-selected: #dfedf3;
+  --control-surface: #ffffff;
+  --message-canvas: #f1f7f9;
+  --chart-surface: #fbfdfd;
+  --chart-summary: #f0f7fa;
+  --chart-footer: #f8fbfc;
+  --chart-divider: #dfebf0;
+  --chart-track-border: #d1e0e7;
+  --chart-grid-a: #f1f7fa;
+  --chart-grid-b: #e0ebf1;
+  --canvas: #f0f5f7;
+  --topbar-surface: #fbfdfd;
+  --nav-hover: #dce8ee;
+  --nav-active: #2d687e;
+  --primary-hover: #24586d;
+  --secondary-line: #acc5d1;
+  --focus-outline: #2d687e;
+}
+
+html[data-skin="sea-salt"][data-theme="dark"] {
+  --navy-950: #101e25;
+  --navy-900: #172a34;
+  --navy-800: #243e4b;
+  --blue-700: #b0d9e8;
+  --blue-600: #8fc6da;
+  --blue-100: #223f4e;
+  --ink: #e6f0f4;
+  --muted: #b1c5ce;
+  --subtle: #8ba6b3;
+  --line: #2d4653;
+  --line-strong: #4a6878;
+  --surface: #192c36;
+  --surface-2: #203641;
+  --surface-muted: #243b46;
+  --surface-inset: #14252e;
+  --surface-hover: #294450;
+  --surface-selected: #294c5d;
+  --control-surface: #142730;
+  --message-canvas: #14252e;
+  --chart-surface: #192c36;
+  --chart-summary: #203641;
+  --chart-footer: #14252e;
+  --chart-divider: #2d4653;
+  --chart-track-border: #3d5968;
+  --chart-grid-a: #203641;
+  --chart-grid-b: #2c4551;
+  --canvas: #11212a;
+  --sidebar-surface: #101e25;
+  --sidebar-line: #293f4b;
+  --topbar-surface: #192c36;
+  --nav-hover: #233b47;
+  --nav-active: #2d5264;
+  --primary-ink: #10232d;
+  --primary-hover: #b0d9e8;
+  --secondary-line: #4a6878;
+  --focus-outline: #8fc6da;
+}

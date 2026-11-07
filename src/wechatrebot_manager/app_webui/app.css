@@ -431,7 +431,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .message { display: flex; gap: 9px; margin-bottom: 15px; }
 .message.assistant { flex-direction: row-reverse; }
 .message-avatar { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 8px; color: #fff; background: #7c8da2; font-size: 11px; font-weight: 800; }
-.message.assistant .message-avatar { background: var(--blue-600); }
+.message.assistant .message-avatar { color: var(--primary-ink, #fff); background: var(--blue-600); }
 .message-avatar-button { flex: 0 0 34px; width: 34px; height: 34px; margin: -2px; padding: 2px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; transition: background-color .18s ease, box-shadow .18s ease; }
 .message-avatar-button:hover { background: var(--blue-100); }
 .message-avatar-button:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
