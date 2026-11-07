@@ -7,6 +7,10 @@ import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import tomllib
+from urllib.parse import quote
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 
 _HASH = re.compile(r"^[0-9A-F]{64}$")
@@ -49,7 +53,7 @@ def _approval_time(value: object) -> bool:
 def _load_object(path: Path, errors: list[str]) -> dict[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         errors.append(f"cannot read {path.name}: {exc}")
         return {}
     if not isinstance(payload, dict):
@@ -71,12 +75,12 @@ def _safe_repo_path(value: object) -> bool:
     )
 
 
-def _exact_lock(path: Path, errors: list[str]) -> None:
+def _exact_lock(path: Path, errors: list[str]) -> dict[str, str]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         errors.append(f"cannot read {path.name}: {exc}")
-        return
+        return {}
     requirements = [
         line.strip()
         for line in lines
@@ -84,9 +88,25 @@ def _exact_lock(path: Path, errors: list[str]) -> None:
     ]
     if not requirements:
         errors.append(f"{path.name} is empty")
-    for requirement in requirements:
-        if "==" not in requirement or any(token in requirement for token in (">=", "<=", "~=", "!=")):
-            errors.append(f"{path.name} contains an unpinned requirement: {requirement}")
+    pins: dict[str, str] = {}
+    for value in requirements:
+        try:
+            requirement = Requirement(value)
+            specifiers = list(requirement.specifier)
+        except InvalidRequirement:
+            errors.append(f"{path.name} contains an unpinned requirement: {value}")
+            continue
+        if (len(specifiers) != 1 or specifiers[0].operator != "=="
+                or "*" in specifiers[0].version or requirement.url
+                or requirement.marker or requirement.extras):
+            errors.append(f"{path.name} contains an unpinned requirement: {value}")
+            continue
+        name = canonicalize_name(requirement.name)
+        if name in pins:
+            errors.append(f"{path.name} contains a duplicate requirement: {name}")
+        else:
+            pins[name] = specifiers[0].version
+    return pins
 
 
 def _sha256(path: Path) -> str:
@@ -180,6 +200,8 @@ def _validate_legal_review(
     root: Path,
     review: dict[str, object],
     *,
+    project_version: str | None,
+    python_pins: dict[str, dict[str, str]],
     errors: list[str],
 ) -> None:
     if review.get("schema_version") != 1:
@@ -210,6 +232,55 @@ def _validate_legal_review(
             errors.append(f"legal review artifact does not exist: {path_value}")
         elif _sha256(artifact) != expected_hash.upper():
             errors.append(f"legal review artifact hash mismatch: {path_value}")
+        if name == "sbom" and artifact.is_file():
+            _validate_sbom_inventory(artifact, project_version, python_pins, errors)
+
+
+def _validate_sbom_inventory(
+    path: Path,
+    project_version: str | None,
+    python_pins: dict[str, dict[str, str]],
+    errors: list[str],
+) -> None:
+    sbom = _load_object(path, errors)
+    metadata = sbom.get("metadata")
+    application = metadata.get("component") if isinstance(metadata, dict) else None
+    if project_version and (
+        not isinstance(application, dict) or application.get("version") != project_version
+    ):
+        errors.append("SBOM application version does not match release version")
+    components = sbom.get("components")
+    if not isinstance(components, list):
+        errors.append("SBOM components must be a list")
+        return
+    inventories: dict[str, dict[str, str]] = {group: {} for group in python_pins}
+    for index, component in enumerate(components):
+        if not isinstance(component, dict):
+            errors.append(f"SBOM component {index} is not an object")
+            continue
+        group = component.get("group")
+        if not isinstance(group, str) or group not in inventories or component.get("type") != "library":
+            continue
+        name, version = component.get("name"), component.get("version")
+        if not isinstance(name, str) or not name or not isinstance(version, str) or not version:
+            errors.append(f"SBOM {group} Python component {index} has no name or version")
+            continue
+        normalized = canonicalize_name(name)
+        if normalized in inventories[group]:
+            errors.append(f"duplicate SBOM Python component: {group}/{normalized}")
+        inventories[group][normalized] = version
+        expected_purl = f"pkg:pypi/{quote(normalized)}@{quote(version)}"
+        if component.get("purl") != expected_purl:
+            errors.append(f"SBOM Python purl does not match name and version: {group}/{normalized}")
+    for group, pins in python_pins.items():
+        for name, version in pins.items():
+            actual = inventories[group].get(name)
+            if actual is None:
+                errors.append(f"SBOM is missing locked Python component: {group}/{name}")
+            elif actual != version:
+                errors.append(f"SBOM Python version does not match lock: {group}/{name} {actual} != {version}")
+
+
 def _validate_acceptance_evidence(
     root: Path,
     evidence: dict[str, object],
@@ -507,8 +578,10 @@ def validate_release_metadata(root: str | Path) -> list[str]:
         errors.append("runtime wheelhouse aggregate SHA-256 is invalid")
     _validate_ffmpeg_definition(ffmpeg, errors)
 
-    _exact_lock(release / "runtime-requirements.lock", errors)
-    _exact_lock(release / "build-requirements.lock", errors)
+    python_pins = {
+        "runtime": _exact_lock(release / "runtime-requirements.lock", errors),
+        "manager-build": _exact_lock(release / "build-requirements.lock", errors),
+    }
     try:
         project_version = _version_consistency(root, errors)
     except OSError as exc:
@@ -517,6 +590,8 @@ def validate_release_metadata(root: str | Path) -> list[str]:
     _validate_legal_review(
         root,
         legal_review,
+        project_version=project_version,
+        python_pins=python_pins,
         errors=errors,
     )
     _validate_acceptance_evidence(
