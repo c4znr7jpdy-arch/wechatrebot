@@ -142,6 +142,14 @@ def test_readopted_services_keep_stop_control_across_configuration_recovery(
         assert recovered.error is not None and recovered.error.code == "13002"
         assert recovered.can_stop and not recovered.can_start
         assert built_ports == [[16200, 15000]]
+        from unittest.mock import Mock
+        start_missing = Mock(side_effect=AssertionError("must stop incomplete recovery before starting"))
+        monkeypatch.setattr(controller._supervisor, "start_missing", start_missing)
+        monkeypatch.setattr(controller, "_snapshotter", Mock(side_effect=AssertionError("must reject before probing")))
+        rejected = controller._start_services(("astrbot",))
+        assert rejected.error.code == "13002" and not rejected.can_start
+        start_missing.assert_not_called()
+        monkeypatch.setattr(controller, "_snapshotter", lambda: runtime_status.RuntimeSnapshot(False, False, ""))
     terminated = []
 
     def terminate(pid, *, expected_creation_time):

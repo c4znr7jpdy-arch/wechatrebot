@@ -461,7 +461,7 @@ class LifecycleController:
         start_generation: int | None = None,
     ) -> LifecycleView:
         with self._lock:
-            if self._start_in_progress or self._stop_error is not None:
+            if self._start_in_progress or self._stop_error is not None or self._has_incomplete_adoption():
                 return self.view()
             if start_generation is not None and start_generation != self._start_generation:
                 return self.view()
