@@ -228,6 +228,55 @@ def test_close_before_start_and_after_owner_exit_are_safe(bridge, monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("external", ["none", "before-close", "after-close", "repeated-after-close"])
+def test_reconnect_wait_distinguishes_requested_close_from_external_cancel(bridge, monkeypatch, external):
+    async def run():
+        waiting = asyncio.Event()
+
+        class RetryWait(asyncio.Event):
+            async def wait(self):
+                waiting.set()
+                return await super().wait()
+
+        class Connect:
+            async def __aenter__(self):
+                raise ConnectionRefusedError("synthetic stopped engine")
+
+            async def __aexit__(self, *_):
+                pass
+
+        monkeypatch.setattr(bridge.onebot.websockets, "connect", lambda *_, **__: Connect())
+        client = bridge.onebot.OneBotClient("ws://127.0.0.1:1", SimpleNamespace(),
+                                           reconnect_min=3600, reconnect_max=3600)
+        client._closed_event = RetryWait()
+        before = asyncio.all_tasks()
+        task = asyncio.create_task(client.run())
+        try:
+            await asyncio.wait_for(waiting.wait(), 1)
+            if external == "before-close":
+                task.cancel()
+            await client.close()
+            await client.close()
+            if external in {"after-close", "repeated-after-close"}:
+                task.cancel()
+                if external == "repeated-after-close":
+                    task.cancel()
+            if external == "none":
+                await asyncio.wait_for(task, 1)
+                assert not task.cancelled()
+            else:
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 1)
+                assert task.cancelled()
+            assert client._run_task is None
+            assert not [item for item in asyncio.all_tasks() - before if not item.done()]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+
+
 def test_external_run_cancellation_is_preserved_and_collects_children(bridge, monkeypatch):
     async def run():
         connection = Connection(action=True)
