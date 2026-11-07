@@ -641,6 +641,50 @@ def test_supervisor_persists_and_readopts_owned_processes(
     assert terminated == [102, 101]
 
 
+@pytest.mark.parametrize("ready_ports", [set(), {6200}])
+def test_adoption_keeps_unready_owned_services_available_for_stop(
+    tmp_path: Path, monkeypatch, ready_ports,
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    state_path = tmp_path / "data" / "manager" / "service-state.json"
+    state_path.parent.mkdir(parents=True)
+    identities = {
+        pid: ProcessIdentity(_normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state_path.write_text(json.dumps({
+        "schema_version": 1,
+        "complete": True,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    supervisor = ProcessSupervisor(
+        specs, state_path=state_path, identity_probe=identities.get,
+        readiness_probe=lambda _host, port: port in ready_ports,
+    )
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+
+    assert supervisor.adopt() is True
+    assert supervisor.adoption_complete is False
+    assert [running.process.pid for running in supervisor.running] == [101, 102]
+    assert [entry["pid"] for entry in json.loads(state_path.read_text())["services"]] == [101, 102]
+    supervisor.force_stop()
+    assert terminated == [102, 101]
+    assert not state_path.exists()
+
+
 @pytest.mark.parametrize("method", ["terminate", "kill", "send_signal"])
 def test_adopted_process_does_not_kill_reused_pid(monkeypatch, method):
     original = ProcessIdentity("owned/python.exe", 1001)

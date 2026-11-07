@@ -592,6 +592,7 @@ class ProcessSupervisor:
         by_name = {spec.name: spec for spec in self.specs}
         adopted: list[RunningService] = []
         adopted_names: set[str] = set()
+        ready_names: set[str] = set()
         try:
             for entry in entries:
                 if not isinstance(entry, dict):
@@ -613,7 +614,6 @@ class ProcessSupervisor:
                         str(entry.get("executable") or "")
                     )
                     or identity.executable != expected_executable
-                    or not self._readiness_probe(spec.ready_host, spec.ready_port)
                 ):
                     continue
                 spec.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -626,6 +626,11 @@ class ProcessSupervisor:
                     )
                 )
                 adopted_names.add(spec.name)
+                # Readiness may still be pending after a UI restart, or a live
+                # service may have stopped listening. Preserve its identity so
+                # the user can still stop it instead of orphaning the process.
+                if self._readiness_probe(spec.ready_host, spec.ready_port):
+                    ready_names.add(spec.name)
         except OSError:
             for running in adopted:
                 running.log_handle.close()
@@ -634,7 +639,7 @@ class ProcessSupervisor:
         if not self.running:
             self._clear_state()
             return False
-        self.adoption_complete = len(self.running) == len(self.specs)
+        self.adoption_complete = len(ready_names) == len(self.specs)
         self._persist_state()
         return True
 
