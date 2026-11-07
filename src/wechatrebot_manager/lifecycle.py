@@ -715,6 +715,10 @@ class LifecycleController:
 
     def request_stop(self) -> LifecycleView:
         with self._lock:
+            if self._stop_error is not None:
+                # A stale normal-stop request must finish the failed shutdown,
+                # including a surviving bridge, before clearing its error.
+                return self.force_stop()
             self.cancel_pending_start()
             status = self._license_snapshot()
             if status["enabled"]:

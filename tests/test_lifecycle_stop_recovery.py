@@ -323,3 +323,52 @@ def test_failed_stop_retries_only_pending_grant_revocation_after_writer_unlocks(
         assert not failed.busy and not failed.online
     assert controller._supervisor is supervisor and world["core"]
     assert failed_stop.call_count == 1
+
+
+@pytest.mark.parametrize("survivor", ["astrbot", "new-hook-bridge"])
+@pytest.mark.parametrize("retry_succeeds", [False, True])
+def test_stale_normal_stop_retries_all_survivors_of_failed_full_stop(
+    tmp_path, monkeypatch, survivor, retry_succeeds,
+):
+    from test_app_shell import _api
+    from test_license_lifecycle import setup_controller
+
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+    supervisor = holders[0]
+    original_force_stop = supervisor.force_stop
+    attempts = []
+
+    def partial_stop():
+        attempts.append(True)
+        if len(attempts) > 1 and retry_succeeds:
+            return original_force_stop()
+        supervisor.stop_names(tuple(item.spec.name for item in supervisor.running
+                                    if item.spec.name != survivor))
+        raise ServiceStopError(survivor, survivor)
+
+    monkeypatch.setattr(supervisor, "force_stop", partial_stop)
+    with pytest.raises(ServiceStopError):
+        controller.force_stop()
+    assert controller.view().error.code == "13008"
+    assert [item.spec.name for item in supervisor.running] == [survivor]
+    api = _api(tmp_path)
+    api._lifecycle = controller
+
+    # An old window may still send its original normal-stop action after the
+    # full-stop failure. It must retry every survivor before clearing 13008.
+    assert api.stop_robot()["data"]["accepted"]
+    assert api._action_lock.acquire(timeout=3)
+    api._action_lock.release()
+    view = api.get_status()["data"]
+    assert len(attempts) == 2
+    if retry_succeeds:
+        assert view["error"] is None and view["can_start"] and not view["can_stop"]
+        assert not supervisor.running and controller._supervisor is None
+    else:
+        assert view["error"]["code"] == "13008" and not view["can_start"] and view["can_stop"]
+        assert controller._supervisor is supervisor
+        assert [item.spec.name for item in supervisor.running] == [survivor]
+    assert not license.granted and not view["online"]
