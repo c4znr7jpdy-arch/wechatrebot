@@ -200,6 +200,34 @@ def test_unavailable_account_preserves_signed_run_and_recovers_without_restart(l
     assert client.snapshot("wxid_a")["run_id"] == run_id
 
 
+def test_unknown_connection_keeps_safe_stop_for_owned_services(tmp_path):
+    from test_app_shell import _api
+
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    assert controller.start().online
+    controller._snapshotter = lambda: RuntimeSnapshot(
+        True, True, "", hook_ready=False, upstream_connected=True,
+        heartbeat_fresh=True, account_status_available=False,
+    )
+    api = _api(tmp_path)
+    api._lifecycle = controller
+
+    status = api.get_status()["data"]
+    assert status["state"] == "VERIFYING_CONNECTION"
+    assert status["busy"] and not status["can_start"]
+    assert status["can_stop"] and not status["start_pending"]
+    assert "微信窗口会保留" in status["message"]
+    assert world["core"] and world["bridge"] and not holders[0].stopped
+
+    assert api.stop_robot()["data"]["accepted"]
+    assert api._action_lock.acquire(timeout=3)
+    api._action_lock.release()
+    assert not world["core"] and world["bridge"]
+    assert not license.granted
+
+
 @pytest.mark.parametrize("denial", ["expired", "paused", "logout", "mismatch"])
 def test_unavailable_account_never_preserves_an_invalid_run(license_setup, denial):
     client, _, clock, _ = license_setup

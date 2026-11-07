@@ -2159,6 +2159,13 @@ const select = (current, can_start=true, can_stop=true, busy=false) => {
   assert.equal($('#stopRetainedConnection').hidden, true);
   await runPrimaryAction();
   assert.equal(calls.at(-1), 'stop_robot');
+  select('VERIFYING_CONNECTION', false, true, true);
+  assert.equal($('#primaryAction').dataset.action, 'stop');
+  assert.equal($('#primaryAction').disabled, false, 'unknown connection state must keep safe stop available');
+  const verificationStopBefore = calls.length;
+  await runPrimaryAction();
+  assert.equal(calls.length, verificationStopBefore + 1);
+  assert.equal(calls.at(-1), 'stop_robot', 'verification stop must not force-kill services');
   select('STOP_WAIT_WECHAT', false);
   assert.equal($('#primaryAction').disabled, false);
   const before = calls.length;

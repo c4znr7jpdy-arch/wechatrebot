@@ -506,11 +506,15 @@
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
     const cancelStart = stopMode && status.start_pending && !online;
+    const verificationStop = current === "VERIFYING_CONNECTION" && status.can_stop
+      && !status.start_pending;
     const stopping = state.stopPending || current === "STOPPING";
-    const primaryLabel = stopping ? "正在停止…" : cancelStart ? "取消启动" : stopMode ? "停止运行" : starting ? "启动中…" : "启动";
+    const primaryLabel = stopping ? "正在停止…" : cancelStart ? "取消启动"
+      : stopMode ? (verificationStop ? "停止机器人" : "停止运行") : starting ? "启动中…" : "启动";
     primary.innerHTML = `${icon(stopping || (starting && !cancelStart) ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = Boolean(state.startPreparing || state.stopPending || (status.busy && !cancelStart))
+    primary.disabled = Boolean(state.startPreparing || state.stopPending
+      || (status.busy && !cancelStart && !verificationStop))
       || (!status.can_start && !status.can_stop)
       || (state.mandatoryUpdate && !stopMode);
     primary.setAttribute("aria-busy", String(Boolean(status.busy || state.stopPending)));
@@ -578,7 +582,10 @@
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
     const cancelStart = action === "stop" && state.status?.start_pending && state.status?.can_stop;
-    if (state.startPreparing || state.stopPending || (state.status?.busy && !cancelStart)) return;
+    const verificationStop = action === "stop" && state.status?.state === "VERIFYING_CONNECTION"
+      && state.status?.can_stop && !state.status?.start_pending;
+    if (state.startPreparing || state.stopPending
+      || (state.status?.busy && !cancelStart && !verificationStop)) return;
     if (action === "start" && state.status?.start_pending) return;
     if (action === "stop" && !cancelStart && (["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)
       || ["13001", "13002", "13008"].includes(state.status?.error?.code))) {

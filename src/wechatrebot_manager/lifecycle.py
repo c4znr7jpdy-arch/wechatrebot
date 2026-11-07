@@ -920,9 +920,17 @@ class LifecycleController:
             LifecycleState.STOPPING,
         }
         owned = self._supervisor is not None and bool(self._supervisor.running)
+        verification_stop_available = (
+            owned
+            and self.state == LifecycleState.VERIFYING_CONNECTION
+            and not self._start_in_progress
+            and not pending_start
+        )
         licensing = self._license_snapshot()
         licensed = licensing["enabled"]
         online = self._stop_error is None and self._runtime.online and (not licensed or licensing["can_run"])
+        if verification_stop_available:
+            message = "连接状态暂时无法确认，可以停止机器人；微信窗口会保留。"
         if (licensed and self.state in {
             LifecycleState.STOPPED, LifecycleState.LICENSE_READY, LifecycleState.LICENSE_PAUSED,
         } and not (pending_start and licensing["authorized"]
@@ -965,7 +973,9 @@ class LifecycleController:
                 and (not owned or licensed)
                 and not online
             ),
-            can_stop=(owned or self._stop_error is not None) and (not busy or pending_start),
+            can_stop=(owned or self._stop_error is not None) and (
+                not busy or pending_start or verification_stop_available
+            ),
             error=self._runtime_config_error or self._error,
             environment=self._environment,
             runtime=self._runtime,
