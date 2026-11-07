@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from test_lifecycle import _Supervisor, _environment
+from test_license_client import activate, setup as license_setup
 from wechatrebot_manager import lifecycle, runtime_status
 from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
 from wechatrebot_manager.launcher import ServiceStopError
@@ -266,3 +267,59 @@ def test_update_stop_failure_remains_an_error_and_does_not_continue_to_wechat(tm
     stop_processes.assert_not_called()
     assert controller.refresh().error.code == "13008"
     assert controller._supervisor is supervisor and supervisor.running
+
+
+@pytest.mark.parametrize("action", ["request_stop", "force_stop"])
+@pytest.mark.parametrize("configuration_broken", [False, True])
+def test_failed_stop_retries_only_pending_grant_revocation_after_writer_unlocks(
+    license_setup, monkeypatch, action, configuration_broken,
+):
+    from test_license_lifecycle import setup_controller
+    from wechatrebot_manager.licensing.protocol import LicenseError
+    from wechatrebot_manager.licensing.runtime_guard import RuntimeGuard
+    from wechatrebot_manager.single_instance import SingleInstanceLock
+
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_customer")
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_customer"
+    controller.start()
+    supervisor = holders[0]
+    failed_stop = Mock(side_effect=ServiceStopError("astrbot", "core"))
+    monkeypatch.setattr(supervisor, "force_stop" if action == "force_stop" else "stop", failed_stop)
+    guard = RuntimeGuard(client.root, client=client, account_source=lambda: world["account"])
+    guard._core_session = client.snapshot(world["account"])["run_id"]
+    snapshot = controller._snapshotter
+
+    lock = SingleInstanceLock(client.lock_key)
+    try:
+        assert lock.acquire()
+        with pytest.raises(ServiceStopError):
+            getattr(controller, action)()
+        assert controller._license_pause_failed
+        assert client.snapshot(world["account"])["can_run"]
+        if configuration_broken:
+            monkeypatch.setattr(controller, "_snapshotter", Mock(side_effect=ValueError("invalid ports")))
+        busy = controller.refresh()
+        assert busy.error.code == ("13001" if configuration_broken else "13008")
+        assert controller._license_pause_failed and failed_stop.call_count == 1
+    finally:
+        lock.release()
+
+    resumed = controller.refresh()
+    assert resumed.error.code == ("13001" if configuration_broken else "13008")
+    assert not client.snapshot(world["account"])["can_run"]
+    assert not controller._license_pause_failed and failed_stop.call_count == 1
+    with pytest.raises(LicenseError, match="自动化已暂停"):
+        guard.require_core()
+
+    if configuration_broken:
+        monkeypatch.setattr(controller, "_snapshotter", snapshot)
+    for _ in range(2):
+        failed = controller.refresh()
+        assert failed.error.code == "13008" and failed.can_stop and not failed.can_start
+        assert not failed.busy and not failed.online
+    assert controller._supervisor is supervisor and world["core"]
+    assert failed_stop.call_count == 1

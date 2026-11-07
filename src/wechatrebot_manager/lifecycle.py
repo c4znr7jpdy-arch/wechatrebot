@@ -557,6 +557,10 @@ class LifecycleController:
 
     def refresh(self) -> LifecycleView:
         with self._lock:
+            if self._stop_error is not None and self._license_pause_failed:
+                # A busy license writer may recover after process shutdown
+                # failed. Revoke that old grant without retrying termination.
+                self._pause_license(stop_on_error=False)
             # Environment discovery is expensive and belongs to the explicit
             # check/start paths. Polling still probes runtime and account state.
             if not self._refresh_runtime_for_view():
