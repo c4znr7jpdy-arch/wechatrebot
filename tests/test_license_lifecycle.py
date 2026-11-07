@@ -170,6 +170,63 @@ def test_expiry_preserves_wechat_and_renewal_requires_explicit_resume(tmp_path):
     assert holders[0].started.count("new-hook-bridge") == 1
 
 
+def test_unavailable_account_preserves_signed_run_and_recovers_without_restart(license_setup):
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_a")
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_a"
+    controller.start()
+    run_id = client.snapshot("wxid_a")["run_id"]
+    ready_probe = controller._snapshotter
+    controller._snapshotter = lambda: RuntimeSnapshot(
+        True, True, "", hook_ready=False, account_status_available=False,
+    )
+
+    for _ in range(3):
+        unknown = controller.refresh()
+        assert unknown.state == LifecycleState.VERIFYING_CONNECTION
+        assert unknown.busy and not unknown.can_start
+        assert not unknown.online and not unknown.runtime.wechat_identity
+        assert world["core"] and world["bridge"]
+        assert not holders[0].stopped
+        assert client.snapshot("wxid_a")["run_id"] == run_id
+
+    controller._snapshotter = ready_probe
+    assert controller.refresh().online
+    assert holders[0].started.count("astrbot") == 1
+    assert client.snapshot("wxid_a")["run_id"] == run_id
+
+
+@pytest.mark.parametrize("denial", ["expired", "paused", "logout", "mismatch"])
+def test_unavailable_account_never_preserves_an_invalid_run(license_setup, denial):
+    client, _, clock, _ = license_setup
+    activate(client)
+    client.bind("wxid_a")
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_a"
+    controller.start()
+    controller._snapshotter = lambda: RuntimeSnapshot(
+        world["core"], True, "", hook_ready=False, account_status_available=False,
+    )
+    if denial == "expired":
+        clock.advance(32 * 86400)
+    elif denial == "paused":
+        client.pause()
+    else:
+        controller._snapshotter = lambda: RuntimeSnapshot(
+            world["core"], True, "" if denial == "logout" else "wxid_other",
+            hook_ready=True, account_status_available=True,
+        )
+
+    stopped = controller.refresh()
+    assert not stopped.online and not world["core"] and world["bridge"]
+    assert holders[0].stopped == ["astrbot"]
+    assert not client.snapshot("wxid_a")["can_run"]
+
+
 def test_valid_license_without_services_is_stopped_and_never_starts_itself(tmp_path):
     controller, license, world, holders = setup_controller(tmp_path)
     license.bound = "wxid_a"
@@ -783,10 +840,89 @@ def test_core_crash_is_reaped_without_closing_wechat(tmp_path):
     controller.start()
     core = next(item for item in holders[0].running if item.spec.name == "astrbot")
     core.process.code = 1
-    controller.refresh()
+    failed = controller.refresh()
+    assert failed.state == LifecycleState.ERROR and not failed.online
+    assert failed.error is not None and failed.error.code == "13004"
+    assert failed.title == "机器人服务意外退出"
+    assert "微信连接仍保留" in failed.message
+    assert failed.can_start and failed.can_stop
     assert not license.granted
     assert world["bridge"] and not world["core"]
     assert [item.spec.name for item in holders[0].running] == ["new-hook-bridge"]
+
+    repeated = controller.refresh()
+    assert repeated.state == LifecycleState.ERROR
+    assert repeated.error == failed.error and repeated.title == failed.title
+    errors = [record for record in controller.events.recent()
+              if record.get("event") == "APP_ERROR"]
+    assert len(errors) == 1 and errors[0]["code"] == "13004"
+
+    restarted = controller.start()
+    assert restarted.state == LifecycleState.RUNNING and restarted.online
+    assert restarted.error is None and license.granted
+    assert holders[0].started == ["new-hook-bridge", "astrbot", "astrbot"]
+    assert "new-hook-bridge" not in holders[0].stopped
+
+
+@pytest.mark.parametrize("denial", ["expired", "revoked", "paused", "logout"])
+def test_core_exit_after_authorization_stop_keeps_actual_reason(license_setup, denial):
+    client, service, clock, _ = license_setup
+    activate(client)
+    client.bind("wxid_a")
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_a"
+    controller.start()
+    if denial == "expired":
+        clock.advance(3600)
+    elif denial == "revoked":
+        service.status = "revoked"
+        service.revision += 1
+        assert client.refresh()["state"] == "revoked"
+    elif denial == "paused":
+        client.pause()
+    else:
+        world["account"] = ""
+    core = next(item for item in holders[0].running if item.spec.name == "astrbot")
+    core.process.code = 0  # The independent authorization watcher stopped first.
+    world["core"] = False
+
+    stopped = controller.refresh()
+
+    expected = (LifecycleState.LICENSE_READY if denial == "paused"
+                else LifecycleState.WAITING_WECHAT if denial == "logout"
+                else LifecycleState.LICENSE_PAUSED)
+    assert stopped.state == expected and stopped.error is None
+    assert not stopped.online and world["bridge"] and not world["core"]
+    assert holders[0].stopped == ["astrbot"]
+    assert not client.snapshot("wxid_a")["can_run"]
+    assert not [event for event in controller.events.recent()
+                if event.get("event") == "APP_ERROR"]
+    assert controller.refresh().state == expected
+
+
+def test_core_crash_while_account_unavailable_still_reports_exit(license_setup):
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_a")
+    controller, _, world, holders = setup_controller(client.root, license_client=client)
+    controller.connect_wechat()
+    world["account"] = "wxid_a"
+    controller.start()
+    core = next(item for item in holders[0].running if item.spec.name == "astrbot")
+    core.process.code = 1
+    world["core"] = False
+    controller._snapshotter = lambda: RuntimeSnapshot(
+        False, True, "", hook_ready=False, account_status_available=False,
+    )
+
+    failed = controller.refresh()
+
+    assert failed.state == LifecycleState.ERROR
+    assert failed.error is not None and failed.error.code == "13004"
+    assert not failed.online and world["bridge"] and not world["core"]
+    assert holders[0].stopped == ["astrbot"]
+    assert not client.snapshot("wxid_a")["can_run"]
 
 
 def test_stop_still_works_when_authorization_storage_is_broken(tmp_path):

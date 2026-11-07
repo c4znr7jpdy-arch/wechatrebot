@@ -562,7 +562,25 @@ class LifecycleController:
             self._pause_license()
             return None  # The existing lifecycle handles an unexpected bridge crash.
         core = by_name.get("astrbot")
-        if core is not None and (not status["can_run"] or core.process.poll() is not None):
+        grant = status
+        if core is not None and not self._runtime.account_status_available:
+            # Check the existing grant without substituting the bound account
+            # for a fresh login probe. Explicit authorization denials still win.
+            grant = self.licenses.snapshot(str(status.get("account") or ""))
+        if core is not None and core.process.poll() is not None and grant["can_run"]:
+            self._pause_license()
+            supervisor.stop_names(("astrbot",), timeout_seconds=3)
+            self._running_events_emitted = False
+            return self._set_error("13004", detail="机器人核心服务意外退出。")
+        if core is not None and not status["can_run"]:
+            if not self._runtime.account_status_available and grant["can_run"]:
+                # An unavailable probe cannot confirm logout or an account
+                # change. Verify only that the existing signed run grant is
+                # still valid; this does not authorize actions for that account.
+                # Runtime guards continue to require a fresh actual identity.
+                self.state = LifecycleState.VERIFYING_CONNECTION
+                self._error = None
+                return self.view()
             # The runtime also enforces this independently when the manager is closed.
             self._pause_license()
             supervisor.stop_names(("astrbot",), timeout_seconds=3)
@@ -769,6 +787,13 @@ class LifecycleController:
         if pending_start and not self._start_in_progress:
             title = "微信已登录，正在启动机器人功能" if self._connected_account() else "等待登录微信"
             message = "本次启动会在确认微信登录和授权账号后自动继续，无需再次点击。"
+        if self.state == LifecycleState.ERROR and self._error is not None and self._error.code == "13004":
+            title = self._error.title
+            message = (
+                "机器人核心服务已停止，微信连接仍保留；点击启动可重新运行机器人。"
+                if self._runtime.connection_ready
+                else "机器人核心服务已停止，点击启动可重新连接并运行机器人。"
+            )
         if self._runtime_config_error is not None:
             title, message = self._runtime_config_error.title, self._runtime_config_error.message
         if (
