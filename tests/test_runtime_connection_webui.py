@@ -28,8 +28,9 @@ def test_message_center_navigation_keeps_connection_and_exit_feedback(browser, m
             status.message = exited
               ? '机器人核心服务已停止，微信连接仍保留；点击启动可重新运行机器人。' : '';
             status.error = exited ? {code:'13004', title:status.title, message:status.message} : null;
+            status.busy = unknown;
             status.can_start = exited;
-            status.can_stop = true;
+            status.can_stop = !unknown;
             status.runtime = {...status.runtime, engine_ready:!exited, connection_ready:true,
               account_status_available:!unknown, hook_ready:!unknown,
               upstream_connected:!exited, heartbeat_fresh:!unknown && !exited,
@@ -46,6 +47,7 @@ def test_message_center_navigation_keeps_connection_and_exit_feedback(browser, m
         expect(page.locator("#stateMessage")).to_have_text("微信连接状态暂时无法确认，正在重新检测。")
         expect(page.locator("#accountText")).to_have_text("正在确认微信连接…")
         expect(page.locator("#globalStatus")).to_contain_text("正在确认连接")
+        expect(page.locator("#primaryAction")).to_be_disabled()
         page.screenshot(path=str(tmp_path / "connection-verifying.png"), animations="disabled")
 
         page.evaluate("window.connectionPhase = 'online'")

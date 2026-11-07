@@ -186,6 +186,7 @@ def test_unavailable_account_preserves_signed_run_and_recovers_without_restart(l
     for _ in range(3):
         unknown = controller.refresh()
         assert unknown.state == LifecycleState.VERIFYING_CONNECTION
+        assert unknown.busy and not unknown.can_start
         assert not unknown.online and not unknown.runtime.wechat_identity
         assert world["core"] and world["bridge"]
         assert not holders[0].stopped
