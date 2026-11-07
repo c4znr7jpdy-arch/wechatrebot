@@ -8,6 +8,173 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+def _open_feature_draft_page(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    page.add_init_script("""(() => {
+      Object.defineProperty(window, 'createFeatureController', {configurable:true, set(create) {
+        Object.defineProperty(window, 'createFeatureController', {value:helpers => {
+          window.featureDraftState=helpers.state;
+          return create(helpers);
+        }});
+      }});
+    })();""")
+    page.goto(manager_url)
+    expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+    if page.locator("#onboardingRecommended").is_visible():
+        page.locator("#onboardingRecommended").click()
+    page.locator('.nav-item[data-page="features"]').click()
+    page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
+    expect(page.locator("#config-basic--analysis_days")).to_have_value("1")
+    return page
+
+
+@pytest.mark.parametrize("trigger", ["reload", "focus"])
+@pytest.mark.parametrize("result", ["network", "license", "success"])
+def test_feature_refresh_keeps_edits_started_during_read(browser, manager_url, tmp_path, trigger, result):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""async () => {
+          const api=window.pywebview.api, read=api.get_feature;
+          window.pendingFeatureResponse=await read('feature-group-analysis');
+          window.featureReadCalls=0;
+          api.get_feature=id => {
+            if (id !== 'feature-group-analysis') return read(id);
+            window.featureReadCalls++;
+            return new Promise(resolve => { window.finishFeatureRead=resolve; });
+          };
+        }""")
+        if trigger == "reload":
+            page.locator("#refreshFeature").click()
+        else:
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+        page.wait_for_function("window.featureReadCalls === 1")
+        field = page.locator("#config-basic--analysis_days")
+        expect(field).to_be_enabled()
+        field.fill("7")
+        page.evaluate("""result => {
+          const response=result === 'success' ? window.pendingFeatureResponse : {ok:false,error:{
+            code:result === 'license' ? 'LIC-subscription_expired' : '19000',
+            title:'设置读取失败',message:'模拟读取失败，请稍后重试',recorded:true}};
+          if (result === 'success') {
+            response.data.revision='newer-unedited-revision';
+            response.data.config.basic.analysis_days=3;
+            response.data.advanced_config.basic.analysis_days=3;
+          }
+          window.finishFeatureRead(response);
+        }""", result)
+        if result == "success":
+            page.wait_for_function("window.featureDraftState.featureDetails['feature-group-analysis'].revision === 'newer-unedited-revision'")
+        else:
+            expect(page.locator("#featureNote")).to_contain_text("未保存的修改已保留")
+        expect(field).to_have_value("7")
+        expect(field).to_be_enabled()
+        expect(page.locator("#saveFeature")).to_be_enabled()
+        assert page.evaluate("""() => ({dirty:featureDraftState.featureDirty,
+          revision:featureDraftState.featureDetail.revision,
+          baseline:featureDraftState.featureBaseline.basic.analysis_days})""") == {
+            "dirty": True, "revision": "preview", "baseline": 1,
+        }
+        page.locator('.nav-item[data-page="home"]').click()
+        expect(page.locator("#modalTitle")).to_have_text("离开前丢弃修改？")
+        page.locator("#modalCancel").click()
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"feature-{trigger}-{result}-draft.png"))
+        assert page.url == manager_url and page.title().startswith("功能中心")
+    finally:
+        page.close()
+
+
+def test_feature_readiness_refresh_cancel_keeps_save_context_and_new_revision(browser, manager_url, tmp_path):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, save=api.save_feature, read=api.get_feature;
+          window.originalFeatureDetail=featureDraftState.featureDetail;
+          window.featureSaveCalls=[];
+          api.save_feature=(...args) => {window.featureSaveCalls.push(args); return save(...args);};
+          api.get_feature=async id => {
+            const result=await read(id);
+            if (id === 'feature-group-analysis' && window.featureSaveCalls.length) {
+              result.data.revision=`saved-revision-${window.featureSaveCalls.length}`;
+            }
+            return result;
+          };
+        }""")
+        field = page.locator("#config-basic--analysis_days")
+        field.fill("7")
+        page.locator("#refreshFeatures").click()
+        expect(page.locator("#modalTitle")).to_have_text("离开前丢弃修改？")
+        page.locator("#modalCancel").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        assert page.evaluate("""() => featureDraftState.selectedFeature === 'feature-group-analysis'
+          && featureDraftState.featureDetail === window.originalFeatureDetail
+          && featureDraftState.featureDetail.revision === 'preview' && featureDraftState.featureDirty""")
+        expect(field).to_have_value("7")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("featureDraftState.featureDetail.revision === 'saved-revision-1' && !featureDraftState.featureSaving")
+        expect(field).to_have_value("7")
+        assert not page.evaluate("featureDraftState.featureDirty")
+        field.fill("14")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("featureDraftState.featureDetail.revision === 'saved-revision-2' && !featureDraftState.featureSaving")
+        writes = page.evaluate("window.featureSaveCalls")
+        assert len(writes) == 2
+        assert [(call[0], call[1]["basic"]["analysis_days"], call[2], call[3]["basic"]["analysis_days"]) for call in writes] == [
+            ("feature-group-analysis", 7, "preview", 1),
+            ("feature-group-analysis", 14, "saved-revision-1", 7),
+        ]
+        expect(field).to_have_value("14")
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / "feature-refresh-cancel-saved.png"))
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("outcome", ["success", "network", "license"])
+def test_feature_readiness_refresh_is_blocked_during_save(browser, manager_url, tmp_path, outcome):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, save=api.save_feature, read=api.get_feature, list=api.get_features;
+          window.featureSaveCalls=[]; window.featureListReads=0;
+          api.get_features=(...args) => {window.featureListReads++; return list(...args);};
+          api.get_feature=async id => {
+            const result=await read(id);
+            if (id === 'feature-group-analysis') result.data.revision='saved-revision';
+            return result;
+          };
+          api.save_feature=(...args) => {
+            window.featureSaveCalls.push(args);
+            return new Promise(resolve => {window.finishFeatureSave=async outcome => resolve(outcome === 'success'
+              ? await save(...args) : {ok:false,error:{code:outcome === 'license' ? 'LIC-subscription_expired' : '19000',
+                title:'设置保存失败',message:'模拟保存失败，请稍后重试',recorded:true}});});
+          };
+        }""")
+        field = page.locator("#config-basic--analysis_days")
+        field.fill("7")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("window.featureSaveCalls.length === 1")
+        expect(field).to_be_disabled()
+        page.locator("#refreshFeatures").click()
+        assert page.evaluate("""() => featureDraftState.selectedFeature === 'feature-group-analysis'
+          && featureDraftState.featureDetail.revision === 'preview' && window.featureListReads === 0""")
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.evaluate("outcome => window.finishFeatureSave(outcome)", outcome)
+        page.wait_for_function("!featureDraftState.featureSaving")
+        expect(field).to_have_value("7")
+        expect(field).to_be_enabled()
+        expect(page.locator("#saveFeature")).to_be_enabled()
+        assert page.evaluate("featureDraftState.featureDirty") is (outcome != "success")
+        if outcome == "success":
+            assert page.evaluate("featureDraftState.featureDetail.revision") == "saved-revision"
+        else:
+            expect(page.locator("#featureNote")).to_contain_text("模拟保存失败")
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"feature-save-{outcome}-refresh-blocked.png"))
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("code,save_failure", [("11007", False), ("19000", True)])
 def test_expected_account_state_does_not_claim_log_write_failure(browser, manager_url, code, save_failure):
     page = browser.new_page()
