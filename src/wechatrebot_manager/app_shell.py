@@ -588,12 +588,19 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                 return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
 
         with action_state_lock:
+            generation_reader = getattr(self._lifecycle, "start_request_generation", None)
+            start_generation = (generation_reader() if action in {"start", "resume_pending_start"}
+                                and callable(generation_reader) else None)
             self._robot_action = action
             self._robot_stop_action = ""
 
         def perform(current_action: str) -> None:
             try:
-                getattr(self._lifecycle, current_action)()
+                operation = getattr(self._lifecycle, current_action)
+                if current_action in {"start", "resume_pending_start"} and start_generation is not None:
+                    operation(start_generation=start_generation)
+                else:
+                    operation()
             except LicenseError as exc:
                 if current_action in {"start", "resume_pending_start"}:
                     self._lifecycle.cancel_pending_start()

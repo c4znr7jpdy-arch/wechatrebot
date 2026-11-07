@@ -303,9 +303,16 @@ class LifecycleController:
             self._license_pause_failed = False
         return self._start_services(("new-hook-bridge",), start_generation=start_generation)
 
-    def start(self) -> LifecycleView:
+    def start_request_generation(self) -> int:
+        """Bind an accepted queue action to its current cancellation boundary."""
         with self._lock:
-            generation = self._start_generation
+            return self._start_generation
+
+    def start(self, *, start_generation: int | None = None) -> LifecycleView:
+        with self._lock:
+            generation = self._start_generation if start_generation is None else start_generation
+            if generation != self._start_generation:
+                return self.view()
         if not self._license_snapshot()["enabled"]:
             return self._start_services(start_generation=generation)
         with self._lock:
@@ -377,9 +384,11 @@ class LifecycleController:
             if self._license_snapshot()["enabled"]:
                 self._pause_license(stop_on_error=False)
 
-    def resume_pending_start(self) -> LifecycleView:
+    def resume_pending_start(self, *, start_generation: int | None = None) -> LifecycleView:
         """Continue one explicit start through the application's action queue."""
         with self._lock:
+            if start_generation is not None and start_generation != self._start_generation:
+                return self.view()
             expected = self._pending_start_account
             generation = self._start_generation
             if not expected:

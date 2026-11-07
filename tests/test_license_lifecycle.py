@@ -824,7 +824,7 @@ def test_api_stop_projection_stays_busy_after_queue_switches_to_teardown(tmp_pat
 
 @pytest.mark.parametrize("action", ["stop_robot", "force_stop_robot"])
 @pytest.mark.parametrize("pause_error", [False, True])
-@pytest.mark.parametrize("boundary", ["readiness", "first_snapshot", "connect_handoff"])
+@pytest.mark.parametrize("boundary", ["readiness", "first_snapshot", "connect_handoff", "queue_start_handoff", "queue_resume_handoff"])
 def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_path, monkeypatch, action, pause_error, boundary):
     from test_app_shell import _api
     from test_launcher import _FakeProcess, _layout
@@ -834,6 +834,7 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
     processes, stop_threads, supervisors = {}, [], []
     waiting, release = threading.Event(), threading.Event()
     ready = False
+    account = "wxid_a"
     core_worker = []
     start_worker = []
     license = License()
@@ -876,7 +877,7 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
 
     def snapshot():
         bridge, core = live("new-hook-bridge"), live("astrbot") and ready
-        return RuntimeSnapshot(core, bridge, "wxid_a" if bridge else "", bridge, core, bridge)
+        return RuntimeSnapshot(core, bridge, account if bridge else "", bridge, core, bridge)
 
     monkeypatch.setattr(launcher, "port_accepting", probe)
     monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
@@ -887,6 +888,10 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
         snapshotter=snapshot, process_probe=lambda: (), preflight=lambda _: ())
     if boundary != "connect_handoff":
         controller.connect_wechat()
+    if boundary == "queue_resume_handoff":
+        account = ""
+        assert controller.start().start_pending
+        account = "wxid_a"
     if boundary == "first_snapshot":
         snapshot_license = license.snapshot
         main_thread = threading.get_ident()
@@ -909,11 +914,25 @@ def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_p
             return connect(**kwargs)
 
         monkeypatch.setattr(controller, "connect_wechat", delayed_connect)
+    elif boundary in {"queue_start_handoff", "queue_resume_handoff"}:
+        method = "start" if boundary == "queue_start_handoff" else "resume_pending_start"
+        operation = getattr(controller, method)
+
+        def delayed_operation(**kwargs):
+            start_worker.append(threading.get_ident())
+            waiting.set()
+            assert release.wait(3)
+            return operation(**kwargs)
+
+        monkeypatch.setattr(controller, method, delayed_operation)
     license.pause_error = pause_error
     api = _api(tmp_path)
     api._lifecycle = controller
     try:
-        assert api.start_robot()["data"]["accepted"]
+        if boundary == "queue_resume_handoff":
+            assert api.get_status()["data"]["start_pending"]
+        else:
+            assert api.start_robot()["data"]["accepted"]
         assert waiting.wait(2)
         starting = api.get_status()["data"]
         assert starting["start_pending"] and starting["busy"] and starting["can_stop"]
