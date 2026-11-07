@@ -581,7 +581,7 @@
     if (state.startPreparing || state.stopPending || (state.status?.busy && !cancelStart)) return;
     if (action === "start" && state.status?.start_pending) return;
     if (action === "stop" && !cancelStart && (["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)
-      || ["13001", "13008"].includes(state.status?.error?.code))) {
+      || ["13001", "13002", "13008"].includes(state.status?.error?.code))) {
       runForceStop();
       return;
     }

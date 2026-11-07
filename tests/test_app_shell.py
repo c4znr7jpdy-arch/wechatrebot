@@ -3087,7 +3087,7 @@ def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:
     assert calls == ["permit", "destroy"]
 
 
-@pytest.mark.parametrize("code", ["13001", "13008"])
+@pytest.mark.parametrize("code", ["13001", "13002", "13008"])
 def test_failed_stop_reuses_force_stop_confirmation_before_retrying(code) -> None:
     if shutil.which("node") is None:
         pytest.skip("Node.js is unavailable")
