@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 from .location import chat_history_path
@@ -26,6 +26,14 @@ _IMAGE_XML = re.compile(r"<img\b", re.IGNORECASE)
 _APP_MESSAGE_XML = re.compile(r"<appmsg\b", re.IGNORECASE)
 _LEGACY_LINK_CARD = re.compile(r"^\s*\[链接卡片\]", re.IGNORECASE)
 _HTTP_URL = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _csv_text(value: str) -> str:
+    """Keep untrusted chat fields literal when opened in a spreadsheet."""
+    if (value.startswith(("\t", "\r", "\n"))
+            or value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@"))):
+        return "'" + value
+    return value
 
 
 def _xml_fragment(content: str, tag: str) -> str:
@@ -258,6 +266,23 @@ def _media_previews(value: object) -> list[str]:
     return result
 
 
+def _csv_record(row: sqlite3.Row) -> tuple[str, ...]:
+    return (
+        "群聊" if row["conversation_type"] == "group" else "个人聊天",
+        _csv_text(row["conversation_id"]),
+        _csv_text(row["group_name"]),
+        "机器人" if row["role"] == "assistant" else "用户",
+        _csv_text(row["wechat_id"] or row["sender_id"]),
+        _csv_text(row["wechat_name"] or row["sender_name"]),
+        _csv_text(row["group_nickname"]),
+        _csv_text(_display_content(
+            row["content"], message_kind=row["message_kind"],
+            quote_sender=row["quote_sender"], quote_content=row["quote_content"],
+        )),
+        datetime.fromtimestamp(row["timestamp"], tz=timezone.utc).astimezone().isoformat(timespec="seconds"),
+    )
+
+
 class ChatHistoryService:
     """Product history index sourced from the bridge with a legacy fallback."""
 
@@ -409,15 +434,19 @@ class ChatHistoryService:
                 "ON messages(account_id, conversation_id, timestamp)"
             )
 
-    def sync(self) -> int:
+    def sync(self, *, strict: bool = False) -> int:
+        """Refresh the index; mutations and exports reject unreadable sources."""
         source = self.bridge_source if self.bridge_source.is_file() else self.source
-        return self._sync_source(source)
+        return self._sync_source(source, strict=strict)
 
-    def _sync_source(self, source_path: Path) -> int:
+    def _sync_source(self, source_path: Path, *, strict: bool = False) -> int:
         if not source_path.is_file():
             return 0
         source_key = str(source_path.resolve()).casefold()
         with self._connect() as target:
+            # Own the writer before reading the import cursor. Otherwise a
+            # delayed importer can restore rows another caller already deleted.
+            target.execute("BEGIN IMMEDIATE")
             row = target.execute(
                 "SELECT last_message_id, account_backfill_complete "
                 "FROM import_sources WHERE source_key = ?",
@@ -480,6 +509,8 @@ class ChatHistoryService:
                         )
                     backfill_complete = True
             except sqlite3.Error:
+                if strict:
+                    raise
                 return 0
             finally:
                 if "source" in locals():
@@ -788,6 +819,7 @@ class ChatHistoryService:
         *,
         account_id: str = "",
         include_unassigned: bool = False,
+        validate_access: Callable[[], None] | None = None,
     ) -> int:
         clauses = ["conversation_id = ?"]
         params: list[object] = [conversation_id]
@@ -799,7 +831,11 @@ class ChatHistoryService:
             clauses.append("account_id = ''")
         else:
             return 0
+        self.sync(strict=True)
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if validate_access is not None:
+                validate_access()
             cursor = connection.execute(
                 f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
             )
@@ -811,6 +847,7 @@ class ChatHistoryService:
         *,
         account_id: str = "",
         include_unassigned: bool = False,
+        validate_access: Callable[[], None] | None = None,
     ) -> int:
         clauses = ["timestamp < ?"]
         params: list[object] = [float(timestamp)]
@@ -822,7 +859,11 @@ class ChatHistoryService:
             clauses.append("account_id = ''")
         else:
             return 0
+        self.sync(strict=True)
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if validate_access is not None:
+                validate_access()
             cursor = connection.execute(
                 f"DELETE FROM messages WHERE {' AND '.join(clauses)}", params
             )
@@ -835,6 +876,7 @@ class ChatHistoryService:
         format: str = "csv",
         account_id: str = "",
         include_unassigned: bool = False,
+        validate_access: Callable[[], None] | None = None,
     ) -> Path:
         normalized_account = str(account_id or "").strip()
         if normalized_account:
@@ -845,8 +887,7 @@ class ChatHistoryService:
             params = ()
         else:
             raise ValueError("导出聊天记录必须指定机器人微信账号。")
-        output = Path(target).expanduser().resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
+        self.sync(strict=True)
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
@@ -859,7 +900,8 @@ class ChatHistoryService:
                 """,
                 params,
             ).fetchall()
-        if format.casefold() == "json":
+        is_json = format.casefold() == "json"
+        if is_json:
             exported = []
             for row in rows:
                 item = dict(row)
@@ -870,11 +912,15 @@ class ChatHistoryService:
                     quote_content=item.get("quote_content", ""),
                 )
                 exported.append(item)
-            output.write_text(
-                json.dumps(exported, ensure_ascii=False, indent=2)
-                + "\n",
-                encoding="utf-8",
-            )
+            json_text = json.dumps(exported, ensure_ascii=False, indent=2) + "\n"
+        else:
+            csv_rows = [_csv_record(row) for row in rows]
+        if validate_access is not None:
+            validate_access()
+        output = Path(target).expanduser().resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if is_json:
+            output.write_text(json_text, encoding="utf-8")
         else:
             with output.open("w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
@@ -884,27 +930,7 @@ class ChatHistoryService:
                         "发送人微信昵称", "发送人群昵称", "内容", "时间",
                     )
                 )
-                for row in rows:
-                    writer.writerow(
-                        (
-                            "群聊" if row["conversation_type"] == "group" else "个人聊天",
-                            row["conversation_id"],
-                            row["group_name"],
-                            "机器人" if row["role"] == "assistant" else "用户",
-                            row["wechat_id"] or row["sender_id"],
-                            row["wechat_name"] or row["sender_name"],
-                            row["group_nickname"],
-                            _display_content(
-                                row["content"],
-                                message_kind=row["message_kind"],
-                                quote_sender=row["quote_sender"],
-                                quote_content=row["quote_content"],
-                            ),
-                            datetime.fromtimestamp(
-                                row["timestamp"], tz=timezone.utc
-                            ).astimezone().isoformat(timespec="seconds"),
-                        )
-                    )
+                writer.writerows(csv_rows)
         return output
 
 

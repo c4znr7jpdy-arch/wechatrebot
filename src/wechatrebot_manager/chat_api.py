@@ -47,9 +47,12 @@ class ChatApiMixin:
     def _history_data_identity(self) -> str:
         return self._authorized_history_account(self._history_account_id())
 
-    def _history_read_result(self, account_id: str, data: object) -> dict[str, object]:
+    def _require_history_account(self, account_id: str) -> None:
         if self._history_data_identity() != account_id:
             raise ValueError("微信登录或授权状态已变化，请刷新消息中心后重试。")
+
+    def _history_read_result(self, account_id: str, data: object) -> dict[str, object]:
+        self._require_history_account(account_id)
         return self._ok(data)
 
     def _history_contacts(self, user_ids: list[str]) -> dict[str, dict[str, str]]:
@@ -185,7 +188,7 @@ class ChatApiMixin:
                 "summary": summary,
                 "account_id": account_id,
             })
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def get_groups(self, refresh: bool = False) -> dict[str, object]:
@@ -446,7 +449,7 @@ class ChatApiMixin:
                     "account_id": account_id,
                 })
             return self._history_read_result(account_id, messages)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def get_message_image(
@@ -492,9 +495,10 @@ class ChatApiMixin:
             count = self._history.delete_conversation(
                 conversation_id,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"deleted": count})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def delete_history_before(
@@ -512,9 +516,10 @@ class ChatApiMixin:
             count = self._history.delete_before(
                 timestamp,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"deleted": count})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def export_history(
@@ -550,7 +555,8 @@ class ChatApiMixin:
                 selected,
                 format=suffix,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"path": str(target)})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)

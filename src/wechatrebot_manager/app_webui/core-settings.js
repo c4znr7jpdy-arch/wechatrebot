@@ -23,7 +23,7 @@
     }
 
     function guard(next) {
-      if (state.busy) return true;
+      if (state.busy || state.loading) return true;
       if (!state.dirty) return false;
       confirmAction({title: "离开前丢弃核心配置修改？", message: "这些修改尚未保存。留在此页可继续编辑或保存。", confirmText: "丢弃修改并继续", onConfirm: async () => { resetDraft(); render(); await next(); }});
       return true;
@@ -37,47 +37,59 @@
     }
 
     async function load(force = false) {
-      if (state.loading) return;
+      if (state.busy || state.loading) return;
       if (state.detail && !force && (!state.stale || state.dirty)) return;
       if (force && guard(() => load(true))) return;
-      state.loading = true;
+      state.loading = true; renderNavigation();
       try {
         const detail = await read();
+        const profiles = detail.engine_online ? await readProfiles() : {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: ""};
+        if (state.dirty) {
+          state.stale = true;
+          state.feedback = "未保存的修改已保留；本次读取未覆盖当前草稿。保存时仍会检查配置是否冲突。";
+          $("#coreNote").textContent = note();
+          return;
+        }
         state.detail = detail; state.stale = false;
-        state.profilesAvailable = false; state.capabilityWarning = "";
+        Object.assign(state, profiles);
         if (!detail.engine_online) { state.view = "global"; state.templateId = null; }
-        if (detail.engine_online) await loadProfiles();
         if (!state.profilesAvailable) { state.view = "global"; state.templateId = null; }
         if (state.view === "template" && !currentTemplate()) { state.view = "global"; state.templateId = null; }
         resetDraft(); render();
       } catch (error) {
-        root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
+        state.stale = true;
+        if (state.detail) {
+          state.feedback = state.dirty ? "核心配置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。" : "核心配置读取失败；当前内容已保留，请稍后重新读取。";
+          $("#coreNote").textContent = note();
+        } else root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
         reportError(error);
       } finally { state.loading = false; renderNavigation(); }
     }
 
-    async function loadProfiles(strict = false) {
+    async function readProfiles(strict = false) {
       try {
         const profiles = await request("GET", "profiles");
-        state.templates = profiles.templates || [];
-        state.bindings = profiles.bindings || {};
-        state.profilesAvailable = true; state.capabilityWarning = "";
+        return {templates: profiles.templates || [], bindings: profiles.bindings || {}, profilesAvailable: true, capabilityWarning: ""};
       } catch (error) {
-        state.profilesAvailable = false;
-        state.capabilityWarning = `模板接口暂不可用：${error.message}。全局配置仍可编辑和保存。`;
         if (strict) throw error;
-        return;
+        return {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: `模板接口暂不可用：${error.message}。全局配置仍可编辑和保存。`};
       }
     }
 
+    async function loadProfiles(strict = false) {
+      Object.assign(state, await readProfiles(strict));
+    }
+
     function renderNavigation() {
+      const pending = state.busy || state.loading;
       const online = state.detail?.engine_online && state.profilesAvailable;
       $("#coreStatus").textContent = state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
-      $("#newCoreTemplate").disabled = state.busy || !online || !Object.keys(state.detail?.template_schema || {}).length;
+      $("#newCoreTemplate").disabled = pending || !online || !Object.keys(state.detail?.template_schema || {}).length;
       $("#coreTemplateSource").disabled = $("#newCoreTemplate").disabled;
-      $("#refreshCore").disabled = state.busy;
+      $("#refreshCore").disabled = pending;
+      $$('#saveCore, #renameCoreTemplate, #deleteCoreTemplate, #backCoreGlobal', root()).forEach((button) => { button.disabled = pending; });
       const count = (id) => Object.values(state.bindings).filter((value) => value === id).length;
-      $("#coreTemplateList").innerHTML = `<label class="template-picker"><span>正在编辑</span><select id="activeCoreTemplate" ${state.busy ? "disabled" : ""}><option value="">全局默认</option>${state.templates.map((item) => `<option value="${esc(item.id)}" ${state.templateId === item.id ? "selected" : ""} ${!online ? "disabled" : ""}>${esc(item.name)} · ${count(item.id)} 个聊天使用</option>`).join("")}</select></label><p class="template-help">${state.view === "template" ? `修改仅影响使用此模板的 ${count(state.templateId)} 个聊天，其他聊天不受影响。` : state.templates.length ? `已有 ${state.templates.length} 个模板，可在上方选择查看和编辑。` : "还没有模板。大多数聊天使用全局默认即可；需要不同回复风格时再新建。"}</p>`;
+      $("#coreTemplateList").innerHTML = `<label class="template-picker"><span>正在编辑</span><select id="activeCoreTemplate" ${pending ? "disabled" : ""}><option value="">全局默认</option>${state.templates.map((item) => `<option value="${esc(item.id)}" ${state.templateId === item.id ? "selected" : ""} ${!online ? "disabled" : ""}>${esc(item.name)} · ${count(item.id)} 个聊天使用</option>`).join("")}</select></label><p class="template-help">${state.view === "template" ? `修改仅影响使用此模板的 ${count(state.templateId)} 个聊天，其他聊天不受影响。` : state.templates.length ? `已有 ${state.templates.length} 个模板，可在上方选择查看和编辑。` : "还没有模板。大多数聊天使用全局默认即可；需要不同回复风格时再新建。"}</p>`;
       $("#activeCoreTemplate").addEventListener("change", (event) => {
         const id = event.target.value;
         event.target.value = state.templateId || "";
@@ -147,6 +159,7 @@
       $("#saveCore").addEventListener("click", saveCurrent);
       $("#renameCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); renameTemplate(); });
       $("#deleteCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); deleteTemplate(); });
+      renderNavigation();
     }
 
     function attachOverrides() {
@@ -205,15 +218,16 @@
     }
 
     async function busy(action) {
-      if (state.busy) return;
+      if (state.busy || state.loading) return;
       state.busy = true; renderNavigation();
       $$('input, select, textarea, button', root()).forEach((input) => { input.dataset.coreDisabled = String(input.disabled); input.disabled = true; });
       try { await action(); window.dispatchEvent(new Event("chat-profiles-changed")); }
       catch (error) { showError(error); }
-      finally { state.busy = false; renderNavigation(); $$('[data-core-disabled]', root()).forEach((input) => { input.disabled = input.dataset.coreDisabled === 'true'; delete input.dataset.coreDisabled; }); }
+      finally { state.busy = false; $$('[data-core-disabled]', root()).forEach((input) => { input.disabled = input.dataset.coreDisabled === 'true'; delete input.dataset.coreDisabled; }); renderNavigation(); }
     }
 
     async function saveCurrent() {
+      if (state.busy || state.loading) return;
       let config;
       try { config = draftFromForm(); } catch (error) { showError(error); return; }
       await busy(async () => {
