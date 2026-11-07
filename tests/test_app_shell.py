@@ -564,6 +564,59 @@ def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_pat
     assert captured["values"]["provider"] == "tavily"
 
 
+@pytest.mark.parametrize("ignored", ["web_search", "websearch_provider", "web_search_link", "websearch_bocha_key"])
+def test_web_search_hot_apply_requires_requested_values_in_readback(monkeypatch, tmp_path, ignored):
+    api = _api(tmp_path)
+    config = {"provider_settings": {
+        "web_search": False, "websearch_provider": "tavily", "web_search_link": False,
+        "websearch_bocha_key": ["synthetic-old-key"],
+    }}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                previous = config["provider_settings"][ignored]
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"][ignored] = previous
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({
+        "enabled": True, "provider": "bocha", "link_enabled": True,
+        "key": "synthetic-new-key",
+    })
+    assert result["ok"] is False
+    assert "synthetic" not in str(result)
+
+
+def test_web_search_hot_apply_preserves_unspecified_secrets_and_unrelated_changes(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    config = {"provider_settings": {"websearch_bocha_key": ["synthetic-saved-key"]}}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"]["unrelated_setting"] = "changed"
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({"enabled": True, "provider": "bocha", "link_enabled": False})
+    assert result["ok"] is True
+    assert result["data"]["providers"]["bocha"]["configured"] is True
+    assert "synthetic" not in str(result)
+
+
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
     api = _api(tmp_path)
     provider_id = "custom_mimo/mimo-v2.5"
