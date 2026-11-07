@@ -162,34 +162,40 @@ class LifecycleController:
         self._license_pause_failed = False
         self.events.emit("APP_START", "success")
         runtime_available = self._refresh_runtime_for_view()
-        if self._uses_default_supervisor and runtime_available:
-            try:
-                candidate = self._supervisor_factory(self._on_progress)
-                adopter = getattr(candidate, "adopt", None)
-                if callable(adopter) and adopter():
-                    self._supervisor = candidate
-                    connection_only = {item.spec.name for item in candidate.running} == {"new-hook-bridge"}
-                    if connection_only and self._license_snapshot()["enabled"]:
-                        self.state = LifecycleState.LICENSE_READY
-                    elif not bool(getattr(candidate, "adoption_complete", False)):
-                        self.state = LifecycleState.ERROR
-                        self._error = self.catalog.get("13002")
-                        self.events.emit(
-                            "APP_ERROR",
-                            "failed",
-                            code=self._error.code,
-                            message="检测到上次未完整启动的后台服务，请点击停止后重试。",
-                        )
-                    elif self._runtime.online:
-                        self._mark_running()
-                    elif self._runtime.login_required:
-                        self.state = LifecycleState.WAITING_WECHAT
-                        self._error = None
-                    else:
-                        self.state = LifecycleState.VERIFYING_CONNECTION
-                        self._error = None
-            except (OSError, ServiceLaunchError, ValueError):
-                self._supervisor = None
+        if runtime_available:
+            self._adopt_services()
+
+    def _adopt_services(self) -> None:
+        """Recover service ownership once this installation can be inspected."""
+        if not self._uses_default_supervisor or self._supervisor is not None:
+            return
+        try:
+            candidate = self._supervisor_factory(self._on_progress)
+            adopter = getattr(candidate, "adopt", None)
+            if callable(adopter) and adopter():
+                self._supervisor = candidate
+                connection_only = {item.spec.name for item in candidate.running} == {"new-hook-bridge"}
+                if connection_only and self._license_snapshot()["enabled"]:
+                    self.state = LifecycleState.LICENSE_READY
+                elif not bool(getattr(candidate, "adoption_complete", False)):
+                    self.state = LifecycleState.ERROR
+                    self._error = self.catalog.get("13002")
+                    self.events.emit(
+                        "APP_ERROR",
+                        "failed",
+                        code=self._error.code,
+                        message="检测到上次未完整启动的后台服务，请点击停止后重试。",
+                    )
+                elif self._runtime.online:
+                    self._mark_running()
+                elif self._runtime.login_required:
+                    self.state = LifecycleState.WAITING_WECHAT
+                    self._error = None
+                else:
+                    self.state = LifecycleState.VERIFYING_CONNECTION
+                    self._error = None
+        except (OSError, ServiceLaunchError, ValueError):
+            self._supervisor = None
 
     def _refresh_runtime_for_view(self) -> bool:
         """Keep the window usable on invalid config without probing other ports."""
@@ -215,6 +221,7 @@ class LifecycleController:
                 self._error = None
                 self.state = LifecycleState.STOPPED
             self._runtime_config_error = None
+            self._adopt_services()
         return True
 
     def _set_error(self, code: str, *, detail: str = "") -> LifecycleView:

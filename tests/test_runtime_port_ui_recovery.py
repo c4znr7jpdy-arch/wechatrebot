@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from wechatrebot_manager import environment, lifecycle, runtime_status
+from wechatrebot_manager import environment, launcher, lifecycle, runtime_config, runtime_status, uninstaller
 from wechatrebot_manager.app_shell import ApplicationApi
 from wechatrebot_manager.customer_config import (
     load_provider_services, save_provider_thinking_preference,
@@ -69,3 +69,67 @@ def test_damaged_manager_config_bootstraps_without_default_probes(tmp_path, monk
     assert repaired["state"] == "STOPPED" and repaired["error"] is None
     assert repaired["can_start"] is True
     assert probes == [16200, 15000]
+
+
+def test_repaired_configuration_readopts_services_without_reopening_manager(tmp_path, monkeypatch):
+    ports = runtime_config.RuntimePorts(astrbot_ws=16200, bridge_callback=15000)
+    monkeypatch.setattr(launcher, "_hook_integrity_files", lambda _: ())
+    specs = launcher.build_service_specs(tmp_path, ports=ports)
+    identities = {
+        pid: launcher.ProcessIdentity(launcher._normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state = tmp_path / "data/manager/service-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({
+        "schema_version": 1,
+        "complete": True,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    manager = tmp_path / "config/manager.json"
+    manager.parent.mkdir()
+    manager.write_text("{broken", encoding="utf-8")
+    built_ports = []
+
+    def supervisor(specs, **kwargs):
+        built_ports.append([spec.ready_port for spec in specs])
+        return launcher.ProcessSupervisor(
+            specs, **kwargs, identity_probe=identities.get,
+            readiness_probe=lambda _host, _port: True,
+        )
+
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda _host, _port: True)
+    monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_: runtime_status.BridgeHealth(
+        True, True, True, True, "wxid_owned", True, True,
+    ))
+    controller = lifecycle.LifecycleController(
+        tmp_path, environment_checker=lambda _: environment.WechatEnvironment(True, "10000", "", "", ()),
+    )
+    assert controller.view().state == lifecycle.LifecycleState.ERROR
+    assert built_ports == [] and controller._supervisor is None
+    manager.write_text(json.dumps({"ports": {"astrbot_ws": 16200, "bridge_callback": 15000}}), encoding="utf-8")
+
+    repaired = controller.refresh()
+    assert repaired.state == lifecycle.LifecycleState.RUNNING
+    assert repaired.can_stop is True
+    assert built_ports == [[16200, 15000]]
+    assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
+    assert controller.refresh().can_stop is True
+    assert built_ports == [[16200, 15000]]
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    controller.force_stop()
+    assert terminated == [102, 101]
+    assert not state.exists()
