@@ -17,7 +17,7 @@ from .environment import (
 from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
 from .launcher import (
-    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
+    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec, ServiceStartCancelled,
     build_service_specs, capture_update_wechat_process, installation_services_stopped,
     force_stop_update_processes,
 )
@@ -129,10 +129,12 @@ class LifecycleController:
         )
         self._process_probe = process_probe
         self._preflight = preflight
+        self._start_cancel_event = threading.Event()
         self._uses_default_supervisor = supervisor_factory is None
         self._supervisor_factory = supervisor_factory or (
             lambda progress: ProcessSupervisor(
                 build_service_specs(self.install_root),
+                start_cancel_event=self._start_cancel_event,
                 progress_callback=progress,
                 state_path=(
                     self.install_root
@@ -366,6 +368,7 @@ class LifecycleController:
         """Revoke automation now; the action queue owns service teardown."""
         with self._lock:
             self.cancel_pending_start()
+            self._start_cancel_event.set()
             if self._license_snapshot()["enabled"]:
                 self._pause_license(stop_on_error=False)
 
@@ -438,6 +441,7 @@ class LifecycleController:
                     return self._set_error("13001", detail="；".join(preflight_errors))
                 supervisor = existing or self._supervisor_factory(self._on_progress)
                 self._supervisor = supervisor
+                self._start_cancel_event.clear()
                 self._start_in_progress = True
             except (OSError, ServiceLaunchError, ValueError) as exc:
                 self._supervisor = existing
@@ -452,6 +456,13 @@ class LifecycleController:
                 supervisor.start()
             else:
                 supervisor.start_missing(names)
+        except ServiceStartCancelled:
+            with self._lock:
+                self._start_in_progress = False
+                self.state = LifecycleState.STOPPING
+                self._error = None
+                self.events.emit("CORE_STOP", "cancelled", message="本次启动已取消，正在停止后台服务。")
+                return self.view()
         except (OSError, ServiceLaunchError, ValueError) as exc:
             with self._lock:
                 code = (

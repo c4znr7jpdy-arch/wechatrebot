@@ -726,6 +726,105 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
     assert holders[0].stopped == ["astrbot"]
 
 
+@pytest.mark.parametrize("action", ["stop_robot", "force_stop_robot"])
+@pytest.mark.parametrize("pause_error", [False, True])
+def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_path, monkeypatch, action, pause_error):
+    from test_app_shell import _api
+    from test_launcher import _FakeProcess, _layout
+    from wechatrebot_manager import launcher, lifecycle
+
+    _layout(tmp_path)
+    processes, stop_threads, supervisors = {}, [], []
+    waiting = threading.Event()
+    ready = False
+    core_worker = []
+    license = License()
+    license.bound = "wxid_a"
+    executable = launcher._normalized_executable(tmp_path / "runtime/python/python.exe")
+
+    class Process(_FakeProcess):
+        def terminate(self):
+            stop_threads.append(threading.get_ident())
+            super().terminate()
+
+        def kill(self):
+            stop_threads.append(threading.get_ident())
+            super().kill()
+
+    def popen(argv, **_kwargs):
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        process = Process(name, [], 100 + len(processes))
+        processes[name] = process
+        if name == "astrbot":
+            core_worker.append(threading.get_ident())
+        return process
+
+    def live(name):
+        return name in processes and processes[name].poll() is None
+
+    def probe(_host, port):
+        if port == 5000:
+            return live("new-hook-bridge")
+        if port == 6200 and live("astrbot"):
+            waiting.set()
+            return ready
+        return False
+
+    def supervisor(*args, **kwargs):
+        value = launcher.ProcessSupervisor(*args, **kwargs, popen_factory=popen,
+            identity_probe=lambda pid: launcher.ProcessIdentity(executable, pid))
+        supervisors.append(value)
+        return value
+
+    def snapshot():
+        bridge, core = live("new-hook-bridge"), live("astrbot") and ready
+        return RuntimeSnapshot(core, bridge, "wxid_a" if bridge else "", bridge, core, bridge)
+
+    monkeypatch.setattr(launcher, "port_accepting", probe)
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    environment = WechatEnvironment(True, "10000", "就绪", "就绪", (),
+        str(tmp_path / "Weixin.exe"), "4.1.8.27", "test")
+    controller = LifecycleController(tmp_path, license_client=license,
+        environment_checker=lambda _: environment, environment_saver=lambda *_: None,
+        snapshotter=snapshot, process_probe=lambda: (), preflight=lambda _: ())
+    controller.connect_wechat()
+    license.pause_error = pause_error
+    api = _api(tmp_path)
+    api._lifecycle = controller
+    try:
+        assert api.start_robot()["data"]["accepted"]
+        assert waiting.wait(2)
+        assert getattr(api, action)()["data"]["accepted"]
+        # No readiness release or timeout advance: production's default waiter
+        # must wake on cancellation and the same worker owns all teardown.
+        assert api._action_lock.acquire(timeout=2)
+        api._action_lock.release()
+        assert stop_threads and set(stop_threads) == {core_worker[0]}
+        assert not live("astrbot")
+        assert live("new-hook-bridge") is (action == "stop_robot" and not pause_error)
+        assert license.granted is pause_error
+        assert not controller._start_in_progress
+        records = controller.events.recent()
+        assert any(record["event"] == "CORE_STOP" and record["status"] == "cancelled" for record in records)
+        assert not [record for record in records if record.get("code") in {"13001", "12001"}]
+
+        # A fresh user request clears the old signal, reuses/recreates the
+        # connection as needed, and may run normally once readiness succeeds.
+        license.pause_error = False
+        ready = True
+        assert api.start_robot()["data"]["accepted"]
+        assert api._action_lock.acquire(timeout=2)
+        api._action_lock.release()
+        assert controller.refresh().state == LifecycleState.RUNNING
+        assert live("astrbot") and live("new-hook-bridge") and license.granted
+    finally:
+        controller.cancel_start_request()
+        assert api._action_lock.acquire(timeout=3)
+        api._action_lock.release()
+        license.pause_error = False
+        controller.force_stop()
+
+
 @pytest.mark.parametrize("actual", ["wxid_a", "wxid_wrong"])
 def test_start_rechecks_actual_account_after_reconnecting(tmp_path, actual):
     controller, license, world, holders = setup_controller(tmp_path)

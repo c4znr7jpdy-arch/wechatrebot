@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from wechatrebot_manager.launcher import (
     ProcessSupervisor,
     ServiceLaunchError,
     ServiceStopError,
+    ServiceStartCancelled,
     _normalized_executable,
     build_service_specs,
 )
@@ -162,6 +164,76 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
         "ready:new-hook-bridge",
     ]
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
+
+
+def test_default_readiness_cancellation_returns_owned_services_to_start_worker(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    cancel, waiting = threading.Event(), threading.Event()
+    events, failures = [], []
+    supervisor = ProcessSupervisor(
+        build_service_specs(tmp_path), start_cancel_event=cancel,
+        popen_factory=lambda argv, **_: _FakeProcess(argv[-1], events),
+    )
+
+    def probe(*_args):
+        if supervisor.running:
+            waiting.set()
+        return False
+
+    def start():
+        try:
+            supervisor.start()
+        except Exception as exc:
+            failures.append(exc)
+
+    monkeypatch.setattr(launcher, "port_accepting", probe)
+    worker = threading.Thread(target=start)
+    worker.start()
+    try:
+        assert waiting.wait(2)
+        cancel.set()
+        worker.join(2)
+        assert not worker.is_alive()
+        assert len(failures) == 1 and isinstance(failures[0], ServiceStartCancelled)
+        # No second thread touches the handles; the action worker can now run
+        # its normal/force stop and preserve ownership if a process survives.
+        assert len(supervisor.running) == 2
+        assert all(not item.log_handle.closed for item in supervisor.running)
+        assert not events
+    finally:
+        cancel.set()
+        worker.join(2)
+        supervisor.stop(timeout_seconds=0)
+
+
+@pytest.mark.parametrize("boundary", ["starting", "custom_readiness"])
+def test_start_cancellation_checks_spawn_and_custom_waiter_boundaries(tmp_path, monkeypatch, boundary):
+    _layout(tmp_path)
+    cancel = threading.Event()
+    events = []
+
+    def progress(event, _spec):
+        if boundary == event:
+            cancel.set()
+
+    def ready(_spec, _process):
+        if boundary == "custom_readiness":
+            cancel.set()
+        return False
+
+    monkeypatch.setattr(launcher, "port_accepting", lambda *_: False)
+    supervisor = ProcessSupervisor(
+        build_service_specs(tmp_path), start_cancel_event=cancel,
+        readiness_waiter=ready, progress_callback=progress,
+        popen_factory=lambda argv, **_: _FakeProcess(argv[-1], events),
+    )
+    try:
+        with pytest.raises(ServiceStartCancelled):
+            supervisor.start()
+        assert len(supervisor.running) == (0 if boundary == "starting" else 2)
+        assert not events
+    finally:
+        supervisor.stop(timeout_seconds=0)
 
 
 def test_supervisor_reports_a_service_that_survives_all_stop_retries(
