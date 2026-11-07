@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -299,6 +300,63 @@ def test_start_reconnects_then_retains_one_request_until_real_login(tmp_path):
     assert license.grants == ["wxid_a"]
 
 
+@pytest.mark.parametrize("logged_in", [False, True])
+def test_environment_recheck_preserves_pending_start_without_launching_core(tmp_path, logged_in):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().state == LifecycleState.WAITING_WECHAT
+    if logged_in:
+        world["account"] = "wxid_a"
+        assert controller.refresh().state == LifecycleState.CORE_STARTING
+
+    checked = controller.check_environment()
+
+    assert checked.state == (LifecycleState.CORE_STARTING if logged_in else LifecycleState.WAITING_WECHAT)
+    assert checked.title == ("微信已登录，正在启动机器人功能" if logged_in else "等待登录微信")
+    assert "自动继续，无需再次点击" in checked.message
+    assert checked.start_pending and not checked.can_start
+    assert checked.busy is logged_in
+    assert checked.can_stop
+    assert checked.error is None and not checked.online
+    assert holders[0].started == ["new-hook-bridge"]
+    assert not license.grants and not world["core"]
+
+
+@pytest.mark.parametrize("state", [LifecycleState.STOPPED, LifecycleState.LICENSE_READY])
+def test_pending_start_message_is_not_replaced_by_licensed_idle_copy(tmp_path, state):
+    controller, license, _, _ = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().start_pending
+    controller.state = state
+
+    waiting = controller.view()
+
+    assert waiting.title == "等待登录微信"
+    assert "自动继续，无需再次点击" in waiting.message
+    assert waiting.start_pending and waiting.can_stop and not waiting.can_start
+
+
+@pytest.mark.parametrize("failure", ["environment", "authorization"])
+def test_environment_recheck_does_not_project_failed_pending_start_as_starting(tmp_path, failure):
+    controller, license, _, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().start_pending
+    if failure == "environment":
+        controller._environment_checker = lambda _: replace(controller._environment, ready=False, code="11001")
+    else:
+        license.valid = False
+
+    checked = controller.check_environment()
+
+    assert checked.state == LifecycleState.STOPPED
+    assert not checked.busy and not checked.online and not checked.can_start
+    assert holders[0].started == ["new-hook-bridge"] and not license.grants
+    if failure == "environment":
+        assert checked.error is not None and checked.error.code == "11001"
+    else:
+        assert checked.error is None and checked.message == "测试授权状态"
+
+
 @pytest.mark.parametrize("action", ["request_stop", "force_stop"])
 def test_stop_cancels_explicit_start_waiting_for_login(tmp_path, action):
     controller, license, world, holders = setup_controller(tmp_path)
@@ -394,10 +452,10 @@ def test_status_poll_during_connect_preparation_keeps_explicit_start_request(tmp
     connect = controller.connect_wechat
     results = []
 
-    def delayed_connect():
+    def delayed_connect(**kwargs):
         connect_ready.set()
         assert finish_connect.wait(3)
-        return connect()
+        return connect(**kwargs)
 
     controller.connect_wechat = delayed_connect
     worker = threading.Thread(target=lambda: results.append(controller.start()))
@@ -434,6 +492,7 @@ def test_api_queue_acceptance_is_busy_before_start_worker_runs(tmp_path, monkeyp
         status = api.get_status()["data"]
         assert status["start_pending"] and status["busy"]
         assert status["state"] == "CORE_STARTING" and not status["can_start"]
+        assert status["can_stop"]
         assert not api.start_robot()["data"]["accepted"]
     assert len(workers) == 1 and not license.grants
     workers.pop()()
@@ -617,8 +676,8 @@ def test_cancellation_during_initial_connect_cannot_restore_pending_start(tmp_pa
     connect = controller.connect_wechat
     results = []
 
-    def delayed_connect():
-        result = connect()
+    def delayed_connect(**kwargs):
+        result = connect(**kwargs)
         world["account"] = "wxid_a"
         entered.set()
         assert finish.wait(3)
@@ -712,6 +771,9 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
     assert api.start_robot()["data"]["accepted"]
     try:
         assert started.wait(2)
+        starting = api.get_status()["data"]
+        assert starting["start_pending"] and starting["busy"] and starting["can_stop"]
+        assert controller.view().can_stop
         assert api.stop_robot()["data"]["accepted"]
         assert not license.granted
         assert not api.start_robot()["data"]["accepted"]
@@ -726,14 +788,200 @@ def test_api_stop_during_core_launch_runs_before_releasing_action_queue(tmp_path
     assert holders[0].stopped == ["astrbot"]
 
 
+def test_api_stop_projection_stays_busy_after_queue_switches_to_teardown(tmp_path):
+    from test_app_shell import _api
+
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    api = _api(tmp_path)
+    api._lifecycle = controller
+    entered, finish = threading.Event(), threading.Event()
+    stop = controller.request_stop
+
+    def delayed_stop():
+        entered.set()
+        assert finish.wait(3)
+        return stop()
+
+    controller.request_stop = delayed_stop
+    assert api.stop_robot()["data"]["accepted"]
+    try:
+        assert entered.wait(2)
+        assert api._robot_action == "request_stop" and not api._robot_stop_action
+        for _ in range(2):
+            status = api.get_status()["data"]
+            assert status["state"] == "STOPPING" and status["busy"]
+            assert not status["can_stop"] and not status["can_start"] and not status["start_pending"]
+        assert not api.stop_robot()["data"]["accepted"]
+    finally:
+        finish.set()
+        assert api._action_lock.acquire(timeout=3)
+        api._action_lock.release()
+    assert not api.get_status()["data"]["busy"]
+    assert holders[0].started == ["new-hook-bridge"]
+
+
+@pytest.mark.parametrize("action", ["stop_robot", "force_stop_robot"])
+@pytest.mark.parametrize("pause_error", [False, True])
+@pytest.mark.parametrize("boundary", ["readiness", "first_snapshot", "connect_handoff", "queue_start_handoff", "queue_resume_handoff"])
+def test_api_stop_interrupts_real_supervisor_readiness_on_its_start_worker(tmp_path, monkeypatch, action, pause_error, boundary):
+    from test_app_shell import _api
+    from test_launcher import _FakeProcess, _layout
+    from wechatrebot_manager import launcher, lifecycle
+
+    _layout(tmp_path)
+    processes, stop_threads, supervisors = {}, [], []
+    waiting, release = threading.Event(), threading.Event()
+    ready = False
+    account = "wxid_a"
+    core_worker = []
+    start_worker = []
+    license = License()
+    license.bound = "wxid_a"
+    executable = launcher._normalized_executable(tmp_path / "runtime/python/python.exe")
+
+    class Process(_FakeProcess):
+        def terminate(self):
+            stop_threads.append(threading.get_ident())
+            super().terminate()
+
+        def kill(self):
+            stop_threads.append(threading.get_ident())
+            super().kill()
+
+    def popen(argv, **_kwargs):
+        name = "astrbot" if "astrbot.cli.__main__" in argv else "new-hook-bridge"
+        process = Process(name, [], 100 + len(processes))
+        processes[name] = process
+        if name == "astrbot":
+            core_worker.append(threading.get_ident())
+        return process
+
+    def live(name):
+        return name in processes and processes[name].poll() is None
+
+    def probe(_host, port):
+        if port == 5000:
+            return live("new-hook-bridge")
+        if port == 6200 and live("astrbot"):
+            waiting.set()
+            return ready
+        return False
+
+    def supervisor(*args, **kwargs):
+        value = launcher.ProcessSupervisor(*args, **kwargs, popen_factory=popen,
+            identity_probe=lambda pid: launcher.ProcessIdentity(executable, pid))
+        supervisors.append(value)
+        return value
+
+    def snapshot():
+        bridge, core = live("new-hook-bridge"), live("astrbot") and ready
+        return RuntimeSnapshot(core, bridge, account if bridge else "", bridge, core, bridge)
+
+    monkeypatch.setattr(launcher, "port_accepting", probe)
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    environment = WechatEnvironment(True, "10000", "就绪", "就绪", (),
+        str(tmp_path / "Weixin.exe"), "4.1.8.27", "test")
+    controller = LifecycleController(tmp_path, license_client=license,
+        environment_checker=lambda _: environment, environment_saver=lambda *_: None,
+        snapshotter=snapshot, process_probe=lambda: (), preflight=lambda _: ())
+    if boundary != "connect_handoff":
+        controller.connect_wechat()
+    if boundary == "queue_resume_handoff":
+        account = ""
+        assert controller.start().start_pending
+        account = "wxid_a"
+    if boundary == "first_snapshot":
+        snapshot_license = license.snapshot
+        main_thread = threading.get_ident()
+
+        def delayed_snapshot(account=""):
+            if threading.get_ident() != main_thread and not start_worker:
+                start_worker.append(threading.get_ident())
+                waiting.set()
+                assert release.wait(3)
+            return snapshot_license(account)
+
+        monkeypatch.setattr(license, "snapshot", delayed_snapshot)
+    elif boundary == "connect_handoff":
+        connect = controller.connect_wechat
+
+        def delayed_connect(**kwargs):
+            start_worker.append(threading.get_ident())
+            waiting.set()
+            assert release.wait(3)
+            return connect(**kwargs)
+
+        monkeypatch.setattr(controller, "connect_wechat", delayed_connect)
+    elif boundary in {"queue_start_handoff", "queue_resume_handoff"}:
+        method = "start" if boundary == "queue_start_handoff" else "resume_pending_start"
+        operation = getattr(controller, method)
+
+        def delayed_operation(**kwargs):
+            start_worker.append(threading.get_ident())
+            waiting.set()
+            assert release.wait(3)
+            return operation(**kwargs)
+
+        monkeypatch.setattr(controller, method, delayed_operation)
+    license.pause_error = pause_error
+    api = _api(tmp_path)
+    api._lifecycle = controller
+    try:
+        if boundary == "queue_resume_handoff":
+            assert api.get_status()["data"]["start_pending"]
+        else:
+            assert api.start_robot()["data"]["accepted"]
+        assert waiting.wait(2)
+        starting = api.get_status()["data"]
+        assert starting["start_pending"] and starting["busy"] and starting["can_stop"]
+        assert getattr(api, action)()["data"]["accepted"]
+        release.set()
+        # No readiness release or timeout advance: production's default waiter
+        # must wake on cancellation and the same worker owns all teardown.
+        assert api._action_lock.acquire(timeout=2)
+        api._action_lock.release()
+        if boundary == "readiness":
+            assert stop_threads and set(stop_threads) == {core_worker[0]}
+        else:
+            assert not core_worker
+            assert not stop_threads or set(stop_threads) == {start_worker[0]}
+        assert not live("astrbot")
+        assert live("new-hook-bridge") is (boundary != "connect_handoff" and action == "stop_robot" and not pause_error)
+        assert license.granted is (boundary == "readiness" and pause_error)
+        assert not controller._start_in_progress
+        records = controller.events.recent()
+        if boundary == "readiness":
+            assert any(record["event"] == "CORE_STOP" and record["status"] == "cancelled" for record in records)
+        assert not [record for record in records if record.get("code") in {"13001", "12001"}]
+
+        # A fresh user request clears the old signal, reuses/recreates the
+        # connection as needed, and may run normally once readiness succeeds.
+        license.pause_error = False
+        ready = True
+        assert api.start_robot()["data"]["accepted"]
+        assert api._action_lock.acquire(timeout=2)
+        api._action_lock.release()
+        assert controller.refresh().state == LifecycleState.RUNNING
+        assert live("astrbot") and live("new-hook-bridge") and license.granted
+    finally:
+        release.set()
+        controller.cancel_start_request()
+        assert api._action_lock.acquire(timeout=3)
+        api._action_lock.release()
+        license.pause_error = False
+        controller.force_stop()
+
+
 @pytest.mark.parametrize("actual", ["wxid_a", "wxid_wrong"])
 def test_start_rechecks_actual_account_after_reconnecting(tmp_path, actual):
     controller, license, world, holders = setup_controller(tmp_path)
     license.bound = "wxid_a"
     original_connect = controller.connect_wechat
 
-    def connect():
-        result = original_connect()
+    def connect(**kwargs):
+        result = original_connect(**kwargs)
         world["account"] = actual
         return result
 
@@ -755,11 +1003,11 @@ def test_logged_in_account_without_owned_bridge_still_connects_before_start(tmp_
     original_connect = controller.connect_wechat
     connections = []
 
-    def connect():
+    def connect(**kwargs):
         assert not license.grants and not world["core"]
         connections.append(True)
         world["account"] = ""  # The newly opened bot WeChat must confirm its own login.
-        return original_connect()
+        return original_connect(**kwargs)
 
     controller.connect_wechat = connect
     waiting = controller.start()

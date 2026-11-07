@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import socket
 import subprocess
+import threading
 import time
 from typing import Callable, IO, Mapping, Protocol
 
@@ -73,6 +74,10 @@ class RunningService:
 
 class ServiceLaunchError(RuntimeError):
     """Raised when the managed startup sequence cannot complete."""
+
+
+class ServiceStartCancelled(ServiceLaunchError):
+    """Return startup ownership to its caller before serial service teardown."""
 
 
 class ServiceStopError(ServiceLaunchError):
@@ -222,14 +227,21 @@ def port_accepting(
         return False
 
 
-def wait_until_ready(spec: ServiceSpec, process: ProcessLike) -> bool:
+def wait_until_ready(
+    spec: ServiceSpec, process: ProcessLike, *, cancel_event: threading.Event | None = None,
+) -> bool:
     deadline = time.monotonic() + spec.ready_timeout_seconds
     while time.monotonic() < deadline:
+        if cancel_event is not None and cancel_event.is_set():
+            return False
         if process.poll() is not None:
             return False
         if port_accepting(spec.ready_host, spec.ready_port):
             return True
-        time.sleep(0.2)
+        if cancel_event is None:
+            time.sleep(0.2)
+        else:
+            cancel_event.wait(0.2)
     return False
 
 
@@ -500,7 +512,8 @@ class ProcessSupervisor:
         specs: tuple[ServiceSpec, ...],
         *,
         popen_factory: Callable[..., ProcessLike] = subprocess.Popen,
-        readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] = wait_until_ready,
+        readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] | None = None,
+        start_cancel_event: threading.Event | None = None,
         progress_callback: Callable[[str, ServiceSpec], None] | None = None,
         state_path: str | Path | None = None,
         identity_probe: Callable[[int], ProcessIdentity | None] = process_identity,
@@ -508,7 +521,10 @@ class ProcessSupervisor:
     ) -> None:
         self.specs = specs
         self._popen_factory = popen_factory
-        self._readiness_waiter = readiness_waiter
+        self._start_cancel_event = start_cancel_event
+        self._readiness_waiter = readiness_waiter or (
+            lambda spec, process: wait_until_ready(spec, process, cancel_event=start_cancel_event)
+        )
         self._progress_callback = progress_callback
         self._state_path = Path(state_path).resolve() if state_path is not None else None
         self._identity_probe = identity_probe
@@ -639,6 +655,7 @@ class ProcessSupervisor:
         return self._start_specs(selected) if selected else tuple(self.running)
 
     def _start_specs(self, specs: tuple[ServiceSpec, ...]) -> tuple[RunningService, ...]:
+        self._check_start_cancelled()
         self._check_authorization(specs)
         validation_errors = [
             error
@@ -668,8 +685,10 @@ class ProcessSupervisor:
         # plugin startup sequence before a login window can appear.
         names = tuple(spec.name for spec in specs)
         for spec in specs:
+            self._check_start_cancelled()
             if self._progress_callback is not None:
                 self._progress_callback("starting", spec)
+            self._check_start_cancelled()
             spec.log_file.parent.mkdir(parents=True, exist_ok=True)
             log_handle = spec.log_file.open("ab", buffering=0)
             environment = os.environ.copy()
@@ -703,8 +722,11 @@ class ProcessSupervisor:
             spec = running.spec
             if spec.name not in names:
                 continue
+            self._check_start_cancelled()
             process = running.process
-            if not self._readiness_waiter(spec, process):
+            ready = self._readiness_waiter(spec, process)
+            self._check_start_cancelled()
+            if not ready:
                 exit_code = process.poll()
                 self.stop_names(names)
                 raise ServiceLaunchError(
@@ -712,6 +734,7 @@ class ProcessSupervisor:
                 )
             if self._progress_callback is not None:
                 self._progress_callback("ready", spec)
+        self._check_start_cancelled()
         self.adoption_complete = len(self.running) == len(self.specs)
         try:
             self._persist_state()
@@ -719,6 +742,12 @@ class ProcessSupervisor:
             self.stop_names(names)
             raise ServiceLaunchError(str(exc)) from exc
         return tuple(self.running)
+
+    def _check_start_cancelled(self) -> None:
+        if self._start_cancel_event is not None and self._start_cancel_event.is_set():
+            # Only the startup/action worker may mutate running handles and
+            # state. Its queued stop retains normal/force/fail-closed semantics.
+            raise ServiceStartCancelled("本次启动已取消。")
 
     def _check_authorization(self, specs: tuple[ServiceSpec, ...]) -> None:
         # Also covers CLI and the legacy control centre, before any subprocess

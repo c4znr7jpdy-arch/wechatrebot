@@ -2023,14 +2023,18 @@ const state = {mandatoryUpdate:false};
 const icon = () => '';
 const subscription = {beforeStart:async () => true};
 const calls = [];
-const api = async name => {calls.push(name); return {accepted:true};};
+let rejectForce = false;
+const api = async name => {calls.push(name); return {accepted:!(rejectForce && name === 'force_stop_robot')};};
 const window = {setTimeout(){}};
 const refreshStatus = async () => {};
 const reportError = error => {throw error;};
 let dialog;
 const confirmAction = options => {dialog = options;};
 const startingStatus = status => ({...status, state:'CORE_STARTING', busy:true, can_start:false, can_stop:false});
-const select = (current, can_start=true, can_stop=true, busy=false) => renderStatus({state:current, can_start, can_stop, busy});
+const select = (current, can_start=true, can_stop=true, busy=false) => {
+  state.stopPending = false;
+  renderStatus({state:current, can_start, can_stop, busy});
+};
 (async () => {
   for (const current of ['LICENSE_READY', 'LICENSE_PAUSED']) {
     select(current);
@@ -2044,6 +2048,8 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
     assert.match(dialog.message, /保留微信窗口/);
     await dialog.onConfirm();
     assert.equal(calls.at(-1), 'force_stop_robot');
+    assert.equal($('#primaryAction').disabled, true, 'a stop awaiting status must stay disabled');
+    select(current);
     await runPrimaryAction();
     assert.equal(calls.at(-1), 'start_robot');
     assert.equal($('#stopRetainedConnection').hidden, true, 'starting must not offer force stop');
@@ -2072,6 +2078,12 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
   assert.equal($('#primaryAction').disabled, true);
   select('LICENSE_PAUSED', true, false);
   assert.equal($('#stopRetainedConnection').hidden, true, 'no stop without owned services');
+  select('LICENSE_READY');
+  runForceStop();
+  rejectForce = true;
+  await assert.rejects(dialog.onConfirm());
+  assert.equal(state.stopPending, false);
+  assert.equal($('#primaryAction').disabled, false, 'rejected force stop must restore the primary action');
   process.stdout.write('ok');
 })().catch(error => {console.error(error); process.exitCode = 1;});
 """
@@ -2085,6 +2097,51 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
         ["node"], input=render + actions + harness, text=True, encoding="utf-8",
         capture_output=True, check=True, timeout=10,
     )
+    assert result.stdout == "ok"
+
+
+def test_environment_actions_render_only_responses_from_the_current_robot_action() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    actions = script[script.index("  async function checkEnvironment()"):script.index("  const PAGE_TITLES =")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {startActionRevision:0};
+const rendered = [], errors = [], notices = [];
+const renderStatus = status => rendered.push(status);
+const reportError = error => errors.push(error.message);
+const toast = message => notices.push(message);
+let complete;
+const api = () => new Promise((resolve, reject) => {complete = {resolve, reject};});
+(async () => {
+  for (const run of [checkEnvironment, chooseWechat]) {
+    const before = rendered.length;
+    const stale = run();
+    state.startActionRevision++;
+    complete.resolve({state:'CORE_STARTING', start_pending:true});
+    await stale;
+    assert.equal(rendered.length, before, 'an environment response from before stop must be ignored');
+    const current = run();
+    complete.resolve({state:'STOPPED'});
+    await current;
+    assert.equal(rendered.length, before + 1, 'a current response must still render');
+    assert.equal(rendered.at(-1).state, 'STOPPED');
+    const failed = run();
+    complete.reject(new Error('expected environment failure'));
+    await failed;
+    assert.equal(errors.at(-1), 'expected environment failure');
+  }
+  const before = rendered.length;
+  const cancelled = chooseWechat();
+  complete.resolve({cancelled:true});
+  await cancelled;
+  assert.equal(rendered.length, before);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=actions + harness, text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
     assert result.stdout == "ok"
 
 

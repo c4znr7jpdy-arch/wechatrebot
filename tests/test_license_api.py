@@ -16,6 +16,7 @@ from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
 from test_license_client import activate, setup
 from test_lifecycle import _environment
+from test_license_lifecycle import setup_controller
 
 
 def make_api(client, *, account=""):
@@ -160,6 +161,27 @@ def test_bound_license_can_queue_start_to_reconnect_without_a_current_account(se
     assert actions == ["start"]
     assert not client.snapshot()["can_run"]
     assert len(service.calls) == calls
+
+
+def test_environment_check_keeps_waiting_start_cancellable_until_login(tmp_path):
+    controller, license, world, holders = setup_controller(tmp_path)
+    license.bound = "wxid_a"
+    assert controller.start().start_pending
+    api, _, actions = make_api(SimpleNamespace(root=tmp_path))
+    api._lifecycle = controller
+
+    response = api.check_environment()
+
+    assert response["ok"]
+    status = response["data"]
+    assert status["state"] == "WAITING_WECHAT"
+    assert status["title"] == "等待登录微信"
+    assert "自动继续，无需再次点击" in status["message"]
+    assert status["start_pending"] and status["can_stop"]
+    assert not status["busy"] and not status["can_start"] and not status["online"]
+    assert not actions and not license.grants and not world["core"]
+    assert holders[0].started == ["new-hook-bridge"]
+    assert not controller.request_stop().start_pending
 
 
 @pytest.mark.parametrize("stage", ["unactivated", "unbound", "expired"])

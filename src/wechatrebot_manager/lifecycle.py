@@ -17,7 +17,7 @@ from .environment import (
 from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
 from .launcher import (
-    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec,
+    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec, ServiceStartCancelled,
     build_service_specs, capture_update_wechat_process, installation_services_stopped,
     force_stop_update_processes,
 )
@@ -129,10 +129,12 @@ class LifecycleController:
         )
         self._process_probe = process_probe
         self._preflight = preflight
+        self._start_cancel_event = threading.Event()
         self._uses_default_supervisor = supervisor_factory is None
         self._supervisor_factory = supervisor_factory or (
             lambda progress: ProcessSupervisor(
                 build_service_specs(self.install_root),
+                start_cancel_event=self._start_cancel_event,
                 progress_callback=progress,
                 state_path=(
                     self.install_root
@@ -257,6 +259,9 @@ class LifecycleController:
                     if self._runtime.online
                     else LifecycleState.STOPPED
                 )
+                if self._pending_start_account and self._license_snapshot()["authorized"]:
+                    self.state = (LifecycleState.CORE_STARTING if self.pending_start_ready()
+                                  else LifecycleState.WAITING_WECHAT)
             else:
                 self.state = LifecycleState.STOPPED
                 self._error = self.catalog.get(self._environment.code)
@@ -280,11 +285,11 @@ class LifecycleController:
                 self._supervisor.stop(timeout_seconds=0)
                 self._runtime = self._snapshotter()
 
-    def connect_wechat(self) -> LifecycleView:
+    def connect_wechat(self, *, start_generation: int | None = None) -> LifecycleView:
         """Connect WeChat for identity checks or binding, without reply plugins."""
         status = self._license_snapshot()
         if not status["enabled"]:
-            return self.start()
+            return self._start_services(start_generation=start_generation)
         if not status["can_connect"]:
             raise LicenseError(status["state"], status["message"])
         owned_core = self._supervisor and any(
@@ -296,15 +301,24 @@ class LifecycleController:
             # its pause. Reconnecting must never resume bridge automation.
             self.licenses.pause()
             self._license_pause_failed = False
-        return self._start_services(("new-hook-bridge",))
+        return self._start_services(("new-hook-bridge",), start_generation=start_generation)
 
-    def start(self) -> LifecycleView:
-        if not self._license_snapshot()["enabled"]:
-            return self._start_services()
+    def start_request_generation(self) -> int:
+        """Bind an accepted queue action to its current cancellation boundary."""
         with self._lock:
-            if self._start_in_progress or self._pending_start_account:
+            return self._start_generation
+
+    def start(self, *, start_generation: int | None = None) -> LifecycleView:
+        with self._lock:
+            generation = self._start_generation if start_generation is None else start_generation
+            if generation != self._start_generation:
                 return self.view()
-            generation = self._start_generation
+        if not self._license_snapshot()["enabled"]:
+            return self._start_services(start_generation=generation)
+        with self._lock:
+            if (generation != self._start_generation
+                    or self._start_in_progress or self._pending_start_account):
+                return self.view()
             self._runtime = self._snapshotter()
             reconnect = not self._connected_account()
             if reconnect:
@@ -316,7 +330,7 @@ class LifecycleController:
                 self._pending_start_account = status["account"]
         if reconnect:
             try:
-                connection = self.connect_wechat()
+                connection = self.connect_wechat(start_generation=generation)
             except Exception:
                 self.cancel_pending_start()
                 raise
@@ -366,12 +380,15 @@ class LifecycleController:
         """Revoke automation now; the action queue owns service teardown."""
         with self._lock:
             self.cancel_pending_start()
+            self._start_cancel_event.set()
             if self._license_snapshot()["enabled"]:
                 self._pause_license(stop_on_error=False)
 
-    def resume_pending_start(self) -> LifecycleView:
+    def resume_pending_start(self, *, start_generation: int | None = None) -> LifecycleView:
         """Continue one explicit start through the application's action queue."""
         with self._lock:
+            if start_generation is not None and start_generation != self._start_generation:
+                return self.view()
             expected = self._pending_start_account
             generation = self._start_generation
             if not expected:
@@ -438,6 +455,7 @@ class LifecycleController:
                     return self._set_error("13001", detail="；".join(preflight_errors))
                 supervisor = existing or self._supervisor_factory(self._on_progress)
                 self._supervisor = supervisor
+                self._start_cancel_event.clear()
                 self._start_in_progress = True
             except (OSError, ServiceLaunchError, ValueError) as exc:
                 self._supervisor = existing
@@ -452,6 +470,13 @@ class LifecycleController:
                 supervisor.start()
             else:
                 supervisor.start_missing(names)
+        except ServiceStartCancelled:
+            with self._lock:
+                self._start_in_progress = False
+                self.state = LifecycleState.STOPPING
+                self._error = None
+                self.events.emit("CORE_STOP", "cancelled", message="本次启动已取消，正在停止后台服务。")
+                return self.view()
         except (OSError, ServiceLaunchError, ValueError) as exc:
             with self._lock:
                 code = (
@@ -817,9 +842,10 @@ class LifecycleController:
         licensing = self._license_snapshot()
         licensed = licensing["enabled"]
         online = self._runtime.online and (not licensed or licensing["can_run"])
-        if licensed and self.state in {
+        if (licensed and self.state in {
             LifecycleState.STOPPED, LifecycleState.LICENSE_READY, LifecycleState.LICENSE_PAUSED,
-        }:
+        } and not (pending_start and licensing["authorized"]
+                   and self._environment.ready and self._error is None)):
             if self.state == LifecycleState.LICENSE_PAUSED:
                 title = {
                     "unactivated": "未授权",
@@ -856,7 +882,7 @@ class LifecycleController:
                 and (not owned or licensed)
                 and not online
             ),
-            can_stop=owned and not busy,
+            can_stop=owned and (not busy or pending_start),
             error=self._runtime_config_error or self._error,
             environment=self._environment,
             runtime=self._runtime,
