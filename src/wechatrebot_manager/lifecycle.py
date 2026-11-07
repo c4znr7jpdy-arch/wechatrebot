@@ -197,6 +197,13 @@ class LifecycleController:
         except (OSError, ServiceLaunchError, ValueError):
             self._supervisor = None
 
+    def _has_incomplete_adoption(self) -> bool:
+        return (
+            self.state == LifecycleState.ERROR and self._error is not None
+            and self._error.code == "13002" and self._supervisor is not None
+            and not bool(getattr(self._supervisor, "adoption_complete", True))
+        )
+
     def _refresh_runtime_for_view(self) -> bool:
         """Keep the window usable on invalid config without probing other ports."""
         try:
@@ -543,7 +550,18 @@ class LifecycleController:
                 if self._wechat_closed_confirmations >= 2:
                     return self._finish_stop()
                 return self.view()
+            adoption_error = self._error if self._has_incomplete_adoption() else None
             licensed_view = self._refresh_licensed()
+            if (
+                adoption_error is not None and self._supervisor is not None
+                and self._supervisor.running
+                and (self._error is None or self._error == adoption_error)
+            ):
+                # License enforcement still runs, but an incomplete recovery
+                # must keep its stop/retry action available across status polls.
+                self.state = LifecycleState.ERROR
+                self._error = adoption_error
+                return self.view()
             if licensed_view is not None:
                 return licensed_view
             if self._supervisor is not None and self._supervisor.running:
@@ -884,6 +902,7 @@ class LifecycleController:
             can_start=(
                 self._environment.ready
                 and self._runtime_config_error is None
+                and not self._has_incomplete_adoption()
                 and not busy
                 and not pending_start
                 and (not owned or licensed)

@@ -71,7 +71,12 @@ def test_damaged_manager_config_bootstraps_without_default_probes(tmp_path, monk
     assert probes == [16200, 15000]
 
 
-def test_repaired_configuration_readopts_services_without_reopening_manager(tmp_path, monkeypatch):
+@pytest.mark.parametrize("service_ready", [False, True])
+@pytest.mark.parametrize("repair_configuration", [False, True])
+@pytest.mark.parametrize("licensed", [False, True])
+def test_readopted_services_keep_stop_control_across_configuration_recovery(
+    tmp_path, monkeypatch, service_ready, repair_configuration, licensed,
+):
     ports = runtime_config.RuntimePorts(astrbot_ws=16200, bridge_callback=15000)
     monkeypatch.setattr(launcher, "_hook_integrity_files", lambda _: ())
     specs = launcher.build_service_specs(tmp_path, ports=ports)
@@ -92,31 +97,39 @@ def test_repaired_configuration_readopts_services_without_reopening_manager(tmp_
     }), encoding="utf-8")
     manager = tmp_path / "config/manager.json"
     manager.parent.mkdir()
-    manager.write_text("{broken", encoding="utf-8")
+    valid_config = json.dumps({"ports": {"astrbot_ws": 16200, "bridge_callback": 15000}})
+    manager.write_text("{broken" if repair_configuration else valid_config, encoding="utf-8")
     built_ports = []
 
     def supervisor(specs, **kwargs):
         built_ports.append([spec.ready_port for spec in specs])
         return launcher.ProcessSupervisor(
             specs, **kwargs, identity_probe=identities.get,
-            readiness_probe=lambda _host, _port: True,
+            readiness_probe=lambda _host, _port: service_ready,
         )
 
     monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
-    monkeypatch.setattr(runtime_status, "port_accepting", lambda _host, _port: True)
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda _host, _port: service_ready)
     monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_: runtime_status.BridgeHealth(
         True, True, True, True, "wxid_owned", True, True,
     ))
+    from test_license_lifecycle import License
+    license_client = License() if licensed else None
+    if license_client is not None:
+        license_client.bound, license_client.granted = "wxid_owned", True
     controller = lifecycle.LifecycleController(
         tmp_path, environment_checker=lambda _: environment.WechatEnvironment(True, "10000", "", "", ()),
+        license_client=license_client,
     )
-    assert controller.view().state == lifecycle.LifecycleState.ERROR
-    assert built_ports == [] and controller._supervisor is None
-    manager.write_text(json.dumps({"ports": {"astrbot_ws": 16200, "bridge_callback": 15000}}), encoding="utf-8")
+    if repair_configuration:
+        assert controller.view().state == lifecycle.LifecycleState.ERROR
+        assert built_ports == [] and controller._supervisor is None
+        manager.write_text(valid_config, encoding="utf-8")
 
     repaired = controller.refresh()
-    assert repaired.state == lifecycle.LifecycleState.RUNNING
+    assert repaired.state == (lifecycle.LifecycleState.RUNNING if service_ready else lifecycle.LifecycleState.ERROR)
     assert repaired.can_stop is True
+    assert repaired.can_start is False
     assert built_ports == [[16200, 15000]]
     assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
     assert controller.refresh().can_stop is True
