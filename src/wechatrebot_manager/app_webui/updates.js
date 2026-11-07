@@ -164,10 +164,10 @@ window.createUpdateNotifications = function (helpers) {
       pendingMessage: "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
         const pending = managerCloseState();
-        if (pending.busy) throw new Error("设置仍在读取、保存或记录正在导出，请稍候；也可选择“稍后安装”，更新包会保留。");
+        if (pending.busy) throw new Error("机器人正在启动、停止或处理其他操作，请稍候；也可选择“稍后安装”，更新包会保留。");
         if (pending.dirty) throw new Error("有设置尚未保存。请选择“稍后安装”，保存或处理修改后再安装；更新包会保留，无需重新下载。");
         const accepted = await api("install_update", release.version, ready.confirmation_token);
-        if (!accepted?.accepted) throw new Error("更新任务已经在处理中。 ");
+        if (!accepted?.accepted) throw new Error("机器人或更新操作尚未完成，请稍后再次确认安装；更新包会保留。");
         await waitForUpdate(release, "restarting");
       },
     });

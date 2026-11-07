@@ -259,7 +259,8 @@ def test_ready_card_can_be_dismissed_without_hiding_a_new_confirmation(update_pa
     assert len(page.evaluate("window.updateCalls.download")) == 1
 
 
-@pytest.mark.parametrize("busy", ["featureSaving", "webSearchSaving", "scheduledBusy", "historyExporting"])
+@pytest.mark.parametrize("busy", ["featureSaving", "webSearchSaving", "scheduledBusy", "historyExporting",
+                                  "startPreparing", "startPending", "stopPending", "stopRequestPending"])
 def test_install_rechecks_work_in_progress_then_reuses_ready_package(update_page, busy):
     page = update_page
     _download_and_wait_for_consent(page)
@@ -272,6 +273,123 @@ def test_install_rechecks_work_in_progress_then_reuses_ready_package(update_page
     expect(page.locator("#modalBackdrop")).to_be_hidden()
     assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
     assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
+@pytest.mark.parametrize("operation", ["start_preparing", "stop_pending"])
+def test_install_waits_for_real_robot_request_even_after_idle_status(update_page, operation):
+    page = update_page
+    _check_automatically(page)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    page.evaluate("""async operation => {
+      const api = window.pywebview.api, idle = structuredClone((await api.get_status()).data);
+      Object.assign(idle, {state:'LICENSE_READY', title:'机器人未启动', message:'', busy:false,
+        online:false, can_start:true, can_stop:false, start_pending:false, error:null});
+      Object.assign(idle.runtime, {engine_ready:false, connection_ready:true,
+        account_status_available:true, wechat_identity:'wxid_demo_account'});
+      window.robotUpdatePhase = operation === 'stop_pending' ? 'loading' : 'idle';
+      window.robotUpdateRequestFinished = false;
+      api.get_status = async () => {
+        const status = structuredClone(idle);
+        if (window.robotUpdatePhase === 'loading') Object.assign(status, {state:'CORE_STARTING',
+          title:'正在启动机器人', busy:true, can_start:false, can_stop:true, start_pending:true});
+        return {ok:true, data:status};
+      };
+      if (operation === 'start_preparing') {
+        const read = api.get_license_status;
+        let held = false;
+        api.get_license_status = async (...args) => {
+          const result = await read(...args);
+          if (held) return result;
+          held = true;
+          return new Promise(resolve => { window.finishRobotUpdateRequest = () => {
+            window.robotUpdateRequestFinished = true; resolve(result);
+          }; });
+        };
+        api.start_robot = async () => ({ok:true, data:{accepted:false}});
+      } else {
+        api.stop_robot = () => {
+          window.robotUpdatePhase = 'idle';
+          return new Promise(resolve => { window.finishRobotUpdateRequest = () => {
+            window.robotUpdateRequestFinished = true; resolve({ok:true, data:{accepted:true}});
+          }; });
+        };
+      }
+    }""", operation)
+    expect(page.locator("#primaryAction")).to_have_text("启动" if operation == "start_preparing" else "取消启动")
+    expect(page.locator("#primaryAction")).to_be_enabled()
+    page.locator("#primaryAction").click()
+    if operation == "start_preparing":
+        expect(page.locator("#stateTitle")).to_have_text("微信已登录，正在确认启动")
+        assert page.evaluate("window.updateTestState.startPreparing")
+    else:
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        assert page.evaluate("window.updateTestState.stopRequestPending")
+    expect(page.locator("#primaryAction")).to_be_disabled()
+    page.evaluate("window.finishUpdateDownload(); window.updateTestController.pollUpdateStatus()")
+    expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("机器人正在启动、停止或处理其他操作")
+    assert page.evaluate("window.updateCalls.install") == []
+    assert not page.evaluate("window.robotUpdateRequestFinished")
+    page.evaluate("window.finishRobotUpdateRequest()")
+    expect(page.locator("#primaryAction")).to_have_text("启动")
+    expect(page.locator("#primaryAction")).to_be_enabled()
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+
+
+@pytest.mark.parametrize("stable", ["running", "retained"])
+def test_install_waits_for_runtime_transition_then_allows_stable_state(update_page, stable):
+    page = update_page
+    _download_and_wait_for_consent(page)
+    page.evaluate("""() => {
+      window.originalRobotStatus = window.pywebview.api.get_status;
+      window.pywebview.api.get_status = async () => {
+        const result = structuredClone(await window.originalRobotStatus());
+        Object.assign(result.data, {state:'STOPPING', title:'正在停止机器人', busy:true,
+          can_start:false, can_stop:false, online:false, start_pending:false});
+        return result;
+      };
+    }""")
+    expect(page.locator("#stateTitle")).to_have_text("正在停止机器人")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("请稍候")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("""stable => {
+      window.pywebview.api.get_status = async () => {
+        const result = structuredClone(await window.originalRobotStatus());
+        if (stable === 'retained') {
+          Object.assign(result.data, {state:'LICENSE_READY', title:'机器人未启动', busy:false,
+            can_start:true, can_stop:true, online:false, start_pending:false});
+          Object.assign(result.data.runtime, {engine_ready:false, connection_ready:true});
+        }
+        return result;
+      };
+    }""", stable)
+    expect(page.locator("#stateTitle")).to_have_text("机器人可用" if stable == "running" else "机器人未启动")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+
+
+def test_install_busy_rejection_keeps_consent_and_explains_robot_or_update_work(update_page):
+    page = update_page
+    _download_and_wait_for_consent(page)
+    page.evaluate("""() => {
+      window.originalInstallUpdate = window.pywebview.api.install_update;
+      window.pywebview.api.install_update = async () => ({ok:true, data:{accepted:false, busy:true}});
+    }""")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("机器人或更新操作尚未完成")
+    expect(page.locator("#modalError")).to_contain_text("更新包会保留")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("() => { window.pywebview.api.install_update = window.originalInstallUpdate; }")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
 
 
 @pytest.mark.parametrize("operation", ["core_read", "provider_save"])
