@@ -162,3 +162,73 @@ def test_readopted_services_keep_stop_control_across_configuration_recovery(
     controller.force_stop()
     assert terminated == [102, 101]
     assert not state.exists()
+
+
+@pytest.mark.parametrize("failure", ["state_oserror", "state_launcherror", "first_log", "second_log"])
+def test_adoption_io_failure_preserves_verified_process_control(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr(launcher, "_hook_integrity_files", lambda _: ())
+    specs = launcher.build_service_specs(tmp_path)
+    identities = {
+        pid: launcher.ProcessIdentity(launcher._normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state = tmp_path / "data/manager/service-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({
+        "schema_version": 1,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    original_open = type(state).open
+    blocked_log = specs[0 if failure == "first_log" else 1].log_file
+
+    def open_file(path, mode="r", *args, **kwargs):
+        if failure.endswith("log") and path == blocked_log and mode == "ab":
+            raise PermissionError("synthetic-private-storage-details")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(type(state), "open", open_file)
+    candidates = []
+
+    def supervisor(specs, **kwargs):
+        candidate = launcher.ProcessSupervisor(
+            specs, **kwargs, identity_probe=identities.get,
+            readiness_probe=lambda *_args: True,
+        )
+        if failure.startswith("state_"):
+            def persist():
+                error = OSError if failure == "state_oserror" else launcher.ServiceLaunchError
+                raise error("synthetic-private-storage-details")
+            candidate._persist_state = persist
+        candidates.append(candidate)
+        return candidate
+
+    monkeypatch.setattr(lifecycle, "ProcessSupervisor", supervisor)
+    controller = lifecycle.LifecycleController(
+        tmp_path, environment_checker=lambda _: environment.WechatEnvironment(True, "10000", "", "", ()),
+        snapshotter=lambda: runtime_status.RuntimeSnapshot(False, False, ""),
+    )
+    recovered = controller.refresh()
+    assert controller._supervisor is candidates[0]
+    assert [item.process.pid for item in controller._supervisor.running] == [101, 102]
+    assert recovered.state == lifecycle.LifecycleState.ERROR
+    assert recovered.error.code == "13002" and recovered.can_stop and not recovered.can_start
+    assert "synthetic-private" not in json.dumps(recovered.to_dict())
+    assert "synthetic-private" not in (tmp_path / "logs/lifecycle-events.jsonl").read_text("utf-8")
+    handles = [item.log_handle for item in controller._supervisor.running]
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    controller.force_stop()
+    assert terminated == [102, 101]
+    assert all(handle.closed for handle in handles)
+    assert not state.exists()

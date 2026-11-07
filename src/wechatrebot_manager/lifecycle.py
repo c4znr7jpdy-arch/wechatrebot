@@ -171,6 +171,7 @@ class LifecycleController:
         """Recover service ownership once this installation can be inspected."""
         if not self._uses_default_supervisor or self._supervisor is not None:
             return
+        candidate = None
         try:
             candidate = self._supervisor_factory(self._on_progress)
             adopter = getattr(candidate, "adopt", None)
@@ -198,7 +199,14 @@ class LifecycleController:
                     self.state = LifecycleState.VERIFYING_CONNECTION
                     self._error = None
         except (OSError, ServiceLaunchError, ValueError):
-            self._supervisor = None
+            if candidate is not None and candidate.running:
+                # Adoption may already have verified live process identities
+                # before log/state I/O failed. Retain their safe stop handles.
+                self._supervisor = candidate
+                candidate.adoption_complete = False
+                self.state = LifecycleState.ERROR
+                self._error = self.catalog.get("13002")
+                self._adoption_error = self._error
 
     def _has_incomplete_adoption(self) -> bool:
         return (

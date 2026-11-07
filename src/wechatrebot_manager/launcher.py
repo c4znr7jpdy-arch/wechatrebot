@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import json
 import os
 from pathlib import Path
@@ -593,6 +594,7 @@ class ProcessSupervisor:
         adopted: list[RunningService] = []
         adopted_names: set[str] = set()
         ready_names: set[str] = set()
+        recovery_failed = False
         try:
             for entry in entries:
                 if not isinstance(entry, dict):
@@ -616,8 +618,15 @@ class ProcessSupervisor:
                     or identity.executable != expected_executable
                 ):
                     continue
-                spec.log_file.parent.mkdir(parents=True, exist_ok=True)
-                log_handle = spec.log_file.open("ab", buffering=0)
+                try:
+                    spec.log_file.parent.mkdir(parents=True, exist_ok=True)
+                    log_handle = spec.log_file.open("ab", buffering=0)
+                except OSError:
+                    # Existing processes own their original stdout handles.
+                    # Keep a closeable placeholder so log I/O cannot erase
+                    # their verified identities or prevent a safe stop.
+                    log_handle = io.BytesIO()
+                    recovery_failed = True
                 adopted.append(
                     RunningService(
                         spec,
@@ -632,15 +641,21 @@ class ProcessSupervisor:
                 if self._readiness_probe(spec.ready_host, spec.ready_port):
                     ready_names.add(spec.name)
         except OSError:
-            for running in adopted:
-                running.log_handle.close()
-            return False
+            recovery_failed = True
         self.running = adopted
         if not self.running:
+            if recovery_failed:
+                return False
             self._clear_state()
             return False
-        self.adoption_complete = len(ready_names) == len(self.specs)
-        self._persist_state()
+        self.adoption_complete = not recovery_failed and len(ready_names) == len(self.specs)
+        if recovery_failed:
+            raise ServiceLaunchError("后台服务状态恢复未完成，请停止已确认的进程后重试。")
+        try:
+            self._persist_state()
+        except (OSError, ServiceLaunchError):
+            self.adoption_complete = False
+            raise
         return True
 
     def start(self) -> tuple[RunningService, ...]:
