@@ -102,7 +102,7 @@ def test_group_qrcode_api_preserves_account_scope_and_reports_errors(tmp_path):
     assert "群二维码读取失败" in result["error"]["message"]
 
 
-@pytest.mark.parametrize("code,recorded", [("automation_paused", False), ("license_revoked", True)])
+@pytest.mark.parametrize("code,recorded", [("automation_paused", None), ("license_revoked", True)])
 def test_group_qrcode_license_denial_reuses_license_response_and_only_silences_manual_pause(tmp_path, code, recorded):
     api = _api(tmp_path)
 
@@ -113,9 +113,42 @@ def test_group_qrcode_license_denial_reuses_license_response_and_only_silences_m
     result = api.get_group_qrcode("wxid_bot", "room@chatroom")
     assert result["ok"] is False and result["error"]["code"] == f"LIC-{code}"
     assert result["error"]["recorded"] is recorded
-    assert bool(api._lifecycle.events.items) is recorded
-    if not recorded:
+    assert bool(api._lifecycle.events.items) is bool(recorded)
+    if recorded is None:
         assert result["error"]["retryable"] is False
+
+
+def test_group_qrcode_expected_pause_does_not_show_ui_recording_failure(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the delivered API error handler")
+    api = _api(tmp_path)
+    error = LicenseError("automation_paused", "请在运行中心启动机器人后重试。")
+    responses = [api._license_failed(error, record=False)]
+    api._record_error = lambda *_args, **_kwargs: ("", False)
+    responses.append(api._license_failed(error))
+    script = manager_script()
+    source = script[script.index("  async function api(method, ...args)"):script.index("  function debounce(fn, wait = 280)")]
+    probe = r"""
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const run = new Function('window', 'toast', 'subscription', 'state', payload.source +
+  '\nreturn api("get_group_qrcode", "wxid_bot", "room@chatroom").catch(reportError);');
+(async () => {
+  const messages = [];
+  for (const response of payload.responses) {
+    const toasts = [];
+    await run({pywebview:{api:{get_group_qrcode:async () => response}}},
+      message => toasts.push(message), {formatMessage: error => error.message}, {activePage:'history'});
+    messages.push(toasts);
+  }
+  process.stdout.write(JSON.stringify(messages));
+})();
+"""
+    result = subprocess.run([node, "-e", probe], input=json.dumps({"source": source, "responses": responses}),
+                            capture_output=True, text=True, encoding="utf-8", check=True)
+    expected_pause, failed_recording = json.loads(result.stdout)
+    assert len(expected_pause) == 1 and "运行中心" in expected_pause[0]
+    assert len(failed_recording) == 2 and "错误记录未能保存" in failed_recording[1]
 
 
 def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
