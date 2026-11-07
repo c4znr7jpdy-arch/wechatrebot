@@ -134,7 +134,11 @@ window.createMessageHistory = function (helpers) {
     enabled = Boolean(enabled && state.historyAccount && state.historyReadyAccount === state.historyAccount
       && state.status?.runtime?.account_status_available !== false);
     const exportButton = $("#exportHistory");
-    if (exportButton) exportButton.disabled = !enabled;
+    if (exportButton) {
+      exportButton.disabled = !enabled || state.historyExporting;
+      if (state.historyExporting) exportButton.setAttribute("aria-busy", "true");
+      else exportButton.removeAttribute("aria-busy");
+    }
     for (const id of ["#cleanHistory", "#deleteConversation"]) {
       const button = $(id);
       if (button) button.disabled = !enabled || !canEditHistory();
