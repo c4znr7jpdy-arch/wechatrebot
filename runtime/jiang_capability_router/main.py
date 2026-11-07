@@ -309,6 +309,11 @@ class Main(star.Star):
                 capability.capability_id,
                 type(exc).__name__,
             )
+            if capability.side_effect == "write":
+                return (
+                    f"{capability.name}的结果尚未确认，请先查询当前状态；"
+                    "不要自动重复提交。"
+                )
             return (
                 f"{capability.name}暂时未能完成，请稍后重试；"
                 "如果持续失败，请联系管理员检查功能配置和网络连接。"

@@ -374,7 +374,8 @@ def test_all_shipped_declarations_validate_and_are_packaged(tmp_path):
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, ValueError, TimeoutError])
-def test_natural_capability_failure_keeps_internal_details_private(caplog, error_type):
+@pytest.mark.parametrize("side_effect", ["read", "write"])
+def test_natural_capability_failure_keeps_internal_details_private(caplog, error_type, side_effect):
     from test_hot_config_runtime import _runtime_function
 
     secret = "synthetic-private-content-key"
@@ -382,7 +383,8 @@ def test_natural_capability_failure_keeps_internal_details_private(caplog, error
     async def fail(_arguments):
         raise error_type("upstream rejected https://example.invalid/api?key=" + secret)
 
-    capability = NS(capability_id="info.weather", name="天气预报", permission="public", handler=fail)
+    capability = NS(capability_id="info.weather", name="天气预报", permission="public",
+                    side_effect=side_effect, handler=fail)
 
     async def discover_current(*_args):
         return {"stars": [], "registered_commands": []}
@@ -408,7 +410,12 @@ def test_natural_capability_failure_keeps_internal_details_private(caplog, error
     with caplog.at_level(logging.INFO, logger="capability_failure_test"):
         result = asyncio.run(invoke(NS(context=object()), Event("查询成都天气"), intent="查询成都天气"))
 
-    assert "天气预报" in result and "稍后重试" in result
+    assert "天气预报" in result
+    if side_effect == "write":
+        assert "结果尚未确认" in result and "先查询当前状态" in result
+        assert "不要自动重复提交" in result and "稍后重试" not in result
+    else:
+        assert "稍后重试" in result
     assert secret not in result and secret not in caplog.text
     assert "example.invalid" not in result and "example.invalid" not in caplog.text
     assert "info.weather" in caplog.text and error_type.__name__ in caplog.text
