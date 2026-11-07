@@ -3085,3 +3085,29 @@ def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:
     api._close_window_for_update()
 
     assert calls == ["permit", "destroy"]
+
+
+@pytest.mark.parametrize("code", ["13001", "13008"])
+def test_failed_stop_reuses_force_stop_confirmation_before_retrying(code) -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    action = script[script.index("  async function runPrimaryAction()"):script.index("  function runForceStop()")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {status:{state:'ERROR', can_start:false, can_stop:true,
+  error:{code:'13008'}}, startPreparing:false, stopPending:false};
+const $ = () => ({dataset:{action:'stop'}});
+let confirmations = 0;
+const runForceStop = () => {confirmations++;};
+const api = () => {throw new Error('a retry requires explicit force-stop confirmation');};
+(async () => {
+  await runPrimaryAction();
+  assert.equal(confirmations, 1);
+  assert.equal(state.stopPending, false);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=action + harness.replace("13008", code), text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
+    assert result.stdout == "ok"

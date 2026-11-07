@@ -580,7 +580,8 @@
     const cancelStart = action === "stop" && state.status?.start_pending && state.status?.can_stop;
     if (state.startPreparing || state.stopPending || (state.status?.busy && !cancelStart)) return;
     if (action === "start" && state.status?.start_pending) return;
-    if (action === "stop" && !cancelStart && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
+    if (action === "stop" && !cancelStart && (["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)
+      || ["13001", "13008"].includes(state.status?.error?.code))) {
       runForceStop();
       return;
     }
