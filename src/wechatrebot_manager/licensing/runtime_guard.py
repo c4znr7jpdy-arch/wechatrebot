@@ -56,6 +56,11 @@ def probe_account(install_root: str | Path | None = None) -> str:
     """Read the bridge's actual identity, independently of the manager window."""
     try:
         port = load_runtime_ports(install_root).bridge_callback if install_root is not None else 5000
+    except (OSError, ValueError, TypeError):
+        # Invalid saved configuration is not a temporary health-query failure.
+        # Keep it denied without falling back to another installation's port.
+        return ""
+    try:
         request = Request(f"http://127.0.0.1:{port}/api/health", method="GET")
         # Match the manager's health budget: a fresh response can take longer
         # than 0.5s while the bridge verifies HOOK connectivity during startup.
