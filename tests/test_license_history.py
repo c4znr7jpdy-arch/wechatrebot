@@ -1,14 +1,16 @@
 """Message history requires a verified login and a matching valid subscription."""
 import sys
+import sqlite3
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import pytest
 
-from wechatrebot_manager import app_shell, runtime_config
+from wechatrebot_manager import app_shell, chat_history, runtime_config
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 from test_app_shell import _api
 from test_license_client import activate, running, setup
+from test_chat_history import _dated_history
 
 
 def history_api(root, client=None):
@@ -224,7 +226,103 @@ def test_export_rechecks_authorization_and_login_after_dialog(setup, monkeypatch
     assert result["ok"]
     if change == "none":
         assert result["data"] == {"path": str(target)}
-        api._history.export.assert_called_once_with(str(target), format="csv", account_id="wxid_customer")
+        api._history.export.assert_called_once_with(
+            str(target), format="csv", account_id="wxid_customer", validate_access=ANY,
+        )
     else:
         assert result["data"] == {"cancelled": True, "account_changed": True}
         api._history.export.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["conversation", "date", "export"])
+@pytest.mark.parametrize("change", ["expired", "logged_out", "wrong_account", "unknown_account"])
+def test_history_mutations_revalidate_after_sync_before_touching_records(
+    setup, monkeypatch, tmp_path, operation, change,
+):
+    client, _, clock, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    history = _dated_history(client.root, "wxid_customer")
+    api._history = history
+    sync = history.sync
+
+    def sync_then_change_access(**kwargs):
+        result = sync(**kwargs)
+        if change == "expired":
+            clock.advance(3601)
+        elif change == "logged_out":
+            view.runtime = RuntimeSnapshot(True, True, "")
+        elif change == "wrong_account":
+            view.runtime = RuntimeSnapshot(True, True, "wxid_other")
+        else:
+            view.runtime = RuntimeSnapshot(True, True, "wxid_customer", account_status_available=False)
+        return result
+
+    monkeypatch.setattr(history, "sync", sync_then_change_access)
+    target = tmp_path / "existing.csv"
+    target.write_text("preserve existing file", encoding="utf-8")
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    if operation == "conversation":
+        result = api.delete_conversation("456@chatroom", "wxid_customer")
+    elif operation == "date":
+        result = api.delete_history_before("2026-10-12", "wxid_customer")
+    else:
+        result = api.export_history("csv", "wxid_customer")
+    assert result["ok"] is False
+    assert "data" not in result
+    assert target.read_text(encoding="utf-8") == "preserve existing file"
+    with sqlite3.connect(history.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 5
+    with sqlite3.connect(history.bridge_source) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 5
+
+
+@pytest.mark.parametrize("operation", ["conversations", "messages", "conversation", "date", "export"])
+def test_history_database_errors_use_the_existing_api_error_response(setup, monkeypatch, tmp_path, operation):
+    client, _, _, _ = setup
+    running(client)
+    api, _ = history_api(client.root, client)
+    method = {"conversation": "delete_conversation", "date": "delete_before"}.get(operation, operation)
+    getattr(api._history, method).side_effect = sqlite3.OperationalError("database is locked")
+    target = tmp_path / "history.csv"
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    if operation == "conversations":
+        result = api.get_conversations({"kind": "private", "account_id": "wxid_customer"})
+    elif operation == "messages":
+        result = api.get_messages("friend", {"paged": True, "account_id": "wxid_customer"})
+    elif operation == "conversation":
+        result = api.delete_conversation("friend", "wxid_customer")
+    elif operation == "date":
+        result = api.delete_history_before("2026-10-12", "wxid_customer")
+    else:
+        result = api.export_history("csv", "wxid_customer")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15007"
+    assert "data" not in result
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("format", ["csv", "json"])
+def test_export_rechecks_access_after_formatting_before_overwriting_file(setup, monkeypatch, tmp_path, format):
+    client, _, _, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    api._history = _dated_history(client.root, "wxid_customer")
+    target = tmp_path / f"existing.{format}"
+    target.write_text("existing file", encoding="utf-8")
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    display = chat_history._display_content
+
+    def format_and_logout(*args, **kwargs):
+        result = display(*args, **kwargs)
+        view.runtime = RuntimeSnapshot(True, True, "")
+        return result
+
+    monkeypatch.setattr(chat_history, "_display_content", format_and_logout)
+    result = api.export_history(format, "wxid_customer")
+    assert result["ok"] is False
+    assert "data" not in result
+    assert target.read_text(encoding="utf-8") == "existing file"

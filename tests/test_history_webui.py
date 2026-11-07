@@ -204,3 +204,114 @@ def test_history_access_loss_clears_private_data_and_rejects_late_responses(
         print(f"History access evidence: {evidence}")
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("outcome", [
+    "cancelled", "success", "error", "requires_login", "account_changed",
+    "logged_out", "account_switched", "status_unknown", "account_returned",
+])
+def test_history_export_pending_blocks_duplicates_and_restores_current_access(
+    browser, manager_url, tmp_path, outcome,
+):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.add_init_script("""(() => {
+      const schedule = window.setInterval;
+      window.setInterval = (callback, ...args) => {
+        if (callback.name === 'refreshStatus') { window.refreshExportStatus = callback; return 0; }
+        return callback.name === 'pollHistory' ? 0 : schedule(callback, ...args);
+      };
+    })();""")
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, status = api.get_status;
+          window.exportAccess = 'allowed';
+          window.exportCalls = [];
+          window.exportAccount = () => exportAccess === 'account_switched' ? 'wxid_second' : 'wxid_demo_account';
+          api.get_status = async () => {
+            const result = structuredClone(await status());
+            result.data.history_account = exportAccess === 'logged_out' ? '' : exportAccount();
+            result.data.runtime.wechat_identity = result.data.history_account;
+            result.data.runtime.account_status_available = exportAccess !== 'status_unknown';
+            return result;
+          };
+          api.get_conversations = async () => ({ok:true, data:{account_id:exportAccount(),
+            items:[{conversation_id:'export-chat', display_name:'导出测试会话', type:'private',
+              message_count:1, last_timestamp:1}], summary:{}}});
+          api.get_messages = async () => ({ok:true, data:{account_id:exportAccount(), has_more:false,
+            items:[{id:1, timestamp:1793200001, content:'导出测试消息', role:'user', sender_id:'member'}]}});
+          api.export_history = (...args) => {
+            exportCalls.push(args);
+            return new Promise(resolve => { window.resolveHistoryExport = resolve; });
+          };
+        }""")
+        page.evaluate("window.refreshExportStatus()")
+        page.locator('.nav-item[data-page="history"]').click()
+        expect(page.locator("#messageList .message-bubble")).to_have_text("导出测试消息")
+        button = page.locator("#exportHistory")
+        expect(button).to_be_enabled()
+        page.evaluate("document.querySelector('#toastRegion').replaceChildren()")
+        button.click()
+        expect(button).to_be_disabled()
+        expect(button).to_have_attribute("aria-busy", "true")
+        expect(button).to_have_text("导出中…")
+        button.dispatch_event("click")
+        page.evaluate("window.refreshExportStatus()")
+        expect(button).to_be_disabled()
+        page.locator("#refreshHistory").click()
+        expect(page.locator("#refreshHistory")).to_have_text("刷新")
+        expect(button).to_be_disabled()
+        button.dispatch_event("click")
+        assert page.evaluate("window.exportCalls") == [["csv", "wxid_demo_account"]]
+        expect(page.locator("#toastRegion .toast")).to_have_count(0)
+        expect(page.locator("dialog[open]")).to_have_count(0)
+        page.screenshot(path=str(tmp_path / f"history-export-pending-{outcome}.png"), animations="disabled")
+        if outcome in {"logged_out", "account_switched", "status_unknown"}:
+            page.evaluate("mode => { window.exportAccess = mode; return window.refreshExportStatus(); }", outcome)
+            expect(button).to_be_disabled()
+        elif outcome == "account_returned":
+            for mode in ["logged_out", "allowed"]:
+                page.evaluate("mode => { window.exportAccess = mode; return window.refreshExportStatus(); }", mode)
+                expect(button).to_be_disabled()
+            expect(page.locator("#messageList .message-bubble")).to_have_text("导出测试消息")
+            button.dispatch_event("click")
+            assert page.evaluate("window.exportCalls.length") == 1
+        result = {"ok": True, "data": {"cancelled": True}}
+        if outcome in {"success", "logged_out", "account_switched", "status_unknown"}:
+            result["data"] = {"path": "测试导出.csv"}
+        elif outcome == "error":
+            result = {"ok": False, "error": {"message": "导出暂时失败", "recorded": True}}
+        elif outcome in {"requires_login", "account_changed"}:
+            result["data"][outcome] = True
+        page.evaluate("result => window.resolveHistoryExport(result)", result)
+        expect(button).to_have_text("导出记录")
+        expect(button).not_to_have_attribute("aria-busy", "true")
+        expect(button.locator('svg use[href="#i-download"]')).to_have_count(1)
+        if outcome in {"cancelled", "success", "error", "account_returned"}:
+            expect(button).to_be_enabled()
+            if outcome == "success":
+                expect(page.locator("#toastRegion .toast")).to_have_text("已导出到 测试导出.csv")
+            elif outcome == "error":
+                expect(page.locator("#toastRegion .toast.error")).to_contain_text("导出暂时失败")
+            else:
+                expect(page.locator("#toastRegion .toast")).to_have_count(0)
+            button.click()
+            expect(button).to_be_disabled()
+            assert page.evaluate("window.exportCalls.length") == 2
+            page.evaluate("window.resolveHistoryExport({ok:true,data:{cancelled:true}})")
+            expect(button).to_be_enabled()
+        else:
+            expect(button).to_be_disabled()
+            button.dispatch_event("click")
+            assert page.evaluate("window.exportCalls.length") == 1
+            expect(page.locator("#toastRegion .toast")).to_have_count(0)
+        assert page.url == manager_url and page.title().startswith("消息中心")
+        assert not errors, errors
+    finally:
+        page.close()

@@ -67,6 +67,7 @@
     historyHasNewer: false,
     historyLoadingOlder: false,
     historyManualRefresh: false,
+    historyExporting: false,
     historyOlderLoad: 0,
     historyMessageQuery: "",
     historyMessageCache: new Map(),
@@ -1026,7 +1027,13 @@
       if (!state.historyHasNewer && list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
     $("#exportHistory").addEventListener("click", async () => {
+      if (state.historyExporting || !canEditHistory()) return;
       const accountId = state.historyAccount;
+      const button = $("#exportHistory");
+      const buttonContent = button.innerHTML;
+      state.historyExporting = true;
+      button.textContent = "导出中…";
+      setHistoryActionsEnabled(canEditHistory());
       try {
         const result = await api("export_history", "csv", accountId);
         if (result?.requires_login || result?.account_changed || accountId !== state.historyAccount) {
@@ -1036,6 +1043,11 @@
         }
         if (!result?.cancelled) toast(`已导出到 ${result.path}`);
       } catch (error) { reportError(error); }
+      finally {
+        state.historyExporting = false;
+        button.innerHTML = buttonContent;
+        setHistoryActionsEnabled(canEditHistory());
+      }
     });
     $("#refreshSchedules").addEventListener("click", loadSchedules);
     $("#newScheduledTask").addEventListener("click", () => openScheduledEditor());
