@@ -824,6 +824,12 @@
   }
 
   let modalResolve = null;
+  function syncShellInteractivity() {
+    const shell = $(".app-shell");
+    if (shell) shell.inert = Boolean(state.updateInstalling
+      || !$("#modalBackdrop").hidden || !$("#onboardingBackdrop").hidden);
+  }
+
   function managerCloseState({ignoreModalBusy = false} = {}) {
     return {
       dirty: Boolean(state.featureDirty || state.featurePageDirty || state.providerDirty || state.webSearchDirty
@@ -869,10 +875,9 @@
     let complete;
     const completed = new Promise((resolve) => { complete = resolve; });
     const restoreFocus = document.activeElement;
-    const shell = $(".app-shell");
-    if (shell) shell.inert = true;
+    syncShellInteractivity();
     cancel.focus();
-    const close = () => { backdrop.hidden = true; if (shell) shell.inert = false; restoreFocus?.focus(); };
+    const close = () => { backdrop.hidden = true; syncShellInteractivity(); restoreFocus?.focus(); };
     modalResolve = async (confirmed) => {
       if (!confirmed) {
         if (backdrop.dataset.busy === "true") return;
@@ -1527,6 +1532,7 @@
     safeImageUrl: (...args) => safeImageUrl(...args),
     showProviderOverview: (...args) => showProviderOverview(...args),
     state,
+    syncShellInteractivity,
     toast: (...args) => toast(...args),
     updateToggleCopy: (...args) => updateToggleCopy(...args),
     getCoreSettings: () => coreSettings,
@@ -1564,6 +1570,7 @@
     renderStatus: (status) => renderStatus(status, {optimistic: true}),
     reportError: (...args) => reportError(...args),
     state,
+    syncShellInteractivity,
     toast: (...args) => toast(...args),
   });
 

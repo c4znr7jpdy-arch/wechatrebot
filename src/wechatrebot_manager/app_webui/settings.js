@@ -24,6 +24,7 @@ window.createManagerSettings = function (helpers) {
     safeImageUrl,
     showProviderOverview,
     state,
+    syncShellInteractivity,
     toast,
     updateToggleCopy,
     getCoreSettings,
@@ -377,7 +378,7 @@ window.createManagerSettings = function (helpers) {
       await api("complete_onboarding");
       state.bootstrap.experience.onboarding_complete = true;
       $("#onboardingBackdrop").hidden = true;
-      $(".app-shell").inert = false;
+      syncShellInteractivity();
       if (goToSettings) await openModelSettings();
       else $("#primaryAction").focus();
     } catch (error) { reportError(error); }
@@ -395,7 +396,7 @@ window.createManagerSettings = function (helpers) {
     const backdrop = $("#onboardingBackdrop");
     renderOnboardingReadiness(state.bootstrap?.readiness);
     backdrop.hidden = false;
-    $(".app-shell").inert = true;
+    syncShellInteractivity();
     $("#onboardingRecommended").focus();
   }
 

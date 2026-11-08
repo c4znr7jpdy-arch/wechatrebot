@@ -1,0 +1,63 @@
+diff --git a/core/data_storage.py b/core/data_storage.py
+--- a/core/data_storage.py
++++ b/core/data_storage.py
+@@ -4,6 +4,8 @@
+ 
+ import asyncio
+ import json
++from pathlib import Path
++import tempfile
+ from typing import Any
+ 
+ import aiofiles
+@@ -49,20 +51,37 @@
+             self.session_data = {}
+ 
+     async def _save_data_internal(self) -> None:
+-        """
+-        将会话数据保存到文件（异步无锁内部实现）。
+-        """
++        """将完整 JSON 原子替换到原文件；调用方持有 data_lock。"""
++        def _write():
++            self.data_dir.mkdir(parents=True, exist_ok=True)
++            temporary = None
++            try:
++                with tempfile.NamedTemporaryFile(
++                    mode="w", encoding="utf-8", dir=self.data_dir,
++                    prefix=f".{self.session_data_file.name}.", suffix=".tmp", delete=False,
++                ) as handle:
++                    temporary = Path(handle.name)
++                    json.dump(self.session_data, handle, indent=4, ensure_ascii=False)
++                temporary.replace(self.session_data_file)
++            finally:
++                if temporary is not None:
++                    temporary.unlink(missing_ok=True)
++
++        write_task = asyncio.create_task(asyncio.to_thread(_write))
+         try:
+-            # 确保目录存在
+-            await aio_os.makedirs(self.data_dir, exist_ok=True)
+-            # 写入 JSON（避免阻塞事件循环）
+-            async with aiofiles.open(
+-                self.session_data_file, "w", encoding="utf-8"
+-            ) as f:
+-                content_to_write = await asyncio.to_thread(
+-                    json.dumps, self.session_data, indent=4, ensure_ascii=False
+-                )
+-                await f.write(content_to_write)
++            await asyncio.shield(write_task)
++        except asyncio.CancelledError:
++            # 线程写入不能被取消；等原子替换完成再交还锁，避免新保存越过旧写入。
++            completion = asyncio.gather(write_task, return_exceptions=True)
++            while not completion.done():
++                try:
++                    await asyncio.shield(completion)
++                except asyncio.CancelledError:
++                    continue
++            error = completion.result()[0]
++            if isinstance(error, OSError):
++                logger.error(f"[主动消息] 保存会话数据失败喵: {error}")
++            raise
+         except OSError as e:
+             logger.error(f"[主动消息] 保存会话数据失败喵: {e}")
+ 
