@@ -423,7 +423,7 @@ window.createChatManagement = function (helpers) {
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong></span><span class="toggle"><input id="groupScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="groupScheduledEnabled" aria-label="切换本群定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
       <div class="toggle-line"><span><strong>定时任务安静时段</strong></span><span class="toggle"><input id="groupQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="groupQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="groupQuietEnabled" aria-label="切换本群安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="groupQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
-      <label><span>每日定时任务上限（0 为暂停）</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"></label>
+      <label><span>每日定时任务上限（0 为暂停）</span><input name="daily_limit" type="number" min="0" max="100" required value="${escapeHtml(policy.daily_limit ?? 3)}"></label>
       </details>
     </form>`;
   }
@@ -444,9 +444,20 @@ window.createChatManagement = function (helpers) {
     };
   }
 
+  function validateChatPolicyForm(form) {
+    const invalid = form.querySelector(":invalid");
+    if (invalid) {
+      for (let ancestor = invalid.parentElement; ancestor && ancestor !== form; ancestor = ancestor.parentElement) {
+        if (ancestor.tagName === "DETAILS") ancestor.open = true;
+      }
+    }
+    return form.reportValidity();
+  }
+
   async function saveGroupPolicy(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    if (!validateChatPolicyForm(form)) return;
     const button = $('button[form="groupPolicyForm"]');
     if (!button) return;
     const groupId = state.selectedGroup;
@@ -783,7 +794,7 @@ window.createChatManagement = function (helpers) {
       <div class="toggle-line"><span><strong>接收已配置的定时任务</strong></span><span class="toggle"><input id="privateScheduledEnabled" name="scheduled_enabled" type="checkbox" ${policy.scheduled_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateScheduledEnabled" aria-label="切换此私聊定时任务"></label><span>${policy.scheduled_enabled !== false ? "已允许" : "已暂停"}</span></span></div>
       <details class="advanced-details"><summary>更多私聊规则</summary><div class="toggle-line"><span><strong>安静时段</strong></span><span class="toggle"><input id="privateQuietEnabled" name="quiet_enabled" type="checkbox" aria-controls="privateQuietHoursFields" ${quiet.enabled ? "checked" : ""}><label class="toggle-track" for="privateQuietEnabled" aria-label="切换此私聊安静时段"></label><span>${quiet.enabled ? "已启用" : "已关闭"}</span></span></div>
       <div class="field-pair quiet-hours-fields" id="privateQuietHoursFields" ${quiet.enabled ? "" : "hidden"}><label><span>开始</span><input name="quiet_start" type="time" value="${escapeHtml(quiet.start || "22:00")}"></label><label><span>结束</span><input name="quiet_end" type="time" value="${escapeHtml(quiet.end || "08:00")}"></label></div>
-      <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
+      <label class="private-scheduled-limit"><span>每日定时消息上限</span><input name="daily_limit" type="number" min="0" max="100" required value="${escapeHtml(policy.daily_limit ?? 3)}"><small>填 0 表示暂停该联系人的定时推送。</small></label>
       </details><details class="advanced-details"><summary>可用功能</summary>
       <p>勾选机器人在这段私聊中可以使用的功能。未单独配置的联系人沿用新安装默认启用范围。</p>
       <div class="option-grid compact-options private-feature-options">${choices || "<span class='subtle'>当前没有可分配的功能</span>"}</div></details>
@@ -828,6 +839,7 @@ window.createChatManagement = function (helpers) {
   async function savePrivatePolicy(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    if (!validateChatPolicyForm(form)) return;
     const button = $('button[form="privatePolicyForm"]');
     if (!button || !state.selectedContact) return;
     const contactId = state.selectedContact;
