@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+import ctypes
 import hashlib
 import io
 import json
@@ -1089,8 +1090,9 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
     assert error.value.definition.code == "UPD-1004"
 
 
+@pytest.mark.parametrize("wait_failure", [None, "open", "wait"])
 def test_next_start_recovery_restores_an_interrupted_install(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, windows_process_wait, wait_failure,
 ) -> None:
     install = tmp_path / "install"
     updates = install / "updates"
@@ -1134,7 +1136,7 @@ def test_next_start_recovery_restores_an_interrupted_install(
                 "install_root": str(install),
                 "target_executable": str(install / "manager" / "WeChatReBot.exe"),
                 "parent_pid": 0,
-                "wait_pids": [0],
+                "wait_pids": [1234] if wait_failure else [0],
             }
         ),
         encoding="utf-8",
@@ -1145,6 +1147,20 @@ def test_next_start_recovery_restores_an_interrupted_install(
         "_restart_manager",
         lambda target, _root, **_kwargs: restarted.append(target),
     )
+
+    if wait_failure:
+        before = journal_path.read_bytes()
+        windows_process_wait(handle=0 if wait_failure == "open" else 123,
+                             result=0xFFFFFFFF, error=5)
+        assert recover_update_plan(plan_path) == 1
+        assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
+        assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "new-feature"
+        assert journal_path.read_bytes() == before
+        assert (backup_files / "00000000").read_bytes() == b"old-manager"
+        assert (backup_files / "00000001").read_text(encoding="utf-8") == "old-feature"
+        result = json.loads((updates / "update-result.json").read_text(encoding="utf-8"))
+        assert result["error_code"] == "UPD-1010"
+        return
 
     assert recover_update_plan(plan_path) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"old-manager"
@@ -1252,3 +1268,54 @@ def test_download_accepts_https_redirect_to_github_asset_host(monkeypatch, tmp_p
         prepare_update(release, channel, tmp_path / "install-insecure")
     assert rejected.value.definition.code == "UPD-1003"
     assert "HTTPS" in rejected.value.detail
+
+
+@pytest.fixture
+def windows_process_wait(monkeypatch):
+    def install(*, handle=123, result=0, error=0):
+        calls, last_error = [], [error]
+
+        def open_process(*args):
+            calls.append(("open", args))
+            return handle
+
+        def wait(*args):
+            calls.append(("wait", args))
+            return result
+
+        def close(*args):
+            calls.append(("close", args))
+            last_error[0] = 6  # Cleanup must not replace the original wait error.
+            return 1
+
+        kernel = SimpleNamespace(OpenProcess=open_process, WaitForSingleObject=wait, CloseHandle=close)
+        monkeypatch.setattr(updates_module, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: last_error[0], raising=False)
+        return calls
+
+    return install
+
+
+@pytest.mark.parametrize("error", [0, 5, 6, 87, 259, 1168])
+def test_wait_for_windows_process_exit_fails_closed_on_query_errors(windows_process_wait, error):
+    calls = windows_process_wait(handle=0, error=error)
+    if error == 87:
+        updates_module._wait_for_process_exit(1234)
+    else:
+        with pytest.raises(UpdateError, match=f"无法确认旧版本进程.*错误 {error}"):
+            updates_module._wait_for_process_exit(1234)
+    assert calls == [("open", (0x00100000, False, 1234))]
+
+
+@pytest.mark.parametrize("result", [0, 0x00000102, 0xFFFFFFFF, 0x00000080])
+def test_wait_for_windows_process_exit_requires_signaled_handle(windows_process_wait, result):
+    calls = windows_process_wait(result=result, error=5)
+    if result == 0:
+        updates_module._wait_for_process_exit(1234, timeout_seconds=2)
+    else:
+        message = ("等待旧版本退出超时" if result == 0x00000102 else
+                   "错误 5" if result == 0xFFFFFFFF else "等待结果 128")
+        with pytest.raises(UpdateError, match=message):
+            updates_module._wait_for_process_exit(1234, timeout_seconds=2)
+    assert calls == [("open", (0x00100000, False, 1234)), ("wait", (123, 2000)), ("close", (123,))]
