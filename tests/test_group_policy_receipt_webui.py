@@ -145,3 +145,36 @@ def test_group_policy_late_save_receipt_does_not_replace_another_account(browser
         assert not errors, errors
     finally:
         page.close()
+
+
+def test_new_group_edits_during_slow_preview_survive_confirmed_save(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator('#stateTitle')).to_have_text('机器人可用')
+        if page.locator('#onboardingRecommended').is_visible():
+            page.locator('#onboardingRecommended').click()
+        page.locator('.nav-item[data-page="groups"]').click()
+        page.locator('#groupRows .group-row').first.click()
+        mode = page.locator('#groupPolicyForm [name="reply_mode"]')
+        expect(mode).to_be_visible()
+        original_revision = page.locator('#groupPolicyForm').get_attribute('data-revision')
+        page.evaluate("""() => {
+          const api = window.pywebview.api, preview = api.preview_group_policy;
+          api.preview_group_policy = async (...args) => {
+            const result = await preview(...args);
+            return new Promise(resolve => { window.finishGroupPreview = () => resolve(result); });
+          };
+        }""")
+        mode.select_option('off')
+        page.locator('button[form="groupPolicyForm"]').click()
+        page.wait_for_function("typeof window.finishGroupPreview === 'function'")
+        mode.select_option('natural')
+        page.evaluate('window.finishGroupPreview()')
+        page.locator('#modalConfirm').click()
+        expect(page.locator('#modalBackdrop')).to_be_hidden()
+        expect(mode).to_have_value('natural')
+        expect(page.locator('#groupPolicyNote')).to_contain_text('未保存')
+        assert page.locator('#groupPolicyForm').get_attribute('data-revision') != original_revision
+    finally:
+        page.close()

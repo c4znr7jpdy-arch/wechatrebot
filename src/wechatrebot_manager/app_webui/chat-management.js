@@ -456,6 +456,7 @@ window.createChatManagement = function (helpers) {
     button.textContent = "正在检查影响…";
     try {
       const values = readGroupPolicyForm(form);
+      const draft = groupDrafts[groupId];
       const preview = await api("preview_group_policy", account, groupId, values, form.dataset.revision || "");
       const impact = Array.isArray(preview.impact) ? preview.impact : ["本次修改只影响当前群的机器人规则。"];
       button.disabled = false;
@@ -476,12 +477,13 @@ window.createChatManagement = function (helpers) {
           policies[groupId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
             ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
           }))};
-          delete groupDrafts[groupId];
+          if (groupDrafts[groupId] === draft) delete groupDrafts[groupId];
+          else if (groupDrafts[groupId]) groupDrafts[groupId].policy.revision = saved.revision;
           if (state.selectedGroup === groupId) {
             renderGroupInspector();
-            $("#groupPolicyNote").textContent = "群聊规则已保存并回读确认。";
+            if (!groupDrafts[groupId]) $("#groupPolicyNote").textContent = "群聊规则已保存并回读确认。";
           }
-          toast("群聊规则已保存并回读确认。");
+          toast(groupDrafts[groupId] ? "群聊规则已保存；检查期间的新修改仍未保存，已为你保留。" : "群聊规则已保存并回读确认。");
         },
       });
       return;
