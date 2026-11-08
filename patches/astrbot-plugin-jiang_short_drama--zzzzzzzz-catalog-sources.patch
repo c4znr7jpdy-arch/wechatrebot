@@ -1,0 +1,12 @@
+diff --git a/search.py b/search.py
+--- a/search.py
++++ b/search.py
+@@ -84,6 +84,8 @@
+     Source("百度云资源", "https://api.apibdzy.com/api.php/provide/vod/"),
+     Source("金鹰资源", "https://jyzyapi.com/provide/vod/from/jinyingm3u8/at/json"),
+     Source("飘零资源", "https://p2100.net/api.php/provide/vod/"),
++    Source("360资源", "https://360zy.com/api.php/provide/vod/"),
++    Source("无尽资源", "https://api.wujinapi.com/api.php/provide/vod/"),
+ )
+ 
+ _MEDIA_COMMAND_RE = re.compile(
