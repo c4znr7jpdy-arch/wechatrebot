@@ -3,7 +3,7 @@ import pytest
 from playwright.sync_api import expect
 
 from test_manager_startup import browser, manager_url  # noqa: F401
-from test_update_flow_webui import update_page, _download_and_wait_for_consent
+from test_update_flow_webui import update_page, _download_and_wait_for_consent, _open_update_settings
 
 
 def _hold_install_progress(page):
@@ -48,8 +48,10 @@ def test_accepted_install_keeps_card_and_close_guard_when_progress_read_fails(up
       const event=new Event('beforeunload',{cancelable:true});
       dispatchEvent(event);return event.defaultPrevented;
     }""")
-    page.evaluate("window.updateTestController.refreshUpdate(true)")
+    _open_update_settings(page)
+    page.locator("#checkUpdate").click()
     expect(page.locator("#modalBackdrop")).to_be_hidden()
+    expect(page.locator("#checkUpdate")).to_have_text("查看更新")
     expect(page.locator("#updateCardAction")).to_be_hidden()
     assert len(page.evaluate("window.updateCalls.install"))==1
     assert len(page.evaluate("window.updateCalls.download"))==1

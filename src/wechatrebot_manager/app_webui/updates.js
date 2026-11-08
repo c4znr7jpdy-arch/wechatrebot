@@ -182,9 +182,11 @@ window.createUpdateNotifications = function (helpers) {
     button.textContent = "检查中…";
     try {
       if (manual && state.availableUpdate) {
-        const progress = await pollUpdateStatus();
+        const progress = await pollUpdateStatus()
+          || (state.updateInstalling && ["running", "restarting"].includes(latestStatus?.state) ? latestStatus : null);
         if (matchesRelease(state.availableUpdate, progress)) {
           if (progress.state === "running" || progress.state === "restarting") {
+            renderUpdateCard(state.availableUpdate, progress);
             $("#updateCard").focus();
             return;
           }
