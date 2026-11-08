@@ -163,7 +163,12 @@ def test_legacy_dispatcher_keeps_history_file_with_fake_transport(runtime):
         assert trace.metadata["report_files"][0]["filename"] == files[0].name
 
 
-def test_html_template_trace_component_matches_cleaned_history_identity(runtime, modules):
+def test_html_template_trace_component_matches_cleaned_history_identity(runtime, modules, monkeypatch):
+    # CI tests manager code without optional plugin wheels. The identifier's
+    # randomness is outside this real filename/path regression.
+    ulid = ModuleType("ulid")
+    ulid.new = lambda: "01TESTREPORTIDENTIFIER"
+    monkeypatch.setitem(sys.modules, "ulid", ulid)
     builder = modules("infrastructure.reporting.render_diagnostics").build_safe_report_path
     path = builder(runtime.directory, "report_${trace_id}.html", GROUP, "20261108", LEGACY)
     assert path.name == f"report_{CLEAN}.html"
