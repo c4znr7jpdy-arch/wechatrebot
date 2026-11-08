@@ -22,10 +22,12 @@ window.createFeatureController = function (helpers) {
   } = helpers;
 
   async function loadFeatures() {
+    const request = state.featuresLoad = (state.featuresLoad || 0) + 1;
     const list = $("#featureList");
     list.innerHTML = '<div class="loading-row">正在读取功能…</div>';
     try {
       const data = await api("get_features");
+      if (request !== state.featuresLoad) return false;
       state.features = data.plugins || [];
       state.featuresEngineOnline = Boolean(data.engine_online);
       state.featuresLoaded = true;
@@ -36,6 +38,7 @@ window.createFeatureController = function (helpers) {
       void prefetchFeatureDetails(++state.featurePrefetch);
       return true;
     } catch (error) {
+      if (request !== state.featuresLoad) return false;
       list.innerHTML = '<div class="loading-row">功能暂时无法读取</div>';
       $("#featureSummary").textContent = "读取失败，请重新检查";
       reportError(error);
