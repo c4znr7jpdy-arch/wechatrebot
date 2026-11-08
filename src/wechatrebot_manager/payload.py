@@ -467,11 +467,17 @@ def validate_incremental_base(payload_root: str | Path, install_root: str | Path
         _validate_incremental_base(manifest, root, _read_installed_manifest_for_merge(root))
 
 
-def _copy_stream_and_hash(reader: BinaryIO, target: Path) -> str:
+def _copy_stream_and_hash(
+    reader: BinaryIO, target: Path, *, max_bytes: int | None = None,
+) -> str:
     digest = hashlib.sha256()
     target.parent.mkdir(parents=True, exist_ok=True)
+    copied = 0
     with target.open("wb") as writer:
         for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+            copied += len(chunk)
+            if max_bytes is not None and copied > max_bytes:
+                raise PayloadError("文件复制体积超出允许范围。")
             digest.update(chunk)
             writer.write(chunk)
     return digest.hexdigest().upper()
