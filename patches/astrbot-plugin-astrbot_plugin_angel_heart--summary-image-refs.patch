@@ -1,0 +1,116 @@
+diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
+--- a/core/conversation_ledger.py
++++ b/core/conversation_ledger.py
+@@ -298,31 +298,54 @@
+         lines = []
+         if old_summary:
+             lines.append(old_summary.strip())
++        seen_image_refs = set()
+         for msg in discarded:
+             if not keep_tools and self._is_tool_message(msg):
+                 continue
+             if msg.get("kind") in ("context_summary", "summary_context", "context_compaction"):
+                 text = self._extract_message_text(msg)
+-                if text:
++                if text and not old_summary:
+                     lines.append(text)
+                 continue
+             role = msg.get("role", "user")
+             name = msg.get("sender_name") or msg.get("sender_id") or role
+             text = self._extract_message_text(msg)
+-            if not text:
+-                continue
+-            # 控制规则摘要体积
+-            if len(text) > 120:
+-                text = text[:120] + "…"
+-            lines.append(f"{name}: {text}")
++            if text:
++                # 控制规则摘要体积
++                if len(text) > 120:
++                    text = text[:120] + "…"
++                lines.append(f"{name}: {text}")
++            for ref in self._summary_image_refs([msg]):
++                if ref not in old_summary and ref not in seen_image_refs:
++                    lines.append(f"[图片] {ref}")
++                    seen_image_refs.add(ref)
+         summary = "\n".join(lines).strip()
+         # 限制摘要总长，避免无限膨胀
+         if len(summary) > 4000:
+             summary = summary[-4000:]
+         return summary
+ 
+-    def _make_summary_message(self, summary: str, timestamp: float) -> Dict:
+-        return {
++    def _summary_image_refs(self, messages: List[Dict]) -> List[str]:
++        """复用清理逻辑的权威路径解析，只继承插件自有媒体引用并去重。"""
++        refs = []
++        for message in messages:
++            content = message.get("content")
++            image_message = dict(message)
++            image_message["content"] = [
++                item for item in content
++                if isinstance(item, dict) and item.get("type") == "image_url"
++            ] if isinstance(content, list) else []
++            refs.extend(sorted(self._extract_managed_cache_paths_from_message(image_message)))
++        return list(dict.fromkeys(refs))
++
++    def _make_summary_message(
++        self, summary: str, timestamp: float, image_refs: List[str] | None = None
++    ) -> Dict:
++        refs = list(dict.fromkeys(image_refs or []))
++        missing_refs = [f"[图片] {ref}" for ref in refs if ref not in summary]
++        if missing_refs:
++            summary = "\n".join([summary, *missing_refs]).strip()
++        message = {
+             "role": "system",
+             "content": f"[当前摘要]\n{summary}",
+             "sender_id": "system",
+@@ -330,6 +353,9 @@
+             "kind": "context_summary",
+             "timestamp": max(0.0, float(timestamp) - 0.001),
+         }
++        if refs:
++            message["image_refs"] = refs
++        return message
+ 
+     def add_message(self, chat_id: str, message: Dict, should_prune: bool = False):
+         """
+@@ -442,7 +468,11 @@
+         ):
+             return messages
+         ts = messages[0].get("timestamp", time.time()) if messages else time.time()
+-        return [self._make_summary_message(summary, ts)] + messages
++        summary_refs = self._summary_image_refs([
++            message for message in messages
++            if message.get("kind") in ("context_summary", "summary_context", "context_compaction")
++        ])
++        return [self._make_summary_message(summary, ts, summary_refs)] + messages
+ 
+     def organize_context(
+         self,
+@@ -699,7 +729,11 @@
+             ]
+             if summary:
+                 ts = retained[0].get("timestamp", time.time()) if retained else time.time()
+-                retained = [self._make_summary_message(summary, ts)] + retained
++                retained_ids = {id(message) for message in retained}
++                summary_refs = self._summary_image_refs([
++                    message for message in messages if id(message) not in retained_ids
++                ])
++                retained = [self._make_summary_message(summary, ts, summary_refs)] + retained
+             original = len(messages)
+             ledger["messages"] = retained
+             self._last_compression_time[chat_id] = time.time()
+@@ -760,7 +794,11 @@
+ 
+             ts = retained[0].get("timestamp", time.time()) if retained else time.time()
+             ledger["current_summary"] = summary_text
+-            ledger["messages"] = [self._make_summary_message(summary_text, ts)] + retained
++            retained_ids = {id(message) for message in retained}
++            summary_refs = self._summary_image_refs([
++                message for message in messages if id(message) not in retained_ids
++            ])
++            ledger["messages"] = [self._make_summary_message(summary_text, ts, summary_refs)] + retained
+             self._last_compression_time[chat_id] = time.time()
+             logger.info(
+                 f"AngelHeart[{chat_id}]: 摘要提交完成({reason}) "

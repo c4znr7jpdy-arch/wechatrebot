@@ -34,9 +34,9 @@ def manager_url(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def browser():
+def browser(manager_browser_launch_options):
     with sync_playwright() as runtime:
-        instance = runtime.chromium.launch()
+        instance = runtime.chromium.launch(**manager_browser_launch_options)
         try:
             yield instance
         finally:

@@ -817,14 +817,15 @@
   }
 
   let modalResolve = null;
-  function managerCloseState() {
+  function managerCloseState({ignoreModalBusy = false} = {}) {
     return {
       dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
         || state.scheduledDirty || coreSettings.dirty || hasChatDrafts()),
       busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
         || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
-        || state.stopRequestPending || state.status?.busy),
+        || state.stopRequestPending || state.status?.busy
+        || (!ignoreModalBusy && $("#modalBackdrop")?.dataset.busy === "true")),
       updating: Boolean(state.updateInstalling),
     };
   }
