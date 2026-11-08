@@ -463,6 +463,7 @@ window.createChatManagement = function (helpers) {
     button.textContent = "正在检查影响…";
     try {
       const values = readGroupPolicyForm(form);
+      const draft = groupDrafts[groupId];
       const preview = await api("preview_group_policy", account, groupId, values, form.dataset.revision || "");
       const impact = Array.isArray(preview.impact) ? preview.impact : ["本次修改只影响当前群的机器人规则。"];
       button.disabled = false;
@@ -474,11 +475,22 @@ window.createChatManagement = function (helpers) {
         intent: "primary",
         onConfirm: async () => {
           if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
-          await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
+          const saved = await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
           if (state.groupAccount !== account || state.groupPolicies !== policies) return;
-          delete groupDrafts[groupId];
-          if (!await loadGroupPolicy(groupId, true)) throw new Error("规则已保存，但未能重新读取，请重试后核对。");
-          toast("群聊规则已保存并回读确认。");
+          if (!saved?.saved || saved.account_id !== account || saved.group_id !== groupId || !saved.revision) {
+            throw new Error("未收到本群规则的保存确认，请重新读取规则后核对。");
+          }
+          const previous = policies[groupId] || {};
+          policies[groupId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
+            ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
+          }))};
+          if (groupDrafts[groupId] === draft) delete groupDrafts[groupId];
+          else if (groupDrafts[groupId]) groupDrafts[groupId].policy.revision = saved.revision;
+          if (state.selectedGroup === groupId) {
+            renderGroupInspector();
+            if (!groupDrafts[groupId]) $("#groupPolicyNote").textContent = "群聊规则已保存并回读确认。";
+          }
+          toast(groupDrafts[groupId] ? "群聊规则已保存；检查期间的新修改仍未保存，已为你保留。" : "群聊规则已保存并回读确认。");
         },
       });
       return;

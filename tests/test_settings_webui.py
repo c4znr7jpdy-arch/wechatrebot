@@ -388,7 +388,7 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         page.locator('#modalConfirm').click()
         expect(page.locator('#groupPolicyNote')).not_to_contain_text('未保存')
         expect(mode).to_have_value('off')
-        assert page.evaluate('window.policyReads') == 4
+        assert page.evaluate('window.policyReads') == 3  # Save already returns the verified policy.
     finally:
         page.close()
 
