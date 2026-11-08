@@ -467,10 +467,20 @@ window.createChatManagement = function (helpers) {
         intent: "primary",
         onConfirm: async () => {
           if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
-          await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
+          const saved = await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
           if (state.groupAccount !== account || state.groupPolicies !== policies) return;
+          if (!saved?.saved || saved.account_id !== account || saved.group_id !== groupId || !saved.revision) {
+            throw new Error("未收到本群规则的保存确认，请重新读取规则后核对。");
+          }
+          const previous = policies[groupId] || {};
+          policies[groupId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
+            ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
+          }))};
           delete groupDrafts[groupId];
-          if (!await loadGroupPolicy(groupId, true)) throw new Error("规则已保存，但未能重新读取，请重试后核对。");
+          if (state.selectedGroup === groupId) {
+            renderGroupInspector();
+            $("#groupPolicyNote").textContent = "群聊规则已保存并回读确认。";
+          }
           toast("群聊规则已保存并回读确认。");
         },
       });

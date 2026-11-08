@@ -569,7 +569,7 @@ window.createPreviewApi = function (helpers) {
       ]}),
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
       preview_group_policy: (_accountId, groupId, values) => ok({group_id: groupId, changed_fields: Object.keys(values || {}), impact: ["预览模式只影响当前群的机器人规则。"], will_send_messages: false}),
-      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok(previewPolicyOverview(groupId).policy, "群聊策略已保存；未向群内发送消息。"); },
+      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok({...previewPolicyOverview(groupId).policy, saved: true, apply_state: "applied"}, "群聊策略已保存；未向群内发送消息。"); },
       get_contacts: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: previewContacts.length, truncated: false, items: structuredClone(previewContacts), message: "预览数据：正式版本从当前登录微信通讯录读取，刷新不会发送消息。"}),
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_contact_network_profile: (accountId, contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: accountId, item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
