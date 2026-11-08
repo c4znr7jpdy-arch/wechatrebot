@@ -26,6 +26,7 @@ window.createModelServices = function (helpers) {
   let providerReadGeneration = 0;
   let providerReadBusy = false;
   let providerMutationBusy = false;
+  let providerReadbackResult = "模型已保存";
 
   function clearProviderTest() {
     providerTestGeneration += 1;
@@ -117,17 +118,22 @@ window.createModelServices = function (helpers) {
     showProviderOverview(true);
   }
 
-  function acceptSavedProvider(data, submitted, generation) {
-    const services = state.bootstrap.providers || [];
-    const existing = services.find((item) => item.id === data.id);
-    state.bootstrap.providers = services
-      .filter((item) => item.id !== data.id)
-      .map((item) => data.is_default ? {...item, is_default: false} : item);
-    state.bootstrap.providers.push({...existing, ...data});
-    state.bootstrap.provider = state.bootstrap.providers.find((item) => item.is_default) || state.bootstrap.provider;
+  function applyProviderServices(services) {
+    state.bootstrap.providers = services;
+    state.bootstrap.provider = services.find((item) => item.is_default) || null;
     state.featureDetails = {};
     getCoreSettings().invalidate();
     renderProviderServices();
+  }
+
+  function acceptSavedProvider(data, submitted, generation) {
+    const services = state.bootstrap.providers || [];
+    const existing = services.find((item) => item.id === data.id);
+    const updated = services
+      .filter((item) => item.id !== data.id)
+      .map((item) => data.is_default ? {...item, is_default: false} : item);
+    updated.push({...existing, ...data});
+    applyProviderServices(updated);
     if (generation !== providerEditorGeneration || state.providerScreen !== "editor") return;
     const form = $("#providerForm");
     form.elements.provider_id.value = data.id;
@@ -160,27 +166,26 @@ window.createModelServices = function (helpers) {
     $("#reloadProviderServices").disabled = providerReadBusy || providerSaveBusy;
   }
 
-  async function refreshProviderServices() {
+  async function refreshProviderServices(confirmedResult = providerReadbackResult) {
     const request = ++providerReadGeneration;
     const feedback = $("#providerReadbackFeedback");
     const button = $("#reloadProviderServices");
     providerReadBusy = true;
+    providerReadbackResult = confirmedResult;
     feedback.hidden = false;
     button.disabled = true;
-    $("#providerReadbackMessage").textContent = "模型已保存，正在重新读取模型列表…";
+    $("#providerReadbackMessage").textContent = `${confirmedResult}，正在重新读取模型列表…`;
     try {
       const providers = await api("get_providers");
       if (request !== providerReadGeneration) return false;
-      state.bootstrap.providers = providers;
-      state.bootstrap.provider = providers.find((item) => item.is_default) || state.bootstrap.provider;
-      renderProviderServices();
+      applyProviderServices(providers);
       feedback.hidden = true;
       return true;
     } catch (error) {
       if (request !== providerReadGeneration) return false;
-      $("#providerReadbackMessage").textContent = "模型已保存，但列表暂时未能刷新。请重新读取模型列表，已保存的配置仍然保留。";
-      const readError = new Error(`模型已保存，列表刷新失败：${error.message}`, {cause: error});
-      if (error.product) readError.product = {...error.product, title: "模型已保存，列表刷新失败"};
+      $("#providerReadbackMessage").textContent = `${confirmedResult}，但列表暂时未能刷新。请重新读取模型列表，已完成的操作无需再次执行。`;
+      const readError = new Error(`${confirmedResult}，列表刷新失败：${error.message}`, {cause: error});
+      if (error.product) readError.product = {...error.product, title: `${confirmedResult}，列表刷新失败`};
       reportError(readError);
       return false;
     } finally {
@@ -231,7 +236,7 @@ window.createModelServices = function (helpers) {
           ? "模型服务已保存，并已设为当前回复模型。"
           : "模型服务已保存，机器人启动时会使用它。")
         : "模型服务已保存，当前回复模型保持不变。");
-      await refreshProviderServices();
+      await refreshProviderServices("模型已保存");
       if (generation === providerEditorGeneration && state.providerScreen === "editor") {
         if (state.providerDirty) {
           $("#providerNote").textContent = "提交时的配置已保存；之后的修改仍未保存，请再次保存。";
@@ -556,11 +561,9 @@ window.createModelServices = function (helpers) {
     button.textContent = "切换中…";
     try {
       const result = await api("set_default_provider", providerId);
-      state.bootstrap.providers = await api("get_providers");
-      state.featureDetails = {};
-      getCoreSettings().invalidate();
-      renderProviderServices();
+      applyProviderServices(state.bootstrap.providers.map((item) => ({...item, is_default: item.id === result.id})));
       toast(result.apply_state === "applied" ? "回复模型已切换并立即生效。" : "回复模型已切换，将在启动时生效。");
+      await refreshProviderServices("回复模型已切换");
     } catch (error) { reportError(error); }
     finally { button.disabled = false; button.textContent = original; finishProviderMutation(); }
   }
@@ -810,13 +813,17 @@ window.createModelServices = function (helpers) {
         beginProviderMutation();
         try {
           await api("delete_provider", providerId, replacementId || "");
-          state.bootstrap.providers = await api("get_providers");
-          state.featureDetails = {};
-          getCoreSettings().invalidate();
-          renderProviderServices();
+          applyProviderServices(state.bootstrap.providers
+            .filter((item) => item.id !== providerId)
+            .map((item) => item.id === replacementId ? {
+              ...item,
+              is_default: service.is_default || item.is_default,
+              references: [...new Set([...(item.references || []), ...references])],
+            } : item));
           markProviderClean();
           showProviderOverview(true);
           toast("模型服务已删除。");
+          await refreshProviderServices("模型服务已删除");
         } finally { finishProviderMutation(); }
       },
     });
@@ -829,9 +836,12 @@ window.createModelServices = function (helpers) {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     try {
-      await api("set_provider_thinking", providerId, !service.thinking_enabled);
-      state.bootstrap.providers = await api("get_providers");
-      renderProviderServices();
+      const result = await api("set_provider_thinking", providerId, !service.thinking_enabled);
+      applyProviderServices(state.bootstrap.providers.map((item) => item.id === result.id ? {
+        ...item, thinking_enabled: result.thinking_enabled,
+        thinking_supported: result.thinking_supported ?? item.thinking_supported,
+      } : item));
+      await refreshProviderServices("思考模式已保存");
     } catch (error) {
       reportError(error);
       renderProviderServices();
