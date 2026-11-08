@@ -30,9 +30,13 @@ def update_release_id(release: UpdateRelease) -> str:
 def _read_receipt(working: Path) -> dict[str, object] | None:
     try:
         path = _checked_target(working, Path(UPDATE_CACHE_RECEIPT))
-        if not path.is_file() or path.stat().st_size > 1024:
+        if not path.is_file():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        with path.open("rb") as source:
+            content = source.read(1025)
+        if len(content) > 1024:
+            return None
+        payload = json.loads(content.decode("utf-8"))
         if (isinstance(payload, dict) and payload.get("schema_version") == 1
                 and _valid_digest(payload.get("release_id"))):
             return payload
