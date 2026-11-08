@@ -240,7 +240,7 @@ window.createFeatureController = function (helpers) {
       const inputType = ["int", "float"].includes(type) || uiControl === "proxy-port" ? "number" : (field.secret ? "password" : "text");
       const step = type === "float" ? "any" : "1";
       const slider = field.slider && typeof field.slider === "object" ? field.slider : {};
-      const numericRules = inputType === "number" ? `step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
+      const numericRules = inputType === "number" ? `data-nullable="${field._nullable === true}" step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
       const secretRules = field.secret ? `autocomplete="new-password" placeholder="${field._secret_configured ? "已安全保存；留空保持不变" : "请输入后保存"}"` : "";
       control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(uiControl === "proxy-port" ? uiControl : type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
     }
@@ -619,6 +619,9 @@ window.createFeatureController = function (helpers) {
         }
       }
       else value = input.value;
+      if (["int", "float"].includes(input.dataset.type) && value === null && input.dataset.nullable !== "true") {
+        throw new Error(`${input.dataset.label || "数字配置"}不能为空，请填写数字。`);
+      }
       if (input.dataset.required === "true" && !String(value ?? "").trim()) {
         throw new Error(`${input.dataset.label || "此配置"}不能为空，请先选择可用模型。`);
       }
