@@ -14,11 +14,13 @@ window.createManagerSettings = function (helpers) {
     fullTime,
     guardProviderDraft,
     loadFeatures,
+    managerCloseState,
     navigate,
     openFeature,
     openModelSettings,
     renderProviderServices,
     reportError,
+    refreshRestoredSettings,
     safeImageUrl,
     showProviderOverview,
     state,
@@ -83,6 +85,7 @@ window.createManagerSettings = function (helpers) {
   }
 
   function setSettingsSection(section, focus = false) {
+    if (state.restorePending && section !== "system") { toast("备份已恢复，请先重新读取恢复结果。", "error"); return; }
     if (!SETTINGS_SECTIONS.has(section)) return;
     const changed = state.settingsSection !== section;
     if (changed) {
@@ -278,7 +281,16 @@ window.createManagerSettings = function (helpers) {
       if (request !== maintenanceRead) return;
       $("#backupSummary").textContent = "维护信息暂时无法读取，请重新打开“系统”重试。";
       reportError(error);
-    }
+    } finally { if (request === maintenanceRead) renderRestoreReadback(); }
+  }
+
+  function renderRestoreReadback() {
+    if (!state.restorePending) return;
+    $("#createBackup").disabled = true;
+    $("#restoreBackup").disabled = Boolean(state.restoreRefreshing);
+    $("#restoreBackup").textContent = "重新读取恢复结果";
+    $("#restoreSummary").textContent = state.restoreRefreshing ? "备份已恢复，正在重新读取配置…"
+      : "备份已恢复，但界面尚未完成刷新。请重新读取恢复结果；无需再次恢复备份，也可关闭并重新打开管理器。";
   }
 
   function createBackup() {
@@ -292,6 +304,11 @@ window.createManagerSettings = function (helpers) {
   }
 
   function chooseRestoreBackup() {
+    if (state.restoreRefreshing) return;
+    if (state.restorePending) { void readRestoredSettings(); return; }
+    const pending = managerCloseState();
+    if (pending.dirty) { toast("有设置尚未保存。请先保存或处理修改，再恢复备份。", "error"); return; }
+    if (pending.busy || pending.updating || state.webSearchLoading) { toast("正在处理其他操作，请完成后再恢复备份。", "error"); return; }
     const backups = state.maintenance?.backups || [];
     if (!backups.length) { toast("当前没有可恢复的备份。", "error"); return; }
     confirmAction({
@@ -300,8 +317,34 @@ window.createManagerSettings = function (helpers) {
       confirmText: "校验并恢复",
       pendingText: "正在校验…",
       field: {label: "选择备份", type: "select", value: backups[0].id, options: backups.map((item) => ({value: item.id, label: `${fullTime(item.modified_at)} · ${formatBytes(item.size)}`}))},
-      onConfirm: async (backupId) => { await api("validate_restore", backupId); await api("restore_backup", backupId); state.maintenance = null; await loadMaintenance(); },
+      onConfirm: async (backupId) => {
+        const current = managerCloseState({ignoreModalBusy: true});
+        if (current.dirty || current.busy || current.updating || state.webSearchLoading) throw new Error("请先完成其他操作并处理未保存的设置，再恢复备份。");
+        await api("validate_restore", backupId);
+        await api("restore_backup", backupId);
+        state.restorePending = true;
+        await readRestoredSettings();
+      },
     });
+  }
+
+  async function readRestoredSettings() {
+    state.restoreRefreshing = true;
+    $("#restoreBackup").disabled = true;
+    $("#createBackup").disabled = true;
+    $("#restoreSummary").textContent = "备份已恢复，正在重新读取配置…";
+    try {
+      await refreshRestoredSettings();
+      state.restorePending = false;
+      $("#restoreBackup").textContent = "选择恢复";
+      await loadMaintenance();
+      toast("备份已恢复，界面已读取恢复后的设置。");
+    } catch (error) {
+      reportError(error);
+    } finally {
+      state.restoreRefreshing = false;
+      renderRestoreReadback();
+    }
   }
 
   async function exportDiagnostics() {

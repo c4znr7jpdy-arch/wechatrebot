@@ -1,0 +1,29 @@
+diff --git a/core/event_handler_modules/memory_reflection.py b/core/event_handler_modules/memory_reflection.py
+--- a/core/event_handler_modules/memory_reflection.py
++++ b/core/event_handler_modules/memory_reflection.py
+@@ -243,16 +243,21 @@
+ 
+                     # 检查是否已达到最大重试次数
+                     if retry_count >= 3:
++                        try:
++                            failed_end = int(pending_summary.get("end_index", last_summarized_index))
++                        except (TypeError, ValueError, OverflowError):
++                            failed_end = last_summarized_index
++                        abandoned_end = max(last_summarized_index, min(end_index, failed_end))
+                         logger.warning(
+                             f"[{session_id}] 待处理总结已连续失败 {retry_count} 次，放弃该范围 "
+-                            f"[{pending_start}:{pending_summary.get('end_index', end_index)}]"
+-                        )
+-                        # 清除待处理记录，更新 last_summarized_index 到当前位置
++                            f"[{pending_start}:{abandoned_end}]"
++                        )
++                        # 只跳过已失败的历史范围，保留之后新到的消息供下次总结。
+                         await self.conversation_manager.update_session_metadata(
+                             session_id, "pending_summary", None
+                         )
+                         await self.conversation_manager.update_session_metadata(
+-                            session_id, "last_summarized_index", end_index
++                            session_id, "last_summarized_index", abandoned_end
+                         )
+                         return
+ 
