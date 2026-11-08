@@ -54,7 +54,7 @@ window.createScheduledTasks = function (helpers) {
       && (state.historyAccount === undefined || state.historyAccount === account);
   }
 
-  function invalidateScheduledContext() {
+  function invalidateScheduledContext({clearEditor = false} = {}) {
     pendingTaskReadback = "";
     state.scheduledLoad += 1;
     state.scheduledContextRequest = null;
@@ -62,6 +62,7 @@ window.createScheduledTasks = function (helpers) {
     state.scheduledCommandCatalog = [];
     state.schedules = [];
     state.legacyMigrations = [];
+    if (clearEditor) { state.scheduledEditor = null; showScheduledList(); }
     $("#refreshSchedules").disabled = false;
     $("#scheduleContextMessage").textContent = "微信账号已变化，请重新读取任务列表。";
     $("#scheduleContextMessage").hidden = false;

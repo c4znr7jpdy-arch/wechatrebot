@@ -355,6 +355,15 @@
       $("#refreshCore").addEventListener('click', () => load(true));
       $("#newCoreTemplate").addEventListener('click', createTemplate);
     }
-    return {init, load, guard, invalidate() { state.stale = true; }, get dirty() { return state.dirty; }, get busy() { return state.busy || state.loading; }};
+    function invalidate(clear = false) {
+      state.stale = true;
+      if (!clear) return;
+      state.detail = null;
+      state.templates = []; state.bindings = {}; state.view = "global"; state.templateId = null;
+      state.readbackPending = ""; state.readbackScope = "";
+      resetDraft();
+      root().innerHTML = '<div class="loading-row">配置已恢复，请重新读取。</div>';
+    }
+    return {init, load, guard, invalidate, get dirty() { return state.dirty; }, get busy() { return state.busy || state.loading; }};
   };
 })();

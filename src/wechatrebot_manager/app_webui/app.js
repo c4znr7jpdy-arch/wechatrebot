@@ -19,6 +19,7 @@
     featureSaving: false,
     featureLoad: 0,
     featurePrefetch: 0,
+    featuresLoad: 0,
     featureDetails: {},
     imageServiceChoicesStale: false,
     featureFeedback: "",
@@ -90,6 +91,8 @@
     experience: null,
     readiness: null,
     maintenance: null,
+    restorePending: false,
+    restoreRefreshing: false,
     responseTraces: [],
     activityItems: [],
     activityPage: 1,
@@ -581,6 +584,7 @@
   }
 
   async function runPrimaryAction() {
+    if (state.restorePending) { toast("备份已恢复，请先到系统设置重新读取恢复结果。", "error"); return; }
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
     const cancelStart = action === "stop" && state.status?.start_pending && state.status?.can_stop;
@@ -685,6 +689,7 @@
   const retainedPageScroll = new Map(["groups", "history", "schedules", "activity"].map(page => [page, 0]));
 
   async function navigate(page) {
+    if (state.restorePending && page !== "settings") { toast("备份已恢复，请先重新读取恢复结果。", "error"); return; }
     if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
     if (page !== state.activePage && coreSettings.guard(() => navigate(page))) return;
     if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
@@ -824,7 +829,7 @@
       busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
         || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
-        || state.stopRequestPending || state.status?.busy
+        || state.stopRequestPending || state.status?.busy || state.restoreRefreshing
         || (!ignoreModalBusy && $("#modalBackdrop")?.dataset.busy === "true")),
       updating: Boolean(state.updateInstalling),
     };
@@ -1357,6 +1362,33 @@
     }
   }
 
+  async function refreshRestoredSettings() {
+    state.featuresLoad += 1;
+    state.featureLoad += 1;
+    state.featurePrefetch += 1;
+    state.featurePageLoad += 1;
+    state.featuresLoaded = false;
+    state.features = [];
+    state.selectedFeature = null;
+    state.featureDetail = null;
+    state.featureDetails = {};
+    $("#featureDetail").innerHTML = '<div class="loading-row">配置已恢复，请重新读取功能设置。</div>';
+    $("#featurePageFrame")?.removeAttribute("src");
+    state.webSearch = null;
+    state.webSearchUnconfirmed = false;
+    $("#webSearchForm").elements.key.value = "";
+    clearProviderModels();
+    clearProviderTest();
+    coreSettings.invalidate(true);
+    invalidateHistoryState();
+    invalidateScheduledContext({clearEditor: true});
+    invalidateChatManagementContext();
+    const data = await api("bootstrap");
+    state.bootstrap = data;
+    fillSettings(data);
+    renderStatus(data.status);
+  }
+
   // Assemble existing page controllers before attaching the application lifecycle.
   const { configFromForm, discardFeatureChanges, growTextarea, loadFeatures, openFeature, refreshFeatures, refreshVisibleFeatureState, renderFeatureList, renderHelp, schemaMarkup } = createPageController("createFeatureController", {
     $,
@@ -1483,11 +1515,13 @@
     fullTime: (...args) => fullTime(...args),
     guardProviderDraft: (...args) => guardProviderDraft(...args),
     loadFeatures: (...args) => loadFeatures(...args),
+    managerCloseState,
     navigate: (...args) => navigate(...args),
     openFeature: (...args) => openFeature(...args),
     openModelSettings: (...args) => openModelSettings(...args),
     renderProviderServices: (...args) => renderProviderServices(...args),
     reportError: (...args) => reportError(...args),
+    refreshRestoredSettings,
     safeImageUrl: (...args) => safeImageUrl(...args),
     showProviderOverview: (...args) => showProviderOverview(...args),
     state,
