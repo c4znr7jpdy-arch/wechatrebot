@@ -247,7 +247,7 @@ class UpdateApiMixin:
             )
 
     def get_update_status(self) -> dict[str, object]:
-        if getattr(self, "_update_close_pending", False) and self._update_lock.acquire(blocking=False):
+        if getattr(self, "_update_installing", False) and self._update_lock.acquire(blocking=False):
             try:
                 self._refresh_update_close_helper()
             finally:
@@ -256,7 +256,7 @@ class UpdateApiMixin:
             return self._ok(dict(self._update_status))
 
     def _refresh_update_close_helper(self) -> None:
-        if not getattr(self, "_update_close_pending", False):
+        if not getattr(self, "_update_installing", False):
             return
         helper = getattr(self, "_update_helper", None)
         try:
@@ -272,6 +272,7 @@ class UpdateApiMixin:
             # An unverified helper must still block another installation.
             return
         self._update_helper = None
+        self._update_close_generation += 1
         self._update_close_pending = False
         self._update_installing = False
         self._update_confirmation_token = ""
@@ -295,6 +296,15 @@ class UpdateApiMixin:
             confirmation_token=self._update_confirmation_token,
             message=failure["error"]["message"], error=failure["error"],
         )
+
+    def _schedule_update_close(self) -> None:
+        # Installation and close retries call this while holding _update_lock.
+        # Capture the exact helper as well as the close attempt's generation.
+        self._update_close_generation += 1
+        helper, generation = self._update_helper, self._update_close_generation
+        threading.Timer(
+            0.35, lambda: self._close_window_for_update(helper, generation),
+        ).start()
 
     def _prepared_matches(self, release: UpdateRelease) -> bool:
         prepared = self._prepared_update
@@ -388,7 +398,7 @@ class UpdateApiMixin:
             )
             succeeded = True
             if self._window is not None:
-                threading.Timer(0.35, self._close_window_for_update).start()
+                self._schedule_update_close()
         except Exception as exc:
             if succeeded:
                 self._report_update_close_failure(exc)
@@ -441,7 +451,7 @@ class UpdateApiMixin:
                     confirmation_token="", error=None, message="正在再次关闭管理器以继续更新",
                 )
                 try:
-                    threading.Timer(0.35, self._close_window_for_update).start()
+                    self._schedule_update_close()
                 except RuntimeError as exc:
                     self._report_update_close_failure(exc)
                 return self._ok({"accepted": True, "version": release.version})

@@ -54,6 +54,9 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value._prepared_update = None
     value._update_confirmation_token = ""
     value._update_installing = False
+    value._update_helper = None
+    value._update_close_pending = False
+    value._update_close_generation = 0
     value._mandatory_update = False
     value._update_channel_error = ""
     value._update_result = None
@@ -1805,7 +1808,8 @@ def _downloadable_update(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(update_api, "prepare_update", prepare)
     monkeypatch.setattr(update_api, "create_update_plan", lambda *_a, **_kw: events.append("verify_plan") or "plan")
     monkeypatch.setattr(update_api, "assert_update_runtime_stopped", lambda *_a: events.append("verify_stopped"))
-    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: events.append("launch"))
+    helper = SimpleNamespace(poll=lambda: None, args=[str(tmp_path / "helper.exe")])
+    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: events.append("launch") or helper)
     api._lifecycle.force_stop_for_update = lambda: events.append("stop_all")
     return api, prepared, events
 
@@ -1849,7 +1853,7 @@ def test_update_download_waits_for_explicit_confirmation(monkeypatch, tmp_path):
     assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
     assert api.get_update_status()["data"]["confirmation_token"] == ""
     assert api._update_installing is True
-    assert close_timers == [(0.35, api._close_window_for_update)]
+    assert len(close_timers) == 1 and close_timers[0][0] == 0.35
     assert api.start_robot()["data"]["accepted"] is False
     assert api._queue_robot_action("connect_wechat", "连接")["data"]["accepted"] is False
     assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is False
@@ -3173,8 +3177,10 @@ def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:
         permit_programmatic_close=lambda: calls.append("permit")
     )
     api._window = SimpleNamespace(destroy=lambda: calls.append("destroy"))
+    api._update_installing = True
+    api._update_helper = SimpleNamespace(poll=lambda: None)
 
-    api._close_window_for_update()
+    api._close_window_for_update(api._update_helper, api._update_close_generation)
 
     assert calls == ["permit", "destroy"]
 

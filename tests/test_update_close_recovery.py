@@ -111,8 +111,88 @@ def test_native_close_failure_keeps_tray_and_normal_close_protection(monkeypatch
     monkeypatch.setattr(api._tray, "stop", lambda: calls.append("stop"))
     monkeypatch.setattr(api._tray, "_ensure_available", lambda: True)
     api._window.hide = lambda: calls.append("hide")
-    api._close_window_for_update()
+    api._close_window_for_update(api._update_helper, api._update_close_generation)
     assert calls == []
     assert not api._tray._exit_requested
     assert api._tray.handle_window_closing() is False
     assert calls == ["hide"]
+
+
+def _scheduled_close(monkeypatch, tmp_path, attempt):
+    if attempt == "retry":
+        api, prepared, events, helper, callbacks, failed = _waiting_for_close(monkeypatch, tmp_path)
+        assert api.install_update(prepared.release.version, failed["confirmation_token"])["data"]["accepted"]
+    else:
+        api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+        callbacks = []
+        monkeypatch.setattr(update_api.threading, "Timer", lambda _delay, callback:
+                            SimpleNamespace(start=lambda: callbacks.append(callback)))
+        api._window = SimpleNamespace(destroy=lambda: None)
+        ready = _download_ready(api)
+        assert api.install_update(prepared.release.version, ready["confirmation_token"])["data"]["accepted"]
+        _wait_update_worker(api)
+        helper = api._update_helper
+    calls = []
+    api._tray = SimpleNamespace(
+        permit_programmatic_close=lambda: calls.append("permit"),
+        cancel_programmatic_close=lambda: calls.append("cancel"),
+    )
+    api._window.destroy = lambda: calls.append("destroy")
+    api._close_feature_page_server = lambda: calls.append("server_close")
+    return api, prepared, events, helper, callbacks, calls
+
+
+@pytest.mark.parametrize("attempt", ["initial", "retry"])
+@pytest.mark.parametrize("poll_before_callback", [False, True])
+def test_exited_helper_invalidates_pending_close_before_native_side_effects(
+    monkeypatch, tmp_path, attempt, poll_before_callback,
+):
+    api, _prepared, _events, helper, callbacks, calls = _scheduled_close(monkeypatch, tmp_path, attempt)
+    helper.poll = lambda: 1
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _paths: ())
+    if poll_before_callback:
+        assert api.get_update_status()["data"]["state"] == "failed"
+    callbacks.pop()()
+    assert calls == []
+    assert not api._update_installing and api._update_helper is None
+    assert api.get_update_status()["data"]["state"] == "failed"
+
+
+@pytest.mark.parametrize("attempt", ["initial", "retry"])
+def test_old_close_cannot_close_or_reset_a_new_helper_handoff(monkeypatch, tmp_path, attempt):
+    api, prepared, events, helper, callbacks, calls = _scheduled_close(monkeypatch, tmp_path, attempt)
+    old_callback = callbacks.pop()
+    helper.poll = lambda: 1
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _paths: ())
+    assert api.get_update_status()["data"]["state"] == "failed"
+    ready = _download_ready(api)
+    replacement = SimpleNamespace(poll=lambda: None, args=[str(tmp_path / "replacement-helper.exe")])
+    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan:
+                        events.append("launch") or replacement)
+    assert api.install_update(prepared.release.version, ready["confirmation_token"])["data"]["accepted"]
+    assert _wait_update_worker(api)["state"] == "restarting"
+    before = api.get_update_status()["data"]
+    old_callback()
+    assert calls == []
+    assert api._update_helper is replacement and api._update_installing
+    assert api.get_update_status()["data"] == before
+    current_callback = callbacks.pop()
+    current_callback()
+    current_callback()  # An already consumed timer cannot close twice.
+    old_callback()
+    assert calls == ["permit", "destroy", "server_close"]
+    assert events.count("launch") == 2 and events.count("download") == 1
+
+
+def test_new_close_attempt_invalidates_older_attempt_for_same_helper(monkeypatch, tmp_path):
+    api, _prepared, _events, helper, callbacks, calls = _scheduled_close(monkeypatch, tmp_path, "retry")
+    old_callback = callbacks.pop()
+    with api._update_lock:
+        api._schedule_update_close()
+    current_callback = callbacks.pop()
+    before = api.get_update_status()["data"]
+    old_callback()
+    assert calls == [] and api._update_helper is helper
+    assert api.get_update_status()["data"] == before
+    current_callback()
+    assert calls == ["permit", "destroy", "server_close"]

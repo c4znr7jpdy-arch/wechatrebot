@@ -248,6 +248,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._update_installing = False
         self._update_helper = None
         self._update_close_pending = False
+        self._update_close_generation = 0
         self._mandatory_update = False
         self._update_result = None
         if not development:
@@ -383,17 +384,29 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 
-    def _close_window_for_update(self) -> None:
-        try:
-            if self._tray is not None:
-                self._tray.permit_programmatic_close()
-            if self._window is not None:
-                self._window.destroy()
-            self._close_feature_page_server()
-        except Exception as exc:
-            if self._tray is not None:
-                self._tray.cancel_programmatic_close()
-            self._report_update_close_failure(exc)
+    def _close_window_for_update(self, helper: Any, generation: int) -> None:
+        with self._update_lock:
+            if (not self._update_installing or helper is None
+                    or helper is not self._update_helper
+                    or generation != self._update_close_generation):
+                return
+            self._refresh_update_close_helper()
+            if (helper is not self._update_helper
+                    or generation != self._update_close_generation):
+                return
+            # Consume this callback before any native side effects. A late or
+            # repeated callback must never close a recovered/newer session.
+            self._update_close_generation += 1
+            try:
+                if self._tray is not None:
+                    self._tray.permit_programmatic_close()
+                if self._window is not None:
+                    self._window.destroy()
+                self._close_feature_page_server()
+            except Exception as exc:
+                if self._tray is not None:
+                    self._tray.cancel_programmatic_close()
+                self._report_update_close_failure(exc)
 
     @staticmethod
     def _ok(data: Any = None, *, message: str = "") -> dict[str, object]:
