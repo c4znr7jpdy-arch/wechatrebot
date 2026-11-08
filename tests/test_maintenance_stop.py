@@ -10,7 +10,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from wechatrebot_manager import launcher, lifecycle, uninstaller
+from test_customer_maintenance import _install
+from wechatrebot_manager import app_shell, launcher, lifecycle, uninstaller
+from wechatrebot_manager.customer_maintenance import CustomerMaintenanceService, MaintenanceBusyError
 from wechatrebot_manager.environment import WechatEnvironment
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
@@ -123,6 +125,57 @@ def test_licensed_user_pause_preserves_bridge_and_cannot_pass_maintenance_gate(t
     assert core.poll() == 0 and bridge.poll() is None
     assert bridge.signals == []
     assert controller.maintenance_stopped() is False
+
+
+@pytest.mark.parametrize("license_state", ["unactivated", "expired"])
+def test_unlicensed_stopped_installation_can_backup_without_starting_services(
+    tmp_path, monkeypatch, license_state,
+):
+    tmp_path = tmp_path / "install"
+    _install(tmp_path)
+    controller, _, _ = _controller(tmp_path, monkeypatch, licensed=True)
+    controller.licenses.snapshot = lambda account: {
+        "enabled": True, "authorized": False, "can_run": False,
+        "state": license_state, "message": "Not authorized",
+    }
+    monkeypatch.setattr(controller, "request_stop", lambda: pytest.fail("Backup must not stop services"))
+    api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._lifecycle = controller
+    service = CustomerMaintenanceService(tmp_path, is_running=api._runtime_active)
+
+    assert controller.refresh().state == lifecycle.LifecycleState.LICENSE_PAUSED
+    assert service.preview_backup()["can_create"] is True
+    assert Path(service.create_backup()["path"]).is_file()
+    assert controller._supervisor is None
+
+
+@pytest.mark.parametrize("blocker", ["bridge", "snapshot", "probe", "unknown"])
+def test_customer_backup_gate_rejects_survivors_and_unavailable_status(tmp_path, monkeypatch, blocker):
+    tmp_path = tmp_path / "install"
+    _install(tmp_path)
+    controller, supervisor, _ = _controller(tmp_path, monkeypatch, licensed=True)
+    controller.licenses.snapshot = lambda account: {
+        "enabled": True, "authorized": False, "can_run": False,
+        "state": "expired", "message": "Not authorized",
+    }
+    if blocker == "bridge":
+        controller._supervisor = supervisor
+        supervisor.running = [launcher.RunningService(supervisor.specs[1], _Process(), io.BytesIO())]
+    elif blocker == "snapshot":
+        def unavailable():
+            raise ValueError("invalid runtime configuration")
+        controller._snapshotter = unavailable
+    elif blocker == "probe":
+        monkeypatch.setattr(lifecycle, "installation_services_stopped", lambda root: False)
+    else:
+        controller = SimpleNamespace(refresh=lambda: SimpleNamespace(state="STOPPED"))
+    api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._lifecycle = controller
+    service = CustomerMaintenanceService(tmp_path, is_running=api._runtime_active)
+
+    with pytest.raises(MaintenanceBusyError):
+        service.create_backup()
+    assert not (tmp_path / "backups").exists()
 
 
 @pytest.mark.parametrize("licensed", [False, True])
