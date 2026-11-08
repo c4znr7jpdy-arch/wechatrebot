@@ -677,7 +677,7 @@ window.createPreviewApi = function (helpers) {
       save_theme: (theme) => ok({theme}),
       sync_window_theme: () => ok({applied: false}),
       save_skin: (skin) => ok({skin}),
-      get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
+      get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json", path: "C:\\WeChatReBot\\logs\\robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
       open_install_folder: () => ok({opened: true}), open_uninstaller: () => ok({opened: true}),
       check_update: () => ok({enabled: true, current: true, release: null}),
       get_update_status: () => ok(structuredClone(previewUpdateStatus)),

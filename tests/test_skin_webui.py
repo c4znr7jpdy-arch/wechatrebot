@@ -29,6 +29,15 @@ def open_skin_settings(page, url):
     expect(page.locator("#skinOptions")).to_be_visible()
 
 
+def wait_for_finite_animations(page):
+    page.evaluate("""async () => {
+      getComputedStyle(document.documentElement).color;
+      await Promise.all(document.getAnimations().filter(animation =>
+        animation.playState === 'running' && animation.effect.getComputedTiming().iterations !== Infinity
+      ).map(animation => animation.finished.catch(() => {})));
+    }""")
+
+
 @pytest.mark.parametrize("width,height", [(1440, 900), (1080, 680), (600, 860)])
 def test_skins_switch_independently_of_mode_and_survive_reload(browser, manager_url, tmp_path, width, height):
     page = browser.new_page(viewport={"width": width, "height": height})
@@ -245,6 +254,7 @@ def test_soft_controls_preserve_shared_behavior(browser, manager_url, tmp_path, 
         page.locator('[data-settings-tab="system"]').click()
         expect(page.locator("#createBackup")).to_be_enabled()
         expect(page.locator("#exportDiagnostics")).to_be_enabled()
+        wait_for_finite_animations(page)
         appearances = page.locator("#createBackup, #exportDiagnostics").evaluate_all("""buttons => buttons.map(el => {
           const css = getComputedStyle(el);
           return [css.borderRadius, css.borderColor, css.backgroundColor, css.color, css.boxShadow];
@@ -252,6 +262,7 @@ def test_soft_controls_preserve_shared_behavior(browser, manager_url, tmp_path, 
         assert appearances[0] == appearances[1]
         # Exercise the disabled appearance without altering the shared preview fixture.
         page.locator("#restoreBackup").evaluate("el => { el.disabled = true; }")
+        wait_for_finite_animations(page)
         for button in page.locator(".maintenance-row > .button").all():
             capsule = button.evaluate("""el => {
               const css = getComputedStyle(el);
@@ -338,12 +349,7 @@ def test_palette_skins_preserve_layout_and_readable_controls(browser, manager_ur
             }""")
             assert not comparison, comparison
             # Restoring the skin starts the shared color transition; measure its final colors.
-            page.evaluate("""async () => {
-              getComputedStyle(document.querySelector('.nav-item.active')).backgroundColor;
-              await Promise.all(document.getAnimations().filter(animation =>
-                animation.playState === 'running' && animation.effect.getComputedTiming().iterations !== Infinity
-              ).map(animation => animation.finished.catch(() => {})));
-            }""")
+            wait_for_finite_animations(page)
             colors = page.evaluate("""() => {
               const css = getComputedStyle(document.documentElement);
               const token = name => {
