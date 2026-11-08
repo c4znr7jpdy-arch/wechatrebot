@@ -487,7 +487,8 @@
 
     const global = $("#globalStatus");
     global.className = `status-badge ${online ? "online" : problem ? "error" : waiting ? "warning" : "checking"}`;
-    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
+    const globalMarkup = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
+    if (global.innerHTML !== globalMarkup) global.innerHTML = globalMarkup;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
     $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
@@ -516,7 +517,11 @@
     const stopping = state.stopPending || current === "STOPPING";
     const primaryLabel = stopping ? "正在停止…" : cancelStart ? "取消启动"
       : stopMode ? (verificationStop ? "停止机器人" : "停止运行") : starting ? "启动中…" : "启动";
-    primary.innerHTML = `${icon(stopping || (starting && !cancelStart) ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
+    const primarySymbol = stopping || (starting && !cancelStart) ? "i-refresh" : stopMode ? "i-stop" : "i-play";
+    if (primary.querySelector("use")?.getAttribute("href") !== `#${primarySymbol}`
+      || primary.querySelector("span")?.textContent !== primaryLabel) {
+      primary.innerHTML = `${icon(primarySymbol)}<span>${primaryLabel}</span>`;
+    }
     primary.dataset.action = stopMode ? "stop" : "start";
     primary.disabled = Boolean(state.startPreparing || state.stopPending
       || (status.busy && !cancelStart && !verificationStop))
@@ -824,8 +829,9 @@
   let modalResolve = null;
   function syncShellInteractivity() {
     const shell = $(".app-shell");
-    if (shell) shell.inert = Boolean(state.updateInstalling
+    const inert = Boolean(state.updateInstalling
       || !$("#modalBackdrop").hidden || !$("#onboardingBackdrop").hidden);
+    if (shell && shell.inert !== inert) shell.inert = inert;
   }
 
   function managerCloseState({ignoreModalBusy = false} = {}) {
