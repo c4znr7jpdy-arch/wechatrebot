@@ -165,8 +165,8 @@ window.createUpdateNotifications = function (helpers) {
       confirmText: closing ? "再次关闭管理器" : "确认关闭并安装",
       cancelText: closing ? "返回管理器" : "稍后安装",
       intent: "danger",
-      pendingText: "正在安装…",
-      pendingMessage: "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
+      pendingText: closing ? "正在关闭管理器…" : "正在安装…",
+      pendingMessage: closing ? "正在再次关闭管理器以继续更新。" : "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
         const pending = managerCloseState();
         if (pending.busy) throw new Error("机器人正在启动、停止或处理其他操作，请稍候；也可选择“稍后安装”，更新包会保留。");
