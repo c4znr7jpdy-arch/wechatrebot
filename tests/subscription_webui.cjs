@@ -192,8 +192,16 @@ async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
       h.snapshot.current_account = 'wxid_account_a';
       return {accepted: true};
     };
-    assert.equal(await h.ui.beforeStart(), true, 'The backend reconnects and verifies the actual account before granting a run');
-    assert.equal(h.confirmations.length, 0);
+    const pending = h.ui.beforeStart();
+    await flush();
+    if (!current_account) {
+      assert.equal(h.confirmations.length, 1);
+      assert.equal(h.confirmations[0].title, '请登录微信');
+      assert.equal(h.confirmations[0].dismissible, false);
+      await h.confirmations[0].confirm();
+    }
+    assert.equal(await pending, true, 'A newly connected account must be explicitly confirmed before granting a run');
+    assert.equal(h.confirmations.length, current_account ? 0 : 1);
     assert.equal(h.calls.filter(([method]) => method === 'connect_license_wechat').length, current_account ? 0 : 1);
     assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
   }
@@ -316,12 +324,18 @@ async function startupConsentPrecedesAccountConnection() {
     return structuredClone(h.snapshot);
   };
   await dialog.confirm();
+  await flush();
+  assert.equal(h.confirmations.length, 2, 'A fast login still requires the separate explicit login confirmation');
+  assert.equal(h.confirmations[1].title, '请登录微信');
+  assert.equal(h.confirmations[1].dismissible, false);
+  assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+  await h.confirmations[1].confirm();
   assert.equal(await pending, true);
   assert.equal(h.calls.filter(([method]) => method === 'bind_license_account').length, 1);
   assert.equal(h.calls.some(([method]) => method === 'start_robot'), false,
     'The subscription gate returns permission; only the run center starts the robot');
   assert.equal(await h.ui.beforeStart(), true);
-  assert.equal(h.confirmations.length, 1, 'A bound matching account must not ask again');
+  assert.equal(h.confirmations.length, 2, 'A bound matching account must not ask again');
   assert.equal(h.element('#licenseRefresh').disabled, false);
 
   const canceled = startupHarness({current_account: ''});
@@ -486,6 +500,90 @@ async function startupFreshReadCannotRaceAnotherEntry() {
   await assert.rejects(h.ui.beforeStart(), /实时账号读取失败/);
   assert.equal(h.element('#licenseRefresh').disabled, false);
   assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+}
+
+async function startupLoginWaitsForExplicitConfirmationAndPausesBackgroundReads() {
+  const h = startupHarness({state: 'ready', account: 'wxid_account_a', current_account: ''});
+  await h.ui.initialize();
+  h.handlers.connect_license_wechat = () => ({accepted: true});
+  const poll = h.intervals.find(fn => fn.delay === 4000);
+  let releaseOld;
+  h.handlers.get_license_status = () => new Promise(resolve => { releaseOld = resolve; });
+  poll(); await flush();
+  const stale = {...h.snapshot, license_id: 'stale-license', current_account: ''};
+  h.handlers.get_license_status = () => structuredClone(h.snapshot);
+  let settled = false;
+  const pending = h.ui.beforeStart();
+  pending.then(() => { settled = true; });
+  await flush();
+  assert.equal(h.confirmations.length, 1);
+  const dialog = h.confirmations[0];
+  assert.equal(dialog.title, '请登录微信');
+  assert.equal(dialog.dismissible, false);
+  assert.match(dialog.message, /完成登录.*已登录，继续.*无需再次点击启动/);
+
+  releaseOld(stale); await flush();
+  assert.equal(settled, false, 'A response accepted before this action must not cancel its login decision');
+  assert.equal(h.element('#licenseIdText').textContent, 'license-one');
+  const reads = h.calls.filter(([method]) => method === 'get_license_status').length;
+  h.snapshot.current_account = 'wxid_account_a';
+  for (let i = 0; i < 3; i++) { poll(); await flush(); }
+  assert.equal(h.calls.filter(([method]) => method === 'get_license_status').length, reads,
+    'The four-second background poll must not overwrite the action-owned snapshot while preparing');
+  assert.equal(settled, false, 'Logging in and polling must not substitute for clicking Continue');
+  assert.equal(dialog.settled, false);
+  assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+  await dialog.confirm();
+  assert.equal(await pending, true);
+  assert.ok(h.calls.filter(([method]) => method === 'get_license_status').length >= reads + 2,
+    'Confirmation and final validation must still read the actual account while preparing');
+  assert.equal(h.confirmations.length, 1);
+  assert.equal(h.calls.some(([method]) => method === 'start_robot'), false);
+  poll(); await flush();
+  assert.ok(h.calls.filter(([method]) => method === 'get_license_status').length > reads + 2,
+    'Normal background refresh resumes after the decision finishes');
+}
+
+async function startupFinalReadRejectsAccountChangedAfterLoginConfirmation() {
+  const h = startupHarness({state: 'ready', account: 'wxid_account_a', current_account: ''});
+  await h.ui.initialize();
+  h.handlers.connect_license_wechat = () => ({accepted: true});
+  const pending = h.ui.beforeStart();
+  const rejected = assert.rejects(pending, /微信账号或授权已变化/);
+  await flush();
+  let reads = 0;
+  h.handlers.get_license_status = () => ({...h.snapshot,
+    current_account: ++reads === 1 ? 'wxid_account_a' : 'wxid_account_b'});
+  await h.confirmations[0].confirm();
+  await rejected;
+  assert.equal(reads, 2, 'Final validation must re-read the account after the confirmed login');
+  assert.equal(h.calls.some(([method]) => ['bind_license_account', 'start_robot'].includes(method)), false);
+  assert.equal(h.element('#licenseRefresh').disabled, false);
+}
+
+async function confirmedAccountSurvivesAnInterleavedSnapshotReplacement() {
+  const start = script.indexOf('    async function connectAccount(');
+  const end = script.indexOf('    async function rebindAccount(', start);
+  assert.ok(start >= 0 && end > start);
+  const state = {snapshot: {current_account: ''}};
+  let dialog;
+  const context = vm.createContext({state, accountId: value => String(value || ''),
+    readForAction: async () => state.snapshot,
+    checkConnectionRuntime: async () => {}, refreshRuntime: async () => {}, api: async () => ({accepted: true}),
+    confirmAction: async config => {
+      dialog = config;
+      state.snapshot = {current_account: 'wxid_confirmed'};
+      await config.onConfirm();
+      // Model the original race after the onConfirm read, before its promise
+      // continuation consumes the result. The confirmed identity must be local.
+      state.snapshot = {current_account: ''};
+      return true;
+    },
+  });
+  vm.runInContext(script.slice(start, end), context);
+  assert.equal(await context.connectAccount({forStart: true}), 'wxid_confirmed');
+  assert.equal(state.snapshot.current_account, '');
+  assert.equal(dialog.dismissible, false);
 }
 
 async function subscriptionOptionsFollowEntitlementAndPreserveExpansion() {
@@ -1002,7 +1100,7 @@ async function confirmationPromiseSettlesOnCancelAndAllowsFailureRecovery() {
   const context = vm.createContext({$: h.element, escapeHtml, state: {}, document: {activeElement: focus},
     reportError: error => errors.push(error)});
   vm.runInContext(app.slice(start, end), context);
-  const resolve = confirmed => vm.runInContext(`modalResolve(${confirmed})`, context);
+  const resolve = (confirmed, implicit = false) => vm.runInContext(`modalResolve(${confirmed}, {implicit: ${implicit}})`, context);
   let canceled = 0;
   const cancel = context.confirmAction({title: '确认账号', message: '请核对',
     onConfirm: async () => assert.fail('Cancellation must not run the confirmed operation'),
@@ -1042,6 +1140,47 @@ async function confirmationPromiseSettlesOnCancelAndAllowsFailureRecovery() {
   assert.equal(h.element('#modalBackdrop').hidden, false, 'An accepted write cannot be canceled halfway through');
   release(); await confirming;
   assert.equal(await confirmed, true);
+  assert.equal(h.element('#modalBackdrop').hidden, true);
+
+  let continued = 0, loginCanceled = 0, loginSettled = false, releaseLogin;
+  h.element('#modalCancel').focused = false;
+  h.element('#modalBody').focused = false;
+  const login = context.confirmAction({title: '请登录微信', message: '登录后请点击继续', dismissible: false,
+    onConfirm: () => {
+      continued += 1;
+      return new Promise(done => { releaseLogin = done; });
+    }, onCancel: () => { loginCanceled += 1; }});
+  login.then(() => { loginSettled = true; });
+  assert.equal(h.element('#modalBody').focused, true, 'Returning from WeChat must leave focus on the login instructions');
+  assert.equal(h.element('#modalCancel').focused, false, 'Enter must not implicitly accept Cancel after returning from WeChat');
+  await resolve(false, true);
+  assert.equal(loginSettled, false, 'Escape and backdrop clicks must not dismiss the login decision');
+  assert.equal(h.element('#modalBackdrop').hidden, false);
+  assert.equal(loginCanceled, 0);
+  const continuing = resolve(true);
+  await resolve(true);
+  await resolve(false);
+  await resolve(false, true);
+  assert.equal(continued, 1, 'Repeated confirmation while busy must not run the operation twice');
+  assert.equal(loginCanceled, 0);
+  assert.equal(loginSettled, false);
+  assert.equal(h.element('#modalBackdrop').hidden, false);
+  releaseLogin(); await continuing;
+  assert.equal(await login, true);
+  await resolve(true);
+  await resolve(false);
+  assert.equal(continued, 1, 'A completed confirmation must remain settled after duplicate events');
+  assert.equal(loginCanceled, 0);
+  assert.equal(h.element('#modalBackdrop').hidden, true);
+
+  const explicitCancel = context.confirmAction({title: '请登录微信', message: '登录后请点击继续', dismissible: false,
+    onConfirm: async () => assert.fail('Explicit cancellation must not continue startup'),
+    onCancel: () => { loginCanceled += 1; }});
+  await resolve(false);
+  assert.equal(await explicitCancel, false, 'A non-dismissible login still allows the explicit Cancel button');
+  await resolve(false);
+  await resolve(true);
+  assert.equal(loginCanceled, 1, 'Duplicate cancellation must not invoke onCancel again');
   assert.equal(h.element('#modalBackdrop').hidden, true);
 }
 
@@ -1273,9 +1412,16 @@ async function trialConnectionAwaitsEligibilityAndRecoversFromFailure() {
   assert.equal(h.calls.some(([method]) => method === 'connect_license_wechat'), false);
   await h.confirmations[0].confirm();
   await flush();
-  assert.equal(h.confirmations.length, 1, 'Account discovery must await its in-flight eligibility request');
+  assert.equal(h.confirmations.length, 2, 'A connection request must still require explicit login confirmation after fast account discovery');
+  assert.equal(h.confirmations[1].title, '请登录微信');
+  assert.equal(h.confirmations[1].dismissible, false);
+  assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false);
+  await h.confirmations[1].confirm();
+  await flush();
   assert.equal(h.calls.filter(([method]) => method === 'get_trial_status').length, 1,
     'Automatic account discovery and the trial action must share the pending eligibility request');
+  assert.equal(h.calls.some(([method]) => method === 'activate_free_trial'), false,
+    'Explicit login confirmation must still await the pending eligibility decision');
   assert.equal(h.element('#licenseActivateTrial').disabled, true);
   h.handlers.activate_free_trial = account => {
     assert.equal(account, 'wxid_trial_a');
@@ -1286,7 +1432,9 @@ async function trialConnectionAwaitsEligibilityAndRecoversFromFailure() {
   h.handlers.get_trial_status = () => ({free_trial: {state: 'active', account: 'wxid_trial_a'}});
   release({free_trial: {state: 'eligible', eligible: true, account: 'wxid_trial_a'}});
   await pending;
-  assert.equal(h.confirmations.length, 1, 'The accepted trial consent must not be asked again after login');
+  assert.equal(h.confirmations.length, 2);
+  assert.equal(h.confirmations.filter(dialog => dialog.title === '确认激活免费试用').length, 1,
+    'The accepted trial consent must not be asked again after login');
   assert.equal(h.calls.filter(([method]) => method === 'activate_free_trial').length, 1);
   assert.equal(h.element('#licenseActivateTrial').disabled, true);
 
@@ -1353,6 +1501,9 @@ const completionTimer = setTimeout(() => {
   await startupConnectionFailuresAndLoginCancellation();
   await startupRejectsIdentityOrLicenseChanges();
   await startupFreshReadCannotRaceAnotherEntry();
+  await startupLoginWaitsForExplicitConfirmationAndPausesBackgroundReads();
+  await startupFinalReadRejectsAccountChangedAfterLoginConfirmation();
+  await confirmedAccountSurvivesAnInterleavedSnapshotReplacement();
   await subscriptionOptionsFollowEntitlementAndPreserveExpansion();
   await rebindConsentCanBeRefusedWithoutRuntimeChanges();
   await rebindWaitsForADifferentActualAccountAndDoesNotStart();
