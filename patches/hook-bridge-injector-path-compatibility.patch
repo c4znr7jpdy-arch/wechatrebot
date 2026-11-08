@@ -1,0 +1,69 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/launcher.py b/hook_41827_astrbot_bridge/src/hook_bridge/launcher.py
+index 494ceb5..524f38c 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/launcher.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/launcher.py
+@@ -1,11 +1,53 @@
+ from __future__ import annotations
+ 
++import ctypes
++from ctypes import wintypes
+ import json
++from pathlib import Path
+ import subprocess
+ 
+ from .config import Settings, SettingsError
+ 
+ 
++def _native_file_argument(path: Path, label: str) -> str:
++    """The pinned injector widens argv bytes directly; native paths need ASCII."""
++    original = str(path)
++    if original.isascii():
++        return original
++    try:
++        api = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
++        api.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
++        api.restype = wintypes.DWORD
++        # API sizes count UTF-16 characters on Windows, including the NUL when
++        # querying capacity. Never size this buffer using Python string length.
++        capacity = api(original, None, 0)
++        for _ in range(2):
++            if not 0 < capacity <= 32768:
++                break
++            buffer = ctypes.create_unicode_buffer(capacity)
++            written = api(original, buffer, capacity)
++            if 0 < written < capacity:
++                alias = buffer.value
++                # Disabled 8.3 names may return the unchanged Unicode path.
++                # Require an existing file and matching identity, not spelling.
++                candidate = Path(alias)
++                if (
++                    alias.isascii() and candidate.is_absolute()
++                    and candidate.is_file() and path.samefile(candidate)
++                ):
++                    return alias
++                break
++            if not written:
++                break
++            capacity = written
++    except (AttributeError, OSError, ValueError):
++        pass
++    raise SettingsError(
++        f"{label}路径含有微信连接组件不支持的字符，且无法使用兼容短路径。"
++        "请调整为仅含英文、数字和常规符号的路径后重试。"
++    ) from None
++
++
+ def build_inject_command(settings: Settings) -> list[str]:
+     if settings.wechat_exe_path is None:
+         raise SettingsError("wechat_exe_path is not configured")
+@@ -20,8 +62,8 @@ def build_inject_command(settings: Settings) -> list[str]:
+     }
+     return [
+         str(settings.injector_path),
+-        str(settings.wechat_exe_path),
+-        str(settings.hook_dll_path),
++        _native_file_argument(settings.wechat_exe_path, "微信程序"),
++        _native_file_argument(settings.hook_dll_path, "机器人安装目录"),
+         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+     ]
+ 
