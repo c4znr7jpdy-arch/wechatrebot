@@ -21,6 +21,7 @@ window.createFeatureController = function (helpers) {
     getCoreSettings,
   } = helpers;
   const readOnlyFeatures = new Set();
+  let featurePageEditorSession = "";
 
   async function loadFeatures() {
     const request = state.featuresLoad = (state.featuresLoad || 0) + 1;
@@ -349,6 +350,7 @@ window.createFeatureController = function (helpers) {
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
+    featurePageEditorSession = "";
     state.featurePageDirty = false;
     state.featurePageBusy = false;
     const previousReference = $("#featureQuickReference");
@@ -483,11 +485,20 @@ window.createFeatureController = function (helpers) {
       if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
       frame.hidden = true;
       status.hidden = false;
-      frame.onload = () => syncEmbeddedTheme(frame, () => {
+      featurePageEditorSession = "";
+      frame.onload = () => {
         if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
-        frame.hidden = false;
-        status.hidden = true;
-      });
+        // A WindowProxy survives document reloads; bind editor state to this load.
+        const session = crypto.randomUUID();
+        featurePageEditorSession = session;
+        sendEmbeddedEditorContext(frame);
+        syncEmbeddedTheme(frame, () => {
+          if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id
+            || featurePageEditorSession !== session) return;
+          frame.hidden = false;
+          status.hidden = true;
+        });
+      };
       frame.src = page.url;
       syncEmbeddedTheme(frame);
     } catch (error) {
@@ -498,6 +509,12 @@ window.createFeatureController = function (helpers) {
   }
 
   const featurePageChannel = "astrbot-plugin-page";
+  function sendEmbeddedEditorContext(frame) {
+    if (!featurePageEditorSession || state.selectedFeature !== "feature-voice-clone") return;
+    frame.contentWindow.postMessage({channel: featurePageChannel, kind: "editor-context",
+      session: featurePageEditorSession}, window.location.origin);
+  }
+
   async function handleEmbeddedFeaturePageRequest(message) {
     const detail = state.featureDetail;
     if (!detail || detail.configuration !== "page" || !state.selectedFeature) {
@@ -519,10 +536,12 @@ window.createFeatureController = function (helpers) {
       || message.channel !== featurePageChannel) return;
     if (message.kind === "ready") {
       window.sendFeaturePageContext(frame);
+      sendEmbeddedEditorContext(frame);
       return;
     }
     if (message.kind === "editor-state") {
       if (state.selectedFeature !== "feature-voice-clone" || message.featureId !== state.selectedFeature
+        || !featurePageEditorSession || message.session !== featurePageEditorSession
         || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
       state.featurePageDirty = message.dirty;
       state.featurePageBusy = message.busy;

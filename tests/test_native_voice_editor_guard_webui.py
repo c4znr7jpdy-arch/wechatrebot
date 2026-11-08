@@ -42,6 +42,7 @@ def guarded_voice(capture_voice_controllers, native_voice):
           || message?.channel !== 'astrbot-plugin-page' || message.kind !== 'editor-state') return;
         document.body.dataset.voiceEditorDirty = String(window.voiceGuardState.featurePageDirty);
         document.body.dataset.voiceEditorBusy = String(window.voiceGuardState.featurePageBusy);
+        document.body.dataset.voiceEditorLastSession = String(message.session || 'missing');
       });
     }""")
     return view
@@ -189,6 +190,12 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
     }""")
     view.outer.locator("html").evaluate("""() => {
       const frame = document.querySelector('#plugin-frame');
+      const previousParent = parentEditorSession;
+      for (const [origin,source] of [['https://invalid.example',parent],[location.origin,window]]) {
+        dispatchEvent(new MessageEvent('message',{origin,source,data:{
+          channel:'astrbot-plugin-page',kind:'editor-context',session:'untrusted-context'}}));
+      }
+      if (parentEditorSession !== previousParent) throw new Error('Untrusted manager context accepted');
       for (const [origin, source, session] of [
         ['https://invalid.example',frame.contentWindow,editorSession],
         [location.origin,window,editorSession],
@@ -197,7 +204,8 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
           channel:'astrbot-plugin-page',kind:'editor-state',session,dirty:false,busy:false}}));
       }
     }""")
-    view.page.evaluate("""() => {
+    parent_session = view.outer.locator("html").evaluate("() => parentEditorSession")
+    view.page.evaluate("""session => {
       const frame = document.querySelector('#featurePageFrame');
       for (const [origin, source, featureId, dirty] of [
         ['https://invalid.example',frame.contentWindow,'feature-voice-clone',false],
@@ -205,11 +213,45 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
         [location.origin,frame.contentWindow,'feature-commands',false],
         [location.origin,frame.contentWindow,'feature-voice-clone','false']]) {
         dispatchEvent(new MessageEvent('message',{origin,source,data:{
-          channel:'astrbot-plugin-page',kind:'editor-state',featureId,dirty,busy:false}}));
+          channel:'astrbot-plugin-page',kind:'editor-state',session,featureId,dirty,busy:false}}));
       }
-    }""")
+    }""", parent_session)
     _expect_close_guard(view, True)
     assert view.page.evaluate("window.voiceGuardState.featurePageDirty")
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_outer_reload_rejects_previous_document_editor_state(guarded_voice, pending):
+    view = guarded_voice
+    old_session = view.outer.locator("html").evaluate("() => parentEditorSession")
+    assert old_session
+    outer_document = view.page.locator("#featurePageFrame").element_handle().content_frame()
+    view.page.evaluate("window.previousOuterFrame = document.querySelector('#featurePageFrame').contentWindow")
+    with view.page.expect_event("framenavigated", predicate=lambda frame: frame == outer_document):
+        view.page.locator("#featurePageFrame").evaluate("frame => { frame.src = frame.src; }")
+    outer_document.wait_for_load_state("load")
+    expect(view.field).to_have_value("已保存的风格")
+    assert view.page.evaluate("previousOuterFrame === document.querySelector('#featurePageFrame').contentWindow")
+    assert view.outer.locator("html").evaluate("() => parentEditorSession") != old_session
+
+    view.field.fill("新载入页面的草稿")
+    if pending:
+        view.frame.locator("#save-config").click()
+        expect(view.frame.locator("#save-config")).to_be_disabled()
+    _expect_editor(view, dirty=True, busy=pending)
+    # Keep the real WindowProxy while delivering a previous document's state.
+    # A missing token must also fail closed; only current-session updates apply.
+    view.outer.locator("html").evaluate("""previous => {
+      for (const session of [previous, undefined]) {
+        parent.postMessage({channel:'astrbot-plugin-page',kind:'editor-state',
+          featureId:'feature-voice-clone',session,dirty:false,busy:false},location.origin);
+      }
+    }""", old_session)
+    expect(view.page.locator("body")).to_have_attribute("data-voice-editor-last-session", "missing")
+    _expect_editor(view, dirty=True, busy=pending)
+    _expect_close_guard(view, True)
+    assert view.page.evaluate("window.voiceGuardState.featurePageDirty")
+    assert view.page.evaluate("window.voiceGuardState.featurePageBusy") is pending
 
 
 @pytest.mark.parametrize("pending", [False, True])

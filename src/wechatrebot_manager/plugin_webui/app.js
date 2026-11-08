@@ -101,12 +101,24 @@ async function api(path, options = {}) {
 
 const pluginPageChannel = "astrbot-plugin-page";
 let editorSession = "";
+// The manager document handshake is independent of the native page session.
+let parentEditorSession = "";
 
 function publishEditorState() {
-  if (window.parent === window || state.currentId !== "feature-voice-clone") return;
+  if (window.parent === window || state.currentId !== "feature-voice-clone" || !parentEditorSession) return;
   window.parent.postMessage({channel: pluginPageChannel, kind: "editor-state",
-    featureId: state.currentId, dirty: state.pageDirty, busy: state.pageBusy}, window.location.origin);
+    session: parentEditorSession, featureId: state.currentId,
+    dirty: state.pageDirty, busy: state.pageBusy}, window.location.origin);
 }
+
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin
+    || message?.channel !== pluginPageChannel || message.kind !== "editor-context"
+    || typeof message.session !== "string" || !message.session || message.session.length > 80) return;
+  parentEditorSession = message.session;
+  publishEditorState();
+});
 
 function resetPageEditor() {
   editorSession = "";
