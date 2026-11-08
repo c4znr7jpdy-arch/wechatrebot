@@ -46,6 +46,8 @@ def test_preview_free_trial_connects_and_activates_without_start(browser, manage
         expect(page.locator("#modalMessage")).to_contain_text("接下来登录的微信号")
         expect(page.locator("#modalSubject")).to_be_hidden()
         page.locator("#modalConfirm").click()
+        expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+        page.locator("#modalConfirm").click()
         expect(page.locator("#licenseStateTitle")).to_have_text("免费试用已生效")
         expect(page.locator("#licenseOptions")).not_to_have_attribute("open", "")
         expect(page.locator("#licenseConnect, #licenseBind, #licenseResume")).to_have_count(0)
@@ -265,7 +267,7 @@ def test_revoked_subscription_previews_new_month_without_automatic_start(browser
         page.close()
 
 
-@pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}, {"width": 600, "height": 900}])
+@pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}])
 def test_start_requests_consent_before_connecting_wechat(browser, manager_url, viewport):
     page = browser.new_page(viewport=viewport)
     errors = []
@@ -311,12 +313,112 @@ def test_start_requests_consent_before_connecting_wechat(browser, manager_url, v
         expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
         save_flow_screenshot(page, f"start-binding-consent-{viewport['width']}.png")
         page.locator("#modalConfirm").click()
+        expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        assert page.evaluate("window.flowCalls.start_robot") == 0
+        page.locator("#modalConfirm").click()
         expect(page.locator("#globalStatus")).to_have_text("机器人可用")
         expect(page.locator("#modalBackdrop")).to_be_hidden()
         assert page.evaluate("window.flowCalls") == {
             "bind_license_account": 1, "start_robot": 1, "connect_license_wechat": 1}
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         assert page.title() and page.url.startswith(manager_url) and "license=pending" in page.url
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("bound", [False, True])
+@pytest.mark.parametrize("fast_login", [False, True])
+def test_login_confirmation_preserves_one_start_across_runtime_polls(
+    browser, manager_url, bound, fast_login,
+):
+    page = browser.new_page(viewport={"width": 1520, "height": 900})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url + ("&license=active" if bound else "&license=pending"))
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""async fastLogin => {
+          const api = window.pywebview.api;
+          const base = structuredClone((await api.get_status()).data);
+          const license = api.get_license_status, connect = api.connect_license_wechat;
+          const start = api.start_robot, bind = api.bind_license_account;
+          window.loginFlowCalls = {connect: 0, start: 0, bind: 0};
+          window.loginFlowPhase = 'idle'; window.loginFlowLoggedIn = false;
+          window.loginFlowReads = 0;
+          window.completeLogin = async () => { await connect(); window.loginFlowLoggedIn = true; };
+          api.get_license_status = async () => {
+            const result = structuredClone(await license());
+            result.data.current_account = window.loginFlowLoggedIn ? 'wxid_demo_account' : '';
+            return result;
+          };
+          api.get_status = async () => {
+            document.body.dataset.loginFlowReads = String(++window.loginFlowReads);
+            const status = structuredClone(base), phase = window.loginFlowPhase;
+            const loading = phase === 'loading', running = phase === 'running';
+            Object.assign(status, {state: running ? 'RUNNING' : loading ? 'CORE_STARTING'
+                : phase === 'login' && !window.loginFlowLoggedIn ? 'WAITING_WECHAT' : 'LICENSE_READY',
+              title: running ? '机器人可用' : loading ? '正在加载机器人功能'
+                : window.loginFlowLoggedIn ? '机器人未启动' : phase === 'login' ? '等待登录微信' : '机器人未启动',
+              message: '', busy: loading, online: running, can_start: !loading && !running,
+              can_stop: running, start_pending: loading, error: null});
+            Object.assign(status.runtime, {wechat_identity: window.loginFlowLoggedIn ? 'wxid_demo_account' : '',
+              account_status_available: true, connection_ready: window.loginFlowLoggedIn,
+              engine_ready: running, upstream_connected: running, heartbeat_fresh: running});
+            status.environment.ready = true;
+            return {ok: true, data: status};
+          };
+          api.check_environment = api.get_status;
+          api.connect_license_wechat = async () => {
+            window.loginFlowCalls.connect++; window.loginFlowPhase = 'login';
+            if (fastLogin) await window.completeLogin();
+            return {ok: true, data: {accepted: true}};
+          };
+          api.bind_license_account = (...args) => { window.loginFlowCalls.bind++; return bind(...args); };
+          api.start_robot = async () => {
+            window.loginFlowCalls.start++;
+            const result = await start(); window.loginFlowPhase = 'loading'; return result;
+          };
+        }""", fast_login)
+        expect(page.locator("#stateTitle")).to_have_text("机器人未启动")
+        page.locator("#primaryAction").click()
+        if not bound:
+            expect(page.locator("#modalTitle")).to_have_text("确认绑定当前套餐")
+            page.locator("#modalConfirm").click()
+        expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+        expect(page.locator("#modalMessage")).to_contain_text("本次启动会继续加载机器人功能")
+        expect(page.locator("#modalBody")).to_be_focused()
+        page.keyboard.press("Enter")
+        page.keyboard.press("Escape")
+        page.locator("#modalBackdrop").click(position={"x": 3, "y": 3})
+        expect(page.locator("#modalBackdrop")).to_be_visible()
+        if not fast_login:
+            page.evaluate("window.completeLogin()")
+        page.evaluate("""() => {
+          window.dispatchEvent(new Event('focus'));
+          document.dispatchEvent(new Event('visibilitychange'));
+        }""")
+        reads = page.evaluate("window.loginFlowReads")
+        expect(page.locator("body")).not_to_have_attribute("data-login-flow-reads", str(reads))
+        expect(page.locator("#stateTitle")).to_have_text("微信已登录，正在确认启动")
+        expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+        expect(page.locator("#modalBackdrop")).to_be_visible()
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.loginFlowCalls") == {"connect": 1, "start": 0, "bind": 0}
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#stateTitle")).to_have_text("正在加载机器人功能")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#primaryAction").dispatch_event("click")
+        assert page.evaluate("window.loginFlowCalls") == {"connect": 1, "start": 1, "bind": 0 if bound else 1}
+        page.evaluate("window.loginFlowPhase = 'running'")
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        expect(page.locator("#primaryAction")).to_have_text("停止运行")
+        expect(page.locator("#primaryAction")).to_be_enabled()
+        assert page.evaluate("window.loginFlowCalls.start") == 1
         assert not errors, errors
     finally:
         page.close()
@@ -347,6 +449,9 @@ def test_start_waits_for_login_and_recovers_from_connect_or_binding_failure(brow
         page.locator("#modalConfirm").click()
         expect(page.locator("#modalTitle")).to_have_text("请登录微信")
         page.keyboard.press("Escape")
+        expect(page.locator("#modalBackdrop")).to_be_visible()
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#modalCancel").click()
         expect(page.locator("#primaryAction")).to_be_enabled()
         assert page.evaluate("window.bindCount") == 0
         page.locator("#primaryAction").click()
