@@ -225,6 +225,10 @@ def _is_secret_field(key: str, field: dict[str, Any]) -> bool:
     )
 
 
+def _numeric_field_allows_null(field: dict[str, Any]) -> bool:
+    return "default" in field and field["default"] is None
+
+
 def _customer_schema(
     schema: dict[str, Any],
     stored: dict[str, Any],
@@ -236,6 +240,8 @@ def _customer_schema(
             continue
         field = copy.deepcopy(raw_field)
         current = stored.get(key)
+        if field.get("type") in {"int", "float"}:
+            field["_nullable"] = _numeric_field_allows_null(field)
         if field.get("type") == "list" and not field.get("options") and key in {
             "whitelist", "blacklist", "session_list", "scheduled_push_groups",
             "allowed_group_ids", "alarm_target_sessions", "whitelist_users",
@@ -709,6 +715,10 @@ def _validate_config(schema: dict[str, Any], config: dict[str, Any], path: str =
         field_type = str(field.get("type") or "string")
         value = config[key]
         if value is None:
+            if field_type in {"int", "float"} and not _numeric_field_allows_null(field):
+                raise PluginCenterError(
+                    f"“{field.get('description') or field_path}”不能为空，请填写数字。"
+                )
             continue
         accepted = expected_types.get(field_type)
         if accepted and (
