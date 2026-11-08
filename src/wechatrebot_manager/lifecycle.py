@@ -241,7 +241,9 @@ class LifecycleController:
             self._adopt_services()
         return True
 
-    def _set_error(self, code: str, *, detail: str = "") -> LifecycleView:
+    def _set_error(
+        self, code: str, *, detail: str = "", details: dict[str, object] | None = None,
+    ) -> LifecycleView:
         self.cancel_pending_start()
         self.state = LifecycleState.ERROR
         self._error = self.catalog.get(code)
@@ -250,8 +252,20 @@ class LifecycleController:
             "failed",
             code=self._error.code,
             message=detail or self._error.message,
+            details=details,
         )
         return self.view()
+
+    @staticmethod
+    def _service_exit_details(exited: list[tuple[object, int]]) -> dict[str, object]:
+        # Capture only exit facts before cleanup removes handles or stops peers.
+        # Never include process argv, environment, or the logged-in account.
+        services = []
+        for item, code in exited:
+            spec = getattr(item, "spec", None)
+            services.append({"service": getattr(spec, "label", getattr(spec, "name", "unknown")),
+                             "exit_code": code})
+        return {"operation": "runtime_supervision", "technical": {"exited_services": services}}
 
     def _stop_services(
         self, names: tuple[str, ...] | None = None, *,
@@ -608,18 +622,20 @@ class LifecycleController:
             if licensed_view is not None:
                 return licensed_view
             if self._supervisor is not None and self._supervisor.running:
-                exited = any(
-                    getattr(item, "process", None) is not None
-                    and item.process.poll() is not None
+                exited = [
+                    (item, code)
                     for item in self._supervisor.running
-                )
+                    if getattr(item, "process", None) is not None
+                    and (code := item.process.poll()) is not None
+                ]
                 if exited:
+                    details = self._service_exit_details(exited)
                     try:
                         self._stop_services()
                     except Exception:
                         return self.view()
                     self._supervisor = None
-                    return self._set_error("13002", detail="托管服务意外退出。")
+                    return self._set_error("13002", detail="托管服务意外退出。", details=details)
                 if self._runtime.online:
                     self._mark_running()
                 elif self._runtime.login_required:
@@ -665,11 +681,12 @@ class LifecycleController:
             # Check the existing grant without substituting the bound account
             # for a fresh login probe. Explicit authorization denials still win.
             grant = self.licenses.snapshot(str(status.get("account") or ""))
-        if core is not None and core.process.poll() is not None and grant["can_run"]:
+        if core is not None and (core_exit_code := core.process.poll()) is not None and grant["can_run"]:
+            details = self._service_exit_details([(core, core_exit_code)])
             self._pause_license()
             self._stop_services(("astrbot",), timeout_seconds=3)
             self._running_events_emitted = False
-            return self._set_error("13004", detail="机器人核心服务意外退出。")
+            return self._set_error("13004", detail="机器人核心服务意外退出。", details=details)
         if core is not None and not status["can_run"]:
             if not self._runtime.account_status_available and grant["can_run"]:
                 # An unavailable probe cannot confirm logout or an account
