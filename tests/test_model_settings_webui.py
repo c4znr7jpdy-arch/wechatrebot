@@ -125,6 +125,188 @@ def test_embedding_delete_identifies_target_and_keeps_replacement(browser, manag
         page.close()
 
 
+@pytest.mark.parametrize("first_chat,width", [(True, 430), (False, 1380)])
+def test_provider_saved_identity_survives_list_failure(browser, manager_url, tmp_path, first_chat, width):
+    page = browser.new_page(viewport={"width": width, "height": 920})
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        if not first_chat:
+            page.locator("[data-provider-create]").click()
+            page.locator("#providerApiKey").fill("preview-only-existing")
+            page.locator("#saveProvider").click()
+            expect(page.locator("#providerOverview")).to_be_visible()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerModelInput").fill("saved-model")
+        page.locator("#providerApiKey").fill("preview-only-submitted")
+        page.locator("#revealProviderKey").click()
+        page.evaluate("""() => {
+          const api = window.pywebview.api, save = api.save_provider, read = api.get_providers;
+          window.providerSaveCalls = [];
+          window.providerReadCalls = 0;
+          window.failProviderRead = true;
+          api.save_provider = async values => {
+            window.providerSaveCalls.push(structuredClone(values));
+            const result = await save(values);
+            window.lastSavedProvider = result.data;
+            return result;
+          };
+          api.get_providers = async () => {
+            window.providerReadCalls += 1;
+            return window.failProviderRead
+              ? {ok: false, error: {message: '模拟列表读取失败'}} : await read();
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        expect(page.locator("#providerReadbackMessage")).to_contain_text("模型已保存")
+        expect(page.locator("#reloadProviderServices")).to_be_enabled()
+        expect(page.locator("#toastRegion .toast.error").last).to_contain_text("模型已保存")
+        page.screenshot(path=str(tmp_path / f"model-saved-list-failed-{width}.png"), animations="disabled")
+        saved_id = page.evaluate("window.lastSavedProvider.id")
+        saved = page.locator(".provider-service").filter(has=page.locator(f'footer [data-provider-edit="{saved_id}"]'))
+        expect(saved).to_be_visible()
+        saved.locator("footer [data-provider-edit]").click()
+        expect(page.locator('#providerForm [name="provider_id"]')).to_have_value(saved_id)
+        expect(page.locator("#providerApiKey")).to_have_value("")
+        expect(page.locator("#providerApiKey")).to_have_attribute("type", "password")
+        expect(page.locator("#revealProviderKey")).to_have_attribute("aria-pressed", "false")
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
+        page.locator("#reloadProviderServices").click()
+        expect(page.locator("#reloadProviderServices")).to_be_enabled()
+        assert page.evaluate("window.providerSaveCalls.length") == 1
+        assert page.evaluate("window.providerReadCalls") == 2
+        page.evaluate("window.failProviderRead = false")
+        page.locator("#reloadProviderServices").click()
+        expect(page.locator("#providerReadbackFeedback")).to_be_hidden()
+        assert page.evaluate("window.providerSaveCalls.length") == 1
+        page.locator("#providerModelInput").fill("retry-model")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        assert page.evaluate("window.providerSaveCalls[1].provider_id") == saved_id
+        assert page.evaluate("window.lastSavedProvider.is_default") is first_chat
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(tmp_path / f"model-readback-recovered-{width}.png"), animations="disabled")
+    finally:
+        page.close()
+
+
+def test_provider_save_and_list_retry_keep_newer_draft(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 760, "height": 920})
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        original_model = page.locator("#providerModelInput").input_value()
+        page.locator("#providerApiKey").fill("preview-only-submitted")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, save = api.save_provider, read = api.get_providers;
+          window.providerSaveCalls = [];
+          api.save_provider = async values => {
+            window.providerSaveCalls.push(structuredClone(values));
+            const result = await save(values);
+            window.savedProviderId = result.data.id;
+            return new Promise(resolve => { window.finishProviderSave = () => resolve(result); });
+          };
+          api.get_providers = async () => {
+            const result = await read();
+            return new Promise(resolve => { window.finishProviderRead = failed => resolve(failed
+              ? {ok: false, error: {message: '模拟列表读取失败'}} : result); });
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#saveProvider")).to_be_disabled()
+        page.locator("#providerModelInput").fill("draft-during-save")
+        page.locator("#providerApiKey").fill("preview-only-newer")
+        page.evaluate("window.finishProviderSave()")
+        expect(page.locator('#providerForm [name="provider_id"]')).to_have_value(page.evaluate("window.savedProviderId"))
+        expect(page.locator("#providerEditorTitle")).not_to_have_text("新建模型服务")
+        expect(page.locator("#providerApiKey")).to_have_value("preview-only-newer")
+        page.locator("#providerModelInput").fill("draft-during-read")
+        page.evaluate("window.finishProviderRead(true)")
+        expect(page.locator("#saveProvider")).to_be_enabled()
+        expect(page.locator("#providerEditorStatus")).to_have_text("有未保存修改")
+        expect(page.locator("#providerNote")).to_contain_text("之后的修改仍未保存")
+        expect(page.locator("#providerReadbackMessage")).to_contain_text("模型已保存")
+        page.locator("#reloadProviderServices").click()
+        expect(page.locator("#reloadProviderServices")).to_be_disabled()
+        page.locator("#providerModelInput").fill("draft-during-retry")
+        page.locator("#providerApiKey").fill("preview-only-latest")
+        page.evaluate("window.finishProviderRead(false)")
+        expect(page.locator("#providerReadbackFeedback")).to_be_hidden()
+        expect(page.locator("#providerModelInput")).to_have_value("draft-during-retry")
+        expect(page.locator("#providerApiKey")).to_have_value("preview-only-latest")
+        expect(page.locator("#providerEditorStatus")).to_have_text("有未保存修改")
+        assert page.evaluate("window.providerSaveCalls.length") == 1
+        page.screenshot(path=str(tmp_path / "model-readback-kept-draft.png"), animations="disabled")
+        # The clean baseline belongs to the submitted values, not a later draft.
+        page.locator("#providerModelInput").fill(original_model)
+        page.locator("#providerApiKey").fill("")
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("old_read_fails", [False, True])
+def test_provider_retry_read_cannot_replace_a_later_save(browser, manager_url, old_read_fails):
+    page = browser.new_page(viewport={"width": 1380, "height": 920})
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerApiKey").fill("preview-only-submitted")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, save = api.save_provider, read = api.get_providers;
+          window.providerSaveCalls = [];
+          window.providerReadCalls = 0;
+          api.save_provider = async values => {
+            window.providerSaveCalls.push(structuredClone(values));
+            const result = await save(values);
+            window.savedProviderId = result.data.id;
+            return result;
+          };
+          api.get_providers = async () => {
+            const result = await read();
+            window.providerReadCalls += 1;
+            if (window.providerReadCalls === 1) return {ok:false,error:{message:'模拟列表读取失败'}};
+            if (window.providerReadCalls === 2) return new Promise(resolve => {
+              window.finishOldProviderRead = failed => resolve(failed
+                ? {ok:false,error:{message:'不应显示的旧读取错误'}} : result);
+            });
+            return result;
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        page.locator('.provider-service footer [data-provider-edit]').first.click()
+        page.locator("#reloadProviderServices").click()
+        expect(page.locator("#reloadProviderServices")).to_be_disabled()
+        page.locator("#providerModelInput").fill("latest-saved-model")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        latest_id = page.evaluate("window.savedProviderId")
+        expect(page.locator('.provider-service.active footer [data-provider-edit]')).to_have_attribute("data-provider-edit", latest_id)
+        expect(page.locator("#providerReadbackFeedback")).to_be_hidden()
+        page.evaluate("failed => window.finishOldProviderRead(failed)", old_read_fails)
+        # A browser task turn lets the old promise and its finally block settle.
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(resolve))")
+        expect(page.locator('.provider-service.active footer [data-provider-edit]')).to_have_attribute("data-provider-edit", latest_id)
+        expect(page.locator("#providerReadbackFeedback")).to_be_hidden()
+        expect(page.get_by_text("不应显示的旧读取错误", exact=False)).to_have_count(0)
+        assert page.evaluate("window.providerSaveCalls.length") == 2
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("theme,width,height", [("light", 1440, 1024), ("dark", 1080, 680)])
 def test_provider_icons_default_save_and_editor_navigation(browser, manager_url, tmp_path, theme, width, height):
     page = browser.new_page(viewport={"width": width, "height": height})
