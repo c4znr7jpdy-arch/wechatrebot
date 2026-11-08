@@ -1,6 +1,6 @@
 """Accepted installs keep a single write while progress reads recover."""
 import pytest
-from playwright.sync_api import expect
+from playwright.sync_api import TimeoutError, expect
 
 from test_manager_startup import browser, manager_url  # noqa: F401
 from test_update_flow_webui import update_page, _download_and_wait_for_consent, _open_update_settings
@@ -36,6 +36,7 @@ def _hold_install_progress(page):
 def test_accepted_install_keeps_card_and_close_guard_when_progress_read_fails(update_page, tmp_path, width):
     page=update_page
     page.set_viewport_size({"width":width,"height":860})
+    _open_update_settings(page)
     _download_and_wait_for_consent(page)
     _hold_install_progress(page)
     page.locator("#modalConfirm").click()
@@ -48,8 +49,7 @@ def test_accepted_install_keeps_card_and_close_guard_when_progress_read_fails(up
       const event=new Event('beforeunload',{cancelable:true});
       dispatchEvent(event);return event.defaultPrevented;
     }""")
-    _open_update_settings(page)
-    page.locator("#checkUpdate").click()
+    page.evaluate("window.updateTestController.refreshUpdate(true)")
     expect(page.locator("#modalBackdrop")).to_be_hidden()
     expect(page.locator("#checkUpdate")).to_have_text("查看更新")
     expect(page.locator("#updateCardAction")).to_be_hidden()
@@ -60,6 +60,32 @@ def test_accepted_install_keeps_card_and_close_guard_when_progress_read_fails(up
     expect(page.locator("#updateCardMessage")).to_have_text("正在关闭机器人及微信")
     assert len(page.evaluate("window.updateCalls.install"))==1
     assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+
+
+@pytest.mark.parametrize("section", ["model", "search"])
+def test_accepted_install_blocks_settings_edits_during_unknown_progress(update_page, section):
+    page=update_page
+    _open_update_settings(page)
+    page.locator(f'[data-settings-tab="{section}"]').click()
+    if section=="model":
+        page.locator('[data-provider-create]').click()
+        field=page.locator('#providerModelInput')
+    else:
+        page.locator('label[for="webSearchEnabled"]').click()
+        page.locator('#webSearchForm button[type="submit"]').click()
+        expect(page.locator('#webSearchNote')).to_contain_text('已热更新')
+        field=page.locator('#webSearchKey')
+    _download_and_wait_for_consent(page)
+    _hold_install_progress(page)
+    page.locator('#modalConfirm').click()
+    expect(page.locator('#modalBackdrop')).to_be_hidden()
+    expect(page.locator('.app-shell')).to_have_js_property('inert',True)
+    value=field.input_value()
+    with pytest.raises(TimeoutError):
+        field.click(timeout=500)
+    page.keyboard.type('blocked-during-install')
+    expect(field).to_have_value(value)
+    assert len(page.evaluate('window.updateCalls.install'))==1
 
 
 def test_accepted_install_close_failure_uses_fresh_close_consent_after_read_recovers(update_page):
@@ -109,7 +135,38 @@ def test_confirmed_install_failure_releases_close_guard_and_retains_retry(update
     expect(page.locator("#updateCardMessage")).to_contain_text("原版本文件未更改")
     expect(page.locator("#updateCardAction")).to_have_text("重试下载")
     assert not page.evaluate("window.updateTestState.updateInstalling")
+    expect(page.locator('.app-shell')).to_have_js_property('inert',False)
     assert len(page.evaluate("window.updateCalls.install"))==1
+
+
+def test_install_failure_does_not_unlock_an_open_onboarding_dialog(update_page):
+    page=update_page
+    _open_update_settings(page)
+    page.evaluate("""() => {
+      const api=window.pywebview.api, read=api.get_onboarding_readiness;
+      api.get_onboarding_readiness=async()=>{
+        const result=await read();
+        return new Promise(resolve=>{window.finishOnboardingRead=()=>resolve(result);});
+      };
+    }""")
+    page.locator('#openOnboarding').click()
+    _download_and_wait_for_consent(page)
+    _hold_install_progress(page)
+    page.locator('#modalConfirm').click()
+    expect(page.locator('#modalBackdrop')).to_be_hidden()
+    page.evaluate('window.finishOnboardingRead()')
+    expect(page.locator('#onboardingBackdrop')).to_be_visible()
+    page.evaluate("""() => {
+      window.testUpdateStatus={...window.testUpdateStatus,state:'failed',phase:'failed',
+        error:{code:'UPD-1007',message:'安装未能启动'}};
+      window.installStatusFails=false;
+      return window.updateTestController.pollUpdateStatus();
+    }""")
+    assert not page.evaluate('window.updateTestState.updateInstalling')
+    expect(page.locator('.app-shell')).to_have_js_property('inert',True)
+    page.locator('#onboardingRecommended').click()
+    expect(page.locator('#onboardingBackdrop')).to_be_hidden()
+    expect(page.locator('.app-shell')).to_have_js_property('inert',False)
 
 
 def test_status_read_started_before_install_cannot_restore_consumed_consent(update_page):

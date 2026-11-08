@@ -10,6 +10,7 @@ window.createUpdateNotifications = function (helpers) {
     renderStatus,
     reportError,
     state,
+    syncShellInteractivity,
     toast,
   } = helpers;
 
@@ -35,6 +36,7 @@ window.createUpdateNotifications = function (helpers) {
   function renderUpdateCard(release, progress) {
     state.updateInstalling = Boolean(progress?.state === "restarting" || progress?.close_pending
       || (progress?.state === "running" && ["prepare", "stopping_services", "launching", "install"].includes(progress.phase)));
+    syncShellInteractivity();
     const card = $("#updateCard");
     const matching = matchesRelease(release, progress);
     const ready = isReadyForRelease(release, progress);
