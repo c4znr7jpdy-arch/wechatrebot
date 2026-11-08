@@ -1,4 +1,6 @@
 """Native voice drafts and pending actions reach the manager's real guards."""
+from urllib.parse import urlsplit
+
 import pytest
 from playwright.sync_api import expect
 
@@ -60,9 +62,10 @@ def _expect_close_guard(view, blocked):
     assert view.frame.locator("html").evaluate(dispatch) is blocked
 
 
-@pytest.mark.parametrize("target", ["feature", "navigation", "refresh"])
-def test_voice_draft_requires_discard_and_cancel_preserves_frame(guarded_voice, target):
+@pytest.mark.parametrize("target,width", [("feature", 1380), ("navigation", 430), ("refresh", 1380)])
+def test_voice_draft_requires_discard_and_cancel_preserves_frame(guarded_voice, tmp_path, target, width):
     view = guarded_voice
+    view.page.set_viewport_size({"width": width, "height": 920})
     view.field.fill("不能静默丢失的语音草稿")
     _expect_editor(view, dirty=True, busy=False)
     _expect_close_guard(view, True)
@@ -78,6 +81,8 @@ def test_voice_draft_requires_discard_and_cancel_preserves_frame(guarded_voice, 
 
     leave()
     expect(view.page.locator("#modalTitle")).to_have_text("离开前丢弃修改？")
+    view.page.screenshot(path=str(tmp_path / f"voice-draft-leave-{width}.png"), animations="disabled")
+    assert view.page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     view.page.locator("#modalCancel").click()
     expect(view.field).to_have_value("不能静默丢失的语音草稿")
     assert view.page.evaluate("oldVoiceFrame === document.querySelector('#featurePageFrame').contentWindow")
@@ -133,14 +138,18 @@ def test_voice_page_reselection_keeps_current_draft(guarded_voice):
     _expect_close_guard(view, True)
 
 
-@pytest.mark.parametrize("pending", [False, True])
-def test_voice_editor_protects_restore_and_update_install(guarded_voice, pending):
+@pytest.mark.parametrize("phase", ["draft", "saving", "clean-save"])
+def test_voice_editor_protects_restore_and_update_install(guarded_voice, phase):
     view = guarded_voice
-    view.field.fill("维护操作前的草稿")
+    pending = phase != "draft"
+    dirty = phase != "clean-save"
+    if dirty:
+        view.field.fill("维护操作前的草稿")
     if pending:
         view.frame.locator("#save-config").click()
         expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "1")
-    _expect_editor(view, dirty=True, busy=pending)
+    _expect_editor(view, dirty=dirty, busy=pending)
+    _expect_close_guard(view, True)
     view.page.evaluate("""() => {
       const api = window.pywebview.api;
       window.voiceMaintenanceWrites = [];
@@ -149,7 +158,7 @@ def test_voice_editor_protects_restore_and_update_install(guarded_voice, pending
       document.querySelector('#restoreBackup').disabled = false;
       document.querySelector('#restoreBackup').click();
     }""")
-    expect(view.page.locator("#toastRegion")).to_contain_text("尚未保存")
+    expect(view.page.locator("#toastRegion")).to_contain_text("尚未保存" if dirty else "正在处理其他操作")
     expect(view.page.locator("#modalBackdrop")).to_be_hidden()
     view.page.evaluate("""() => {
       const release = {version:'1.0.1',release_id:'voice-guard-release',package_size:1000};
@@ -170,6 +179,14 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
     view = guarded_voice
     view.field.fill("拒绝伪造清空状态")
     _expect_editor(view, dirty=True, busy=False)
+    assert view.frame.locator("html").evaluate("""() => {
+      const previous = editorSession;
+      for (const [origin,source] of [['https://invalid.example',parent],[location.origin,window]]) {
+        dispatchEvent(new MessageEvent('message',{origin,source,data:{
+          channel:'astrbot-plugin-page',kind:'editor-context',session:'untrusted-context'}}));
+      }
+      return editorSession === previous;
+    }""")
     view.outer.locator("html").evaluate("""() => {
       const frame = document.querySelector('#plugin-frame');
       for (const [origin, source, session] of [
@@ -193,3 +210,31 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
     }""")
     _expect_close_guard(view, True)
     assert view.page.evaluate("window.voiceGuardState.featurePageDirty")
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_voice_standalone_shell_keeps_dirty_or_pending_page(native_voice, pending):
+    view = native_voice
+    address = urlsplit(view.page.url)._replace(path="", query="").geturl()
+    view.page.goto(address + "/plugin-center?feature=feature-voice-clone")
+    frame = view.page.frame_locator("#plugin-frame")
+    field = frame.locator("#default-context")
+    expect(field).to_have_value("已保存的风格")
+    writes = []
+    view.page.route("**/control/plugins/*/reload", lambda route: (
+        writes.append(route.request.url), route.fulfill(json={"ok": True, "data": {}})))
+    field.fill("独立设置页的草稿")
+    if pending:
+        frame.locator("#save-config").click()
+        expect(frame.locator("#save-config")).to_be_disabled()
+    assert view.page.evaluate("""() => {
+      const event = new Event('beforeunload', {cancelable:true});
+      dispatchEvent(event); return event.defaultPrevented;
+    }""")
+    # Native-page headers hide this fallback button; its handler must also
+    # reject a programmatic event while the editor still owns a draft/action.
+    view.page.locator("#reload-plugin").dispatch_event("click")
+    assert writes == []
+    view.page.locator('.page-button[data-page-name="settings"]').click()
+    expect(field).to_have_value("独立设置页的草稿")
+    assert len(view.writes) == int(pending)
