@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import hashlib
+from itertools import islice
 import json
+import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+import time
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from .json_io import write_json_atomic
 from .payload import PayloadError, _checked_target, _copy_stream_and_hash, _valid_digest
@@ -15,6 +18,8 @@ if TYPE_CHECKING:
 
 UPDATE_CACHE_RECEIPT = "prepared-update.json"
 UPDATE_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+UPDATE_CACHE_MAX_SCAN_ENTRIES = 128
+UPDATE_CACHE_MAX_COPY_ATTEMPTS = 3
 
 
 def update_release_id(release: UpdateRelease) -> str:
@@ -50,6 +55,16 @@ def has_update_cache_receipt(working: Path) -> bool:
     return _read_receipt(working) is not None
 
 
+def _cache_candidates(updates_root: Path) -> Iterator[Path]:
+    try:
+        with os.scandir(updates_root) as entries:
+            for entry in islice(entries, UPDATE_CACHE_MAX_SCAN_ENTRIES):
+                if entry.name.startswith(".pending-"):
+                    yield Path(entry.path)
+    except OSError:
+        return
+
+
 def restore_update_archive(
     updates_root: Path,
     release: UpdateRelease,
@@ -58,16 +73,18 @@ def restore_update_archive(
     progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> Path | None:
     """Copy an eligible ZIP and hash the copied bytes against current metadata."""
-    try:
-        candidates = tuple(updates_root.glob(".pending-*"))
-    except OSError:
-        return None
     identity = update_release_id(release)
-    for candidate in candidates:
+    cutoff = time.time() - UPDATE_CACHE_MAX_AGE_SECONDS
+    attempts = 0
+    for candidate in _cache_candidates(updates_root):
+        if attempts >= UPDATE_CACHE_MAX_COPY_ATTEMPTS:
+            break
         if candidate == destination.parent:
             continue
         try:
             working = _checked_target(updates_root, Path(candidate.name), allow_directory=True)
+            if not working.is_dir() or working.stat().st_mtime <= cutoff:
+                continue
             receipt = _read_receipt(working)
             if receipt is None or receipt["release_id"] != identity:
                 continue
@@ -76,6 +93,7 @@ def restore_update_archive(
                 continue
             if progress_callback is not None:
                 progress_callback("verify", 0, release.package_size)
+            attempts += 1
             with archive.open("rb") as source:
                 actual = _copy_stream_and_hash(source, destination, max_bytes=release.package_size)
             if destination.stat().st_size != release.package_size or actual != release.package_sha256:

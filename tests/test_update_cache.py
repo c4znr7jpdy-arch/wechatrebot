@@ -1,18 +1,21 @@
 """A new manager session may reuse only archives bound to the current release."""
 
 from dataclasses import replace
+from contextlib import contextmanager
 import io
 import json
 import os
 from pathlib import Path
+import shutil
 import time
+from types import SimpleNamespace
 import zipfile
 
 import pytest
 
 from test_app_shell import _api, _download_ready
 from test_updates import _DownloadResponse, _channel_and_key, _ready_incremental_update, _ready_payload, _release_for_archive
-from wechatrebot_manager import update_api, updates
+from wechatrebot_manager import update_api, update_cache, updates
 from wechatrebot_manager.payload import sha256_file
 from wechatrebot_manager.update_errors import UpdateFailure
 
@@ -191,3 +194,73 @@ def test_cache_that_grows_during_copy_is_bounded_and_redownloaded(downloaded, mo
 
     assert prepared.archive_path.stat().st_size == release.package_size
     assert calls == [release.package_url, release.package_url]
+
+
+def _ordered_scan(monkeypatch, updates_root, candidates):
+    scandir = os.scandir
+    visited = []
+    @contextmanager
+    def scan(path):
+        if Path(path) == updates_root:
+            def entries():
+                for candidate in candidates:
+                    visited.append(candidate)
+                    yield SimpleNamespace(name=candidate.name, path=str(candidate))
+            yield entries()
+        else:
+            with scandir(path) as entries:
+                yield entries
+    monkeypatch.setattr(update_cache.os, "scandir", scan)
+    return visited
+
+
+@pytest.mark.parametrize("age_offset,uses_cache", [(-1, False), (0, False), (1, True)])
+def test_cache_age_is_enforced_during_restore_without_cleanup(downloaded, monkeypatch, age_offset, uses_cache):
+    root, release, channel, original, calls = downloaded
+    now = time.time()
+    monkeypatch.setattr(update_cache.time, "time", lambda: now)
+    modified = now - update_cache.UPDATE_CACHE_MAX_AGE_SECONDS + age_offset
+    os.utime(original.working_root, (modified, modified))
+
+    updates.prepare_update(release, channel, root)
+
+    assert len(calls) == (1 if uses_cache else 2)
+
+
+@pytest.mark.parametrize("before_limit", [True, False])
+def test_directory_scan_stops_at_entry_limit(downloaded, monkeypatch, before_limit):
+    root, release, channel, original, calls = downloaded
+    limit = update_cache.UPDATE_CACHE_MAX_SCAN_ENTRIES
+    misses = [root / "updates" / f"unrelated-{index}" for index in range(limit - int(before_limit))]
+    for path in misses:
+        path.touch()
+    visited = _ordered_scan(monkeypatch, root / "updates", [*misses, original.working_root])
+
+    updates.prepare_update(release, channel, root)
+
+    assert len(visited) == limit
+    assert len(calls) == (1 if before_limit else 2)
+
+
+@pytest.mark.parametrize("before_limit", [True, False])
+def test_repeated_damaged_archives_have_a_copy_attempt_limit(downloaded, monkeypatch, before_limit):
+    root, release, channel, original, calls = downloaded
+    limit = update_cache.UPDATE_CACHE_MAX_COPY_ATTEMPTS
+    damaged = []
+    for index in range(limit - int(before_limit)):
+        candidate = root / "updates" / f".pending-damaged-{index}"
+        shutil.copytree(original.working_root, candidate)
+        (candidate / "update.zip").write_bytes(b"x" * release.package_size)
+        damaged.append(candidate)
+    _ordered_scan(monkeypatch, root / "updates", [*damaged, original.working_root])
+    copied = []
+    copy = update_cache._copy_stream_and_hash
+    def track(reader, target, **kwargs):
+        copied.append(reader.name)
+        return copy(reader, target, **kwargs)
+    monkeypatch.setattr(update_cache, "_copy_stream_and_hash", track)
+
+    updates.prepare_update(release, channel, root)
+
+    assert len(copied) == limit
+    assert len(calls) == (1 if before_limit else 2)
