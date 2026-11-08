@@ -19,6 +19,7 @@ window.createScheduledTasks = function (helpers) {
   } = helpers;
 
   let scheduledTestResult = null;
+  let pendingTaskReadback = "";
 
   async function loadSchedules(options = {}) {
     const background = options?.background === true;
@@ -26,7 +27,8 @@ window.createScheduledTasks = function (helpers) {
         || (state.scheduledContext && !state.scheduledContext.loading
           && state.status?.runtime?.account_status_available === false))) return;
     if (background && state.scheduledContextRequest) return state.scheduledContextRequest;
-    const retained = background && state.scheduledContext && !state.scheduledContext.loading
+    const retained = (background || (pendingTaskReadback && pendingTaskReadback === state.scheduledContext?.account_id))
+      && state.scheduledContext && !state.scheduledContext.loading
       && scheduledAccountMatches(state.scheduledContext.account_id || "")
       ? {context: state.scheduledContext, schedules: state.schedules, migrations: state.legacyMigrations} : null;
     const generation = ++state.scheduledLoad;
@@ -53,6 +55,7 @@ window.createScheduledTasks = function (helpers) {
   }
 
   function invalidateScheduledContext() {
+    pendingTaskReadback = "";
     state.scheduledLoad += 1;
     state.scheduledContextRequest = null;
     state.scheduledContext = null;
@@ -106,13 +109,17 @@ window.createScheduledTasks = function (helpers) {
       // A failed background read must not replace a verified same-account view.
       if (retained && scheduledAccountMatches(initialAccount)
           && [context, legacy, migrations].some((result) => result.status === "rejected")
-          && (context.status === "rejected" || context.value.account_id === initialAccount)) return;
+          && (context.status === "rejected" || context.value.account_id === initialAccount)) {
+        showPendingTaskReadback();
+        return;
+      }
       let contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
       const accountChanged = Boolean(contextData.account_id && ((!scheduledAccountMatches(contextData.account_id))
         || (initialAccount && contextData.account_id !== initialAccount)));
       if (accountChanged) {
         contextData = {account_id: "", items: [], message: "微信账号已变化，请刷新任务列表。"};
       }
+      pendingTaskReadback = "";
       const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
       const visibleMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
       const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
@@ -133,7 +140,10 @@ window.createScheduledTasks = function (helpers) {
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
     } catch (error) {
       if (generation !== state.scheduledLoad) return;
-      if (retained && scheduledAccountMatches(retained.context.account_id || "")) return;
+      if (retained && scheduledAccountMatches(retained.context.account_id || "")) {
+        showPendingTaskReadback();
+        return;
+      }
       state.scheduledContext = null;
       state.scheduledCommandCatalog = [];
       state.schedules = [];
@@ -146,6 +156,30 @@ window.createScheduledTasks = function (helpers) {
       if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
       reportError(error);
     }
+  }
+
+  function showPendingTaskReadback() {
+    if (!pendingTaskReadback) return;
+    $("#scheduleContextMessage").textContent = "任务操作已确认，列表本次未能完整刷新；正在显示已确认的结果。可点击“刷新”重新读取，无需重复提交。";
+    $("#scheduleContextMessage").hidden = false;
+  }
+
+  function acceptScheduledTaskWrite(expected, result, deleted = false) {
+    const context = state.scheduledContext;
+    if (context?.account_id !== expected.account_id || !scheduledAccountMatches(expected.account_id)) return false;
+    const item = result?.item;
+    if (deleted ? result?.deleted !== true
+      : !item || item.id !== expected.id || item.account_id !== expected.account_id || !item.revision) {
+      throw new Error("未收到当前任务的操作确认，请刷新核对；当前编辑内容已保留。");
+    }
+    context.items = (context.items || []).filter((entry) => entry.id !== expected.id);
+    if (!deleted) context.items.push(item);
+    pendingTaskReadback = expected.account_id;
+    // An earlier list request must not overwrite a newer confirmed write.
+    state.scheduledLoad += 1;
+    state.scheduledContextRequest = null;
+    renderScheduledTasks();
+    return true;
   }
 
   function renderScheduledSnapshot(previous) {
@@ -636,8 +670,9 @@ window.createScheduledTasks = function (helpers) {
     await scheduledBusyAction(async () => {
       if (!draft && !scheduledReadiness().ready) throw new Error(scheduledReadiness().message);
       const payload = scheduledPayload(draft);
+      const editor = state.scheduledEditor;
       const data = await api("save_scheduled_task", payload);
-      if (!data.item) throw new Error("未收到任务保存确认，请刷新核对。当前草稿已保留。 ");
+      if (state.scheduledEditor !== editor || !acceptScheduledTaskWrite(payload, data)) return;
       state.scheduledDirty = false; state.scheduledEditor = null;
       showScheduledList(); await loadSchedules();
       toast(data.message || (data.item.draft ? "任务草稿已保存。" : data.item.enabled ? "任务已保存并启用。" : "任务已保存。"));
@@ -749,6 +784,7 @@ window.createScheduledTasks = function (helpers) {
     if (action === "runs") { await showScheduledRuns(item); return; }
     confirmAction({title: action === "delete" ? "永久删除定时任务？" : item.enabled ? "暂停定时任务？" : "启用定时任务？", message: action === "delete" ? `“${item.name}”将永久删除，重启或升级后也不会恢复。已提交微信的消息无法撤回。` : `${item.name}：${item.schedule_text || scheduledTimeText(item.schedule)}，发送给${scheduledTargetText(item.targets)}。`, confirmText: action === "delete" ? "永久删除" : item.enabled ? "暂停任务" : "启用任务", intent: action === "delete" ? "danger" : action === "toggle" && !item.enabled ? "primary" : "secondary", onConfirm: async () => {
       const data = action === "delete" ? await api("delete_scheduled_task", item.account_id, item.id, item.revision) : await api("set_scheduled_task_enabled", item.account_id, item.id, !item.enabled, item.revision);
+      if (!acceptScheduledTaskWrite(item, data, action === "delete")) return;
       await loadSchedules(); toast(data.message || (action === "delete" ? "任务已删除。" : "任务状态已更新。"));
     }});
   }
