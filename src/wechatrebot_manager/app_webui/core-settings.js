@@ -6,7 +6,7 @@
     const {read, request, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-    const state = {detail: null, stale: false, view: "global", templateId: null, templates: [], bindings: {}, config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", feedback: "", readbackPending: ""};
+    const state = {detail: null, stale: false, view: "global", templateId: null, templates: [], bindings: {}, config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", feedback: "", readbackPending: "", readbackScope: ""};
     const root = () => $("#coreDetail");
     const clone = (value) => structuredClone(value || {});
     const currentTemplate = () => state.templates.find((item) => item.id === state.templateId);
@@ -43,8 +43,9 @@
       state.loading = true; renderNavigation();
       try {
         const detail = await read();
-        const profiles = detail.engine_online ? await readProfiles(Boolean(state.readbackPending)) : {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: ""};
-        if (state.readbackPending && state.view === "template" && !detail.engine_online) {
+        const templateReadback = state.readbackPending && state.readbackScope === "template";
+        const profiles = detail.engine_online ? await readProfiles(Boolean(templateReadback)) : {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: ""};
+        if (templateReadback && !detail.engine_online) {
           throw new Error("请恢复机器人连接后重新读取模板列表。");
         }
         if (state.dirty) {
@@ -59,6 +60,7 @@
         if (!state.profilesAvailable) { state.view = "global"; state.templateId = null; }
         if (state.view === "template" && !currentTemplate()) { state.view = "global"; state.templateId = null; }
         state.readbackPending = "";
+        state.readbackScope = "";
         resetDraft(); render();
       } catch (error) {
         state.stale = true;
@@ -66,7 +68,8 @@
           state.feedback = state.readbackPending ? readbackWarning() : state.dirty ? "核心配置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。" : "核心配置读取失败；当前内容已保留，请稍后重新读取。";
           $("#coreNote").textContent = note();
         } else root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
-        reportError(error);
+        if (state.readbackPending) reportReadbackError(error);
+        else reportError(error);
       } finally { state.loading = false; renderNavigation(); }
     }
 
@@ -88,7 +91,7 @@
       const pending = state.busy || state.loading;
       const writeBlocked = pending || Boolean(state.readbackPending);
       const online = state.detail?.engine_online && state.profilesAvailable;
-      $("#coreStatus").textContent = state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
+      $("#coreStatus").textContent = state.readbackPending ? "已提交 · 等待读取核对" : state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
       $("#newCoreTemplate").disabled = writeBlocked || !online || !Object.keys(state.detail?.template_schema || {}).length;
       $("#coreTemplateSource").disabled = $("#newCoreTemplate").disabled;
       $("#refreshCore").disabled = pending;
@@ -109,6 +112,7 @@
         event.target.value = state.templateId || "";
         void selectView(id ? "template" : "global", id || null);
       });
+      if (state.readbackPending) $("#coreTemplateList").insertAdjacentHTML("afterbegin", `<p class="form-note" role="status">${esc(state.feedback || readbackWarning())}</p>`);
     }
 
     async function selectView(view, templateId = null) {
@@ -119,6 +123,7 @@
 
     function note() {
       if (state.feedback) return state.feedback;
+      if (state.readbackPending) return readbackWarning();
       if (state.dirty) return "有修改尚未保存。";
       if (state.view === "template") return "打开“单独设置”来修改这一项；关闭时跟随全局，后续全局调整也会同步。";
       if (state.capabilityWarning) return state.capabilityWarning;
@@ -249,26 +254,38 @@
       return `${state.readbackPending} 后续读取暂未完成，请点击“重新读取”核对；核对前暂停编辑，避免重复提交。`;
     }
 
-    async function confirmWrite(message, readback) {
+    function reportReadbackError(error) {
+      const readError = new Error(`操作已提交，后续读取未完成。${error.message}`, {cause: error});
+      if (error.product) readError.product = {...error.product, title: "操作已提交，后续读取未完成", message: readError.message};
+      reportError(readError);
+    }
+
+    async function confirmWrite(message, readback, scope = "template") {
       state.readbackPending = message;
+      state.readbackScope = scope;
       state.dirty = false;
       state.feedback = `${message} 正在重新读取核对…`;
       render();
       try {
         await readback();
+        let feedback = message;
+        if (scope === "template" && state.view === "template" && state.templateId && !currentTemplate()) {
+          state.view = "global";
+          state.templateId = null;
+          feedback = `${message} 该模板已不在当前列表中，已返回全局配置。`;
+        }
         state.readbackPending = "";
+        state.readbackScope = "";
         state.stale = false;
         resetDraft();
-        state.feedback = message;
+        state.feedback = feedback;
         render();
-        toast(message);
+        toast(feedback);
       } catch (error) {
         state.stale = true;
         state.feedback = readbackWarning();
         $("#coreNote").textContent = state.feedback;
-        const readError = new Error(`${state.feedback} ${error.message}`, {cause: error});
-        if (error.product) readError.product = {...error.product, title: "操作已保存，后续读取未完成", message: readError.message};
-        reportError(readError);
+        reportReadbackError(error);
       }
     }
 
@@ -288,7 +305,7 @@
         await confirmWrite(message, async () => {
           if (state.view === 'template') await loadProfiles(true);
           else state.detail = await read();
-        });
+        }, state.view);
       });
     }
 
