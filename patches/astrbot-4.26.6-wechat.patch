@@ -689,6 +689,25 @@ diff --git a/official/astrbot/core/provider/sources/openai_source.py b/expected/
  
          self._finally_convert_payload(payloads)
  
+@@ -1244,7 +1258,7 @@
+                 if success:
+                     break
+ 
+-        if retry_cnt == max_retries - 1 or llm_response is None:
++        if llm_response is None:
+             logger.error(f"API 调用失败，重试 {max_retries} 次仍然失败。")
+             if last_exception is None:
+                 raise Exception("未知错误")
+@@ -1320,8 +1334,7 @@
+                 )
+                 if success:
+                     break
+-
+-        if retry_cnt == max_retries - 1:
++        else:
+             logger.error(f"API 调用失败，重试 {max_retries} 次仍然失败。")
+             if last_exception is None:
+                 raise Exception("未知错误")
 
 diff --git a/official/astrbot/core/provider/sources/request_retry.py b/expected/astrbot/core/provider/sources/request_retry.py
 --- a/official/astrbot/core/provider/sources/request_retry.py
