@@ -38,11 +38,13 @@ def test_adapted_native_plugins_pass_delivery_guard(tmp_path, monkeypatch):
         entry = next(e for e in entries if e['source'] == f'runtime/{module}')
         target = stage / entry['target']
         _copy_source_entry(ROOT / entry['source'], target, entry)
-        subprocess.run([
-            'git', 'apply', '--ignore-space-change',
-            f'--directory={target.relative_to(tmp_path).as_posix()}',
-            str(ROOT / 'patches' / f'astrbot-plugin-{module}.patch'),
-        ], cwd=tmp_path, check=True)
+        base_patch = ROOT / 'patches' / f'astrbot-plugin-{module}.patch'
+        for patch in [base_patch, *sorted(base_patch.parent.glob(f'{base_patch.stem}--*.patch'))]:
+            subprocess.run([
+                'git', 'apply', '--ignore-space-change',
+                f'--directory={target.relative_to(tmp_path).as_posix()}',
+                str(patch),
+            ], cwd=tmp_path, check=True)
     assert scan_release(stage) == []
 
 
