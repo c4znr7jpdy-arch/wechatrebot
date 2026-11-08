@@ -241,7 +241,7 @@ def test_outer_reload_rejects_previous_document_editor_state(guarded_voice, pend
     _expect_editor(view, dirty=True, busy=pending)
     # Keep the real WindowProxy while delivering a previous document's state.
     # A missing token must also fail closed; only current-session updates apply.
-    view.outer.locator("html").evaluate("""previous => {
+    view.outer.locator("html").evaluate("""(_element, previous) => {
       for (const session of [previous, undefined]) {
         parent.postMessage({channel:'astrbot-plugin-page',kind:'editor-state',
           featureId:'feature-voice-clone',session,dirty:false,busy:false},location.origin);
