@@ -510,7 +510,8 @@ window.createFeatureController = function (helpers) {
 
   const featurePageChannel = "astrbot-plugin-page";
   function sendEmbeddedEditorContext(frame) {
-    if (!featurePageEditorSession || state.selectedFeature !== "feature-voice-clone") return;
+    if (!featurePageEditorSession || !state.selectedFeature
+      || state.featureDetail?.id !== state.selectedFeature || !state.featureDetail.pages?.length) return;
     frame.contentWindow.postMessage({channel: featurePageChannel, kind: "editor-context",
       session: featurePageEditorSession}, window.location.origin);
   }
@@ -540,7 +541,8 @@ window.createFeatureController = function (helpers) {
       return;
     }
     if (message.kind === "editor-state") {
-      if (state.selectedFeature !== "feature-voice-clone" || message.featureId !== state.selectedFeature
+      if (!state.selectedFeature || state.featureDetail?.id !== state.selectedFeature
+        || !state.featureDetail.pages?.length || message.featureId !== state.selectedFeature
         || !featurePageEditorSession || message.session !== featurePageEditorSession
         || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
       state.featurePageDirty = message.dirty;

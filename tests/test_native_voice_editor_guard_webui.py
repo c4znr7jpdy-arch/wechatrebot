@@ -63,7 +63,7 @@ def _expect_close_guard(view, blocked):
     assert view.frame.locator("html").evaluate(dispatch) is blocked
 
 
-@pytest.mark.parametrize("target,width", [("feature", 1380), ("navigation", 430), ("refresh", 1380)])
+@pytest.mark.parametrize("target,width", [("feature", 1380), ("navigation", 1380), ("refresh", 1380)])
 def test_voice_draft_requires_discard_and_cancel_preserves_frame(guarded_voice, tmp_path, target, width):
     view = guarded_voice
     view.page.set_viewport_size({"width": width, "height": 920})
@@ -205,17 +205,17 @@ def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guard
       }
     }""")
     parent_session = view.outer.locator("html").evaluate("() => parentEditorSession")
-    view.page.evaluate("""session => {
+    view.page.evaluate("""({session, featureId: currentFeatureId}) => {
       const frame = document.querySelector('#featurePageFrame');
       for (const [origin, source, featureId, dirty] of [
-        ['https://invalid.example',frame.contentWindow,'feature-voice-clone',false],
-        [location.origin,window,'feature-voice-clone',false],
+        ['https://invalid.example',frame.contentWindow,currentFeatureId,false],
+        [location.origin,window,currentFeatureId,false],
         [location.origin,frame.contentWindow,'feature-commands',false],
-        [location.origin,frame.contentWindow,'feature-voice-clone','false']]) {
+        [location.origin,frame.contentWindow,currentFeatureId,'false']]) {
         dispatchEvent(new MessageEvent('message',{origin,source,data:{
           channel:'astrbot-plugin-page',kind:'editor-state',session,featureId,dirty,busy:false}}));
       }
-    }""", parent_session)
+    }""", {"session": parent_session, "featureId": view.feature_id})
     _expect_close_guard(view, True)
     assert view.page.evaluate("window.voiceGuardState.featurePageDirty")
 
@@ -241,12 +241,12 @@ def test_outer_reload_rejects_previous_document_editor_state(guarded_voice, pend
     _expect_editor(view, dirty=True, busy=pending)
     # Keep the real WindowProxy while delivering a previous document's state.
     # A missing token must also fail closed; only current-session updates apply.
-    view.outer.locator("html").evaluate("""(_element, previous) => {
+    view.outer.locator("html").evaluate("""(_element, {previous, featureId}) => {
       for (const session of [previous, undefined]) {
         parent.postMessage({channel:'astrbot-plugin-page',kind:'editor-state',
-          featureId:'feature-voice-clone',session,dirty:false,busy:false},location.origin);
+          featureId,session,dirty:false,busy:false},location.origin);
       }
-    }""", old_session)
+    }""", {"previous": old_session, "featureId": view.feature_id})
     expect(view.page.locator("body")).to_have_attribute("data-voice-editor-last-session", "missing")
     _expect_editor(view, dirty=True, busy=pending)
     _expect_close_guard(view, True)
@@ -258,7 +258,7 @@ def test_outer_reload_rejects_previous_document_editor_state(guarded_voice, pend
 def test_voice_standalone_shell_keeps_dirty_or_pending_page(native_voice, pending):
     view = native_voice
     address = urlsplit(view.page.url)._replace(path="", query="").geturl()
-    view.page.goto(address + "/plugin-center?feature=feature-voice-clone")
+    view.page.goto(address + f"/plugin-center?feature={view.feature_id}")
     frame = view.page.frame_locator("#plugin-frame")
     field = frame.locator("#default-context")
     expect(field).to_have_value("已保存的风格")

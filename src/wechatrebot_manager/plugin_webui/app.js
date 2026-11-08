@@ -105,7 +105,8 @@ let editorSession = "";
 let parentEditorSession = "";
 
 function publishEditorState() {
-  if (window.parent === window || state.currentId !== "feature-voice-clone" || !parentEditorSession) return;
+  if (window.parent === window || !state.currentId || state.detail?.id !== state.currentId
+    || !state.detail.pages?.length || !parentEditorSession) return;
   window.parent.postMessage({channel: pluginPageChannel, kind: "editor-state",
     session: parentEditorSession, featureId: state.currentId,
     dirty: state.pageDirty, busy: state.pageBusy}, window.location.origin);
@@ -208,7 +209,8 @@ window.addEventListener("message", async (event) => {
     return;
   }
   if (message.kind === "editor-state") {
-    if (state.currentId !== "feature-voice-clone" || !editorSession || message.session !== editorSession
+    if (!state.currentId || state.detail?.id !== state.currentId || !state.detail.pages?.includes(state.pageName)
+      || !editorSession || message.session !== editorSession
       || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
     state.pageDirty = message.dirty;
     state.pageBusy = message.busy;
