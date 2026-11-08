@@ -754,7 +754,6 @@
     }
     if (page === "settings") {
       setSettingsSection(state.settingsSection);
-      if (!state.maintenance) await loadMaintenance();
     }
   }
 
@@ -1241,6 +1240,7 @@
     $("#createBackup").addEventListener("click", createBackup);
     $("#restoreBackup").addEventListener("click", chooseRestoreBackup);
     $("#exportDiagnostics").addEventListener("click", exportDiagnostics);
+    $("#copyDiagnosticPath").addEventListener("click", () => { void copyText($("#diagnosticExportPath").textContent, "保存位置"); });
     $("#openOnboarding").addEventListener("click", () => { showOnboarding(true); });
     $("#cleanHistory").addEventListener("click", () => {
       const accountId = state.historyAccount;
@@ -1463,7 +1463,7 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, loadMaintenance, openMemoryManager, reloadWebSearchSettings, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
+  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, openMemoryManager, reloadWebSearchSettings, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
     $,
     $$,
     SETTINGS_SECTIONS,

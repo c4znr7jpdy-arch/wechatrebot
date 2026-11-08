@@ -468,6 +468,8 @@
               <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
+              <p class="activity-feedback" id="diagnosticExportFeedback" role="status" aria-live="polite"></p>
+              <div class="path-box" id="diagnosticExportLocation" hidden><span>保存位置</span><code id="diagnosticExportPath"></code><button class="button ghost small" id="copyDiagnosticPath" type="button" disabled>复制保存位置</button></div>
               <div class="maintenance-row"><div><strong>使用帮助</strong></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>记忆数据</strong><span>查看和删除已保存的记忆</span></div><button class="button ghost small" id="manageMemories" data-action-bound disabled>管理记忆</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>

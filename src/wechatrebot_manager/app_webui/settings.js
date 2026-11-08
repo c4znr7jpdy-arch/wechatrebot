@@ -25,6 +25,7 @@ window.createManagerSettings = function (helpers) {
     updateToggleCopy,
     getCoreSettings,
   } = helpers;
+  let maintenanceRead = 0;
 
   async function initializeSkins() {
     const skins = window.managerSkins;
@@ -106,6 +107,7 @@ window.createManagerSettings = function (helpers) {
     }
     if (section === "core") void getCoreSettings().load();
     if (section === "search" && !state.webSearchDirty) void loadWebSearchSettings();
+    if (section === "system") void loadMaintenance();
     if (changed) window.managerMotion?.enter($(`[data-settings-section="${section}"]`, page));
   }
 
@@ -254,8 +256,15 @@ window.createManagerSettings = function (helpers) {
   }
 
   async function loadMaintenance() {
+    const request = ++maintenanceRead;
+    state.maintenance = null;
+    $("#createBackup").disabled = true;
+    $("#restoreBackup").disabled = true;
+    $("#backupSummary").textContent = "正在重新检查备份条件…";
     try {
-      state.maintenance = await api("get_maintenance");
+      const maintenance = await api("get_maintenance");
+      if (request !== maintenanceRead) return;
+      state.maintenance = maintenance;
       const preview = state.maintenance.preview || {};
       const backups = state.maintenance.backups || [];
       const summary = state.maintenance.diagnostics?.summary || {};
@@ -265,7 +274,8 @@ window.createManagerSettings = function (helpers) {
       $("#restoreBackup").disabled = !backups.length || !preview.can_create;
       $("#diagnosticSummary").textContent = summary.error_count ? `${summary.error_count} 项需要处理，导出内容已自动脱敏` : `已检查 ${summary.check_count || 0} 项，不包含密钥和聊天正文`;
     } catch (error) {
-      $("#backupSummary").textContent = "维护信息暂时无法读取";
+      if (request !== maintenanceRead) return;
+      $("#backupSummary").textContent = "维护信息暂时无法读取，请重新打开“系统”重试。";
       reportError(error);
     }
   }
@@ -294,11 +304,25 @@ window.createManagerSettings = function (helpers) {
   }
 
   async function exportDiagnostics() {
+    const button = $("#exportDiagnostics");
+    if (button.disabled) return;
+    button.disabled = true;
+    const feedback = $("#diagnosticExportFeedback");
+    feedback.textContent = "正在导出安全诊断摘要…";
     try {
       const result = await api("export_diagnostics");
+      const path = String(result.path || "");
+      $("#diagnosticExportPath").textContent = path;
+      $("#diagnosticExportLocation").hidden = !path;
+      $("#copyDiagnosticPath").disabled = !path;
+      feedback.textContent = path ? "安全诊断摘要已保存，可复制下面的位置找到文件并发给技术支持。"
+        : `安全诊断摘要已保存：${result.file_name || "诊断文件"}`;
       toast(`安全诊断摘要已导出：${result.file_name || "诊断文件"}`);
-      await api("get_diagnostics");
-    } catch (error) { reportError(error); }
+      await api("get_diagnostics").catch(reportError);
+    } catch (error) {
+      feedback.textContent = "安全诊断摘要未能导出，请重试；如已有保存位置，仍可复制上次的位置。";
+      reportError(error);
+    } finally { button.disabled = false; }
   }
 
   async function closeOnboarding(goToSettings) {
