@@ -1,0 +1,33 @@
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -90,6 +90,7 @@
+         self._start_time: float = 0.0
+         # 保存原 asyncio 全局异常处理器，以便插件卸载时恢复原状。
+         self._original_exception_handler = None
++        self._exception_handler_installed = False
+ 
+         # 群聊沉默倒计时与自动触发计时器
+         self.group_timers: dict[str, asyncio.TimerHandle] = {}
+diff --git a/core/plugin_lifecycle.py b/core/plugin_lifecycle.py
+--- a/core/plugin_lifecycle.py
++++ b/core/plugin_lifecycle.py
+@@ -170,8 +170,6 @@
+                     )
+                 except Exception as e:
+                     logger.debug(f"[主动消息] shutdown 遥测上报失败喵: {e}")
+-                # 再清理其余挂起的 telemetry tasks，避免遗留后台任务。
+-                await self._cleanup_telemetry_tasks()
+ 
+             if self._exception_handler_installed:
+                 loop = asyncio.get_running_loop()
+@@ -211,6 +209,9 @@
+             self.auto_trigger_timers.clear()
+             logger.info(f"[主动消息] 已取消 {auto_trigger_count} 个自动触发计时器喵。")
+ 
++            # 计时器也会登记业务回调；任务回收不能取决于遥测是否启用。
++            await self._cleanup_telemetry_tasks()
++
+             # 清理调度器任务（逐个移除后再 shutdown，便于日志定位）
+             if self.scheduler and self.scheduler.running:
+                 try:
