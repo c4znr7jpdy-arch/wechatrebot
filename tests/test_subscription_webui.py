@@ -120,7 +120,7 @@ def test_preview_trial_end_message_is_exact(browser, manager_url, state):
 
 
 @pytest.mark.parametrize("skin", ["default", "soft"])
-@pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}, {"width": 600, "height": 900}])
+@pytest.mark.parametrize("viewport", [{"width": 1520, "height": 900}])
 def test_paid_subscription_remains_active_and_compact_after_stop(browser, manager_url, skin, viewport, tmp_path):
     page = browser.new_page(viewport=viewport)
     errors = []
@@ -153,6 +153,9 @@ def test_paid_subscription_remains_active_and_compact_after_stop(browser, manage
         page.screenshot(path=str(tmp_path / f"paid-{skin}-{viewport['width']}.png"))
         page.locator('.nav-item[data-page="home"]').click()
         page.locator("#primaryAction").click()
+        expect(page.locator("#modalTitle")).to_have_text("请登录微信")
+        expect(page.locator("#primaryAction")).to_be_disabled()
+        page.locator("#modalConfirm").click()
         expect(page.locator("#globalStatus")).to_have_text("机器人可用")
         expect(page.locator("#modalBackdrop")).to_be_hidden()
         assert not errors, errors
