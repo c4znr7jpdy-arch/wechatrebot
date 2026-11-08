@@ -502,6 +502,8 @@ def test_helper_window_failure_clears_inherited_update_handshake_before_restart(
     launches = []
     monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
                         launches.append((args, kwargs)) or object())
+    monkeypatch.setattr(updates_module, "start_owned_process", lambda *args, **kwargs:
+                        launches.append((args, kwargs)) or object())
 
     assert apply_update_plan(plan.plan_path) == 1
 
@@ -531,6 +533,8 @@ def test_successful_restart_uses_only_current_update_handshake(tmp_path, monkeyp
     for name, value in (("ID", "a" * 32), ("FROM", "0.7.8"), ("TO", "0.7.9")):
         monkeypatch.setenv(f"WECHATREBOT_UPDATE_{name}", value)
     monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
+                        launches.append(kwargs) or object())
+    monkeypatch.setattr(updates_module, "start_owned_process", lambda *args, **kwargs:
                         launches.append(kwargs) or object())
 
     updates_module._restart_manager(target, tmp_path, update_id="b" * 32, version="0.8.0")
