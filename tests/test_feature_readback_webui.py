@@ -7,7 +7,7 @@ from test_settings_webui import _open_feature_draft_page
 
 
 @pytest.mark.parametrize("mode,width", [("refresh", 1380), ("saved", 430)])
-@pytest.mark.parametrize("trigger", ["tabs", "reselect"])
+@pytest.mark.parametrize("trigger", ["tabs", "reselect", "return"])
 def test_failed_feature_read_remains_readonly_until_verified(browser, manager_url, tmp_path, mode, width, trigger):
     page = _open_feature_draft_page(browser, manager_url)
     errors = []
@@ -52,6 +52,9 @@ def test_failed_feature_read_remains_readonly_until_verified(browser, manager_ur
             page.locator('.config-tabs button[data-tab="basic"]').click()
             assert page.evaluate("window.featureReadbackReads") == reads
         else:
+            if trigger == "return":
+                page.locator('.feature-item[data-feature-id="feature-commands"]').click()
+                expect(page.locator("#featureDetail h2")).to_have_text("常用指令")
             page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
             page.wait_for_function("reads => window.featureReadbackReads > reads", arg=reads, timeout=5000)
         expect(field).to_have_value("7" if mode == "saved" else "1")
@@ -61,6 +64,7 @@ def test_failed_feature_read_remains_readonly_until_verified(browser, manager_ur
         page.locator("#featureForm").dispatch_event("submit")
         assert page.evaluate("window.featureReadbackWrites") == int(mode == "saved")
         assert page.evaluate("featureDraftState.featureDirty") is False
+        expect(page.locator("#toastRegion .toast")).to_have_count(0, timeout=8000)
         note.scroll_into_view_if_needed()
         page.screenshot(path=str(tmp_path / f"feature-readonly-{mode}-{trigger}-{width}.png"), animations="disabled")
         page.evaluate("window.failFeatureReadback = false")
