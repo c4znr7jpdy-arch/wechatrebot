@@ -12,6 +12,7 @@ import pytest
 from test_hot_config_runtime import _runtime_function
 from test_livingmemory_patch import patched_plugin  # noqa: F401
 from test_livingmemory_transactions import _Connection
+from test_livingmemory_reset_generation import conversation_manager_type
 
 
 SESSION = "offline:GroupMessage:room"
@@ -38,10 +39,12 @@ def reflection(patched_plugin: Path, tmp_path):
         return connection.raw.execute("SELECT * FROM messages ORDER BY id LIMIT ? OFFSET ?",
                                       (end_index - start_index, start_index)).fetchall()
 
-    manager = NS(store=NS(connection=connection, get_session=get_session,
-                          get_message_count=AsyncMock(return_value=100)),
-                 add_message_from_event=AsyncMock(), get_session_info=get_session,
-                 get_messages_range=AsyncMock(side_effect=get_range))
+    manager = conversation_manager_type(patched_plugin)(
+        NS(connection=connection, get_session=get_session, get_message_count=AsyncMock(return_value=100))
+    )
+    manager.add_message_from_event = AsyncMock()
+    manager.get_session_info = get_session
+    manager.get_messages_range = AsyncMock(side_effect=get_range)
     scope = {"asyncio": asyncio, "json": json, "logger": Mock(),
              "MessageType": NS(GROUP_MESSAGE="group"), "is_event_memory_allowed": lambda *_: True,
              "resolve_memory_scope": lambda *_: SESSION, "get_persona_id": AsyncMock(return_value="persona")}

@@ -120,6 +120,7 @@ def test_synthetic_assistant_does_not_advance_reflection_threshold(
     )
     manager.update_session_metadata = AsyncMock()
     manager.get_messages_range = AsyncMock(return_value=[])
+    manager._summary_snapshot = AsyncMock(return_value=0)
     handler = SimpleNamespace(
         config_manager=SimpleNamespace(get=lambda key, default: default),
         conversation_manager=manager,
