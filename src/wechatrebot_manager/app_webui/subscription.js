@@ -393,7 +393,7 @@
     }
 
     async function load({silent = false} = {}) {
-      if (state.loading || state.busy) return state.snapshot;
+      if (state.loading || state.busy || state.preparing) return state.snapshot;
       state.loading = true;
       const epoch = state.epoch;
       try {
@@ -627,10 +627,12 @@
       throw error;
     }
 
-    async function connectAccount({differentFrom = ""} = {}) {
+    async function connectAccount({differentFrom = "", forStart = false} = {}) {
       await readForAction();
       if (!differentFrom && accountId(state.snapshot.current_account)) return accountId(state.snapshot.current_account);
-      if (!accountId(state.snapshot.current_account)) {
+      const requestedConnection = !accountId(state.snapshot.current_account);
+      let confirmedAccount = "";
+      if (requestedConnection) {
         await checkConnectionRuntime(true);
         const response = await api("connect_license_wechat");
         if (response?.accepted === false) throw new Error(response.message || "微信连接尚未开始，请稍后重试。");
@@ -638,19 +640,23 @@
         await checkConnectionRuntime();
         await readForAction();
       }
-      if (differentFrom || !accountId(state.snapshot.current_account)) {
+      if (differentFrom || requestedConnection) {
         const confirmed = await confirmAction({title: differentFrom ? "请切换微信账号" : "请登录微信",
           message: differentFrom ? "请在微信窗口切换并登录新的微信账号，再继续读取。取消不会更改绑定或扣除换绑次数。"
-            : "微信连接请求已提交。请等待微信窗口打开，完成登录后再继续读取实际账号；取消不会绑定账号或启动机器人。",
-          confirmText: differentFrom ? "已切换，继续" : "已登录，继续", intent: "primary", onConfirm: async () => {
+            : forStart ? "请在微信窗口完成登录，再点击“已登录，继续”。本次启动会继续加载机器人功能，无需再次点击启动；取消则结束本次启动。"
+              : "微信连接请求已提交。请等待微信窗口打开，完成登录后再继续读取实际账号；取消不会绑定账号或启动机器人。",
+          confirmText: differentFrom ? "已切换，继续" : "已登录，继续", cancelText: forStart ? "取消本次启动" : "取消",
+          pendingText: "正在读取账号…", intent: "primary", dismissible: false, onConfirm: async () => {
             await checkConnectionRuntime();
             await readForAction();
-            if (!accountId(state.snapshot.current_account)) throw new Error("尚未读取到登录的微信账号，请完成登录后重试。");
-            if (accountId(state.snapshot.current_account) === differentFrom) throw new Error("仍是原绑定微信，请切换到新的微信账号后重试。");
+            const account = accountId(state.snapshot.current_account);
+            if (!account) throw new Error("尚未读取到登录的微信账号，请完成登录后重试。");
+            if (account === differentFrom) throw new Error("仍是原绑定微信，请切换到新的微信账号后重试。");
+            confirmedAccount = account;
           }});
         if (!confirmed) return "";
       }
-      return accountId(state.snapshot.current_account);
+      return confirmedAccount;
     }
 
     async function rebindAccount() {
@@ -780,7 +786,7 @@
               }});
             if (!confirmed) return false;
           }
-          const account = await connectAccount();
+          const account = await connectAccount({forStart: true});
           if (!account) return false;
           if (state.snapshot.license_id !== license || !hasValidAuthorization()) throw new Error("授权状态已变化，请重新启动并确认。");
           if (bound && bound !== account) throw new Error(statusMessage({...state.snapshot, state: "account_mismatch"}));
