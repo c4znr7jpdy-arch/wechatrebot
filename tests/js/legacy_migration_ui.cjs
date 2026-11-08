@@ -50,7 +50,7 @@ function fixture() {
     confirmAction(options) { dialogs.push(options); $('#modalBackdrop').hidden = false; },
   });
   for (const [startMarker, endMarker] of [
-    ['  async function loadSchedules(', '  function renderGroupAnalysisMigration('],
+    ['  let pendingTaskReadback =', '  function renderGroupAnalysisMigration('],
     ['  async function beginLegacyMigration(', '  async function scheduleAction('],
   ]) {
     const start = script.indexOf(startMarker), end = script.indexOf(endMarker, start);
