@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import logging
 import os
@@ -30,7 +31,7 @@ from .customer_config import (
     load_ui_theme,
     save_ui_theme,
 )
-from .customer_maintenance import CustomerMaintenanceService, MaintenanceError
+from .customer_maintenance import CustomerMaintenanceService, MaintenanceBusyError, MaintenanceError
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog, classify_error
 from .experience import ExperienceError, ExperienceService
@@ -407,7 +408,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         # filesystem/transport errors, which can contain paths or credentials.
         if isinstance(exc, (GroupPolicyError, PrivatePolicyError, ConfigConflictError)):
             error["detail"] = str(exc)
-        if isinstance(exc, AnalysisModelBindingError):
+        if isinstance(exc, (AnalysisModelBindingError, MaintenanceBusyError)):
             error["message"] = str(exc)
         event_id, saved = self._record_error(exc, definition.code, operation=operation)
         error.update(event_id=event_id, recorded=saved)
@@ -951,12 +952,20 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
 
     def create_backup(self) -> dict[str, object]:
         try:
-            return self._ok(
-                self._maintenance_service().create_backup(),
-                message="设置、人格和长期记忆已备份。",
-            )
+            result = self._run_backup_mutation(self._maintenance_service().create_backup)
+            return self._ok(result, message="设置、人格和长期记忆已备份。")
         except (OSError, ValueError, MaintenanceError) as exc:
             return self._failed(exc, "15001")
+
+    def _run_backup_mutation(self, operation: Callable[[], dict[str, object]]) -> dict[str, object]:
+        if not self._action_lock.acquire(blocking=False):
+            raise MaintenanceBusyError("机器人正在执行其他操作，请完成后再备份或恢复。")
+        try:
+            if getattr(self, "_update_installing", False):
+                raise MaintenanceBusyError("更新正在安装，请完成后再备份或恢复。")
+            return operation()
+        finally:
+            self._action_lock.release()
 
     def validate_restore(self, backup_id: str) -> dict[str, object]:
         try:
@@ -966,10 +975,10 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
 
     def restore_backup(self, backup_id: str) -> dict[str, object]:
         try:
-            return self._ok(
-                self._maintenance_service().restore_backup(backup_id),
-                message="备份已经恢复，并已保留恢复前副本。",
+            result = self._run_backup_mutation(
+                lambda: self._maintenance_service().restore_backup(backup_id),
             )
+            return self._ok(result, message="备份已经恢复，并已保留恢复前副本。")
         except (OSError, ValueError, MaintenanceError) as exc:
             return self._failed(exc, "15001")
 

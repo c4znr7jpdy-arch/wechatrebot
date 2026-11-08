@@ -2435,7 +2435,16 @@ def test_feature_details_are_warmed_but_revalidated_before_editing() -> None:
     )[0]
     assert "if (!force) return;" not in open_feature
     assert "Never expose a cached revision for edit" in open_feature
-    assert "当前仅显示上次内容，请重新读取后再修改" in open_feature
+    assert "readOnlyFeatures.add(featureId);" in open_feature
+    assert "readOnlyFeatures.delete(featureId);" in open_feature
+    feature_renderer = script[
+        script.index("function renderFeatureDetail") : script.index(
+            "function helpAudienceMatch"
+        )
+    ]
+    assert "if (readOnlyFeatures.has(state.selectedFeature))" in feature_renderer
+    assert "input.disabled = true" in feature_renderer
+    assert "当前仅显示上次内容，请重新读取后再修改" in feature_renderer
 
 
 def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
@@ -2482,7 +2491,13 @@ def test_feature_center_reloads_offline_cache_after_robot_becomes_online() -> No
     assert "const wasOnline = Boolean(state.status?.online);" in script
     assert "state.featureDetails = {};" in script
     assert "!wasOnline" in script and "void openFeature(state.selectedFeature, false, true);" in script
-    assert "const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);" in script
+    open_feature = script.split("async function openFeature", 1)[1].split(
+        "\n  function getAtPath", 1
+    )[0]
+    cache_refresh = open_feature.split("const cacheNeedsRefresh = ", 1)[1].split(";", 1)[0]
+    assert "cached &&" in cache_refresh
+    assert "readOnlyFeatures.has(featureId) ||" in cache_refresh
+    assert "state.status?.online && !cached.engine_online" in cache_refresh
     assert "if (!force && !cacheNeedsRefresh) return;" in script
     assert "if (!detail.engine_online && !state.status?.online)" in script
 
