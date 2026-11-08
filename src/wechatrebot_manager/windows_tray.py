@@ -181,7 +181,14 @@ class WindowsTrayController:
             self._exit_generation += 1
             self._exit_requested = True
             self._exit_check_pending = False
-        self.stop()
+        # The window's closed event removes the tray only after native closure
+        # succeeds. A failed destroy must leave a usable notification icon.
+
+    def cancel_programmatic_close(self) -> None:
+        with self._lock:
+            self._exit_generation += 1
+            self._exit_requested = False
+            self._exit_check_pending = False
 
     def stop(self) -> None:
         hwnd = self._hwnd

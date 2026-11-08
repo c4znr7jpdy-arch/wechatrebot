@@ -5,6 +5,7 @@ import pytest
 
 from test_app_shell import _download_ready, _downloadable_update, _wait_update_worker
 from wechatrebot_manager import update_api, windows_file_holders
+from wechatrebot_manager.windows_tray import WindowsTrayController
 
 
 def _waiting_for_close(monkeypatch, tmp_path, *, timer_fails=False):
@@ -101,3 +102,17 @@ def test_repeated_close_failure_rotates_consent_without_launching_helper(monkeyp
     again = api.get_update_status()["data"]
     assert again["close_pending"] and again["confirmation_token"] != failed["confirmation_token"]
     assert api._update_installing and events.count("launch") == 1
+
+
+def test_native_close_failure_keeps_tray_and_normal_close_protection(monkeypatch, tmp_path):
+    api, _prepared, _events, _helper, _callbacks, _failed = _waiting_for_close(monkeypatch, tmp_path)
+    calls = []
+    api._tray = WindowsTrayController(api._window, "test")
+    monkeypatch.setattr(api._tray, "stop", lambda: calls.append("stop"))
+    monkeypatch.setattr(api._tray, "_ensure_available", lambda: True)
+    api._window.hide = lambda: calls.append("hide")
+    api._close_window_for_update()
+    assert calls == []
+    assert not api._tray._exit_requested
+    assert api._tray.handle_window_closing() is False
+    assert calls == ["hide"]

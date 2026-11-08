@@ -390,6 +390,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                 self._window.destroy()
             self._close_feature_page_server()
         except Exception as exc:
+            if self._tray is not None:
+                self._tray.cancel_programmatic_close()
             self._report_update_close_failure(exc)
 
     @staticmethod
