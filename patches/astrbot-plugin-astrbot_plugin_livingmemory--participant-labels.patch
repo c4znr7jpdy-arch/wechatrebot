@@ -1,0 +1,86 @@
+# Derived from LivingMemory PR #391, stable participant identity injection.
+# Source: https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory/pull/391
+# Implementation commit: 190c03884a704a1e5a4bd9130b4329fa40d04144
+# Local adaptation: hash saved stable keys instead of exposing account suffixes;
+# reject malformed identity fields and retain the existing persona-summary channel.
+--- a/core/utils/formatting.py
++++ b/core/utils/formatting.py
+@@ -3,6 +3,7 @@
+ 自 core/utils/__init__.py 拆分，保持行为不变
+ """
+ 
++import hashlib
+ import time
+ from typing import Any
+ from datetime import datetime
+@@ -33,6 +34,45 @@
+                         return raw_content[: -len(suffix)].strip()
+     return raw_content
+ 
++def _participant_identity_label(identity: Any) -> str:
++    """Reuse saved aliases and stable keys without exposing account identifiers."""
++    if not isinstance(identity, dict):
++        return ""
++    if identity.get("is_bot") is True:
++        return "我"
++
++    sender_value = identity.get("sender_id")
++    sender_id = (
++        str(sender_value).strip()
++        if isinstance(sender_value, (str, int)) and not isinstance(sender_value, bool)
++        else ""
++    )
++    key_value = identity.get("identity_key")
++    identity_key = key_value.strip() if isinstance(key_value, str) else ""
++    if not identity_key and sender_id:
++        platform_value = identity.get("platform")
++        platform = (
++            platform_value.strip().lower() if isinstance(platform_value, str) else ""
++        ) or "unknown"
++        identity_key = f"{platform}:{sender_id}"
++    if not identity_key:
++        return ""
++
++    name_value = identity.get("display_name")
++    display_name = name_value.strip() if isinstance(name_value, str) else ""
++    # Older rows used the full sender ID as a missing-name fallback. The saved
++    # key can still identify that account when sender_id itself is missing.
++    account_ids = (sender_id, identity_key.partition(":")[2] or identity_key)
++    if (
++        not display_name
++        or display_name == identity_key
++        or any(account and account.casefold() in display_name.casefold() for account in account_ids)
++    ):
++        display_name = "用户"
++    suffix = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()[:8]
++    return f"{display_name}#{suffix}"
++
++
+ def _memory_metadata_rows(metadata: dict) -> list[str]:
+     """构建记忆条目的元数据描述行（Topics/Participants/Key facts/Source time）。
+ 
+@@ -46,11 +86,19 @@
+         if topics_str:
+             rows.append(f"Topics: {topics_str}")
+ 
+-    participants = metadata.get("participants", [])
+-    if participants and isinstance(participants, list) and len(participants) > 0:
+-        participants_str = "、".join(str(p) for p in participants if p)
+-        if participants_str:
+-            rows.append(f"Participants: {participants_str}")
++    identities = metadata.get("participant_identities")
++    labels = (
++        [label for item in identities if (label := _participant_identity_label(item))]
++        if isinstance(identities, list) else []
++    )
++    if labels:
++        rows.append(f"Participants: {'、'.join(labels)}")
++    else:
++        participants = metadata.get("participants", [])
++        if participants and isinstance(participants, list):
++            participants_str = "、".join(str(p) for p in participants if p)
++            if participants_str:
++                rows.append(f"Participants: {participants_str}")
+ 
+     key_facts = metadata.get("key_facts", [])
+     if key_facts and isinstance(key_facts, list) and len(key_facts) > 0:
