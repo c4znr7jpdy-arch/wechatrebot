@@ -73,11 +73,11 @@ def native_voice(browser, manager_url, tmp_path):
         elif path.endswith("/extension/save_config"):
             view.writes.append(route.request.post_data_json)
             view.posts.append(route)
-            page.evaluate("count => { window.nativeVoiceWrites = count; }", len(view.writes))
+            page.locator("body").evaluate("(body, count) => { body.dataset.nativeVoiceWrites = String(count); }", len(view.writes))
         elif path.endswith("/extension/get_config"):
             if view.hold_read:
                 view.reads.append(route)
-                page.evaluate("window.heldVoiceReads = (window.heldVoiceReads || 0) + 1")
+                page.locator("body").evaluate("body => { body.dataset.heldVoiceReads = String(Number(body.dataset.heldVoiceReads || 0) + 1); }")
             else:
                 route.fulfill(json=view.payload)
         elif "/extension/" in path:
@@ -128,7 +128,7 @@ def test_voice_save_preserves_edits_made_after_submission(native_voice, tmp_path
     view.field.fill("这次提交的风格")
     view.frame.locator("#save-config").click()
     expect(view.frame.locator("#save-config")).to_have_attribute("aria-busy", "true")
-    view.page.wait_for_function("() => window.nativeVoiceWrites === 1")
+    expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "1")
     assert len(view.posts) == 1
     view.payload["config"] = view.writes[0]
     view.hold_read = phase == "read"
@@ -144,7 +144,7 @@ def test_voice_save_preserves_edits_made_after_submission(native_voice, tmp_path
         view.posts.pop().fulfill(json=response)
     if phase == "read":
         expect(view.frame.locator("#save-config")).to_be_disabled()
-        view.page.wait_for_function("() => window.heldVoiceReads === 1")
+        expect(view.page.locator("body")).to_have_attribute("data-held-voice-reads", "1")
         assert len(view.reads) == 1
         view.field.fill("提交后继续编辑的新风格")
         view.reads.pop().fulfill(json=view.payload)
@@ -156,7 +156,7 @@ def test_voice_save_preserves_edits_made_after_submission(native_voice, tmp_path
     view.hold_read = False
     view.frame.locator("#save-config").click()
     expect(view.frame.locator("#save-config")).to_be_disabled()
-    view.page.wait_for_function("() => window.nativeVoiceWrites === 2")
+    expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "2")
     assert len(view.writes) == 2
     assert view.writes[1]["default_context"] == "提交后继续编辑的新风格"
     view.payload["config"] = view.writes[1]
@@ -171,7 +171,7 @@ def test_voice_save_distinguishes_write_failure_from_readback_failure(native_voi
     view.field.fill("提交的风格")
     view.frame.locator("#save-config").click()
     expect(view.frame.locator("#save-config")).to_be_disabled()
-    view.page.wait_for_function("() => window.nativeVoiceWrites === 1")
+    expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "1")
     if failure == "post":
         view.posts.pop().fulfill(json={"success": False, "error": "模拟保存失败"})
         expect(view.frame.locator("#toast")).to_have_text("模拟保存失败")
@@ -180,7 +180,7 @@ def test_voice_save_distinguishes_write_failure_from_readback_failure(native_voi
         view.hold_read = True
         with view.page.expect_request("**/extension/get_config"):
             view.posts.pop().fulfill(json={"success": True, "config": view.writes[0]})
-        view.page.wait_for_function("() => window.heldVoiceReads === 1")
+        expect(view.page.locator("body")).to_have_attribute("data-held-voice-reads", "1")
         assert len(view.reads) == 1
         if failure == "read-edited":
             view.field.fill("回读期间的新风格")
@@ -198,7 +198,7 @@ def test_voice_save_distinguishes_write_failure_from_readback_failure(native_voi
 def test_voice_save_tracks_transport_fields_as_new_drafts(native_voice):
     view = native_voice
     view.frame.locator("#save-config").click()
-    view.page.wait_for_function("() => window.nativeVoiceWrites === 1")
+    expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "1")
     view.frame.locator("#audio-transport").select_option("path")
     values = {"shared-path-linux": "/srv/new-voice", "shared-path-windows": "D:\\new-voice",
               "delivery-segment-chars": "700", "base64-max-mb": "12"}
@@ -213,7 +213,7 @@ def test_voice_save_tracks_transport_fields_as_new_drafts(native_voice):
     for identifier, value in values.items():
         expect(view.frame.locator(f"#{identifier}")).to_have_value(value)
     view.frame.locator("#save-config").click()
-    view.page.wait_for_function("() => window.nativeVoiceWrites === 2")
+    expect(view.page.locator("body")).to_have_attribute("data-native-voice-writes", "2")
     assert {key: view.writes[1][key] for key in (
         "audio_transport", "shared_path_linux", "shared_path_windows",
         "delivery_segment_chars", "base64_max_mb",
