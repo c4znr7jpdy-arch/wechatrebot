@@ -1372,6 +1372,7 @@
     state.selectedFeature = null;
     state.featureDetail = null;
     state.featureDetails = {};
+    $("#featureDetail").innerHTML = '<div class="loading-row">配置已恢复，请重新读取功能设置。</div>';
     $("#featurePageFrame")?.removeAttribute("src");
     state.webSearch = null;
     state.webSearchUnconfirmed = false;

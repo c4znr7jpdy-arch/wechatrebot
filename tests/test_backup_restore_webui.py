@@ -41,6 +41,7 @@ def _open(page, manager_url):
               return result;
             };
             api.get_features = async () => {
+              if (window.restoreWrites && window.failFeatureList) return {ok:false,error:{message:'模拟功能列表读取失败',recorded:true}};
               const result = await features();
               result.data.plugins = result.data.plugins.map(item => ({...item,
                 display_name: window.restoreWrites ? '恢复后功能' : '恢复前功能'}));
@@ -114,6 +115,63 @@ def test_restore_requires_resolving_unsaved_search_draft(browser, manager_url):
         expect(page.locator("#toastRegion")).to_contain_text("尚未保存")
         assert page.evaluate("restoreWrites") == 0
         expect(page.locator("#modalBackdrop")).to_be_hidden()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("list_failure", [False, True])
+def test_restore_discards_feature_detail_started_before_restore(browser, manager_url, list_failure):
+    page = browser.new_page()
+    try:
+        _open(page, manager_url)
+        page.locator('.nav-item[data-page="features"]').click()
+        page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
+        expect(page.locator("#config-basic--analysis_days")).to_be_visible()
+        page.evaluate("""value => {
+          window.failFeatureList = value;
+          const api = window.pywebview.api, read = api.get_feature;
+          api.get_feature = async id => {
+            const result = await read(id);
+            if (id === 'feature-group-analysis') {
+              const restored = Boolean(window.restoreWrites);
+              result.data.display_name = restored ? '恢复后的设置' : '恢复前的旧设置';
+              if (!restored) await new Promise(resolve => {window.finishOldFeature = resolve;});
+            }
+            return result;
+          };
+        }""", list_failure)
+        page.locator("#refreshFeature").click()
+        page.wait_for_function("typeof finishOldFeature === 'function'")
+        page.locator('.nav-item[data-page="settings"]').click()
+        _restore(page)
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.evaluate("window.finishOldFeature()")
+        page.locator('.nav-item[data-page="features"]').click()
+        if list_failure:
+            expect(page.locator("#featureList")).to_contain_text("功能暂时无法读取")
+            expect(page.locator("#featureForm")).to_have_count(0)
+        else:
+            page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
+            expect(page.locator("#featureDetail")).to_have_attribute("data-feature-name", "恢复后的设置")
+    finally:
+        page.close()
+
+
+def test_restore_clears_clean_task_editor_before_returning_to_tasks(browser, manager_url):
+    page = browser.new_page()
+    try:
+        _open(page, manager_url)
+        page.locator('.nav-item[data-page="schedules"]').click()
+        page.locator("#newScheduledTask").click()
+        expect(page.locator("#scheduledTaskEditor")).to_be_visible()
+        page.locator('.nav-item[data-page="settings"]').click()
+        _restore(page)
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.locator('.nav-item[data-page="schedules"]').click()
+        expect(page.locator("#scheduledTaskEditor")).to_be_hidden()
+        expect(page.locator("#scheduleListView")).to_be_visible()
+        page.locator("#newScheduledTask").click()
+        expect(page.locator("#scheduledTaskEditor")).to_be_visible()
     finally:
         page.close()
 
