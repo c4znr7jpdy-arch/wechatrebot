@@ -193,3 +193,32 @@ def test_voice_save_distinguishes_write_failure_from_readback_failure(native_voi
     expect(view.frame.locator("#save-config")).to_be_enabled()
     expect(view.field).to_have_value("回读期间的新风格" if failure == "read-edited" else "提交的风格")
     assert len(view.writes) == 1
+
+
+def test_voice_save_tracks_transport_fields_as_new_drafts(native_voice):
+    view = native_voice
+    view.frame.locator("#save-config").click()
+    view.page.wait_for_function("() => window.nativeVoiceWrites === 1")
+    view.frame.locator("#audio-transport").select_option("path")
+    values = {"shared-path-linux": "/srv/new-voice", "shared-path-windows": "D:\\new-voice",
+              "delivery-segment-chars": "700", "base64-max-mb": "12"}
+    for identifier, value in values.items():
+        view.frame.locator(f"#{identifier}").fill(value)
+    expect(view.frame.locator("#save-state")).to_have_text("有未保存更改")
+    view.payload["config"] = view.writes[0]
+    view.posts.pop().fulfill(json={"success": True, "config": view.writes[0]})
+    expect(view.frame.locator("#save-config")).to_be_enabled()
+    expect(view.frame.locator("#save-state")).to_contain_text("尚未保存")
+    expect(view.frame.locator("#audio-transport")).to_have_value("path")
+    for identifier, value in values.items():
+        expect(view.frame.locator(f"#{identifier}")).to_have_value(value)
+    view.frame.locator("#save-config").click()
+    view.page.wait_for_function("() => window.nativeVoiceWrites === 2")
+    assert {key: view.writes[1][key] for key in (
+        "audio_transport", "shared_path_linux", "shared_path_windows",
+        "delivery_segment_chars", "base64_max_mb",
+    )} == {"audio_transport": "path", "shared_path_linux": "/srv/new-voice",
+          "shared_path_windows": "D:\\new-voice", "delivery_segment_chars": 700, "base64_max_mb": 12}
+    view.payload["config"] = view.writes[1]
+    view.posts.pop().fulfill(json={"success": True, "config": view.writes[1]})
+    expect(view.frame.locator("#save-state")).to_have_text("配置已同步")

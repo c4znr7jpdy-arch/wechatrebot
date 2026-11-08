@@ -74,3 +74,15 @@ diff --git a/pages/settings/app.js b/pages/settings/app.js
  }
  
  function validateVoiceUpload() {
+@@ -861,6 +885,11 @@
+     'max-voice-file-mb',
+     'reply-mode',
+     'delivery-mode',
++    'audio-transport',
++    'shared-path-linux',
++    'shared-path-windows',
++    'delivery-segment-chars',
++    'base64-max-mb',
+     'background-queue-size',
+     'tts-timeout-seconds',
+     'tts-max-retries',
