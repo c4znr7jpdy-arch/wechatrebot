@@ -16,7 +16,7 @@ def test_update_popup_describes_release_and_offers_later_action() -> None:
     assert "formatBytes(release.package_size)" in script
     assert "release.notes.join" in script
     assert "更新会强制关闭机器人程序及当前连接的微信，是否确认？" in script
-    assert 'confirmText: "确认关闭并安装"' in script
+    assert 'confirmText: closing ? "再次关闭管理器" : "确认关闭并安装"' in script
     assert "scheduleAutomaticUpdateCheck(1800)" in script
     assert "configured : 600" in script
 

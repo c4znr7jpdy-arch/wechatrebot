@@ -1005,13 +1005,13 @@ def create_update_plan(
     return UpdatePlan(plan_path, helper)
 
 
-def launch_update_helper(plan: UpdatePlan) -> None:
+def launch_update_helper(plan: UpdatePlan) -> subprocess.Popen:
     environment = os.environ.copy()
     environment["WECHATREBOT_UPDATE_HELPER"] = "1"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "DETACHED_PROCESS", 0
     )
-    subprocess.Popen(
+    return subprocess.Popen(
         [str(plan.helper_executable), "apply-update", "--plan", str(plan.plan_path)],
         cwd=plan.plan_path.parent,
         env=environment,
@@ -1030,17 +1030,33 @@ def _wait_for_process_exit(pid: int, timeout_seconds: int = 180) -> None:
         import ctypes
 
         synchronize = 0x00100000
-        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        handle = kernel32.OpenProcess(synchronize, False, pid)
         if not handle:
-            return
+            error = ctypes.get_last_error()
+            # A PID can disappear between planning and the wait. Every other
+            # failure is ambiguous and must block replacement of live files.
+            if error == 87:  # ERROR_INVALID_PARAMETER: the nonzero PID no longer exists.
+                return
+            raise UpdateError(f"无法确认旧版本进程是否已退出（错误 {error}）。")
         try:
-            result = ctypes.windll.kernel32.WaitForSingleObject(
+            result = kernel32.WaitForSingleObject(
                 handle, timeout_seconds * 1000
             )
+            error = ctypes.get_last_error() if result == 0xFFFFFFFF else None
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(handle)
         if result == 0x00000102:
             raise UpdateError("等待旧版本退出超时。")
+        if result != 0:  # WAIT_OBJECT_0 is the only confirmed process exit.
+            detail = f"错误 {error}" if error is not None else f"等待结果 {result}"
+            raise UpdateError(f"无法确认旧版本进程是否已退出（{detail}）。")
         return
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
