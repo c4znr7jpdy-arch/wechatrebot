@@ -46,6 +46,7 @@ from .payload import (
 from .single_instance import SingleInstanceLock
 from .update_errors import UpdateFailure
 from .update_logger import UpdateLogger
+from .windows_process_job import OwnedProcess, ProcessTreeStopError, start_owned_process
 
 
 PRODUCT_ID = "wechatrebot-desktop"
@@ -1150,7 +1151,7 @@ def _restart_manager(
     update_id: str = "",
     current_version: str = "",
     version: str = "",
-) -> subprocess.Popen | None:
+) -> subprocess.Popen | OwnedProcess | None:
     if not target.is_file():
         return None
     environment = os.environ.copy()
@@ -1165,6 +1166,8 @@ def _restart_manager(
         if update_id and value:
             environment[name] = value
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt":
+        return start_owned_process([str(target)], cwd=install_root, env=environment)
     return subprocess.Popen(
         [str(target)],
         cwd=install_root,
@@ -1289,8 +1292,13 @@ def _wait_for_startup_confirmation(
     raise UpdateFailure("UPD-1009", "新版本未在规定时间内完成启动确认。")
 
 
-def _stop_restarted_manager(process: subprocess.Popen | None) -> None:
-    if process is None or process.poll() is not None:
+def _stop_restarted_manager(process: subprocess.Popen | OwnedProcess | None) -> None:
+    if process is None:
+        return
+    if isinstance(process, OwnedProcess):
+        process.terminate_tree()
+        return
+    if process.poll() is not None:
         return
     try:
         process.terminate()
@@ -1299,8 +1307,8 @@ def _stop_restarted_manager(process: subprocess.Popen | None) -> None:
         try:
             process.kill()
             process.wait(timeout=5)
-        except Exception:
-            return
+        except Exception as exc:
+            raise ProcessTreeStopError("无法确认本次重启的客户端已退出。") from exc
 
 
 def _complete_successful_update(
@@ -1367,7 +1375,7 @@ def apply_update_plan(
     rollback_root: Path | None = None
     journal_path: Path | None = None
     journal: dict[str, object] | None = None
-    restarted: subprocess.Popen | None = None
+    restarted: subprocess.Popen | OwnedProcess | None = None
     lock: SingleInstanceLock | None = None
     failure: BaseException | None = None
     result = 1
@@ -1483,29 +1491,43 @@ def apply_update_plan(
                 message=detail or str(exc),
             )
         if journal is not None and root is not None:
-            _stop_restarted_manager(restarted)
+            processes_stopped = False
             try:
-                journal["state"] = "rolling_back"
-                if journal_path is not None:
-                    write_json_atomic(journal_path, journal)
-                _restore_update_targets(journal, root)
-                if journal_path is not None:
-                    journal_path.unlink(missing_ok=True)
-                if rollback_root is not None:
-                    shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
-                result = 1
-            except UpdateFailure as rollback_error:
-                failure = rollback_error
-                code = rollback_error.definition.code
+                if isinstance(exc, ProcessTreeStopError):
+                    raise exc
+                _stop_restarted_manager(restarted)
+                processes_stopped = True
+            except (OSError, RuntimeError) as stop_error:
+                failure = UpdateFailure(
+                    "UPD-1010", str(stop_error),
+                    public_message="新版本客户端尚未完全退出，已保留恢复文件。请关闭所有机器人客户端窗口后重新打开软件，以继续恢复。",
+                )
+                restart = False
                 if logger is not None:
                     logger.write(
-                        "rollback_failed",
-                        state="failed",
-                        version=version,
-                        error_code=code,
-                        message=rollback_error.detail,
+                        "rollback_blocked", state="failed", version=version,
+                        error_code="UPD-1010", message=str(stop_error),
                     )
-                result = 1
+            if processes_stopped:
+                try:
+                    journal["state"] = "rolling_back"
+                    if journal_path is not None:
+                        write_json_atomic(journal_path, journal)
+                    _restore_update_targets(journal, root)
+                    if journal_path is not None:
+                        journal_path.unlink(missing_ok=True)
+                    if rollback_root is not None:
+                        shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+                    result = 1
+                except UpdateFailure as rollback_error:
+                    failure = rollback_error
+                    code = rollback_error.definition.code
+                    if logger is not None:
+                        logger.write(
+                            "rollback_failed", state="failed", version=version,
+                            error_code=code, message=rollback_error.detail,
+                        )
+                    result = 1
         elif rollback_root is not None:
             shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
         if root is not None:
