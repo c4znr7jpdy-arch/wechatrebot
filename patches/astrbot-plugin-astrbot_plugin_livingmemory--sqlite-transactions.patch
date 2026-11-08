@@ -1,0 +1,776 @@
+Backport of LivingMemory PR #348 (2.7.3):
+https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory/pull/348
+Upstream implementation: 6537d07029584d786e421c0ba1acc9ab76b47e82
+Adapted to the pinned 2.6.1 baseline; retain local write-operation journaling.
+BEGIN cancellation also queues rollback, and close uses the same write lock.
+
+diff --git a/core/managers/memory_engine.py b/core/managers/memory_engine.py
+index c17eab5..7442701 100644
+--- a/core/managers/memory_engine.py
++++ b/core/managers/memory_engine.py
+@@ -6,6 +6,7 @@
+ import asyncio
+ from collections import OrderedDict
+ from collections.abc import Callable
++from contextlib import asynccontextmanager
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -140,6 +141,7 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+         self.atom_lifecycle_manager = None
+         self.atom_retriever = None
+         self.db_connection = None
++        self._db_write_lock = asyncio.Lock()
+         self._search_cache_enabled = bool(self.config.get("search_cache_enabled", True))
+         self._search_cache_ttl = float(
+             self.config.get("search_cache_ttl_seconds", 45.0)
+@@ -256,11 +258,34 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+                     task.cancel()
+             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+             self._pending_tasks.clear()
+-        if self.db_connection:
+-            await self.db_connection.close()
++        async with self._db_write_lock:
++            if self.db_connection is not None:
++                if self.db_connection.in_transaction:
++                    await self.db_connection.rollback()
++                await self.db_connection.close()
++                self.db_connection = None
+         if self.graph_vector_db is not None:
+             await self.graph_vector_db.close()
+ 
++    @asynccontextmanager
++    async def _write_transaction(self):
++        """串行执行主连接写事务，并保证任何失败都不会残留写锁。"""
++        async with self._db_write_lock:
++            connection = self.db_connection
++            if connection is None:
++                raise RuntimeError("memory database is not initialized")
++            try:
++                if connection.in_transaction:
++                    await connection.rollback()
++                await connection.execute("BEGIN IMMEDIATE")
++                yield connection
++                await connection.commit()
++            except BaseException:
++                # An interrupted BEGIN can already be queued by aiosqlite;
++                # queue rollback even when in_transaction has not changed yet.
++                await connection.rollback()
++                raise
++
+     def _create_tracked_task(self, coro) -> asyncio.Task:
+         """Create and track a background task, auto-discarding on completion."""
+         task = asyncio.create_task(coro)
+@@ -277,11 +302,11 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+         - 如果 FAISS 未创建（极端情况），插件仍能正常工作
+         - 插件需要直接操作此表进行高频更新（如访问时间）
+         """
+-        # documents表 - 与FAISS共享，IF NOT EXISTS确保不重复创建
+-        if self.db_connection is not None:
+-            await self._drop_legacy_documents_fts_triggers()
++        async with self._write_transaction() as connection:
++            await self._drop_legacy_documents_fts_triggers(connection)
+ 
+-            await self.db_connection.execute("""
++            # documents表 - 与FAISS共享，IF NOT EXISTS确保不重复创建
++            await connection.execute("""
+             CREATE TABLE IF NOT EXISTS documents (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 doc_id TEXT,
+@@ -293,23 +318,23 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+         """)
+ 
+             # 兼容旧版插件创建的简化 documents 表，确保 FAISS DocumentStorage 所需字段存在
+-            cursor = await self.db_connection.execute("PRAGMA table_info(documents)")
++            cursor = await connection.execute("PRAGMA table_info(documents)")
+             column_rows = await cursor.fetchall()
+             existing_columns = {row[1] for row in column_rows}
+ 
+             missing_columns = []
+             if "doc_id" not in existing_columns:
+-                await self.db_connection.execute(
++                await connection.execute(
+                     "ALTER TABLE documents ADD COLUMN doc_id TEXT"
+                 )
+                 missing_columns.append("doc_id")
+             if "created_at" not in existing_columns:
+-                await self.db_connection.execute(
++                await connection.execute(
+                     "ALTER TABLE documents ADD COLUMN created_at TEXT"
+                 )
+                 missing_columns.append("created_at")
+             if "updated_at" not in existing_columns:
+-                await self.db_connection.execute(
++                await connection.execute(
+                     "ALTER TABLE documents ADD COLUMN updated_at TEXT"
+                 )
+                 missing_columns.append("updated_at")
+@@ -321,64 +346,64 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+                 )
+ 
+             # 回填旧数据，避免 doc_id/timestamp 缺失导致删除与展示异常
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             UPDATE documents
+             SET doc_id = 'legacy-' || id
+             WHERE doc_id IS NULL OR TRIM(doc_id) = ''
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             UPDATE documents
+             SET created_at = datetime('now')
+             WHERE created_at IS NULL OR TRIM(CAST(created_at AS TEXT)) = ''
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             UPDATE documents
+             SET updated_at = COALESCE(created_at, datetime('now'))
+             WHERE updated_at IS NULL OR TRIM(CAST(updated_at AS TEXT)) = ''
+         """)
+ 
+             # 创建索引以提升session_id查询性能
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_metadata
+             ON documents(json_extract(metadata, '$.session_id'))
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_persona_metadata
+             ON documents(json_extract(metadata, '$.persona_id'))
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_importance_metadata
+             ON documents(json_extract(metadata, '$.importance'))
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_last_access_metadata
+             ON documents(json_extract(metadata, '$.last_access_time'))
+         """)
+             # 表达式索引：与召回/列表查询中的过滤、排序表达式逐字匹配，
+             # COALESCE/CAST 包装必须同时出现在索引与查询中才能被命中
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_status
+             ON documents(COALESCE(json_extract(metadata, '$.status'), 'active'))
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_memory_type
+             ON documents(UPPER(COALESCE(json_extract(metadata, '$.memory_type'), 'GENERAL')))
+         """)
+             # 复合索引同时服务：近期记忆查询（create_time 范围 + 倒序截断）
+             # 与 WebUI 列表 created_desc/asc 排序（反向扫描即升序）
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_doc_create_time
+             ON documents(
+                 COALESCE(CAST(json_extract(metadata, '$.create_time') AS REAL), 0) DESC,
+                 id DESC
+             )
+         """)
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_documents_doc_id
+             ON documents(doc_id)
+         """)
+ 
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE TABLE IF NOT EXISTS memory_sources (
+                 memory_id INTEGER PRIMARY KEY,
+                 source_json TEXT NOT NULL,
+@@ -387,10 +412,10 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+             )
+         """)
+ 
+-            await self._create_write_ops_table()
++            await self._create_write_ops_table(connection)
+ 
+             # 创建版本管理表
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE TABLE IF NOT EXISTS db_version (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 version INTEGER NOT NULL,
+@@ -401,7 +426,7 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+         """)
+ 
+             # 创建迁移状态表
+-            await self.db_connection.execute("""
++            await connection.execute("""
+             CREATE TABLE IF NOT EXISTS migration_status (
+                 key TEXT PRIMARY KEY,
+                 value TEXT,
+@@ -409,10 +434,8 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+             )
+         """)
+ 
+-            await self.db_connection.commit()
+-
+             # 检查是否需要初始化版本信息
+-            cursor = await self.db_connection.execute("SELECT COUNT(*) FROM db_version")
++            cursor = await connection.execute("SELECT COUNT(*) FROM db_version")
+             version_result = await cursor.fetchone()
+             version_count = version_result[0] if version_result else 0
+ 
+@@ -422,7 +445,7 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+ 
+                 from ...storage.db_migration import DBMigration
+ 
+-                await self.db_connection.execute(
++                await connection.execute(
+                     """
+                     INSERT INTO db_version (version, description, migrated_at, migration_duration_seconds)
+                     VALUES (?, ?, ?, ?)
+@@ -434,7 +457,6 @@ class MemoryEngine(MemoryEngineWriteOpsMixin, MemoryEngineCrudMixin, MemoryEngin
+                         0.0,
+                     ),
+                 )
+-                await self.db_connection.commit()
+ 
+                 logger.info(f"已初始化数据库版本信息: v{DBMigration.CURRENT_VERSION}")
+ 
+diff --git a/core/managers/memory_engine_batch.py b/core/managers/memory_engine_batch.py
+index 6c5de11..b224134 100644
+--- a/core/managers/memory_engine_batch.py
++++ b/core/managers/memory_engine_batch.py
+@@ -43,10 +43,11 @@ class MemoryEngineBatchMixin:
+ 
+             try:
+                 # 1. Batch delete from BM25 FTS
+-                await self.db_connection.execute(
+-                    f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
+-                    batch,
+-                )
++                async with self._write_transaction() as connection:
++                    await connection.execute(
++                        f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
++                        batch,
++                    )
+                 await self._advance_write_op(
+                     op_id,
+                     "bm25_deleted",
+@@ -76,15 +77,15 @@ class MemoryEngineBatchMixin:
+                 )
+ 
+                 # 3. Batch delete from documents table
+-                cursor = await self.db_connection.execute(
+-                    f"DELETE FROM documents WHERE id IN ({placeholders})",
+-                    batch,
+-                )
+-                await self.db_connection.execute(
+-                    f"DELETE FROM memory_sources WHERE memory_id IN ({placeholders})",
+-                    batch,
+-                )
+-                await self.db_connection.commit()
++                async with self._write_transaction() as connection:
++                    cursor = await connection.execute(
++                        f"DELETE FROM documents WHERE id IN ({placeholders})",
++                        batch,
++                    )
++                    await connection.execute(
++                        f"DELETE FROM memory_sources WHERE memory_id IN ({placeholders})",
++                        batch,
++                    )
+                 # FaissVecDB 与本引擎共享 documents 表；向量删除可能已移除
+                 # 对应行，因此以删除前查到的记录数作为准确结果。
+                 batch_deleted = len(found_ids)
+@@ -260,15 +261,15 @@ class MemoryEngineBatchMixin:
+ 
+         archived_ids = [int(document["id"]) for document in active_documents]
+         placeholders = ",".join("?" * len(archived_ids))
+-        await self.db_connection.executemany(
+-            "UPDATE documents SET metadata = ? WHERE id = ?",
+-            metadata_updates,
+-        )
+-        await self.db_connection.execute(
+-            f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
+-            archived_ids,
+-        )
+-        await self.db_connection.commit()
++        async with self._write_transaction() as connection:
++            await connection.executemany(
++                "UPDATE documents SET metadata = ? WHERE id = ?",
++                metadata_updates,
++            )
++            await connection.execute(
++                f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
++                archived_ids,
++            )
+ 
+         embedding_storage = getattr(self.faiss_db, "embedding_storage", None)
+         embedding_delete = getattr(embedding_storage, "delete", None)
+@@ -341,20 +342,20 @@ class MemoryEngineBatchMixin:
+                     memory_id, content, metadata, atoms
+                 )
+ 
+-            await self.db_connection.execute(
+-                "UPDATE documents SET metadata = ? WHERE id = ?",
+-                (json.dumps(metadata, ensure_ascii=False), memory_id),
+-            )
+-            await self.db_connection.commit()
++            async with self._write_transaction() as connection:
++                await connection.execute(
++                    "UPDATE documents SET metadata = ? WHERE id = ?",
++                    (json.dumps(metadata, ensure_ascii=False), memory_id),
++                )
+             self._invalidate_search_cache()
+             return True
+         except Exception:
+             if fts_inserted:
+-                await self.db_connection.execute(
+-                    "DELETE FROM livingmemory_memories_fts WHERE doc_id = ?",
+-                    (memory_id,),
+-                )
+-                await self.db_connection.commit()
++                async with self._write_transaction() as connection:
++                    await connection.execute(
++                        "DELETE FROM livingmemory_memories_fts WHERE doc_id = ?",
++                        (memory_id,),
++                    )
+             if vector_inserted and callable(embedding_delete):
+                 await embedding_delete([memory_id])
+             if self.graph_memory_manager is not None:
+@@ -440,11 +441,11 @@ class MemoryEngineBatchMixin:
+             if not rows:
+                 logger.info("[自动迁移] 未找到需要迁移的旧数据")
+                 # 即使没有旧数据也标记为已检查，避免重复查询
+-                await self.db_connection.execute(
+-                    "INSERT OR REPLACE INTO migration_status (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+-                    (migration_key, "true"),
+-                )
+-                await self.db_connection.commit()
++                async with self._write_transaction() as connection:
++                    await connection.execute(
++                        "INSERT OR REPLACE INTO migration_status (key, value, updated_at) VALUES (?, ?, datetime('now'))",
++                        (migration_key, "true"),
++                    )
+                 return
+ 
+             logger.info(f"[自动迁移] 找到 {len(rows)} 条旧数据需要迁移")
+@@ -469,22 +470,18 @@ class MemoryEngineBatchMixin:
+ 
+                 updates.append((json.dumps(metadata, ensure_ascii=False), doc_id))
+ 
+-            if updates:
+-                await self.db_connection.executemany(
+-                    "UPDATE documents SET metadata = ? WHERE id = ?",
+-                    updates,
++            async with self._write_transaction() as connection:
++                if updates:
++                    await connection.executemany(
++                        "UPDATE documents SET metadata = ? WHERE id = ?",
++                        updates,
++                    )
++                updated_count = len(updates)
++                # 与元数据更新一并提交，失败时保留原迁移状态。
++                await connection.execute(
++                    "INSERT OR REPLACE INTO migration_status (key, value, updated_at) VALUES (?, ?, datetime('now'))",
++                    (migration_key, "true"),
+                 )
+-            updated_count = len(updates)
+-
+-            # 6. 提交更新
+-            await self.db_connection.commit()
+-
+-            # 7. 标记为已迁移
+-            await self.db_connection.execute(
+-                "INSERT OR REPLACE INTO migration_status (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+-                (migration_key, "true"),
+-            )
+-            await self.db_connection.commit()
+ 
+             logger.info(
+                 f"[自动迁移] 完成！已更新 {updated_count} 条记录 -> {unified_msg_origin}"
+@@ -642,9 +639,10 @@ class MemoryEngineBatchMixin:
+                 "memory_atoms_fts",
+             ):
+                 try:
+-                    await self.db_connection.execute(
+-                        f"INSERT INTO {fts_table}({fts_table}) VALUES ('optimize')"
+-                    )
++                    async with self._write_transaction() as connection:
++                        await connection.execute(
++                            f"INSERT INTO {fts_table}({fts_table}) VALUES ('optimize')"
++                        )
+                 except asyncio.CancelledError:
+                     raise
+                 except Exception:
+@@ -653,7 +651,6 @@ class MemoryEngineBatchMixin:
+                         exc_info=True,
+                     )
+ 
+-            await self.db_connection.commit()
+             await self.db_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+ 
+             if vacuum:
+diff --git a/core/managers/memory_engine_crud.py b/core/managers/memory_engine_crud.py
+index ff0b41d..dfd2fcb 100644
+--- a/core/managers/memory_engine_crud.py
++++ b/core/managers/memory_engine_crud.py
+@@ -253,22 +253,22 @@ class MemoryEngineCrudMixin:
+         if self.db_connection is None:
+             raise RuntimeError("数据库连接未初始化")
+         now = time.time()
+-        await self.db_connection.execute(
+-            """
+-            INSERT INTO memory_sources(memory_id, source_json, created_at, updated_at)
+-            VALUES (?, ?, ?, ?)
+-            ON CONFLICT(memory_id) DO UPDATE SET
+-                source_json = excluded.source_json,
+-                updated_at = excluded.updated_at
+-            """,
+-            (
+-                int(memory_id),
+-                json.dumps(source_messages, ensure_ascii=False),
+-                now,
+-                now,
+-            ),
+-        )
+-        await self.db_connection.commit()
++        async with self._write_transaction() as connection:
++            await connection.execute(
++                """
++                INSERT INTO memory_sources(memory_id, source_json, created_at, updated_at)
++                VALUES (?, ?, ?, ?)
++                ON CONFLICT(memory_id) DO UPDATE SET
++                    source_json = excluded.source_json,
++                    updated_at = excluded.updated_at
++                """,
++                (
++                    int(memory_id),
++                    json.dumps(source_messages, ensure_ascii=False),
++                    now,
++                    now,
++                ),
++            )
+ 
+     async def get_memory_source(self, memory_id: int) -> list[dict[str, Any]]:
+         """Return structured source messages for one memory."""
+@@ -783,10 +783,10 @@ class MemoryEngineCrudMixin:
+ 
+         await self._advance_write_op(op_id, "document_deleted", memory_id=memory_id)
+         if self.db_connection is not None:
+-            await self.db_connection.execute(
+-                "DELETE FROM memory_sources WHERE memory_id = ?", (memory_id,)
+-            )
+-            await self.db_connection.commit()
++            async with self._write_transaction() as connection:
++                await connection.execute(
++                    "DELETE FROM memory_sources WHERE memory_id = ?", (memory_id,)
++                )
+ 
+         needs_repair = False
+         try:
+@@ -979,12 +979,12 @@ class MemoryEngineCrudMixin:
+             if not updates:
+                 return 0
+ 
+-            await self.db_connection.executemany(
+-                "UPDATE documents SET metadata = ? WHERE id = ?",
+-                updates,
+-            )
++            async with self._write_transaction() as connection:
++                await connection.executemany(
++                    "UPDATE documents SET metadata = ? WHERE id = ?",
++                    updates,
++                )
+ 
+-            await self.db_connection.commit()
+             affected = len(updates)
+ 
+             logger.info(
+@@ -1039,28 +1039,28 @@ class MemoryEngineCrudMixin:
+             # 单条原子 SQL，避免并发召回任务对同一记忆产生丢失更新，
+             # 同时将多条结果合并为一次 commit 以降低写放大。
+             placeholders = ",".join("?" * len(unique_ids))
+-            cursor = await self.db_connection.execute(
+-                f"""
+-                UPDATE documents
+-                SET metadata = CASE
+-                    WHEN json_valid(metadata) THEN json_set(
+-                        json_set(metadata, '$.last_access_time', ?),
+-                        '$.access_count',
+-                        MIN(
+-                            COALESCE(
+-                                CAST(json_extract(metadata, '$.access_count') AS INTEGER),
+-                                0
+-                            ) + 1,
+-                            1000000
++            async with self._write_transaction() as connection:
++                cursor = await connection.execute(
++                    f"""
++                    UPDATE documents
++                    SET metadata = CASE
++                        WHEN json_valid(metadata) THEN json_set(
++                            json_set(metadata, '$.last_access_time', ?),
++                            '$.access_count',
++                            MIN(
++                                COALESCE(
++                                    CAST(json_extract(metadata, '$.access_count') AS INTEGER),
++                                    0
++                                ) + 1,
++                                1000000
++                            )
+                         )
+-                    )
+-                    ELSE json_set('{{}}', '$.last_access_time', ?, '$.access_count', 1)
+-                END
+-                WHERE id IN ({placeholders})
+-                """,
+-                (current_time, current_time, *unique_ids),
+-            )
+-            await self.db_connection.commit()
++                        ELSE json_set('{{}}', '$.last_access_time', ?, '$.access_count', 1)
++                    END
++                    WHERE id IN ({placeholders})
++                    """,
++                    (current_time, current_time, *unique_ids),
++                )
+ 
+             return cursor.rowcount > 0
+ 
+diff --git a/core/managers/memory_engine_write_ops.py b/core/managers/memory_engine_write_ops.py
+index 9db0ea0..d38a7fe 100644
+--- a/core/managers/memory_engine_write_ops.py
++++ b/core/managers/memory_engine_write_ops.py
+@@ -16,11 +16,11 @@ import time
+ 
+ class MemoryEngineWriteOpsMixin:
+     """MemoryEngine 拆分模块：MemoryEngineWriteOpsMixin"""
+-    async def _create_write_ops_table(self) -> None:
++    async def _create_write_ops_table(self, connection) -> None:
+         """Create the resumable write-operation log."""
+-        if self.db_connection is None:
++        if connection is None:
+             return
+-        await self.db_connection.execute("""
++        await connection.execute("""
+             CREATE TABLE IF NOT EXISTS memory_write_ops (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 op_type TEXT NOT NULL,
+@@ -34,11 +34,11 @@ class MemoryEngineWriteOpsMixin:
+                 updated_at REAL NOT NULL
+             )
+         """)
+-        await self.db_connection.execute("""
++        await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_memory_write_ops_status
+             ON memory_write_ops(status, updated_at)
+         """)
+-        await self.db_connection.execute("""
++        await connection.execute("""
+             CREATE INDEX IF NOT EXISTS idx_memory_write_ops_memory
+             ON memory_write_ops(memory_id, op_type)
+         """)
+@@ -54,22 +54,22 @@ class MemoryEngineWriteOpsMixin:
+             return None
+         now = time.time()
+         try:
+-            cursor = await self.db_connection.execute(
+-                """
+-                INSERT INTO memory_write_ops(
+-                    op_type, memory_id, status, step, payload,
+-                    created_at, updated_at
+-                ) VALUES (?, ?, 'pending', 'started', ?, ?, ?)
+-                """,
+-                (
+-                    op_type,
+-                    memory_id,
+-                    json.dumps(payload or {}, ensure_ascii=False),
+-                    now,
+-                    now,
+-                ),
+-            )
+-            await self.db_connection.commit()
++            async with self._write_transaction() as connection:
++                cursor = await connection.execute(
++                    """
++                    INSERT INTO memory_write_ops(
++                        op_type, memory_id, status, step, payload,
++                        created_at, updated_at
++                    ) VALUES (?, ?, 'pending', 'started', ?, ?, ?)
++                    """,
++                    (
++                        op_type,
++                        memory_id,
++                        json.dumps(payload or {}, ensure_ascii=False),
++                        now,
++                        now,
++                    ),
++                )
+             return int(cursor.lastrowid)
+         except asyncio.CancelledError:
+             raise
+@@ -95,49 +95,49 @@ class MemoryEngineWriteOpsMixin:
+             if status == "completed":
+                 error = None
+             current_payload: dict[str, Any] = {}
+-            if payload_patch:
+-                cursor = await self.db_connection.execute(
+-                    "SELECT payload FROM memory_write_ops WHERE id = ?",
+-                    (op_id,),
+-                )
+-                row = await cursor.fetchone()
+-                if row and row[0]:
+-                    try:
+-                        loaded = json.loads(row[0])
+-                        current_payload = loaded if isinstance(loaded, dict) else {}
+-                    except (json.JSONDecodeError, TypeError):
+-                        current_payload = {}
+-                current_payload.update(payload_patch)
+-
+-            fields = ["step = ?", "updated_at = ?"]
+-            params: list[Any] = [step, time.time()]
+-            if memory_id is not None:
+-                fields.append("memory_id = ?")
+-                params.append(memory_id)
+-            if error is not None:
+-                fields.append("error = ?")
+-                params.append(error[:1000])
+-                fields.append("retry_count = retry_count + 1")
+-                # 达到重试上限后转为终态 failed，避免待修复记录永久滞留。
+-                fields.append(
+-                    "status = CASE WHEN retry_count + 1 >= ? THEN 'failed' ELSE ? END"
++            async with self._write_transaction() as connection:
++                if payload_patch:
++                    cursor = await connection.execute(
++                        "SELECT payload FROM memory_write_ops WHERE id = ?",
++                        (op_id,),
++                    )
++                    row = await cursor.fetchone()
++                    if row and row[0]:
++                        try:
++                            loaded = json.loads(row[0])
++                            current_payload = loaded if isinstance(loaded, dict) else {}
++                        except (json.JSONDecodeError, TypeError):
++                            current_payload = {}
++                    current_payload.update(payload_patch)
++
++                fields = ["step = ?", "updated_at = ?"]
++                params: list[Any] = [step, time.time()]
++                if memory_id is not None:
++                    fields.append("memory_id = ?")
++                    params.append(memory_id)
++                if error is not None:
++                    fields.append("error = ?")
++                    params.append(error[:1000])
++                    fields.append("retry_count = retry_count + 1")
++                    # 达到重试上限后转为终态 failed，避免待修复记录永久滞留。
++                    fields.append(
++                        "status = CASE WHEN retry_count + 1 >= ? THEN 'failed' ELSE ? END"
++                    )
++                    params.append(self._write_op_max_retries)
++                    params.append(status)
++                else:
++                    fields.append("status = ?")
++                    params.append(status)
++                    if status == "completed":
++                        fields.append("error = NULL")
++                if payload_patch:
++                    fields.append("payload = ?")
++                    params.append(json.dumps(current_payload, ensure_ascii=False))
++                params.append(op_id)
++                await connection.execute(
++                    f"UPDATE memory_write_ops SET {', '.join(fields)} WHERE id = ?",
++                    params,
+                 )
+-                params.append(self._write_op_max_retries)
+-                params.append(status)
+-            else:
+-                fields.append("status = ?")
+-                params.append(status)
+-                if status == "completed":
+-                    fields.append("error = NULL")
+-            if payload_patch:
+-                fields.append("payload = ?")
+-                params.append(json.dumps(current_payload, ensure_ascii=False))
+-            params.append(op_id)
+-            await self.db_connection.execute(
+-                f"UPDATE memory_write_ops SET {', '.join(fields)} WHERE id = ?",
+-                params,
+-            )
+-            await self.db_connection.commit()
+         except asyncio.CancelledError:
+             raise
+         except Exception:
+@@ -631,10 +631,10 @@ class MemoryEngineWriteOpsMixin:
+             if await cursor.fetchone() is not None and self.hybrid_retriever is not None:
+                 await self.hybrid_retriever.delete_memory(int(memory_id))
+ 
+-            await self.db_connection.execute(
+-                "DELETE FROM memory_sources WHERE memory_id = ?", (int(memory_id),)
+-            )
+-            await self.db_connection.commit()
++            async with self._write_transaction() as connection:
++                await connection.execute(
++                    "DELETE FROM memory_sources WHERE memory_id = ?", (int(memory_id),)
++                )
+         if self.graph_memory_manager is not None:
+             await self.graph_memory_manager.delete_memory(int(memory_id))
+         if self.atom_store is not None:
+@@ -694,10 +694,11 @@ class MemoryEngineWriteOpsMixin:
+             return 0
+ 
+         placeholders = ",".join("?" * len(memory_ids))
+-        await self.db_connection.execute(
+-            f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
+-            memory_ids,
+-        )
++        async with self._write_transaction() as connection:
++            await connection.execute(
++                f"DELETE FROM livingmemory_memories_fts WHERE doc_id IN ({placeholders})",
++                memory_ids,
++            )
+ 
+         cursor = await self.db_connection.execute(
+             f"SELECT id, doc_id FROM documents WHERE id IN ({placeholders})",
+@@ -718,15 +719,15 @@ class MemoryEngineWriteOpsMixin:
+                     exc_info=True,
+                 )
+ 
+-        cursor = await self.db_connection.execute(
+-            f"DELETE FROM documents WHERE id IN ({placeholders})",
+-            memory_ids,
+-        )
+-        await self.db_connection.execute(
+-            f"DELETE FROM memory_sources WHERE memory_id IN ({placeholders})",
+-            memory_ids,
+-        )
+-        await self.db_connection.commit()
++        async with self._write_transaction() as connection:
++            cursor = await connection.execute(
++                f"DELETE FROM documents WHERE id IN ({placeholders})",
++                memory_ids,
++            )
++            await connection.execute(
++                f"DELETE FROM memory_sources WHERE memory_id IN ({placeholders})",
++                memory_ids,
++            )
+         return int(cursor.rowcount or 0)
+ 
+     async def _delete_graph_and_atoms_for_batch(self, memory_ids: list[int]) -> None:
+@@ -751,11 +752,8 @@ class MemoryEngineWriteOpsMixin:
+                 return {}
+         return {}
+ 
+-    async def _drop_legacy_documents_fts_triggers(self):
+-        if self.db_connection is None:
+-            return
+-
+-        cursor = await self.db_connection.execute("""
++    async def _drop_legacy_documents_fts_triggers(self, connection):
++        cursor = await connection.execute("""
+             SELECT name FROM sqlite_master
+             WHERE type='trigger' AND tbl_name='documents'
+               AND sql LIKE '%documents_fts%'
+@@ -763,5 +761,5 @@ class MemoryEngineWriteOpsMixin:
+         rows = await cursor.fetchall()
+         for row in rows:
+             trigger_name = row[0]
+-            await self.db_connection.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}"')
++            await connection.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}"')
+             logger.warning(f"已清理旧 LivingMemory FTS 触发器: {trigger_name}")
