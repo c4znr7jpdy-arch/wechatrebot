@@ -32,6 +32,12 @@ window.createChatProfiles = function (helpers) {
     return candidates[0] || (kind === "group" ? id : "");
   }
 
+  function templateChoices(profiles, binding) {
+    const templates = profiles.templates || [];
+    const missing = Boolean(binding && !templates.some((template) => template.id === binding));
+    return {missing, markup: `<option value="">全局默认</option>${templates.map((template) => `<option value="${esc(template.id)}" ${template.id === binding ? "selected" : ""}>${esc(template.name)}</option>`).join("")}${missing ? `<option value="${esc(binding)}" selected>原配置方案暂不可用</option>` : ""}<option value="__manage_templates__">管理配置模板…</option>`};
+  }
+
   async function mount(container, id, kind, account) {
     if (!container || !account) return;
     const current = () => container.isConnected && account === (kind === "group" ? state.groupAccount : state.contactAccount)
@@ -42,14 +48,43 @@ window.createChatProfiles = function (helpers) {
       if (!current()) return;
       const key = bindingKey(id, kind, profiles, chats);
       const saved = profiles.bindings?.[key] || "";
-      const templates = profiles.templates || [];
-      const missing = saved && !templates.some((template) => template.id === saved);
+      const choices = templateChoices(profiles, saved);
+      const missing = choices.missing;
       const status = (statuses || []).find((item) => item.chat_id === key);
       const decision = status?.last_decision;
-      container.innerHTML = `<label class="chat-profile-field"><span>配置方案</span><select aria-label="配置方案" ${!key || missing ? "disabled" : ""}><option value="">全局默认</option>${templates.map((template) => `<option value="${esc(template.id)}" ${template.id === saved ? "selected" : ""}>${esc(template.name)}</option>`).join("")}${missing ? `<option value="${esc(saved)}" selected>原配置方案暂不可用</option>` : ""}<option value="__manage_templates__">管理配置模板…</option></select></label><p class="chat-profile-note" role="status">${!key ? "此联系人尚无对话记录，使用全局默认；产生消息后可绑定模板。" : missing ? "保留原绑定，请恢复连接后重新读取。" : "对话参数跟随所选方案；切换时确认应用。"}</p><p class="chat-decision">最近决策：${decision ? `${decision.should_reply ? "回复" : "不回复"} · ${esc(decision.summary || "暂无说明")}` : "暂无可用记录"}</p>`;
+      container.innerHTML = `<label class="chat-profile-field"><span>配置方案</span><select aria-label="配置方案" ${!key || missing ? "disabled" : ""}>${choices.markup}</select></label><p class="chat-profile-note" role="status">${!key ? "此联系人尚无对话记录，使用全局默认；产生消息后可绑定模板。" : missing ? "保留原绑定，请恢复连接后重新读取。" : "对话参数跟随所选方案；切换时确认应用。"}</p><p class="chat-decision">最近决策：${decision ? `${decision.should_reply ? "回复" : "不回复"} · ${esc(decision.summary || "暂无说明")}` : "暂无可用记录"}</p>`;
       const select = container.querySelector("select");
       const note = container.querySelector('[role="status"]');
       let binding = saved;
+      let blocked = !key || missing;
+      let readbackPending = false;
+      const retry = document.createElement("button");
+      retry.type = "button"; retry.className = "row-action"; retry.textContent = "重新读取方案";
+      retry.addEventListener("click", () => verifyBinding(binding));
+      async function verifyBinding(expected) {
+        if (!current()) return;
+        readbackPending = true; select.disabled = true; retry.disabled = true;
+        try {
+          const verified = await request("GET", "profiles");
+          if (!current()) return;
+          binding = verified.bindings?.[key] || "";
+          const choices = templateChoices(verified, binding);
+          blocked = choices.missing;
+          select.innerHTML = choices.markup; select.value = binding;
+          readbackPending = false; retry.remove();
+          note.textContent = choices.missing ? "操作已提交；当前绑定的配置方案暂不可用，请恢复方案后重新读取规则。"
+            : binding === expected ? "配置方案已应用并回读确认。"
+            : "操作已提交；重新读取的当前方案与所选方案不同，已显示当前结果，请核对其他窗口的修改。";
+        } catch (_error) {
+          if (current()) {
+            note.textContent = "配置方案已提交，后续读取暂未完成。请重新读取方案核对，无需重复应用。";
+            note.append(" ", retry);
+          }
+        } finally {
+          cache.delete(account);
+          if (current()) { select.disabled = blocked || readbackPending; retry.disabled = false; }
+        }
+      }
       select.addEventListener("change", () => {
         const next = select.value;
         select.value = binding;
@@ -64,16 +99,14 @@ window.createChatProfiles = function (helpers) {
             if ((latest.bindings?.[key] || "") !== binding) throw new Error("配置方案已被其他窗口修改，请重新选择聊天后重试。");
             await request("POST", "bindings/set", {chat_id: key, template_id: next});
             window.dispatchEvent(new Event("chat-profiles-changed"));
-            const verified = await request("GET", "profiles");
-            if ((verified.bindings?.[key] || "") !== next) throw new Error("未确认方案生效，请重新读取后核对。");
             if (!current()) return;
             binding = next; select.value = binding;
-            note.textContent = "配置方案已应用并回读确认。";
+            await verifyBinding(next);
           } catch (error) {
             cache.delete(account);
             if (current()) note.textContent = error.message || "应用失败，请重新读取后核对。";
             throw error;
-          } finally { if (current()) select.disabled = false; }
+          } finally { if (current()) select.disabled = blocked || readbackPending; }
         }});
       });
     } catch (error) {
