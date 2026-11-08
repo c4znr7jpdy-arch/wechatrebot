@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 from ...shared.constants import AnalysisStage
+from ...shared.trace_context import strip_control_characters
 
 if TYPE_CHECKING:
     from ...shared.trace_context import TraceContextSnapshot
@@ -494,13 +495,16 @@ class TraceSQLiteStore:
                     deduped_rfiles.append(rf)
 
             # 额外扫描磁盘 reports 目录，聚合文件名中明确带有 trace_id 的产物文件（如换模板重绘/续跑生成的文件）
+            filename_trace_ids = {trace_id, strip_control_characters(trace_id)} - {""}
             try:
                 reports_dir = self.db_path.parent / "reports"
                 if reports_dir.is_dir():
                     for p in reports_dir.iterdir():
                         if (
                             p.is_file()
-                            and trace_id in p.name
+                            and any(
+                                candidate in p.name for candidate in filename_trace_ids
+                            )
                             and p.name not in seen_rfiles
                         ):
                             seen_rfiles.add(p.name)
