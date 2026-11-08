@@ -319,7 +319,8 @@ def test_chat_profile_selection_preserves_scope_and_confirms_readback(browser, s
             expected = "wechat:FriendMessage:person" if scenario == "private" else "group"
             assert result["writes"][0] == {"chat_id": expected, "template_id": "custom"}
             if scenario == "readback":
-                assert result["error"] and result["after"] == ""
+                assert not result["error"] and result["after"] == ""
+                assert "当前方案与所选方案不同" in result["text"]
             else:
                 assert result["before"] == "" and result["after"] == "custom"
                 assert "回读确认" in result["text"]
