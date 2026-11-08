@@ -4,6 +4,7 @@ import pytest
 from playwright.sync_api import expect
 
 from test_manager_startup import browser, manager_url  # noqa: F401
+from test_update_flow_webui import _check_automatically, update_page  # noqa: F401
 
 
 def open_private_rules(page, manager_url, *, deferred_detail=False):
@@ -259,3 +260,33 @@ def test_private_draft_warns_before_browser_close(browser, manager_url):
         assert dialogs == ["beforeunload"]
     finally:
         page.close()
+
+
+def test_update_install_waits_for_private_rule_save(update_page):
+    page = update_page
+    _check_automatically(page)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    page.locator('.nav-item[data-page="groups"]').click()
+    page.locator("#privateManagementTab").click()
+    page.locator("#contactRows .contact-row").first.click()
+    expect(page.locator("#privatePolicyForm")).to_be_visible()
+    page.evaluate("""() => {
+      const api = window.pywebview.api, save = api.save_private_policy;
+      api.save_private_policy = async (...args) => new Promise(resolve => {
+        window.finishPrivateRuleSave = async () => resolve(await save(...args));
+      });
+    }""")
+    page.locator('button[form="privatePolicyForm"]').click()
+    page.wait_for_function("() => typeof window.finishPrivateRuleSave === 'function'")
+    page.evaluate("window.finishUpdateDownload(); window.updateTestController.pollUpdateStatus()")
+    expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_contain_text("请稍候")
+    assert page.evaluate("window.updateCalls.install") == []
+    page.evaluate("window.finishPrivateRuleSave()")
+    expect(page.locator('button[form="privatePolicyForm"]')).to_be_enabled()
+    expect(page.locator("#privatePolicyNote")).to_have_text("私聊规则已保存。")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
