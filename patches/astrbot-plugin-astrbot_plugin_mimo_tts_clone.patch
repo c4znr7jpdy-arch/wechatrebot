@@ -215,7 +215,7 @@ index 5c5f396..0874f33 100644
              created_at=float(data.get("created_at") or time.time()),
          )
 diff --git a/main.py b/main.py
-index 37f678f..c60e8be 100644
+index 37f678f..2b33ac7 100644
 --- a/main.py
 +++ b/main.py
 @@ -17,6 +17,9 @@ from astrbot.api import logger
@@ -236,7 +236,7 @@ index 37f678f..c60e8be 100644
  from .core.tts_jobs import TTSJob, TTSJobManager
  from .core.tts_reliability import CircuitOpenError, ReliabilityController
  from .core.wav_utils import merge_wav_files
-@@ -74,7 +78,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -74,11 +78,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          self._config_file = pathlib.Path(self.data_dir) / "config.json"
          native_config = self._coerce_config(config)
          persisted_config = self._load_persisted_config()
@@ -245,7 +245,12 @@ index 37f678f..c60e8be 100644
          self.plugin_config = build_plugin_config(self.config)
          self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
          self.voice_store = VoiceStore(self.data_dir)
-@@ -156,8 +160,33 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
++        self._synthesis_inflight = 0
+         self._style_director_cache: OrderedDict[str, tuple[float, TTSContextResult]] = OrderedDict()
+         self._mimo_client: MimoOfficialClient | None = None
+         self._mimo_client_signature: tuple[Any, ...] | None = None
+@@ -156,13 +161,54 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
                  if key == "api_key" and not str(changes[key] or "").strip():
                      continue
                  merged[key] = changes[key]
@@ -260,10 +265,24 @@ index 37f678f..c60e8be 100644
 +            candidate_config.job_recovery_max_age_hours,
 +            candidate_config.job_history_size,
 +        )
-+        if self._job_manager is not None and candidate_queue_settings != previous_queue_settings:
++        concurrency_changed = candidate_config.max_concurrency != self.plugin_config.max_concurrency
++        reliability_changed = any(
++            getattr(candidate_config, key) != getattr(self.plugin_config, key)
++            for key in (
++                "tts_rate_limit_rpm", "tts_max_retries",
++                "tts_retry_backoff_base_seconds", "tts_retry_backoff_max_seconds",
++                "circuit_failure_threshold", "circuit_recovery_seconds",
++            )
++        )
++        limits_changed = concurrency_changed or reliability_changed
++        if limits_changed and self._synthesis_inflight:
++            raise ValueError("语音仍在生成或等待生成，请等待任务结束后再修改运行限制；本次未保存。")
++        if self._job_manager is not None and (
++            candidate_queue_settings != previous_queue_settings or reliability_changed
++        ):
 +            queue = self._job_manager.snapshot()
 +            if queue["queued_jobs"] or queue["running_jobs"]:
-+                raise ValueError("语音队列仍有任务，请等待任务结束后再修改队列设置；本次未保存。")
++                raise ValueError("语音队列仍有任务，请等待任务结束后再修改队列设置或运行限制；本次未保存。")
 +        previous_config = self.config
 +        self.config = candidate
 +        try:
@@ -279,9 +298,82 @@ index 37f678f..c60e8be 100644
 +            raise ValueError("配置无法保存，已保留原设置。请检查磁盘空间和写入权限。") from None
 +        self.plugin_config = candidate_config
          self.emotion_router = EmotionRouter(emotion_contexts=self.plugin_config.emotion_contexts)
-         self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
+-        self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
++        if concurrency_changed:
++            self._tts_sem = asyncio.Semaphore(self.plugin_config.max_concurrency)
          self._style_director_cache.clear()
-@@ -612,6 +641,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         self._voice_data_cache.clear()
+-        self._reliability = self._build_reliability_controller()
++        if reliability_changed:
++            self._reliability = self._build_reliability_controller()
+         current_queue_settings = (
+             self.plugin_config.background_queue_size,
+             self.plugin_config.max_concurrency,
+@@ -289,32 +335,37 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+         voice_data_url: str | None = None,
+         output_path: pathlib.Path | None = None,
+     ) -> pathlib.Path:
+-        assistant_text = text.strip()
+-        if voice.style_tags.strip():
+-            assistant_text = f"{voice.style_tags.strip()} {assistant_text}".strip()
+-        if len(assistant_text) > self.plugin_config.max_text_chars:
+-            raise RuntimeError(f"文本过长，最大 {self.plugin_config.max_text_chars} 字")
+-
+-        voice_data_url = voice_data_url or await self._voice_data_url(voice)
+-        output_dir = pathlib.Path(self.data_dir) / "outputs"
+-        output_path = output_path or output_dir / f"mimo_tts_{time.time_ns()}.wav"
+-        async with self._tts_sem:
+-            client = self._acquire_client()
+-            try:
+-                result = await self._reliability.execute(
+-                    lambda: client.synthesize_to_file(
+-                        text=assistant_text,
+-                        voice_data_url=voice_data_url,
+-                        output_path=output_path,
+-                        context=context or self.plugin_config.default_context,
+-                    ),
+-                    retryable=lambda exc: isinstance(
+-                        exc, (MimoRateLimitError, MimoTransientError)
+-                    ),
+-                )
+-            finally:
+-                self._release_client(client)
+-        return result
++        # Include preparation and semaphore waiters, not only active API calls.
++        self._synthesis_inflight += 1
++        try:
++            assistant_text = text.strip()
++            if voice.style_tags.strip():
++                assistant_text = f"{voice.style_tags.strip()} {assistant_text}".strip()
++            if len(assistant_text) > self.plugin_config.max_text_chars:
++                raise RuntimeError(f"文本过长，最大 {self.plugin_config.max_text_chars} 字")
++
++            voice_data_url = voice_data_url or await self._voice_data_url(voice)
++            output_dir = pathlib.Path(self.data_dir) / "outputs"
++            output_path = output_path or output_dir / f"mimo_tts_{time.time_ns()}.wav"
++            async with self._tts_sem:
++                client = self._acquire_client()
++                try:
++                    result = await self._reliability.execute(
++                        lambda: client.synthesize_to_file(
++                            text=assistant_text,
++                            voice_data_url=voice_data_url,
++                            output_path=output_path,
++                            context=context or self.plugin_config.default_context,
++                        ),
++                        retryable=lambda exc: isinstance(
++                            exc, (MimoRateLimitError, MimoTransientError)
++                        ),
++                    )
++                finally:
++                    self._release_client(client)
++            return result
++        finally:
++            self._synthesis_inflight -= 1
+ 
+     def _cleanup_outputs(self) -> None:
+         output_dir = pathlib.Path(self.data_dir) / "outputs"
+@@ -612,6 +663,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          )
          return str(output)
  
@@ -294,7 +386,7 @@ index 37f678f..c60e8be 100644
      if hasattr(filter, "llm_tool"):
  
          @filter.llm_tool(name="mimo_tts_speak")
-@@ -632,30 +667,13 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -632,30 +689,13 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
                  style(string): Optional temporary style instruction.
  
              Returns:
@@ -331,7 +423,7 @@ index 37f678f..c60e8be 100644
  
      @staticmethod
      def _conversation_id(event: AstrMessageEvent) -> str:
-@@ -1168,7 +1186,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1168,7 +1208,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          bot: Any,
          *,
          is_group: bool,
@@ -340,7 +432,7 @@ index 37f678f..c60e8be 100644
          source: str,
          self_id: Any = None,
      ) -> None:
-@@ -1182,11 +1200,11 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1182,11 +1222,11 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              params["self_id"] = self_id
          method = getattr(bot, action, None)
          if callable(method):
@@ -354,7 +446,7 @@ index 37f678f..c60e8be 100644
              return
          raise RuntimeError("aiocqhttp 客户端不支持 OneBot 消息发送接口。")
  
-@@ -1237,23 +1255,44 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1237,23 +1277,44 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              source=source,
          )
  
@@ -404,7 +496,7 @@ index 37f678f..c60e8be 100644
  
      def _background_manager(self) -> TTSJobManager:
          if self._job_manager is None:
-@@ -1304,7 +1343,19 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1304,7 +1365,19 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
      def _task_list(self, *, limit: int = 50) -> list[dict[str, Any]]:
          return self._job_manager.list_tasks(limit=limit) if self._job_manager is not None else []
  
@@ -424,7 +516,7 @@ index 37f678f..c60e8be 100644
          if self.plugin_config.audio_transport in {"base64", "shared_path"}:
              return await self._synthesize_delivery_bundle(job)
          return await self.synthesize_text(
-@@ -1321,8 +1372,13 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1321,8 +1394,13 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              raise RuntimeError("当前 AstrBot 版本不支持主动消息 MessageChain。")
          return MessageChain(chain=components)
  
@@ -440,7 +532,7 @@ index 37f678f..c60e8be 100644
          if sent is False:
              raise RuntimeError("AstrBot 未找到可主动发送该会话的平台。")
  
-@@ -1330,15 +1386,28 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1330,15 +1408,28 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          self,
          session: str,
          audio_path: pathlib.Path,
@@ -471,7 +563,7 @@ index 37f678f..c60e8be 100644
              except Exception as exc:
                  record_error = exc
                  self.logger.warning(
-@@ -1353,7 +1422,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1353,7 +1444,7 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          if not self.plugin_config.file_fallback_enabled:
              raise record_error
          await self._send_to_session(
@@ -480,7 +572,7 @@ index 37f678f..c60e8be 100644
          )
  
      def _platform_capabilities(self) -> list[dict[str, Any]]:
-@@ -1388,8 +1457,14 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1388,8 +1479,14 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
      async def _deliver_tts_job(self, job: TTSJob, output: pathlib.Path) -> None:
          self._preflight_session(job.session)
          paths = self._delivery_audio_paths(output)
@@ -497,7 +589,7 @@ index 37f678f..c60e8be 100644
          self.logger.info(
              "[mimo-tts] background audio delivered: job=%s source=%s session=%s segments=%s",
              job.id,
-@@ -1410,9 +1485,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1410,9 +1507,12 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              clip_log_text(job.session),
              exc,
          )
@@ -512,7 +604,7 @@ index 37f678f..c60e8be 100644
  
      def _failure_notice_enabled(self, source: str) -> bool:
          mode = self.plugin_config.async_failure_notice
-@@ -1428,6 +1506,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1428,6 +1528,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          emotion: str = "",
          context: str = "",
      ) -> bool:
@@ -521,7 +613,7 @@ index 37f678f..c60e8be 100644
          session = str(getattr(event, "unified_msg_origin", "") or "").strip()
          if not session:
              raise RuntimeError("当前消息缺少 unified_msg_origin，无法后台补发语音。")
-@@ -1442,6 +1522,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1442,6 +1544,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              group_id=self._conversation_id(event),
              source="command" if source == "command" else "auto",
              notify_on_failure=self._failure_notice_enabled(source),
@@ -530,7 +622,7 @@ index 37f678f..c60e8be 100644
          )
          return await self._background_manager().submit(job)
  
-@@ -1482,10 +1564,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1482,10 +1586,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
          message: str,
      ) -> None:
          session = str(getattr(event, "unified_msg_origin", "") or "").strip()
@@ -543,7 +635,7 @@ index 37f678f..c60e8be 100644
          except Exception as exc:
              self.logger.warning(
                  "[mimo-tts] failed to deliver deferred queue notice: %s", exc
-@@ -1511,6 +1593,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1511,6 +1615,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
  
              # Consume before awaiting so another hook invocation cannot submit twice.
              event.set_extra(_PENDING_BACKGROUND_JOB_EXTRA, None)
@@ -552,7 +644,7 @@ index 37f678f..c60e8be 100644
              text = clean_tts_text(str(pending.get("text") or ""))
              if not text:
                  self.logger.info(
-@@ -1548,6 +1632,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1548,6 +1654,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
  
      @filter.command("tts", alias={"朗读", "语音"})
      async def tts_command(self, event: AstrMessageEvent):
@@ -561,7 +653,7 @@ index 37f678f..c60e8be 100644
          raw = self._tail_any(event.message_str, ("tts", "朗读", "语音"))
          voice_name, requested_emotion, text, command_context = self._parse_tts_args(raw)
          text = clean_tts_text(text)
-@@ -1609,7 +1695,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1609,7 +1717,10 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              yield event.plain_result(f"语音生成失败：{exc}")
              return
  
@@ -573,7 +665,7 @@ index 37f678f..c60e8be 100644
  
      @filter.command("tts音色列表", alias={"音色列表"})
      async def list_voices_command(self, event: AstrMessageEvent):
-@@ -1631,6 +1720,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1631,6 +1742,8 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
  
      @filter.on_decorating_result()
      async def auto_tts_reply(self, event: AstrMessageEvent):
@@ -582,7 +674,7 @@ index 37f678f..c60e8be 100644
          if not self.plugin_config.auto_tts_enabled:
              self.logger.info("[mimo-tts] auto tts skipped: feature disabled")
              return
-@@ -1708,6 +1799,9 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
+@@ -1708,6 +1821,9 @@ class MimoTTSClonePlugin(PagesAPIMixin, Star):
              clip_log_text(text),
          )
  
