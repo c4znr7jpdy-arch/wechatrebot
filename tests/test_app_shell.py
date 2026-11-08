@@ -2139,7 +2139,7 @@ def test_stop_actions_preserve_licensed_restart_and_complete_shutdown() -> None:
 const assert = require('node:assert/strict');
 const nodes = new Map();
 const $ = selector => {
-  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}});
+  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}, querySelector(){ return null; }});
   return nodes.get(selector);
 };
 const state = {mandatoryUpdate:false};
