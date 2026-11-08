@@ -130,16 +130,56 @@ def test_unverified_stop_retains_new_files_and_backups_without_restarting_old_ma
     assert result["error_code"] == "UPD-1010" and "保留" in result["message"]
 
 
-@pytest.mark.parametrize("failure", ["terminate", "query", "timeout"])
+@pytest.mark.parametrize("failure", ["terminate", "query", "timeout", "wait"])
 def test_job_stop_failure_is_explicit(failure, monkeypatch):
+    import _winapi
     api = SimpleNamespace(TerminateJobObject=lambda *_: failure != "terminate")
     process = OwnedProcess(0, 0, 123, api)
+    def wait(*_args):
+        if failure == "wait":
+            raise OSError("wait unavailable")
+        return _winapi.WAIT_TIMEOUT if failure == "timeout" else _winapi.WAIT_OBJECT_0
+    monkeypatch.setattr(_winapi, "WaitForSingleObject", wait)
     if failure == "query":
         api.QueryInformationJobObject = lambda *_: False
     else:
         monkeypatch.setattr(process, "active_processes", lambda: 1)
     with pytest.raises(ProcessTreeStopError):
         process.terminate_tree(timeout_seconds=0)
+
+
+def test_job_stop_waits_for_nested_descendant_file_lock_release(tmp_path):
+    import _winapi
+    target = tmp_path / "locked.bin"
+    target.write_bytes(b"new")
+    marker = tmp_path / "nested-child.pid"
+    child = "import os,sys,time; from pathlib import Path; handle=open(sys.argv[1],'rb'); Path(sys.argv[2]).write_text(str(os.getpid())); time.sleep(30)"
+    parent = (
+        "import os,sys,time; from pathlib import Path; "
+        "from wechatrebot_manager.windows_process_job import start_owned_process; "
+        "inner=start_owned_process([sys.executable,'-c',sys.argv[1],sys.argv[2],sys.argv[3]],"
+        "cwd=Path(sys.argv[2]).parent,env=os.environ.copy()); time.sleep(30)"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path(windows_process_job.__file__).resolve().parents[1])
+    process = start_owned_process(
+        [sys.executable, "-c", parent, child, str(target), str(marker)],
+        cwd=tmp_path, env=environment,
+    )
+    child_handle = None
+    try:
+        _wait_until(marker.is_file)
+        child_handle = _winapi.OpenProcess(0x00101001, False, int(marker.read_text()))
+        with pytest.raises(PermissionError):
+            target.rename(target.with_suffix(".replacement"))
+        process.terminate_tree()
+        assert _winapi.WaitForSingleObject(child_handle, 0) == _winapi.WAIT_OBJECT_0
+        target.rename(target.with_suffix(".replacement"))
+    finally:
+        process.terminate_tree()
+        process.close()
+        if child_handle is not None:
+            _winapi.CloseHandle(child_handle)
 
 
 def test_releasing_successful_restart_does_not_stop_client(tmp_path):

@@ -6,7 +6,6 @@ from ctypes import wintypes
 import os
 from pathlib import Path
 import subprocess
-import time
 
 
 class ProcessTreeStopError(OSError):
@@ -64,15 +63,23 @@ class OwnedProcess:
         return int(accounting.active)
 
     def terminate_tree(self, timeout_seconds: float = 10) -> None:
+        import _winapi
         # The root can already have exited while its one-file child is alive.
         # The retained job still owns that child and all of its descendants.
         if not self._api.TerminateJobObject(self._job, 1):
             raise ProcessTreeStopError("无法停止本次重启的客户端进程树。")
-        deadline = time.monotonic() + timeout_seconds
-        while self.active_processes():
-            if time.monotonic() >= deadline:
-                raise ProcessTreeStopError("等待本次重启的客户端进程树退出超时。")
-            time.sleep(0.05)
+        # Termination clears ActiveProcesses before asynchronous process teardown
+        # releases executable/file locks. The terminated job is signaled only
+        # after its processes, including nested-job descendants, have exited.
+        timeout_ms = max(0, min(int(timeout_seconds * 1000), 0xFFFFFFFE))
+        try:
+            result = _winapi.WaitForSingleObject(self._job, timeout_ms)
+        except OSError as exc:
+            raise ProcessTreeStopError("无法确认本次重启进程树是否已退出。") from exc
+        if result != _winapi.WAIT_OBJECT_0:
+            raise ProcessTreeStopError("等待本次重启的客户端进程树退出超时。")
+        if self.active_processes():
+            raise ProcessTreeStopError("无法确认本次重启进程树是否已退出。")
 
     def close(self) -> None:
         import _winapi
