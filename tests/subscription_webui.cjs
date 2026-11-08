@@ -998,7 +998,8 @@ async function confirmationPromiseSettlesOnCancelAndAllowsFailureRecovery() {
   assert.ok(start >= 0 && end > start);
   const h = harness(), errors = [];
   const focus = {focus() { focus.restored = true; }};
-  const context = vm.createContext({$: h.element, escapeHtml, document: {activeElement: focus},
+  h.element('#onboardingBackdrop').hidden = true;
+  const context = vm.createContext({$: h.element, escapeHtml, state: {}, document: {activeElement: focus},
     reportError: error => errors.push(error)});
   vm.runInContext(app.slice(start, end), context);
   const resolve = confirmed => vm.runInContext(`modalResolve(${confirmed})`, context);
