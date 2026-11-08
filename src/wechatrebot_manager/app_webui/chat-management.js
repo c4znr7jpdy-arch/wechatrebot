@@ -31,6 +31,8 @@ window.createChatManagement = function (helpers) {
   const chatProfiles = window.createChatProfiles({api, escapeHtml, confirmAction, openCoreTemplates, state});
 
   let groupDrafts = {};
+  let privateDrafts = {};
+  let privatePolicySaves = new Set();
   let chatContextGeneration = 0;
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
@@ -148,6 +150,8 @@ window.createChatManagement = function (helpers) {
     state.privatePolicies = {};
     state.contactPage = 1;
     groupDrafts = {};
+    privateDrafts = {};
+    privatePolicySaves = new Set();
     chatProfiles.invalidate();
     for (const [selector, label] of [["#refreshGroups", "刷新群列表"], ["#refreshContacts", "刷新联系人"]]) {
       const button = $(selector);
@@ -428,10 +432,9 @@ window.createChatManagement = function (helpers) {
     </form>`;
   }
 
-  function readGroupPolicyForm(form) {
+  function readChatPolicyForm(form) {
     return {
       bot_enabled: form.elements.bot_enabled.checked,
-      reply_mode: form.elements.reply_mode.value,
       scheduled_enabled: form.elements.scheduled_enabled.checked,
       allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
       quiet_hours: {
@@ -442,6 +445,10 @@ window.createChatManagement = function (helpers) {
       },
       daily_limit: Number(form.elements.daily_limit.value),
     };
+  }
+
+  function readGroupPolicyForm(form) {
+    return {...readChatPolicyForm(form), reply_mode: form.elements.reply_mode.value};
   }
 
   async function saveGroupPolicy(event) {
@@ -629,6 +636,8 @@ window.createChatManagement = function (helpers) {
         state.selectedContact = null;
         state.contactDetails = {};
         state.privatePolicies = {};
+        privateDrafts = {};
+        privatePolicySaves = new Set();
         state.contactPage = 1;
       }
       state.contactUpdatedAt = data.updated_at || "";
@@ -751,13 +760,13 @@ window.createChatManagement = function (helpers) {
     if (state.selectedContact === contactId) renderContactInspector();
   }
 
-  async function loadPrivatePolicy(contactId) {
+  async function loadPrivatePolicy(contactId, force = false) {
     if (!state.contactAccount || !contactId) return;
     const account = state.contactAccount;
     const policies = state.privatePolicies;
-    if (policies[contactId]?.loading) return;
+    if (policies[contactId]?.loading || (!force && policies[contactId] && !policies[contactId].error)) return;
     policies[contactId] = {loading: true};
-    renderContactInspector();
+    if (state.selectedContact === contactId) renderContactInspector();
     try {
       const data = await api("get_private_policy", account, contactId);
       if (state.contactAccount !== account || state.privatePolicies !== policies) return;
@@ -768,6 +777,22 @@ window.createChatManagement = function (helpers) {
       reportError(error);
     }
     if (state.selectedContact === contactId) renderContactInspector();
+    return !policies[contactId]?.error;
+  }
+
+  function refreshPrivatePolicy(contactId) {
+    const account = state.contactAccount;
+    const policies = state.privatePolicies;
+    const refresh = () => {
+      if (state.contactAccount !== account || state.privatePolicies !== policies) throw new Error("微信账号已变化，请重新选择联系人。");
+      if (privatePolicySaves.has(contactId)) throw new Error("私聊规则正在保存，请稍后重新读取。");
+      delete privateDrafts[contactId];
+      chatProfiles.invalidate();
+      return loadPrivatePolicy(contactId, true);
+    };
+    if (privateDrafts[contactId]) {
+      confirmAction({title: "重新读取私聊规则？", message: "此联系人未保存的修改将被丢弃。", confirmText: "丢弃并重新读取", onConfirm: refresh});
+    } else void refresh();
   }
 
   function privatePolicyMarkup(data) {
@@ -775,8 +800,9 @@ window.createChatManagement = function (helpers) {
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
+    const allowed = new Set(policy.allowed_features || []);
     const isWechatTeam = String(policy.contact_id || "").trim().toLowerCase() === "weixin";
-    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${feature.allowed ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
+    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div id="privateChatProfile" class="chat-profile"></div><div class="toggle-line"><span><strong>在此私聊使用机器人</strong></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
       ${isWechatTeam ? '<div class="toggle-line"><span><strong>微信团队私聊的模型回复</strong></span><span class="toggle"><input id="privateModelReplyDisabled" type="checkbox" disabled><label class="toggle-track" for="privateModelReplyDisabled" aria-label="微信团队私聊模型回复已关闭"></label><span>已关闭</span></span></div>' : ""}
@@ -810,19 +836,32 @@ window.createChatManagement = function (helpers) {
       : detailState?.error
         ? `<div class="profile-state error">${escapeHtml(detailState.error)}</div>`
         : facts ? `<dl class="contact-facts">${facts}</dl>` : '<div class="profile-state">当前接口没有返回更多个人资料。</div>';
-    const policyData = state.privatePolicies[contact.user_id];
-    const saveDisabled = !policyData || policyData.loading || policyData.error;
+    const policyData = privateDrafts[contact.user_id] || state.privatePolicies[contact.user_id];
+    const saving = privatePolicySaves.has(contact.user_id);
+    const saveDisabled = !policyData || policyData.loading || policyData.error || saving;
     panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><div class="contact-inspector-actions"><button class="row-action" type="button" data-contact-profile="${escapeHtml(contact.user_id)}">查询好友资料</button><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></div></header>
+      <div class="inspector-detail-actions"><button class="row-action" id="refreshPrivatePolicy" type="button" ${state.privatePolicies[contact.user_id]?.loading || saving ? "disabled" : ""}>重新读取规则</button></div>
       <div class="inspector-scroll contact-detail-scroll"><details class="contact-profile"><summary>个人详情</summary><div class="contact-section-heading"><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</details>${privatePolicyMarkup(policyData)}</div>
-      <footer class="inspector-footer"><span>资料只在当前运行期间保存在内存中。</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""}>保存私聊规则</button></footer>`;
+      <footer class="inspector-footer"><span id="privatePolicyNote">${privateDrafts[contact.user_id] ? "有未保存修改，切换联系人会保留。" : "在线保存会立即应用到此私聊。"}</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""} ${saving ? 'aria-busy="true"' : ""}>${saving ? "正在保存…" : "保存私聊规则"}</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
     const accountId = state.contactAccount;
     $("[data-contact-profile]", panel)?.addEventListener("click", () => openContactProfile({accountId, contactId: contact.user_id, name: displayName}));
     $(".chat-scheduled-entry", panel)?.addEventListener("click", () => openScheduledForChat({type: "private", id: contact.user_id, name: displayName}, state.contactAccount));
+    $("#refreshPrivatePolicy", panel)?.addEventListener("click", () => refreshPrivatePolicy(contact.user_id));
     bindAvatarFallbacks(panel);
     void chatProfiles.mount($("#privateChatProfile"), contact.user_id, "private", state.contactAccount);
-    $("#privatePolicyForm")?.addEventListener("submit", savePrivatePolicy);
-    $$(".toggle input", panel).forEach((input) => input.addEventListener("change", updatePolicyToggle));
+    const policyForm = $("#privatePolicyForm");
+    if (policyForm) {
+      policyForm.addEventListener("submit", savePrivatePolicy);
+      const rememberDraft = (event) => {
+        if (!event.target.name) return;
+        privateDrafts[contact.user_id] = {...policyData, policy: {...policyData.policy, ...readChatPolicyForm(policyForm), daily_limit: policyForm.elements.daily_limit.value}};
+        $("#privatePolicyNote").textContent = "有未保存修改，切换联系人会保留。";
+      };
+      policyForm.addEventListener("input", rememberDraft);
+      policyForm.addEventListener("change", rememberDraft);
+      $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updatePolicyToggle));
+    }
   }
 
   async function savePrivatePolicy(event) {
@@ -832,33 +871,44 @@ window.createChatManagement = function (helpers) {
     if (!button || !state.selectedContact) return;
     const contactId = state.selectedContact;
     const accountId = state.contactAccount;
+    const policies = state.privatePolicies;
+    const saves = privatePolicySaves;
+    if (saves.has(contactId)) return;
+    const draft = privateDrafts[contactId];
+    const values = readChatPolicyForm(form);
+    saves.add(contactId);
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     button.textContent = "正在保存…";
     try {
-      await api("save_private_policy",
+      const saved = await api("save_private_policy",
         accountId,
         contactId,
-        {allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value), bot_enabled: form.elements.bot_enabled.checked, scheduled_enabled: form.elements.scheduled_enabled.checked, quiet_hours: {enabled: form.elements.quiet_enabled.checked, start: form.elements.quiet_start.value, end: form.elements.quiet_end.value, timezone: "Asia/Shanghai"}, daily_limit: Number(form.elements.daily_limit.value)},
+        values,
         form.dataset.revision || "",
       );
-      if (state.selectedContact === contactId && state.contactAccount === accountId) {
-        await loadPrivatePolicy(contactId);
-      }
+      if (state.contactAccount !== accountId || state.privatePolicies !== policies) return;
+      policies[contactId] = {...policies[contactId], policy: saved};
+      if (privateDrafts[contactId] === draft) delete privateDrafts[contactId];
+      else if (privateDrafts[contactId]) privateDrafts[contactId].policy.revision = saved.revision || "";
+      if (!await loadPrivatePolicy(contactId, true)) toast("私聊规则已保存，但暂时无法重新读取，可点击“重新读取规则”核对。", "warning");
     } catch (error) { reportError(error); }
     finally {
+      saves.delete(contactId);
       if (button.isConnected) {
         button.disabled = false;
         button.removeAttribute("aria-busy");
         button.textContent = "保存私聊规则";
       }
+      if (state.selectedContact === contactId && state.contactAccount === accountId && state.privatePolicies === policies) renderContactInspector();
     }
   }
 
   return {
     clearPendingGroupMemberLoading,
     invalidateChatManagementContext,
-    hasGroupDrafts: () => Object.keys(groupDrafts).length > 0,
+    hasChatDrafts: () => Object.keys(groupDrafts).length > 0 || Object.keys(privateDrafts).length > 0,
+    isPrivatePolicySaving: () => privatePolicySaves.size > 0,
     loadContacts,
     loadGroups,
     renderContacts,

@@ -815,9 +815,9 @@
   function managerCloseState() {
     return {
       dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
-        || state.scheduledDirty || coreSettings.dirty || hasGroupDrafts()),
+        || state.scheduledDirty || coreSettings.dirty || hasChatDrafts()),
       busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
-        || coreSettings.busy || isProviderSaving() || state.historyExporting
+        || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
         || state.stopRequestPending || state.status?.busy),
     };
@@ -1376,7 +1376,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasGroupDrafts, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,
