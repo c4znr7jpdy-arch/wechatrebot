@@ -25,6 +25,7 @@ window.createModelServices = function (helpers) {
   let providerSaveBusy = false;
   let providerReadGeneration = 0;
   let providerReadBusy = false;
+  let providerMutationBusy = false;
 
   function clearProviderTest() {
     providerTestGeneration += 1;
@@ -146,6 +147,19 @@ window.createModelServices = function (helpers) {
       ? "提交时的配置已保存；之后的修改仍未保存，请再次保存。" : "模型服务已保存。";
   }
 
+  function beginProviderMutation() {
+    providerMutationBusy = true;
+    providerReadGeneration += 1;
+    providerReadBusy = false;
+    $("#providerReadbackFeedback").hidden = true;
+    $("#reloadProviderServices").disabled = true;
+  }
+
+  function finishProviderMutation() {
+    providerMutationBusy = false;
+    $("#reloadProviderServices").disabled = providerReadBusy || providerSaveBusy;
+  }
+
   async function refreshProviderServices() {
     const request = ++providerReadGeneration;
     const feedback = $("#providerReadbackFeedback");
@@ -172,26 +186,26 @@ window.createModelServices = function (helpers) {
     } finally {
       if (request === providerReadGeneration) {
         providerReadBusy = false;
-        button.disabled = providerSaveBusy;
+        button.disabled = providerSaveBusy || providerMutationBusy;
       }
     }
   }
 
   async function reloadProviderServices() {
-    if (providerReadBusy || providerSaveBusy) return;
+    if (providerReadBusy || providerSaveBusy || providerMutationBusy) return;
     if (await refreshProviderServices()) toast("模型列表已重新读取。");
   }
 
   async function saveProvider(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    if (providerSaveBusy || !requiredValues(form)) return;
+    if (providerSaveBusy || providerMutationBusy || !requiredValues(form)) return;
     const generation = providerEditorGeneration;
     const submitted = Object.fromEntries(new FormData(form));
     const button = $('button[type="submit"]', form);
     const originalText = button.textContent;
     providerSaveBusy = true;
-    $("#reloadProviderServices").disabled = true;
+    beginProviderMutation();
     button.disabled = true;
     button.textContent = "正在保存并应用…";
     $("#providerNote").textContent = "正在更新统一模型配置…";
@@ -229,7 +243,7 @@ window.createModelServices = function (helpers) {
     } finally {
       providerSaveBusy = false;
       button.disabled = false;
-      $("#reloadProviderServices").disabled = providerReadBusy;
+      finishProviderMutation();
       if (generation === providerEditorGeneration && state.providerScreen === "editor") {
         renderProviderSaveIntent(
           providerWillBeDefault(form.elements.service_kind.value, form.elements.provider_id.value),
@@ -535,7 +549,9 @@ window.createModelServices = function (helpers) {
   }
 
   async function setProviderDefault(providerId, button) {
+    if (button.disabled || providerMutationBusy) return;
     const original = button.textContent;
+    beginProviderMutation();
     button.disabled = true;
     button.textContent = "切换中…";
     try {
@@ -546,7 +562,7 @@ window.createModelServices = function (helpers) {
       renderProviderServices();
       toast(result.apply_state === "applied" ? "回复模型已切换并立即生效。" : "回复模型已切换，将在启动时生效。");
     } catch (error) { reportError(error); }
-    finally { button.disabled = false; button.textContent = original; }
+    finally { button.disabled = false; button.textContent = original; finishProviderMutation(); }
   }
 
   async function testSelectedProvider() {
@@ -790,21 +806,26 @@ window.createModelServices = function (helpers) {
         options: alternatives.map((item) => ({value: item.id, label: item.name})),
       } : null,
       onConfirm: async (replacementId) => {
-        await api("delete_provider", providerId, replacementId || "");
-        state.bootstrap.providers = await api("get_providers");
-        state.featureDetails = {};
-        getCoreSettings().invalidate();
-        renderProviderServices();
-        markProviderClean();
-        showProviderOverview(true);
-        toast("模型服务已删除。");
+        if (providerMutationBusy) throw new Error("模型配置正在更新，请稍后重试。");
+        beginProviderMutation();
+        try {
+          await api("delete_provider", providerId, replacementId || "");
+          state.bootstrap.providers = await api("get_providers");
+          state.featureDetails = {};
+          getCoreSettings().invalidate();
+          renderProviderServices();
+          markProviderClean();
+          showProviderOverview(true);
+          toast("模型服务已删除。");
+        } finally { finishProviderMutation(); }
       },
     });
   }
 
   async function setProviderThinking(providerId, button) {
     const service = (state.bootstrap?.providers || []).find((item) => item.id === providerId);
-    if (!service || button.disabled) return;
+    if (!service || button.disabled || providerMutationBusy) return;
+    beginProviderMutation();
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     try {
@@ -814,7 +835,7 @@ window.createModelServices = function (helpers) {
     } catch (error) {
       reportError(error);
       renderProviderServices();
-    }
+    } finally { finishProviderMutation(); }
   }
 
   function deleteSelectedProvider() {

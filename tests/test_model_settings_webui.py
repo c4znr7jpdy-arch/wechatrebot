@@ -307,6 +307,63 @@ def test_provider_retry_read_cannot_replace_a_later_save(browser, manager_url, o
         page.close()
 
 
+@pytest.mark.parametrize("action", ["default", "delete"])
+@pytest.mark.parametrize("old_read_fails", [False, True])
+def test_provider_retry_read_cannot_replace_a_later_action(browser, manager_url, action, old_read_fails):
+    page = browser.new_page(viewport={"width": 1380, "height": 920})
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerApiKey").fill("preview-only-first")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerModelInput").fill("alternate-model")
+        page.locator("#providerApiKey").fill("preview-only-alternate")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_providers;
+          window.providerReadCalls = 0;
+          api.get_providers = async () => {
+            const result = await read();
+            window.providerReadCalls += 1;
+            if (window.providerReadCalls === 1) return {ok:false,error:{message:'模拟列表读取失败'}};
+            if (window.providerReadCalls === 2) return new Promise(resolve => {
+              window.finishOldProviderRead = failed => resolve(failed
+                ? {ok:false,error:{message:'不应显示的旧读取错误'}} : result);
+            });
+            return result;
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        page.locator("#reloadProviderServices").click()
+        expect(page.locator("#reloadProviderServices")).to_be_disabled()
+        alternate_id = "deepseek/alternate-model"
+        if action == "default":
+            page.locator(f'footer [data-provider-default="{alternate_id}"]').click()
+            expect(page.locator('.provider-service.active footer [data-provider-edit]')).to_have_attribute("data-provider-edit", alternate_id)
+        else:
+            page.locator(f'footer [data-provider-delete="{alternate_id}"]').click()
+            page.locator("#modalConfirm").click()
+            expect(page.locator("#modalBackdrop")).to_be_hidden()
+            expect(page.locator(f'footer [data-provider-edit="{alternate_id}"]')).to_have_count(0)
+        page.evaluate("failed => window.finishOldProviderRead(failed)", old_read_fails)
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(resolve))")
+        if action == "default":
+            expect(page.locator('.provider-service.active footer [data-provider-edit]')).to_have_attribute("data-provider-edit", alternate_id)
+        else:
+            expect(page.locator(f'footer [data-provider-edit="{alternate_id}"]')).to_have_count(0)
+        expect(page.locator("#providerReadbackFeedback")).to_be_hidden()
+        expect(page.locator("#reloadProviderServices")).to_be_enabled()
+        expect(page.get_by_text("不应显示的旧读取错误", exact=False)).to_have_count(0)
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("theme,width,height", [("light", 1440, 1024), ("dark", 1080, 680)])
 def test_provider_icons_default_save_and_editor_navigation(browser, manager_url, tmp_path, theme, width, height):
     page = browser.new_page(viewport={"width": width, "height": height})
