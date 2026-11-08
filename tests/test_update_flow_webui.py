@@ -155,6 +155,42 @@ def test_cancel_install_keeps_ready_package_and_manual_retry_skips_download(upda
     assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
 
 
+def test_failed_window_close_offers_close_retry_and_protects_explicit_exit(update_page, tmp_path):
+    page = update_page
+    _download_and_wait_for_consent(page)
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    page.evaluate("""() => {
+      window.testUpdateStatus = {...window.testUpdateStatus, state:'ready', phase:'close_failed',
+        close_pending:true, confirmation_token:'close-retry',
+        error:{code:'UPD-1007',message:'管理器未能自动关闭，请再次关闭管理器以继续更新。'}};
+      window.pywebview.api.install_update = async (...args) => {
+        window.updateCalls.install.push(args);
+        window.testUpdateStatus = {...window.testUpdateStatus, state:'restarting',close_pending:false};
+        return {ok:true,data:{accepted:true}};
+      };
+      return window.updateTestController.pollUpdateStatus();
+    }""")
+    expect(page.locator("#modalTitle")).to_have_text("再次关闭管理器以继续更新？")
+    expect(page.locator("#modalMessage")).to_contain_text("同一次更新")
+    page.locator("#modalCancel").click()
+    expect(page.locator("#updateCardTitle")).to_have_text("管理器未能关闭")
+    expect(page.locator("#updateCardAction")).to_have_text("再次关闭管理器")
+    assert page.locator("#updateCardDismiss").is_hidden()
+    assert page.evaluate("""() => {
+      const event = new Event('beforeunload',{cancelable:true});
+      dispatchEvent(event); return event.defaultPrevented;
+    }""")
+    page.screenshot(path=str(tmp_path / "update-close-retry.png"))
+    page.locator("#updateCardAction").click()
+    expect(page.locator("#modalConfirm")).to_have_text("再次关闭管理器")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.effects") == ["stop", "install"]
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+    assert page.evaluate("window.updateCalls.install")[-1] == ["1.0.1", "close-retry"]
+
+
 @pytest.mark.parametrize("editor", ["core", "provider", "feature", "schedule", "search", "group"])
 def test_install_preserves_unsaved_settings_and_the_downloaded_package(update_page, tmp_path, editor):
     page = update_page

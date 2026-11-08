@@ -29,6 +29,22 @@ def _wait_until(predicate):
         time.sleep(0.02)
 
 
+def test_windows_process_wait_distinguishes_live_and_exited_process():
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        with pytest.raises(updates.UpdateError, match="等待旧版本退出超时"):
+            updates._wait_for_process_exit(process.pid, timeout_seconds=0)
+        assert process.poll() is None
+        process.terminate()
+        process.wait(timeout=5)
+        updates._wait_for_process_exit(process.pid, timeout_seconds=0)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+
+
 def _plan(tmp_path):
     root, prepared = _ready_incremental_update(tmp_path)
     manager = prepared.payload_root / "manager/WeChatReBot.exe"
