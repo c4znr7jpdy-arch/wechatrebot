@@ -1180,6 +1180,7 @@
     });
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
+    $("#reloadProviderServices").addEventListener("click", reloadProviderServices);
     $("#providerForm").addEventListener("input", updateProviderDirty);
     $("#providerForm").addEventListener("change", updateProviderDirty);
     $("#providerForm").addEventListener("input", (event) => {
@@ -1448,7 +1449,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
