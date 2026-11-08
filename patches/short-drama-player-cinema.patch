@@ -689,7 +689,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -377,9 +347,39 @@
+@@ -377,9 +347,40 @@
        const videoShell = document.getElementById('videoShell');
        const fallback = document.getElementById('direct');
        const retry = document.getElementById('retry');
@@ -720,6 +720,7 @@ diff --git a/index.html b/index.html
 +      const searchAllSources = document.getElementById('searchAllSources');
 +      const searchSuggestions = document.getElementById('searchSuggestions');
 +      let searchController = null, historyController = null, catalogSummary = '';
++      let sharedSelection = null, sharedNotice = '';
 +      let historyReady = false, historyPlaylist = null, historyEpisode = -1, historySavedAt = 0, skipIntroDone = false, finishedLoadId = -1;
 +      let stalledTimer = null, recoveryAttempts = 0, recoveryProgress = 0;
        const previous = document.getElementById('previous');
@@ -729,7 +730,7 @@ diff --git a/index.html b/index.html
        const episodeSheet = document.getElementById('episodeSheet');
        const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
        const sheetBackdrop = document.getElementById('sheetBackdrop');
-@@ -406,24 +406,409 @@
+@@ -406,24 +407,409 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -1059,7 +1060,7 @@ diff --git a/index.html b/index.html
 +            saveWatchHistory();
 +            playlist = item; current = 0; resetSources(item);
 +            titleNode.textContent = item.title; document.title = item.title;
-+            fragment.delete('i'); fragment.delete('ep'); fragment.delete('resume'); fragment.delete('search');
++            ['i', 'ep', 'resume', 'search', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
 +            // A new same-origin selection token makes refreshed recommendations shareable.
 +            if (item.selectionToken) { fragment.delete('p'); fragment.delete('r'); fragment.set('i', '0'); params.set('s', item.selectionToken); }
 +            history.replaceState(null, '', `${location.pathname}?${params}#${fragment}`);
@@ -1144,7 +1145,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +906,7 @@
+@@ -521,7 +907,7 @@
            }
            return { name, url };
          });
@@ -1153,7 +1154,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +922,542 @@
+@@ -537,8 +923,576 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1270,7 +1271,15 @@ diff --git a/index.html b/index.html
 +        castOwnsStatus = false;
 +        shareButton.disabled = true; actionStatus.textContent = '';
 +        try {
-+          const data = {title: playlist.title, url: location.href};
++          let url = location.href;
++          if (fragment.has('resume') || fragment.has('search') || fragment.has('watch')
++            || (sourceSession?.item && sourceSession.item.source !== playlist.source)) {
++            const shared = new URLSearchParams({watch: '1', title: playlist.title, source: String(playlist.source || ''),
++              year: String(playlist.year || ''), category: String(playlist.category || ''),
++              episode: playlist.episodes[current].name, ep: String(current + 1)});
++            url = `${location.origin}${location.pathname}#${shared}`;
++          }
++          const data = {title: playlist.title, url};
 +          if (typeof navigator.share === 'function') await navigator.share(data);
 +          else if (typeof navigator.clipboard?.writeText === 'function') {
 +            await navigator.clipboard.writeText(data.url);
@@ -1600,7 +1609,8 @@ diff --git a/index.html b/index.html
 +        playlist = item; current = entry.episode; resetSources(item); historyController = controller;
 +        watchStage.hidden = false; recommendationsNode.style.display = 'none';
 +        titleNode.textContent = item.title; updateWatchDetails(); renderEpisodes(); renderWatchHistory();
-+        fragment.delete('p'); fragment.delete('r'); fragment.delete('i'); fragment.set('resume', historyKey(item.title));
++        ['p', 'r', 'i', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
++        fragment.set('resume', historyKey(item.title));
 +        loadEpisode(current, {autoplay: true, resumeTime: entry.position});
 +        showHint(`继续观看 ${item.episodes[current].name}`, 2200);
 +        window.scrollTo(0, 0);
@@ -1655,7 +1665,8 @@ diff --git a/index.html b/index.html
 +          if (controller !== searchController || generation !== actionGeneration) return;
 +          const items = payload.items.map(validateSelectionItem);
 +          recommendationItems = items; selectionKind = 'search'; playlist = null;
-+          fragment.delete('i'); fragment.delete('ep'); fragment.delete('resume'); fragment.delete('q'); fragment.set('search', query);
++          ['i', 'ep', 'resume', 'q', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
++          fragment.set('search', query);
 +          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
 +          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
 +          recommendationsTitle.textContent = String(payload.heading || `搜索：${query}`).slice(0, 300);
@@ -1686,8 +1697,32 @@ diff --git a/index.html b/index.html
 +
        try {
 -        if (params.get('s')) {
-+        if (fragment.get('resume')) {
++        if (fragment.get('watch')) {
++          const allowed = new Set(['watch', 'title', 'source', 'year', 'category', 'episode', 'ep']);
++          if (fragment.get('watch') !== '1' || [...fragment.keys()].some((key) => !allowed.has(key) || fragment.getAll(key).length !== 1)) throw new Error('invalid shared selection');
++          const fields = {title: 100, source: 100, year: 20, category: 100, episode: 200};
++          const target = {};
++          for (const [key, limit] of Object.entries(fields)) {
++            target[key] = fragment.get(key) || '';
++            if (target[key].length > limit || /[\u0000-\u001f]/.test(target[key])) throw new Error('invalid shared selection');
++          }
++          if (!target.title.trim() || !target.source.trim() || !target.episode.trim() || !/^[1-9]\d{0,3}$/.test(fragment.get('ep') || '') || Number(fragment.get('ep')) > 2000) throw new Error('invalid shared selection');
++          const payload = await fetchSearch(target.title);
++          recommendationItems = payload.items.map(validateSelectionItem);
++          sharedSelection = target; selectionKind = 'search';
++          recommendationsTitle.textContent = `查找分享的作品：${target.title}`;
 +          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++        } else if (fragment.get('resume')) {
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++          const entry = watchEntries.find((item) => historyKey(item.title) === fragment.get('resume'));
++          if (!entry) {
++            const query = fragment.get('resume');
++            const payload = await fetchSearch(query);
++            recommendationItems = payload.items.map(validateSelectionItem); selectionKind = 'search';
++            recommendationsTitle.textContent = `搜索：${query}`;
++            sharedNotice = '本设备没有这条观看记录，请选择来源继续观看。';
++            fragment.delete('resume'); fragment.set('search', query);
++          }
 +        } else if (fragment.get('search')) {
 +          const payload = await fetchSearch(fragment.get('search'));
 +          recommendationItems = payload.items.map(validateSelectionItem);
@@ -1697,7 +1732,7 @@ diff --git a/index.html b/index.html
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -552,28 +1471,34 @@
+@@ -552,28 +1506,34 @@
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1727,7 +1762,7 @@ diff --git a/index.html b/index.html
 -        fail('分集数据已损坏，请回到微信重新搜索。');
 -        return;
 +        watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
-+        recommendationsTitle.textContent = '片单已过期，可重新搜索';
++        recommendationsTitle.textContent = fragment.has('watch') ? '分享的作品暂时无法打开，可重新搜索' : '片单已过期，可重新搜索';
 +        recommendationItems = [];
        }
  
@@ -1740,7 +1775,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1506,24 @@
+@@ -581,19 +1541,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1772,7 +1807,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1544,15 @@
+@@ -614,27 +1579,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1807,7 +1842,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1614,90 @@
+@@ -696,27 +1649,90 @@
          updateQualityActive();
        };
  
@@ -1905,7 +1940,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1705,42 @@
+@@ -724,24 +1740,42 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -1960,7 +1995,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1748,20 @@
+@@ -749,21 +1783,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1988,7 +2023,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,10 +1771,19 @@
+@@ -773,68 +1806,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2011,8 +2046,12 @@ diff --git a/index.html b/index.html
            });
          } else {
            fail('当前浏览器不支持 HLS 播放。');
-@@ -784,57 +1791,120 @@
+         }
          fragment.set('ep', String(current + 1));
++        if (fragment.has('watch')) {
++          ['title', 'source', 'year', 'category'].forEach((key) => fragment.set(key, String(playlist[key] || '')));
++          fragment.set('episode', item.name);
++        }
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
 -      };
@@ -2118,10 +2157,10 @@ diff --git a/index.html b/index.html
 +        queueMicrotask(() => { if (!watchStage.hidden) loadSources(); });
 +      };
 +
-+      const selectRecommendation = (index, {restoreSavedSource = false} = {}) => {
++      const selectRecommendation = (index, {restoreSavedSource = false, sharedEpisode = -1} = {}) => {
          const selected = recommendationItems[index];
          if (!selected || !Array.isArray(selected.episodes) || !selected.episodes.length) return;
-+        const saved = watchEntries.find((entry) => historyKey(entry.title) === historyKey(selected.title)
++        const saved = sharedEpisode < 0 && watchEntries.find((entry) => historyKey(entry.title) === historyKey(selected.title)
 +          && (!selected.year || !entry.item.year || selected.year === entry.item.year)
 +          && (!selected.category || !entry.item.category || selected.category === entry.item.category));
 +        if (saved) {
@@ -2139,21 +2178,27 @@ diff --git a/index.html b/index.html
 +        saveWatchHistory();
          playlist = selected;
 +        resetSources(selected);
-+        current = 0;
++        current = sharedEpisode >= 0 ? sharedEpisode : 0;
 +        updateWatchDetails();
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
          recommendationsNode.style.display = 'none';
-+        renderWatchHistory();
-         fragment.set('i', String(index));
+-        fragment.set('i', String(index));
 -        fragment.delete('ep');
++        renderWatchHistory();
++        if (sharedEpisode < 0) fragment.set('i', String(index)); else fragment.delete('i');
 +        fragment.delete('ep'); fragment.delete('resume');
++        if (fragment.has('watch') || fragment.has('search')) {
++          [...fragment.keys()].forEach((key) => fragment.delete(key));
++          fragment.set('watch', '1');
++        }
          renderEpisodes();
-         loadEpisode(0);
+-        loadEpisode(0);
 -      };
 -
 -      if (recommendationItems.length) {
++        loadEpisode(current);
 +        metadataStatus.textContent = needsMetadata(selected) && selected.episodeCount > selected.episodes.length ? '正在获取完整选集…' : '';
 +        metadataRetry.hidden = true; hydrateMetadata(selected);
 +        window.scrollTo(0, 0);
@@ -2169,7 +2214,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1926,11 @@
+@@ -856,10 +1969,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2182,7 +2227,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1953,7 @@
+@@ -882,7 +1996,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2191,7 +2236,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +1961,85 @@
+@@ -890,22 +2004,90 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2251,6 +2296,11 @@ diff --git a/index.html b/index.html
 +        }
 +        if (recommendationItems.length || fragment.get('search')) {
 +          saveWatchHistory();
++          if (fragment.has('watch')) {
++            const query = fragment.get('title') || playlist?.title || '';
++            ['watch', 'title', 'source', 'year', 'category', 'episode', 'resume'].forEach((key) => fragment.delete(key));
++            fragment.set('search', query);
++          }
 +          resetSources();
 +          closeEpisodeSheet();
 +          video.pause();
@@ -2289,7 +2339,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2052,44 @@
+@@ -918,19 +2100,44 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2339,7 +2389,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2100,15 @@
+@@ -941,6 +2148,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2355,7 +2405,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2118,31 @@
+@@ -950,20 +2166,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
@@ -2370,6 +2420,20 @@ diff --git a/index.html b/index.html
        syncNativeControls();
 -      if (playlist) {
 +      renderWatchHistory();
++      if (sharedSelection) {
++        const matches = recommendationItems.map((item, index) => ({item, index})).filter(({item}) =>
++          historyKey(item.title) === historyKey(sharedSelection.title) && item.source === sharedSelection.source
++          && (!sharedSelection.year || item.year === sharedSelection.year)
++          && (!sharedSelection.category || item.category === sharedSelection.category));
++        const match = matches.length === 1 ? matches[0] : null;
++        const index = match ? matchingEpisode(match.item, {episodes: [{name: sharedSelection.episode}], episodeCount: 2}, 0) : -1;
++        if (match && index >= 0) selectRecommendation(match.index, {sharedEpisode: index});
++        else {
++          sharedNotice = match ? `分享的${sharedSelection.episode}暂不可用，请选择其他剧集或来源。`
++            : '分享的作品来源暂不可用，以下为搜索结果，请自行选择。';
++        }
++      }
++      if (sharedNotice) { catalogSummary = sharedNotice; recommendationsSummary.textContent = sharedNotice; }
 +      if (fragment.get('resume')) {
 +        const entry = watchEntries.find((item) => historyKey(item.title) === fragment.get('resume'));
 +        if (entry) restoreWatchHistory(entry);

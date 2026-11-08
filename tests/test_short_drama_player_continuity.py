@@ -18,7 +18,7 @@ def continuity_page(browser, player_assets):
     html, media = player_assets
     pages, errors = [], []
 
-    def create(*, stored=None, expired=False, search_failure=False, block_storage=False):
+    def create(*, stored=None, expired=False, search_failure=False, block_storage=False, url=None, search_items=None):
         page = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
         page.set_default_timeout(6000)
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -48,7 +48,7 @@ def continuity_page(browser, player_assets):
                 values = [current, item(current["title"], "非凡资源", "alternate")] if "alternatives" in query else [current]
                 route.fulfill(json={"v": 1, "kind": "search", "items": values})
             elif path.endswith("/api/search"):
-                route.fulfill(status=503 if search_failure else 200, json={"v": 1, "kind": "search", "heading": "全源搜索", "items": [item("新剧", prefix="new")], "sources_total": 10, "sources_searched": 10, "failures": ["不可用源"], "suggestions": ["相关新剧"]})
+                route.fulfill(status=503 if search_failure else 200, json={"v": 1, "kind": "search", "heading": "全源搜索", "items": search_items if search_items is not None else [item("新剧", prefix="new")], "sources_total": 10, "sources_searched": 10, "failures": ["不可用源"], "suggestions": ["相关新剧"]})
             elif path.endswith("/api/recommendations"):
                 route.fulfill(json={"v": 1, "kind": "recommendations", "items": []})
             elif path.endswith(".mp4"):
@@ -64,7 +64,7 @@ def continuity_page(browser, player_assets):
                 route.fulfill(body="", content_type="application/javascript")
 
         page.route("**/*", respond)
-        page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+        page.goto(url or "https://player.example/short-drama/player?s=abcdefghijklmnop")
         page.wait_for_function("document.getElementById('searchAllSources').textContent === '搜索全部资源'")
         pages.append(page)
         return page, requests
@@ -401,3 +401,162 @@ def test_existing_history_is_visible_before_new_work_media_metadata(continuity_p
     assert page.locator("#watchHistory").is_visible()
     assert page.locator("#watchHistory").evaluate("node => node.parentElement.classList.contains('watch-stage')")
     assert page.locator(".history-row").filter(has_text="测试作品").is_visible()
+
+
+def shared_url(page):
+    page.evaluate("Object.defineProperty(navigator, 'share', {configurable:true, value: async data => {window.sharedPlayerData=data}})")
+    page.locator("#shareButton").click()
+    page.wait_for_function("!!window.sharedPlayerData")
+    return page.evaluate("window.sharedPlayerData.url")
+
+
+def test_history_share_opens_same_source_and_episode_in_new_context(continuity_page):
+    saved = item(source="非凡资源", prefix="saved")
+    page, _ = continuity_page(stored=json.dumps([{"item": saved, "episode": 1, "position": 2, "updated": 1}]))
+    page.locator(".history-row").click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    url = shared_url(page)
+    assert "resume=" not in url and "s=" not in url
+    assert "watch=1" in url
+    recipient, _ = continuity_page(url=url, search_items=[item("无关作品"), item(), saved])
+    recipient.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert recipient.locator("#title").inner_text() == "测试作品"
+    assert recipient.locator("#sourceLabel").inner_text() == "非凡"
+    assert "saved-2" in recipient.locator("#video").get_attribute("src")
+    # The recipient context has no sender's saved record before entering this exact selection.
+    assert recipient.context != page.context
+    recipient.reload()
+    recipient.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert "saved-2" in recipient.locator("#video").get_attribute("src")
+
+
+def test_search_share_ignores_catalog_result_order_and_local_history(continuity_page):
+    selected = item("新剧", "无尽资源", "selected")
+    page, _ = continuity_page(search_items=[item("其他作品"), selected])
+    page.locator("#catalogSearch").fill("新剧")
+    page.locator("#searchAllSources").click()
+    page.locator(".recommend-card").filter(has_text="新剧").click()
+    page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
+    url = shared_url(page)
+    assert "search=" not in url and "i=" not in url
+    recipient, _ = continuity_page(url=url, search_items=[selected, item("其他作品")],
+        stored=json.dumps([{"item": item("新剧", "暴风资源", "old-history"), "episode": 0, "position": 1, "updated": 1}]))
+    recipient.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert recipient.locator("#sourceLabel").inner_text() == "无尽"
+    assert recipient.locator("#meta").inner_text() == "第3集"
+    assert "selected-3" in recipient.locator("#video").get_attribute("src")
+
+
+def test_changed_source_share_opens_changed_source_and_episode(continuity_page):
+    page, _ = continuity_page()
+    open_first(page)
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.locator("#sourceButton").click()
+    page.locator("#sourceOptions button").filter(has_text="非凡").click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('alternate-2.mp4')")
+    url = shared_url(page)
+    recipient, _ = continuity_page(url=url, search_items=[item(), item(source="非凡资源", prefix="alternate")])
+    recipient.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert recipient.locator("#sourceLabel").inner_text() == "非凡"
+    assert "alternate-2" in recipient.locator("#video").get_attribute("src")
+
+
+@pytest.mark.parametrize("unavailable", ["source", "episode"])
+def test_shared_missing_source_or_episode_keeps_actionable_results(continuity_page, unavailable):
+    target = item(source="非凡资源", prefix="shared")
+    page, _ = continuity_page(stored=json.dumps([{"item": target, "episode": 2, "position": 0, "updated": 1}]))
+    page.locator(".history-row").click()
+    url = shared_url(page)
+    available = item() if unavailable == "source" else {**target, "episodes": target["episodes"][:1]}
+    recipient, _ = continuity_page(url=url, search_items=[available])
+    assert recipient.locator(".watch-stage").is_hidden()
+    assert recipient.locator(".recommend-card").is_visible()
+    assert recipient.locator("#searchAllSources").is_visible()
+    assert "暂不可用" in recipient.locator("#recommendationsSummary").inner_text()
+    assert not recipient.locator("#video").get_attribute("src")
+
+
+def test_legacy_resume_without_local_record_has_search_results(continuity_page):
+    page, _ = continuity_page(url="https://player.example/short-drama/player#resume=测试作品", search_items=[item()])
+    assert page.locator(".recommend-card").is_visible()
+    assert page.locator("#searchAllSources").is_visible()
+    assert "本设备没有这条观看记录" in page.locator("#recommendationsSummary").inner_text()
+
+
+def test_shared_entry_source_change_updates_public_locator_for_refresh(continuity_page):
+    query = {"watch": "1", "title": "测试作品", "source": "暴风资源", "year": "2005", "category": "国产剧", "episode": "第2集", "ep": "2"}
+    from urllib.parse import urlencode
+    page, _ = continuity_page(url="https://player.example/short-drama/player#" + urlencode(query),
+        search_items=[item(), item(source="非凡资源", prefix="alternate")])
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.locator("#sourceButton").click()
+    page.locator("#sourceOptions button").filter(has_text="非凡").click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('alternate-2.mp4')")
+    locator = parse_qs(urlsplit(page.url).fragment)
+    assert locator["source"] == ["非凡资源"]
+    assert locator["episode"] == ["第2集"]
+    page.reload()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert page.locator("#sourceLabel").inner_text() == "非凡"
+    assert "alternate-2" in page.locator("#video").get_attribute("src")
+
+
+def test_missing_shared_source_then_other_result_uses_selected_public_identity(continuity_page):
+    from urllib.parse import urlencode
+    query = {"watch": "1", "title": "测试作品", "source": "失效来源", "year": "2005", "category": "国产剧", "episode": "第2集", "ep": "2"}
+    selected = item("其他作品", "非凡资源", "chosen-result")
+    page, _ = continuity_page(url="https://player.example/short-drama/player#" + urlencode(query), search_items=[item(), selected])
+    page.locator(".recommend-card").filter(has_text="其他作品").click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    locator = parse_qs(urlsplit(page.url).fragment)
+    assert locator["watch"] == ["1"]
+    assert locator["title"] == ["其他作品"]
+    assert locator["source"] == ["非凡资源"]
+    assert "i" not in locator and "search" not in locator
+    # The selected title now has a different result order, without the original result index.
+    page.route("**/api/search?*", lambda route: route.fulfill(json={"v": 1, "kind": "search", "items": [selected, item()]}))
+    page.reload()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert page.locator("#title").inner_text() == "其他作品"
+    assert "chosen-result-1" in page.locator("#video").get_attribute("src")
+
+
+def test_shared_player_back_opens_search_catalog_that_survives_refresh(continuity_page):
+    from urllib.parse import urlencode
+    query = {"watch": "1", "title": "测试作品", "source": "暴风资源", "year": "2005", "category": "国产剧", "episode": "第2集", "ep": "2"}
+    page, _ = continuity_page(url="https://player.example/short-drama/player#" + urlencode(query), search_items=[item()])
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.locator("#pageBackButton").click()
+    locator = parse_qs(urlsplit(page.url).fragment)
+    assert locator == {"search": ["测试作品"]}
+    assert page.locator(".recommend-card").is_visible()
+    page.reload()
+    assert page.locator(".watch-stage").is_hidden()
+    assert page.locator(".recommend-card").is_visible()
+    assert "非法" not in page.locator("#recommendationsTitle").inner_text()
+    assert "暂时无法打开" not in page.locator("#recommendationsTitle").inner_text()
+
+
+def test_search_card_address_refresh_matches_identity_after_source_order_changes(continuity_page):
+    selected = item("新剧", "无尽资源", "search-choice")
+    other = item("新剧", "暴风资源", "other-source")
+    page, _ = continuity_page(search_items=[other, selected])
+    page.locator("#catalogSearch").fill("新剧")
+    page.locator("#searchAllSources").click()
+    page.locator(".recommend-card").filter(has_text="无尽资源").wait_for()
+    page.locator("#catalogSearch").fill("新")  # Local filter writes q into the fragment.
+    page.evaluate("() => {const url = new URL(location.href); url.hash += '&p=old-packed&r=old-list'; history.replaceState(null, '', url)}")
+    page.reload()
+    page.locator(".recommend-card").filter(has_text="无尽资源").click()
+    page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
+    locator = parse_qs(urlsplit(page.url).fragment)
+    assert locator["watch"] == ["1"]
+    assert locator["source"] == ["无尽资源"]
+    assert set(locator) == {"watch", "title", "source", "year", "category", "episode", "ep"}
+    # Clear local state, reorder sources and open the actual address in a clean context.
+    recipient, _ = continuity_page(url=page.url, search_items=[selected, other])
+    recipient.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert recipient.locator("#title").inner_text() == "新剧"
+    assert recipient.locator("#sourceLabel").inner_text() == "无尽"
+    assert recipient.locator("#meta").inner_text() == "第3集"
+    assert "search-choice-3" in recipient.locator("#video").get_attribute("src")
