@@ -135,6 +135,14 @@ class ActiveTaskSnapshot(TypedDict):
 # Trace ID 中群名的最大长度（平衡可读性和日志宽度）
 _MAX_GROUP_NAME_LEN = 10
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def strip_control_characters(value: str) -> str:
+    """清理文件名片段中的 C0/DEL；原始追踪标识继续用于数据关联。"""
+    return _CONTROL_CHARS.sub("", str(value))
+
+
 # 用于匹配报告 Caption 中去重 Token 的正则模式
 REPORT_CAPTION_PATTERN = re.compile(r"\| (\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 
@@ -599,7 +607,9 @@ class TraceContext:
         if prefix:
             parts.append(prefix)
         if group_name:
-            safe_name = re.sub(r'[\s\n\r\t/\\:*?"<>|\[\]{}]', "", str(group_name))
+            safe_name = re.sub(
+                r'[\s/\\:*?"<>|\[\]{}]', "", strip_control_characters(group_name)
+            )
             safe_name = safe_name[:_MAX_GROUP_NAME_LEN]
             if safe_name:
                 parts.append(safe_name)

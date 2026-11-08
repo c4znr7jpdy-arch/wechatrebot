@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from ...domain.value_objects.analysis_results import SummaryTopic
 from ...shared.constants import PLUGIN_NAME, AnalysisStage
-from ...shared.trace_context import TraceContext
+from ...shared.trace_context import TraceContext, strip_control_characters
 from ...utils.logger import logger
 from ..services.analysis_application_service import (
     AnalysisApplicationService,
@@ -422,7 +422,10 @@ class ComicCommandHandler:
                     logger.info(f"群 {group_id} 漫画生成成功，准备发送和保存副本...")
                     ext = self.detect_image_ext(comic_bytes)
                     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    trace_suffix = f"_{cur_trace.trace_id}" if cur_trace else ""
+                    filename_trace = (
+                        strip_control_characters(cur_trace.trace_id) if cur_trace else ""
+                    )
+                    trace_suffix = f"_{filename_trace}" if filename_trace else ""
                     filename = f"comic_{group_id}_{ts_str}{trace_suffix}{ext}"
 
                     reports_dir = (
