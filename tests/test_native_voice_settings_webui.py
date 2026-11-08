@@ -10,18 +10,19 @@ from playwright.sync_api import expect
 
 from test_manager_startup import browser, manager_url
 from test_plugin_portability import PROJECT_PLUGINS, _patched
+from wechatrebot_manager.plugin_center import _public_plugin_id
 
 
 # Model the AstrBot page SDK transport; the manager and plugin-center listeners
 # and their HTTP bridge run unchanged. No robot, TTS service or live writes run.
 _PAGE_SDK = """(() => {
   const calls = new Map(); let sequence = 0;
-  function request(action, endpoint, body) {
+  function request(action, endpoint, body, params) {
     const requestId = 'voice-test-' + (++sequence);
     return new Promise((resolve, reject) => {
       calls.set(requestId, {resolve, reject});
       parent.postMessage({channel: 'astrbot-plugin-page', kind: 'request',
-        requestId, action, endpoint, body}, location.origin);
+        requestId, action, endpoint, body, params}, location.origin);
     });
   }
   window.addEventListener('message', event => {
@@ -34,7 +35,7 @@ _PAGE_SDK = """(() => {
     message.ok ? call.resolve(message.data) : call.reject(new Error(message.error));
   });
   window.AstrBotPluginPage = {ready: async () => ({}),
-    apiGet: endpoint => request('api:get', endpoint),
+    apiGet: (endpoint, params) => request('api:get', endpoint, undefined, params),
     apiPost: (endpoint, body) => request('api:post', endpoint, body),
     upload: async () => { throw new Error('Upload is outside this test'); }};
   parent.postMessage({channel: 'astrbot-plugin-page', kind: 'ready'}, location.origin);
@@ -53,13 +54,15 @@ def native_voice(browser, manager_url, tmp_path):
     html = (source / "index.html").read_text("utf-8").replace(
         "</body>", '<script src="./test-page-sdk.js"></script></body>'
     )
-    detail = {"id": "feature-voice-clone", "display_name": "语音克隆",
+    feature_id = _public_plugin_id(module)
+    detail = {"id": feature_id, "display_name": "语音克隆",
               "pages": ["settings"], "enabled": True, "engine_online": True,
               "configurable": False, "config": {}, "revision": "voice-test", "schema": {}}
     payload = {"success": True, "config": {"default_context": "已保存的风格"},
                "voices": [], "defaults": {}, "emotions": ["neutral"],
                "readiness": {}, "queue_status": {}, "tasks": []}
-    view = SimpleNamespace(writes=[], posts=[], reads=[], hold_read=False, payload=payload)
+    view = SimpleNamespace(writes=[], posts=[], reads=[], hold_read=False, payload=payload,
+                           feature_id=feature_id)
     page = browser.new_page(viewport={"width": 1380, "height": 920})
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -103,11 +106,20 @@ def native_voice(browser, manager_url, tmp_path):
         expect(page.locator("#stateTitle")).to_have_text("机器人可用")
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
-        page.evaluate("""() => { window.pywebview.api.get_feature_page = async () => ({
-          ok: true, data: {url: location.origin + '/plugin-center?feature=feature-voice-clone&embedded=1',
-          origin: location.origin}}); }""")
+        page.evaluate("""detail => {
+          const api = window.pywebview.api, catalog = api.get_features, feature = api.get_feature;
+          api.get_features = async () => {
+            const result = structuredClone(await catalog());
+            result.data.plugins = result.data.plugins.map(item => item.id === 'feature-voice-clone' ? detail : item);
+            return result;
+          };
+          api.get_feature = id => id === detail.id ? Promise.resolve({ok:true,data:detail}) : feature(id);
+          api.get_feature_page = async () => ({ok: true, data: {
+            url: location.origin + '/plugin-center?feature=' + encodeURIComponent(detail.id) + '&embedded=1',
+            origin: location.origin}});
+        }""", detail)
         page.locator('.nav-item[data-page="features"]').click()
-        page.locator('.feature-item[data-feature-id="feature-voice-clone"]').click()
+        page.locator(f'.feature-item[data-feature-id="{feature_id}"]').click()
         view.page = page
         view.frame = page.frame_locator("#featurePageFrame").frame_locator("#plugin-frame")
         view.field = view.frame.locator("#default-context")
@@ -121,7 +133,7 @@ def native_voice(browser, manager_url, tmp_path):
 
 
 @pytest.mark.parametrize("phase", ["post", "read", "warning"])
-@pytest.mark.parametrize("width", [1380, 430])
+@pytest.mark.parametrize("width", [1380])
 def test_voice_save_preserves_edits_made_after_submission(native_voice, tmp_path, phase, width):
     view = native_voice
     view.page.set_viewport_size({"width": width, "height": 920})

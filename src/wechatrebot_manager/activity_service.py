@@ -27,6 +27,9 @@ _MODEL_FAILURE = re.compile(
     r"error_type=([A-Za-z_][A-Za-z_0-9]*) status_code=(\d{3}|none)\s*$"
 )
 _PRIVATE_FIELDS = re.compile(r"(?i)^(?:content|prompt|messages|chat_text|request_body|response_body)$")
+_SERVICE_EXIT_CONTEXT_SECONDS = 5
+_CONTEXT_RECORD_LIMIT = 3
+_CONTEXT_TEXT_LIMIT = 6000
 _EVENT_NAMES = {
     "APP_START": "软件已打开", "CHECK_WECHAT": "正在检查微信环境",
     "WECHAT_READY": "微信环境检查通过", "CORE_START": "开始启动机器人功能",
@@ -169,7 +172,7 @@ class ActivityService:
                 current.append((item, raw))
             for index, (item, raw) in enumerate(current):
                 if item["level"] != "info" and source.key not in {"manager", "update"}:
-                    item["context"] = diagnostic_text("\n".join(raw for _, raw in current[max(0, index - 1):index + 2]), self.root, limit=6000)
+                    item["context"] = diagnostic_text("\n".join(raw for _, raw in current[max(0, index - 1):index + 2]), self.root, limit=_CONTEXT_TEXT_LIMIT)
                 item["truncated"] = truncated
                 items.append(item)
         items.sort(key=lambda item: item["timestamp"] if item["timestamp"] is not None else float("-inf"), reverse=True)
@@ -191,9 +194,38 @@ class ActivityService:
         retained = [item for item in result if item["level"] != "info"][:300]
         retained += [item for item in result if item["level"] == "info"][:100]
         retained.sort(key=lambda item: item["timestamp"] if item["timestamp"] is not None else float("-inf"), reverse=True)
+        self._attach_service_exit_context(retained, items)
         for item in retained:
             item["report"] = self.report(item)
         return retained
+
+    def _attach_service_exit_context(self, retained: list[dict], items: list[dict]) -> None:
+        # All candidates came from this installation's bounded, single read.
+        # Never use file mtime to associate an undated record with a crash.
+        candidates = [item for item in items if item["source"] not in {"manager", "update"}
+                      and item["level"] in {"warning", "error"} and item["timestamp"] is not None]
+        for item in retained:
+            if (item["source"] != "manager" or item["event"] != "APP_ERROR"
+                    or item["code"] not in {"13002", "13004"} or item["timestamp"] is None):
+                continue
+            nearby = sorted(
+                (candidate for candidate in candidates
+                 if abs(candidate["timestamp"] - item["timestamp"]) <= _SERVICE_EXIT_CONTEXT_SECONDS),
+                key=lambda candidate: abs(candidate["timestamp"] - item["timestamp"]),
+            )
+            seen: set[tuple[float, str]] = set()
+            lines = [f"以下异常与服务退出时间相邻（前后 {_SERVICE_EXIT_CONTEXT_SECONDS} 秒），仅供排查，不代表因果关系："]
+            for candidate in nearby:
+                # The bridge service output and its own file can mirror a record.
+                identity = (candidate["timestamp"], candidate["detail"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                lines.append(f"[{candidate['time']}] {candidate['source_name']}：\n{candidate['detail']}")
+                if len(seen) >= _CONTEXT_RECORD_LIMIT:
+                    break
+            if seen:
+                item["context"] = diagnostic_text("\n\n".join(lines), self.root, limit=_CONTEXT_TEXT_LIMIT)
 
     def _read_failure(self, source: LogSource, exc: OSError) -> dict:
         item = self._item(LogSource(source.key, source.display_name, source.path), "ERROR 日志读取失败")

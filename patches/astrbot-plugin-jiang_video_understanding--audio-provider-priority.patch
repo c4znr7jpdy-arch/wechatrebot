@@ -1,0 +1,36 @@
+--- a/main.py
++++ b/main.py
+@@ -621,12 +621,20 @@
+ 
+     def _find_audio_chat_provider(self) -> str:
+         configured = str(self.config.get("audio_provider_id") or "").strip()
+-        if configured:
+-            return configured
+         for provider in self.context.get_all_providers():
++            if configured and provider.meta().id != configured:
++                continue
+             modalities = provider.provider_config.get("modalities") or []
+             if "audio" in modalities:
+                 return provider.meta().id
++            if configured:
++                raise VideoProcessingError(
++                    "指定的音频理解模型未声明音频能力，请选择支持音频的聊天模型"
++                )
++        if configured:
++            raise VideoProcessingError(
++                "指定的音频理解聊天模型不可用，请检查模型是否存在并已启用"
++            )
+         return ""
+ 
+     async def _transcribe_audio(
+@@ -634,7 +642,9 @@
+         event: AstrMessageEvent,
+         audio_path: Path,
+     ) -> str:
+-        stt_provider = self.context.get_using_stt_provider(event.unified_msg_origin)
++        stt_provider = None
++        if not str(self.config.get("audio_provider_id") or "").strip():
++            stt_provider = self.context.get_using_stt_provider(event.unified_msg_origin)
+         if stt_provider:
+             try:
+                 return (

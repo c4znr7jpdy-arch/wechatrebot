@@ -17,6 +17,8 @@
     featureReferenceOpen: {},
     featureDirty: false,
     featureSaving: false,
+    featurePageDirty: false,
+    featurePageBusy: false,
     featureLoad: 0,
     featurePrefetch: 0,
     featuresLoad: 0,
@@ -697,9 +699,9 @@
 
   async function navigate(page) {
     if (state.restorePending && page !== "settings") { toast("备份已恢复，请先重新读取恢复结果。", "error"); return; }
-    if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
+    if (!PAGE_TITLES[page] || state.featureSaving || state.featurePageBusy || state.scheduledBusy || coreSettings.busy) return;
     if (page !== state.activePage && coreSettings.guard(() => navigate(page))) return;
-    if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
+    if (page !== state.activePage && (state.featureDirty || state.featurePageDirty)) { discardFeatureChanges(() => navigate(page)); return; }
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
     const leavingGroupManagement = state.activePage === "groups" && page !== "groups";
@@ -838,9 +840,9 @@
 
   function managerCloseState({ignoreModalBusy = false} = {}) {
     return {
-      dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
+      dirty: Boolean(state.featureDirty || state.featurePageDirty || state.providerDirty || state.webSearchDirty
         || state.scheduledDirty || coreSettings.dirty || hasChatDrafts()),
-      busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
+      busy: Boolean(state.featureSaving || state.featurePageBusy || state.webSearchSaving || state.scheduledBusy
         || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
         || state.stopRequestPending || state.status?.busy || state.restoreRefreshing

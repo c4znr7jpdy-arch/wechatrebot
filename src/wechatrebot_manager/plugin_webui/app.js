@@ -8,6 +8,10 @@ const state = {
   revision: "",
   dirty: false,
   busy: false,
+  pageDirty: false,
+  pageBusy: false,
+  pageName: "",
+  editorRevision: 0,
   activeTab: "basic",
   pendingAction: null,
 };
@@ -96,6 +100,34 @@ async function api(path, options = {}) {
 }
 
 const pluginPageChannel = "astrbot-plugin-page";
+let editorSession = "";
+// The manager document handshake is independent of the native page session.
+let parentEditorSession = "";
+
+function publishEditorState() {
+  if (window.parent === window || !state.currentId || state.detail?.id !== state.currentId
+    || !state.detail.pages?.length || !parentEditorSession) return;
+  window.parent.postMessage({channel: pluginPageChannel, kind: "editor-state",
+    session: parentEditorSession, featureId: state.currentId,
+    dirty: state.pageDirty, busy: state.pageBusy}, window.location.origin);
+}
+
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin
+    || message?.channel !== pluginPageChannel || message.kind !== "editor-context"
+    || typeof message.session !== "string" || !message.session || message.session.length > 80) return;
+  parentEditorSession = message.session;
+  publishEditorState();
+});
+
+function resetPageEditor() {
+  editorSession = "";
+  state.pageDirty = false;
+  state.pageBusy = false;
+  state.pageName = "";
+  publishEditorState();
+}
 
 function encodePluginEndpoint(value) {
   if (typeof value !== "string") throw new Error("高级配置页请求无效。");
@@ -174,6 +206,16 @@ window.addEventListener("message", async (event) => {
   ) return;
   if (message.kind === "ready") {
     window.sendFeaturePageContext(frame);
+    return;
+  }
+  if (message.kind === "editor-state") {
+    if (!state.currentId || state.detail?.id !== state.currentId || !state.detail.pages?.includes(state.pageName)
+      || !editorSession || message.session !== editorSession
+      || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
+    state.pageDirty = message.dirty;
+    state.pageBusy = message.busy;
+    state.editorRevision += 1;
+    publishEditorState();
     return;
   }
   if (message.kind !== "request" || typeof message.requestId !== "string") return;
@@ -864,6 +906,7 @@ function renderPages() {
   frame.hidden = true;
   frame.onload = null;
   frame.removeAttribute("src");
+  resetPageEditor();
   el("page-placeholder").hidden = false;
 
   pages.forEach((pageName) => {
@@ -878,7 +921,7 @@ function renderPages() {
 }
 
 async function selectPlugin(moduleName, openFirstPage = false) {
-  if (state.busy) return;
+  if (state.busy || state.pageBusy) return;
   state.currentId = moduleName;
   renderCatalog();
   detailView.hidden = true;
@@ -909,7 +952,8 @@ async function selectPlugin(moduleName, openFirstPage = false) {
 
 function requestSelection(moduleName) {
   if (moduleName === state.currentId) return;
-  if (!state.dirty) {
+  if (state.pageBusy) { setNotice("专属配置页正在处理操作，请完成后再离开。", "error"); return; }
+  if (!state.dirty && !state.pageDirty) {
     selectPlugin(moduleName);
     return;
   }
@@ -970,7 +1014,8 @@ async function saveConfig(event) {
 }
 
 async function reloadPlugin() {
-  if (state.busy || !state.detail) return;
+  if (state.busy || state.pageBusy || !state.detail) return;
+  if (state.pageDirty) { setNotice("专属配置页有未保存的修改，请先保存后再重新载入功能。", "error"); return; }
   const button = el("reload-plugin");
   setBusy(true, button, "正在重载…");
   setNotice("");
@@ -986,7 +1031,10 @@ async function reloadPlugin() {
   }
 }
 
-async function openPluginPage(pageName, button) {
+async function openPluginPage(pageName, button, discarded = false) {
+  if (state.busy || state.pageBusy) { setNotice("专属配置页正在处理操作，请完成后再打开。", "error"); return; }
+  if (state.pageName === pageName && el("plugin-frame").getAttribute("src")) return;
+  if (state.pageDirty && !discarded) { showDiscardModal(() => openPluginPage(pageName, button, true)); return; }
   if (!state.detail.engine_online) {
     setNotice("高级页面需要回复引擎在线，请先在运行中心启动机器人。", "error");
     return;
@@ -996,17 +1044,27 @@ async function openPluginPage(pageName, button) {
   button.disabled = true;
   const originalText = button.textContent;
   button.textContent = "正在打开…";
+  const editorRevision = state.editorRevision;
   try {
     const data = await api(`/control/plugins/${encodeURIComponent(state.currentId)}/pages/${encodeURIComponent(pageName)}/entry`);
+    if (state.pageBusy) { setNotice("专属配置页正在处理操作，请完成后再打开。", "error"); return; }
+    if (state.pageDirty && (!discarded || editorRevision !== state.editorRevision)) {
+      showDiscardModal(() => openPluginPage(pageName, button, true));
+      return;
+    }
     const frame = el("plugin-frame");
+    resetPageEditor();
+    state.pageName = pageName;
     frame.hidden = true;
     el("page-placeholder").hidden = false;
-    frame.onload = () => window.syncFeaturePageTheme(
-      frame, document.documentElement.dataset.theme, () => {
+    frame.onload = () => {
+      editorSession = crypto.randomUUID();
+      frame.contentWindow.postMessage({channel: pluginPageChannel, kind: "editor-context", session: editorSession}, window.location.origin);
+      window.syncFeaturePageTheme(frame, document.documentElement.dataset.theme, () => {
         frame.hidden = false;
         el("page-placeholder").hidden = true;
-      },
-    );
+      });
+    };
     frame.src = data.content_path;
     setNotice("");
   } catch (error) {
@@ -1114,7 +1172,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !el("modal-backdrop").hidden) closeDiscardModal();
 });
 window.addEventListener("beforeunload", (event) => {
-  if (state.dirty) event.preventDefault();
+  if (state.dirty || state.busy || state.pageDirty || state.pageBusy) { event.preventDefault(); event.returnValue = ""; }
 });
 window.addEventListener("focus", () => { refreshCurrentPluginState(); });
 
