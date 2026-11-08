@@ -151,7 +151,7 @@ class WindowsTrayController:
                 if not self._exit_check_current(generation):
                     return
                 message = (
-                    "仍有未保存的设置，或保存尚未完成。确认退出会丢失未保存修改，并可能中断保存。取消可返回管理器继续编辑。"
+                    "仍有未保存的设置，或保存、更新等任务尚未完成。确认退出会丢失未保存修改，并可能中断任务。取消可返回管理器继续处理。"
                     if needs_confirmation is True else
                     "暂时无法确认设置是否已保存。确认退出可能丢失未保存修改，取消可返回管理器检查。"
                 )

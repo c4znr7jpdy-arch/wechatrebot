@@ -987,13 +987,13 @@ def create_update_plan(
     return UpdatePlan(plan_path, helper)
 
 
-def launch_update_helper(plan: UpdatePlan) -> None:
+def launch_update_helper(plan: UpdatePlan) -> subprocess.Popen:
     environment = os.environ.copy()
     environment["WECHATREBOT_UPDATE_HELPER"] = "1"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "DETACHED_PROCESS", 0
     )
-    subprocess.Popen(
+    return subprocess.Popen(
         [str(plan.helper_executable), "apply-update", "--plan", str(plan.plan_path)],
         cwd=plan.plan_path.parent,
         env=environment,

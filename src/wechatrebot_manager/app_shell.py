@@ -245,6 +245,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._prepared_update = None
         self._update_confirmation_token = ""
         self._update_installing = False
+        self._update_helper = None
+        self._update_close_pending = False
         self._mandatory_update = False
         self._update_result = None
         if not development:
@@ -382,11 +384,14 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             return self._failed(exc, "13003")
 
     def _close_window_for_update(self) -> None:
-        self._close_feature_page_server()
-        if self._tray is not None:
-            self._tray.permit_programmatic_close()
-        if self._window is not None:
-            self._window.destroy()
+        try:
+            if self._tray is not None:
+                self._tray.permit_programmatic_close()
+            if self._window is not None:
+                self._window.destroy()
+            self._close_feature_page_server()
+        except Exception as exc:
+            self._report_update_close_failure(exc)
 
     @staticmethod
     def _ok(data: Any = None, *, message: str = "") -> dict[str, object]:
