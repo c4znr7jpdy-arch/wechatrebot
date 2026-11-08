@@ -842,7 +842,7 @@ window.createChatManagement = function (helpers) {
     panel.innerHTML = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("contact-avatar large", displayName, detail.avatar)}<div><h2>${escapeHtml(displayName)}</h2><code class="inspector-id">${escapeHtml(detail.alias || detail.user_id)}</code></div></div><div class="contact-inspector-actions"><button class="row-action" type="button" data-contact-profile="${escapeHtml(contact.user_id)}">查询好友资料</button><button class="row-action chat-scheduled-entry" type="button">该联系人的定时任务</button></div></header>
       <div class="inspector-detail-actions"><button class="row-action" id="refreshPrivatePolicy" type="button" ${state.privatePolicies[contact.user_id]?.loading || saving ? "disabled" : ""}>重新读取规则</button></div>
       <div class="inspector-scroll contact-detail-scroll"><details class="contact-profile"><summary>个人详情</summary><div class="contact-section-heading"><button class="row-action copy-contact" type="button">复制微信标识</button></div>${detailsMessage}</details>${privatePolicyMarkup(policyData)}</div>
-      <footer class="inspector-footer"><span id="privatePolicyNote">${privateDrafts[contact.user_id] ? "有未保存修改，切换联系人会保留。" : "在线保存会立即应用到此私聊。"}</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""} ${saving ? 'aria-busy="true"' : ""}>${saving ? "正在保存…" : "保存私聊规则"}</button></footer>`;
+      <footer class="inspector-footer"><span id="privatePolicyNote">${privateDrafts[contact.user_id] ? "有未保存修改，切换联系人会保留。" : policyData?.policy?.saved ? "私聊规则已保存。" : "在线保存会立即应用到此私聊。"}</span><button class="button primary" type="submit" form="privatePolicyForm" ${saveDisabled ? "disabled" : ""} ${saving ? 'aria-busy="true"' : ""}>${saving ? "正在保存…" : "保存私聊规则"}</button></footer>`;
     $(".copy-contact", panel)?.addEventListener("click", () => copyText(contact.user_id, "微信标识"));
     const accountId = state.contactAccount;
     $("[data-contact-profile]", panel)?.addEventListener("click", () => openContactProfile({accountId, contactId: contact.user_id, name: displayName}));
@@ -880,6 +880,7 @@ window.createChatManagement = function (helpers) {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     button.textContent = "正在保存…";
+    $("#refreshPrivatePolicy").disabled = true;
     try {
       const saved = await api("save_private_policy",
         accountId,
@@ -888,10 +889,15 @@ window.createChatManagement = function (helpers) {
         form.dataset.revision || "",
       );
       if (state.contactAccount !== accountId || state.privatePolicies !== policies) return;
-      policies[contactId] = {...policies[contactId], policy: saved};
+      if (!saved?.saved || saved.account_id !== accountId || saved.contact_id !== contactId || !saved.revision) {
+        throw new Error("未收到此私聊规则的保存确认，请重新读取规则后核对。");
+      }
+      const previous = policies[contactId] || {};
+      policies[contactId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
+        ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
+      }))};
       if (privateDrafts[contactId] === draft) delete privateDrafts[contactId];
       else if (privateDrafts[contactId]) privateDrafts[contactId].policy.revision = saved.revision || "";
-      if (!await loadPrivatePolicy(contactId, true)) toast("私聊规则已保存，但暂时无法重新读取，可点击“重新读取规则”核对。", "warning");
     } catch (error) { reportError(error); }
     finally {
       saves.delete(contactId);

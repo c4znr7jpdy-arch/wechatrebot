@@ -39,7 +39,7 @@ def open_private_rules(page, manager_url, *, deferred_detail=False):
         if (window.deferPrivateSave) await new Promise(resolve => {window.finishPrivateSave = resolve;});
         if (window.rejectPrivateSave) throw new Error('模拟保存失败');
         const policy = {...structuredClone(values), account_id:account, contact_id:id,
-          configured:true, revision:`private-saved-${window.privateWrites.length}`};
+          saved:true, configured:true, revision:`private-saved-${window.privateWrites.length}`};
         window.privateSaved.set([account,id].join('/'), policy);
         return {ok:true, data:policy};
       };
@@ -111,6 +111,7 @@ def test_private_rule_save_keeps_newer_draft_and_advances_revision(browser, mana
         page.evaluate("window.deferPrivateSave = true")
         page.locator('button[form="privatePolicyForm"]').click()
         page.wait_for_function("() => typeof window.finishPrivateSave === 'function'")
+        expect(page.locator("#refreshPrivatePolicy")).to_be_disabled()
         edit_limit(page, "19")
         select_contact(page, "private_b")
         select_contact(page, "private_a")
@@ -146,6 +147,56 @@ def test_private_save_failure_keeps_draft(browser, manager_url):
         expect(page.locator('#privatePolicyForm [name="daily_limit"]')).to_have_value("17")
         expect(page.locator("#privatePolicyNote")).to_contain_text("未保存")
         assert len(page.evaluate("window.privateWrites")) == 1
+    finally:
+        page.close()
+
+
+def test_private_save_receipt_survives_unavailable_followup_read(browser, manager_url):
+    page = browser.new_page()
+    try:
+        open_private_rules(page, manager_url)
+        edit_limit(page, "17")
+        page.evaluate("""() => {
+          window.pywebview.api.get_private_policy = async () => {
+            window.privateReads++; throw new Error('模拟规则读取中断');
+          };
+        }""")
+        page.locator('button[form="privatePolicyForm"]').click()
+        expect(page.locator("#privatePolicyNote")).to_have_text("私聊规则已保存。")
+        expect(page.locator('#privatePolicyForm [name="daily_limit"]')).to_have_value("17")
+        expect(page.locator("#privatePolicyForm")).to_have_attribute("data-revision", "private-saved-1")
+        expect(page.locator('button[form="privatePolicyForm"]')).to_be_enabled()
+        expect(page.locator("#refreshPrivatePolicy")).to_be_enabled()
+        assert page.evaluate("window.privateReads") == 1
+        page.locator('.contact-row[data-contact-id="private_b"]').click()
+        expect(page.locator("#privatePolicyForm")).to_have_count(0)
+        page.locator('.contact-row[data-contact-id="private_a"]').click()
+        expect(page.locator('#privatePolicyForm [name="daily_limit"]')).to_have_value("17")
+        expect(page.locator("#privatePolicyNote")).to_have_text("私聊规则已保存。")
+        assert len(page.evaluate("window.privateWrites")) == 1
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("invalid", ["saved", "account_id", "contact_id", "revision"])
+def test_private_save_requires_matching_receipt(browser, manager_url, invalid):
+    page = browser.new_page()
+    try:
+        open_private_rules(page, manager_url)
+        edit_limit(page, "17")
+        page.evaluate("""invalid => {
+          const save = window.pywebview.api.save_private_policy;
+          window.pywebview.api.save_private_policy = async (...args) => {
+            const result = await save(...args);
+            result.data[invalid] = invalid === 'saved' ? false : '';
+            return result;
+          };
+        }""", invalid)
+        page.locator('button[form="privatePolicyForm"]').click()
+        expect(page.locator("#privatePolicyNote")).to_contain_text("未保存")
+        expect(page.locator('#privatePolicyForm [name="daily_limit"]')).to_have_value("17")
+        expect(page.locator('button[form="privatePolicyForm"]')).to_be_enabled()
+        assert page.evaluate("window.privateReads") == 1
     finally:
         page.close()
 
