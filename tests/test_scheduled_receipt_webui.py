@@ -6,8 +6,9 @@ from test_manager_startup import browser, manager_url  # noqa: F401
 from test_scheduled_analysis_ui import open_schedules
 
 
-def test_saved_task_remains_visible_when_context_readback_fails(browser, manager_url, tmp_path):
-    page = browser.new_page(viewport={'width': 1380, 'height': 920})
+@pytest.mark.parametrize('width', [1380, 430])
+def test_saved_task_remains_visible_when_context_readback_fails(browser, manager_url, tmp_path, width):
+    page = browser.new_page(viewport={'width': width, 'height': 920})
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
     try:
@@ -46,6 +47,7 @@ def test_saved_task_remains_visible_when_context_readback_fails(browser, manager
         expect(page.locator('#scheduledTaskRows')).to_contain_text('已经确认保存的任务')
         assert page.evaluate("window.taskCalls.filter(call => call.name === 'save_scheduled_task').length") == 1
         assert page.url == manager_url and page.title()
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         assert not errors, errors
     finally:
         page.close()
