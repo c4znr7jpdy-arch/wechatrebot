@@ -16,6 +16,7 @@ window.createManagerSettings = function (helpers) {
     loadFeatures,
     navigate,
     openFeature,
+    openModelSettings,
     renderProviderServices,
     reportError,
     safeImageUrl,
@@ -331,7 +332,7 @@ window.createManagerSettings = function (helpers) {
       state.bootstrap.experience.onboarding_complete = true;
       $("#onboardingBackdrop").hidden = true;
       $(".app-shell").inert = false;
-      if (goToSettings) await navigate("settings");
+      if (goToSettings) await openModelSettings();
       else $("#primaryAction").focus();
     } catch (error) { reportError(error); }
   }
