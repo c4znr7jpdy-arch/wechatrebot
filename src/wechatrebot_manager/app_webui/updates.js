@@ -69,32 +69,6 @@ window.createUpdateNotifications = function (helpers) {
     $("#checkUpdate").textContent = closing ? "继续更新" : failed ? "重试更新" : ready ? "安装更新" : "查看更新";
   }
 
-  async function waitForUpdate(release, targetState) {
-    $("#modalProgress").hidden = false;
-    while (true) {
-      const progress = await api("get_update_status");
-      if (progress.release_id !== release.release_id) {
-        throw new Error("更新包已变更，请取消并重新检查更新。 ");
-      }
-      const percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
-      const bar = $("#modalProgressBar");
-      const indeterminate = ["stopping_services", "waiting_wechat", "launching"].includes(progress.phase);
-      bar.classList.toggle("is-indeterminate", indeterminate);
-      bar.style.width = indeterminate ? "36%" : `${Math.min(100, Math.max(0, percent))}%`;
-      const percentPhases = ["download", "extract", "verify", "prepare", "install"];
-      const phaseSuffix = percentPhases.includes(progress.phase) ? ` · ${percent}%` : "";
-      $("#modalMessage").textContent = `${progress.message || "正在准备更新"}${phaseSuffix}。请保持管理器打开。`;
-      if (progress.state === "failed" || progress.close_pending) {
-        const error = new Error(progress.error?.message || progress.message || "更新未能完成。 ");
-        error.product = progress.error || null;
-        throw error;
-      }
-      if (progress.state === targetState) return progress;
-      if (progress.state === "idle") throw new Error("更新任务已停止，请重试。 ");
-      await new Promise((resolve) => window.setTimeout(resolve, 400));
-    }
-  }
-
   function queueUpdatePrompt(release, ready = null) {
     pendingPrompt = {release, ready};
     window.clearTimeout(promptTimer);
@@ -174,8 +148,14 @@ window.createUpdateNotifications = function (helpers) {
         if (pending.dirty) throw new Error("有设置尚未保存。请选择“稍后安装”，保存或处理修改后再安装；更新包会保留，无需重新下载。");
         const accepted = await api("install_update", release.version, ready.confirmation_token);
         if (!accepted?.accepted) throw new Error("机器人或更新操作尚未完成，请稍后再次确认安装；更新包会保留。");
-        state.updateInstalling = true;
-        await waitForUpdate(release, "restarting");
+        // Consent is consumed once accepted; progress reads must never retry it.
+        statusRevision += 1;
+        latestStatus = {...ready, state: closing ? "restarting" : "running",
+          phase: closing ? "restarting" : "prepare", confirmation_token: "", close_pending: false,
+          error: null, message: closing ? "正在再次关闭管理器以继续更新。请保持管理器打开。"
+            : "安装请求已接受，正在确认更新进度。请保持管理器打开。"};
+        renderUpdateCard(release, latestStatus);
+        void pollUpdateStatus();
       },
     });
   }
