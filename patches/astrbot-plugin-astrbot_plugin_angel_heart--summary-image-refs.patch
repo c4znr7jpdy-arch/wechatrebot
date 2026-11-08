@@ -1,7 +1,13 @@
 diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
 --- a/core/conversation_ledger.py
 +++ b/core/conversation_ledger.py
-@@ -303,26 +303,46 @@
+@@ -298,31 +298,54 @@
+         lines = []
+         if old_summary:
+             lines.append(old_summary.strip())
++        seen_image_refs = set()
+         for msg in discarded:
+             if not keep_tools and self._is_tool_message(msg):
                  continue
              if msg.get("kind") in ("context_summary", "summary_context", "context_compaction"):
                  text = self._extract_message_text(msg)
@@ -24,7 +30,9 @@ diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
 +                    text = text[:120] + "…"
 +                lines.append(f"{name}: {text}")
 +            for ref in self._summary_image_refs([msg]):
-+                lines.append(f"[图片] {ref}")
++                if ref not in old_summary and ref not in seen_image_refs:
++                    lines.append(f"[图片] {ref}")
++                    seen_image_refs.add(ref)
          summary = "\n".join(lines).strip()
          # 限制摘要总长，避免无限膨胀
          if len(summary) > 4000:
@@ -57,7 +65,7 @@ diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
              "role": "system",
              "content": f"[当前摘要]\n{summary}",
              "sender_id": "system",
-@@ -330,6 +350,9 @@
+@@ -330,6 +353,9 @@
              "kind": "context_summary",
              "timestamp": max(0.0, float(timestamp) - 0.001),
          }
@@ -67,7 +75,7 @@ diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
  
      def add_message(self, chat_id: str, message: Dict, should_prune: bool = False):
          """
-@@ -442,7 +465,11 @@
+@@ -442,7 +468,11 @@
          ):
              return messages
          ts = messages[0].get("timestamp", time.time()) if messages else time.time()
@@ -80,7 +88,7 @@ diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
  
      def organize_context(
          self,
-@@ -699,7 +726,11 @@
+@@ -699,7 +729,11 @@
              ]
              if summary:
                  ts = retained[0].get("timestamp", time.time()) if retained else time.time()
@@ -93,7 +101,7 @@ diff --git a/core/conversation_ledger.py b/core/conversation_ledger.py
              original = len(messages)
              ledger["messages"] = retained
              self._last_compression_time[chat_id] = time.time()
-@@ -760,7 +791,11 @@
+@@ -760,7 +794,11 @@
  
              ts = retained[0].get("timestamp", time.time()) if retained else time.time()
              ledger["current_summary"] = summary_text

@@ -47,9 +47,12 @@ def ledger(tmp_path):
     return result
 
 
-def _image(ledger):
+def _image(ledger, *, alternate=False):
     buffer = io.BytesIO()
-    Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
+    image = Image.new("RGB", (8, 8), "red")
+    if alternate:
+        image.paste("white", (0, 0, 4, 8))
+    image.save(buffer, format="PNG")
     dhash = ledger.image_cache.put(CHAT, buffer.getvalue())
     path = Path(ledger.image_cache.get_cached_path(CHAT, dhash))
     assert path.is_file()
@@ -105,6 +108,35 @@ def test_repeated_compaction_keeps_one_reference_without_repeating_summary(ledge
         assert summary.count("看这张图") == 1
         assert len(summary) < 600
         _messages(ledger).append(_text(boundary + 1))
+
+
+def test_resending_same_image_does_not_accumulate_duplicate_paths(ledger):
+    path, image = _image(ledger)
+    _messages(ledger).append(image)
+    for boundary in range(2, 11, 2):
+        _messages(ledger).append(_text(boundary))
+        assert ledger.organize_on_group_enter(CHAT, keep_from_timestamp=boundary)
+        _assert_retained_image(ledger, path)
+        assert _messages(ledger)[0]["content"].count(str(path)) == 1
+        _, repeated = _image(ledger)
+        repeated["timestamp"] = boundary + 1
+        _messages(ledger).append(repeated)
+
+
+def test_different_images_keep_distinct_readable_references(ledger):
+    first_path, first = _image(ledger)
+    second_path, second = _image(ledger, alternate=True)
+    assert first_path != second_path
+    second["timestamp"] = 2
+    _messages(ledger).extend([first, second, _text(3)])
+    assert ledger.organize_on_group_enter(CHAT, keep_from_timestamp=3)
+    summary = _messages(ledger)[0]
+    assert set(summary["image_refs"]) == {str(first_path), str(second_path)}
+    ledger._cleanup_unreferenced_media_cache(CHAT)
+    for path in (first_path, second_path):
+        assert summary["content"].count(str(path)) == 1
+        with Image.open(path) as image:
+            assert image.size == (8, 8)
 
 
 @pytest.mark.parametrize("mode", ["private_llm", "private_fallback"])
