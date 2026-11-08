@@ -1,0 +1,32 @@
+diff --git a/core/chat_flow.py b/core/chat_flow.py
+--- a/core/chat_flow.py
++++ b/core/chat_flow.py
+@@ -275,7 +275,14 @@
+                 return
+ 
+             # 发送消息与收尾
+-            await self._send_proactive_message(session_id, response_text)
++            if not await self._send_proactive_message(session_id, response_text):
++                logger.info("主动消息未提交，保留未回复次数和对话历史。")
++                parsed = self._parse_session_id(session_id)
++                current_config = self._get_session_config(session_id)
++                if (parsed and ("Friend" in parsed[1] or "Private" in parsed[1])
++                        and current_config and current_config.get("enable", False)):
++                    await self._schedule_next_chat_and_save(session_id)
++                return
+ 
+             await self._finalize_and_reschedule(
+                 session_id,
+diff --git a/core/message_events.py b/core/message_events.py
+--- a/core/message_events.py
++++ b/core/message_events.py
+@@ -613,7 +613,8 @@
+                 )
+                 return
+ 
+-            await self._send_proactive_message(llm_request["session_id"], response_text)
++            if not await self._send_proactive_message(llm_request["session_id"], response_text):
++                return
+             await self._archive_live_interject_pair(
+                 llm_request["conv_id"],
+                 final_user_prompt,
