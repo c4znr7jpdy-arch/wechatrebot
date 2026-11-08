@@ -1,0 +1,201 @@
+diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
+--- a/pages/dashboard/app.js
++++ b/pages/dashboard/app.js
+@@ -68,6 +68,11 @@
+     contentType: "dialogues",
+     settingsGroup: null,
+     dirtySettings: new Map(),
++    settingsEditVersions: new Map(),
++    settingsEditVersion: 0,
++    settingsSaving: false,
++    settingsReadFailed: false,
++    settingsLoad: 0,
+     graph: {
+       nodes: [],
+       links: [],
+@@ -574,19 +579,20 @@
+       if (page === "graphs") return loadGraphs(force);
+       if (page === "reply-strategy") return renderConversationCore(await cached("conversationCore", () => apiGet("conversation-core"), force));
+       if (page === "integrations") return renderIntegrations(await cached("integrations", () => apiGet("integrations"), force));
+-      if (page === "settings") return renderSettings(await cached("settings", () => apiGet("settings", { schema: "true" }), force));
++      if (page === "settings" && !state.settingsSaving) return await refreshSettings(force);
+     } catch (error) {
+       showToast(error.message || String(error), "error");
+     }
+   }
+ 
+-  async function cached(key, loader, force) {
++  async function cached(key, loader, force, isCurrent = () => true) {
+     if (!force && state.pageData[key]) {
+       setPageReady(state.pageData[key]);
+       return state.pageData[key];
+     }
+     setBusy(t("status.loading", "加载中"));
+     const data = await loader();
++    if (!isCurrent()) return data;
+     state.pageData[key] = data;
+     if (key.startsWith("reviews:")) state.pageData.reviews = data;
+     if (key.startsWith("style:")) state.pageData.style = data;
+@@ -1457,7 +1463,9 @@
+ 
+   function renderSettings(data) {
+     const schema = data.schema || {};
+-    setHtml("settings-warnings", warningListHtml(schema.warnings || data.warnings || []));
++    const warnings = [...(schema.warnings || data.warnings || [])];
++    if (state.settingsReadFailed) warnings.push("最新设置读取失败；当前内容仅供查看，请点击刷新后继续修改。");
++    setHtml("settings-warnings", warningListHtml(warnings));
+     const groups = schema.groups || [];
+     if (!state.settingsGroup && groups.length) state.settingsGroup = groups[0].key;
+     setHtml("settings-groups", groups.map((group) => `
+@@ -1470,11 +1478,12 @@
+     const active = groups.find((group) => group.key === state.settingsGroup) || groups[0] || { fields: [] };
+     setHtml("config-form", (active.fields || []).map(fieldHtml).join("") || empty(t("empty.selectConfigGroup", "请选择配置分组")));
+     renderPipMirrors(data.pip_mirrors || {});
++    syncSettingsSaveButton();
+   }
+ 
+   function fieldHtml(field) {
+     const value = state.dirtySettings.has(field.key) ? state.dirtySettings.get(field.key) : field.value;
+-    const common = `data-config-field="${escapeAttr(field.key)}" data-config-type="${escapeAttr(field.type)}" ${field.editable ? "" : "disabled"}`;
++    const common = `data-config-field="${escapeAttr(field.key)}" data-config-type="${escapeAttr(field.type)}" ${field.editable && !state.settingsReadFailed ? "" : "disabled"}`;
+     const groupKey = field.group_key || activeSettingsGroupKeyForField(field.key);
+     const label = configT(`${groupKey}.${field.key}.description`, field.label || field.key);
+     const hint = configT(`${groupKey}.${field.key}.hint`, field.hint || "");
+@@ -1741,26 +1750,96 @@
+     await loadPageData("content", { force: true });
+   }
+ 
++  function configFieldValue(field) {
++    if (field.type === "checkbox") return field.checked;
++    const type = field.dataset.configType;
++    if (type === "int") return Number.parseInt(field.value || "0", 10);
++    if (type === "float") return Number.parseFloat(field.value || "0");
++    if (type === "list") {
++      const raw = field.value.trim();
++      try {
++        return raw.startsWith("[") ? JSON.parse(raw) : raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
++      } catch (_) {
++        return raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
++      }
++    }
++    return field.value;
++  }
++
+   function collectConfigPayload() {
+     const payload = Object.fromEntries(state.dirtySettings.entries());
+     qsa("[data-config-field]").forEach((field) => {
+-      const key = field.dataset.configField;
+-      const type = field.dataset.configType;
+-      let value;
+-      if (field.type === "checkbox") value = field.checked;
+-      else if (type === "int") value = Number.parseInt(field.value || "0", 10);
+-      else if (type === "float") value = Number.parseFloat(field.value || "0");
+-      else if (type === "list") {
+-        const raw = field.value.trim();
+-        try {
+-          value = raw.startsWith("[") ? JSON.parse(raw) : raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+-        } catch (_) {
+-          value = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+-        }
+-      } else value = field.value;
+-      payload[key] = value;
++      if (!field.disabled) payload[field.dataset.configField] = configFieldValue(field);
+     });
+     return payload;
++  }
++
++  function recordSettingsEdit(event) {
++    const field = event.target.closest("[data-config-field]");
++    if (!field || field.disabled) return;
++    const key = field.dataset.configField;
++    state.dirtySettings.set(key, configFieldValue(field));
++    state.settingsEditVersions.set(key, ++state.settingsEditVersion);
++  }
++
++  function syncSettingsSaveButton() {
++    const button = $("config-save-button");
++    if (!button) return;
++    button.disabled = state.settingsSaving || state.settingsReadFailed || !state.pageData.settings;
++    button.textContent = state.settingsSaving ? "保存中…" : t("actions.saveSettings", "保存设置");
++    button.setAttribute("aria-busy", String(state.settingsSaving));
++  }
++
++  async function refreshSettings(force) {
++    const request = ++state.settingsLoad;
++    try {
++      const data = await cached("settings", () => apiGet("settings", { schema: "true" }), force || state.settingsReadFailed,
++        () => request === state.settingsLoad);
++      if (request !== state.settingsLoad) return;
++      state.settingsReadFailed = false;
++      renderSettings(data);
++    } catch (error) {
++      if (request !== state.settingsLoad) return;
++      state.settingsReadFailed = true;
++      renderSettings(state.pageData.settings || {});
++      throw error;
++    }
++  }
++
++  function acceptSettingsReceipt(submitted, versions, result) {
++    Object.keys(submitted).forEach((key) => {
++      if (state.settingsEditVersions.get(key) === versions.get(key)) state.dirtySettings.delete(key);
++    });
++    const groups = state.pageData.settings?.schema?.groups || [];
++    groups.forEach((group) => (group.fields || []).forEach((field) => {
++      if (!Object.prototype.hasOwnProperty.call(submitted, field.key)) return;
++      field.value = field.secret ? "" : (Object.prototype.hasOwnProperty.call(result.config || {}, field.key)
++        ? result.config[field.key] : submitted[field.key]);
++    }));
++  }
++
++  async function saveSettings() {
++    if (state.settingsSaving || state.settingsReadFailed || !state.pageData.settings) return;
++    state.settingsSaving = true;
++    ++state.settingsLoad;
++    syncSettingsSaveButton();
++    const submitted = collectConfigPayload();
++    const versions = new Map(state.settingsEditVersions);
++    try {
++      const result = await apiPost("settings/action", {action: "save", config: submitted});
++      acceptSettingsReceipt(submitted, versions, result);
++      try {
++        await refreshSettings(true);
++        showToast(state.dirtySettings.size ? "本次设置已保存；后续修改尚未保存。" : (result.message || t("messages.settingsSaved", "设置已保存")));
++      } catch (error) {
++        showToast(`设置已保存；最新设置读取失败：${error.message || String(error)}`, "error");
++      }
++    } catch (error) {
++      showToast(error.message || String(error), "error");
++    } finally {
++      state.settingsSaving = false;
++      syncSettingsSaveButton();
++    }
+   }
+ 
+   function bindEvents() {
+@@ -1859,12 +1938,8 @@
+       showToast(result.message || t("messages.relearnSubmitted", "重新学习已提交"), result.success ? "ok" : "error");
+     });
+     $("graph-type")?.addEventListener("change", () => loadGraphs(true));
+-    $("config-save-button")?.addEventListener("click", async () => {
+-      const result = await apiPost("settings/action", { action: "save", config: collectConfigPayload() });
+-      showToast(result.message || t("messages.settingsSaved", "设置已保存"), result.success ? "ok" : "error");
+-      state.pageData.settings = null;
+-      await loadPageData("settings", { force: true });
+-    });
++    $("config-save-button")?.addEventListener("click", saveSettings);
++    document.addEventListener("input", recordSettingsEdit);
+     $("dependency-install-button")?.addEventListener("click", async () => {
+       const installButton = $("dependency-install-button");
+       const originalLabel = installButton?.textContent || t("actions.manualInstall", "手动安装");
+@@ -1940,9 +2015,7 @@
+         refreshSelectionLabels();
+         return;
+       }
+-      const field = event.target.closest("[data-config-field]");
+-      if (!field) return;
+-      state.dirtySettings.set(field.dataset.configField, field.type === "checkbox" ? field.checked : field.value);
++      recordSettingsEdit(event);
+     });
+ 
+     document.addEventListener("click", async (event) => {

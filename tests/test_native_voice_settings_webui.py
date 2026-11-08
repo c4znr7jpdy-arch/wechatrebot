@@ -16,12 +16,12 @@ from test_plugin_portability import PROJECT_PLUGINS, _patched
 # and their HTTP bridge run unchanged. No robot, TTS service or live writes run.
 _PAGE_SDK = """(() => {
   const calls = new Map(); let sequence = 0;
-  function request(action, endpoint, body) {
+  function request(action, endpoint, body, params) {
     const requestId = 'voice-test-' + (++sequence);
     return new Promise((resolve, reject) => {
       calls.set(requestId, {resolve, reject});
       parent.postMessage({channel: 'astrbot-plugin-page', kind: 'request',
-        requestId, action, endpoint, body}, location.origin);
+        requestId, action, endpoint, body, params}, location.origin);
     });
   }
   window.addEventListener('message', event => {
@@ -34,7 +34,7 @@ _PAGE_SDK = """(() => {
     message.ok ? call.resolve(message.data) : call.reject(new Error(message.error));
   });
   window.AstrBotPluginPage = {ready: async () => ({}),
-    apiGet: endpoint => request('api:get', endpoint),
+    apiGet: (endpoint, params) => request('api:get', endpoint, undefined, params),
     apiPost: (endpoint, body) => request('api:post', endpoint, body),
     upload: async () => { throw new Error('Upload is outside this test'); }};
   parent.postMessage({channel: 'astrbot-plugin-page', kind: 'ready'}, location.origin);
