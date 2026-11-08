@@ -13,7 +13,39 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
      graph: {
        nodes: [],
        links: [],
-@@ -574,19 +579,20 @@
+@@ -137,6 +142,31 @@
+   function endpoint(path) {
+     return `page/${String(path || "").replace(/^\/+/, "").replace(/\/+/g, "/")}`;
+   }
++
++  let settingsEditorSession = "";
++  const settingsPageChannel = "astrbot-plugin-page";
++
++  function publishSettingsEditorState() {
++    if (window.parent === window || !settingsEditorSession) return;
++    window.parent.postMessage({channel: settingsPageChannel, kind: "editor-state",
++      session: settingsEditorSession, dirty: state.dirtySettings.size > 0,
++      busy: state.settingsSaving}, window.location.origin);
++  }
++
++  window.addEventListener("message", (event) => {
++    const message = event.data;
++    if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin
++      || message?.channel !== settingsPageChannel || message.kind !== "editor-context"
++      || typeof message.session !== "string" || !message.session || message.session.length > 80) return;
++    settingsEditorSession = message.session;
++    publishSettingsEditorState();
++  });
++
++  window.addEventListener("beforeunload", (event) => {
++    if (!state.settingsSaving && !state.dirtySettings.size) return;
++    event.preventDefault();
++    event.returnValue = "";
++  });
+ 
+   async function bridgeReady() {
+     const bridge = window.AstrBotPluginPage;
+@@ -574,19 +604,20 @@
        if (page === "graphs") return loadGraphs(force);
        if (page === "reply-strategy") return renderConversationCore(await cached("conversationCore", () => apiGet("conversation-core"), force));
        if (page === "integrations") return renderIntegrations(await cached("integrations", () => apiGet("integrations"), force));
@@ -36,7 +68,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
      state.pageData[key] = data;
      if (key.startsWith("reviews:")) state.pageData.reviews = data;
      if (key.startsWith("style:")) state.pageData.style = data;
-@@ -1457,7 +1463,9 @@
+@@ -1457,7 +1488,9 @@
  
    function renderSettings(data) {
      const schema = data.schema || {};
@@ -47,7 +79,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
      const groups = schema.groups || [];
      if (!state.settingsGroup && groups.length) state.settingsGroup = groups[0].key;
      setHtml("settings-groups", groups.map((group) => `
-@@ -1470,11 +1478,12 @@
+@@ -1470,11 +1503,12 @@
      const active = groups.find((group) => group.key === state.settingsGroup) || groups[0] || { fields: [] };
      setHtml("config-form", (active.fields || []).map(fieldHtml).join("") || empty(t("empty.selectConfigGroup", "请选择配置分组")));
      renderPipMirrors(data.pip_mirrors || {});
@@ -61,7 +93,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
      const groupKey = field.group_key || activeSettingsGroupKeyForField(field.key);
      const label = configT(`${groupKey}.${field.key}.description`, field.label || field.key);
      const hint = configT(`${groupKey}.${field.key}.hint`, field.hint || "");
-@@ -1741,26 +1750,96 @@
+@@ -1741,26 +1775,99 @@
      await loadPageData("content", { force: true });
    }
  
@@ -110,9 +142,11 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
 +    const key = field.dataset.configField;
 +    state.dirtySettings.set(key, configFieldValue(field));
 +    state.settingsEditVersions.set(key, ++state.settingsEditVersion);
++    publishSettingsEditorState();
 +  }
 +
 +  function syncSettingsSaveButton() {
++    publishSettingsEditorState();
 +    const button = $("config-save-button");
 +    if (!button) return;
 +    button.disabled = state.settingsSaving || state.settingsReadFailed || !state.pageData.settings;
@@ -146,6 +180,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
 +      field.value = field.secret ? "" : (Object.prototype.hasOwnProperty.call(result.config || {}, field.key)
 +        ? result.config[field.key] : submitted[field.key]);
 +    }));
++    publishSettingsEditorState();
 +  }
 +
 +  async function saveSettings() {
@@ -173,7 +208,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
    }
  
    function bindEvents() {
-@@ -1859,12 +1938,8 @@
+@@ -1859,12 +1966,8 @@
        showToast(result.message || t("messages.relearnSubmitted", "重新学习已提交"), result.success ? "ok" : "error");
      });
      $("graph-type")?.addEventListener("change", () => loadGraphs(true));
@@ -188,7 +223,7 @@ diff --git a/pages/dashboard/app.js b/pages/dashboard/app.js
      $("dependency-install-button")?.addEventListener("click", async () => {
        const installButton = $("dependency-install-button");
        const originalLabel = installButton?.textContent || t("actions.manualInstall", "手动安装");
-@@ -1940,9 +2015,7 @@
+@@ -1940,9 +2043,7 @@
          refreshSelectionLabels();
          return;
        }
