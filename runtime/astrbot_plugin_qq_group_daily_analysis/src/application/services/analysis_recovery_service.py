@@ -24,7 +24,7 @@ from ...shared.report_status import (
     normalize_timeout_sections,
     timeout_sections_from_errors,
 )
-from ...shared.trace_context import TraceContext
+from ...shared.trace_context import TraceContext, strip_control_characters
 from ...utils.logger import logger
 from .analysis_serializer import AnalysisResultSerializer
 from .pipeline_context import PipelineContext
@@ -141,11 +141,12 @@ class AnalysisRecoveryService:
         reports_dir = StarTools.get_data_dir(PLUGIN_NAME) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         ts_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename_trace = strip_control_characters(trace_id or "")
 
         if render_format == "html":
             filename = (
-                f"report_{group_id}_{ts_str}_{trace_id}_{template_name}.html"
-                if trace_id
+                f"report_{group_id}_{ts_str}_{filename_trace}_{template_name}.html"
+                if filename_trace
                 else f"report_{group_id}_{ts_str}_{template_name}.html"
             )
             dest = reports_dir / filename
@@ -225,8 +226,8 @@ class AnalysisRecoveryService:
         )
         image_url = image_res[0]
         filename = (
-            f"report_{group_id}_{ts_str}_{trace_id}_{template_name}.jpg"
-            if trace_id
+            f"report_{group_id}_{ts_str}_{filename_trace}_{template_name}.jpg"
+            if filename_trace
             else f"report_{group_id}_{ts_str}_{template_name}.jpg"
         )
         dest = reports_dir / filename
