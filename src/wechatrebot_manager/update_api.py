@@ -1,8 +1,6 @@
 """Background update checks, progress and installation lifecycle."""
 from __future__ import annotations
 
-import hashlib
-import json
 import secrets
 import sys
 import threading
@@ -10,6 +8,7 @@ import threading
 from . import __version__
 from .json_io import write_json_atomic
 from .payload import PayloadError
+from .update_cache import update_release_id
 from .updates import (
     MandatoryUpdateUnavailable,
     PreparedUpdate,
@@ -31,10 +30,7 @@ from .update_errors import UpdateFailure
 class UpdateApiMixin:
     @staticmethod
     def _release_id(release: UpdateRelease) -> str:
-        identity = (release.version, release.build, release.package_url,
-                    release.package_sha256, release.package_size,
-                    release.package_kind, release.base_fingerprint)
-        return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+        return update_release_id(release)
 
     def _load_update_channel(self) -> UpdateChannel | None:
         if getattr(self, "_development", False):

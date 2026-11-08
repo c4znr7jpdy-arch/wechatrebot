@@ -10,6 +10,7 @@ COPY services/activation_service/*.py services/activation_service/
 COPY services/activation_service/admin/*.py services/activation_service/admin/
 COPY services/activation_service/admin/templates/* services/activation_service/admin/templates/
 COPY src/wechatrebot_manager/__init__.py src/wechatrebot_manager/json_io.py src/wechatrebot_manager/
+COPY src/wechatrebot_manager/update_cache.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/updates.py src/wechatrebot_manager/update-channel.json src/wechatrebot_manager/payload.py src/wechatrebot_manager/install_paths.py src/wechatrebot_manager/single_instance.py src/wechatrebot_manager/update_errors.py src/wechatrebot_manager/update_logger.py src/wechatrebot_manager/customer_logs.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/licensing/__init__.py src/wechatrebot_manager/licensing/protocol.py src/wechatrebot_manager/licensing/contact.py src/wechatrebot_manager/licensing/
 

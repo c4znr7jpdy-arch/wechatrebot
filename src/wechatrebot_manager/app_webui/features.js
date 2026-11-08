@@ -34,9 +34,12 @@ window.createFeatureController = function (helpers) {
       renderHelp();
       if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
       void prefetchFeatureDetails(++state.featurePrefetch);
+      return true;
     } catch (error) {
       list.innerHTML = '<div class="loading-row">功能暂时无法读取</div>';
+      $("#featureSummary").textContent = "读取失败，请重新检查";
       reportError(error);
+      return false;
     }
   }
 
@@ -49,8 +52,7 @@ window.createFeatureController = function (helpers) {
     state.featureDetail = null;
     state.featureDetails = {};
     getCoreSettings().invalidate();
-    await loadFeatures();
-    toast("功能准备情况已重新检查。 ");
+    if (await loadFeatures()) toast("功能准备情况已重新检查。 ");
   }
 
   async function prefetchFeatureDetails(generation) {
@@ -74,6 +76,11 @@ window.createFeatureController = function (helpers) {
     await Promise.all(Array.from({length: Math.min(3, pending.length)}, () => worker()));
   }
 
+  function featureLoadState(item) {
+    if (!state.featuresEngineOnline) return {label: "启动后检查", loaded: false};
+    return {label: item.enabled === true ? "已加载" : "未加载", loaded: item.enabled === true};
+  }
+
   function renderFeatureList() {
     const keyword = $("#featureSearch").value.trim().toLocaleLowerCase("zh-CN");
     const audienceMatch = (item) => {
@@ -83,11 +90,14 @@ window.createFeatureController = function (helpers) {
     };
     const items = state.features.filter((item) => audienceMatch(item) && (!keyword || item.display_name.toLocaleLowerCase("zh-CN").includes(keyword)));
     $("#featureSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
-    $("#featureList").innerHTML = items.length ? items.map((item) => `
+    $("#featureList").innerHTML = items.length ? items.map((item) => {
+      const availability = featureLoadState(item);
+      return `
       <button class="feature-item ${state.selectedFeature === item.id ? "active" : ""}" data-feature-id="${escapeHtml(item.id)}">
-        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "已加载")}</small></span>
-        <span class="feature-state enabled" title="已加载"></span>
-      </button>`).join("") : '<div class="loading-row">没有符合条件的功能</div>';
+        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "请按说明准备")} · <span class="feature-load-state">${availability.label}</span></small></span>
+        <span class="feature-state ${availability.loaded ? "enabled" : ""}" title="${availability.label}" role="img" aria-label="${availability.label}"></span>
+      </button>`;
+    }).join("") : '<div class="loading-row">没有符合条件的功能</div>';
     $$(".feature-item").forEach((button) => button.addEventListener("click", () => openFeature(button.dataset.featureId)));
   }
 
@@ -529,9 +539,10 @@ window.createFeatureController = function (helpers) {
     $("#helpSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
     root.innerHTML = items.length ? items.map((item) => {
       const guide = item.guide || {};
+      const availability = featureLoadState(item);
       const steps = guide.setup_steps?.length ? guide.setup_steps : ["在功能中心完成必要配置，再到群聊中勾选使用范围。", "在测试聊天中验证一次实际效果。"];
       const prerequisite = (guide.prerequisites || []).join(" ");
-      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="feature-state enabled" title="已加载"></span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
+      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="status-badge ${availability.loaded ? "online" : ""}">${availability.label}</span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
     }).join("") : '<div class="empty-state compact panel"><h2>没有找到相关帮助</h2><p>换一个功能名或用法关键词试试。</p></div>';
     $$(".help-configure-feature", root).forEach((button) => button.addEventListener("click", async () => {
       await navigate("features");
