@@ -608,7 +608,9 @@
     state.startPreparing = action === "start";
     state.stopPending = action === "stop";
     state.stopRequestPending = action === "stop";
-    if (state.stopPending) renderStatus(state.status, {optimistic: true});
+    if (state.startPreparing || state.stopPending) {
+      renderStatus(state.lastRuntimeStatus || state.status, {optimistic: true});
+    }
     try {
       if (action === "start" && !await subscription.beforeStart()) return;
       if (action === "start") {
@@ -847,7 +849,7 @@
     };
   }
 
-  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm, onCancel}) {
+  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", dismissible = true, onConfirm, onCancel}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
@@ -880,11 +882,15 @@
     const completed = new Promise((resolve) => { complete = resolve; });
     const restoreFocus = document.activeElement;
     syncShellInteractivity();
-    cancel.focus();
+    // Login returns from another window; do not leave Enter focused on Cancel.
+    if (dismissible) cancel.focus();
+    else body.focus();
     const close = () => { backdrop.hidden = true; syncShellInteractivity(); restoreFocus?.focus(); };
-    modalResolve = async (confirmed) => {
+    let settled = false;
+    modalResolve = async (confirmed, {implicit = false} = {}) => {
+      if (settled || backdrop.dataset.busy === "true" || (implicit && !dismissible)) return;
       if (!confirmed) {
-        if (backdrop.dataset.busy === "true") return;
+        settled = true;
         close();
         try { await onCancel?.(); }
         finally { complete(false); }
@@ -898,6 +904,7 @@
       if (pendingMessage) $("#modalMessage").textContent = pendingMessage;
       try {
         await onConfirm(field ? $("#modalInput").value : undefined);
+        settled = true;
         close();
         complete(true);
       } catch (error) {
@@ -1302,8 +1309,8 @@
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     });
     $("#modalConfirm").addEventListener("click", () => modalResolve?.(true));
-    $("#modalBackdrop").addEventListener("click", (event) => { if (event.target === event.currentTarget) modalResolve?.(false); });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modalBackdrop").hidden) modalResolve?.(false); });
+    $("#modalBackdrop").addEventListener("click", (event) => { if (event.target === event.currentTarget) modalResolve?.(false, {implicit: true}); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modalBackdrop").hidden) modalResolve?.(false, {implicit: true}); });
     $("#onboardingRecommended").addEventListener("click", () => closeOnboarding(false));
     $("#onboardingConfigure").addEventListener("click", () => closeOnboarding(true));
     $("#onboardingBackdrop").addEventListener("keydown", (event) => {
