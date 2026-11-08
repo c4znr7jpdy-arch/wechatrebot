@@ -1,0 +1,238 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index f5fb697..e916eac 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -33,6 +33,7 @@ from .inbound_image import (
+     parse_quoted_message,
+ )
+ from .launcher import start_injector
++from .injector_output import InjectorOutput
+ from .media import MediaStore
+ from .message_codec import (
+     encode_group_member_notice,
+@@ -148,6 +149,7 @@ class BridgeApplication:
+         ] = {}
+         self._polled_group_names: dict[str, str] = {}
+         self._injector: subprocess.Popen[bytes] | Any | None = None
++        self._injector_output: InjectorOutput | None = None
+         self._stop_event = asyncio.Event()
+         self._hook_ready = False
+ 
+@@ -229,22 +231,26 @@ class BridgeApplication:
+             await self._callback_runner.cleanup()
+             self._callback_runner = None
+ 
++    def _injector_output_detail(self) -> str:
++        output = getattr(self, "_injector_output", None)
++        return output.detail() if output is not None else "stdout=<unavailable>; stderr=<unavailable>"
++
+     async def _wait_hook_ready(self) -> None:
+         deadline = asyncio.get_running_loop().time() + self.settings.hook_start_timeout_seconds
+         while asyncio.get_running_loop().time() < deadline:
++            output = getattr(self, "_injector_output", None)
++            if output is not None:
++                output.check()
+             process = self._injector
+             if (
+                 process is not None
+                 and process.poll() is not None
+                 and process.returncode != 0
+             ):
+-                stderr = b""
+-                if getattr(process, "stderr", None) is not None:
+-                    stderr = await asyncio.to_thread(process.stderr.read, 2000)
+-                detail = stderr.decode("utf-8", errors="replace").strip()
++                detail = self._injector_output_detail()
+                 raise RuntimeError(
+                     f"injector exited before HOOK API became ready: "
+-                    f"code={process.returncode}, stderr={detail[:500]}"
++                    f"code={process.returncode}; {detail}"
+                 )
+             if await self._hook_api_accepting_connections():
+                 logger.info("HOOK API is accepting connections")
+@@ -258,7 +264,8 @@ class BridgeApplication:
+         raise TimeoutError(
+             f"HOOK API did not listen on {self.settings.hook_api_host}:"
+             f"{self.settings.hook_api_port} within "
+-            f"{self.settings.hook_start_timeout_seconds:g}s; injector {injector_status}"
++            f"{self.settings.hook_start_timeout_seconds:g}s; injector {injector_status}; "
++            f"{self._injector_output_detail()}"
+         )
+ 
+     async def _hook_api_accepting_connections(self) -> bool:
+@@ -1774,6 +1781,9 @@ class BridgeApplication:
+ 
+     async def _watch_injector(self) -> None:
+         while True:
++            output = getattr(self, "_injector_output", None)
++            if output is not None:
++                output.check()
+             process = self._injector
+             if process is None:
+                 return
+@@ -1782,13 +1792,10 @@ class BridgeApplication:
+                 if returncode == 0:
+                     logger.info("injector completed successfully")
+                     return
+-                stderr = b""
+-                if getattr(process, "stderr", None) is not None:
+-                    stderr = await asyncio.to_thread(process.stderr.read, 2000)
+-                detail = stderr.decode("utf-8", errors="replace").strip()
++                detail = self._injector_output_detail()
+                 raise RuntimeError(
+                     f"injector exited while bridge was running: "
+-                    f"code={returncode}, stderr={detail[:500]}"
++                    f"code={returncode}; {detail}"
+                 )
+             await asyncio.sleep(0.2)
+ 
+@@ -1827,7 +1834,10 @@ class BridgeApplication:
+         }
+         watchers = critical_tasks | {
+             task
+-            for task in (self._injector_watch_task, self._hook_watch_task)
++            for task in (
++                self._injector_watch_task, self._hook_watch_task,
++                getattr(getattr(self, "_injector_output", None), "task", None),
++            )
+             if task is not None
+         }
+         if not watchers:
+@@ -1895,6 +1905,8 @@ class BridgeApplication:
+                         )
+                 else:
+                     self._injector = self.injector_factory(self.settings)
++                    self._injector_output = InjectorOutput(self._injector)
++                    self._injector_output.start()
+                     await self._wait_hook_ready()
+                     self._hook_ready = True
+                     self._injector_watch_task = asyncio.create_task(
+@@ -1927,6 +1939,15 @@ class BridgeApplication:
+         self._stop_event.set()
+ 
+     async def _shutdown(self) -> None:
++        try:
++            await self._shutdown_components()
++        finally:
++            output = getattr(self, "_injector_output", None)
++            if output is not None:
++                await output.close()
++                self._injector_output = None
++
++    async def _shutdown_components(self) -> None:
+         runtime_guard().stop_refresh()
+         for task in (
+             self._consumer_task,
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py b/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py
+new file mode 100644
+index 0000000..3fa7bc8
+--- /dev/null
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py
+@@ -0,0 +1,107 @@
++from __future__ import annotations
++
++import asyncio
++import logging
++import os
++from typing import Any
++
++from .customer_logs import sanitize_log_text
++
++
++logger = logging.getLogger(__name__)
++_READ_SIZE = 16 * 1024
++_TAIL_LIMIT = 4096
++
++
++class InjectorOutput:
++    """Own nonblocking pipe reads and bounded diagnostics for both streams."""
++
++    def __init__(self, process: Any) -> None:
++        self._pipes = {
++            name: pipe for name in ("stdout", "stderr")
++            if (pipe := getattr(process, name, None)) is not None
++        }
++        self._active: dict[str, int] = {}
++        self._tails = {name: bytearray() for name in self._pipes}
++        self._truncated: set[str] = set()
++        self.task: asyncio.Task[None] | None = None
++
++    def start(self) -> None:
++        # Python 3.13 supports nonblocking anonymous pipes on Windows. Never
++        # mix os.read with BufferedReader.read or leave blocking reads in threads.
++        for name, pipe in self._pipes.items():
++            try:
++                descriptor = pipe.fileno()
++                os.set_blocking(descriptor, False)
++            except (OSError, ValueError) as exc:
++                raise RuntimeError("injector output pipe cannot be made nonblocking") from exc
++            self._active[name] = descriptor
++        self.task = asyncio.create_task(self._drain(), name="injector-output")
++
++    def check(self) -> None:
++        if self.task is not None and self.task.done():
++            if self.task.cancelled():
++                raise RuntimeError("injector output reader was unexpectedly cancelled")
++            self.task.result()
++
++    def _read(self, name: str) -> bool:
++        descriptor = self._active.get(name)
++        if descriptor is None:
++            return False
++        try:
++            data = os.read(descriptor, _READ_SIZE)
++        except BlockingIOError:
++            return False
++        except OSError as exc:
++            raise RuntimeError("injector output pipe could not be read") from exc
++        if not data:
++            self._active.pop(name, None)
++            return False
++        tail = self._tails[name]
++        tail.extend(data)
++        if len(tail) > _TAIL_LIMIT:
++            del tail[:-_TAIL_LIMIT]
++            self._truncated.add(name)
++        return True
++
++    async def _drain(self) -> None:
++        while self._active:
++            received = False
++            for name in tuple(self._active):
++                received = self._read(name) or received
++            # Read both streams once per turn, even under continuous output.
++            await asyncio.sleep(0 if received else 0.02)
++
++    def detail(self) -> str:
++        self.check()
++        # Child exit does not guarantee EOF: a descendant can inherit its pipe.
++        # Collect available final bytes without waiting for writers to close.
++        for _ in range(16):
++            received = False
++            for name in tuple(self._active):
++                received = self._read(name) or received
++            if not received:
++                break
++        details = []
++        for name in ("stdout", "stderr"):
++            raw = bytes(self._tails.get(name, b""))
++            if name in self._truncated:
++                # A cut credential label must never turn its remaining value
++                # into unlabeled text. Omit that first incomplete line.
++                raw = raw.partition(b"\n")[2]
++            text = sanitize_log_text(raw.decode("utf-8", errors="replace")).strip()[:500]
++            details.append(f"{name}={text}")
++        return "; ".join(details)
++
++    async def close(self) -> None:
++        if self.task is not None:
++            if not self.task.done():
++                self.task.cancel()
++            await asyncio.gather(self.task, return_exceptions=True)
++        self._active.clear()
++        for pipe in self._pipes.values():
++            try:
++                pipe.close()
++            except OSError:
++                logger.warning("injector output pipe close failed")
++        self._pipes.clear()
