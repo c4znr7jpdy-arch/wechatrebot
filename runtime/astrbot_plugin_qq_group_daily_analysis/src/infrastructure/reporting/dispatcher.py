@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from ....group_analysis_schedule import legacy_analysis_retired
 from ...shared.constants import AnalysisStage
-from ...shared.trace_context import TraceContext
+from ...shared.trace_context import TraceContext, strip_control_characters
 from ...utils.logger import logger
 
 if TYPE_CHECKING:
@@ -222,7 +222,7 @@ class ReportDispatcher:
                 try:
                     reports_dir = self.report_generator.data_dir / "reports"
                     reports_dir.mkdir(parents=True, exist_ok=True)
-                    eff_trace_id = (
+                    eff_trace_id = strip_control_characters(
                         trace_id
                         or (trace_ctx.trace_id if trace_ctx else "")
                         or TraceContext.get()

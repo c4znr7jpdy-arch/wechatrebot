@@ -26,7 +26,7 @@ from ...domain.repositories.platform_adapter_repository import (
     PlatformAdapterProtocol,
 )
 from ...shared.constants import PLUGIN_NAME, AnalysisStage
-from ...shared.trace_context import TraceContext
+from ...shared.trace_context import TraceContext, strip_control_characters
 from ...utils.logger import logger
 from ..services.analysis_application_service import (
     AnalysisApplicationService,
@@ -571,7 +571,9 @@ class AnalysisCommandHandler:
             reports_dir.mkdir(parents=True, exist_ok=True)
             ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             cur_trace = TraceContext.current()
-            eff_trace_id = trace_id or (cur_trace.trace_id if cur_trace else "")
+            eff_trace_id = strip_control_characters(
+                trace_id or (cur_trace.trace_id if cur_trace else "")
+            )
             trace_suffix = f"_{eff_trace_id}" if eff_trace_id else ""
             dest = reports_dir / f"report_{group_id}_{ts_str}{trace_suffix}.jpg"
             if Path(image_url).exists():
@@ -655,7 +657,9 @@ class AnalysisCommandHandler:
         try:
             group_info = await adapter.get_group_info(group_id)
             if group_info and group_info.group_name:
-                safe_name = re.sub(r'[\\/:*?"<>|]', "", group_info.group_name).strip()
+                safe_name = re.sub(
+                    r'[\\/:*?"<>|]', "", strip_control_characters(group_info.group_name)
+                ).strip()
                 if safe_name:
                     filename_stem = f"群分析报告_{safe_name}_{date_str}_{timestamp}"
         except Exception:
