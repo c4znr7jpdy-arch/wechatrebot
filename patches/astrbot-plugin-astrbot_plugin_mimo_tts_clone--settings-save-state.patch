@@ -1,0 +1,88 @@
+diff --git a/pages/settings/app.js b/pages/settings/app.js
+--- a/pages/settings/app.js
++++ b/pages/settings/app.js
+@@ -61,6 +61,7 @@
+   tasks: [],
+ };
+ let lastUploadedVoiceId = '';
++let configEditVersion = 0;
+ 
+ function toast(message, type = 'ok') {
+   const el = $('toast');
+@@ -86,6 +87,7 @@
+ }
+ 
+ function markDirty() {
++  configEditVersion += 1;
+   setActionState('有未保存更改', 'is-dirty');
+ }
+ 
+@@ -625,29 +627,51 @@
+   updateActionAvailability();
+ }
+ 
+-async function refresh() {
++async function refresh(expectedVersion = configEditVersion) {
+   const [payload, providersPayload] = await Promise.all([
+     bridge.apiGet('get_config'),
+     bridge.apiGet('list_ai_providers').catch(() => ({ success: false, providers: [] })),
+   ]);
+   if (!payload.success) throw new Error(payload.error || '加载配置失败');
++  if (expectedVersion !== configEditVersion) return false;
+   state.providers = providersPayload && providersPayload.success ? providersPayload.providers || [] : [];
+   applyState(payload);
++  return true;
+ }
+ 
+ async function saveConfig() {
++  const submittedVersion = configEditVersion;
+   const res = await bridge.apiPost('save_config', configPayload());
+   if (!res.success) throw new Error(res.error || '保存失败');
+   state.config = res.config || state.config;
++  const newerDraftMessage = '本次配置已保存；后续修改尚未保存';
+   if (res.warning) {
+     updateStatus();
+-    markClean();
+-    setActionState('配置已保存到插件本地文件', 'is-dirty');
++    if (submittedVersion === configEditVersion) {
++      markClean();
++      setActionState('配置已保存到插件本地文件', 'is-dirty');
++    } else {
++      setActionState(newerDraftMessage, 'is-dirty');
++    }
+     toast(res.warning, 'warn');
+     return;
+   }
+-  await refresh();
+-  toast('配置已保存');
++  try {
++    if (!await refresh(submittedVersion)) {
++      setActionState(newerDraftMessage, 'is-dirty');
++      toast('本次配置已保存，后续修改请再次保存。', 'warn');
++      return;
++    }
++    toast('配置已保存');
++  } catch (error) {
++    if (submittedVersion === configEditVersion) {
++      markClean();
++      setActionState('配置已保存；最新状态暂时无法读取', 'is-dirty');
++    } else {
++      setActionState(newerDraftMessage, 'is-dirty');
++    }
++    toast(`配置已保存；最新状态暂时无法读取：${extractErrorMessage(error)}`, 'warn');
++  }
+ }
+ 
+ function validateVoiceUpload() {
+@@ -861,6 +885,11 @@
+     'max-voice-file-mb',
+     'reply-mode',
+     'delivery-mode',
++    'audio-transport',
++    'shared-path-linux',
++    'shared-path-windows',
++    'delivery-segment-chars',
++    'base64-max-mb',
+     'background-queue-size',
+     'tts-timeout-seconds',
+     'tts-max-retries',
