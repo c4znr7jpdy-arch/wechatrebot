@@ -245,3 +245,125 @@ def test_runtime_chat_log_formats_and_nested_payloads_are_redacted(tmp_path):
     ):
         result = diagnostic_text(text, tmp_path)
         assert 'private-message' not in result and 'other-private' not in result
+
+
+@pytest.mark.parametrize("code", ["13002", "13004"])
+def test_service_exit_report_includes_nearby_traceback_once_and_redacts_it(tmp_path, code, monkeypatch):
+    import wechatrebot_manager.activity_service as activity
+
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code=code, message="托管服务意外退出。")
+    block = (
+        "2026-10-10 11:59:58 ERROR API request failed\n"
+        "Traceback (most recent call last):\n"
+        '  File "client.py", line 42\n'
+        "TimeoutError: API request timed out after 30s\n"
+        "Authorization: Bearer near-secret\n"
+        "wxid=private-user\n"
+    )
+    for relative in ("logs/new-hook-bridge.log", "app/bridge/var/log/bridge.log"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "2026-10-10 11:59:57 INFO unrelated-private-chat\n" + block
+            + "2026-10-10 11:59:59 INFO unrelated-completion\n", encoding="utf-8",
+        )
+    reads = []
+    original = activity.read_log_tail
+
+    def count_read(path, **kwargs):
+        reads.append(path)
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(activity, "read_log_tail", count_read)
+    service = ActivityService(tmp_path)
+    items = service.recent()
+    item = next(item for item in items if item["id"] == event.event_id)
+    assert item["context"].count("Traceback (most recent call last)") == 1
+    assert "11:59:58" in item["context"] and "微信连接" in item["context"]
+    assert "line 42" in item["context"] and "30s" in item["context"]
+    assert "不代表因果关系" in item["context"]
+    assert item["report"] == service.report(item)
+    for secret in ("near-secret", "private-user", "unrelated-private-chat", "unrelated-completion"):
+        assert secret not in item["report"]
+    assert len(reads) == len(set(reads))
+
+
+def test_service_exit_context_includes_nearby_warning_without_traceback(tmp_path):
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    (tmp_path / "logs/new-hook-bridge.log").write_text(
+        "2026-10-10 11:59:58 WARNING reconnect-exhausted\n", encoding="utf-8",
+    )
+    items = ActivityService(tmp_path).recent()
+    assert next(item for item in items if "reconnect-exhausted" in item["message"])["level"] == "warning"
+    item = next(item for item in items if item["id"] == event.event_id)
+    assert "reconnect-exhausted" in item["context"]
+
+
+@pytest.mark.parametrize("offset,included", [(-6, False), (-5, True), (5, True), (6, False)])
+def test_service_exit_context_uses_exact_five_second_window(tmp_path, offset, included):
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    timestamp = datetime(2026, 10, 10, 12).timestamp() + offset
+    stamp = datetime.fromtimestamp(timestamp).isoformat(sep=" ")
+    (tmp_path / "logs/new-hook-bridge.log").write_text(f"{stamp} ERROR boundary-failure\n", encoding="utf-8")
+    item = next(item for item in ActivityService(tmp_path).recent() if item["id"] == event.event_id)
+    assert ("boundary-failure" in item["context"]) is included
+
+
+@pytest.mark.parametrize("code,event", [("19001", "APP_ERROR"), ("13002", "CORE_STOP")])
+def test_service_exit_context_does_not_attach_to_unrelated_manager_events(tmp_path, code, event):
+    record = EventStore(tmp_path).emit(event, "failed", code=code, message="some event")
+    (tmp_path / "logs/new-hook-bridge.log").write_text("2026-10-10 11:59:58 ERROR nearby-failure\n", encoding="utf-8")
+    item = next(item for item in ActivityService(tmp_path).recent() if item["id"] == record.event_id)
+    assert item["context"] == ""
+
+
+def test_service_exit_context_does_not_infer_undated_log_time_or_include_other_installations(tmp_path):
+    root = tmp_path / "selected"
+    event = EventStore(root).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    (root / "logs/new-hook-bridge.log").write_text("[11:59:58] ERROR undated-failure\n", encoding="utf-8")
+    other = tmp_path / "another/logs/new-hook-bridge.log"
+    other.parent.mkdir(parents=True)
+    other.write_text("2026-10-10 11:59:58 ERROR other-installation-failure\n", encoding="utf-8")
+    item = next(item for item in ActivityService(root).recent() if item["id"] == event.event_id)
+    assert item["context"] == ""
+
+
+def test_service_exit_context_uses_original_occurrences_before_repeat_grouping(tmp_path):
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    (tmp_path / "logs/new-hook-bridge.log").write_text(
+        "2026-10-10 11:59:58 ERROR repeating-failure\n"
+        "2026-10-10 12:01:00 ERROR repeating-failure\n", encoding="utf-8",
+    )
+    item = next(item for item in ActivityService(tmp_path).recent() if item["id"] == event.event_id)
+    assert "11:59:58" in item["context"] and "12:01:00" not in item["context"]
+
+
+def test_service_exit_context_limits_records_to_three_and_text_to_existing_cap(tmp_path):
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    path = tmp_path / "logs/new-hook-bridge.log"
+    path.write_text("\n".join(f"2026-10-10 12:00:0{index} ERROR nearby-{index}" for index in range(5)), encoding="utf-8")
+    service = ActivityService(tmp_path)
+    item = next(item for item in service.recent() if item["id"] == event.event_id)
+    assert all(f"nearby-{index}" in item["context"] for index in range(3))
+    assert "nearby-3" not in item["context"] and "nearby-4" not in item["context"]
+    path.write_text("2026-10-10 12:00:00 ERROR " + "large-failure " * 1000, encoding="utf-8")
+    item = next(item for item in service.recent() if item["id"] == event.event_id)
+    assert len(item["context"]) <= 6000 + len("\n[内容超出上限，已截断]")
+    assert item["context"].endswith("[内容超出上限，已截断]")
+
+
+def test_service_exit_export_uses_the_same_context_as_copy_report(tmp_path, monkeypatch):
+    from wechatrebot_manager.customer_maintenance import CustomerMaintenanceService
+
+    event = EventStore(tmp_path).emit("APP_ERROR", "failed", code="13002", message="service exited")
+    (tmp_path / "logs/new-hook-bridge.log").write_text(
+        "2026-10-10 11:59:58 ERROR nearby-failure token=export-secret\n", encoding="utf-8",
+    )
+    item = next(item for item in ActivityService(tmp_path).recent() if item["id"] == event.event_id)
+    service = CustomerMaintenanceService(tmp_path, is_running=lambda: False)
+    monkeypatch.setattr(service, "diagnostic_summary", lambda: {"summary": {}, "privacy": {"contains_logs": False}})
+    exported = service.export_diagnostics(include_activity=True)
+    payload = json.loads(Path(exported["path"]).read_text("utf-8"))
+    copied = next(record["report"] for record in payload["activity"] if record["id"] == event.event_id)
+    assert "nearby-failure" in copied and "export-secret" not in copied
+    assert copied == item["report"]
