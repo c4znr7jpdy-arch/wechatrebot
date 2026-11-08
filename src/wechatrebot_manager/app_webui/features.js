@@ -48,8 +48,8 @@ window.createFeatureController = function (helpers) {
   }
 
   async function refreshFeatures() {
-    if (state.featureSaving) return;
-    if (state.featureDirty) { discardFeatureChanges(refreshFeatures); return; }
+    if (state.featureSaving || state.featurePageBusy) return;
+    if (state.featureDirty || state.featurePageDirty) { discardFeatureChanges(refreshFeatures); return; }
     state.featurePrefetch += 1;
     state.featuresLoaded = false;
     state.selectedFeature = null;
@@ -107,7 +107,9 @@ window.createFeatureController = function (helpers) {
 
   function discardFeatureChanges(next) {
     confirmAction({title: "离开前丢弃修改？", message: "这些设置还没有保存。留在此页可继续编辑或保存。", confirmText: "丢弃修改并继续", onConfirm: async () => {
+      if (state.featurePageBusy) throw new Error("专属配置页正在处理操作，请完成后再离开。");
       state.featureDirty = false;
+      state.featurePageDirty = false;
       if (state.featureDetail && state.featureBaseline) state.featureDetail.config = structuredClone(state.featureBaseline);
       renderFeatureDetail();
       await next();
@@ -147,8 +149,8 @@ window.createFeatureController = function (helpers) {
   }
 
   async function openFeature(featureId, afterSave = false, force = false) {
-    if (state.featureSaving && !afterSave) return;
-    if (state.featureDirty && !afterSave) { discardFeatureChanges(() => openFeature(featureId, false, force)); return; }
+    if ((state.featureSaving || state.featurePageBusy) && !afterSave) return;
+    if ((state.featureDirty || state.featurePageDirty) && !afterSave) { discardFeatureChanges(() => openFeature(featureId, false, force)); return; }
     const load = ++state.featureLoad;
     const preserveTab = state.selectedFeature === featureId;
     state.selectedFeature = featureId;
@@ -173,7 +175,7 @@ window.createFeatureController = function (helpers) {
       if (load !== state.featureLoad) return;
       state.featureDetails[featureId] = structuredClone(detail);
       readOnlyFeatures.delete(featureId);
-      if (cached && state.featureDirty) return;
+      if (cached && (state.featureDirty || state.featurePageDirty || state.featurePageBusy)) return;
       useFeatureDetail(detail, afterSave, preserveTab);
       renderFeatureDetail();
       if (!preserveTab && !cached) window.managerMotion?.enter($("#featureDetail"));
@@ -347,6 +349,8 @@ window.createFeatureController = function (helpers) {
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
+    state.featurePageDirty = false;
+    state.featurePageBusy = false;
     const previousReference = $("#featureQuickReference");
     if (previousReference) state.featureReferenceOpen[previousReference.dataset.featureId] = previousReference.open;
     $("#featureDetail").dataset.featureId = detail.id || "";
@@ -515,6 +519,13 @@ window.createFeatureController = function (helpers) {
       || message.channel !== featurePageChannel) return;
     if (message.kind === "ready") {
       window.sendFeaturePageContext(frame);
+      return;
+    }
+    if (message.kind === "editor-state") {
+      if (state.selectedFeature !== "feature-voice-clone" || message.featureId !== state.selectedFeature
+        || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
+      state.featurePageDirty = message.dirty;
+      state.featurePageBusy = message.busy;
       return;
     }
     if (message.kind !== "request" || typeof message.requestId !== "string") return;
