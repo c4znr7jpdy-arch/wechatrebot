@@ -109,6 +109,8 @@
     webSearch: null,
     webSearchDirty: false,
     webSearchSaving: false,
+    webSearchLoading: false,
+    webSearchUnconfirmed: false,
     providerScreen: "overview",
     providerDirty: false,
     providerBaseline: "",
@@ -1142,6 +1144,7 @@
     coreSettings.init();
     $("#openChatRules").addEventListener("click", () => navigate("groups"));
     $("#webSearchForm").addEventListener("submit", saveWebSearchSettings);
+    $("#reloadWebSearch").addEventListener("click", reloadWebSearchSettings);
     $("#webSearchProvider").addEventListener("change", () => {
       $("#webSearchKey").value = "";
       state.webSearchClearKey = false;
@@ -1151,7 +1154,7 @@
       state.webSearchDirty = true;
       if (event.target.name === "key" && event.target.value.trim()) {
         state.webSearchClearKey = false;
-        $("#webSearchNote").textContent = "新密钥将在保存时替换当前服务商密钥。";
+        if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "新密钥将在保存时替换当前服务商密钥。";
       }
     });
     $("#webSearchForm").addEventListener("change", (event) => {
@@ -1160,7 +1163,7 @@
         updateToggleCopy({currentTarget: event.target});
         $("#webSearchDetails").hidden = !event.target.checked;
         $("#clearWebSearchKey").hidden = !event.target.checked;
-        $("#webSearchNote").textContent = "有修改尚未保存。";
+        if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "有修改尚未保存。";
       }
     });
     $("#revealWebSearchKey").addEventListener("click", (event) => {
@@ -1174,7 +1177,7 @@
       $("#webSearchKey").value = "";
       state.webSearchClearKey = true;
       state.webSearchDirty = true;
-      $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
+      if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
     });
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
@@ -1460,7 +1463,7 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, loadMaintenance, openMemoryManager, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
+  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, loadMaintenance, openMemoryManager, reloadWebSearchSettings, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
     $,
     $$,
     SETTINGS_SECTIONS,

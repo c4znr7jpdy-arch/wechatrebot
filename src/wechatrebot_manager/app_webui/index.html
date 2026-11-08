@@ -444,7 +444,7 @@
                 <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select></label></div>
                 <div class="web-search-provider-summary" id="webSearchProviderSummary" aria-live="polite" aria-atomic="true"></div>
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" data-action-bound disabled aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
-                </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
+                </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="reloadWebSearch" type="button" data-action-bound disabled>重新读取设置</button><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
 
             <section class="settings-card panel skin-settings" data-settings-section="skin" hidden aria-labelledby="skinHeading">

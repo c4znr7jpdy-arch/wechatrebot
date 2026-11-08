@@ -111,6 +111,7 @@ window.createManagerSettings = function (helpers) {
 
   function renderWebSearch(settings, preserveDraft = false) {
     state.webSearch = settings || {enabled: false, provider: "tavily", link_enabled: false, providers: {}};
+    state.webSearchUnconfirmed = false;
     const form = $("#webSearchForm");
     if (!form) return;
     const providerSelect = form.elements.provider;
@@ -139,6 +140,7 @@ window.createManagerSettings = function (helpers) {
         ? "服务商已选择；保存后会在需要时调用。"
         : "联网搜索当前关闭。保存后机器人不会发起搜索请求。";
     }
+    updateWebSearchActions();
   }
 
   function updateWebSearchProviderCopy() {
@@ -153,14 +155,47 @@ window.createManagerSettings = function (helpers) {
     $("#webSearchProviderSummary").innerHTML = `<div class="web-search-provider-summary-copy"><span class="eyebrow">当前服务商</span><strong>${escapeHtml(item.name || "未选择")}</strong><small>${website ? ` <a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">注册 / 获取密钥</a>` : ""}</small></div><span class="status-badge ${item.configured ? "online" : ""}">${item.configured ? `已配置 ${item.key_count || 1} 个密钥` : "尚未配置"}</span>`;
   }
 
-  async function loadWebSearchSettings() {
+  function webSearchDraftSnapshot() {
+    return JSON.stringify([Object.fromEntries(new FormData($("#webSearchForm"))), Boolean(state.webSearchClearKey)]);
+  }
+
+  function updateWebSearchActions() {
+    $("#webSearchForm button[type='submit']").disabled = Boolean(
+      state.webSearchSaving || state.webSearchLoading || state.webSearchUnconfirmed,
+    );
+    $("#reloadWebSearch").disabled = Boolean(state.webSearchSaving || state.webSearchLoading);
+  }
+
+  function reloadWebSearchSettings() {
+    if (state.webSearchSaving || state.webSearchLoading) return;
+    if (!state.webSearchDirty) { void loadWebSearchSettings(true); return; }
+    confirmAction({
+      title: "重新读取联网搜索设置？",
+      message: "将读取实际保存的设置并替换当前草稿；未保存的修改和输入的密钥会清除。取消可保留当前内容。",
+      confirmText: "重新读取",
+      pendingText: "正在读取…",
+      onConfirm: () => loadWebSearchSettings(true),
+    });
+  }
+
+  async function loadWebSearchSettings(replaceDraft = false) {
+    if (state.webSearchSaving || state.webSearchLoading) return;
+    const draft = webSearchDraftSnapshot();
+    state.webSearchLoading = true;
+    updateWebSearchActions();
     try {
       const settings = await api("get_web_search_settings");
-      if (!state.webSearchDirty) renderWebSearch(settings);
+      if (replaceDraft || !state.webSearchDirty) {
+        const preserveDraft = draft !== webSearchDraftSnapshot();
+        renderWebSearch(settings, preserveDraft);
+        if (replaceDraft) $("#webSearchNote").textContent = preserveDraft
+          ? "已读取实际设置；读取期间的新修改仍未保存，已为你保留。"
+          : "已重新读取实际保存的设置，请核对后再修改。";
+      }
     } catch (error) {
       $("#webSearchNote").textContent = error.message || "联网搜索设置读取失败。";
       reportError(error);
-    }
+    } finally { state.webSearchLoading = false; updateWebSearchActions(); }
   }
 
   async function saveWebSearchSettings(event) {
@@ -168,11 +203,10 @@ window.createManagerSettings = function (helpers) {
     const form = event.currentTarget;
     const button = form.querySelector("button[type='submit']");
     if (button.disabled) return;
-    const snapshot = () => JSON.stringify([Object.fromEntries(new FormData(form)), Boolean(state.webSearchClearKey)]);
-    const submitted = snapshot();
+    const submitted = webSearchDraftSnapshot();
     const note = $("#webSearchNote");
     state.webSearchSaving = true;
-    button.disabled = true;
+    updateWebSearchActions();
     button.textContent = "正在保存…";
     note.textContent = "正在保存并确认联网搜索设置…";
     try {
@@ -184,17 +218,18 @@ window.createManagerSettings = function (helpers) {
         clear_key: Boolean(state.webSearchClearKey),
       };
       const saved = await api("save_web_search_settings", values);
-      const preserveDraft = snapshot() !== submitted;
+      const preserveDraft = webSearchDraftSnapshot() !== submitted;
       renderWebSearch(saved, preserveDraft);
       note.textContent = preserveDraft ? "提交时的设置已保存；之后的修改仍未保存，请再次保存。"
         : saved.apply_state === "applied" ? "已热更新，下一条消息使用新配置。" : "已保存，机器人下次启动时使用。";
       toast(note.textContent);
     } catch (error) {
+      if (error.product?.code === "15006") state.webSearchUnconfirmed = true;
       note.textContent = error.message || "联网搜索设置保存失败。";
       reportError(error);
     } finally {
       state.webSearchSaving = false;
-      button.disabled = false;
+      updateWebSearchActions();
       button.textContent = "保存联网搜索";
     }
   }
@@ -351,6 +386,7 @@ window.createManagerSettings = function (helpers) {
     initializeSkins,
     loadMaintenance,
     openMemoryManager,
+    reloadWebSearchSettings,
     saveWebSearchSettings,
     selectSettingsSection,
     setSettingsSection,
