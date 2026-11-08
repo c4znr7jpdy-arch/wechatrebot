@@ -199,7 +199,10 @@ window.createManagerSettings = function (helpers) {
           : "已重新读取实际保存的设置，请核对后再修改。";
       }
     } catch (error) {
-      $("#webSearchNote").textContent = error.message || "联网搜索设置读取失败。";
+      state.webSearchUnconfirmed = true;
+      $("#webSearchStatus").textContent = "设置待确认";
+      $("#webSearchStatus").classList.remove("online");
+      $("#webSearchNote").textContent = `${error.message || "联网搜索设置读取失败。"} 请先重新读取设置，确认后再保存。`;
       reportError(error);
     } finally { state.webSearchLoading = false; updateWebSearchActions(); }
   }
