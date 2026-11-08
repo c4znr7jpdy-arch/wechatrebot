@@ -14,6 +14,33 @@ sys.path.insert(0, str(ROOT / "scripts"))
 SOURCE = ROOT / "vendor/data/plugins/jiang_image"
 
 
+def _chromium_socket_launch_options(arguments):
+    disabled = [arg for arg in arguments if arg.startswith("--disable-features=")]
+    if len(disabled) > 1:
+        raise RuntimeError("Expected at most one Chromium --disable-features default")
+    features = disabled[0].split("=", 1)[1].split(",") if disabled else []
+    features = list(dict.fromkeys([*filter(None, features), "TcpPortRandomizationWin"]))
+    return {"ignore_default_args": disabled, "args": ["--disable-features=" + ",".join(features)]}
+
+
+@pytest.fixture(scope="session")
+def manager_browser_launch_options():
+    if sys.platform != "win32":
+        return {}
+    from playwright.sync_api import sync_playwright
+
+    # Backport https://github.com/microsoft/playwright/pull/43605 without
+    # replacing Playwright's other disabled features or reading driver internals.
+    # A single short-lived probe captures the installed version's real defaults.
+    with sync_playwright() as runtime:
+        instance = runtime.chromium.launch(args=["--enable-automation"])
+        try:
+            arguments = instance.new_browser_cdp_session().send("Browser.getBrowserCommandLine")["arguments"]
+        finally:
+            instance.close()
+    return _chromium_socket_launch_options(arguments)
+
+
 @pytest.fixture(autouse=True)
 def manager_browser_failure_evidence(request, monkeypatch):
     """Keep startup evidence even when an early assertion skips final error checks."""
