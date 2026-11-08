@@ -30,16 +30,18 @@ def patched_plugin(tmp_path: Path) -> Path:
         capture_output=True,
         text=True,
     )
-    subprocess.run(
-        ["git", "apply", "--ignore-space-change", "--check", "-p1", str(PATCH)],
-        cwd=target,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "apply", "--ignore-space-change", "-p1", str(PATCH)],
-        cwd=target,
-        check=True,
-    )
+    patches = [PATCH, *sorted(PATCH.parent.glob(f"{PATCH.stem}--*.patch"))]
+    for patch in patches:
+        subprocess.run(
+            ["git", "apply", "--ignore-space-change", "--check", "-p1", str(patch)],
+            cwd=target,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "apply", "--ignore-space-change", "-p1", str(patch)],
+            cwd=target,
+            check=True,
+        )
     return target
 
 
