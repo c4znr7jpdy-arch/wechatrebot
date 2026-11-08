@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -121,12 +122,21 @@ def create_customer_backup(
             strict_timestamps=False,
         ) as archive:
             for source, relative in sources:
-                archive.write(source, relative.as_posix())
+                info = zipfile.ZipInfo.from_file(source, relative.as_posix(), strict_timestamps=False)
+                info.compress_type = archive.compression
+                info.compress_level = archive.compresslevel
+                digest = hashlib.sha256()
+                size = 0
+                with source.open("rb") as reader, archive.open(info, "w", force_zip64=True) as writer:
+                    while chunk := reader.read(1024 * 1024):
+                        writer.write(chunk)
+                        digest.update(chunk)
+                        size += len(chunk)
                 manifest_files.append(
                     {
                         "path": relative.as_posix(),
-                        "size": source.stat().st_size,
-                        "sha256": sha256_file(source),
+                        "size": size,
+                        "sha256": digest.hexdigest().upper(),
                     }
                 )
             manifest: dict[str, object] = {
