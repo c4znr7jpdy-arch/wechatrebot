@@ -1,0 +1,58 @@
+diff --git a/roles/front_desk.py b/roles/front_desk.py
+--- a/roles/front_desk.py
++++ b/roles/front_desk.py
+@@ -1022,6 +1022,8 @@
+             except Exception as e:
+                 logger.warning(f"AngelHeart[{chat_id}]: 启动助理休息失败: {e}")
+ 
++            self._ensure_prompt_text_for_empty_at(event, chat_id)
++
+             event.is_at_or_wake_command = True
+             logger.debug(f"AngelHeart[{chat_id}]: 已设置唤醒主脑标志")
+             # 秘书判断结束即释放单飞；助理生成/发送不再占用。
+@@ -1032,6 +1034,45 @@
+                 reason="reply_handoff",
+             )
+             # 需要回复时，由主框架继续处理该事件（一事件一子代理）
++
++    def _ensure_prompt_text_for_empty_at(
++        self, event: AstrMessageEvent, chat_id: str
++    ) -> None:
++        """保留仅点名事件的可见称呼，避免空正文被核心跳过而残留 running 工作。
++
++        只补 event.message_str；原始组件链与已记录的聊天内容保持不变。
++        媒体或引用本身已有内容，由核心继续按原路径处理。
++        """
++        try:
++            if (event.message_str or "").strip():
++                return
++            components = event.get_messages() or []
++            if any(
++                isinstance(comp, (Image, File, Reply))
++                or type(comp).__name__ in {"Record", "Video"}
++                for comp in components
++            ):
++                return
++            at_parts: List[str] = []
++            for component in components:
++                if not isinstance(component, At):
++                    continue
++                name = getattr(component, "name", None) or getattr(
++                    component, "display", None
++                )
++                name = str(name).strip() if name else ""
++                qq = str(getattr(component, "qq", "") or "").strip()
++                if name:
++                    at_parts.append(f"@{name}")
++                elif qq:
++                    at_parts.append(f"@{qq}")
++        except Exception:
++            logger.debug(f"AngelHeart[{chat_id}]: 补点名正文判断失败，跳过")
++            return
++
++        if at_parts:
++            event.message_str = " ".join(at_parts)
++            logger.debug(f"AngelHeart[{chat_id}]: 已补充仅点名事件正文后放行主脑")
+ 
+     async def _ensure_minimum_context(self, chat_id: str, event: AstrMessageEvent):
+         """

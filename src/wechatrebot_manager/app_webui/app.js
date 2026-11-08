@@ -757,6 +757,11 @@
     }
   }
 
+  async function openModelSettings() {
+    await navigate("settings");
+    if (state.activePage === "settings") selectSettingsSection("model");
+  }
+
   async function copyText(value, label = "群标识") {
     const text = String(value || "");
     if (!text) return;
@@ -815,9 +820,9 @@
   function managerCloseState() {
     return {
       dirty: Boolean(state.featureDirty || state.providerDirty || state.webSearchDirty
-        || state.scheduledDirty || coreSettings.dirty || hasGroupDrafts()),
+        || state.scheduledDirty || coreSettings.dirty || hasChatDrafts()),
       busy: Boolean(state.featureSaving || state.webSearchSaving || state.scheduledBusy
-        || coreSettings.busy || isProviderSaving() || state.historyExporting
+        || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
         || state.stopRequestPending || state.status?.busy),
       updating: Boolean(state.updateInstalling),
@@ -965,10 +970,7 @@
         </div>
       </article>`).join("");
     container.hidden = reminders.length === 0;
-    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", async () => {
-      await navigate("settings");
-      if (state.activePage === "settings") selectSettingsSection("model");
-    }));
+    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", openModelSettings));
     $$('[data-home-setup-dismiss]', container).forEach((button) => button.addEventListener("click", () => {
       state.dismissedHomeSetupAlerts.add(button.dataset.homeSetupDismiss);
       try {
@@ -1029,7 +1031,8 @@
       try { input.showPicker(); } catch (_error) { /* browser may already have opened it */ }
     });
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
-    $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
+    $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => item.dataset.homePage === "settings"
+      ? openModelSettings() : navigate(item.dataset.homePage)));
     $("#themeToggle").addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -1074,7 +1077,8 @@
       button.disabled = false;
     });
     $$("[data-help-target]").forEach((button) => {
-      button.addEventListener("click", () => navigate(button.dataset.helpTarget));
+      button.addEventListener("click", () => button.dataset.helpTarget === "settings"
+        ? openModelSettings() : navigate(button.dataset.helpTarget));
       button.disabled = false;
     });
     $("#refreshGroups").addEventListener("click", () => loadGroups(true));
@@ -1377,7 +1381,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasGroupDrafts, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,
@@ -1480,6 +1484,7 @@
     loadFeatures: (...args) => loadFeatures(...args),
     navigate: (...args) => navigate(...args),
     openFeature: (...args) => openFeature(...args),
+    openModelSettings: (...args) => openModelSettings(...args),
     renderProviderServices: (...args) => renderProviderServices(...args),
     reportError: (...args) => reportError(...args),
     safeImageUrl: (...args) => safeImageUrl(...args),
