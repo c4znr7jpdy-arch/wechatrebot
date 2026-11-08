@@ -591,6 +591,7 @@ def test_web_search_hot_apply_requires_requested_values_in_readback(monkeypatch,
         "key": "synthetic-new-key",
     })
     assert result["ok"] is False
+    assert result["error"]["code"] == "15006"
     assert "synthetic" not in str(result)
 
 
@@ -615,6 +616,35 @@ def test_web_search_hot_apply_preserves_unspecified_secrets_and_unrelated_change
     assert result["ok"] is True
     assert result["data"]["providers"]["bocha"]["configured"] is True
     assert "synthetic" not in str(result)
+
+
+@pytest.mark.parametrize("phase", ["before_submit", "submit", "readback"])
+def test_web_search_submission_uncertainty_uses_readback_guidance(monkeypatch, tmp_path, phase):
+    api = _api(tmp_path)
+    calls = []
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            calls.append(method)
+            if (phase == "before_submit" and calls == ["GET"]
+                    or phase == "submit" and method == "PUT"
+                    or phase == "readback" and calls == ["GET", "PUT", "GET"]):
+                raise model_api.EngineUnavailableError("synthetic-private-transport-details")
+            return {"config": {"provider_settings": {}}}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({"enabled": True, "provider": "bocha", "link_enabled": False})
+    assert result["ok"] is False
+    assert result["error"]["code"] == ("15001" if phase == "before_submit" else "15006")
+    if phase != "before_submit":
+        assert "重新读取" in result["error"]["message"]
+        assert result["error"]["retryable"] is False
+    assert "synthetic-private" not in str(result)
 
 
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
