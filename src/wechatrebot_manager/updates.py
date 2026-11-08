@@ -44,6 +44,12 @@ from .payload import (
     verify_payload,
 )
 from .single_instance import SingleInstanceLock
+from .update_cache import (
+    UPDATE_CACHE_MAX_AGE_SECONDS,
+    has_update_cache_receipt,
+    record_update_archive,
+    restore_update_archive,
+)
 from .update_errors import UpdateFailure
 from .update_logger import UpdateLogger
 from .windows_process_job import OwnedProcess, ProcessTreeStopError, start_owned_process
@@ -824,39 +830,45 @@ def prepare_update(
         working.mkdir()
     except OSError as exc:
         raise UpdateFailure("UPD-1015", str(exc)) from exc
-    archive = working / "update.zip.download"
-    request = urllib.request.Request(
-        release.package_url,
-        headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
-    )
     try:
-        logger.write("download_started", state="downloading", version=release.version)
-        digest = hashlib.sha256()
-        received = 0
-        with urllib.request.urlopen(
-            request, timeout=channel.request_timeout_seconds
-        ) as response, archive.open("wb") as output:
-            _safe_https_url(response.geturl())
-            length = response.headers.get("Content-Length")
-            if length is not None and int(length) != release.package_size:
-                raise UpdateError("更新包大小与发布清单不一致。")
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                received += len(chunk)
-                if received > min(channel.max_package_bytes, release.package_size):
-                    raise UpdateError("更新包下载体积超出发布清单。")
-                output.write(chunk)
-                digest.update(chunk)
-                if progress_callback is not None:
-                    progress_callback("download", received, release.package_size)
-        if received != release.package_size:
-            raise UpdateError("更新包下载不完整。")
-        if digest.hexdigest().upper() != release.package_sha256:
-            raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
         final_archive = working / "update.zip"
-        os.replace(archive, final_archive)
+        cached = restore_update_archive(
+            updates_root, release, final_archive, progress_callback=progress_callback,
+        )
+        if cached is None:
+            archive = working / "update.zip.download"
+            request = urllib.request.Request(
+                release.package_url,
+                headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
+            )
+            logger.write("download_started", state="downloading", version=release.version)
+            digest = hashlib.sha256()
+            received = 0
+            with urllib.request.urlopen(
+                request, timeout=channel.request_timeout_seconds
+            ) as response, archive.open("wb") as output:
+                _safe_https_url(response.geturl())
+                length = response.headers.get("Content-Length")
+                if length is not None and int(length) != release.package_size:
+                    raise UpdateError("更新包大小与发布清单不一致。")
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > min(channel.max_package_bytes, release.package_size):
+                        raise UpdateError("更新包下载体积超出发布清单。")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    if progress_callback is not None:
+                        progress_callback("download", received, release.package_size)
+            if received != release.package_size:
+                raise UpdateError("更新包下载不完整。")
+            if digest.hexdigest().upper() != release.package_sha256:
+                raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
+            os.replace(archive, final_archive)
+        else:
+            logger.write("download_restored", state="verified", version=release.version)
         try:
             payload_root = extract_update_archive(
                 final_archive,
@@ -888,6 +900,11 @@ def prepare_update(
         manager = payload_root / "manager" / "WeChatReBot.exe"
         if not manager.is_file() and verified.manifest.get("schema_version") != 2:
             raise UpdateError("更新包缺少桌面管理器。")
+        try:
+            record_update_archive(working, release, previous=cached)
+        except OSError as exc:
+            logger.write("cache_receipt_failed", state="verified", version=release.version,
+                         message=str(exc))
         logger.write("package_verified", state="verified", version=release.version)
         return PreparedUpdate(release, working, payload_root, final_archive)
     except Exception as exc:
@@ -1839,6 +1856,9 @@ def cleanup_stale_update_workdirs(
             if not candidate.is_dir() or candidate.stat().st_mtime > cutoff:
                 continue
             candidate.resolve().relative_to(updates.resolve())
+            if (candidate.stat().st_mtime > time.time() - UPDATE_CACHE_MAX_AGE_SECONDS
+                    and has_update_cache_receipt(candidate)):
+                continue
             shutil.rmtree(_extended_windows_path(candidate))
             removed += 1
         except (OSError, ValueError):
