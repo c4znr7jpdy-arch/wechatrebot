@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 RUNTIME_FILES = (
-    "json_io.py", "single_instance.py", "port_config.py", "customer_logs.py", "licensing-channel.json",
+    "json_io.py", "single_instance.py", "port_config.py", "licensing-channel.json",
     "licensing/__init__.py", "licensing/protocol.py", "licensing/config.py",
     "licensing/client.py", "licensing/cache.py", "licensing/device.py",
     "licensing/runtime_guard.py",

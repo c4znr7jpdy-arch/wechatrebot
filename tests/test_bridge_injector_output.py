@@ -2,8 +2,10 @@
 
 import asyncio
 import importlib
+import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -11,7 +13,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from wechatrebot_manager.licensing.bundle import install_runtime_bundle
 from test_license_runtime_patches import bridge, patched  # noqa: F401
 from test_bridge_task_lifecycle import application
 
@@ -21,25 +22,32 @@ def output_module(bridge):
     return importlib.import_module(bridge.app.__package__ + ".injector_output")
 
 
-def test_delivered_output_module_imports_from_minimal_runtime_bundle(output_module, tmp_path):
+def test_delivered_output_module_imports_without_manager_runtime(output_module, tmp_path):
     repository = Path(__file__).resolve().parents[1]
-    site_packages = tmp_path / "runtime/python/Lib/site-packages"
-    install_runtime_bundle(repository, site_packages)
-    code = """import importlib.util,sys
+    source = repository / "src/wechatrebot_manager/customer_logs.py"
+    target = "app/bridge/src/hook_bridge/customer_logs.py"
+    manifest = json.loads((repository / "release/source-manifest.json").read_text("utf-8"))
+    assert {"origin": "commercial", "source": "src/wechatrebot_manager/customer_logs.py",
+            "target": target} in manifest["entries"]
+    package = tmp_path / "app/bridge/src/hook_bridge"
+    package.mkdir(parents=True)
+    shutil.copy2(source, package / "customer_logs.py")
+    shutil.copy2(output_module.__file__, package / "injector_output.py")
+    shutil.copy2(Path(output_module.__file__).with_name("__init__.py"), package / "__init__.py")
+    assert (package / "customer_logs.py").read_bytes() == source.read_bytes()
+    code = """import importlib,sys
 from pathlib import Path
-site,source=sys.argv[1:]
-sys.path.insert(0,site)
-spec=importlib.util.spec_from_file_location('_delivered_injector_output',source)
-module=importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+source=sys.argv[1]
+sys.path.insert(0,source)
+module=importlib.import_module('hook_bridge.injector_output')
 assert module.sanitize_log_text('token=private-test-value') == 'token=***'
-sanitizer=sys.modules['wechatrebot_manager.customer_logs']
-assert Path(sanitizer.__file__).is_relative_to(Path(site))
-assert not (Path(site)/'wechatrebot_manager/runtime_config.py').exists()
-print('minimal runtime injector output import: passed')
+sanitizer=sys.modules['hook_bridge.customer_logs']
+assert Path(sanitizer.__file__).is_relative_to(Path(source))
+assert not any(name.startswith('wechatrebot_manager') for name in sys.modules)
+print('component injector output import: passed')
 """
     result = subprocess.run([
-        sys.executable, "-I", "-c", code, str(site_packages), output_module.__file__,
+        sys.executable, "-I", "-c", code, str(package.parent),
     ], capture_output=True, text=True, check=True)
     assert "injector output import: passed" in result.stdout
 

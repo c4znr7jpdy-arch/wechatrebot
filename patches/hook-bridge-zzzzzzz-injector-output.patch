@@ -125,7 +125,7 @@ index f5fb697..e916eac 100644
              self._consumer_task,
 diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py b/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py
 new file mode 100644
-index 0000000..54264cd
+index 0000000..3fa7bc8
 --- /dev/null
 +++ b/hook_41827_astrbot_bridge/src/hook_bridge/injector_output.py
 @@ -0,0 +1,107 @@
@@ -136,7 +136,7 @@ index 0000000..54264cd
 +import os
 +from typing import Any
 +
-+from wechatrebot_manager.customer_logs import sanitize_log_text
++from .customer_logs import sanitize_log_text
 +
 +
 +logger = logging.getLogger(__name__)

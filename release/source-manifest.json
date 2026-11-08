@@ -339,6 +339,11 @@
     },
     {
       "origin": "commercial",
+      "source": "src/wechatrebot_manager/customer_logs.py",
+      "target": "app/bridge/src/hook_bridge/customer_logs.py"
+    },
+    {
+      "origin": "commercial",
       "source": "src/wechatrebot_manager/task_store.py",
       "target": "app/astrbot/data/plugins/jiang_schedule/task_store.py"
     },
