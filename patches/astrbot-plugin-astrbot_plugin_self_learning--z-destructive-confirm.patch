@@ -1,0 +1,102 @@
+--- a/pages/dashboard/app.js
++++ b/pages/dashboard/app.js
+@@ -80,6 +80,7 @@
+       canvasBound: false,
+     },
+     toastTimer: null,
++    destructiveActionPending: false,
+   };
+ 
+   const physics = {
+@@ -504,6 +505,26 @@
+       modal?.addEventListener("cancel", () => finish(false), { once: true });
+       modal?.addEventListener("close", () => finish(false), { once: true });
+     });
++  }
++
++  async function runConfirmedAction(buttonEl, confirmation, handler) {
++    if (state.destructiveActionPending) return;
++    state.destructiveActionPending = true;
++    const disabled = buttonEl.disabled;
++    buttonEl.disabled = true;
++    buttonEl.classList.add("is-busy");
++    buttonEl.setAttribute("aria-busy", "true");
++    try {
++      if (!await showConfirm(...confirmation)) return;
++      await handler();
++    } catch (error) {
++      showToast(error.message || String(error), "error");
++    } finally {
++      state.destructiveActionPending = false;
++      buttonEl.disabled = disabled;
++      buttonEl.classList.remove("is-busy");
++      buttonEl.removeAttribute("aria-busy");
++    }
+   }
+ 
+   function closeModal() {
+@@ -1720,23 +1741,51 @@
+       group_id: buttonEl.dataset.groupId,
+       persona_id: buttonEl.dataset.personaId,
+     };
+-    const result = await apiPost("persona/action", body);
+-    if (action === "backup_detail" || action === "export") {
+-      showModal(action === "export" ? t("modal.personaExport", "人格导出") : t("modal.backupDetails", "备份详情"), `<pre class="code-preview">${escapeHtml(JSON.stringify(result.persona || result.backup || result, null, 2))}</pre>`);
+-      return;
+-    }
+-    showToast(result.message || t("messages.actionDone", "操作完成"), result.success ? "ok" : "error");
+-    state.pageData.persona = null;
+-    await loadPageData("persona-learning", { force: true });
++    const apply = async () => {
++      const result = await apiPost("persona/action", body);
++      if (action === "backup_detail" || action === "export") {
++        showModal(action === "export" ? t("modal.personaExport", "人格导出") : t("modal.backupDetails", "备份详情"), `<pre class="code-preview">${escapeHtml(JSON.stringify(result.persona || result.backup || result, null, 2))}</pre>`);
++        return;
++      }
++      showToast(result.message || t("messages.actionDone", "操作完成"), result.success ? "ok" : "error");
++      state.pageData.persona = null;
++      await loadPageData("persona-learning", { force: true });
++    };
++    if (action === "delete") {
++      const item = (state.pageData.lastPersonaItems || []).find((entry) => String(entry.persona_id || entry.id || entry.name) === body.persona_id);
++      const target = `${item?.name || body.persona_id}（ID：${body.persona_id}）`;
++      return runConfirmedAction(buttonEl, ["删除人格？", `将删除人格“${target}”。删除后不能直接撤销，请确认所选目标。`, "删除人格"], apply);
++    }
++    if (action === "backup_delete" || action === "backup_restore") {
++      const item = (state.pageData.persona?.backups?.backups || []).find((entry) => String(entry.id) === body.id
++        && String(entry.group_id || "") === String(body.group_id || ""));
++      const target = `${item?.backup_name || "人格备份"}（ID：${body.id}，群组：${body.group_id || "default"}）`;
++      const restoring = action === "backup_restore";
++      return runConfirmedAction(buttonEl, [restoring ? "恢复人格备份？" : "删除人格备份？",
++        restoring ? `将使用备份“${target}”恢复对应人格内容，可能覆盖当前内容。请确认备份和群组。`
++          : `将删除备份“${target}”。删除后不能直接撤销，请确认所选目标。`,
++        restoring ? "确认恢复" : "删除备份"], apply);
++    }
++    return apply();
+   }
+ 
+   async function handleContentAction(buttonEl) {
+-    const result = await apiPost("content/action", {
++    const body = {
+       action: buttonEl.dataset.contentAction,
+       bucket: buttonEl.dataset.bucket,
+       id: buttonEl.dataset.id,
+-    });
+-    showToast(result.message || t("messages.actionDone", "操作完成"), result.success ? "ok" : "error");
+-    state.pageData.content = null;
+-    await loadPageData("content", { force: true });
++    };
++    if (body.action !== "delete_content" && body.action !== "delete_batch") return;
++    const batch = body.action === "delete_batch";
++    const items = batch ? state.pageData.content?.batches?.batches : state.pageData.content?.content?.[body.bucket];
++    const item = (items || []).find((entry) => String(entry.id) === body.id);
++    const label = batch ? item?.batch_name || item?.batch_id : item?.title || item?.type;
++    const target = `${label || (batch ? "学习批次记录" : "学习内容")}（ID：${body.id}）`;
++    return runConfirmedAction(buttonEl, [batch ? "删除学习批次记录？" : "删除学习内容？",
++      `将删除“${target}”。删除后不能直接撤销，请确认所选目标。`, "确认删除"], async () => {
++      const result = await apiPost("content/action", body);
++      showToast(result.message || t("messages.actionDone", "操作完成"), result.success ? "ok" : "error");
++      state.pageData.content = null;
++      await loadPageData("content", { force: true });
++    });
+   }
