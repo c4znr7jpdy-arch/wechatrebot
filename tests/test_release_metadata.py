@@ -24,7 +24,7 @@ def _metadata_copy(tmp_path: Path) -> Path:
     package = target / "src" / "wechatrebot_manager"
     package.mkdir(parents=True)
     for name in (
-        "__init__.py", "task_store.py", "hook_recall_patch.py",
+        "__init__.py", "task_store.py", "customer_logs.py", "hook_recall_patch.py",
         "group_analysis_schedule.py", "group_feature_runtime.py",
     ):
         shutil.copy2(source / "src" / "wechatrebot_manager" / name, package)

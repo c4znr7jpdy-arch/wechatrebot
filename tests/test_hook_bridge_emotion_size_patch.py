@@ -28,6 +28,8 @@ def bridge(tmp_path_factory):
         subprocess.run(["git", "apply", "--ignore-space-change", str(patch)],
                        cwd=target, check=True, capture_output=True)
     package = target / "hook_41827_astrbot_bridge/src/hook_bridge"
+    for module_name in ("task_store.py", "customer_logs.py"):
+        shutil.copy2(ROOT / "src/wechatrebot_manager" / module_name, package / module_name)
     name = "_emotion_test_bridge"
     spec = importlib.util.spec_from_file_location(name, package / "__init__.py",
                                                    submodule_search_locations=[str(package)])
