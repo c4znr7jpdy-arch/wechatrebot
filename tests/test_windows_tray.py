@@ -118,7 +118,7 @@ def test_programmatic_update_close_bypasses_draft_prompt(monkeypatch, exit_jobs)
     monkeypatch.setattr(tray, "stop", lambda: calls.append("stop"))
     tray.permit_programmatic_close()
     assert tray.handle_window_closing() is None
-    assert calls == ["stop"]
+    assert calls == []  # The actual closed event owns notification-icon cleanup.
     assert exit_jobs == []
 
 
@@ -221,7 +221,7 @@ def test_programmatic_close_invalidates_pending_user_exit(monkeypatch, exit_jobs
     exit_jobs.pop()()
 
     assert "destroy" not in calls
-    assert calls.count("stop") == 1
+    assert calls.count("stop") == 0
     if stage in {"queued", "probe"}:
         assert "show" not in calls
     if stage != "confirmation":
@@ -248,7 +248,7 @@ def test_stale_destroy_error_cannot_revoke_programmatic_close(monkeypatch, exit_
     tray.request_exit()
     exit_jobs.pop()()
 
-    assert calls == ["destroy", "stop"]
+    assert calls == ["destroy"]
     assert tray._exit_requested
     assert not tray._exit_check_pending
     assert tray.handle_window_closing() is None

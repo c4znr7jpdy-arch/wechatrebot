@@ -820,6 +820,7 @@
         || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
         || state.startPreparing || state.startPending || state.stopPending
         || state.stopRequestPending || state.status?.busy),
+      updating: Boolean(state.updateInstalling),
     };
   }
 
@@ -1266,7 +1267,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { const pending = managerCloseState(); if (pending.dirty || pending.busy) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { const pending = managerCloseState(); if (pending.dirty || pending.busy || pending.updating) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
