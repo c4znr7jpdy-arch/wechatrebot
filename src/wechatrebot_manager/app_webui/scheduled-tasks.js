@@ -62,6 +62,9 @@ window.createScheduledTasks = function (helpers) {
     state.scheduledCommandCatalog = [];
     state.schedules = [];
     state.legacyMigrations = [];
+    const runs = $("#scheduledTaskRuns");
+    if (!runs.hidden) showScheduledList();
+    runs.innerHTML = "";
     $("#refreshSchedules").disabled = false;
     $("#scheduleContextMessage").textContent = "微信账号已变化，请重新读取任务列表。";
     $("#scheduleContextMessage").hidden = false;
@@ -795,13 +798,15 @@ window.createScheduledTasks = function (helpers) {
     $("#scheduleHeading").textContent = "执行记录";
     root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · 执行记录</h2><p>已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
     $("#scheduledRunsBack").addEventListener("click", showScheduledList);
+    const body = $("#scheduledRunsBody");
+    const current = () => body.isConnected && !root.hidden
+      && state.scheduledContext?.account_id === item.account_id;
     try {
       const data = await api("get_scheduled_task_runs", item.account_id, item.id);
-      const body = $("#scheduledRunsBody");
-      if (!body) return;
+      if (!current()) return;
       body.className = "schedule-runs-body";
       body.innerHTML = data.items?.length ? data.items.map((run) => `<article class="schedule-run"><header><strong>${escapeHtml(scheduledTime(run.scheduled_at || run.started_at || run.created_at || run.time))}</strong><span>${escapeHtml(scheduledResultText(run))}</span></header>${run.message ? `<p>${escapeHtml(run.message)}</p>` : ""}<ul>${(run.deliveries || run.targets || run.results || []).map((result) => `<li><strong>${escapeHtml(result.name || result.target?.name || item.targets?.find((target) => target.id === result.id && target.type === result.type)?.name || "发送对象")}</strong><span>${escapeHtml(SCHEDULED_RESULTS[result.status] || result.status || "等待发送")}</span>${result.message || result.error ? `<small>${escapeHtml(result.message || result.error)}</small>` : ""}</li>`).join("")}</ul></article>`).join("") : '<div class="empty-state compact"><h3>尚无执行记录</h3><p>任务到时执行后，可在这里查看每个对象的发送结果。</p></div>';
-    } catch (error) { if ($("#scheduledRunsBody")) $("#scheduledRunsBody").textContent = error.message; }
+    } catch (error) { if (current()) body.textContent = error.message; }
   }
 
   function renderSchedules() {
