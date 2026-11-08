@@ -20,6 +20,7 @@ window.createFeatureController = function (helpers) {
     toast,
     getCoreSettings,
   } = helpers;
+  const readOnlyFeatures = new Set();
 
   async function loadFeatures() {
     const list = $("#featureList");
@@ -150,7 +151,7 @@ window.createFeatureController = function (helpers) {
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
-    const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);
+    const cacheNeedsRefresh = Boolean(cached && (readOnlyFeatures.has(featureId) || (state.status?.online && !cached.engine_online)));
     if (cached) {
       useFeatureDetail(cached, afterSave, preserveTab);
       renderFeatureDetail();
@@ -168,6 +169,7 @@ window.createFeatureController = function (helpers) {
       const detail = await api("get_feature", featureId);
       if (load !== state.featureLoad) return;
       state.featureDetails[featureId] = structuredClone(detail);
+      readOnlyFeatures.delete(featureId);
       if (cached && state.featureDirty) return;
       useFeatureDetail(detail, afterSave, preserveTab);
       renderFeatureDetail();
@@ -180,13 +182,9 @@ window.createFeatureController = function (helpers) {
         if (note) note.textContent = "最新设置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。";
       }
       else {
+        readOnlyFeatures.add(featureId);
         useFeatureDetail(cached, afterSave, preserveTab);
         renderFeatureDetail();
-        $$("#featureForm input, #featureForm select, #featureForm textarea, #featureForm button").forEach((input) => { input.disabled = true; });
-        const save = $("#saveFeature");
-        if (save) save.disabled = true;
-        const note = $("#featureNote");
-        if (note) note.textContent = "最新设置读取失败；当前仅显示上次内容，请重新读取后再修改。";
       }
       reportError(error);
     }
@@ -456,6 +454,11 @@ window.createFeatureController = function (helpers) {
     $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
     $("#openFeatureHelp")?.addEventListener("click", () => openHelpForFeature(detail.display_name));
     $$("[data-action-bound]", $("#featureDetail")).forEach((button) => { button.disabled = false; });
+    if (readOnlyFeatures.has(state.selectedFeature)) {
+      $$("#featureForm input, #featureForm select, #featureForm textarea, #featureForm button, #saveFeature").forEach((input) => { input.disabled = true; });
+      const note = $("#featureNote");
+      if (note) note.textContent = "最新设置读取失败；当前仅显示上次内容，请重新读取后再修改。";
+    }
     if (pageOnly) void openEmbeddedFeaturePage(detail);
   }
 
@@ -639,7 +642,7 @@ window.createFeatureController = function (helpers) {
   }
 
   async function saveFeature() {
-    if (state.featureSaving) return;
+    if (state.featureSaving || readOnlyFeatures.has(state.selectedFeature)) return;
     const button = $("#saveFeature");
     try {
       const config = configFromForm();
