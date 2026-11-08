@@ -726,8 +726,9 @@ html[data-skin="soft"] .empty-state p {
 html[data-skin="soft"] .modal-backdrop,
 html[data-skin="soft"] .onboarding-backdrop {
   background: var(--veil);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  /* A live blurred backdrop flickers in WebView2 while runtime status repaints. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 html[data-skin="soft"] .modal,
