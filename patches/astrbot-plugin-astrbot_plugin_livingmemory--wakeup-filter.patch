@@ -1,3 +1,6 @@
+# Backport: LivingMemory PR #392, synthetic wakeup history filtering.
+# Source: https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory/pull/392
+# Implementation commit: 52e21ca8a9bc041b787b4091a8f656291e60fcaf
 --- a/core/managers/conversation_manager.py
 +++ b/core/managers/conversation_manager.py
 @@ -88,7 +88,7 @@
