@@ -257,6 +257,7 @@ class ModelApiMixin:
             return self._failed(exc, "15001")
 
     def save_web_search_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        submitted = False
         try:
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
@@ -270,6 +271,9 @@ class ModelApiMixin:
                 expected = {"provider_settings": {}}
                 apply_web_search_values(expected, values)
                 apply_web_search_values(config, values)
+                # A transport failure during PUT may follow a successful write.
+                # Ask for a readback instead of inviting repeated submission.
+                submitted = True
                 client.request("PUT", "/api/v1/system-config", config)
                 verified = client.request("GET", "/api/v1/system-config")
                 verified_config = verified.get("config") if isinstance(verified, dict) else None
@@ -294,7 +298,7 @@ class ModelApiMixin:
                 ),
             )
         except (OSError, ValueError, PluginCenterError, EngineUnavailableError) as exc:
-            return self._failed(exc, "15001")
+            return self._failed(exc, "15006" if submitted else "15001")
 
     def set_default_provider(self, provider_id: str) -> dict[str, object]:
         try:

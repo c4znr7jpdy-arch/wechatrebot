@@ -256,9 +256,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             ).start()
 
     def _runtime_active(self) -> bool:
-        status = self._lifecycle.refresh()
-        state = getattr(getattr(status, "state", ""), "value", getattr(status, "state", ""))
-        return str(state) != "STOPPED"
+        self._lifecycle.refresh()
+        return not self._lifecycle.maintenance_stopped()
 
     def _runtime_online(self) -> bool:
         return bool(getattr(self._lifecycle.refresh(), "online", False))

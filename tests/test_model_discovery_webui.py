@@ -114,7 +114,8 @@ def test_provider_save_preserves_newer_draft(browser, manager_url, tmp_path, cha
         assert page.evaluate("typeof window.finishPendingProviderSave") == "function"
         if change == "editor":
             page.locator("#closeProviderEditor").click()
-            page.locator("#modalConfirm").click()
+            if phase == "save":
+                page.locator("#modalConfirm").click()
             page.locator("[data-provider-create]").click()
             page.locator("#providerPreset").select_option("image_custom")
             page.locator('#providerForm [name="api_base"]').fill("https://review.example/v1")
