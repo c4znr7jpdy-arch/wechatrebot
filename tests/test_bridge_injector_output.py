@@ -70,6 +70,7 @@ def test_real_child_can_fill_both_streams_without_backpressure(output_module, ca
         process = spawn(
             "import os; "
             "os.write(1, b'STDOUT-PRIVATE-' + b'x' * (1024 * 1024)); "
+            "os.write(1, b'\\nstdout stage detail\\ntoken=private-stdout-value\\n'); "
             "os.write(2, b'Authorization: ' + b'a' * (1024 * 1024)); "
             "os.write(2, b'\\nfinal diagnostic\\napi_key=private-test-value\\n')"
         )
@@ -79,10 +80,13 @@ def test_real_child_can_fill_both_streams_without_backpressure(output_module, ca
             await wait_exit(process)
             await asyncio.wait_for(output.task, 2)
             assert process.returncode == 0
-            assert len(output._stderr) <= 4096
-            detail = output.stderr_detail()
+            assert all(len(tail) <= 4096 for tail in output._tails.values())
+            detail = output.detail()
             assert "final diagnostic" in detail and "api_key=***" in detail
+            assert "stdout=stdout stage detail\ntoken=***" in detail
+            assert "; stderr=final diagnostic" in detail
             assert "private-test-value" not in detail
+            assert "private-stdout-value" not in detail
             assert "a" * 100 not in detail  # Cut header value is omitted.
             assert "STDOUT-PRIVATE" not in detail
         finally:
@@ -93,6 +97,7 @@ def test_real_child_can_fill_both_streams_without_backpressure(output_module, ca
     captured = capsys.readouterr()
     assert "STDOUT-PRIVATE" not in caplog.text + captured.out + captured.err
     assert "private-test-value" not in caplog.text + captured.out + captured.err
+    assert "private-stdout-value" not in caplog.text + captured.out + captured.err
 
 
 def test_continuous_stdout_does_not_starve_stderr_or_cleanup(output_module, monkeypatch):
@@ -112,8 +117,8 @@ def test_continuous_stdout_does_not_starve_stderr_or_cleanup(output_module, monk
         try:
             await asyncio.sleep(0.01)
             assert 11 in reads and 12 in reads
-            assert "diagnostic remains available" in output.stderr_detail()
-            assert len(output._stderr) <= 4096
+            assert "diagnostic remains available" in output.detail()
+            assert all(len(tail) <= 4096 for tail in output._tails.values())
         finally:
             await asyncio.wait_for(output.close(), 1)
         assert output.task.done()
@@ -122,13 +127,13 @@ def test_continuous_stdout_does_not_starve_stderr_or_cleanup(output_module, monk
 
 
 @pytest.mark.parametrize("phase", ["startup", "runtime", "timeout"])
-def test_failure_diagnostics_use_available_redacted_stderr(bridge, output_module, phase):
+def test_failure_diagnostics_label_available_redacted_streams(bridge, output_module, phase):
     async def run():
-        # A real pipe with an open writer models a descendant retaining stderr.
-        read_fd, write_fd = os.pipe()
-        stream = os.fdopen(read_fd, "rb")
+        # Open writers model a descendant retaining both inherited pipe handles.
+        pipes = [os.pipe(), os.pipe()]
+        stdout, stderr = [os.fdopen(read_fd, "rb") for read_fd, _ in pipes]
         process = SimpleNamespace(
-            stdout=None, stderr=stream, returncode=7,
+            stdout=stdout, stderr=stderr, returncode=7,
             poll=lambda: None if phase == "timeout" else 7,
         )
         output = output_module.InjectorOutput(process)
@@ -141,20 +146,68 @@ def test_failure_diagnostics_use_available_redacted_stderr(bridge, output_module
             hook_api_host="127.0.0.1", hook_api_port=19088,
         )
         app._hook_api_accepting_connections = AsyncMock(return_value=False)
-        os.write(write_fd, b"Authorization: Bearer private-value\nfinal detail\n")
+        os.write(pipes[0][1], b"stdout stage\ntoken=private-stdout-value\n")
+        os.write(pipes[1][1], b"Authorization: Bearer private-value\nfinal detail\n")
         operation = app._watch_injector if phase == "runtime" else app._wait_hook_ready
         try:
             with pytest.raises(TimeoutError if phase == "timeout" else RuntimeError) as caught:
                 await asyncio.wait_for(operation(), 1)
             message = str(caught.value)
+            assert "stdout=stdout stage\ntoken=***" in message
+            assert "; stderr=Authorization: ***" in message
             assert "final detail" in message and "Authorization: ***" in message
             assert "private-value" not in message
+            assert "private-stdout-value" not in message
             assert ("injector running" if phase == "timeout" else "code=7") in message
         finally:
             await output.close()
-            os.close(write_fd)
+            for _, write_fd in pipes:
+                os.close(write_fd)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_exit_zero_stdout_error_keeps_hook_readiness_authoritative(bridge, output_module, ready):
+    async def run():
+        process = spawn("print('DLL injection failed; token=private-native-value')")
+        output = output_module.InjectorOutput(process)
+        output.start()
+        app = application(bridge)
+        app._injector, app._injector_output = process, output
+        app.settings = SimpleNamespace(
+            hook_start_timeout_seconds=0.01, hook_api_host="127.0.0.1", hook_api_port=19088,
+        )
+        app._hook_api_accepting_connections = AsyncMock(return_value=ready)
+        try:
+            await wait_exit(process)
+            assert process.returncode == 0
+            if ready:
+                await app._wait_hook_ready()
+            else:
+                with pytest.raises(TimeoutError) as caught:
+                    await asyncio.wait_for(app._wait_hook_ready(), 1)
+                message = str(caught.value)
+                assert "injector exited with code 0" in message
+                assert "stdout=DLL injection failed; token=***" in message
+                assert "; stderr=" in message and "private-native-value" not in message
+        finally:
+            await collect(process, output)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("name", ["stdout", "stderr"])
+def test_truncated_stream_omits_partial_credential_line(output_module, monkeypatch, name):
+    pipe = SimpleNamespace(close=lambda: None)
+    output = output_module.InjectorOutput(SimpleNamespace(**{name: pipe}))
+    output._active[name] = 11
+    chunks = iter((b"token=" + b"private-cut-value" * 400 + b"\nsafe stage\n", b""))
+    monkeypatch.setattr(output_module.os, "read", lambda *_: next(chunks))
+    detail = output.detail()
+    assert f"{name}=safe stage" in detail
+    assert "private-cut-value" not in detail
+    assert len(output._tails[name]) == 4096
 
 
 @pytest.mark.parametrize("phase", ["startup", "runtime"])
