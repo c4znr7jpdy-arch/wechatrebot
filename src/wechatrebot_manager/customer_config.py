@@ -39,6 +39,11 @@ WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
     ("exa", "Exa", "适合语义检索与研究型搜索。", "https://exa.ai/"),
 )
 _WEB_SEARCH_PROVIDER_KEYS = {item[0] for item in WEB_SEARCH_PROVIDERS}
+# Keep the existing manager/API ID while using the pinned core's tool ID.
+_WEB_SEARCH_CORE_PROVIDER_IDS = {"baidu_app_builder": "baidu_ai_search"}
+_WEB_SEARCH_PROVIDER_ALIASES = {
+    core_id: public_id for public_id, core_id in _WEB_SEARCH_CORE_PROVIDER_IDS.items()
+}
 _WEB_SEARCH_KEY_FIELDS = {
     "tavily": "websearch_tavily_key",
     "bocha": "websearch_bocha_key",
@@ -77,6 +82,7 @@ def web_search_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(settings, dict):
         settings = {}
     provider = str(settings.get("websearch_provider") or "tavily").strip().casefold()
+    provider = _WEB_SEARCH_PROVIDER_ALIASES.get(provider, provider)
     if provider not in _WEB_SEARCH_PROVIDER_KEYS:
         provider = "tavily"
     return {
@@ -104,7 +110,7 @@ def apply_web_search_values(
     if not isinstance(link_enabled, bool):
         raise ValueError("搜索结果链接开关格式无效。")
     settings["web_search"] = enabled
-    settings["websearch_provider"] = provider
+    settings["websearch_provider"] = _WEB_SEARCH_CORE_PROVIDER_IDS.get(provider, provider)
     settings["web_search_link"] = link_enabled
 
     key_value = values.get("key")
