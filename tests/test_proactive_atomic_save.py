@@ -122,3 +122,66 @@ def test_cancelling_save_waits_for_atomic_commit_before_releasing_caller_lock(st
     asyncio.run(run())
     assert json.loads(owner.session_data_file.read_text("utf-8")) == NEW
     assert sorted(path.name for path in owner.data_dir.iterdir()) == ["session_data.json"]
+
+
+@pytest.mark.parametrize("cancel_count", [2, 4])
+@pytest.mark.parametrize("fail_first_write", [False, True])
+def test_repeated_cancellation_keeps_newer_save_behind_running_writer(
+    storage, cancel_count, fail_first_write,
+):
+    owner, scope = storage
+    started, release = threading.Event(), threading.Event()
+    newer = {"wechat:FriendMessage:contact": {"unanswered_count": 3}}
+    calls = 0
+
+    def paused_dump(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("test serializer was not released")
+            if fail_first_write:
+                args[1].write('{"partial":')
+                raise OSError("test full disk after cancellation")
+        return json.dump(*args, **kwargs)
+
+    scope["json"] = NS(dump=paused_dump)
+
+    async def run():
+        newer_entered = asyncio.Event()
+
+        async def save_newer():
+            async with owner.data_lock:
+                newer_entered.set()
+                owner.session_data = newer
+                await owner._save_data_internal()
+
+        async def save():
+            async with owner.data_lock:
+                await owner._save_data_internal()
+
+        first = asyncio.create_task(save())
+        second = None
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            for index in range(cancel_count):
+                first.cancel()
+                await asyncio.wait({first}, timeout=0.01)
+                if index == 0:
+                    second = asyncio.create_task(save_newer())
+                assert not first.done()
+                assert owner.data_lock.locked()
+                assert not newer_entered.is_set()
+                assert json.loads(owner.session_data_file.read_text("utf-8")) == OLD
+        finally:
+            release.set()
+            await asyncio.gather(*[task for task in (first, second) if task], return_exceptions=True)
+        assert first.cancelled()
+        assert second.done() and not second.cancelled() and second.exception() is None
+        assert not owner.data_lock.locked()
+
+    asyncio.run(run())
+    assert json.loads(owner.session_data_file.read_text("utf-8")) == newer
+    assert sorted(path.name for path in owner.data_dir.iterdir()) == ["session_data.json"]
+    assert scope["logger"].error.call_count == int(fail_first_write)

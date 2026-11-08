@@ -10,7 +10,7 @@ diff --git a/core/data_storage.py b/core/data_storage.py
  from typing import Any
  
  import aiofiles
-@@ -49,20 +51,29 @@
+@@ -49,20 +51,37 @@
              self.session_data = {}
  
      async def _save_data_internal(self) -> None:
@@ -48,7 +48,15 @@ diff --git a/core/data_storage.py b/core/data_storage.py
 +            await asyncio.shield(write_task)
 +        except asyncio.CancelledError:
 +            # 线程写入不能被取消；等原子替换完成再交还锁，避免新保存越过旧写入。
-+            await asyncio.gather(write_task, return_exceptions=True)
++            completion = asyncio.gather(write_task, return_exceptions=True)
++            while not completion.done():
++                try:
++                    await asyncio.shield(completion)
++                except asyncio.CancelledError:
++                    continue
++            error = completion.result()[0]
++            if isinstance(error, OSError):
++                logger.error(f"[主动消息] 保存会话数据失败喵: {error}")
 +            raise
          except OSError as e:
              logger.error(f"[主动消息] 保存会话数据失败喵: {e}")
