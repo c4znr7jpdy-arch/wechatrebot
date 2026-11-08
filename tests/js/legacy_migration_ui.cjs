@@ -51,6 +51,7 @@ function fixture() {
   });
   for (const [startMarker, endMarker] of [
     ['  let pendingTaskReadback =', '  function renderGroupAnalysisMigration('],
+    ['  function showScheduledList(', '  async function openScheduledEditor('],
     ['  async function beginLegacyMigration(', '  async function scheduleAction('],
   ]) {
     const start = script.indexOf(startMarker), end = script.indexOf(endMarker, start);
