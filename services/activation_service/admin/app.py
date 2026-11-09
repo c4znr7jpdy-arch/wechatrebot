@@ -22,6 +22,7 @@ from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
 from .codes import FILTERS, checked_reference, detail_html, history_html, reference_fields
 from .github import GitHubError, GitHubReleases
 from .release_cache import ReleaseReadCache
+from .release_editor import ReleaseEditor, is_pending_version
 from .upload import MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, UPLOAD_ROUTE, authenticate_upload, receive_candidate
 
 _LOG = logging.getLogger(__name__)
@@ -319,25 +320,27 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             task.add_done_callback(transactions.discard)
             message = await asyncio.shield(task)
             return await redirect(request, "releases", message)
-        upload_form = ('<section class="panel"><h2>上传已签名更新包</h2>'
+        upload_form = ('<details class="panel"><summary>高级操作：手动上传更新包</summary><h2>上传已签名更新包</h2>'
             '<p class="hint">选择本地发布入口生成的候选记录、签名清单和全部更新 ZIP。总大小最多 4 GiB。上传通过后，再在下方确认切换稳定版本才会通知客户端。</p>'
             + _form(session, "releases/upload", _field("totp", "上传动态码", extra='inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"')
                 + _field("candidate", "发布候选记录", kind="file", extra='accept=".json"')
                 + _field("manifest", "签名稳定清单", kind="file", extra='accept=".json"')
                 + _field("packages", "更新 ZIP（选择清单要求的全部包）", kind="file", extra='accept=".zip" multiple')
-                + '<button type="submit">上传并验证</button>', multipart=True) + '</section>')
+                + '<button type="submit">上传并验证</button>', multipart=True) + '</details>')
         release_reads.snapshot("stable")
         release_reads.snapshot("listing")
-        body = (upload_form + '<section class="panel">' + _release_status(session, "releases")
+        body = (editor.panel(session) + '<section class="panel">' + _release_status(session, "releases")
+                + '<details><summary>高级操作：切换或回滚稳定清单</summary>'
                 + '<p class="hint">选择较早版本即为回滚发布清单；已经升级的客户端不会自动降级。</p>'
                 '<p class="hint">切换前会下载并校验更新包，可能需要几分钟。登录使用过的动态码不可重复使用。</p>'
                 + _form(session, "releases", '<fieldset id="release-switch-fields" disabled><input type="hidden" name="stable_digest" value="">'
                     + '<label>目标版本<select name="version"><option value="">正在读取版本…</option></select></label>'
                     + _field("totp", "重新输入当前动态码", extra='inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"')
-                    + '<button type="submit">确认切换稳定版本</button></fieldset>')
+                    + '<button type="submit">确认切换稳定版本</button></fieldset>') + '</details>'
                 + '<p id="release-listing-status" class="hint" role="status">正在读取发布记录…</p>'
                 + '<div class="scroll"><h2>最近 100 个发布记录</h2><table><thead><tr><th>版本</th><th>发布时间</th><th>资产</th><th>签名</th></tr></thead>'
-                + '<tbody id="release-rows"></tbody></table></div></div></section>' + _release_script())
+                + '<tbody id="release-rows"></tbody></table></div></div></section>' + upload_form
+                + f'<script src="{PREFIX}release-editor.js" defer></script>' + _release_script())
         return await render(request, "发布版本", body)
 
     async def release_status(request):
@@ -348,7 +351,14 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         kinds = ("stable", "listing") if scope == "releases" else ("stable",)
         if request.method == "POST":
             release_reads.invalidate(*kinds)
-        return web.json_response({kind: release_reads.snapshot(kind) for kind in kinds})
+        data = {kind: release_reads.snapshot(kind) for kind in kinds}
+        stable = data["stable"]["value"]
+        listing = data.get("listing", {}).get("value")
+        if stable and listing is not None:
+            data["listing"] = {**data["listing"], "value": [
+                {**item, "pending": bool(item["verified"] and is_pending_version(item["version"], stable["version"]))}
+                for item in listing]}
+        return web.json_response(data)
 
     async def upload(request):
         if upload_lock.locked():
@@ -398,6 +408,12 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     async def release_script(request):
         return web.Response(text=(_TEMPLATES / "releases.js").read_text("utf-8"), content_type="application/javascript")
 
+    async def editor_script(request):
+        return web.Response(text=(_TEMPLATES / "release-editor.js").read_text("utf-8"), content_type="application/javascript")
+
+    editor = ReleaseEditor(releases, auth, data_dir, clock=clock, audit=audit, render=render,
+        redirect=redirect, form=_form, field=_field, release_reads=release_reads, transactions=transactions)
+
     # The upload handler enforces the package and metadata limits while
     # streaming. Keep aiohttp's outer limit aligned so it does not reject a
     # valid multi-gigabyte multipart request before the handler can inspect CSRF
@@ -407,6 +423,11 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     app.router.add_get("/style.css", style)
     app.router.add_get("/codes.js", code_script)
     app.router.add_get("/releases.js", release_script)
+    app.router.add_get("/release-editor.js", editor_script)
+    app.router.add_get("/releases/editor", editor.load)
+    app.router.add_post("/releases/draft", editor.save)
+    app.router.add_post("/releases/preview", editor.preview)
+    app.router.add_post("/releases/publish", editor.publish)
     app.router.add_get("/releases/status", release_status)
     app.router.add_post("/releases/refresh", release_status)
     app.router.add_get("/codes/{code_id}", code_detail)

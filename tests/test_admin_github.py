@@ -12,6 +12,7 @@ import pytest
 from services.activation_service.admin.auth import private_json
 from services.activation_service.admin.github import GitHubError, GitHubReleases
 from wechatrebot_manager.updates import UpdateChannel, canonical_manifest_bytes
+from wechatrebot_manager.update_message import create_update_message, message_asset_name
 
 REPO = "test-owner/test-repo"
 BASE = f"https://github.com/{REPO}/releases/download/"
@@ -93,6 +94,137 @@ class FakeGitHub(GitHubReleases):
         if expected == self.target and self.fail_readback:
             raise GitHubError("readback mismatch")
         assert await self._download(BASE + "stable/stable.json", maximum=1024 * 1024) == expected
+
+
+class MessageGitHub(FakeGitHub):
+    def __init__(self, directory):
+        super().__init__(directory)
+        self.message_assets, self.message_contents = {}, {}
+        self.bad_message_readback = False
+        self.source_success = True
+        self.source_commit = "a" * 40
+
+    async def _api(self, method, path, *, payload=None, content=None, missing_ok=False):
+        if method == "GET" and path.startswith("/commits/v"):
+            result = {"sha": self.source_commit}
+        elif method == "GET" and path.startswith("/compare/"):
+            result = {"status": "ahead"}
+        elif method == "GET" and path.startswith("/actions/"):
+            result = {"workflow_runs": [{"head_sha": self.source_commit, "event": "push",
+                "run_number": 1, "status": "completed", "conclusion": "success" if self.source_success else "failure"}]}
+        elif method == "GET" and path == "/releases/tags/v1.0.1":
+            result = {"id": 1, "tag_name": "v1.0.1", "draft": False, "prerelease": False,
+                "assets": [{"name": "stable-1.0.1.json"}, *self.message_assets.values()]}
+        elif method == "POST" and path.startswith("/releases/1/assets?"):
+            name = parse_qs(urlsplit(path).query)["name"][0]
+            result = self.asset(100, name, content)
+            self.message_assets[name], self.message_contents[name] = result, content
+        else:
+            return await super()._api(method, path, payload=payload, content=content)
+        self.calls.append((method, path, payload))
+        return result
+
+    async def _download(self, url, **kwargs):
+        name = urlsplit(url).path.rsplit("/", 1)[-1]
+        if name.startswith("release-message-"):
+            self.downloads.append(url)
+            return b"corrupt public data" if self.bad_message_readback else self.message_contents[name]
+        return await super()._download(url, **kwargs)
+
+    def message(self):
+        return create_update_message(version="1.0.1", manifest_sha256=hashlib.sha256(self.target).hexdigest(),
+            title="🎉 新版本", notes="✨ 新功能\n\n✅ 问题修复")
+
+    async def publish_message(self, **kwargs):
+        return await self.switch("1.0.1", hashlib.sha256(self.previous).hexdigest(), message=self.message(),
+            expected_candidate_digest=hashlib.sha256(self.target).hexdigest(), **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_message_is_publicly_verified_before_any_stable_write(tmp_path):
+    github = MessageGitHub(tmp_path)
+    result = await github.publish_message()
+    assert result["changed"] and github.assets[22]["name"] == "stable.json"
+    expected = github.message()
+    name = message_asset_name(expected["manifest_sha256"])
+    assert json.loads(github.message_contents[name]) == expected
+    writes = [path for method, path, _ in github.calls if method == "POST"]
+    assert writes[0].startswith("/releases/1/assets?name=release-message-")
+    assert writes[1].startswith("/releases/9/assets?name=stable-pending-")
+    assert any(path.startswith("/actions/") for _, path, _ in github.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["source_ci", "source_commit", "candidate", "package", "stable", "remote_race"])
+async def test_message_publish_preflight_rejects_stale_or_unverified_candidates_without_writes(tmp_path, failure):
+    github = MessageGitHub(tmp_path)
+    github.source_success = failure != "source_ci"
+    github.source_commit = "not a commit" if failure == "source_commit" else "a" * 40
+    github.bad_package = failure == "package"
+    github.race_content = failure == "remote_race"
+    stable_digest = "0" * 64 if failure == "stable" else hashlib.sha256(github.previous).hexdigest()
+    candidate_digest = "0" * 64 if failure == "candidate" else hashlib.sha256(github.target).hexdigest()
+    with pytest.raises(GitHubError):
+        await github.switch("1.0.1", stable_digest, message=github.message(), expected_candidate_digest=candidate_digest)
+    assert not github.message_assets and github.assets[11]["name"] == "stable.json"
+    assert not any(method != "GET" for method, _, _ in github.calls)
+
+
+@pytest.mark.asyncio
+async def test_message_publish_rechecks_tag_after_package_validation(tmp_path, monkeypatch):
+    github = MessageGitHub(tmp_path)
+    api = github._api
+    commit_reads = 0
+
+    async def changed_tag(method, path, **kwargs):
+        nonlocal commit_reads
+        if method == "GET" and path.startswith("/commits/v"):
+            commit_reads += 1
+            if commit_reads == 3:
+                return {"sha": "b" * 40}
+        return await api(method, path, **kwargs)
+
+    monkeypatch.setattr(github, "_api", changed_tag)
+    with pytest.raises(GitHubError, match="不同源提交"):
+        await github.publish_message()
+    assert not github.message_assets and not any(method != "GET" for method, _, _ in github.calls)
+
+
+@pytest.mark.asyncio
+async def test_message_public_readback_failure_keeps_stable_and_same_message_can_retry(tmp_path):
+    github = MessageGitHub(tmp_path)
+    github.bad_message_readback = True
+    with pytest.raises(GitHubError, match="公网读回"):
+        await github.publish_message()
+    assert github.assets[11]["name"] == "stable.json" and len(github.message_assets) == 1
+    assert not any(path.startswith("/releases/9/assets?") for _, path, _ in github.calls)
+    github.bad_message_readback = False
+    assert (await github.publish_message())["changed"]
+    assert sum(method == "POST" and path.startswith("/releases/1/assets?") for method, path, _ in github.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_message_is_immutable_and_different_content_never_overwrites_it(tmp_path):
+    github = MessageGitHub(tmp_path)
+    github.bad_message_readback = True
+    with pytest.raises(GitHubError):
+        await github.publish_message()
+    github.bad_message_readback = False
+    github.calls.clear()
+    different = {**github.message(), "notes": "不同说明"}
+    with pytest.raises(GitHubError, match="文案已锁定"):
+        await github.switch("1.0.1", hashlib.sha256(github.previous).hexdigest(), message=different)
+    assert github.assets[11]["name"] == "stable.json"
+    assert not any(method != "GET" for method, _, _ in github.calls)
+
+
+@pytest.mark.asyncio
+async def test_message_for_another_manifest_is_rejected_before_upload(tmp_path):
+    github = MessageGitHub(tmp_path)
+    with pytest.raises(GitHubError, match="签名清单不一致"):
+        await github.switch("1.0.1", hashlib.sha256(github.previous).hexdigest(),
+            message={**github.message(), "manifest_sha256": "b" * 64})
+    assert not any(method != "GET" for method, _, _ in github.calls)
 
 
 @pytest.mark.asyncio

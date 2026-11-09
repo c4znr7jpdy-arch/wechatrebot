@@ -489,13 +489,21 @@ def check_for_update(
         raise UpdateError("更新清单不是有效 JSON。") from exc
     if not isinstance(payload, dict):
         raise UpdateError("更新清单根节点格式错误。")
-    return parse_update_manifest(
+    release = parse_update_manifest(
         payload,
         channel,
         current_version=current_version,
         current_build=current_build,
         install_root=install_root,
     )
+    if release is not None:
+        from .update_message import load_update_message
+
+        message = load_update_message(channel, version=release.version,
+                                      manifest_sha256=hashlib.sha256(content).hexdigest())
+        if message is not None:
+            release = replace(release, title=message["title"], notes=(message["notes"],))
+    return release
 
 
 def _safe_archive_path(value: str) -> Path:

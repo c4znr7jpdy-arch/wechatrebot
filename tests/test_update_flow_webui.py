@@ -705,3 +705,32 @@ def test_long_update_notes_scroll_with_actions_visible_and_keyboard_escape(updat
     assert body.evaluate("node => node.scrollTop") == 0
     page.locator("#modalCancel").click()
     expect(page.locator("#modalBackdrop")).to_be_hidden()
+
+
+@pytest.mark.parametrize("width,height", [(1380, 860), (390, 700)])
+def test_update_notes_preserve_multiline_emoji_and_literal_markup(update_page, tmp_path, width, height):
+    page = update_page
+    page.set_viewport_size({"width": width, "height": height})
+    notes = ("✨ 体验优化\n\n🛠️ 修复连接提示\n1. 保留你填写的编号和空行\n"
+             '<img src="missing" onerror="window.notesExecuted=true">\n'
+             + "\n".join(f"第 {index + 1} 项：完善更新体验。" for index in range(50)))
+    page.evaluate("""notes => {
+      window.testRelease.title = '🎉 本次更新';
+      window.testRelease.notes = [notes];
+    }""", notes)
+    _check_automatically(page)
+    message = page.locator("#modalMessage")
+    assert message.text_content().startswith(f"🎉 本次更新\n\n{notes}\n\n更新包约 ")
+    assert message.evaluate("node => getComputedStyle(node).whiteSpace") == "pre-wrap"
+    expect(message.locator("*")).to_have_count(0)
+    assert not page.evaluate("Boolean(window.notesExecuted)")
+    assert page.locator("#modalBody").evaluate("node => node.scrollHeight > node.clientHeight")
+    assert not message.evaluate("node => node.scrollWidth > node.clientWidth")
+    for selector in ["#modalTitle", "#modalCancel", "#modalConfirm"]:
+        bounds = page.locator(selector).bounding_box()
+        assert bounds and bounds["y"] >= 20 and bounds["y"] + bounds["height"] <= height - 20
+    page.screenshot(path=str(tmp_path / f"update-multiline-notes-{width}.png"))
+    page.locator("#modalCancel").click()
+    expect(page.locator("#modalBackdrop")).to_be_hidden()
+    assert page.evaluate("window.updateCalls.download") == []
+    assert page.evaluate("window.updateCalls.install") == []
