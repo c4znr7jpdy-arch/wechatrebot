@@ -163,3 +163,31 @@ def test_late_autocomplete_response_cannot_replace_newer_input_suggestions(conti
     assert page.locator("#catalogSearch").input_value() == "新片"
     assert page.locator("#searchAutocomplete [role=option]").filter(has_text="新片正片").is_visible()
     assert page.locator("#searchAutocomplete [role=option]").filter(has_text="旧片").count() == 0
+
+
+def test_search_response_preserves_filter_edited_while_search_was_pending(continuity_page):
+    page, _ = continuity_page()
+    pending = []
+
+    def respond(route):
+        query = parse_qs(urlsplit(route.request.url).query)["q"][0]
+        if query == "仙剑":
+            pending.append(route)
+        else:
+            route.fulfill(json=search_payload(query))
+
+    page.route("**/api/search?*", respond)
+    search = page.locator("#catalogSearch")
+    with page.expect_request(lambda request: "/api/search?" in request.url
+                             and parse_qs(urlsplit(request.url).query).get("q") == ["仙剑"]):
+        search.fill("仙剑")
+        search.press("Enter")
+    search.fill("外传")
+    response = search_payload("仙剑")
+    response["items"] = [item("仙剑正片"), item("仙剑外传")]
+    pending[0].fulfill(json=response)
+    page.locator('#recommendations[aria-busy="false"]').wait_for(state="attached")
+    assert search.input_value() == "外传"
+    assert page.locator(".recommend-card:visible strong").all_text_contents() == ["仙剑外传"]
+    assert "找到 1 部作品" in page.locator("#recommendationsSummary").inner_text()
+    assert parse_qs(urlsplit(page.url).fragment) == {"search": ["仙剑"], "q": ["外传"]}

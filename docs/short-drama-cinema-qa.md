@@ -190,11 +190,11 @@ Codex 内置浏览器另打开隔离的本机预览，以来源目录中的《�
 
 搜索输入使用 16px 字体，保留正常页面缩放。全源搜索按钮移至输入行右侧，加载文案保持固定宽度。输入至少两字、停顿 350ms 后查询现有全源接口，联想下拉最多六个片名；结果页继续展示服务端联想词。支持中文输入法、方向键选择、回车搜索、点击选择、Esc/清空/失焦关闭；独立取消和版本检查阻止旧词的响应覆盖新词。保留已提交的搜索词，并避免按原词再次过滤而隐藏模糊匹配结果。
 
-本地实际定向验证共 201 项通过：
+本地实际定向验证共 202 项通过：
 
 - `python -m pytest tests/test_short_drama_recommendation_ratio.py tests/test_short_drama_source_switching.py tests/test_short_drama_player_hardening.py tests/test_short_drama_player_controls.py tests/test_short_drama_catalog_search.py tests/test_hosted_tweet_pages.py -q --tb=short`：153 passed。
 - `python -m pytest tests/test_short_drama_player_continuity.py -q --tb=short`：37 passed。
-- `python -m pytest tests/test_short_drama_search_interactions.py -q`：11 passed。
+- `python -m pytest tests/test_short_drama_search_interactions.py -q`：12 passed；最后与 continuity 合跑为 49 passed，覆盖正式搜索未返回时继续编辑的筛选保持。
 - 抽取候选页面内联脚本运行 `node --check`，以及 `python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。
 
 Browser 插件在本机候选页面验证 390×844 与 1440×960 布局、页面身份、非空内容、无错误覆盖层、控制台、推荐换一换与搜索交互；320px 布局另由定向测试覆盖。最初预览的固定联想样本没有“走马上任”，已切换为真实全源搜索响应重验：输入“走马”下拉出现“走马上任”，点击后查询十源并显示对应版本，回车搜索同样生效。源覆盖会随网络变化，另一次查询为 9/10 并正确提示一个来源暂不可用。截图保存在任务工作区外。

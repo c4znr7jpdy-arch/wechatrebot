@@ -1169,7 +1169,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +938,661 @@
+@@ -537,8 +938,662 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1776,6 +1776,7 @@ diff --git a/index.html b/index.html
 +          const coverage = Number.isFinite(total) && Number.isFinite(searched) ? ` · 已查询 ${searched}/${total} 个来源` : '';
 +          catalogSummary = `找到 ${items.length} 个结果${coverage}${failures ? ` · ${failures} 个来源暂不可用` : ''}`;
 +          recommendationsSummary.textContent = catalogSummary;
++          if (normalizeSearchQuery(catalogSearch.value) !== query) filterCatalog();
 +          renderWatchHistory(); hydrateCatalog();
 +        } catch (_error) {
 +          if (controller === searchController) {
@@ -1832,7 +1833,7 @@ diff --git a/index.html b/index.html
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -549,31 +1603,39 @@
+@@ -549,31 +1604,39 @@
            if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
@@ -1880,7 +1881,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1643,24 @@
+@@ -581,19 +1644,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1912,7 +1913,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1681,15 @@
+@@ -614,27 +1682,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1947,7 +1948,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1751,90 @@
+@@ -696,27 +1752,90 @@
          updateQualityActive();
        };
  
@@ -2045,7 +2046,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1842,42 @@
+@@ -724,24 +1843,42 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -2100,7 +2101,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1885,20 @@
+@@ -749,21 +1886,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -2128,7 +2129,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,68 +1908,148 @@
+@@ -773,68 +1909,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2319,7 +2320,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +2071,11 @@
+@@ -856,10 +2072,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2332,7 +2333,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +2098,7 @@
+@@ -882,7 +2099,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2341,7 +2342,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +2106,117 @@
+@@ -890,22 +2107,117 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2471,7 +2472,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2229,44 @@
+@@ -918,19 +2230,44 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2521,7 +2522,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2277,15 @@
+@@ -941,6 +2278,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2537,7 +2538,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2295,45 @@
+@@ -950,20 +2296,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
