@@ -245,3 +245,106 @@ async def test_close_before_refresh_starts_clears_loading_state():
     assert cache.snapshot("stable")["loading"]
     await cache.close()
     assert not cache.snapshot("stable")["loading"] and not cache._tasks
+
+
+@pytest.mark.asyncio
+async def test_read_waits_for_one_shared_refresh_and_returns_completed_snapshots():
+    started, ready = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def stable():
+        nonlocal calls
+        calls += 1
+        started.set()
+        await ready.wait()
+        return {"version": "1.0.1"}
+
+    cache = ReleaseReadCache(SimpleNamespace(stable=stable), ttl=0)
+    readers = [asyncio.create_task(cache.read("stable")) for _ in range(2)]
+    try:
+        await started.wait()
+        await asyncio.sleep(0)
+        assert not any(reader.done() for reader in readers)
+        ready.set()
+        results = await asyncio.gather(*readers)
+        assert calls == 1
+        assert results == [{"value": {"version": "1.0.1"}, "loading": False,
+                            "error": "", "age_seconds": 0}] * 2
+    finally:
+        ready.set()
+        await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_one_client_does_not_cancel_the_shared_read():
+    started, ready, cancelled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def stable():
+        started.set()
+        try:
+            await ready.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return {"version": "1.0.1"}
+
+    cache = ReleaseReadCache(SimpleNamespace(stable=stable))
+    first = asyncio.create_task(cache.read("stable"))
+    second = asyncio.create_task(cache.read("stable"))
+    try:
+        await started.wait()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert not cancelled.is_set() and not second.done()
+        ready.set()
+        assert (await second)["value"] == {"version": "1.0.1"}
+        assert not cancelled.is_set()
+    finally:
+        ready.set()
+        await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_read_follows_invalidation_to_the_new_generation():
+    started, cancelled, ready = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def stable():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        await ready.wait()
+        return {"version": "new"}
+
+    cache = ReleaseReadCache(SimpleNamespace(stable=stable))
+    reader = asyncio.create_task(cache.read("stable"))
+    try:
+        await started.wait()
+        cache.invalidate("stable")
+        await cancelled.wait()
+        ready.set()
+        assert (await reader)["value"] == {"version": "new"}
+        assert calls == 2
+    finally:
+        ready.set()
+        await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_read_returns_safe_timeout_in_the_single_response():
+    async def stable():
+        await asyncio.Event().wait()
+
+    cache = ReleaseReadCache(SimpleNamespace(stable=stable), timeout=0.01)
+    try:
+        result = await asyncio.wait_for(cache.read("stable"), timeout=1)
+        assert result == {"value": None, "loading": False,
+                          "error": "GitHub 查询超时，请稍后重试。", "age_seconds": None}
+    finally:
+        await cache.close()

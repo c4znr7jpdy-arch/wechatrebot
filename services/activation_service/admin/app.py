@@ -351,7 +351,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         kinds = ("stable", "listing") if scope == "releases" else ("stable",)
         if request.method == "POST":
             release_reads.invalidate(*kinds)
-        data = {kind: release_reads.snapshot(kind) for kind in kinds}
+        values = await asyncio.gather(*(release_reads.read(kind) for kind in kinds))
+        data = dict(zip(kinds, values))
         stable = data["stable"]["value"]
         listing = data.get("listing", {}).get("value")
         if stable and listing is not None:

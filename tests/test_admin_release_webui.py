@@ -1,5 +1,6 @@
 """Navigation and typed release forms remain usable during slow remote reads."""
 import asyncio
+import json
 import threading
 
 from playwright.sync_api import expect
@@ -10,6 +11,38 @@ from services.activation_service.admin.github import GitHubError
 from test_admin_app import PASSWORD
 from test_admin_upload_webui import _expand_advanced, upload_server  # noqa: F401
 from test_manager_startup import browser  # noqa: F401
+
+
+def test_release_status_reads_once_per_visit_and_manual_refresh(browser, upload_server):
+    server = upload_server
+    page = browser.new_page(ignore_https_errors=True)
+    requests = []
+    loading = {"value": None, "loading": True, "error": "", "age_seconds": None}
+    page.route("**/releases/status?scope=releases", lambda route: route.fulfill(
+        content_type="application/json", body=json.dumps({"stable": loading, "listing": loading})))
+    page.on("request", lambda request: requests.append((request.method, request.url))
+            if "/releases/status?scope=releases" in request.url
+            or request.url.endswith("/releases/refresh") else None)
+    try:
+        page.goto(server.url + "login")
+        page.get_by_label("管理密码", exact=True).fill(PASSWORD)
+        page.get_by_label("6 位动态码").fill(totp(server.secret, server.clock[0] // 30))
+        page.get_by_role("button", name="登录", exact=True).click()
+        page.get_by_role("link", name="发布版本", exact=True).click()
+        expect(page.locator("#stable-status")).to_contain_text("正在读取")
+        page.wait_for_timeout(2200)
+        assert [method for method, _ in requests] == ["GET"]
+        page.get_by_role("button", name="刷新版本信息", exact=True).click()
+        expect(page.locator("#stable-version")).to_contain_text("1.0.0")
+        page.wait_for_timeout(1200)
+        assert [method for method, _ in requests] == ["GET", "POST"]
+        page.get_by_role("link", name="激活码", exact=True).click()
+        page.get_by_role("link", name="发布版本", exact=True).click()
+        expect(page.locator("#stable-status")).to_contain_text("正在读取")
+        page.wait_for_timeout(1200)
+        assert [method for method, _ in requests] == ["GET", "POST", "GET"]
+    finally:
+        page.close()
 
 
 @pytest.mark.parametrize("width,height", [(1366, 900), (390, 844)])
@@ -37,8 +70,11 @@ def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
         monkeypatch.setattr(server.github, kind, slow(kind))
     page = browser.new_page(ignore_https_errors=True, viewport={"width": width, "height": height})
     errors = []
+    release_status_requests = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("request", lambda request: release_status_requests.append(request.url)
+            if request.method == "GET" and "/releases/status?scope=releases" in request.url else None)
     try:
         page.goto(server.url + "login")
         page.get_by_label("管理密码", exact=True).fill(PASSWORD)
@@ -46,10 +82,13 @@ def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
         page.get_by_role("button", name="登录", exact=True).click()
         expect(page.get_by_text("授权数据库连接正常")).to_be_visible(timeout=2000)
         assert page.url == server.url
-        expect(page.locator("#stable-status")).to_contain_text("正在读取")
+        expect(page.locator("#stable-version")).to_contain_text("正在读取")
         page.get_by_role("link", name="发布版本", exact=True).click()
         assert page.url == server.url + "releases"
         expect(page).to_have_title("发布版本 · WeChatReBot 管理后台")
+        expect(page.locator("#stable-version")).to_contain_text("正在读取")
+        page.wait_for_timeout(1200)
+        assert len(release_status_requests) == 1
         _expand_advanced(page, "高级操作：手动上传更新包")
         _expand_advanced(page, "高级操作：切换或回滚稳定清单")
         upload = page.locator('form[action$="/releases/upload"]')
@@ -62,7 +101,7 @@ def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
         })
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         page.screenshot(path=str(tmp_path / f"release-loading-{width}.png"), full_page=True)
-        # Returning from the back/forward cache during a read resumes polling.
+        # Returning from the back/forward cache during a read performs one load.
         page.evaluate("""() => {
             window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
             window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
@@ -71,6 +110,9 @@ def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
             gate.set()
         expect(page.locator("#stable-version")).to_contain_text("1.0.0")
         expect(fields.locator('[name="version"]')).to_be_enabled()
+        assert len(release_status_requests) == 2
+        page.wait_for_timeout(1200)
+        assert len(release_status_requests) == 2
         fields.locator('[name="version"]').select_option("1.0.1")
         fields.locator('[name="totp"]').fill("654321")
         state["changed"] = True
