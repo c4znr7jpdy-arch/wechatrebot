@@ -241,15 +241,13 @@ async def test_signed_manifest_verification_rejects_tampering_cross_repo_and_non
 
 
 @pytest.mark.asyncio
-async def test_listing_reuses_metadata_with_bounded_concurrency_and_original_order(tmp_path, monkeypatch):
+async def test_listing_returns_metadata_without_waiting_for_historical_downloads(tmp_path, monkeypatch):
     github = FakeGitHub(tmp_path)
     versions = [f"1.0.{index}" for index in range(6)]
     releases = [{"tag_name": "v" + version, "draft": False, "prerelease": False,
                  "published_at": version, "assets": [{"name": f"stable-{version}.json", "size": 100}]}
                 for version in versions]
-    calls, started, finished = [], [], []
-    gate, first, four_started, others_finished = (asyncio.Event() for _ in range(4))
-    active = peak = 0
+    calls = []
 
     async def api(method, path, **kwargs):
         calls.append((method, path))
@@ -257,48 +255,18 @@ async def test_listing_reuses_metadata_with_bounded_concurrency_and_original_ord
         return releases
 
     async def download(url, **kwargs):
-        nonlocal active, peak
-        version = urlsplit(url).path.rsplit("/", 1)[-1].removeprefix("stable-").removesuffix(".json")
-        active += 1
-        peak = max(peak, active)
-        started.append(version)
-        if len(started) == 4:
-            four_started.set()
-        try:
-            await gate.wait()
-            if version == versions[0]:
-                await first.wait()
-            finished.append(version)
-            if len(finished) == 5:
-                others_finished.set()
-            return signed(github.signer, version)
-        finally:
-            active -= 1
+        raise AssertionError("History downloads must not block the version selector")
 
     monkeypatch.setattr(github, "_api", api)
     monkeypatch.setattr(github, "_download", download)
-    task = asyncio.create_task(github.listing())
-    try:
-        await asyncio.wait_for(four_started.wait(), timeout=1)
-        assert len(started) == 4 and not task.done()
-        gate.set()
-        await asyncio.wait_for(others_finished.wait(), timeout=1)
-        first.set()
-        result = await asyncio.wait_for(task, timeout=1)
-    finally:
-        gate.set()
-        first.set()
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-    assert peak == 4 and finished[-1] == versions[0]
+    result = await asyncio.wait_for(github.listing(), timeout=1)
     assert [item["version"] for item in result] == versions
-    assert all(item["verified"] and not item["error"] for item in result)
+    assert all(item["available"] and not item["verified"] and not item["error"] for item in result)
     assert calls == [("GET", "/releases?per_page=100")]
 
 
 @pytest.mark.asyncio
-async def test_listing_isolates_invalid_missing_tampered_and_failed_candidates(tmp_path, monkeypatch):
+async def test_metadata_availability_does_not_mark_candidates_as_verified(tmp_path, monkeypatch):
     github = FakeGitHub(tmp_path)
 
     def item(version, **changes):
@@ -326,14 +294,19 @@ async def test_listing_isolates_invalid_missing_tampered_and_failed_candidates(t
     monkeypatch.setattr(github, "_download", download)
     result = await github.listing()
     assert [entry["version"] for entry in result] == ["1.0.0", "../../unsafe", "1.0.1", "1.0.2", "1.0.3", "1.0.4", "1.0.05"]
-    assert [entry["verified"] for entry in result] == [True, False, False, False, False, True, False]
+    assert [entry["available"] for entry in result] == [True, False, False, True, True, True, False]
+    assert not any(entry["verified"] for entry in result)
     assert "版本号无效" in result[1]["error"]
     assert "缺少签名清单" in result[2]["error"]
-    assert "验签" in result[3]["error"]
-    assert "下载中断" in result[4]["error"]
-    assert "正式版本" in result[6]["error"]
-    assert {urlsplit(url).path.rsplit("/", 1)[-1] for url in downloads} == {
-        "stable-1.0.0.json", "stable-1.0.2.json", "stable-1.0.3.json", "stable-1.0.4.json"}
+    assert "标签格式" in result[6]["error"]
+    assert not downloads
+    for version, error in (("1.0.2", "验签"), ("1.0.3", "下载中断")):
+        async def candidate_api(method, path, **kwargs):
+            return item(version)
+
+        monkeypatch.setattr(github, "_api", candidate_api)
+        with pytest.raises(GitHubError, match=error):
+            await github.candidate(version)
 
 
 @pytest.mark.asyncio

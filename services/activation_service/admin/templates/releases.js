@@ -41,7 +41,8 @@
         line.textContent = `${asset.name} · ${Number(asset.size).toLocaleString()} 字节`;
         assets.append(line);
       }
-      row.insertCell().textContent = item.verified ? "签名通过" : `不可选：${item.error}`;
+      row.insertCell().textContent = item.verified ? "签名通过"
+        : item.available ? "选择后校验，发布前重新核验" : `不可选：${item.error}`;
       fragment.append(row);
     }
     rows.replaceChildren(fragment);
@@ -59,15 +60,15 @@
     const listing = data.listing;
     if (listing.value) renderRows(listing.value);
     listingStatus.textContent = statusText(listing, "发布记录", Boolean(rowsKey));
-    const verified = (listing.value || []).filter(item => item.verified);
-    const ready = stable.value && stable.value.verified && verified.length > 0;
+    const available = (listing.value || []).filter(item => item.available ?? item.verified);
+    const ready = stable.value && stable.value.verified && available.length > 0;
     if (ready) {
-      const key = stable.value.digest + JSON.stringify(verified.map(item => item.version));
+      const key = stable.value.digest + JSON.stringify(available.map(item => item.version));
       if (!formKey || (!edited && key !== formKey)) {
         const select = form.elements.namedItem("version");
         const selected = select.value;
-        select.replaceChildren(...verified.map(item => new Option(item.version, item.version)));
-        if (verified.some(item => item.version === selected)) select.value = selected;
+        select.replaceChildren(...available.map(item => new Option(item.version, item.version)));
+        if (available.some(item => item.version === selected)) select.value = selected;
         form.elements.namedItem("stable_digest").value = stable.value.digest;
         formKey = key;
         fields.disabled = false;
@@ -76,8 +77,8 @@
       }
     }
     fields.querySelector('button[type="submit"]').disabled = !ready || stable.loading || listing.loading || Boolean(stable.error || listing.error);
-    if (!listing.loading && listing.value && verified.length === 0 && !listing.error) {
-      listingStatus.textContent += " 暂无签名通过的可选版本。";
+    if (!listing.loading && listing.value && available.length === 0 && !listing.error) {
+      listingStatus.textContent += " 暂无包含签名清单的可选版本。";
     }
   }
 
@@ -86,7 +87,7 @@
     busy = true;
     refresh.disabled = true;
     controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 65000);
+    const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const options = {signal: controller.signal, cache: "no-store", credentials: "same-origin"};
       let url = `/wechatrebot-admin/releases/status?scope=${encodeURIComponent(scope)}`;

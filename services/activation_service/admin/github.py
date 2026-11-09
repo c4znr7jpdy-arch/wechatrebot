@@ -23,7 +23,6 @@ from .auth import TOKEN_FILE, private_json, read_private_json
 
 _PUBLIC_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
 _RECOVERY_FILE = "admin-release-recovery.json"
-_LISTING_CONCURRENCY = 4
 
 
 class GitHubError(RuntimeError):
@@ -201,40 +200,35 @@ class GitHubReleases:
         return raw, release
 
     async def listing(self) -> list[dict]:
+        """List metadata only; selecting a candidate verifies its current signed manifest."""
         values = await self._api("GET", "/releases?per_page=100")
         if not isinstance(values, list):
             raise GitHubError("GitHub 发布列表格式无效。")
-        semaphore = asyncio.Semaphore(_LISTING_CONCURRENCY)
-
-        async def entry(item):
-            tag = item["tag_name"]
-            assets = item.get("assets", [])
-            result = {"version": tag[1:], "published_at": item.get("published_at", ""),
-                      "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)}
-                                 for a in assets if isinstance(a, dict)] if isinstance(assets, list) else [],
-                      "verified": False, "error": ""}
-            try:
-                version = str(Version(tag[1:]))
-                async with semaphore:
-                    # The list already contains the release metadata. Actual
-                    # promotion still calls candidate() for a fresh tag lookup.
-                    await self._candidate_manifest(item, version)
-                result["verified"] = True
-            except InvalidVersion:
-                result["error"] = "版本号无效。"
-            except GitHubError as exc:
-                result["error"] = str(exc)
-            return result
-
-        candidates = []
+        results = []
         for item in values:
             if not isinstance(item, dict):
                 continue
             tag = item.get("tag_name", "")
             if not isinstance(tag, str) or not tag.startswith("v") or item.get("draft") or item.get("prerelease"):
                 continue
-            candidates.append(entry(item))
-        return list(await asyncio.gather(*candidates))
+            assets = item.get("assets", [])
+            result = {"version": tag[1:], "published_at": item.get("published_at", ""),
+                      "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)}
+                                 for a in assets if isinstance(a, dict)] if isinstance(assets, list) else [],
+                      "verified": False, "available": False, "error": ""}
+            try:
+                version = str(Version(tag[1:]))
+                if tag != f"v{version}":
+                    raise GitHubError("版本标签格式无效。")
+                if not any(asset["name"] == f"stable-{version}.json" for asset in result["assets"]):
+                    raise GitHubError("该版本缺少签名清单。")
+                result["available"] = True
+            except InvalidVersion:
+                result["error"] = "版本号无效。"
+            except GitHubError as exc:
+                result["error"] = str(exc)
+            results.append(result)
+        return results
 
     async def _readback(self, expected: bytes, *, attempts: int = 10) -> None:
         failure = None
