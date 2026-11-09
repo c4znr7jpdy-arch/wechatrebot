@@ -95,6 +95,7 @@ def relationship_actions(browser, manager_url, tmp_path):
         yield view
         assert not view.errors, view.errors
     finally:
+        page.unroute_all(behavior="ignoreErrors")
         for route in view.posts:
             route.abort()
         page.close()
