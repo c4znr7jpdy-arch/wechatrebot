@@ -167,8 +167,13 @@ def test_corrupt_or_unavailable_storage_does_not_block_player(continuity_page, s
     assert page.locator("#video").evaluate("video => video.readyState") >= 2
     assert page.locator(".history-row").count() == 1
     if block_storage:
+        page.evaluate("history.replaceState(null, '', location.pathname + location.search)")
         page.reload()
+        page.locator('#recommendations[aria-busy="false"]').wait_for(state="attached")
         assert page.locator(".history-row").count() == 0
+        open_first(page)
+        assert page.locator(".history-row").count() == 1
+        assert "仅在本次页面保留" in page.locator("#historyStatus").inner_text()
 
 
 def test_intro_outro_skip_settings_are_per_work_and_do_not_double_advance(continuity_page):
