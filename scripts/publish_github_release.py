@@ -33,6 +33,9 @@ from source_inputs import verify_source_inputs
 import publish_manager_update as publisher
 from build_update_release import attach_incremental_payloads
 from wechatrebot_manager.payload import sha256_file
+from wechatrebot_manager.update_message import (
+    MAX_MESSAGE_BYTES, message_asset_name, parse_update_message,
+)
 from wechatrebot_manager.updates import (
     UpdateChannel,
     UpdateError,
@@ -207,8 +210,9 @@ def upload_assets(repo: str, tag: str, paths: list[Path], *, clobber: bool = Tru
          *(["--clobber"] if clobber else [])])
 
 
-def publish_release(repo: str, tag: str) -> None:
-    _gh(["release", "edit", tag, "-R", repo, "--draft=false"])
+def publish_release(repo: str, tag: str, *, latest: bool | None = None) -> None:
+    _gh(["release", "edit", tag, "-R", repo, "--draft=false",
+         *([f"--latest={str(latest).lower()}"] if latest is not None else [])])
 
 
 def download_asset(repo: str, tag: str, name: str, directory: Path) -> Path:
@@ -391,9 +395,33 @@ def _verify_web_candidate(marker: Path, *, assets: list[Path], repo: str,
         raise ValueError("网页候选与本地签名包或目标提交不同，拒绝混合恢复")
 
 
+def _verified_message_asset(repo: str, tag: str, *, assets: list[Path], remote_assets: dict,
+                            version: str, channel: UpdateChannel, work_root: Path) -> str:
+    """Only the presentation asset bound to this exact signed manifest may coexist."""
+    manifest_path = next((p for p in assets if p.name == f"stable-{version}.json"), None)
+    if manifest_path is None:
+        return ""
+    digest = sha256_file(manifest_path).lower()
+    name = message_asset_name(digest)
+    if name not in remote_assets:
+        return ""
+    _verify_signed_manifest(_load_manifest(manifest_path), channel, version)
+    size = remote_assets[name].get("size")
+    if type(size) is not int or not 0 < size <= MAX_MESSAGE_BYTES:
+        raise ValueError("网页更新说明资产大小无效")
+    path = download_asset(repo, tag, name, work_root / "remote-check")
+    with path.open("rb") as handle:
+        raw = handle.read(MAX_MESSAGE_BYTES + 1)
+    if len(raw) != size or len(raw) > MAX_MESSAGE_BYTES:
+        raise ValueError("网页更新说明资产大小与下载内容不一致")
+    parse_update_message(json.loads(raw), version=version, manifest_sha256=digest)
+    return name
+
+
 def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], version: str,
                     assets: list[Path], work_root: Path, timeout: int, resume: bool = False,
-                    target: str | None = None, channel: UpdateChannel | None = None) -> None:
+                    target: str | None = None, channel: UpdateChannel | None = None,
+                    latest: bool = True) -> None:
     exists = release_exists(repo, tag)
     if exists and not resume:
         raise ValueError(f"Release {tag} 已存在；请用 --resume --output 原产物目录恢复同一候选")
@@ -420,6 +448,9 @@ def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], 
             _verify_web_candidate(marker, assets=unique, repo=repo, version=version,
                                   target=target or _git_head(), channel=channel or load_update_channel())
             unexpected.remove("publish-candidate.json")
+        message_name = _verified_message_asset(repo, tag, assets=unique, remote_assets=remote_assets,
+            version=version, channel=channel or load_update_channel(), work_root=work_root)
+        unexpected.discard(message_name)
         if unexpected:
             raise ValueError(f"远端 Release 含本候选之外的资产，拒绝混合发布：{', '.join(sorted(unexpected))}")
         for path in all_assets:
@@ -433,10 +464,10 @@ def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], 
             pending.remove(path)
     else:
         create_release(repo, tag, title=f"{Version(version)} {title.strip()}".strip(), notes_file=notes_file,
-                       target=target or _git_head(), latest=True)
+                       target=target or _git_head(), latest=latest)
     # An interrupted upload is recovered by re-reading the remote inventory, never by blindly replacing it.
     upload_assets(repo, tag, pending, clobber=False)
-    publish_release(repo, tag)
+    publish_release(repo, tag, latest=False if not latest else None)
     _verify_release_target(repo, tag, target or _git_head())
     for path in unique:
         if path.name.endswith(".sha256"):
@@ -580,6 +611,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-tests", action="store_true")
     parser.add_argument("--skip-remote-smoke", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--prepare-only", action="store_true",
+                        help="上传并验证候选，等待网页维护者填写说明并二次确认；不切换稳定清单")
     parser.add_argument("--resume", action="store_true", help="从 --output 恢复原签名候选和未完成的上传；不重新签名")
     parser.add_argument("--yes", action="store_true")
     return parser
@@ -638,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("必须使用 Python 3.13 x64 执行发布脚本")
     if args.resume and args.output is None:
         parser.error("--resume 必须同时指定原 --output 产物目录")
+    if args.prepare_only and args.rollback:
+        parser.error("--prepare-only 不能与 --rollback 同时使用")
     channel = load_update_channel()
     repo = repo_name_with_owner()
     if not args.dry_run:
@@ -698,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:
         "manifest": str(release.manifest_path), "manifest_sha256": sha256_file(release.manifest_path),
         "package_url": release.package_url,
         "stable_manifest_url": stable_manifest_url(repo), "dry_run": args.dry_run,
+        "prepare_only": args.prepare_only,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if args.dry_run:
@@ -718,12 +754,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _publish_assets(repo, tag, title=candidate["title"], notes=tuple(candidate["notes"]), version=version,
                         assets=[*assets, versioned], work_root=work_root, timeout=channel.request_timeout_seconds,
-                        resume=args.resume, target=candidate["target"], channel=channel)
+                        resume=args.resume, target=candidate["target"], channel=channel,
+                        latest=not args.prepare_only)
     except Exception as exc:
         receipt.update(status="failed_before_promotion", error=_safe_error(exc))
         _write_json(receipt_path, receipt)
         raise
     receipt["assets_verified"] = True
+    if args.prepare_only:
+        receipt.update(status="awaiting_admin_confirmation", stable_changed=False,
+                       prepared_at=datetime.now(timezone.utc).isoformat())
+        _write_json(receipt_path, receipt)
+        print(json.dumps(receipt, ensure_ascii=False, indent=2))
+        print("候选已上传并通过公网验证，稳定清单未改变。请在网页后台填写更新说明，预览并二次确认发布。")
+        return 0
     _write_json(receipt_path, receipt)
     _finish_publication(repo, release, channel=channel, work_root=work_root, target=candidate["target"],
                         previous=candidate.get("previous_manifest"), skip_smoke=args.skip_remote_smoke,

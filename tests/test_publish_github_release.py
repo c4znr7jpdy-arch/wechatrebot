@@ -484,6 +484,52 @@ def test_main_rollback_calls_rollback_stable(tmp_path: Path, monkeypatch) -> Non
     assert calls == [(REPO, "0.9.8")]
 
 
+def test_prepare_only_verifies_public_assets_without_promoting_stable(tmp_path, monkeypatch):
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    prefix = module.asset_prefix(REPO, "v0.9.9")
+    built = _fake_build(root, module, "0.9.9", prefix)
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda options, **k: _move_build(built, options.output))
+    gh = _FakeGh({("release", "view", "v0.9.9"): subprocess.CalledProcessError(1, "gh", stderr="release not found")})
+    monkeypatch.setattr(module, "_gh", gh)
+    verified = []
+    monkeypatch.setattr(module, "verify_public_asset", lambda url, **k: verified.append(url))
+    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: pytest.fail("must await webpage confirmation"))
+    output = root / "artifacts" / "publish"
+
+    assert module.main(["--prepare-only", "--output", str(output), "--yes"]) == 0
+
+    receipt = json.loads((output / "publication-receipt.json").read_text("utf-8"))
+    assert receipt["status"] == "awaiting_admin_confirmation"
+    assert receipt["assets_verified"] is True and receipt["stable_changed"] is False
+    assert set(verified) == {built[0].package_url, built[1].package_url, built[1].payload_url,
+                             module.asset_url(REPO, "v0.9.9", "stable-0.9.9.json")}
+    create = next(call for call in gh.calls if call[:2] == ["release", "create"])
+    assert "--latest=false" in create
+    publish = next(call for call in gh.calls if call[:2] == ["release", "edit"])
+    assert "--latest=false" in publish
+    assert all("stable" not in call for call in gh.calls)
+
+
+def test_prepare_only_asset_failure_never_promotes_or_claims_ready(tmp_path, monkeypatch):
+    module = _module()
+    root, _ = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    built = _fake_build(root, module, "0.9.9", module.asset_prefix(REPO, "v0.9.9"))
+    monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda options, **k: _move_build(built, options.output))
+    monkeypatch.setattr(module, "_publish_assets", lambda *a, **k: (_ for _ in ()).throw(ValueError("public digest mismatch")))
+    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: pytest.fail("must not promote"))
+    output = root / "artifacts" / "publish"
+    with pytest.raises(ValueError, match="digest mismatch"):
+        module.main(["--prepare-only", "--output", str(output), "--yes"])
+    receipt = json.loads((output / "publication-receipt.json").read_text("utf-8"))
+    assert receipt["status"] == "failed_before_promotion" and not receipt.get("assets_verified")
+
+
+def test_prepare_only_cannot_be_combined_with_rollback():
+    with pytest.raises(SystemExit):
+        _module().main(["--prepare-only", "--rollback", "1.0.1"])
+
+
 def test_powershell_entry_forwards_all_arguments() -> None:
     script = (Path(__file__).parents[1] / "scripts" / "publish-github-release.ps1").read_text(encoding="utf-8")
     assert "publish_github_release.py" in script and "@args" in script and "py -3.13" in script
@@ -698,7 +744,48 @@ def test_resume_rejects_different_remote_bytes_before_any_write(tmp_path, monkey
     assert all(c[:2] == ["release", "view"] for c in gh.calls)
 
 
-def test_resume_does_not_build_or_require_private_key(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed", [None, "version", "manifest_sha256", "package", "controls", "name", "size"])
+def test_resume_only_accepts_display_asset_bound_to_signed_manifest(tmp_path, monkeypatch, changed):
+    module = _module()
+    channel, release = _recoverable_candidate(module, tmp_path / "candidate")
+    versioned = release.manifest_path.with_name("stable-1.0.1.json")
+    versioned.write_bytes(release.manifest_path.read_bytes())
+    digest = module.sha256_file(versioned).lower()
+    name = module.message_asset_name(digest)
+    value = {"schema_version": 1, "version": "1.0.1", "manifest_sha256": digest,
+             "title": "✨ 更新", "notes": "第一行\n\n✅ 第二段"}
+    if changed == "version":
+        value["version"] = "1.0.2"
+    elif changed == "manifest_sha256":
+        value["manifest_sha256"] = "f" * 64
+    elif changed == "package":
+        value["package"] = {"url": "https://other.example/update.zip"}
+    elif changed == "controls":
+        value["notes"] = "bad\x00text"
+    elif changed == "name":
+        name = module.message_asset_name("f" * 64)
+    message = tmp_path / name
+    message.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    gh = _FakeGh({("release", "view"): json.dumps({"isDraft": False, "assets": [{
+        "name": name, "size": module.MAX_MESSAGE_BYTES + 1 if changed == "size" else message.stat().st_size}]})})
+    monkeypatch.setattr(module, "_gh", gh)
+    monkeypatch.setattr(module, "download_asset", lambda *a: message)
+    monkeypatch.setattr(module, "_verify_release_target", lambda *a, **k: None)
+    monkeypatch.setattr(module, "verify_public_asset", lambda *a, **k: None)
+    kwargs = dict(title="t", notes=(), version="1.0.1", assets=[release.archive_path, versioned],
+                  work_root=tmp_path / "work", timeout=1, resume=True, target="commit", channel=channel)
+    if changed:
+        with pytest.raises(ValueError):
+            module._publish_assets(REPO, "v1.0.1", **kwargs)
+        assert all(call[:2] == ["release", "view"] for call in gh.calls)
+    else:
+        module._publish_assets(REPO, "v1.0.1", **kwargs)
+        upload = next(call for call in gh.calls if call[:2] == ["release", "upload"])
+        assert str(message) not in upload and "--clobber" not in upload
+
+
+@pytest.mark.parametrize("prepare_only", [False, True])
+def test_resume_does_not_build_or_require_private_key(tmp_path, monkeypatch, prepare_only):
     module = _module()
     output = tmp_path / "artifacts" / "candidate"
     channel, release = _recoverable_candidate(module, output)
@@ -710,8 +797,14 @@ def test_resume_does_not_build_or_require_private_key(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "fetch_stable_manifest", lambda _: None)
     monkeypatch.setattr(module, "_build_candidate", lambda *a, **k: pytest.fail("rebuilt candidate"))
     monkeypatch.setattr(module, "_publish_assets", lambda *a, **k: None)
-    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: None)
-    assert module.main(["--resume", "--output", str(output), "--yes"]) == 0
+    finished = []
+    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: finished.append(a))
+    assert module.main(["--resume", "--output", str(output), "--yes",
+                        *(["--prepare-only"] if prepare_only else [])]) == 0
+    assert bool(finished) is not prepare_only
+    if prepare_only:
+        receipt = json.loads((output / "publication-receipt.json").read_text("utf-8"))
+        assert receipt["status"] == "awaiting_admin_confirmation" and receipt["assets_verified"]
 
 
 def test_failed_smoke_restores_previous_signed_manifest_and_receipt(tmp_path, monkeypatch):

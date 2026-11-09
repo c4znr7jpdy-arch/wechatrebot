@@ -48,6 +48,7 @@
   }
 
   function render(data) {
+    document.dispatchEvent(new CustomEvent("releases-loaded", {detail: data}));
     const stable = data.stable;
     if (stable.value) {
       stableVersion.textContent = `${stable.value.version}（签名已验证）`;
@@ -107,6 +108,7 @@
       if (!stopped) {
         stableStatus.textContent = error.name === "AbortError" ? "版本信息读取超时，请稍后点击刷新重试。" : error.message;
         if (fields) fields.querySelector('button[type="submit"]').disabled = true;
+        document.dispatchEvent(new CustomEvent("releases-unavailable"));
       }
     } finally {
       clearTimeout(timeout);

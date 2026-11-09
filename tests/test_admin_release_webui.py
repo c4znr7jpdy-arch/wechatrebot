@@ -8,7 +8,7 @@ import pytest
 from services.activation_service.admin.auth import totp
 from services.activation_service.admin.github import GitHubError
 from test_admin_app import PASSWORD
-from test_admin_upload_webui import upload_server  # noqa: F401
+from test_admin_upload_webui import _expand_advanced, upload_server  # noqa: F401
 from test_manager_startup import browser  # noqa: F401
 
 
@@ -50,6 +50,8 @@ def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
         page.get_by_role("link", name="发布版本", exact=True).click()
         assert page.url == server.url + "releases"
         expect(page).to_have_title("发布版本 · WeChatReBot 管理后台")
+        _expand_advanced(page, "高级操作：手动上传更新包")
+        _expand_advanced(page, "高级操作：切换或回滚稳定清单")
         upload = page.locator('form[action$="/releases/upload"]')
         expect(upload).to_be_visible(timeout=2000)
         fields = page.locator("#release-switch-fields")

@@ -711,6 +711,7 @@ tbody tr:hover { background: #fbfdff; }
 .modal-subject dt { color: var(--muted); font-size: 12px; }
 .modal-subject dd { margin: 5px 0 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .modal p { margin: 0; color: var(--muted); }
+#modalMessage { white-space: pre-wrap; line-height: 1.75; }
 .modal-progress { height: 8px; margin-top: 18px; overflow: hidden; background: var(--blue-100); border-radius: 999px; }
 .modal-progress span { display: block; width: 0; height: 100%; background: var(--blue-600); border-radius: inherit; transition: width .2s ease; }
 .modal-progress span.is-indeterminate { animation: update-progress-sweep 1.3s ease-in-out infinite alternate; }

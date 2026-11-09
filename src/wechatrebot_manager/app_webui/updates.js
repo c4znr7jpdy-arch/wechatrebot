@@ -166,7 +166,12 @@ window.createUpdateNotifications = function (helpers) {
     const mandatory = Boolean(release.mandatory);
     confirmAction({
       title: mandatory ? `必须更新到 v${release.version}` : `发现新版本 v${release.version}`,
-      message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${formatBytes(release.package_size)}。点击更新后开始下载，下载完成后会请你确认关闭机器人及当前连接的微信，再安装更新。`,
+      message: [
+        release.title || "新版本已就绪",
+        release.notes?.length ? release.notes.join("\n") : "",
+        `更新包约 ${formatBytes(release.package_size)}。`,
+        "点击更新后开始下载。下载完成后，会再次请你确认关闭机器人及当前连接的微信，再安装更新。",
+      ].filter(Boolean).join("\n\n"),
       confirmText: "立即更新",
       cancelText: mandatory ? "稍后更新" : "稍后提醒",
       intent: "primary",
