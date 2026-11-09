@@ -298,8 +298,13 @@ def test_timeupdate_clears_stale_buffering_message(continuity_page):
     assert page.locator("#status").inner_text() == "正在播放"
 
 
-@pytest.mark.parametrize("dispatch_update", [True, False])
-def test_advancing_playback_avoids_false_stall_even_with_low_ready_state(continuity_page, dispatch_update):
+@pytest.mark.parametrize("dispatch_update, advances", [
+    pytest.param(True, (3,), id="timeupdate-then-stall"),
+    pytest.param(False, (3,), id="no-timeupdate-then-stall"),
+    pytest.param(True, (1.04,), id="tiny-final-frame-then-stall"),
+    pytest.param(True, (3, 5, 7, 9, 11), id="ongoing-progress-then-stall"),
+])
+def test_advancing_playback_avoids_false_stall_even_with_low_ready_state(continuity_page, dispatch_update, advances):
     page, _ = continuity_page()
     open_first(page)
     page.clock.install()
@@ -313,19 +318,24 @@ def test_advancing_playback_avoids_false_stall_even_with_low_ready_state(continu
       });
       video.dispatchEvent(new Event('waiting'));
     }""")
-    page.clock.fast_forward(9000)
-    page.locator("#video").evaluate("""(video, dispatchUpdate) => {
-      window.mediaProgress = 3;
-      if (dispatchUpdate) video.dispatchEvent(new Event('timeupdate'));
-    }""", dispatch_update)
+    for progress in advances:
+        page.clock.fast_forward(9000)
+        page.locator("#video").evaluate("""(video, [dispatchUpdate, progress]) => {
+          window.mediaProgress = progress;
+          if (dispatchUpdate) video.dispatchEvent(new Event('timeupdate'));
+        }""", [dispatch_update, progress])
+        assert page.locator("#retry").is_hidden()
     page.clock.fast_forward(10000)
     assert page.locator("#status").inner_text() == "正在播放"
     assert page.locator("#retry").is_hidden()
-    # A subsequent genuine stall still exposes retry/source switching.
-    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('waiting'))")
-    page.clock.fast_forward(18001)
+    # Without timeupdate, progress is first observed by the watchdog at 18 seconds.
+    page.clock.fast_forward(7000 if dispatch_update else 16000)
+    assert page.locator("#retry").is_hidden()
+    # No second waiting event: stopping after any advance must still expose recovery.
+    page.clock.fast_forward(2001)
     assert "持续缓冲" in page.locator("#status").inner_text()
     assert page.locator("#retry").is_visible()
+    assert page.locator("#switchSourceOnError").is_visible()
 
 
 @pytest.mark.parametrize("seek_target", [10, 200])
@@ -355,11 +365,11 @@ def test_seek_resets_stall_baseline_without_counting_jump_as_playback(continuity
       window.mediaSeeking = false; video.dispatchEvent(new Event('seeked'));
       window.mediaProgress += 2; video.dispatchEvent(new Event('timeupdate'));
     }""")
-    page.clock.fast_forward(18001)
+    page.clock.fast_forward(9000)
     assert page.locator("#retry").is_hidden()
     assert page.locator("#status").inner_text() == "正在播放"
-    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('waiting'))")
-    page.clock.fast_forward(18001)
+    page.clock.fast_forward(10000)
+    assert "持续缓冲" in page.locator("#status").inner_text()
     assert page.locator("#retry").is_visible()
 
 

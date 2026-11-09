@@ -729,7 +729,7 @@ diff --git a/index.html b/index.html
 +      let autocompleteTimer = null, autocompleteController = null, autocompleteVersion = 0;
 +      let sharedSelection = null, sharedNotice = '';
 +      let historyReady = false, historyPlaylist = null, historyEpisode = -1, historySavedAt = 0, skipIntroDone = false, finishedLoadId = -1;
-+      let stalledTimer = null, stalledProgress = 0, recoveryAttempts = 0, recoveryProgress = 0;
++      let stalledTimer = null, stalledProgress = 0, stalledProgressAt = 0, recoveryAttempts = 0, recoveryProgress = 0;
        const previous = document.getElementById('previous');
        const next = document.getElementById('next');
        const episodeOpen = document.getElementById('episodeOpen');
@@ -2483,7 +2483,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2241,48 @@
+@@ -918,19 +2241,56 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2511,14 +2511,19 @@ diff --git a/index.html b/index.html
 +        statusNode.textContent = '正在缓冲…';
 +        if (stalledTimer) return;
 +        const loadId = episodeLoadId;
-+        stalledProgress = video.currentTime;
-+        stalledTimer = setTimeout(() => {
++        stalledProgress = video.currentTime; stalledProgressAt = Date.now();
++        const checkStall = () => {
 +          stalledTimer = null;
-+          if (loadId === episodeLoadId && !video.paused && !document.hidden && video.readyState < 3) {
-+            if (!video.seeking && video.currentTime > stalledProgress) statusNode.textContent = '正在播放';
-+            else fail('当前网络或片源持续缓冲，可重试或切换资源。');
++          if (loadId !== episodeLoadId || video.paused || video.seeking || watchStage.hidden || document.hidden || video.readyState >= 3 || statusNode.classList.contains('error')) return;
++          if (video.currentTime > stalledProgress) {
++            stalledProgress = video.currentTime; stalledProgressAt = Date.now();
++            statusNode.textContent = '正在播放';
 +          }
-+        }, 18000);
++          const remaining = 18000 - (Date.now() - stalledProgressAt);
++          if (remaining > 0) stalledTimer = setTimeout(checkStall, remaining);
++          else fail('当前网络或片源持续缓冲，可重试或切换资源。');
++        };
++        stalledTimer = setTimeout(checkStall, 18000);
 +      };
 +      video.addEventListener('waiting', observeStall);
 +      video.addEventListener('stalled', observeStall);
@@ -2526,8 +2531,11 @@ diff --git a/index.html b/index.html
 +      video.addEventListener('seeked', () => { if (video.readyState < 3) observeStall(); });
 +      video.addEventListener('timeupdate', () => {
 +        if (recoveryAttempts && !video.seeking && video.currentTime > recoveryProgress + 10) { recoveryAttempts = 0; recoveryProgress = video.currentTime; }
-+        if (video.readyState >= 3 || (stalledTimer && !video.seeking && video.currentTime > stalledProgress)) {
++        if (video.readyState >= 3) {
 +          clearTimeout(stalledTimer); stalledTimer = null;
++          if (!video.paused && !statusNode.classList.contains('error')) statusNode.textContent = '正在播放';
++        } else if (stalledTimer && !video.seeking && video.currentTime > stalledProgress) {
++          stalledProgress = video.currentTime; stalledProgressAt = Date.now();
 +          if (!video.paused && !statusNode.classList.contains('error')) statusNode.textContent = '正在播放';
 +        }
 +        applySkipSettings(); saveWatchHistory();
@@ -2537,7 +2545,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2293,15 @@
+@@ -941,6 +2301,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2553,7 +2561,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2311,45 @@
+@@ -950,20 +2319,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
