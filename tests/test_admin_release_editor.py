@@ -128,7 +128,8 @@ async def test_failed_publication_retains_draft_and_does_not_report_success(admi
 @pytest.mark.asyncio
 async def test_editor_loads_before_status_and_old_versions_are_not_pending(admin, monkeypatch):
     async def listing():
-        return [{"version": version, "verified": True} for version in ("1.0.1", "1.0.0", "0.9.9")]
+        return [{"version": version, "verified": False, "available": True}
+                for version in ("1.0.1", "1.0.0", "0.9.9")]
 
     monkeypatch.setattr(admin.github, "listing", listing)
     await login(admin)

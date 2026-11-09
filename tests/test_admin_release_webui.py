@@ -45,6 +45,100 @@ def test_release_status_reads_once_per_visit_and_manual_refresh(browser, upload_
         page.close()
 
 
+def test_metadata_catalog_loads_selected_candidate_once_and_refresh_preserves_draft(
+    browser, upload_server, monkeypatch,
+):
+    server = upload_server
+    original_stable, original_candidate = server.github.stable, server.github.candidate
+    state = {"error": False, "candidates": 0}
+
+    async def listing():
+        return [{"version": "1.0.1", "available": True, "verified": False,
+                 "published_at": "", "assets": [], "error": ""}]
+
+    async def stable():
+        if state["error"]:
+            raise GitHubError("GitHub 查询暂不可用，请稍后重试。")
+        return await original_stable()
+
+    async def candidate(version):
+        state["candidates"] += 1
+        return await original_candidate(version)
+
+    monkeypatch.setattr(server.github, "listing", listing)
+    monkeypatch.setattr(server.github, "stable", stable)
+    monkeypatch.setattr(server.github, "candidate", candidate)
+    page = browser.new_page(ignore_https_errors=True)
+    requests = []
+    page.on("request", lambda request: requests.append(request.method)
+            if "/releases/status?scope=releases" in request.url
+            or request.url.endswith("/releases/refresh") else None)
+    try:
+        page.goto(server.url + "login")
+        page.get_by_label("管理密码", exact=True).fill(PASSWORD)
+        page.get_by_label("6 位动态码").fill(totp(server.secret, server.clock[0] // 30))
+        page.get_by_role("button", name="登录", exact=True).click()
+        page.get_by_role("link", name="发布版本", exact=True).click()
+        editor = page.locator("#release-editor")
+        title, notes = editor.get_by_label("弹窗标题", exact=True), editor.get_by_label("更新说明", exact=True)
+        expect(title).to_be_enabled()
+        expect(editor.locator('select[name="version"]')).to_have_value("1.0.1")
+        assert state["candidates"] == 1 and requests == ["GET"]
+        title.fill("✨ 尚未保存")
+        text = "第一行\n\n🛠️ 保留空行与 emoji"
+        notes.fill(text)
+        state["error"] = True
+        page.get_by_role("button", name="刷新版本信息", exact=True).click()
+        expect(title).to_be_disabled()
+        expect(page.locator("#release-editor-status")).to_contain_text("读取失败")
+        expect(title).to_have_value("✨ 尚未保存")
+        expect(notes).to_have_value(text)
+        state["error"] = False
+        page.get_by_role("button", name="刷新版本信息", exact=True).click()
+        expect(title).to_be_enabled()
+        expect(title).to_have_value("✨ 尚未保存")
+        expect(notes).to_have_value(text)
+        page.wait_for_timeout(1200)
+        assert requests == ["GET", "POST", "POST"] and state["candidates"] == 1
+        assert not server.github.publications
+    finally:
+        page.close()
+
+
+def test_failed_candidate_does_not_lock_version_selection(browser, upload_server):
+    page = browser.new_page(ignore_https_errors=True)
+    page.goto(upload_server.url + "login")
+    page.get_by_label("管理密码", exact=True).fill(PASSWORD)
+    page.get_by_label("6 位动态码").fill(totp(upload_server.secret, upload_server.clock[0] // 30))
+    page.get_by_role("button", name="登录", exact=True).click()
+    page.get_by_role("link", name="发布版本", exact=True).click()
+    editor = page.locator("#release-editor")
+    expect(editor.get_by_label("弹窗标题", exact=True)).to_be_enabled()
+    page.route("**/releases/refresh", lambda route: route.fulfill(content_type="application/json", body=json.dumps({
+        "stable": {"value": {"version": "1.0.0", "verified": True, "digest": "a" * 64},
+                   "loading": False, "error": "", "age_seconds": 0},
+        "listing": {"value": [{"version": version, "available": True, "verified": False, "pending": True,
+                               "published_at": "", "assets": [], "error": ""}
+                              for version in ("1.0.2", "1.0.1")],
+                    "loading": False, "error": "", "age_seconds": 0},
+    })))
+    page.route("**/releases/editor?version=1.0.2", lambda route: route.fulfill(status=409, body="Invalid signature"))
+    try:
+        page.get_by_role("button", name="刷新版本信息", exact=True).click()
+        select = editor.locator('select[name="version"]')
+        expect(select).to_be_enabled()
+        select.select_option("1.0.2")
+        expect(page.locator("#release-editor-status")).to_contain_text("草稿读取失败")
+        expect(select).to_be_enabled()
+        expect(editor.get_by_label("弹窗标题", exact=True)).to_be_disabled()
+        select.select_option("1.0.1")
+        expect(editor.get_by_label("弹窗标题", exact=True)).to_be_enabled()
+        assert not upload_server.github.publications
+    finally:
+        page.unroute_all(behavior="ignoreErrors")
+        page.close()
+
+
 @pytest.mark.parametrize("width,height", [(1366, 900), (390, 844)])
 def test_navigation_does_not_wait_for_github_and_refresh_preserves_inputs(
     browser, upload_server, monkeypatch, tmp_path, width, height,

@@ -21,6 +21,12 @@
   const digest = form.elements.namedItem("manifest_digest");
   const status = document.getElementById("release-editor-status");
   let loaded = "", dirty = false, sequence = 0, ready = false;
+  function setEnabled(usable) {
+    fields.disabled = !ready;
+    for (const control of [title, notes, ...form.querySelectorAll('button[type="submit"]')]) {
+      control.disabled = !ready || !usable;
+    }
+  }
   title.addEventListener("input", () => { dirty = true; });
   notes.addEventListener("input", () => { dirty = true; });
 
@@ -28,7 +34,7 @@
     const version = select.value;
     const attempt = ++sequence;
     digest.value = "";
-    fields.disabled = true;
+    setEnabled(false);
     status.textContent = "正在读取更新说明草稿…";
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -50,7 +56,7 @@
         ? "草稿读取超时，请点击刷新版本信息重试。" : error.message;
     } finally {
       clearTimeout(timeout);
-      if (attempt === sequence) fields.disabled = !ready || !digest.value;
+      if (attempt === sequence) setEnabled(Boolean(digest.value));
     }
   }
 
@@ -63,7 +69,7 @@
   });
   document.addEventListener("releases-unavailable", () => {
     ready = false;
-    fields.disabled = true;
+    setEnabled(false);
     status.textContent = "版本信息暂不可用。已保留你填写的说明，请刷新版本信息后重试。";
   });
   document.addEventListener("releases-loaded", event => {
@@ -71,10 +77,17 @@
     if (!listing) return;
     ready = Boolean(stable.value?.verified && listing.value && !stable.error && !listing.error
       && !stable.loading && !listing.loading);
-    if (!ready) { fields.disabled = true; return; }
-    const versions = listing.value.filter(item => item.verified && item.pending);
+    if (!ready) {
+      setEnabled(false);
+      status.textContent = stable.error || listing.error
+        ? "版本信息读取失败，已保留你填写的说明。请点击刷新版本信息重试。"
+        : "正在读取待发布版本…";
+      return;
+    }
+    const versions = listing.value.filter(item => (item.available ?? item.verified) && item.pending);
     if (!versions.length) {
-      fields.disabled = true;
+      ready = false;
+      setEnabled(false);
       if (!dirty) select.replaceChildren(new Option("暂无待发布版本", ""));
       status.textContent = "暂无待发布版本，请先让 Codex 准备好更新包。";
       return;
@@ -84,12 +97,13 @@
       select.replaceChildren(...versions.map(item => new Option(item.version, item.version)));
       if (versions.some(item => item.version === selected)) select.value = selected;
     } else {
-      fields.disabled = true;
+      ready = false;
+      setEnabled(false);
       status.textContent = "待发布版本已变化，已保留草稿内容。请刷新页面后重新核对。";
       return;
     }
     if (loaded !== select.value || !digest.value) loadDraft();
-    else fields.disabled = false;
+    else setEnabled(true);
   });
   form.addEventListener("submit", () => {
     dirty = false;

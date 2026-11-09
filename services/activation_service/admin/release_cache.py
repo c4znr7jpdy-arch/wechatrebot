@@ -27,7 +27,7 @@ class _Read:
 class ReleaseReadCache:
     """Keep network waits outside navigation; never cache a publish decision."""
 
-    def __init__(self, releases, *, clock=time.monotonic, ttl=60, retry_seconds=15, timeout=60):
+    def __init__(self, releases, *, clock=time.monotonic, ttl=60, retry_seconds=15, timeout=15):
         if ttl < 0 or retry_seconds < 0 or timeout <= 0:
             raise ValueError("Invalid release cache timing")
         self.releases = releases

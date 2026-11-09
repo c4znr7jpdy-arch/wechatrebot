@@ -357,7 +357,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         listing = data.get("listing", {}).get("value")
         if stable and listing is not None:
             data["listing"] = {**data["listing"], "value": [
-                {**item, "pending": bool(item["verified"] and is_pending_version(item["version"], stable["version"]))}
+                {**item, "pending": bool(item.get("available", item.get("verified", False))
+                    and is_pending_version(item["version"], stable["version"]))}
                 for item in listing]}
         return web.json_response(data)
 
