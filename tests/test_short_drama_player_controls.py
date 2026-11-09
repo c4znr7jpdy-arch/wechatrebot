@@ -1106,7 +1106,7 @@ def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page, scr
 
 
 @pytest.fixture
-def source_catalog(player_page):
+def source_catalog(player_page, request):
     """A single search result with two independently served playback sources."""
     page = player_page
     variants = [
@@ -1119,7 +1119,7 @@ def source_catalog(player_page):
                 for index in range(1, 4)
             ],
         }
-        for source, code in [("暴风资源", "bf"), ("非凡资源", "ff")]
+        for source, code in [("暴风资源", "bf"), (getattr(request, "param", "非凡资源"), "ff")]
     ]
     payload = {"v": 1, "kind": "search", "heading": "搜索结果", "items": [variants[0]]}
     state = {"variants": variants, "requests": [], "fail": False}
@@ -1151,13 +1151,14 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     page, state = source_catalog
     state["variants"].extend(
         {**state["variants"][1], "source": source}
-        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源")
+        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源",
+                       "飘零资源", "360资源", "无尽资源", "魔都资源", "新浪资源")
     )
     page.get_by_label("返回", exact=True).click()
     page.evaluate("localStorage.removeItem('short-drama-watch-history')")
     page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
     page.locator(".recommend-card").click()
-    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length === 7")
+    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length === 12")
     page.set_viewport_size({"width": width, "height": 844})
     button = page.locator("#sourceButton")
     assert button.inner_text().strip() == "暴风"
@@ -1196,14 +1197,15 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     assert menu["x"] >= 0 and menu["x"] + menu["width"] <= width
     assert menu["y"] < 844 and menu["y"] + menu["height"] > 0
     assert menu["y"] >= actions["y"] + actions["height"] + 7
-    assert page.locator("#sourceOptions button").count() == 7
+    assert page.locator("#sourceOptions button").count() == 12
     for option in page.locator("#sourceOptions button").all():
         assert option.is_visible() and option.is_enabled()
         # Page scrolling may leave a fractional menu border outside the viewport;
         # each actual control must still scroll fully into view and receive input.
         option.click(trial=True)
         option_bounds = option.bounding_box()
-        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844
+        # Nested scrolling can round the bottom edge by a fraction of a CSS pixel.
+        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844.5
         assert option.evaluate("""node => {
           const bounds = node.getBoundingClientRect();
           return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
@@ -1223,8 +1225,10 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
 
 
 @pytest.mark.parametrize("playing", [False, True])
+@pytest.mark.parametrize("source_catalog", ["非凡资源", "魔都资源", "新浪资源"], indirect=True)
 def test_source_switch_preserves_episode_position_speed_and_starts_playback(source_catalog, playing):
-    page, _ = source_catalog
+    page, state = source_catalog
+    alternative = state["variants"][1]["source"].removesuffix("资源")
     page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
     page.wait_for_function("document.getElementById('video').readyState >= 2")
     page.locator("#speedButton").click()
@@ -1235,9 +1239,10 @@ def test_source_switch_preserves_episode_position_speed_and_starts_playback(sour
         page.wait_for_function("!document.getElementById('video').paused")
     before = page.locator("#video").evaluate("video => video.currentTime")
     page.locator("#sourceButton").click()
-    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.locator("#sourceMenu").get_by_role("button", name=alternative, exact=True).click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-2.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
     assert page.locator("#meta").inner_text() == "第2集"
+    assert page.locator("#sourceButton").inner_text().strip() == alternative
     assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
     page.wait_for_function("!document.getElementById('video').paused")
     assert before - .15 <= page.locator("#video").evaluate("video => video.currentTime") < before + 2
