@@ -11,7 +11,7 @@
   const rows = document.getElementById("release-rows");
   const fields = document.getElementById("release-switch-fields");
   const form = fields?.form;
-  let timer, controller, stopped = false, busy = false, resumePending = false;
+  let controller, stopped = false, busy = false, resumePending = false;
   let rowsKey = "", formKey = "", edited = false, stableLoaded = false;
   form?.addEventListener("input", () => { edited = true; });
   form?.addEventListener("change", () => { edited = true; });
@@ -85,10 +85,8 @@
     if (busy || stopped) return;
     busy = true;
     refresh.disabled = true;
-    clearTimeout(timer);
     controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    let loading = false;
+    const timeout = setTimeout(() => controller.abort(), 65000);
     try {
       const options = {signal: controller.signal, cache: "no-store", credentials: "same-origin"};
       let url = `/wechatrebot-admin/releases/status?scope=${encodeURIComponent(scope)}`;
@@ -103,7 +101,6 @@
       const data = await response.json();
       if (stopped) return;
       render(data);
-      loading = Object.values(data).some(state => state.loading);
     } catch (error) {
       if (!stopped) {
         stableStatus.textContent = error.name === "AbortError" ? "版本信息读取超时，请稍后点击刷新重试。" : error.message;
@@ -116,14 +113,13 @@
       refresh.disabled = false;
       const resuming = resumePending;
       resumePending = false;
-      if ((loading || resuming) && !stopped) timer = setTimeout(() => load(), resuming ? 0 : 1000);
+      if (resuming && !stopped) load();
     }
   }
 
   refresh.addEventListener("click", () => load(true));
   window.addEventListener("pagehide", () => {
     stopped = true;
-    clearTimeout(timer);
     controller?.abort();
   });
   window.addEventListener("pageshow", event => {

@@ -82,15 +82,13 @@ async def issuance_fields(admin):
             for name in ("reference", "reference_signature")}
 
 
-async def release_status(admin, *, scope="releases", complete=True):
+async def release_status(admin, *, scope="releases"):
     async with asyncio.timeout(3):
-        while True:
-            response = await admin.client.get("/releases/status", params={"scope": scope}, cookies=admin.cookies)
-            assert response.status == 200
-            value = await response.json()
-            if not complete or not any(item["loading"] for item in value.values()):
-                return value
-            await asyncio.sleep(0)
+        response = await admin.client.get("/releases/status", params={"scope": scope}, cookies=admin.cookies)
+        assert response.status == 200
+        value = await response.json()
+        assert not any(item["loading"] for item in value.values())
+        return value
 
 
 @pytest.mark.asyncio
@@ -324,6 +322,7 @@ async def test_release_pages_render_and_remain_navigable_while_github_is_blocked
 
     for name in gates:
         monkeypatch.setattr(admin.github, name, blocked(name))
+    pending = []
     try:
         async with asyncio.timeout(2):
             response = await admin.client.get("/", cookies=admin.cookies)
@@ -331,28 +330,30 @@ async def test_release_pages_render_and_remain_navigable_while_github_is_blocked
             assert response.status == 200 and "授权数据库连接正常" in html and "授权数" in html
             assert "releases.js" in html
             await started["stable"].wait()
-            status = await release_status(admin, scope="overview", complete=False)
-            assert set(status) == {"stable"} and status["stable"]["loading"]
-            assert status["stable"]["value"] is None and calls["listing"] == 0
+            pending.append(asyncio.create_task(release_status(admin, scope="overview")))
+            assert calls["listing"] == 0
             response = await admin.client.get("/releases", cookies=admin.cookies)
             html = await response.text()
             assert response.status == 200 and "上传已签名更新包" in html
             assert 'action="' + PREFIX + 'releases/upload"' in html
             assert "<script src=" in html and "releases.js" in html
             await started["listing"].wait()
-            status = await release_status(admin, complete=False)
-            assert all(item["loading"] and item["value"] is None for item in status.values())
+            pending.append(asyncio.create_task(release_status(admin)))
             assert (await admin.client.get("/codes", cookies=admin.cookies)).status == 200
+            assert not any(task.done() for task in pending)
             assert calls == {"stable": 1, "listing": 1}
         gates["stable"].set()
         gates["listing"].set()
-        status = await release_status(admin)
+        overview_status, status = await asyncio.gather(*pending)
+        assert set(overview_status) == {"stable"}
+        assert overview_status["stable"]["value"]["version"] == "1.0.0"
         assert status["stable"]["value"]["version"] == "1.0.0"
         assert status["listing"]["value"][0]["version"] == "1.0.1"
         assert calls == {"stable": 1, "listing": 1}
     finally:
         for gate in gates.values():
             gate.set()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -407,32 +408,39 @@ async def test_refresh_requires_csrf_and_switch_invalidates_both_display_caches(
     assert denied.status == 403
     assert (await release_status(admin))["listing"]["value"]
     gates = {name: asyncio.Event() for name in ("stable", "listing")}
+    started = {name: asyncio.Event() for name in gates}
 
     def blocked(name):
         async def read():
+            started[name].set()
             await gates[name].wait()
             return {"version": "1.0.1", "verified": True, "digest": "b" * 64} if name == "stable" else []
         return read
 
     for name in gates:
         monkeypatch.setattr(admin.github, name, blocked(name))
+    pending = []
     try:
-        response = await post(admin, "/releases/refresh", scope="overview")
-        assert response.status == 200
-        status = await response.json()
-        assert set(status) == {"stable"} and status["stable"]["value"] is None and status["stable"]["loading"]
-        assert (await release_status(admin, complete=False))["listing"]["value"]
-        admin.now[0] += 30
         async with asyncio.timeout(2):
+            pending.append(asyncio.create_task(post(admin, "/releases/refresh", scope="overview")))
+            await started["stable"].wait()
+            assert not pending[0].done() and not started["listing"].is_set()
+            admin.now[0] += 30
             response = await post(admin, "/releases", version="1.0.1", stable_digest="a" * 64,
                                   totp=totp(admin.secret, admin.now[0] // 30))
             assert response.status == 303 and admin.github.calls == [("1.0.1", "a" * 64)]
-            status = await release_status(admin, complete=False)
-            assert all(item["value"] is None and item["loading"] for item in status.values())
+            pending.append(asyncio.create_task(release_status(admin)))
+            await started["listing"].wait()
+            assert not any(task.done() for task in pending)
     finally:
         for gate in gates.values():
             gate.set()
-    status = await release_status(admin)
+        results = await asyncio.gather(*pending)
+    response, status = results
+    assert response.status == 200
+    overview_status = await response.json()
+    assert set(overview_status) == {"stable"} and not overview_status["stable"]["loading"]
+    assert overview_status["stable"]["value"]["version"] == "1.0.1"
     assert status["stable"]["value"]["version"] == "1.0.1" and status["listing"]["value"] == []
 
 

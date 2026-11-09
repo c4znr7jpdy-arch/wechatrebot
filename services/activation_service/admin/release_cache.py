@@ -44,9 +44,36 @@ class ReleaseReadCache:
             state.task = asyncio.create_task(self._refresh(kind, state, state.generation))
             self._tasks.add(state.task)
             state.task.add_done_callback(self._tasks.discard)
+        return self._snapshot(state)
+
+    def _snapshot(self, state: _Read) -> dict:
+        now = self.clock()
         return {"value": deepcopy(state.value), "loading": state.task is not None,
                 "error": state.error,
                 "age_seconds": None if state.succeeded_at is None else max(0, int(now - state.succeeded_at))}
+
+    async def read(self, kind: ReadKind) -> dict:
+        """Wait once for the shared read, without tying its lifetime to a client."""
+        state = self._reads[kind]
+        try:
+            async with asyncio.timeout(self.timeout):
+                while True:
+                    result = self.snapshot(kind)
+                    task, generation = state.task, state.generation
+                    if task is None:
+                        return result
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        if asyncio.current_task().cancelling():
+                            raise
+                    if state.generation == generation:
+                        return self._snapshot(state)
+                    # A write invalidated the job while we waited. Read the
+                    # current generation instead of returning its discarded data.
+        except TimeoutError:
+            return {**self._snapshot(state), "loading": False,
+                    "error": "GitHub 查询超时，请稍后重试。"}
 
     async def _refresh(self, kind: ReadKind, state: _Read, generation: int) -> None:
         error, value = "", None
