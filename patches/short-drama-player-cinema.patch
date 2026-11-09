@@ -729,7 +729,7 @@ diff --git a/index.html b/index.html
 +      let autocompleteTimer = null, autocompleteController = null, autocompleteVersion = 0;
 +      let sharedSelection = null, sharedNotice = '';
 +      let historyReady = false, historyPlaylist = null, historyEpisode = -1, historySavedAt = 0, skipIntroDone = false, finishedLoadId = -1;
-+      let stalledTimer = null, recoveryAttempts = 0, recoveryProgress = 0;
++      let stalledTimer = null, stalledProgress = 0, recoveryAttempts = 0, recoveryProgress = 0;
        const previous = document.getElementById('previous');
        const next = document.getElementById('next');
        const episodeOpen = document.getElementById('episodeOpen');
@@ -1169,7 +1169,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +938,662 @@
+@@ -537,8 +938,673 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1188,27 +1188,38 @@ diff --git a/index.html b/index.html
 +      const observeCastConnection = () => {
 +        removeCastListeners();
 +        const generation = actionGeneration, request = castRequest;
-+        const webkit = typeof video.webkitShowPlaybackTargetPicker === 'function';
-+        const target = webkit ? video : video.remote;
-+        const state = () => webkit ? (video.webkitCurrentPlaybackTargetIsWireless ? 'connected' : 'disconnected')
-+          : target?.state || 'disconnected';
++        const remote = video.remote;
++        const state = () => typeof video.webkitCurrentPlaybackTargetIsWireless === 'boolean'
++          || typeof video.webkitShowPlaybackTargetPicker === 'function'
++          ? (video.webkitCurrentPlaybackTargetIsWireless ? 'connected' : 'disconnected')
++          : remote?.state || 'disconnected';
 +        let previousState = state();
 +        const changed = (announce = true) => {
 +          if (!currentAction(generation) || request !== castRequest) return;
 +          const currentState = state();
-+          const label = currentState === 'connected' ? '已投屏' : currentState === 'connecting' ? '连接中' : '投屏';
++          const label = currentState === 'connected' ? (video.error ? '投屏异常' : '已连接')
++            : currentState === 'connecting' ? '连接中' : '投屏';
 +          castButton.querySelector('span').textContent = label;
 +          castButton.setAttribute('aria-label', currentState === 'connected' ? '投屏，已连接，点击管理设备' : '投屏');
 +          if (announce) {
-+            if (currentState === 'connected') castStatus('已连接投屏设备，点击“已投屏”可管理连接。');
++            if (currentState === 'connected') {
++              const message = video.error ? '设备已连接，但视频播放失败。请换源后重试，或复制视频链接到投屏应用。'
++                : video.ended ? '已连接投屏设备，当前视频已播放结束。'
++                : video.paused ? '已连接投屏设备，视频已暂停，请点击播放继续。'
++                : '已连接投屏设备；若电视无画面，可换源或复制视频链接重试。';
++              castStatus(message, true);
++            }
 +            else if (currentState === 'connecting') castStatus('正在连接投屏设备…');
 +            else if (previousState !== 'disconnected') castStatus('投屏连接已断开，可重新选择设备。');
 +          }
 +          previousState = currentState;
 +        };
-+        const events = webkit ? ['webkitcurrentplaybacktargetiswirelesschanged'] : ['connecting', 'connect', 'disconnect'];
-+        events.forEach((event) => target?.addEventListener?.(event, changed));
-+        removeCastListeners = () => events.forEach((event) => target?.removeEventListener?.(event, changed));
++        const mediaChanged = () => changed(castOwnsStatus && castLink.hidden && !castCopyButton.disabled && state() === 'connected');
++        const listeners = [[video, 'webkitcurrentplaybacktargetiswirelesschanged', changed],
++          ...['connecting', 'connect', 'disconnect'].map((event) => [remote, event, changed]),
++          ...['loadedmetadata', 'playing', 'pause', 'ended', 'error'].map((event) => [video, event, mediaChanged])];
++        listeners.forEach(([target, event, listener]) => target?.addEventListener?.(event, listener));
++        removeCastListeners = () => listeners.forEach(([target, event, listener]) => target?.removeEventListener?.(event, listener));
 +        changed(false);
 +        return changed;
 +      };
@@ -1833,7 +1844,7 @@ diff --git a/index.html b/index.html
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -549,31 +1604,39 @@
+@@ -549,31 +1615,39 @@
            if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
@@ -1881,7 +1892,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1644,24 @@
+@@ -581,19 +1655,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1913,7 +1924,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1682,15 @@
+@@ -614,27 +1693,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1948,7 +1959,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1752,90 @@
+@@ -696,27 +1763,90 @@
          updateQualityActive();
        };
  
@@ -2046,7 +2057,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1843,42 @@
+@@ -724,24 +1854,42 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -2101,7 +2112,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1886,20 @@
+@@ -749,21 +1897,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -2129,7 +2140,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,68 +1909,148 @@
+@@ -773,68 +1920,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2320,7 +2331,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +2072,11 @@
+@@ -856,10 +2083,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2333,7 +2344,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +2099,7 @@
+@@ -882,7 +2110,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2342,7 +2353,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +2107,117 @@
+@@ -890,22 +2118,117 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2472,7 +2483,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2230,44 @@
+@@ -918,19 +2241,48 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2496,22 +2507,26 @@ diff --git a/index.html b/index.html
 +        if (!video.ended && video.readyState >= 2 && !statusNode.classList.contains('error')) statusNode.textContent = '已暂停';
 +      });
 +      const observeStall = () => {
-+        if (video.paused || watchStage.hidden || document.hidden || statusNode.classList.contains('error')) return;
++        if (video.paused || video.seeking || watchStage.hidden || document.hidden || statusNode.classList.contains('error')) return;
 +        statusNode.textContent = '正在缓冲…';
 +        if (stalledTimer) return;
 +        const loadId = episodeLoadId;
++        stalledProgress = video.currentTime;
 +        stalledTimer = setTimeout(() => {
 +          stalledTimer = null;
 +          if (loadId === episodeLoadId && !video.paused && !document.hidden && video.readyState < 3) {
-+            fail('当前网络或片源持续缓冲，可重试或切换资源。');
++            if (!video.seeking && video.currentTime > stalledProgress) statusNode.textContent = '正在播放';
++            else fail('当前网络或片源持续缓冲，可重试或切换资源。');
 +          }
 +        }, 18000);
 +      };
 +      video.addEventListener('waiting', observeStall);
 +      video.addEventListener('stalled', observeStall);
++      video.addEventListener('seeking', () => { clearTimeout(stalledTimer); stalledTimer = null; });
++      video.addEventListener('seeked', () => { if (video.readyState < 3) observeStall(); });
 +      video.addEventListener('timeupdate', () => {
 +        if (recoveryAttempts && !video.seeking && video.currentTime > recoveryProgress + 10) { recoveryAttempts = 0; recoveryProgress = video.currentTime; }
-+        if (video.readyState >= 3) {
++        if (video.readyState >= 3 || (stalledTimer && !video.seeking && video.currentTime > stalledProgress)) {
 +          clearTimeout(stalledTimer); stalledTimer = null;
 +          if (!video.paused && !statusNode.classList.contains('error')) statusNode.textContent = '正在播放';
 +        }
@@ -2522,7 +2537,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2278,15 @@
+@@ -941,6 +2293,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2538,7 +2553,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2296,45 @@
+@@ -950,20 +2311,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
