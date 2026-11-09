@@ -65,7 +65,7 @@ def continuity_page(browser, player_assets):
 
         page.route("**/*", respond)
         page.goto(url or "https://player.example/short-drama/player?s=abcdefghijklmnop")
-        page.wait_for_function("document.getElementById('searchAllSources').textContent === '搜索全部资源'")
+        page.locator('#recommendations[aria-busy="false"]').wait_for(state="attached")
         pages.append(page)
         return page, requests
 
@@ -333,7 +333,7 @@ def test_late_autoplay_rejection_keeps_existing_network_error(continuity_page):
 
 def test_history_then_related_work_refresh_keeps_new_work(continuity_page):
     page, _ = continuity_page(stored=json.dumps([{"item": item(), "episode": 1, "position": 2, "updated": 1}]))
-    related = {**item("推荐新剧", prefix="related"), "selection_token": "bbbbbbbbbbbbbbbb"}
+    related = {**item("推荐新剧", prefix="related"), "recommendation_kind": "live", "selection_token": "bbbbbbbbbbbbbbbb"}
     page.route("**/api/recommendations?*", lambda route: route.fulfill(json={"v": 1, "kind": "recommendations", "items": [related]}))
     page.route("**/api/selections/bbbbbbbbbbbbbbbb", lambda route: route.fulfill(json={"v": 1, "kind": "recommendations", "items": [related]}))
     page.locator(".history-row").click()
@@ -388,6 +388,7 @@ def test_existing_history_is_visible_before_new_work_media_metadata(continuity_p
     page.route("**/*.mp4", lambda route: route.abort("failed"))
     if entry == "related":
         related = {**item("作品乙", prefix="b"), "selection_token": "bbbbbbbbbbbbbbbb"}
+        related["recommendation_kind"] = "live"
         page.route("**/api/recommendations?*", lambda route: route.fulfill(json={"v": 1, "kind": "recommendations", "items": [related]}))
         page.locator(".history-row").click()
         page.locator(".related-card").filter(has_text="作品乙").click()

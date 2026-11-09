@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,339 @@
+@@ -5,369 +5,343 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -223,15 +223,19 @@ diff --git a/index.html b/index.html
 +    .eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; letter-spacing: .14em; }
 +    .catalog-heading h2 { margin: 0 0 12px; font: 700 clamp(26px, 4vw, 42px)/1.3 var(--display-font); overflow-wrap: anywhere; }
 +    #recommendationsSummary { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.7; }
-+    .catalog-search { width: min(100%, 300px); flex-shrink: 0; }
++    .catalog-search { position: relative; width: min(100%, 300px); flex-shrink: 0; }
 +    .catalog-search label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
 +    .search-field { display: flex; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 0 6px 0 14px; }
 +    .search-field:focus-within { border-color: var(--accent); }
 +    .search-field svg { flex-shrink: 0; width: 18px; color: var(--muted); }
-+    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 14px; }
++    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 16px; }
 +    .search-field input::placeholder { color: var(--muted); }
 +    .search-field input::-webkit-search-cancel-button { appearance: none; }
 +    .search-field button { flex-shrink: 0; width: 44px; border: 0; background: transparent; font-size: 22px; }
++    .search-field #clearSearch { width: 32px; }
++    .search-autocomplete { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; left: 0; max-height: min(360px, 50vh); overflow: auto; padding: 5px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 12px 28px #0006; }
++    .search-autocomplete button { display: block; width: 100%; padding: 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; overflow-wrap: anywhere; font-size: 14px; }
++    .search-autocomplete button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
 +    .recommendation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px 22px; }
 +    .recommend-card { display: flex; min-width: 0; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius); background: transparent; text-align: left; transition: border-color 160ms ease, background 160ms ease; }
 +    .recommend-card:hover:not(:disabled) { background: var(--surface); }
@@ -412,6 +416,7 @@ diff --git a/index.html b/index.html
 +    .related-card { position: relative; min-width: 0; aspect-ratio: 6 / 5; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
 +    .related-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 +    .related-card .initial { color: var(--accent); font-size: 28px; }
++    .related-kind { position: absolute; top: 6px; left: 6px; padding: 3px 5px; border-radius: 4px; background: #000b; color: #eee; font-size: 10px; line-height: 1.2; }
 +    .related-card strong { position: absolute; inset: auto 0 0; padding: 24px 7px 7px; font-size: 12px; font-weight: 500; line-height: 1.4; background: linear-gradient(transparent, #000e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 +    #relatedStatus { min-height: 20px; margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
 +    @media (min-width: 761px) { main.watch-mode { margin-top: 24px; } .related-card { aspect-ratio: 16 / 9; } }
@@ -580,8 +585,7 @@ diff --git a/index.html b/index.html
 +    .history-row span { flex-shrink: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: 11px; white-space: nowrap; }
 +    #historyStatus { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 +    #historyStatus:empty { display: none; }
-+    .all-source-search { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-+    #searchAllSources { flex: 1; min-height: 40px; padding: 0 12px; color: var(--accent); font-size: 13px; }
++    #searchAllSources { width: 62px; min-height: 40px; padding: 0 8px; color: var(--accent); background: var(--accent-soft); border-radius: 8px; font-size: 14px; }
 +    #searchSuggestions { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 18px; }
 +    #searchSuggestions:empty { display: none; }
 +    #searchSuggestions button { min-height: 34px; padding: 0 10px; font-size: 12px; }
@@ -641,9 +645,9 @@ diff --git a/index.html b/index.html
 +      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><button id="switchSourceOnError" type="button" hidden>切换资源</button><a id="direct" hidden aria-hidden="true"></a></div>
 +      <div class="metadata-feedback"><p id="metadataStatus" role="status"></p><button id="metadataRetry" type="button" hidden>重试获取选集</button></div>
 +    </section>
-+    <section id="recommendations" class="recommendations-page" hidden>
++    <section id="recommendations" class="recommendations-page" aria-busy="true" hidden>
 +      <header class="catalog-heading"><div><p id="catalogEyebrow" class="eyebrow">为你选片</p><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary" role="status"></p></div>
-+        <div class="catalog-search"><label for="catalogSearch">查找片名 · 支持全源搜索</label><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 0 4.9 12l5.5 5.5 1.4-1.4-5.5-5.5A7 7 0 0 0 10 3Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg><input id="catalogSearch" type="search" placeholder="输入片名" autocomplete="off"><button id="clearSearch" type="button" aria-label="清除片名筛选" hidden>×</button></div><div class="all-source-search"><button id="searchAllSources" type="button">搜索全部资源</button></div></div>
++        <div class="catalog-search"><label for="catalogSearch">查找片名 · 支持全源搜索</label><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 0 4.9 12l5.5 5.5 1.4-1.4-5.5-5.5A7 7 0 0 0 10 3Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg><input id="catalogSearch" type="search" placeholder="输入片名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="searchAutocomplete" aria-expanded="false" enterkeyhint="search"><button id="clearSearch" type="button" aria-label="清除片名筛选" hidden>×</button><button id="searchAllSources" type="button" aria-label="搜索全部资源">搜索</button></div><div id="searchAutocomplete" class="search-autocomplete" role="listbox" aria-label="片名联想" hidden></div></div>
        </header>
 -      <div class="episode-meta"><span class="episode-meta-label">当前：</span><span id="meta">正在载入剧集…</span></div>
 -      <div id="videoShell" class="video-shell">
@@ -689,7 +693,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -377,9 +347,40 @@
+@@ -377,9 +351,43 @@
        const videoShell = document.getElementById('videoShell');
        const fallback = document.getElementById('direct');
        const retry = document.getElementById('retry');
@@ -719,7 +723,10 @@ diff --git a/index.html b/index.html
 +      const historyStatus = document.getElementById('historyStatus');
 +      const searchAllSources = document.getElementById('searchAllSources');
 +      const searchSuggestions = document.getElementById('searchSuggestions');
++      const searchAutocomplete = document.getElementById('searchAutocomplete');
 +      let searchController = null, historyController = null, catalogSummary = '';
++      let catalogSuggestions = [], autocompleteItems = [], autocompleteIndex = -1;
++      let autocompleteTimer = null, autocompleteController = null, autocompleteVersion = 0;
 +      let sharedSelection = null, sharedNotice = '';
 +      let historyReady = false, historyPlaylist = null, historyEpisode = -1, historySavedAt = 0, skipIntroDone = false, finishedLoadId = -1;
 +      let stalledTimer = null, recoveryAttempts = 0, recoveryProgress = 0;
@@ -730,7 +737,7 @@ diff --git a/index.html b/index.html
        const episodeSheet = document.getElementById('episodeSheet');
        const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
        const sheetBackdrop = document.getElementById('sheetBackdrop');
-@@ -406,24 +407,409 @@
+@@ -406,24 +414,417 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -1043,18 +1050,24 @@ diff --git a/index.html b/index.html
 +          if (relatedSeen.has(key)) rememberRelated(item);
 +          else unique.set(key, item);
 +        });
-+        const selected = shuffle([...unique.values()]).slice(0, 3);
++        const available = [...unique.values()];
++        const ai = shuffle(available.filter((item) => item.recommendation_kind === 'ai')).slice(0, 2);
++        const live = shuffle(available.filter((item) => item.recommendation_kind === 'live')).slice(0, 1);
++        const selected = [...ai, ...live];
 +        selected.forEach(rememberRelated);
 +        relatedGrid.replaceChildren();
 +        selected.forEach((item) => {
 +          const button = document.createElement('button'); button.type = 'button'; button.className = 'related-card';
 +          button.dataset.relatedTitle = relatedTitle(item);
++          button.dataset.recommendationKind = item.recommendation_kind;
 +          button.setAttribute('aria-label', `播放${item.title}`);
 +          const initial = document.createElement('span'); initial.className = 'initial'; initial.textContent = Array.from(item.title)[0] || '剧'; button.appendChild(initial);
 +          if (item.cover) {
 +            const cover = document.createElement('img'); cover.src = item.cover; cover.alt = ''; cover.loading = 'lazy'; cover.referrerPolicy = 'no-referrer';
 +            cover.addEventListener('error', () => cover.remove(), {once: true}); button.appendChild(cover);
 +          }
++          const kind = document.createElement('span'); kind.className = 'related-kind';
++          kind.textContent = item.recommendation_kind === 'ai' ? 'AI 剧' : '真人短剧'; button.appendChild(kind);
 +          const title = document.createElement('strong'); title.textContent = item.title; button.appendChild(title);
 +          button.addEventListener('click', () => {
 +            saveWatchHistory();
@@ -1068,7 +1081,9 @@ diff --git a/index.html b/index.html
 +          });
 +          relatedGrid.appendChild(button);
 +        });
-+        relatedStatus.textContent = selected.length === 3 ? '' : selected.length ? '本次新的推荐较少，可稍后再换一换。' : '暂时没有新的推荐，稍后再试。';
++        const missing = [ai.length < 2 ? 'AI 剧' : '', live.length < 1 ? '真人短剧' : ''].filter(Boolean);
++        relatedStatus.textContent = selected.length === 3 ? '' : selected.length
++          ? `新的${missing.join('、')}暂时不足，稍后可再换一换。` : '暂时没有新的推荐，稍后再试。';
 +      };
 +      const refreshRelated = async (force = false) => {
 +        if (!playlist) return;
@@ -1145,7 +1160,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +907,7 @@
+@@ -521,7 +922,7 @@
            }
            return { name, url };
          });
@@ -1154,7 +1169,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +923,576 @@
+@@ -537,8 +938,662 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1601,6 +1616,86 @@ diff --git a/index.html b/index.html
 +        if (payload?.v !== 1 || payload.kind !== 'search' || !Array.isArray(payload.items) || payload.items.length > 24) throw new Error('invalid search');
 +        return payload;
 +      }
++      function normalizeSearchQuery(value) {
++        return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
++      }
++      function getSearchSuggestions(values, query) {
++        const seen = new Set([normalizeSearchQuery(query).toLocaleLowerCase('zh-CN')]);
++        const suggestions = [];
++        for (const value of Array.isArray(values) ? values.slice(0, 30) : []) {
++          if (typeof value !== 'string') continue;
++          const title = normalizeSearchQuery(value), key = title.toLocaleLowerCase('zh-CN');
++          if (!title || title.length > 100 || seen.has(key)) continue;
++          seen.add(key); suggestions.push(title);
++          if (suggestions.length === 6) break;
++        }
++        return suggestions;
++      }
++      function closeAutocomplete() {
++        clearTimeout(autocompleteTimer); autocompleteTimer = null;
++        autocompleteController?.abort(); autocompleteController = null; autocompleteVersion++;
++        autocompleteItems = []; autocompleteIndex = -1;
++        searchAutocomplete.hidden = true; searchAutocomplete.replaceChildren();
++        catalogSearch.setAttribute('aria-expanded', 'false');
++        catalogSearch.setAttribute('aria-busy', 'false');
++        catalogSearch.removeAttribute('aria-activedescendant');
++      }
++      function selectSearchSuggestion(value) {
++        catalogSearch.value = value; clearSearch.hidden = false;
++        searchCatalog();
++      }
++      function renderSearchSuggestions() {
++        searchSuggestions.replaceChildren();
++        if (selectionKind !== 'search') return;
++        catalogSuggestions.forEach((value) => {
++          const button = document.createElement('button'); button.type = 'button'; button.textContent = value;
++          button.addEventListener('click', () => selectSearchSuggestion(value)); searchSuggestions.appendChild(button);
++        });
++      }
++      function setAutocompleteIndex(index) {
++        autocompleteIndex = index;
++        [...searchAutocomplete.children].forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === index)));
++        if (index >= 0) {
++          catalogSearch.setAttribute('aria-activedescendant', `searchOption-${index}`);
++          searchAutocomplete.children[index].scrollIntoView({block: 'nearest'});
++        }
++        else catalogSearch.removeAttribute('aria-activedescendant');
++      }
++      function renderAutocomplete(values) {
++        autocompleteItems = values; autocompleteIndex = -1;
++        searchAutocomplete.replaceChildren(); catalogSearch.removeAttribute('aria-activedescendant');
++        values.forEach((value, index) => {
++          const option = document.createElement('button'); option.type = 'button'; option.tabIndex = -1;
++          option.id = `searchOption-${index}`; option.textContent = value;
++          option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false');
++          option.addEventListener('pointerdown', (event) => event.preventDefault());
++          option.addEventListener('click', () => selectSearchSuggestion(value)); searchAutocomplete.appendChild(option);
++        });
++        searchAutocomplete.hidden = !values.length;
++        catalogSearch.setAttribute('aria-expanded', String(!!values.length));
++      }
++      function scheduleAutocomplete() {
++        closeAutocomplete();
++        const query = normalizeSearchQuery(catalogSearch.value), version = autocompleteVersion;
++        if (composing || document.activeElement !== catalogSearch || query.length < 2 || query.length > 100) return;
++        autocompleteTimer = setTimeout(async () => {
++          autocompleteTimer = null;
++          const controller = new AbortController(); autocompleteController = controller;
++          const timeout = setTimeout(() => controller.abort(), 15000);
++          catalogSearch.setAttribute('aria-busy', 'true');
++          try {
++            const payload = await fetchSearch(query, controller.signal);
++            if (controller !== autocompleteController || version !== autocompleteVersion || composing
++              || document.activeElement !== catalogSearch || normalizeSearchQuery(catalogSearch.value) !== query) return;
++            renderAutocomplete(getSearchSuggestions([...(Array.isArray(payload.suggestions) ? payload.suggestions.slice(0, 6) : []), ...payload.items.map((item) => item?.title)], query));
++          } catch (_error) {
++            if (controller === autocompleteController) renderAutocomplete([]);
++          } finally {
++            clearTimeout(timeout);
++            if (controller === autocompleteController) { autocompleteController = null; catalogSearch.setAttribute('aria-busy', 'false'); }
++          }
++        }, 350);
++      }
 +      async function restoreWatchHistory(entry) {
 +        saveWatchHistory(true);
 +        historyController?.abort();
@@ -1651,13 +1746,16 @@ diff --git a/index.html b/index.html
 +        } finally { clearTimeout(timeout); if (historyController === controller) historyController = null; }
 +      }
 +      async function searchCatalog() {
-+        const query = catalogSearch.value.normalize('NFKC').trim().replace(/\s+/g, ' ');
++        closeAutocomplete();
++        const query = normalizeSearchQuery(catalogSearch.value);
 +        if (!query || query.length > 100) { recommendationsSummary.textContent = '请输入 1–100 字的片名。'; catalogSearch.focus(); return; }
++        catalogSearch.value = query; clearSearch.hidden = false;
 +        searchController?.abort(); historyController?.abort();
 +        const controller = new AbortController(); searchController = controller;
 +        const timeout = setTimeout(() => controller.abort(), 30000);
 +        const generation = ++actionGeneration;
-+        searchAllSources.textContent = '正在搜索全部资源…';
++        searchAllSources.textContent = '搜索中';
++        searchAllSources.setAttribute('aria-busy', 'true');
 +        recommendationsSummary.textContent = '正在查询所有资源，单个来源失败不会影响其他结果…';
 +        recommendationsNode.setAttribute('aria-busy', 'true');
 +        try {
@@ -1665,23 +1763,20 @@ diff --git a/index.html b/index.html
 +          if (controller !== searchController || generation !== actionGeneration) return;
 +          const items = payload.items.map(validateSelectionItem);
 +          recommendationItems = items; selectionKind = 'search'; playlist = null;
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, query);
 +          ['i', 'ep', 'resume', 'q', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
 +          fragment.set('search', query);
 +          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
 +          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
 +          recommendationsTitle.textContent = String(payload.heading || `搜索：${query}`).slice(0, 300);
 +          document.title = recommendationsTitle.textContent;
-+          renderCatalog(); catalogSearch.value = '';
++          renderCatalog();
 +          const total = Number(payload.sources_total), searched = Number(payload.sources_searched);
 +          const failures = Array.isArray(payload.failures) ? payload.failures.length : 0;
 +          const coverage = Number.isFinite(total) && Number.isFinite(searched) ? ` · 已查询 ${searched}/${total} 个来源` : '';
 +          catalogSummary = `找到 ${items.length} 个结果${coverage}${failures ? ` · ${failures} 个来源暂不可用` : ''}`;
 +          recommendationsSummary.textContent = catalogSummary;
-+          if (Array.isArray(payload.suggestions)) payload.suggestions.slice(0, 6).forEach((value) => {
-+            if (typeof value !== 'string' || !value.trim() || value.length > 100 || value === query) return;
-+            const button = document.createElement('button'); button.type = 'button'; button.textContent = value;
-+            button.addEventListener('click', () => { catalogSearch.value = value; searchCatalog(); }); searchSuggestions.appendChild(button);
-+          });
++          if (normalizeSearchQuery(catalogSearch.value) !== query) filterCatalog();
 +          renderWatchHistory(); hydrateCatalog();
 +        } catch (_error) {
 +          if (controller === searchController) {
@@ -1691,7 +1786,10 @@ diff --git a/index.html b/index.html
 +          }
 +        } finally {
 +          clearTimeout(timeout);
-+          if (controller === searchController) { searchController = null; searchAllSources.textContent = '搜索全部资源'; recommendationsNode.setAttribute('aria-busy', 'false'); }
++          if (controller === searchController) {
++            searchController = null; searchAllSources.textContent = '搜索';
++            searchAllSources.setAttribute('aria-busy', 'false'); recommendationsNode.setAttribute('aria-busy', 'false');
++          }
 +        }
 +      }
 +
@@ -1709,6 +1807,7 @@ diff --git a/index.html b/index.html
 +          if (!target.title.trim() || !target.source.trim() || !target.episode.trim() || !/^[1-9]\d{0,3}$/.test(fragment.get('ep') || '') || Number(fragment.get('ep')) > 2000) throw new Error('invalid shared selection');
 +          const payload = await fetchSearch(target.title);
 +          recommendationItems = payload.items.map(validateSelectionItem);
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, target.title);
 +          sharedSelection = target; selectionKind = 'search';
 +          recommendationsTitle.textContent = `查找分享的作品：${target.title}`;
 +          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
@@ -1719,6 +1818,7 @@ diff --git a/index.html b/index.html
 +            const query = fragment.get('resume');
 +            const payload = await fetchSearch(query);
 +            recommendationItems = payload.items.map(validateSelectionItem); selectionKind = 'search';
++            catalogSuggestions = getSearchSuggestions(payload.suggestions, query);
 +            recommendationsTitle.textContent = `搜索：${query}`;
 +            sharedNotice = '本设备没有这条观看记录，请选择来源继续观看。';
 +            fragment.delete('resume'); fragment.set('search', query);
@@ -1726,13 +1826,18 @@ diff --git a/index.html b/index.html
 +        } else if (fragment.get('search')) {
 +          const payload = await fetchSearch(fragment.get('search'));
 +          recommendationItems = payload.items.map(validateSelectionItem);
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, fragment.get('search'));
 +          selectionKind = 'search'; recommendationsTitle.textContent = payload.heading || '搜索结果';
 +          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
 +        } else if (params.get('s')) {
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -552,28 +1506,34 @@
+@@ -549,31 +1604,39 @@
+           if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
+           recommendationItems = validateSelectionPayload(payload);
+           selectionKind = String(payload.kind || 'recommendations');
++          if (selectionKind === 'search') catalogSuggestions = getSearchSuggestions(payload.suggestions, payload.query);
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1743,6 +1848,7 @@ diff --git a/index.html b/index.html
 +          const payload = await decodePlaylist(fragment.get('r'));
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
++          if (selectionKind === 'search') catalogSuggestions = getSearchSuggestions(payload.suggestions, payload.query);
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1775,7 +1881,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1541,24 @@
+@@ -581,19 +1644,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1807,7 +1913,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1579,15 @@
+@@ -614,27 +1682,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1842,7 +1948,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1649,90 @@
+@@ -696,27 +1752,90 @@
          updateQualityActive();
        };
  
@@ -1940,7 +2046,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1740,42 @@
+@@ -724,24 +1843,42 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -1995,7 +2101,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1783,20 @@
+@@ -749,21 +1886,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -2023,7 +2129,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,68 +1806,148 @@
+@@ -773,68 +1909,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2207,14 +2313,14 @@ diff --git a/index.html b/index.html
 +
 +      const renderCatalog = () => {
 +        recommendationGrid.replaceChildren();
-+        searchSuggestions.replaceChildren();
++        renderSearchSuggestions();
          recommendationsNode.removeAttribute('hidden');
          recommendationsNode.style.display = 'block';
 +        document.getElementById('catalogEyebrow').textContent = selectionKind === 'search' ? '搜索片单' : '为你选片';
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1969,11 @@
+@@ -856,10 +2072,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2227,7 +2333,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1996,7 @@
+@@ -882,7 +2099,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2236,7 +2342,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +2004,90 @@
+@@ -890,22 +2107,117 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2247,7 +2353,9 @@ diff --git a/index.html b/index.html
 +      };
 +      renderCatalog();
 +      const filterCatalog = () => {
-+        const query = catalogSearch.value.trim().toLocaleLowerCase('zh-CN');
++        const inputQuery = normalizeSearchQuery(catalogSearch.value).toLocaleLowerCase('zh-CN');
++        const searchedQuery = normalizeSearchQuery(fragment.get('search')).toLocaleLowerCase('zh-CN');
++        const query = selectionKind === 'search' && inputQuery === searchedQuery ? '' : inputQuery;
 +        clearSearch.hidden = !catalogSearch.value;
 +        let matches = 0;
 +        [...recommendationGrid.children].forEach((card, index) => {
@@ -2260,14 +2368,39 @@ diff --git a/index.html b/index.html
 +        if (query) fragment.set('q', catalogSearch.value); else fragment.delete('q');
 +        history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
 +      };
-+      catalogSearch.value = fragment.get('q') || '';
++      catalogSearch.value = fragment.get('q') || fragment.get('search') || '';
++      clearSearch.hidden = !catalogSearch.value;
 +      if (recommendationItems.length) filterCatalog();
-+      catalogSearch.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !composing && !event.isComposing) { event.preventDefault(); searchCatalog(); } });
++      catalogSearch.addEventListener('keydown', (event) => {
++        if (composing || event.isComposing || event.keyCode === 229) return;
++        if (event.key === 'Escape') { event.preventDefault(); closeAutocomplete(); return; }
++        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && autocompleteItems.length) {
++          event.preventDefault();
++          const offset = event.key === 'ArrowDown' ? 1 : -1;
++          const index = autocompleteIndex < 0 ? (offset > 0 ? 0 : autocompleteItems.length - 1)
++            : (autocompleteIndex + offset + autocompleteItems.length) % autocompleteItems.length;
++          setAutocompleteIndex(index); return;
++        }
++        if (event.key === 'Enter') {
++          event.preventDefault();
++          if (autocompleteIndex >= 0) selectSearchSuggestion(autocompleteItems[autocompleteIndex]);
++          else searchCatalog();
++        }
++      });
 +      searchAllSources.addEventListener('click', searchCatalog);
-+      catalogSearch.addEventListener('compositionstart', () => { composing = true; });
-+      catalogSearch.addEventListener('compositionend', () => { composing = false; filterCatalog(); });
-+      catalogSearch.addEventListener('input', () => { clearSearch.hidden = !catalogSearch.value; if (!composing) filterCatalog(); });
-+      clearSearch.addEventListener('click', () => { catalogSearch.value = ''; composing = false; filterCatalog(); catalogSearch.focus(); });
++      catalogSearch.addEventListener('compositionstart', () => { composing = true; closeAutocomplete(); });
++      catalogSearch.addEventListener('compositionend', () => { composing = false; filterCatalog(); scheduleAutocomplete(); });
++      catalogSearch.addEventListener('input', (event) => {
++        clearSearch.hidden = !catalogSearch.value;
++        if (!composing && !event.isComposing) { filterCatalog(); scheduleAutocomplete(); }
++      });
++      catalogSearch.addEventListener('focus', scheduleAutocomplete);
++      catalogSearch.addEventListener('blur', closeAutocomplete);
++      document.addEventListener('pointerdown', (event) => { if (!catalogSearch.closest('.catalog-search').contains(event.target)) closeAutocomplete(); });
++      clearSearch.addEventListener('click', () => {
++        closeAutocomplete(); catalogSearch.value = ''; composing = false; filterCatalog(); catalogSearch.focus();
++      });
++      recommendationsNode.setAttribute('aria-busy', 'false');
 +      hydrateCatalog();
 +      if (playlist) resetSources(playlist);
 +      updateWatchDetails();
@@ -2339,7 +2472,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2100,44 @@
+@@ -918,19 +2230,44 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2389,7 +2522,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2148,15 @@
+@@ -941,6 +2278,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2405,7 +2538,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2166,45 @@
+@@ -950,20 +2296,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
@@ -2471,7 +2604,7 @@ diff --git a/state_server.py b/state_server.py
  
  
  class StateStore:
-@@ -187,6 +189,521 @@
+@@ -187,6 +189,553 @@
      return payload, None
  
  
@@ -2543,11 +2676,35 @@ diff --git a/state_server.py b/state_server.py
 +    return best
 +
 +
++def _recommendation_kind(category: object, title: object = '') -> str:
++    """Only explicit AI/comic dramas and live short-drama categories qualify."""
++    import unicodedata
++    name = re.sub(r'\s+', '', unicodedata.normalize('NFKC', str(category or ''))).casefold()
++    if '漫剧' in name or re.search(r'(?<![a-z])ai(?:短剧|剧|动画|动漫)', name):
++        return 'ai'
++    if '短剧' not in name or re.search(r'动漫|动画', name):
++        return ''
++    label = unicodedata.normalize('NFKC', str(title or '')).casefold()
++    tagged_ai = re.search(r'(?:^|[\s(\[])ai(?:$|[\s)\]])|(?<![a-z])ai(?:短剧|漫剧|剧)', label)
++    return 'ai' if tagged_ai else 'live'
++
++
++def _recommendation_candidates(items: list[dict], limit: int) -> list[dict]:
++    """Reserve two AI slots per live slot, including in the bounded shared pool."""
++    ai = [item for item in items if item.get('recommendation_kind') == 'ai']
++    live = [item for item in items if item.get('recommendation_kind') == 'live']
++    selected = []
++    for index in range((limit + 2) // 3):
++        selected.extend(ai[index * 2:index * 2 + 2] + live[index:index + 1])
++    return selected[:limit]
++
++
 +class RecommendationCatalog:
 +    """Public source metadata only; never enumerate private stored user selections."""
 +    # Same sources already maintained by jiang_short_drama/search.py.
 +    SOURCES = (('暴风资源', 'https://bfzyapi.com/api.php/provide/vod/'),
-+               ('非凡资源', 'https://cj.ffzyapi.com/api.php/provide/vod/'))
++               ('非凡资源', 'https://cj.ffzyapi.com/api.php/provide/vod/'),
++               ('量子资源', 'https://cj.lziapi.com/api.php/provide/vod/'))
 +
 +    def __init__(self, state: StateStore):
 +        import threading
@@ -2571,43 +2728,52 @@ diff --git a/state_server.py b/state_server.py
 +                if time.monotonic() >= deadline:
 +                    break
 +                listing = _catalog_json(base, ac='list')
-+                categories = [category.get('type_id') for category in listing.get('class', [])
-+                              if isinstance(category, dict) and re.search(r'短剧|漫剧', str(category.get('type_name') or ''))]
-+                if not categories:
++                categories = {'ai': [], 'live': []}
++                for category in listing.get('class', []):
++                    if isinstance(category, dict) and (kind := _recommendation_kind(category.get('type_name'))):
++                        categories[kind].append(category.get('type_id'))
++                if not any(categories.values()):
 +                    completed = True
-+                    continue
-+                category = secrets.choice(categories)
-+                if time.monotonic() >= deadline:
-+                    break
-+                details = _catalog_json(base, ac='detail', t=category, pg=1)
-+                page_count = max(1, min(100000, int(details.get('pagecount') or 1)))
-+                page = secrets.randbelow(page_count) + 1
-+                if page != 1:
-+                    if time.monotonic() >= deadline:
-+                        break
-+                    details = _catalog_json(base, ac='detail', t=category, pg=page)
-+                completed = True
-+                for record in details.get('list', [])[:100]:
-+                    item = _catalog_item(record, source_name)
-+                    if item:
-+                        item['recommendation_id'] = hashlib.sha256(_source_identity(item)[0].encode()).hexdigest()[:16]
-+                        found.setdefault(item['recommendation_id'], item)
-+                if len(found) >= 6:
++                for kind, identifiers in categories.items():
++                    if not identifiers or time.monotonic() >= deadline:
++                        continue
++                    try:
++                        category = secrets.choice(identifiers)
++                        details = _catalog_json(base, ac='detail', t=category, pg=1)
++                        page_count = max(1, min(100000, int(details.get('pagecount') or 1)))
++                        page = secrets.randbelow(page_count) + 1
++                        if page != 1:
++                            if time.monotonic() >= deadline:
++                                break
++                            details = _catalog_json(base, ac='detail', t=category, pg=page)
++                        completed = True
++                        for record in details.get('list', [])[:100]:
++                            if not isinstance(record, dict) or not (record_kind := _recommendation_kind(record.get('type_name'), record.get('vod_name'))):
++                                continue
++                            item = _catalog_item(record, source_name, short_only=False)
++                            if item:
++                                item['recommendation_kind'] = record_kind
++                                item['recommendation_id'] = hashlib.sha256(_source_identity(item)[0].encode()).hexdigest()[:16]
++                                found.setdefault(item['recommendation_id'], item)
++                    except (OSError, ValueError, TypeError, KeyError, AttributeError):
++                        LOGGER.warning('recommendation category unavailable: %s/%s', source_name, kind)
++                if (sum(item['recommendation_kind'] == 'ai' for item in found.values()) >= 8
++                        and sum(item['recommendation_kind'] == 'live' for item in found.values()) >= 4):
 +                    break
 +            except (OSError, ValueError, TypeError, KeyError, AttributeError):
 +                LOGGER.warning('recommendation catalog source unavailable: %s', source_name)
 +        if not completed:
 +            raise OSError('recommendation catalogs unavailable')
-+        return list(found.values())[:self.max_candidates]
++        return _recommendation_candidates(list(found.values()), self.max_candidates)
 +
 +    def _select(self, excluded: set[str] | None) -> list[dict]:
 +        if time.time() >= self.expires_at:
 +            return []
-+        if excluded is None:
-+            return self.cached[:12]
-+        available = [item for item in self.cached if item['recommendation_id'] not in excluded]
++        available = [item for item in self.cached if not excluded or item['recommendation_id'] not in excluded]
++        if excluded is not None:
++            secrets.SystemRandom().shuffle(available)
 +        selected, size = [], 2048
-+        for item in secrets.SystemRandom().sample(available, min(12, len(available))):
++        for item in _recommendation_candidates(available, 12):
 +            size += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
 +            if size > MAX_BODY_BYTES:
 +                break
@@ -2649,7 +2815,7 @@ diff --git a/state_server.py b/state_server.py
 +                combined[item['recommendation_id']] = item
 +            # Keep only bounded public metadata; request-specific exclusions are never stored.
 +            size, bounded = 0, []
-+            for item in reversed(list(combined.values())):
++            for item in _recommendation_candidates(list(reversed(list(combined.values()))), self.max_candidates):
 +                item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
 +                if len(bounded) >= self.max_candidates or size + item_size > self.max_cache_bytes:
 +                    break
@@ -2692,7 +2858,6 @@ diff --git a/state_server.py b/state_server.py
 +class SelectionResolver:
 +    """Recover compact-link metadata from the original fixed product source."""
 +    SOURCES = dict(RecommendationCatalog.SOURCES + (
-+        ('量子资源', 'https://cj.lziapi.com/api.php/provide/vod/'),
 +        ('红牛资源', 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/'),
 +        ('极速资源', 'https://jszyapi.com/api.php/provide/vod'),
 +        ('百度云资源', 'https://api.apibdzy.com/api.php/provide/vod/'),
@@ -2993,7 +3158,7 @@ diff --git a/state_server.py b/state_server.py
  class Handler(BaseHTTPRequestHandler):
      server_version = "short-drama-state/1.0"
  
-@@ -211,6 +728,71 @@
+@@ -211,6 +760,71 @@
          path = unquote(urlsplit(self.path).path)
          if path == "/health":
              self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
@@ -3065,7 +3230,7 @@ diff --git a/state_server.py b/state_server.py
              return
          prefix = "/selections/"
          if path.startswith(prefix):
-@@ -272,6 +854,9 @@
+@@ -272,6 +886,9 @@
      logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
      server = ThreadingHTTPServer((args.host, args.port), Handler)
      server.state_store = StateStore(Path(args.directory), args.ttl, args.max_entries)  # type: ignore[attr-defined]

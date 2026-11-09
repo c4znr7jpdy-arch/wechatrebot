@@ -280,13 +280,15 @@ def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(stat
     def catalog_json(_base, **params):
         calls.append(params)
         if params["ac"] == "list":
-            return {"class": [{"type_id": 3, "type_name": "短剧"}]}
+            return {"class": [{"type_id": 3, "type_name": "短剧"}, {"type_id": 4, "type_name": "AI漫剧"}]}
         if params["pg"] == 1:
             return {"pagecount": 100, "list": [_record("只在首页的新剧", category="短剧")]}
         assert params["pg"] == 100
+        category = "AI漫剧" if params["t"] == 4 else "短剧"
+        indices = range(14) if params["t"] == 4 else range(14, 20)
         return {"list": [
-            _record(f"随机作品{index}", category="短剧", count=2) for index in range(20)
-        ] + [_record("随机作品0 2005", category="短剧", count=2)]}
+            _record(f"随机作品{index}", category=category, count=2) for index in indices
+        ] + [_record("随机作品0 2005", category="AI漫剧", count=2)]}
 
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
     first = catalog.get(set())
@@ -302,7 +304,7 @@ def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(stat
     assert catalog.get(seen) == []
     # Exclusions belong to the request; another viewer can still see every cached work.
     assert len(catalog.get(set())) == 12
-    assert len(calls) == 3
+    assert len(calls) == 5
     for item in first:
         assert store.get(item["selection_token"])["items"][0]["title"] == item["title"]
 
@@ -320,6 +322,7 @@ def test_recommendation_resampling_keeps_shared_cache_bounded(state_module, tmp_
         calls[0] += 1
         return [
             {**module._catalog_item(_record(f"作品{calls[0]}-{number}", category="短剧", count=1), "暴风资源"),
+             "recommendation_kind": "ai" if number < 4 else "live",
              "recommendation_id": f"{calls[0] * 10 + number:016x}"}
             for number in range(5)
         ]
