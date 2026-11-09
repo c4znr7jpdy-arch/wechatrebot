@@ -90,6 +90,7 @@ def test_metadata_catalog_loads_selected_candidate_once_and_refresh_preserves_dr
         state["error"] = True
         page.get_by_role("button", name="刷新版本信息", exact=True).click()
         expect(title).to_be_disabled()
+        expect(page.locator("#release-editor-status")).to_contain_text("读取失败")
         expect(title).to_have_value("✨ 尚未保存")
         expect(notes).to_have_value(text)
         state["error"] = False

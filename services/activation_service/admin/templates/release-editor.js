@@ -77,7 +77,13 @@
     if (!listing) return;
     ready = Boolean(stable.value?.verified && listing.value && !stable.error && !listing.error
       && !stable.loading && !listing.loading);
-    if (!ready) { setEnabled(false); return; }
+    if (!ready) {
+      setEnabled(false);
+      status.textContent = stable.error || listing.error
+        ? "版本信息读取失败，已保留你填写的说明。请点击刷新版本信息重试。"
+        : "正在读取待发布版本…";
+      return;
+    }
     const versions = listing.value.filter(item => (item.available ?? item.verified) && item.pending);
     if (!versions.length) {
       ready = false;
