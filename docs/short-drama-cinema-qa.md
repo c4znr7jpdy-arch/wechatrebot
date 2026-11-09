@@ -181,3 +181,22 @@ Codex 内置浏览器另打开隔离的本机预览，以来源目录中的《�
 自动化验证使用 Browser plugin not available 路径和项目 Chromium Playwright 夹具，覆盖接口优先级、点击手势、错误分类、连接事件、播放不受干扰、换集保持连接、过期回调及复制备用路径。实际执行结果记录在 PR。此修复没有新增 Google Cast SDK、DLNA 发现服务或第三方投屏应用；手机浏览器、电视协议、同网段条件和接收端 HLS 兼容性需按实际设备验收，不能以模拟 API 测试代替。
 
 目标版本保持 0.9.9，候选类型为托管静态页面更新；状态服务、Nginx、客户端载荷和依赖无变化。用户确认失败环境为 iPhone 微信 / Safari，并要求兼顾其他设备；当前实现覆盖浏览器提供的原生通道与链接转接，具体电视及实机结果仍待确认，不能宣称所有电视协议已获支持。
+
+## 推荐比例与输入联想（2026-11-09）
+
+变更文件为 `patches/short-drama-player-cinema.patch`、本文件，以及 `tests/test_short_drama_{recommendation_ratio,search_interactions,player_continuity,player_controls,player_hardening,source_switching}.py`。沿用本仓库 `vendor/deploy/short_drama_player` 和 hosted-only、controls、cinema 补丁组合；状态服务的 Twitter 扩展另按原顺序应用。
+
+复用现有推荐目录、公开地址校验、跨源标题去重、推荐排除列表、搜索缓存和全源 GET 接口。服务端统一识别明确 AI/漫剧分类及 AI 片名标记，候选池按 AI 2、真人短剧 1 保留名额；前端每批显示两部 AI 剧和一部真人短剧并加角标。缺少某类时显示不足提示，普通动漫及电影不用于填补名额。推荐采样增加已经接入的量子源，搜索和换源仍使用原有十源。
+
+搜索输入使用 16px 字体，保留正常页面缩放。全源搜索按钮移至输入行右侧，加载文案保持固定宽度。输入至少两字、停顿 350ms 后查询现有全源接口，联想下拉最多六个片名；结果页继续展示服务端联想词。支持中文输入法、方向键选择、回车搜索、点击选择、Esc/清空/失焦关闭；独立取消和版本检查阻止旧词的响应覆盖新词。保留已提交的搜索词，并避免按原词再次过滤而隐藏模糊匹配结果。
+
+本地实际定向验证共 201 项通过：
+
+- `python -m pytest tests/test_short_drama_recommendation_ratio.py tests/test_short_drama_source_switching.py tests/test_short_drama_player_hardening.py tests/test_short_drama_player_controls.py tests/test_short_drama_catalog_search.py tests/test_hosted_tweet_pages.py -q --tb=short`：153 passed。
+- `python -m pytest tests/test_short_drama_player_continuity.py -q --tb=short`：37 passed。
+- `python -m pytest tests/test_short_drama_search_interactions.py -q`：11 passed。
+- 抽取候选页面内联脚本运行 `node --check`，以及 `python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。
+
+Browser 插件在本机候选页面验证 390×844 与 1440×960 布局、页面身份、非空内容、无错误覆盖层、控制台、推荐换一换与搜索交互；320px 布局另由定向测试覆盖。最初预览的固定联想样本没有“走马上任”，已切换为真实全源搜索响应重验：输入“走马”下拉出现“走马上任”，点击后查询十源并显示对应版本，回车搜索同样生效。源覆盖会随网络变化，另一次查询为 9/10 并正确提示一个来源暂不可用。截图保存在任务工作区外。
+
+候选类型为托管页面与状态服务更新，需要同时更新二者以提供推荐分类字段；无数据库结构或依赖变化。线上客户端最新为 v1.0.14，后续客户端待发布目标保持 1.0.15，本次不制作客户端包。CI、合并及实际服务器部署分别以 PR 和部署记录为准；真实 iPhone/微信聚焦缩放和各网络播放能力仍需实机验收。

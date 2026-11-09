@@ -98,7 +98,7 @@ def player_page(browser, player_assets, request):
             route.fulfill(json=payload)
         elif path.endswith("/api/recommendations"):
             route.fulfill(json={"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": [
-                {"title": f"推荐短剧{index}", "category": "短剧", "cover": "", "selection_token": f"abcdefghijklmnop{index}", "recommendation_id": f"{index:016x}",
+                {"title": f"推荐短剧{index}", "category": "AI漫剧" if index % 3 else "短剧", "recommendation_kind": "ai" if index % 3 else "live", "cover": "", "selection_token": f"abcdefghijklmnop{index}", "recommendation_id": f"{index:016x}",
                  "episodes": [{"name": "第1集", "url": f"https://media.example/related{index}.m3u8"}]}
                 for index in range(1, 10)
             ]})
@@ -484,7 +484,8 @@ def test_random_recommendations_do_not_repeat_across_rounds_and_exhaust_cleanly(
 def test_random_recommendations_failure_retry_excludes_previously_seen_cards(cinema_catalog):
     page = cinema_catalog
     state = {"fail": False, "requests": []}
-    items = [{"title": f"随机影片{index}", "category": "电影", "source": "非凡资源",
+    items = [{"title": f"随机短剧{index}", "category": "AI漫剧" if index % 3 else "短剧", "source": "非凡资源",
+              "recommendation_kind": "ai" if index % 3 else "live",
               "recommendation_id": f"{index:016x}",
               "episodes": [{"name": "正片", "url": f"https://media.example/movie-{index}.m3u8"}]}
              for index in range(21, 30)]
