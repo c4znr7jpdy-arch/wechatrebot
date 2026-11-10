@@ -430,6 +430,17 @@ def _hide_customer_internal_schema(
     schema: dict[str, Any],
 ) -> dict[str, Any]:
     """Remove runtime-only fields from every customer-facing schema view."""
+    if module_name == "astrbot_plugin_proactive_chat":
+        group = schema.get("group_settings")
+        # Older plugin runtimes still require their own group list. Hide it
+        # only when the installed schema confirms manager-owned group scope.
+        if not isinstance(group, dict) or group.get("_wechatrebot_managed_scope") is not True:
+            return schema
+        visible_schema = copy.deepcopy(schema)
+        group_items = visible_schema["group_settings"].get("items")
+        if isinstance(group_items, dict):
+            group_items.pop("session_list", None)
+        return visible_schema
     if module_name != "meme_manager":
         return schema
     visible_schema = copy.deepcopy(schema)

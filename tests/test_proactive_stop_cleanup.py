@@ -2,9 +2,11 @@
 import ast
 import asyncio
 import copy
+import importlib.util
 from pathlib import Path
+import sys
 import time
-from types import SimpleNamespace as NS
+from types import ModuleType, SimpleNamespace as NS
 from unittest.mock import AsyncMock, Mock
 import zoneinfo
 
@@ -27,6 +29,28 @@ def lifecycle_class(tmp_path_factory):
         destination.write_bytes((source / relative).read_bytes())
     main = _patched(directory, PLUGIN, "main.py", all_patches=True)
     lifecycle = (directory / "core/plugin_lifecycle.py").read_text("utf-8")
+    package_name = "proactive_lifecycle_fixture.core"
+    with pytest.MonkeyPatch.context() as imports:
+        for name, path in (("proactive_lifecycle_fixture", directory),
+                           (package_name, directory / "core")):
+            package = ModuleType(name)
+            package.__path__ = [str(path)]
+            imports.setitem(sys.modules, name, package)
+        imports.setitem(sys.modules, "astrbot.api", NS(logger=Mock()))
+        imports.setitem(sys.modules, "astrbot.core.platform.platform", NS(
+            PlatformStatus=NS(RUNNING="running")))
+        from wechatrebot_manager import group_feature_runtime
+        imports.setitem(sys.modules, "astrbot.core.platform.wechat_group_policy", group_feature_runtime)
+        helper_name = f"{package_name}.wechat_group_scope"
+        helper_spec = importlib.util.spec_from_file_location(
+            helper_name, directory / "core/wechat_group_scope.py")
+        helper = importlib.util.module_from_spec(helper_spec)
+        imports.setitem(sys.modules, helper_name, helper)
+        helper_spec.loader.exec_module(helper)
+        yield _build_lifecycle_class(directory, source, main, lifecycle, package_name)
+
+
+def _build_lifecycle_class(directory, source, main, lifecycle, package_name):
     selected = []
     for text, wanted in (
         (main, {"__init__", "_track_task", "_cleanup_telemetry_tasks"}),
@@ -58,7 +82,7 @@ def lifecycle_class(tmp_path_factory):
         instance.shutdown.side_effect = lambda: setattr(instance, "running", False)
         return instance
 
-    namespace = {"Base": Base, "asyncio": asyncio, "time": time,
+    namespace = {"__package__": package_name, "Base": Base, "asyncio": asyncio, "time": time,
                  "zoneinfo": zoneinfo, "logger": Mock(),
                  "star": NS(StarTools=NS(get_data_dir=lambda name: directory)),
                  "SessionOverrideManager": service, "NotificationCenter": service,
