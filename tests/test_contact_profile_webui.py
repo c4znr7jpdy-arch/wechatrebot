@@ -4,7 +4,10 @@ import re
 import pytest
 from playwright.sync_api import expect
 
+from wechatrebot_manager.ui_skins import load_skin_catalog
+
 from test_manager_startup import browser, manager_url  # noqa: F401
+from test_skin_webui import contrast_ratio
 
 
 def open_manager(page, manager_url, *, skin="default", theme="light"):
@@ -139,10 +142,12 @@ def test_profile_pending_close_reopen_discards_old_response_and_escapes_content(
 
 
 @pytest.mark.parametrize("account_state", ["changed", "unknown"])
-def test_profile_failure_retries_and_account_change_closes_pending_dialog(browser, manager_url, account_state):
+@pytest.mark.parametrize("skin", [item["id"] for item in load_skin_catalog()])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_profile_failure_retries_and_account_change_closes_pending_dialog(browser, manager_url, account_state, skin, theme):
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     try:
-        open_manager(page, manager_url)
+        open_manager(page, manager_url, skin=skin, theme=theme)
         entry = open_private_management(page)
         page.evaluate("""() => {
           window.pywebview.api.get_contact_network_profile = async () => ({ok:false,
@@ -151,6 +156,11 @@ def test_profile_failure_retries_and_account_change_closes_pending_dialog(browse
         entry.click()
         dialog = page.get_by_role("dialog", name="好友资料", exact=True)
         expect(dialog.get_by_role("alert")).to_contain_text("查询暂时失败")
+        error_colors = dialog.get_by_role("alert").evaluate("""element => {
+          const style = getComputedStyle(element);
+          return [style.color, style.backgroundColor];
+        }""")
+        assert contrast_ratio(*error_colors) >= 4.5, (skin, theme, "error", error_colors)
         page.evaluate("""() => {
           window.pywebview.api.get_contact_network_profile = (account, user) => new Promise(resolve => {
             window.resolveProfile = () => resolve({ok:true,data:{account_id:account,item:{user_id:user,nickname:'OLD_ACCOUNT_DATA'}}});
@@ -158,6 +168,11 @@ def test_profile_failure_retries_and_account_change_closes_pending_dialog(browse
         }""")
         dialog.get_by_role("button", name="重新查询").click()
         expect(dialog).to_contain_text("正在查询好友资料")
+        loading_colors = dialog.get_by_role("status").evaluate("""element => {
+          const style = getComputedStyle(element);
+          return [style.color, style.backgroundColor];
+        }""")
+        assert contrast_ratio(*loading_colors) >= 4.5, (skin, theme, "loading", loading_colors)
         page.evaluate("""state => {
           const original = window.pywebview.api.get_status;
           window.pywebview.api.get_status = async () => {
