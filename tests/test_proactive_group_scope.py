@@ -267,4 +267,3 @@ def test_revoked_group_does_not_prepare_or_generate_model_request(scoped):
     owner._prepare_llm_request.assert_not_called()
     owner._generate_llm_response.assert_not_called()
     owner._send_proactive_message.assert_not_called()
-
