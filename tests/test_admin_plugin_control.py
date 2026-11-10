@@ -150,3 +150,19 @@ def test_global_state_api_revision_changes_with_state(tmp_path, monkeypatch):
     after = api.get_global_plugin_states()["data"]
     assert after["states"]["astrbot_plugin_music"] is False
     assert before["revision"] != after["revision"]
+
+
+def test_unwritable_bridge_descriptor_keeps_existing_manager_pages_available(plugins, monkeypatch):
+    api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._install_root = plugins.install_root
+    api._features = plugins
+    def unwritable(*_args):
+        raise PermissionError("read-only descriptor directory")
+    monkeypatch.setattr(app_shell, "write_json_atomic", unwritable)
+    server = api._ensure_feature_page_server()
+    try:
+        with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=3) as response:
+            assert response.status == 200
+        assert not (plugins.install_root / CONTROL_DESCRIPTOR).exists()
+    finally:
+        api._close_feature_page_server()

@@ -309,19 +309,24 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             daemon=True,
             name="wechatrebot-feature-page",
         )
+        published_token = token
         try:
             write_json_atomic(self._install_root / CONTROL_DESCRIPTOR, {
                 "url": f"http://127.0.0.1:{server.server_port}{CONTROL_PATH}",
                 "token": token,
                 "pid": os.getpid(),
             })
+        except OSError:
+            published_token = ""
+            logging.getLogger(__name__).warning("插件管理接口描述文件无法写入，自然语言插件开关暂不可用。")
+        try:
             thread.start()
         except Exception:
             server.server_close()
             raise
         self._feature_page_server = server
         self._feature_page_thread = thread
-        self._plugin_control_token = token
+        self._plugin_control_token = published_token
         return server
 
     def _close_feature_page_server(self) -> None:
