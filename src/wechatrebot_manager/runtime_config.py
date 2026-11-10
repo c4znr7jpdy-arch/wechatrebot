@@ -9,7 +9,9 @@ import secrets
 from .brand import BrandProfile
 from .feature_policy import (
     RETIRED_PLUGIN_MODULES,
-    globally_disabled_plugins,
+    GLOBAL_DISABLED_PLUGINS_KEY,
+    global_plugin_state_path,
+    load_global_disabled_plugins,
     load_delivery_features,
 )
 from .json_io import write_json_atomic
@@ -326,10 +328,14 @@ def _sync_delivery_plugins(
     astrbot_payload: dict[str, object],
 ) -> None:
     features = load_delivery_features(root)
+    disabled = load_global_disabled_plugins(root, astrbot_payload)
+    # This mirror can be removed by AstrBot's integrity check; the manager file
+    # remains authoritative on the next save and startup configuration pass.
+    if disabled or GLOBAL_DISABLED_PLUGINS_KEY in astrbot_payload or global_plugin_state_path(root).exists():
+        astrbot_payload[GLOBAL_DISABLED_PLUGINS_KEY] = sorted(disabled)
     if features is not None:
         # Legacy stale plugin_set values are migrated to the delivery defaults;
         # explicit administrator disables remain effective across manager saves.
-        disabled = globally_disabled_plugins(astrbot_payload)
         astrbot_payload["plugin_set"] = [
             feature.module
             for feature in features

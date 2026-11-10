@@ -35,7 +35,10 @@ from wechatrebot_manager.plugin_center import (
 from wechatrebot_manager.runtime_config import write_runtime_configs
 from wechatrebot_manager.provider import OpenAIProviderProfile
 from wechatrebot_manager.customer_config import global_plugin_states, load_plugins, set_plugin_enabled
-from wechatrebot_manager.feature_policy import DeliveryFeature, GLOBAL_DISABLED_PLUGINS_KEY
+from wechatrebot_manager.feature_policy import (
+    DeliveryFeature, GLOBAL_DISABLED_PLUGINS_KEY, global_plugin_state_path,
+    load_global_disabled_plugins, save_global_disabled_plugins,
+)
 
 
 def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
@@ -1647,6 +1650,7 @@ def test_live_state_requires_activation_and_plugin_filter_membership(
         "registered-name": True,
     }
     disabled.append("folder-name")
+    save_global_disabled_plugins(tmp_path, disabled)
     assert client.plugin_states() == {
         "folder-name": False,
         "registered-name": False,
@@ -1775,11 +1779,16 @@ def test_global_plugin_states_give_explicit_disables_precedence_and_virtual_fall
     {}, {"plugin_set": ["*"]},
     {"plugin_set": [], GLOBAL_DISABLED_PLUGINS_KEY: ["other_feature"]},
 ])
-def test_global_toggle_rollback_restores_exact_fields_and_preserves_other_saves(tmp_path: Path, initial: dict) -> None:
+@pytest.mark.parametrize("policy_text", [None, '\ufeff{ "disabled_plugins": ["other_feature"], "future": "保留" }\r\n'])
+def test_global_toggle_rollback_restores_exact_fields_and_preserves_other_saves(tmp_path: Path, initial: dict, policy_text: str | None) -> None:
     install, public_id = _install(tmp_path)
     _deliver_global_control(install)
     path = install / "app/astrbot/data/cmd_config.json"
     path.write_text(json.dumps(initial), encoding="utf-8")
+    policy_path = global_plugin_state_path(install)
+    if policy_text is not None:
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        policy_path.write_bytes(policy_text.encode("utf-8"))
     service = PluginCenterService(install)
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
     service.engine.plugin_states = lambda: {"sample_configurable_feature": True}  # type: ignore[method-assign]
@@ -1806,6 +1815,12 @@ def test_global_toggle_rollback_restores_exact_fields_and_preserves_other_saves(
     assert json.loads(path.read_text(encoding="utf-8")) == {
         **initial, "unrelated_concurrent_save": "preserved",
     }
+    if policy_text is not None:
+        assert policy_path.read_bytes() == policy_text.encode("utf-8")
+    elif GLOBAL_DISABLED_PLUGINS_KEY in initial:
+        assert load_global_disabled_plugins(install) == frozenset(initial[GLOBAL_DISABLED_PLUGINS_KEY])
+    else:
+        assert not policy_path.exists()
 
 
 def test_engine_plugin_filter_preserves_explicit_disable_in_live_config(tmp_path: Path) -> None:
@@ -1828,6 +1843,20 @@ def test_engine_plugin_filter_preserves_explicit_disable_in_live_config(tmp_path
     assert config[GLOBAL_DISABLED_PLUGINS_KEY] == ["sample_configurable_feature"]
     client.set_plugin_filter(None, disabled_plugins=None)
     assert config == {"unrelated": "preserved"}
+
+
+def test_engine_live_states_use_durable_policy_when_command_marker_was_removed(tmp_path: Path) -> None:
+    client = EngineApiClient(tmp_path)
+    save_global_disabled_plugins(tmp_path, ["sample_configurable_feature"])
+
+    def request(_method, path, body=None):
+        if path == "/api/v1/plugins":
+            return [{"root_dir_name": "sample_configurable_feature", "name": "registered-sample", "activated": True}]
+        return {"config": {"plugin_set": ["*"]}}
+
+    client.request = request  # type: ignore[method-assign]
+    assert client.plugin_activation_states()["sample_configurable_feature"] is True
+    assert client.plugin_states() == {"sample_configurable_feature": False, "registered-sample": False}
 
 
 def test_engine_plugin_filter_rejects_unconfirmed_explicit_disable(tmp_path: Path) -> None:

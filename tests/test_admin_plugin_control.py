@@ -166,3 +166,24 @@ def test_unwritable_bridge_descriptor_keeps_existing_manager_pages_available(plu
         assert not (plugins.install_root / CONTROL_DESCRIPTOR).exists()
     finally:
         api._close_feature_page_server()
+
+
+def test_runtime_bridge_uses_real_manager_authentication_and_response_contract(plugins, monkeypatch):
+    from test_admin_plugin_runtime import control
+
+    api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._install_root = plugins.install_root
+    api._features = plugins
+    monkeypatch.setattr(control, "_install_root", lambda: plugins.install_root)
+    api._ensure_feature_page_server()
+    try:
+        assert control._request(_payload(action="list"))["plugins"][0]["enabled"] is True
+        result = control._request(_payload())
+        assert result["enabled"] is False and result["applied"] is True
+        assert result["module"] == "astrbot_plugin_music"
+        assert control._request(_payload(action="list"))["plugins"][0]["enabled"] is False
+        with pytest.raises(control.PluginControlError, match="管理员微信号"):
+            control._request(_payload(sender_id="wxid_other"))
+        assert plugins.calls == [("music", False)]
+    finally:
+        api._close_feature_page_server()

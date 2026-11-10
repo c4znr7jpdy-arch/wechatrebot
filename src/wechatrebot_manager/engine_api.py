@@ -18,7 +18,9 @@ from .plugin_configuration import _dashboard_path, _json_revision, _read_object,
 from .plugin_errors import ConfigConflictError, EngineUnavailableError, PluginCenterError, ProviderTestError
 from .customer_logs import sanitize_log_text
 from .error_catalog import provider_error_code
-from .feature_policy import GLOBAL_DISABLED_PLUGINS_KEY, globally_disabled_plugins
+from .feature_policy import (
+    GLOBAL_DISABLED_PLUGINS_KEY, globally_disabled_plugins, load_global_disabled_plugins,
+)
 from .port_config import load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
@@ -192,7 +194,7 @@ class EngineApiClient:
             else {"*"}
         )
         try:
-            disabled = globally_disabled_plugins(config)
+            disabled = load_global_disabled_plugins(self.install_root, config)
         except ValueError as exc:
             raise PluginCenterError(str(exc)) from exc
         return _plugin_state_map(plugins, enabled_names, disabled)

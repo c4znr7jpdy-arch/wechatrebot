@@ -11,7 +11,8 @@ from .brand import BrandProfile
 from .feature_policy import (
     GLOBAL_DISABLED_PLUGINS_KEY,
     RETIRED_PLUGIN_MODULES,
-    globally_disabled_plugins,
+    load_global_disabled_plugins,
+    save_global_disabled_plugins,
 )
 from .json_io import write_json_atomic
 from .provider import (
@@ -782,7 +783,7 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
     engine = _object(engine_path)
     configured = engine.get("plugin_set", ["*"])
     enabled_names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
-    disabled = globally_disabled_plugins(engine)
+    disabled = load_global_disabled_plugins(install, engine)
     entries: list[PluginEntry] = []
     if plugin_root.is_dir():
         for path in sorted(plugin_root.iterdir(), key=lambda item: item.name.casefold()):
@@ -821,12 +822,13 @@ def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> Non
     else:
         names.discard(module_name)
     engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
-    disabled = set(globally_disabled_plugins(engine))
+    disabled = set(load_global_disabled_plugins(install, engine))
     if enabled:
         disabled.discard(module_name)
     else:
         disabled.add(module_name)
     engine[GLOBAL_DISABLED_PLUGINS_KEY] = sorted(disabled - RETIRED_PLUGIN_MODULES)
+    save_global_disabled_plugins(install, engine[GLOBAL_DISABLED_PLUGINS_KEY])
     write_json_atomic(engine_path, engine)
 
 
@@ -847,7 +849,7 @@ def _installed_plugin_modules(install: Path) -> set[str]:
 
 
 def global_plugin_states(root: str | Path) -> dict[str, bool]:
-    """Read persisted global plugin states without changing configuration.
+    """Read durable global plugin states, migrating a legacy cmd marker once.
 
     A literal ``*`` in ``plugin_set`` means every installed plugin is enabled;
     the explicit disabled list takes precedence.  The result is intentionally
@@ -862,7 +864,7 @@ def global_plugin_states(root: str | Path) -> dict[str, bool]:
         if isinstance(configured, list) else set()
     )
     allow_all = "*" in names
-    disabled = globally_disabled_plugins(engine)
+    disabled = load_global_disabled_plugins(install, engine)
     states = {
         name: (name not in disabled and (allow_all or name in names))
         for name in sorted(_installed_plugin_modules(install))

@@ -22,10 +22,10 @@ from .customer_config import PluginEntry, global_plugin_states, load_plugins, lo
 from .engine_api import EngineApiClient as EngineApiClient
 from .feature_policy import (
     DeliveryFeature, GLOBAL_DISABLED_PLUGINS_KEY, PROTECTED_PLUGIN_MODULES,
-    load_delivery_features,
+    global_plugin_state_path, load_delivery_features,
 )
 from .group_analysis_settings import group_analysis_ui_schema as _group_analysis_ui_schema
-from .json_io import write_json_atomic
+from .json_io import write_json_atomic, write_text_atomic
 from .plugin_center_web import (
     _PAGE_ID,
     _asset_root as _asset_root,
@@ -644,6 +644,11 @@ class PluginCenterService:
             snapshot = {key: copy.deepcopy(original[key]) for key in state_keys if key in original}
             if any(not isinstance(value, list) for value in snapshot.values()):
                 raise PluginCenterError("全局功能开关配置格式不正确。")
+            policy_path = global_plugin_state_path(self.install_root)
+            try:
+                policy_snapshot = policy_path.read_bytes().decode("utf-8")
+            except FileNotFoundError:
+                policy_snapshot = None
             try:
                 # Update the durable allowlist before activation; background
                 # deliveries and message handlers then share one global state.
@@ -671,6 +676,13 @@ class PluginCenterService:
                         self.engine.set_enabled(module_name, previous_live)
                     except (OSError, ValueError, PluginCenterError) as exc:
                         rollback_errors.append(exc)
+                try:
+                    if policy_snapshot is None:
+                        policy_path.unlink(missing_ok=True)
+                    else:
+                        write_text_atomic(policy_path, policy_snapshot)
+                except (OSError, ValueError) as exc:
+                    rollback_errors.append(exc)
                 try:
                     # Engine PUT may also rewrite disk: restore these exact
                     # fields last while preserving unrelated concurrent saves.
