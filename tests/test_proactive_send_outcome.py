@@ -1,11 +1,12 @@
 """Keep rejected proactive sends out of delivered history and reply counters."""
 import asyncio
+import importlib.util
 import json
 from pathlib import Path
 import sys
 import time
 import traceback
-from types import MethodType, SimpleNamespace as NS
+from types import MethodType, ModuleType, SimpleNamespace as NS
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -22,18 +23,37 @@ RESPONSE = "Generated proactive message"
 
 
 @pytest.fixture
-def sender(tmp_path, background):
+def sender(tmp_path, background, monkeypatch):
     source = _patched(tmp_path, PLUGIN, "core/message_sender.py", all_patches=True)
     for relative in ("core/chat_flow.py", "core/message_events.py"):
         path = tmp_path / relative
         if not path.exists():
             path.write_bytes((ROOT / "vendor/data/plugins" / PLUGIN / relative).read_bytes())
-    scope = {"asyncio": asyncio, "time": time, "traceback": traceback, "logger": Mock(),
+    package_name = "proactive_outcome_fixture.core"
+    for name, path in (("proactive_outcome_fixture", tmp_path),
+                       (package_name, tmp_path / "core")):
+        package = ModuleType(name)
+        package.__path__ = [str(path)]
+        monkeypatch.setitem(sys.modules, name, package)
+    monkeypatch.setitem(sys.modules, "astrbot.api", NS(logger=Mock()))
+    monkeypatch.setitem(sys.modules, "astrbot.core.platform.platform", NS(
+        PlatformStatus=NS(RUNNING="running")))
+    helper_name = f"{package_name}.wechat_group_scope"
+    helper_spec = importlib.util.spec_from_file_location(
+        helper_name, tmp_path / "core/wechat_group_scope.py")
+    helper = importlib.util.module_from_spec(helper_spec)
+    monkeypatch.setitem(sys.modules, helper_name, helper)
+    helper_spec.loader.exec_module(helper)
+
+    scope = {"__package__": package_name, "asyncio": asyncio, "time": time,
+             "traceback": traceback, "logger": Mock(),
              "PlatformStatus": NS(RUNNING="running"), "MessageChain": list,
              "Plain": lambda **kwargs: NS(**kwargs), "Record": lambda **kwargs: NS(**kwargs)}
     config = {"enable": True, "tts_settings": {"enable_tts": False},
               "segmented_reply_settings": {"enable": False}}
     owner = NS(context=background.context, telemetry=None,
+               session_data={SESSION: {"self_id": "wxid_bot"}},
+               _parse_session_id=lambda session: tuple(session.split(":", 2)),
                _get_session_config=lambda session: config,
                _get_session_log_str=lambda *args: "test-session",
                _trigger_decorating_hooks=AsyncMock(side_effect=lambda session, chain, **kwargs: chain),
@@ -101,7 +121,7 @@ def _flow(owner, scope, plugin_root: Path, session=SESSION):
     owner._normalize_session_id = lambda session: session
     owner._is_chat_allowed = AsyncMock(return_value=(True, "allowed"))
     owner.data_lock = asyncio.Lock()
-    owner.session_data = {}
+    owner.session_data = {session: {"self_id": "wxid_bot"}}
     owner.last_message_times = {}
     owner._prepare_llm_request = AsyncMock(return_value={"conv_id": "conversation", "history": [],
                                                         "system_prompt": "", "session_id": session})
@@ -185,7 +205,8 @@ def test_session_disabled_during_generation_is_not_sent_or_rescheduled(sender, t
 def test_real_finalizer_preserves_counter_and_history_when_send_was_denied(sender, tmp_path, accepted):
     owner, _config, scope = sender
     _flow(owner, scope, tmp_path)
-    owner.session_data[SESSION] = {"unanswered_count": 2, "recent_proactive_messages": ["previous"]}
+    owner.session_data[SESSION] = {"self_id": "wxid_bot", "unanswered_count": 2,
+                                   "recent_proactive_messages": ["previous"]}
     owner.context.conversation_manager = NS(add_message_pair=AsyncMock())
     owner.RECENT_PROACTIVE_MESSAGES_LIMIT = 20
     owner._send_proactive_message = AsyncMock(return_value=accepted)

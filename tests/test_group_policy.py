@@ -282,13 +282,21 @@ def test_group_overview_exactly_summarizes_schedules_and_proactive_sources(tmp_p
             {
                 "group_settings": {
                     "enable": True,
-                    "session_list": [f"source:GroupMessage:{GROUP}"],
+                    "session_list": [],
                 }
             }
         ),
         encoding="utf-8",
     )
     service = GroupPolicyService(tmp_path, schedules=ScheduleService(tmp_path))
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": ["astrbot_plugin_proactive_chat"]})
+
+    # Manager-only upgrades must not claim an old, empty-list plugin can send.
+    old_runtime = service.proactive_summary(ACCOUNT_A, GROUP)
+    assert not any(item["id"].startswith("feature:") for item in old_runtime["items"])
+    schema_path = config.parents[1] / "plugins" / "astrbot_plugin_proactive_chat" / "_conf_schema.json"
+    schema_path.parent.mkdir(parents=True)
+    schema_path.write_text(json.dumps({"group_settings": {"_wechatrebot_managed_scope": True}}), encoding="utf-8")
 
     overview = service.overview(ACCOUNT_A, GROUP)
     proactive = overview["proactive"]
@@ -301,6 +309,18 @@ def test_group_overview_exactly_summarizes_schedules_and_proactive_sources(tmp_p
     assert "effective_enabled" not in proactive
     assert proactive["message"] == "主动聊天由各功能自行配置；定时任务按本群设置执行。"
     assert overview["features"][0]["name"] == "常用指令"
+
+    # The same group under another account never inherits this account's grant.
+    other = service.proactive_summary(ACCOUNT_B, GROUP)
+    assert not any(item["id"] == "feature:astrbot_plugin_proactive_chat" for item in other["items"])
+    service.save(ACCOUNT_A, GROUP, {"bot_enabled": False})
+    paused = service.proactive_summary(ACCOUNT_A, GROUP)
+    feature = next(item for item in paused["items"] if item["id"].startswith("feature:"))
+    assert feature["enabled"] is False
+    assert feature["status"] == "本群已停用"
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": []})
+    revoked = service.proactive_summary(ACCOUNT_A, GROUP)
+    assert not any(item["id"].startswith("feature:") for item in revoked["items"])
 
 
 def test_schedule_items_expose_exact_machine_readable_target(tmp_path: Path) -> None:

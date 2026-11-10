@@ -15,7 +15,7 @@ _GUIDES = {
     "astrbot_plugin_music": ("在聊天中点歌", "群聊直接发送“点歌 七里香”，无需点名机器人。", "点歌属于对当前消息的回复，不受主动推送开关影响。音乐能否播放取决于平台和歌曲授权。", ()),
     "astrbot_plugin_parser": ("解析聊天中的抖音等分享链接", "启用后直接发送分享链接，使用内置推荐配置即可。", "部分平台可能受登录状态或网络环境影响；普通使用无需填写参数。", ()),
     "astrbot_plugin_patch_at_wxid": ("识别微信群里的点名", "保持启用即可，无需填写参数。", "这是微信兼容功能；关闭后可能影响群聊点名识别。", ()),
-    "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "只填写允许主动联系的会话，再打开对应的群聊或私聊开关。", "主动消息会发送给真实联系人；先在测试会话试用，避免打扰。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.session_list", "group_settings.group_idle_trigger_minutes")),
+    "astrbot_plugin_proactive_chat": ("按指定范围主动聊天", "微信群在群聊&私聊管理中允许主动聊天，无需另填群聊名单；私聊仍需填写对象列表，再打开对应开关。", "群聊总开关控制所有已允许的群；频率、免打扰和随机插话在本功能设置中调整。旧版运行环境需同步更新插件后才能省去群聊名单。", ("friend_settings.enable", "friend_settings.session_list", "group_settings.enable", "group_settings.group_idle_trigger_minutes")),
     "astrbot_plugin_qq_group_daily_analysis": ("整理近 1 天或 7 天的群聊报告", "从管理器的群聊列表选择自动日报群，不需要在群里发送命令。", "使用当前机器人账号成功接收后保存在本机的群消息；安装前或连接离线期间的消息无法补拉。生成报告还会调用回复模型。", ()),
     "astrbot_plugin_twitter": ("订阅 X（Twitter）账号，以文字、微信卡片或截图推送", "在下方内嵌订阅页手动设置数据源、代理、推主和推送形式，也可在目标群发送 /推特关注 OpenAI 卡片；网页和命令使用同一份会话订阅。", "网络设置对本功能生效，订阅和推送形式按会话隔离；截图失败回退文字，卡片沿用微信推文卡片样式。", ()),
     "astrbot_plugin_self_iterative_core": ("限制自动优化的使用范围", "先开启白名单，只添加可信任的管理员。", "进阶维护能力可能修改功能代码；普通用户不建议关闭权限限制。", ("enable_whitelist", "whitelist_users", "verbose_steps")),
@@ -70,7 +70,7 @@ _COMMANDS = {
         {"title": "使用方式", "items": (("发送分享链接", "自动解析支持的平台链接"),)},
     ),
     "astrbot_plugin_proactive_chat": (
-        {"title": "使用方式", "items": (("设置会话范围", "添加目标会话，再开启群聊或私聊主动消息"),)},
+        {"title": "使用方式", "items": (("设置群聊范围", "在群聊&私聊管理允许主动聊天，再打开群聊总开关"), ("设置私聊范围", "添加私聊对象，再开启私聊主动消息"))},
     ),
     "astrbot_plugin_self_learning": (
         {"title": "使用方式", "items": (("自动维护", "记忆与情感使用默认策略，无需手动配置"),)},

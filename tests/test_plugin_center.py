@@ -77,6 +77,22 @@ def test_meme_prompt_schema_is_hidden_from_customer_configuration() -> None:
     assert "prompt" in schema["generation"]["items"]
 
 
+@pytest.mark.parametrize("managed_scope", [False, True])
+def test_proactive_group_list_is_hidden_only_with_a_compatible_runtime(managed_scope) -> None:
+    schema = {
+        "group_settings": {
+            "type": "object",
+            "_wechatrebot_managed_scope": managed_scope,
+            "items": {"enable": {"type": "bool"}, "session_list": {"type": "list"}},
+        },
+        "friend_settings": {"type": "object", "items": {"session_list": {"type": "list"}}},
+    }
+    visible = _hide_customer_internal_schema("astrbot_plugin_proactive_chat", schema)
+    assert ("session_list" in visible["group_settings"]["items"]) is not managed_scope
+    assert "session_list" in visible["friend_settings"]["items"]
+    assert "session_list" in schema["group_settings"]["items"]
+
+
 def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
     schema = {
         "analyzer_model": {

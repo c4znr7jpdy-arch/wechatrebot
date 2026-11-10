@@ -1,0 +1,542 @@
+diff --git a/_conf_schema.json b/_conf_schema.json
+index 6223cfc..058012c 100644
+--- a/_conf_schema.json
++++ b/_conf_schema.json
+@@ -266,6 +266,7 @@
+         }
+     },
+     "group_settings": {
++        "_wechatrebot_managed_scope": true,
+         "description": "👥 群聊全局配置",
+         "type": "object",
+         "items": {
+@@ -273,13 +274,13 @@
+                 "description": "✅ 启用群聊全局主动消息功能",
+                 "type": "bool",
+                 "default": false,
+-                "hint": "只有在会话列表中明确配置的群聊才会获得主动消息服务，避免给未配置的会话提供服务"
++                "hint": "群聊主动消息总开关。微信群的使用范围由群聊管理中的主动聊天授权决定；其他平台仍使用群聊对象列表。"
+             },
+             "session_list": {
+                 "description": "📋 群聊对象列表",
+                 "type": "list",
+                 "default": [],
+-                "hint": "填写需要主动联系的群聊标识。建议在对应群聊发送 /sid 后完整复制结果；每行一个，不要手动修改格式。"
++                "hint": "仅供非微信平台填写群聊标识。微信群由群聊管理中的主动聊天授权统一控制，无需在此重复填写。"
+             },
+             "auto_trigger_settings": {
+                 "description": "🤖 自动主动消息设置",
+@@ -312,7 +313,7 @@
+                         "description": "✅ 启用群聊随机插话",
+                         "type": "bool",
+                         "default": true,
+-                        "hint": "仅对已启用群聊主动消息且在 session_list 中的群生效。群里有人正常聊天时，机器人会按概率理解上下文并自然接一句话。"
++                        "hint": "仅对已启用主动消息、且在群聊管理获得授权的微信群或对象列表中的其他平台群生效。群里有人正常聊天时，机器人会按概率理解上下文并自然接一句话。"
+                     },
+                     "probability_percent": {
+                         "description": "🎲 每条群消息触发概率 (%)",
+diff --git a/core/chat_flow.py b/core/chat_flow.py
+index 631e2e9..308815d 100644
+--- a/core/chat_flow.py
++++ b/core/chat_flow.py
+@@ -43,6 +43,9 @@ class ProactiveCoreMixin:
+ 
+     async def _is_chat_allowed(self, session_id: str) -> tuple[bool, str]:
+         """检查是否允许进行主动聊天，并返回阻断原因。"""
++        from .wechat_group_scope import authorize_group_chat
++        if not await authorize_group_chat(self, session_id):
++            return False, "group_permission"
+         session_config = self._get_session_config(session_id)
+         # 会话未配置或已禁用时，直接阻止本轮主动消息
+         if not session_config:
+@@ -159,7 +162,9 @@ class ProactiveCoreMixin:
+ 
+     async def check_and_chat(self, session_id: str) -> None:
+         """由定时任务触发的核心函数，完成一次完整的主动消息流程。"""
++        from .wechat_group_scope import pin_group_generation, reset_group_generation
+         normalized_session_id = self._normalize_session_id(session_id)
++        generation_token = None
+         try:
+             # 免打扰与启用状态检查
+             is_allowed, block_reason = await self._is_chat_allowed(
+@@ -220,6 +225,7 @@ class ProactiveCoreMixin:
+                     )
+                 )
+ 
++            generation_token = pin_group_generation(self, normalized_session_id)
+             # 准备上下文与人格
+             request_package = await self._prepare_llm_request(normalized_session_id)
+             if not request_package:
+@@ -342,4 +348,5 @@ class ProactiveCoreMixin:
+                     )
+                 )
+         finally:
++            reset_group_generation(generation_token)
+             await self._clear_manual_trigger_state(normalized_session_id)
+diff --git a/core/message_events.py b/core/message_events.py
+index dbb6335..e69225e 100644
+--- a/core/message_events.py
++++ b/core/message_events.py
+@@ -553,6 +553,8 @@ class EventsMixin:
+         if session_id in self.live_interject_sessions:
+             return
+         self.live_interject_sessions.add(session_id)
++        from .wechat_group_scope import pin_group_generation, reset_group_generation
++        generation_token = None
+         try:
+             max_response_delay_seconds = settings["max_response_delay_seconds"]
+             if time.time() - trigger_time > max_response_delay_seconds:
+@@ -568,6 +570,7 @@ class EventsMixin:
+                 )
+                 return
+ 
++            generation_token = pin_group_generation(self, session_id)
+             llm_request = await self._prepare_llm_request(session_id)
+             if not llm_request:
+                 return
+@@ -624,6 +627,7 @@ class EventsMixin:
+                 f"[主动消息] {self._get_session_log_str(session_id, session_config)} 已完成一次群聊随机插话。"
+             )
+         finally:
++            reset_group_generation(generation_token)
+             self.live_interject_sessions.discard(session_id)
+ 
+     async def _archive_live_interject_pair(
+@@ -754,6 +758,9 @@ class EventsMixin:
+                     event.get_self_id()
+                 )
+ 
++        from .wechat_group_scope import remember_group_account
++        remember_group_account(self, event)
++
+         # 过滤 Bot 自身消息，避免把机器人发言误判成“用户活跃”
+         sender_id = None
+         try:
+diff --git a/core/message_sender.py b/core/message_sender.py
+index 10558e5..3835e20 100644
+--- a/core/message_sender.py
++++ b/core/message_sender.py
+@@ -165,8 +165,10 @@ class SenderMixin:
+         from astrbot.core.platform.wechat_group_policy import event_plugins, plugin_allowed
+         from astrbot.core.star.star import star_map
+ 
++        from .wechat_group_scope import bound_group_account
+         authorized = authorized or await background_event(
+             self.context, session_id, "astrbot_plugin_proactive_chat",
++            account_id=bound_group_account(self, session_id),
+         )
+         permission_event = authorized[1]
+         parsed = self._parse_session_id(session_id)
+@@ -330,8 +332,10 @@ class SenderMixin:
+         )
+ 
+         try:
++            from .wechat_group_scope import bound_group_account
+             authorized = await background_event(
+                 self.context, session_id, "astrbot_plugin_proactive_chat",
++                account_id=bound_group_account(self, session_id),
+             )
+             if authorized[0].status != PlatformStatus.RUNNING:
+                 logger.warning("Proactive platform is not running; delivery skipped.")
+@@ -364,7 +368,9 @@ class SenderMixin:
+         """发送主动消息（支持TTS与分段）。"""
+         from astrbot.core.platform.wechat_background_policy import background_event
+         try:
+-            await background_event(self.context, session_id, "astrbot_plugin_proactive_chat")
++            from .wechat_group_scope import bound_group_account
++            await background_event(self.context, session_id, "astrbot_plugin_proactive_chat",
++                                   account_id=bound_group_account(self, session_id))
+         except PermissionError:
+             logger.info("Proactive permission unavailable; generation skipped.")
+             return False
+diff --git a/core/plugin_lifecycle.py b/core/plugin_lifecycle.py
+index b7bfb15..5fa6a12 100644
+--- a/core/plugin_lifecycle.py
++++ b/core/plugin_lifecycle.py
+@@ -113,6 +113,8 @@ class LifecycleMixin:
+         logger.info("[主动消息] 调度器已初始化喵。")
+ 
+         await self._setup_auto_triggers_for_enabled_sessions()
++        from .wechat_group_scope import schedule_group_scope_refresh
++        schedule_group_scope_refresh(self)
+         logger.info("[主动消息] 自动主动消息触发器初始化完成喵。")
+ 
+         # 启动通知系统
+@@ -152,6 +154,11 @@ class LifecycleMixin:
+     async def terminate(self) -> None:
+         """插件被卸载或停用时调用的清理函数。"""
+         logger.info("[主动消息] 收到插件终止指令，开始清理资源喵。")
++        scope_task = getattr(self, "_wechat_group_scope_task", None)
++        if scope_task is not None:
++            scope_task.cancel()
++            await asyncio.gather(scope_task, return_exceptions=True)
++            self._wechat_group_scope_task = None
+         try:
+             if self._heartbeat_task:
+                 self._heartbeat_task.cancel()
+diff --git a/core/session_config.py b/core/session_config.py
+index c1b3e18..37f1352 100644
+--- a/core/session_config.py
++++ b/core/session_config.py
+@@ -10,6 +10,8 @@ from typing import Any
+ 
+ from astrbot.api import logger
+ 
++from .wechat_group_scope import group_is_allowed, is_wechat_group
++
+ 
+ class ConfigMixin:
+     """配置读取与验证混入类。"""
+@@ -22,7 +24,6 @@ class ConfigMixin:
+         try:
+             # 读取全局配置块
+             friend_settings = self.config.get("friend_settings", {})
+-            group_settings = self.config.get("group_settings", {})
+ 
+             # 私聊配置校验
+             if friend_settings.get("enable", False):
+@@ -41,14 +42,6 @@ class ConfigMixin:
+                         "[主动消息] 私聊主动消息配置中最小间隔大于最大间隔喵，将自动调整喵。"
+                     )
+ 
+-            # 群聊配置校验
+-            if group_settings.get("enable", False):
+-                session_list = group_settings.get("session_list", [])
+-                if not session_list:
+-                    logger.warning(
+-                        "[主动消息] 群聊主动消息已启用但未配置任何会话喵（session_list 为空）。"
+-                    )
+-
+             logger.info("[主动消息] 配置验证完成喵。")
+ 
+         except Exception as e:
+@@ -121,11 +114,17 @@ class ConfigMixin:
+         normalized_session_id = self._normalize_session_id(session_id)
+         candidates = {session_id, normalized_session_id, target_id}
+ 
+-        if any(candidate in session_list for candidate in candidates):
++        managed_group = session_type == "group" and is_wechat_group(self, session_id)
++        selected = (
++            group_is_allowed(self, session_id) if managed_group
++            else any(candidate in session_list for candidate in candidates)
++        )
++        if selected:
+             # 返回深拷贝，避免调用方意外修改全局配置对象
+             config_copy = copy.deepcopy(settings)
+             config_copy["_session_type"] = session_type
+-            config_copy["_from_session_list"] = True
++            config_copy["_from_session_list"] = not managed_group
++            config_copy["_manager_group_scope"] = managed_group
+             return config_copy
+ 
+         return None
+diff --git a/core/session_parser.py b/core/session_parser.py
+index 1e67405..ef441b8 100644
+--- a/core/session_parser.py
++++ b/core/session_parser.py
+@@ -196,4 +196,7 @@ class SessionMixin:
+             return session_id
+ 
+         platform, msg_type, target_id = parsed
++        # A WeChat group task must never migrate to another platform/account.
++        if msg_type == "GroupMessage" and target_id.endswith("@chatroom"):
++            return session_id
+         return self._resolve_full_umo(target_id, msg_type, platform)
+diff --git a/core/task_scheduler.py b/core/task_scheduler.py
+index 92b1344..3f1f0eb 100644
+--- a/core/task_scheduler.py
++++ b/core/task_scheduler.py
+@@ -258,10 +258,13 @@ class SchedulerMixin:
+                 elif result == "max_unanswered":
+                     skipped_max_unanswered += 1
+ 
+-        # 群聊 session_list 批量注册
++        # Manager grants discover WeChat groups even before any new message.
++        from .wechat_group_scope import discover_group_sessions
+         group_settings = self.config.get("group_settings", {})
+         if group_settings.get("enable", False):
+-            for session_id in group_settings.get("session_list", []):
++            managed_sessions = await discover_group_sessions(self)
++            sessions = set(group_settings.get("session_list", [])) | set(managed_sessions)
++            for session_id in sorted(sessions):
+                 result = await self._setup_auto_trigger_for_session_config(
+                     group_settings, session_id
+                 )
+@@ -369,7 +372,7 @@ class SchedulerMixin:
+         await self._setup_auto_trigger(resolved_session_id, silent=True)
+         return "created"
+ 
+-    async def _init_jobs_from_data(self) -> None:
++    async def _init_jobs_from_data(self, *, managed_groups_only: bool = False) -> None:
+         """从已加载的 session_data 中恢复定时任务。"""
+         restored_count = 0
+         cleaned_runtime_state = 0
+@@ -389,7 +392,15 @@ class SchedulerMixin:
+         logger.debug(f"[主动消息] 会话数据条目数: {len(self.session_data)}")
+ 
+         # 遍历持久化任务并恢复调度器
++        from .wechat_group_scope import group_scope_ready, is_wechat_group
+         for session_id, session_info in list(self.session_data.items()):
++            managed_group = is_wechat_group(self, session_id)
++            if managed_groups_only and not managed_group:
++                continue
++            # Platform initialization happens after plugin initialization.
++            # Preserve pending group times/counts until its account is confirmed.
++            if managed_group and not group_scope_ready(self, session_id):
++                continue
+             session_config = self._get_session_config(session_id)
+             if not session_config or not session_config.get("enable", False):
+                 if self._clear_session_schedule_state(session_id):
+diff --git a/core/web_admin_server.py b/core/web_admin_server.py
+index 0460ddf..a26dbfa 100644
+--- a/core/web_admin_server.py
++++ b/core/web_admin_server.py
+@@ -1060,13 +1060,19 @@ class WebAdminServer:
+     def _list_known_sessions(self) -> list[str]:
+         sessions: set[str] = set()
+ 
++        from .wechat_group_scope import configured_group_sessions, is_wechat_group
++
+         # 先收集全局配置里显式声明的会话。
+         for scope_key in ("friend_settings", "group_settings"):
+             cfg = self.config.get(scope_key, {})
+             for session in cfg.get("session_list", []):
+                 if isinstance(session, str) and session:
++                    if scope_key == "group_settings" and is_wechat_group(self.plugin, session):
++                        continue
+                     sessions.add(self.plugin._normalize_session_id(session))
+ 
++        sessions.update(configured_group_sessions(self.plugin))
++
+         # 再并入运行时数据与会话覆写记录，保证“曾经出现过”的会话也能在管理端看到。
+         sessions.update(self.plugin.session_data.keys())
+         sessions.update(self.plugin.session_override_manager.list_sessions())
+diff --git a/core/wechat_group_scope.py b/core/wechat_group_scope.py
+new file mode 100644
+index 0000000..1371d0a
+--- /dev/null
++++ b/core/wechat_group_scope.py
+@@ -0,0 +1,202 @@
++"""Use the manager's account-scoped grants for WeChat proactive group chats."""
++from __future__ import annotations
++
++import asyncio
++from contextvars import ContextVar
++import json
++from pathlib import Path
++
++from astrbot.api import logger
++from astrbot.core.platform.platform import PlatformStatus
++from astrbot.core.platform.wechat_group_policy import group_plugins
++
++
++MODULE = "astrbot_plugin_proactive_chat"
++_generation_account = ContextVar("proactive_wechat_generation_account", default=None)
++
++
++def _policy_path() -> Path:
++    return Path.cwd().parent.parent / "data/manager/group-policies.json"
++
++
++def _group_platform(plugin, session_id: str):
++    parsed = plugin._parse_session_id(session_id)
++    if not parsed or parsed[1] != "GroupMessage" or not parsed[2].endswith("@chatroom"):
++        return None
++    return plugin.context.get_platform_inst(parsed[0])
++
++
++def is_wechat_group(plugin, session_id: str) -> bool:
++    parsed = plugin._parse_session_id(session_id)
++    if not parsed or parsed[1] != "GroupMessage" or not parsed[2].endswith("@chatroom"):
++        return False
++    platform = _group_platform(plugin, session_id)
++    # A temporarily missing WeChat platform must not revive the legacy list.
++    return platform is None or platform.meta().name == "aiocqhttp"
++
++
++def remember_group_account(plugin, event) -> None:
++    """A new live group event confirms an account switch before timers restart."""
++    session_id = event.unified_msg_origin
++    if not is_wechat_group(plugin, session_id):
++        return
++    account = str(event.get_self_id() or "").strip()
++    if account:
++        accounts = getattr(plugin, "_wechat_group_accounts", {})
++        accounts[plugin._parse_session_id(session_id)[0]] = account
++        plugin._wechat_group_accounts = accounts
++
++
++def group_scope_ready(plugin, session_id: str) -> bool:
++    parsed = plugin._parse_session_id(session_id)
++    return bool(parsed and parsed[0] in getattr(plugin, "_wechat_group_accounts", {}))
++
++
++def bound_group_account(plugin, session_id: str) -> str | None:
++    """Keep a pending group task bound to the account that created it."""
++    if not is_wechat_group(plugin, session_id):
++        return None
++    platform_id = plugin._parse_session_id(session_id)[0]
++    payload = getattr(plugin, "session_data", {}).get(session_id, {})
++    account = str(payload.get("self_id") or "").strip()
++    if not account and payload.get("next_trigger_time"):
++        raise PermissionError("Persisted proactive group task has no account binding")
++    generation = _generation_account.get()
++    if generation and generation[0] == session_id:
++        if account and account != generation[1]:
++            raise PermissionError("Proactive group account changed during generation")
++        account = generation[1]
++    confirmed = getattr(plugin, "_wechat_group_accounts", {}).get(platform_id, "")
++    if account and confirmed and account != confirmed:
++        raise PermissionError("Proactive group account changed")
++    account = account or confirmed
++    if not account:
++        raise PermissionError("Proactive group account is unconfirmed")
++    return account
++
++
++def group_is_allowed(plugin, session_id: str) -> bool:
++    """Reuse the manager's authoritative grant rules, never the legacy group list."""
++    try:
++        if not is_wechat_group(plugin, session_id):
++            return False
++        platform = _group_platform(plugin, session_id)
++        if platform is None or platform.status != PlatformStatus.RUNNING:
++            return False
++        parsed = plugin._parse_session_id(session_id)
++        allowed = group_plugins(
++            _policy_path(), bound_group_account(plugin, session_id), parsed[2],
++            plugin.context.get_config(session_id).get("plugin_set", ["*"]),
++            plugin.context.get_all_stars(),
++        )
++        return bool(allowed and MODULE in allowed)
++    except (AttributeError, KeyError, PermissionError, TypeError, ValueError):
++        logger.debug("Proactive group scope could not be confirmed; denied.")
++        return False
++
++
++def configured_group_sessions(plugin) -> list[str]:
++    """Discover explicit manager grants for previously confirmed platform accounts."""
++    if not plugin.config.get("group_settings", {}).get("enable", False):
++        return []
++    try:
++        payload = json.loads(_policy_path().read_text(encoding="utf-8-sig"))
++        if payload.get("schema_version") != 1 or not isinstance(payload.get("accounts"), dict):
++            return []
++        sessions = []
++        for platform_id, account in getattr(plugin, "_wechat_group_accounts", {}).items():
++            entry = payload["accounts"].get(account, {})
++            groups = entry.get("groups", {}) if isinstance(entry, dict) else {}
++            if not isinstance(groups, dict):
++                continue
++            for target in groups:
++                if not isinstance(target, str) or not target.endswith("@chatroom"):
++                    continue
++                session_id = f"{platform_id}:GroupMessage:{target}"
++                if group_is_allowed(plugin, session_id):
++                    sessions.append(session_id)
++        return sorted(set(sessions))
++    except (OSError, AttributeError, TypeError, ValueError):
++        logger.debug("Proactive group discovery could not read manager policy; denied.")
++        return []
++
++
++async def discover_group_sessions(plugin) -> list[str]:
++    """Resolve live accounts before seeding startup tasks or exposing group sessions."""
++    accounts = {}
++    for platform in plugin.context.platform_manager.get_insts():
++        if platform.meta().name != "aiocqhttp" or platform.status != PlatformStatus.RUNNING:
++            continue
++        try:
++            login = await asyncio.wait_for(platform.bot.get_login_info(), timeout=5)
++            account = str(login.get("user_id") or "").strip()
++            if account:
++                accounts[platform.meta().id] = account
++        except Exception as exc:
++            logger.warning("Proactive group account discovery failed: %s", type(exc).__name__)
++    plugin._wechat_group_accounts = accounts
++    sessions = configured_group_sessions(plugin)
++    async with plugin.data_lock:
++        for session_id in sessions:
++            platform_id = plugin._parse_session_id(session_id)[0]
++            # An old task for a different account remains blocked until a real
++            # message from the new account resets that chat's state.
++            plugin.session_data.setdefault(session_id, {})["self_id"] = accounts[platform_id]
++    return sessions
++
++
++async def refresh_group_scope(plugin) -> None:
++    """Wait briefly for platform connections without polling indefinitely."""
++    for attempt in range(12):
++        sessions = await discover_group_sessions(plugin)
++        settings = plugin.config.get("group_settings", {})
++        if not settings.get("enable", False):
++            return
++        await plugin._init_jobs_from_data(managed_groups_only=True)
++        for session_id in sessions:
++            if (session_id not in plugin.auto_trigger_timers
++                    and not plugin.last_message_times.get(session_id, 0)):
++                await plugin._setup_auto_trigger_for_session_config(settings, session_id)
++        platforms = [p for p in plugin.context.platform_manager.get_insts()
++                     if p.meta().name == "aiocqhttp"]
++        if platforms and all(p.meta().id in plugin._wechat_group_accounts for p in platforms):
++            return
++        if attempt < 11:
++            await asyncio.sleep(5)
++    logger.info("Proactive group discovery is waiting for a connected WeChat account.")
++
++
++def schedule_group_scope_refresh(plugin) -> None:
++    """Coalesce startup and platform-loaded notifications into one discovery task."""
++    if not plugin.config.get("group_settings", {}).get("enable", False):
++        return
++    task = getattr(plugin, "_wechat_group_scope_task", None)
++    if task is None or task.done():
++        plugin._wechat_group_scope_task = asyncio.create_task(refresh_group_scope(plugin))
++
++
++def pin_group_generation(plugin, session_id: str):
++    if is_wechat_group(plugin, session_id):
++        return _generation_account.set((session_id, bound_group_account(plugin, session_id)))
++    return None
++
++
++def reset_group_generation(token) -> None:
++    if token is not None:
++        _generation_account.reset(token)
++
++
++async def authorize_group_chat(plugin, session_id: str) -> bool:
++    """Recheck identity and current grants before preparing context or calling a model."""
++    if not is_wechat_group(plugin, session_id):
++        return True
++    if not group_is_allowed(plugin, session_id):
++        return False
++    from astrbot.core.platform.wechat_background_policy import background_event
++    try:
++        account = bound_group_account(plugin, session_id)
++        await background_event(plugin.context, session_id, MODULE, account_id=account)
++        return True
++    except PermissionError:
++        logger.info("Proactive group permission revoked or account changed; generation skipped.")
++        return False
+diff --git a/main.py b/main.py
+index 58f6c04..46ce603 100644
+--- a/main.py
++++ b/main.py
+@@ -230,6 +230,16 @@ class ProactiveChatPlugin(
+                 )
+             )
+ 
++    @filter.on_platform_loaded()
++    async def on_platform_loaded(self) -> None:
++        from .core.wechat_group_scope import schedule_group_scope_refresh
++        schedule_group_scope_refresh(self)
++
++    @filter.on_astrbot_loaded()
++    async def on_astrbot_loaded(self) -> None:
++        from .core.wechat_group_scope import schedule_group_scope_refresh
++        schedule_group_scope_refresh(self)
++
+     async def terminate(self) -> None:
+         """插件终止入口：委托 LifecycleMixin 清理。"""
+         await LifecycleMixin.terminate(self)

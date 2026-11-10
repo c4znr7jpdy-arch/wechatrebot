@@ -108,7 +108,7 @@ _PROACTIVE_SPECS = (
     _ProactiveSpec(
         "astrbot_plugin_proactive_chat",
         "主动聊天",
-        (("group_settings", "session_list"),),
+        (),
         (("group_settings", "enable"),),
     ),
     _ProactiveSpec(
@@ -507,7 +507,7 @@ class GroupPolicyService:
         names = {str(item) for item in plugin_set}
         return None if "*" in names else names
 
-    def _plugin_sources(self, group_id: str) -> list[dict[str, object]]:
+    def _plugin_sources(self, group_id: str, policy: dict[str, object]) -> list[dict[str, object]]:
         config_root = self.install_root / "app" / "astrbot" / "data" / "config"
         enabled_plugins = self._enabled_plugins()
         result: list[dict[str, object]] = []
@@ -517,14 +517,32 @@ class GroupPolicyService:
                 payload = json.loads(path.read_text(encoding="utf-8-sig"))
             except (FileNotFoundError, OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(payload, dict) or not any(
+            if not isinstance(payload, dict):
+                continue
+            if spec.target_paths and not any(
                 _contains_group(_nested(payload, item), group_id) for item in spec.target_paths
             ):
                 continue
+            if not spec.target_paths and spec.module not in policy["allowed_features"]:
+                continue
+            if not spec.target_paths:
+                schema_path = config_root.parent / "plugins" / spec.module / "_conf_schema.json"
+                try:
+                    schema = json.loads(schema_path.read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError):
+                    schema = {}
+                managed_scope = _nested(schema, ("group_settings", "_wechatrebot_managed_scope")) is True
+                if not managed_scope and not _contains_group(
+                    _nested(payload, ("group_settings", "session_list")), group_id
+                ):
+                    continue
             flags = [_nested(payload, item) for item in spec.enable_paths]
             configured_enabled = any(value is True for value in flags)
             globally_enabled = enabled_plugins is None or spec.module in enabled_plugins
-            enabled = configured_enabled and globally_enabled
+            group_enabled = bool(spec.target_paths) or (
+                policy["bot_enabled"] is True and policy["reply_mode"] != "off"
+            )
+            enabled = configured_enabled and globally_enabled and group_enabled
             result.append(
                 {
                     "id": f"feature:{spec.module}",
@@ -536,6 +554,8 @@ class GroupPolicyService:
                         if enabled
                         else "功能未启用"
                         if not globally_enabled
+                        else "本群已停用"
+                        if not group_enabled
                         else "已暂停"
                     ),
                     "next_run_time": "",
@@ -563,7 +583,7 @@ class GroupPolicyService:
             and item.get("target_type") == "group"
             and item.get("target_id") == group_id
         ]
-        items = schedule_items + self._plugin_sources(group_id)
+        items = schedule_items + self._plugin_sources(group_id, policy)
         deduplicated = {str(item["id"]): item for item in items}
         items = list(deduplicated.values())
         enabled_count = sum(1 for item in items if item["enabled"])
