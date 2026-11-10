@@ -31,4 +31,4 @@
 .provider-brand-logo img { display: block; width: 24px; height: 24px; object-fit: contain; }
 .provider-preset-icon svg,
 .provider-brand-logo svg { width: 22px; height: 22px; }
-.provider-logo.provider-brand-logo { color: var(--muted); background: var(--surface-muted); }
+#page-settings .provider-logo.provider-brand-logo { color: var(--muted); background: var(--surface-muted); }
