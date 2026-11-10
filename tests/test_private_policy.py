@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from wechatrebot_manager import private_policy
 from wechatrebot_manager.private_policy import (
     PrivateChatPolicyService,
     PrivatePolicyError,
@@ -51,6 +52,25 @@ def test_new_contact_inherits_default_enabled_features(tmp_path: Path) -> None:
     assert [item["name"] for item in result["features"]] == ["常用指令", "点歌"]
     assert result["features"][0]["allowed"] is True
     assert result["features"][1]["allowed"] is False
+
+
+def test_globally_disabled_private_feature_retains_its_chat_scope(tmp_path, monkeypatch):
+    _feature_set(tmp_path)
+    service = PrivateChatPolicyService(tmp_path)
+    service.save(ACCOUNT, CONTACT, {"allowed_features": ["jiang_commands"]})
+    monkeypatch.setattr(private_policy, "global_plugin_states", lambda _root: {"jiang_commands": False})
+
+    overview = service.overview(ACCOUNT, CONTACT)
+    feature = next(item for item in overview["features"] if item["id"] == "jiang_commands")
+    assert feature["globally_enabled"] is False
+    assert feature["allowed"] is False
+    assert "jiang_commands" in overview["policy"]["allowed_features"]
+
+    service.save(ACCOUNT, CONTACT, {"daily_limit": 7})
+    monkeypatch.setattr(private_policy, "global_plugin_states", lambda _root: {"jiang_commands": True})
+    restored = service.overview(ACCOUNT, CONTACT)
+    assert restored["policy"]["daily_limit"] == 7
+    assert next(item for item in restored["features"] if item["id"] == "jiang_commands")["allowed"] is True
 
 
 def test_private_feature_scope_is_atomic_audited_and_account_scoped(

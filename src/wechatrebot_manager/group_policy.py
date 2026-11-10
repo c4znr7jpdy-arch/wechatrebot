@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .feature_policy import DeliveryFeature, load_delivery_features
+from .customer_config import global_plugin_states
 from .json_io import write_json_atomic
 from .schedules import ScheduleService
 
@@ -600,11 +601,15 @@ class GroupPolicyService:
     def overview(self, account_id: str, group_id: str) -> dict[str, object]:
         policy = self.get(account_id, group_id)
         allowed = set(policy["allowed_features"])
+        global_states = global_plugin_states(self.install_root)
         features = [
             {
                 "id": item.module,
                 "name": item.display_name,
-                "allowed": item.module in allowed,
+                "allowed": item.module in allowed and global_states.get(
+                    item.module.split(".", 1)[0], True
+                ),
+                "globally_enabled": global_states.get(item.module.split(".", 1)[0], True),
                 "globally_enabled_by_default": True,
             }
             for item in self._features()

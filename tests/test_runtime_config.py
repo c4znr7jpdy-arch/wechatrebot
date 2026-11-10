@@ -377,6 +377,27 @@ def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> N
     ]
 
 
+def test_runtime_config_preserves_explicit_global_disables(tmp_path: Path) -> None:
+    install = tmp_path / "install"
+    legal = install / "legal"
+    legal.mkdir(parents=True)
+    (legal / "feature-set.json").write_text(json.dumps({"features": [
+        {"module": "jiang_commands", "display_name": "指令", "configuration": "none"},
+        {"module": "jiang_schedule", "display_name": "定时任务", "configuration": "none"},
+    ]}), encoding="utf-8")
+    path = install / "app/astrbot/data/cmd_config.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "plugin_set": ["*"], "wechatrebot_disabled_plugins": ["jiang_schedule"],
+    }), encoding="utf-8")
+    write_runtime_configs(install)
+    write_runtime_configs(install, admin_id="wxid_admin")
+    updated = json.loads(path.read_text(encoding="utf-8"))
+    assert updated["plugin_set"] == ["jiang_commands"]
+    assert updated["wechatrebot_disabled_plugins"] == ["jiang_schedule"]
+    assert updated["admins_id"] == ["wxid_admin"]
+
+
 @pytest.mark.parametrize("retired_module", ["astrbot_plugin_mnemosyne", "jiang_yanyun_checkin"])
 def test_delivery_retires_legacy_plugins_and_loads_private_emotion_defaults(
     tmp_path: Path, retired_module: str,

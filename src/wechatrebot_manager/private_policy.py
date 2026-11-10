@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .feature_policy import DeliveryFeature, load_delivery_features
+from .customer_config import global_plugin_states
 from .json_io import write_json_atomic
 from .group_policy import QuietHours
 
@@ -177,11 +178,13 @@ class PrivateChatPolicyService:
             raw = self._raw_policy(payload, account, contact)
         policy = self._policy(raw)
         allowed = set(policy.allowed_features)
+        global_states = global_plugin_states(self.install_root)
         features = [
             {
                 "id": feature.module,
                 "name": feature.display_name,
-                "allowed": feature.module in allowed,
+                "allowed": feature.module in allowed and global_states.get(feature.module, True),
+                "globally_enabled": global_states.get(feature.module, True),
                 "globally_enabled_by_default": True,
             }
             for feature in self._features()

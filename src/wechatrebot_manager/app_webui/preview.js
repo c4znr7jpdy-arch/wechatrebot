@@ -567,6 +567,7 @@ window.createPreviewApi = function (helpers) {
         {user_id: "wxid_demo_02", wechat_id: "lisi_photo", name: "李四", group_nickname: "李四"},
         {user_id: "wxid_demo_03", name: "王五", group_nickname: ""},
       ]}),
+      get_global_plugin_states: () => ok({states: Object.fromEntries(features.map((item) => [item.id, item.enabled])), revision: "preview-global-1"}),
       get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
       preview_group_policy: (_accountId, groupId, values) => ok({group_id: groupId, changed_fields: Object.keys(values || {}), impact: ["预览模式只影响当前群的机器人规则。"], will_send_messages: false}),
       save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok({...previewPolicyOverview(groupId).policy, saved: true, apply_state: "applied"}, "群聊策略已保存；未向群内发送消息。"); },

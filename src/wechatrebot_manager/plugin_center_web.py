@@ -5,6 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from html import escape
 import json
+import secrets
 from pathlib import Path
 import re
 import sys
@@ -12,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
 from .customer_config import load_ui_theme
+from .admin_plugin_control import CONTROL_PATH, handle_plugin_control
 from .plugin_errors import PluginCenterError
 from .plugin_schema_profiles import _ANGEL_HEART_MODULE
 from .ui_skins import load_skin_catalog, load_ui_skin
@@ -129,7 +131,10 @@ def _skin_catalog_markup(catalog: list[dict[str, str]]) -> bytes:
     return "\n  ".join(markup).encode("utf-8")
 
 
-def _handler(service: PluginCenterService, *, manager_assets: Path | None = None):
+def _handler(
+    service: PluginCenterService, *, manager_assets: Path | None = None,
+    plugin_control_token: str = "",
+):
     assets = manager_assets if manager_assets is not None else _asset_root()
     manager_mode = manager_assets is not None
     shared_assets = assets if manager_mode else assets.with_name("app_webui")
@@ -442,6 +447,18 @@ def _handler(service: PluginCenterService, *, manager_assets: Path | None = None
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             try:
                 self._require_same_origin()
+                if urlsplit(self.path).path == CONTROL_PATH:
+                    authorization = self.headers.get("Authorization", "")
+                    if (
+                        not plugin_control_token
+                        or self.client_address[0] != "127.0.0.1"
+                        or not secrets.compare_digest(authorization, f"Bearer {plugin_control_token}")
+                    ):
+                        self._send_json(HTTPStatus.FORBIDDEN, {"ok": False, "message": "请求未获授权。"})
+                        return
+                    data = handle_plugin_control(service, self._body())
+                    self._send_json(HTTPStatus.OK, {"ok": True, "data": data})
+                    return
                 if any(urlsplit(self.path).path.startswith(prefix) for prefix in _PROXY_PREFIXES):
                     self._proxy()
                     return

@@ -8,7 +8,11 @@ import threading
 from typing import Any
 
 from .brand import BrandProfile
-from .feature_policy import RETIRED_PLUGIN_MODULES
+from .feature_policy import (
+    GLOBAL_DISABLED_PLUGINS_KEY,
+    RETIRED_PLUGIN_MODULES,
+    globally_disabled_plugins,
+)
 from .json_io import write_json_atomic
 from .provider import (
     provider_service_label,
@@ -778,6 +782,7 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
     engine = _object(engine_path)
     configured = engine.get("plugin_set", ["*"])
     enabled_names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
+    disabled = globally_disabled_plugins(engine)
     entries: list[PluginEntry] = []
     if plugin_root.is_dir():
         for path in sorted(plugin_root.iterdir(), key=lambda item: item.name.casefold()):
@@ -793,37 +798,78 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
                 PluginEntry(
                     module_name=path.name,
                     display_name=_plugin_display_name(path.name),
-                    enabled="*" in enabled_names or path.name in enabled_names,
+                    enabled=("*" in enabled_names or path.name in enabled_names) and path.name not in disabled,
                 )
             )
     return tuple(entries)
 
 
 def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> None:
+    if not isinstance(enabled, bool):
+        raise ValueError("功能开关格式不正确。")
     install, _, engine_path = _paths(root)
     engine = _object(engine_path)
-    plugins = load_plugins(root)
-    available = {item.module_name for item in plugins}
+    available = _installed_plugin_modules(install)
     if module_name not in available:
         raise ValueError("所选功能不存在或尚未交付。")
     configured = engine.get("plugin_set", ["*"])
     names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
     if "*" in names:
-        plugin_root = install / "app" / "astrbot" / "data" / "plugins"
-        names = {
-            path.name
-            for path in plugin_root.iterdir()
-            if path.is_dir()
-            and not path.name.startswith((".", "__"))
-            and path.name not in {"data", "logs"}
-            and not path.name.endswith("_disabled")
-        }
+        names = available
     if enabled:
         names.add(module_name)
     else:
         names.discard(module_name)
     engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
+    disabled = set(globally_disabled_plugins(engine))
+    if enabled:
+        disabled.discard(module_name)
+    else:
+        disabled.add(module_name)
+    engine[GLOBAL_DISABLED_PLUGINS_KEY] = sorted(disabled - RETIRED_PLUGIN_MODULES)
     write_json_atomic(engine_path, engine)
+
+
+def _installed_plugin_modules(install: Path) -> set[str]:
+    """Return installed plugin directory names, including hidden customer entries."""
+    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+    if not plugin_root.is_dir():
+        return set()
+    return {
+        path.name
+        for path in plugin_root.iterdir()
+        if path.is_dir()
+        and not path.name.startswith((".", "__"))
+        and path.name not in {"data", "logs"}
+        and not path.name.endswith("_disabled")
+        and path.name not in RETIRED_PLUGIN_MODULES
+    }
+
+
+def global_plugin_states(root: str | Path) -> dict[str, bool]:
+    """Read persisted global plugin states without changing configuration.
+
+    A literal ``*`` in ``plugin_set`` means every installed plugin is enabled;
+    the explicit disabled list takes precedence.  The result is intentionally
+    based on disk state so the manager can display the state while the engine
+    is offline.
+    """
+    install, _, engine_path = _paths(root)
+    engine = _object(engine_path)
+    configured = engine.get("plugin_set", ["*"])
+    names = (
+        {item.strip() for item in configured if isinstance(item, str) and item.strip()}
+        if isinstance(configured, list) else set()
+    )
+    allow_all = "*" in names
+    disabled = globally_disabled_plugins(engine)
+    states = {
+        name: (name not in disabled and (allow_all or name in names))
+        for name in sorted(_installed_plugin_modules(install))
+    }
+    if "jiang_commands" in states:
+        states["jiang_commands.setu"] = states["jiang_commands"]
+    return states
 
 
 __all__ = [
@@ -837,6 +883,7 @@ __all__ = [
     "load_plugins",
     "load_provider_profile",
     "load_provider_services",
+    "global_plugin_states",
     "load_web_search_settings",
     "provider_reference_modules",
     "replace_provider_references",

@@ -77,3 +77,86 @@ def test_chat_configuration_keeps_paging_and_unsaved_form(browser, manager_url, 
         assert not errors, errors
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("chat_type", ["group", "private"])
+def test_global_plugin_switch_updates_checkbox_without_losing_chat_draft(
+    browser, manager_url, tmp_path, chat_type,
+):
+    page = browser.new_page(viewport={"width": 1380, "height": 920})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          window.globalFeatureEnabled = true;
+          window.globalFeatureRevision = 1;
+          window.chatPolicyWrites = [];
+          const api = window.pywebview.api;
+          api.get_global_plugin_states = async () => ({ok:true, data:{
+            states:{'feature-commands':window.globalFeatureEnabled},
+            revision:String(window.globalFeatureRevision)}});
+          for (const method of ['save_group_policy', 'save_private_policy']) {
+            const save = api[method];
+            api[method] = async (...args) => {
+              window.chatPolicyWrites.push(structuredClone(args));
+              return save(...args);
+            };
+          }
+        }""")
+        page.locator('.nav-item[data-page="groups"]').click()
+        if chat_type == "private":
+            page.locator("#privateManagementTab").click()
+            page.locator("#contactRows .contact-row").first.click()
+        else:
+            page.locator("#groupRows .group-row").first.click()
+        form_id = "#privatePolicyForm" if chat_type == "private" else "#groupPolicyForm"
+        form = page.locator(form_id)
+        expect(form).to_be_visible()
+        form.locator("details").filter(has_text="可用功能").first.locator("summary").click()
+        feature = form.locator('[name="allowed_features"][value="feature-commands"]')
+        expect(feature).to_be_checked()
+        # Keep both a scalar draft and a deliberately unchecked second feature.
+        other_feature = form.locator('[name="allowed_features"][value="feature-music"]')
+        other_feature.uncheck()
+        if chat_type == "private":
+            form.locator("details").first.locator("summary").click()
+        else:
+            form.locator("details").nth(1).locator("summary").click()
+        limit = form.locator('[name="daily_limit"]')
+        limit.fill("17")
+        page.evaluate("""selector => {
+          window.retainedSwitchForm = document.querySelector(selector);
+          window.globalFeatureEnabled = false;
+          window.globalFeatureRevision++;
+        }""", form_id)
+        expect(feature).to_be_disabled(timeout=7000)
+        expect(feature).not_to_be_checked()
+        expect(feature.locator("..")).to_contain_text("已全局关闭")
+        expect(limit).to_have_value("17")
+        expect(other_feature).not_to_be_checked()
+        assert page.evaluate("selector => window.retainedSwitchForm === document.querySelector(selector)", form_id)
+
+        page.screenshot(path=str(tmp_path / f"{chat_type}-global-feature-disabled.png"), animations="disabled")
+        page.locator(f'button[form="{form_id[1:]}"]').click()
+        if chat_type == "group":
+            page.locator("#modalConfirm").click()
+            expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.wait_for_function("() => window.chatPolicyWrites.length === 1")
+        saved_values = page.evaluate("window.chatPolicyWrites[0][2]")
+        assert "feature-commands" in saved_values["allowed_features"]
+        assert "feature-music" not in saved_values["allowed_features"]
+        assert saved_values["daily_limit"] == 17
+        expect(feature).to_be_disabled()
+
+        page.evaluate("window.globalFeatureEnabled = true; window.globalFeatureRevision++")
+        expect(feature).to_be_enabled(timeout=7000)
+        expect(feature).to_be_checked()
+        expect(limit).to_have_value("17")
+        expect(other_feature).not_to_be_checked()
+        assert not errors, errors
+    finally:
+        page.close()

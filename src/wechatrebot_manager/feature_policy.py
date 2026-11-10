@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 import json
 from pathlib import Path
 import re
@@ -24,6 +25,28 @@ RETIRED_PLUGIN_MODULES = frozenset({
     "astrbot_plugin_mnemosyne",
     "jiang_yanyun_checkin",
 })
+
+# Persisted in AstrBot's command configuration so a manager save cannot
+# accidentally re-enable a plugin that an administrator disabled explicitly.
+GLOBAL_DISABLED_PLUGINS_KEY = "wechatrebot_disabled_plugins"
+
+# These modules are part of the product's message and control plane. They must
+# remain loaded so an administrator can recover a disabled customer feature.
+PROTECTED_PLUGIN_MODULES = frozenset({
+    "astrbot_plugin_angel_heart",
+    "astrbot_plugin_patch_at_wxid",
+    "jiang_capability_router",
+})
+
+
+def globally_disabled_plugins(config: Mapping[str, object]) -> frozenset[str]:
+    """Read explicit customer feature disables, excluding protected modules."""
+    values = config.get(GLOBAL_DISABLED_PLUGINS_KEY, [])
+    if not isinstance(values, list):
+        raise ValueError("全局功能开关配置格式不正确。")
+    if any(not isinstance(item, str) or not _MODULE_NAME.fullmatch(item) for item in values):
+        raise ValueError("全局功能开关包含无效的功能名称。")
+    return frozenset(values) - PROTECTED_PLUGIN_MODULES - RETIRED_PLUGIN_MODULES
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +125,9 @@ def load_delivery_features(
 __all__ = [
     "DeliveryFeature",
     "FEATURE_CONFIGURATION_MODES",
+    "GLOBAL_DISABLED_PLUGINS_KEY",
+    "PROTECTED_PLUGIN_MODULES",
     "RETIRED_PLUGIN_MODULES",
+    "globally_disabled_plugins",
     "load_delivery_features",
 ]

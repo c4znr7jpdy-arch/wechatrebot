@@ -39,6 +39,26 @@ def test_setu_has_independent_group_checkbox_and_persists(tmp_path):
     assert "jiang_commands.setu" not in service.get(ACCOUNT_A, GROUP)["allowed_features"]
 
 
+def test_globally_disabled_group_features_keep_their_chat_scope(tmp_path, monkeypatch):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": ["jiang_commands", "jiang_commands.setu"]})
+    monkeypatch.setattr(group_policy, "global_plugin_states", lambda _root: {"jiang_commands": False})
+
+    overview = service.overview(ACCOUNT_A, GROUP)
+    features = {item["id"]: item for item in overview["features"]}
+    for module in ("jiang_commands", "jiang_commands.setu"):
+        assert features[module]["globally_enabled"] is False
+        assert features[module]["allowed"] is False
+        assert module in overview["policy"]["allowed_features"]
+
+    service.save(ACCOUNT_A, GROUP, {"daily_limit": 7})
+    monkeypatch.setattr(group_policy, "global_plugin_states", lambda _root: {"jiang_commands": True})
+    restored = service.overview(ACCOUNT_A, GROUP)
+    assert restored["policy"]["daily_limit"] == 7
+    assert all(item["allowed"] for item in restored["features"] if item["id"].startswith("jiang_commands"))
+
+
 def _feature_set(root: Path) -> None:
     path = root / "legal" / "feature-set.json"
     path.parent.mkdir(parents=True)

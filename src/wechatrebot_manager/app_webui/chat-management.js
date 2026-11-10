@@ -37,7 +37,73 @@ window.createChatManagement = function (helpers) {
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
+  let globalPluginRevision = "";
+  let globalPluginStates = {};
+  let globalPluginPollBusy = false;
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
+
+  function featureGloballyEnabled(feature) {
+    const module = feature.id.split(".", 1)[0];
+    return typeof globalPluginStates[module] === "boolean"
+      ? globalPluginStates[module] : feature.globally_enabled !== false;
+  }
+
+  function featureChoicesMarkup(data) {
+    const allowed = new Set(data.policy?.allowed_features || []);
+    return (data.features || []).map((feature) => {
+      const enabled = featureGloballyEnabled(feature);
+      const selected = allowed.has(feature.id);
+      return `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" data-scope-allowed="${selected}" ${selected && enabled ? "checked" : ""} ${enabled ? "" : "disabled"}><span>${escapeHtml(feature.name)}<small data-global-plugin-note ${enabled ? "hidden" : ""}>已全局关闭，请让机器人管理员开启。</small></span></label>`;
+    }).join("");
+  }
+
+  function updateGlobalFeatureChoices() {
+    for (const cache of [state.groupPolicies, state.privatePolicies, groupDrafts, privateDrafts]) {
+      for (const data of Object.values(cache)) {
+        const allowed = new Set(data.policy?.allowed_features || []);
+        for (const feature of data.features || []) {
+          feature.globally_enabled = featureGloballyEnabled(feature);
+          feature.allowed = feature.globally_enabled && allowed.has(feature.id);
+        }
+      }
+    }
+    for (const selector of ["#groupPolicyForm", "#privatePolicyForm"]) {
+      const form = $(selector);
+      if (!form) continue;
+      for (const input of $$('input[name="allowed_features"]', form)) {
+        const enabled = featureGloballyEnabled({id: input.value, globally_enabled: !input.disabled});
+        if (!input.disabled) input.dataset.scopeAllowed = String(input.checked);
+        input.disabled = !enabled;
+        input.checked = enabled && input.dataset.scopeAllowed === "true";
+        const note = input.closest("label")?.querySelector("[data-global-plugin-note]");
+        if (note) note.hidden = enabled;
+      }
+    }
+  }
+
+  async function pollGlobalPluginStates() {
+    if (globalPluginPollBusy) return;
+    globalPluginPollBusy = true;
+    try {
+      if (state.activePage !== "groups" || window.document?.hidden) return;
+      const generation = chatContextGeneration;
+      const result = await api("get_global_plugin_states");
+      if (generation !== chatContextGeneration || !result?.revision
+          || !result.states || typeof result.states !== "object"
+          || Array.isArray(result.states) || Object.values(result.states).some((value) => typeof value !== "boolean")) return;
+      if (globalPluginRevision !== result.revision) {
+        globalPluginRevision = result.revision;
+        globalPluginStates = result.states;
+        updateGlobalFeatureChoices();
+      }
+    } catch (_error) {
+      // Retain the last confirmed state and form drafts during a background read failure.
+      return false;
+    } finally {
+      globalPluginPollBusy = false;
+      window.setTimeout(pollGlobalPluginStates, 4000);
+    }
+  }
   function hasGroupMemberCount(value) {
     return Number.isSafeInteger(value) && value > 0;
   }
@@ -152,6 +218,8 @@ window.createChatManagement = function (helpers) {
     groupDrafts = {};
     privateDrafts = {};
     privatePolicySaves = new Set();
+    globalPluginRevision = "";
+    globalPluginStates = {};
     chatProfiles.invalidate();
     for (const [selector, label] of [["#refreshGroups", "刷新群列表"], ["#refreshContacts", "刷新联系人"]]) {
       const button = $(selector);
@@ -416,8 +484,7 @@ window.createChatManagement = function (helpers) {
     if (data.error) return `<section class="group-policy-form"><h3>本群机器人规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
-    const allowed = new Set(policy.allowed_features || []);
-    const featureChoices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span>${escapeHtml(feature.name)}</span></label>`).join("");
+    const featureChoices = featureChoicesMarkup(data);
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div id="groupChatProfile" class="chat-profile"></div>
       <div class="toggle-line"><span><strong>在本群使用机器人</strong></span><span class="toggle"><input id="groupBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><label class="toggle-track" for="groupBotEnabled" aria-label="切换本群机器人"></label><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></div>
@@ -436,7 +503,9 @@ window.createChatManagement = function (helpers) {
     return {
       bot_enabled: form.elements.bot_enabled.checked,
       scheduled_enabled: form.elements.scheduled_enabled.checked,
-      allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
+      allowed_features: $$('input[name="allowed_features"]', form)
+        .filter((input) => input.disabled ? input.dataset.scopeAllowed === "true" : input.checked)
+        .map((input) => input.value),
       quiet_hours: {
         enabled: form.elements.quiet_enabled.checked,
         start: form.elements.quiet_start.value,
@@ -493,7 +562,7 @@ window.createChatManagement = function (helpers) {
           }
           const previous = policies[groupId] || {};
           policies[groupId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
-            ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
+            ...feature, allowed: featureGloballyEnabled(feature) && (saved.allowed_features || []).includes(feature.id),
           }))};
           if (groupDrafts[groupId] === draft) delete groupDrafts[groupId];
           else if (groupDrafts[groupId]) groupDrafts[groupId].policy.revision = saved.revision;
@@ -823,9 +892,8 @@ window.createChatManagement = function (helpers) {
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
-    const allowed = new Set(policy.allowed_features || []);
     const isWechatTeam = String(policy.contact_id || "").trim().toLowerCase() === "weixin";
-    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
+    const choices = featureChoicesMarkup(data);
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div id="privateChatProfile" class="chat-profile"></div><div class="toggle-line"><span><strong>在此私聊使用机器人</strong></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
       ${isWechatTeam ? '<div class="toggle-line"><span><strong>微信团队私聊的模型回复</strong></span><span class="toggle"><input id="privateModelReplyDisabled" type="checkbox" disabled><label class="toggle-track" for="privateModelReplyDisabled" aria-label="微信团队私聊模型回复已关闭"></label><span>已关闭</span></span></div>' : ""}
@@ -918,7 +986,7 @@ window.createChatManagement = function (helpers) {
       }
       const previous = policies[contactId] || {};
       policies[contactId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
-        ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
+        ...feature, allowed: featureGloballyEnabled(feature) && (saved.allowed_features || []).includes(feature.id),
       }))};
       if (privateDrafts[contactId] === draft) delete privateDrafts[contactId];
       else if (privateDrafts[contactId]) privateDrafts[contactId].policy.revision = saved.revision || "";
@@ -933,6 +1001,8 @@ window.createChatManagement = function (helpers) {
       if (state.selectedContact === contactId && state.contactAccount === accountId && state.privatePolicies === policies) renderContactInspector();
     }
   }
+
+  window.setTimeout(pollGlobalPluginStates, 4000);
 
   return {
     clearPendingGroupMemberLoading,

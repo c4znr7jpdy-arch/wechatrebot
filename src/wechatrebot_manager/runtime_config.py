@@ -7,7 +7,11 @@ import re
 import secrets
 
 from .brand import BrandProfile
-from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
+from .feature_policy import (
+    RETIRED_PLUGIN_MODULES,
+    globally_disabled_plugins,
+    load_delivery_features,
+)
 from .json_io import write_json_atomic
 from .port_config import RuntimePorts, _load_object, load_runtime_ports
 from .provider import (
@@ -323,14 +327,13 @@ def _sync_delivery_plugins(
 ) -> None:
     features = load_delivery_features(root)
     if features is not None:
-        # Customer features stay loaded globally. Their actual use is granted
-        # per chat by group/private policy, so a stale global switch cannot
-        # silently override a chat selection. Hidden experimental features
-        # still follow their delivery default and remain outside customer UI.
+        # Legacy stale plugin_set values are migrated to the delivery defaults;
+        # explicit administrator disables remain effective across manager saves.
+        disabled = globally_disabled_plugins(astrbot_payload)
         astrbot_payload["plugin_set"] = [
             feature.module
             for feature in features
-            if feature.visible or feature.default_enabled
+            if (feature.visible or feature.default_enabled) and feature.module not in disabled
         ]
         astrbot_payload["wechatrebot_feature_scope_version"] = 2
     configured = astrbot_payload.get("plugin_set")
