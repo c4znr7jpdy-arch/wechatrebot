@@ -218,9 +218,14 @@ class ChatApiMixin:
         except GroupDirectoryError as exc:
             return {"ok": False, "error": {"title": "群二维码暂不可用", "message": str(exc)}}
 
-    def get_group_policy(self, account_id: str, group_id: str) -> dict[str, object]:
+    def get_group_policy(
+        self, account_id: str, group_id: str, features_only: bool = False,
+    ) -> dict[str, object]:
         try:
-            return self._ok(self._group_policy_service().overview(account_id, group_id))
+            service = self._group_policy_service()
+            data = (service.feature_permissions(account_id, group_id) if features_only is True
+                    else service.overview(account_id, group_id))
+            return self._ok(data)
         except (OSError, ValueError, GroupPolicyError) as exc:
             return self._failed(exc, "15001")
 

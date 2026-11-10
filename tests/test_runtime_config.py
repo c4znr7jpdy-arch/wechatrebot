@@ -1,23 +1,16 @@
-import ast
 import json
-import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from wechatrebot_manager.runtime_config import (
     RuntimePorts,
     normalize_admin_id,
+    normalize_admin_ids,
     write_runtime_configs,
 )
 from wechatrebot_manager.brand import BrandProfile
 from wechatrebot_manager.provider import OpenAIProviderProfile
-from wechatrebot_manager.customer_config import global_plugin_states, set_plugin_enabled
-from wechatrebot_manager.feature_policy import (
-    GLOBAL_DISABLED_PLUGINS_KEY, global_plugin_state_path, load_global_disabled_plugins,
-)
-from test_hot_config_runtime import _runtime_function
 
 
 def test_runtime_config_uses_only_new_bridge_ports_and_selected_wechat(
@@ -258,6 +251,28 @@ def test_admin_id_validation_and_reconfiguration_preservation(tmp_path: Path) ->
     assert astrbot["admins_id"] == ["wxid_customer"]
 
 
+def test_admin_list_validation_round_trip_and_omitted_update_preserves_all(tmp_path: Path) -> None:
+    assert normalize_admin_ids([" wxid_first ", "wxid_second", "wxid_first", ""]) == ("wxid_first", "wxid_second")
+    write_runtime_configs(tmp_path, admin_ids=["wxid_first", "wxid_second"])
+    write_runtime_configs(tmp_path)
+    path = tmp_path / "app/astrbot/data/cmd_config.json"
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == ["wxid_first", "wxid_second"]
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is True
+    write_runtime_configs(tmp_path, admin_ids=[])
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == []
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is False
+
+
+@pytest.mark.parametrize("admins", ["wxid_first", [None], [True], ["bad wxid"]])
+def test_bad_admin_list_cannot_partially_write_runtime_configuration(tmp_path: Path, admins) -> None:
+    write_runtime_configs(tmp_path, admin_id="wxid_first")
+    paths = [tmp_path / name for name in ("app/astrbot/data/cmd_config.json", "app/bridge/config.json", "config/manager.json")]
+    before = [path.read_bytes() for path in paths]
+    with pytest.raises(ValueError, match="管理员"):
+        write_runtime_configs(tmp_path, admin_ids=admins)
+    assert [path.read_bytes() for path in paths] == before
+
+
 def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path) -> None:
     install = tmp_path / "install"
     legal = install / "legal"
@@ -383,92 +398,6 @@ def test_customer_features_stay_loaded_for_per_chat_scoping(tmp_path: Path) -> N
         "jiang_commands",
         "jiang_schedule",
     ]
-
-
-def test_runtime_config_preserves_explicit_global_disables(tmp_path: Path) -> None:
-    install = tmp_path / "install"
-    legal = install / "legal"
-    legal.mkdir(parents=True)
-    (legal / "feature-set.json").write_text(json.dumps({"features": [
-        {"module": "jiang_commands", "display_name": "指令", "configuration": "none"},
-        {"module": "jiang_schedule", "display_name": "定时任务", "configuration": "none"},
-    ]}), encoding="utf-8")
-    path = install / "app/astrbot/data/cmd_config.json"
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({
-        "plugin_set": ["*"], "wechatrebot_disabled_plugins": ["jiang_schedule"],
-    }), encoding="utf-8")
-    write_runtime_configs(install)
-    write_runtime_configs(install, admin_id="wxid_admin")
-    updated = json.loads(path.read_text(encoding="utf-8"))
-    assert updated["plugin_set"] == ["jiang_commands"]
-    assert updated["wechatrebot_disabled_plugins"] == ["jiang_schedule"]
-    assert updated["admins_id"] == ["wxid_admin"]
-
-
-def test_global_disable_survives_actual_engine_integrity_cleanup_and_manager_save(tmp_path: Path) -> None:
-    install = tmp_path / "install"
-    legal = install / "legal"
-    legal.mkdir(parents=True)
-    modules = ("jiang_commands", "jiang_schedule")
-    (legal / "feature-set.json").write_text(json.dumps({"features": [
-        {"module": module, "display_name": module, "configuration": "none"}
-        for module in modules
-    ]}), encoding="utf-8")
-    for module in modules:
-        (install / "app/astrbot/data/plugins" / module).mkdir(parents=True)
-    write_runtime_configs(install)
-    assert not global_plugin_state_path(install).exists()
-    set_plugin_enabled(install, "jiang_schedule", False)
-    state_bytes = global_plugin_state_path(install).read_bytes()
-    path = install / "app/astrbot/data/cmd_config.json"
-    config = json.loads(path.read_text(encoding="utf-8"))
-    assert config[GLOBAL_DISABLED_PLUGINS_KEY] == ["jiang_schedule"]
-
-    # Execute the pinned engine's actual startup integrity method, without
-    # importing AstrBot or starting its process. Its accepted plugin_set field
-    # remains while the manager's unknown marker is removed.
-    engine_config = Path(__file__).parents[1] / "vendor/engine/astrbot/core/config"
-    defaults_tree = ast.parse((engine_config / "default.py").read_text("utf-8-sig"))
-    defaults = next(node.value for node in defaults_tree.body if isinstance(node, ast.Assign)
-                    and any(isinstance(target, ast.Name) and target.id == "DEFAULT_CONFIG" for target in node.targets))
-    default_keys = {ast.literal_eval(key) for key in defaults.keys}
-    assert GLOBAL_DISABLED_PLUGINS_KEY not in default_keys and "plugin_set" in default_keys
-    source = (engine_config / "astrbot_config.py").read_text("utf-8-sig")
-    check = _runtime_function(source, "check_config_integrity", {"logger": logging.getLogger(__name__)})
-    owner = SimpleNamespace()
-    owner.check_config_integrity = lambda reference, current, key="": check(owner, reference, current, key)
-    assert check(owner, {"plugin_set": ["*"]}, config) is True
-    assert GLOBAL_DISABLED_PLUGINS_KEY not in config
-    assert config["plugin_set"] == ["jiang_commands"]
-    path.write_text(json.dumps(config), encoding="utf-8")
-    assert global_plugin_states(install)["jiang_schedule"] is False
-    write_runtime_configs(install, admin_id="wxid_updated_admin")
-    updated = json.loads(path.read_text(encoding="utf-8"))
-    assert updated["plugin_set"] == ["jiang_commands"]
-    assert global_plugin_state_path(install).read_bytes() == state_bytes
-    assert load_global_disabled_plugins(install) == frozenset({"jiang_schedule"})
-
-
-def test_legacy_disable_migrates_once_and_stale_engine_marker_cannot_override_it(tmp_path: Path) -> None:
-    legacy = {GLOBAL_DISABLED_PLUGINS_KEY: ["jiang_schedule"]}
-    assert load_global_disabled_plugins(tmp_path, {}) == frozenset()
-    assert not global_plugin_state_path(tmp_path).exists()
-    assert load_global_disabled_plugins(tmp_path, legacy) == frozenset({"jiang_schedule"})
-    assert global_plugin_state_path(tmp_path).is_file()
-    assert load_global_disabled_plugins(tmp_path, {GLOBAL_DISABLED_PLUGINS_KEY: []}) == frozenset({"jiang_schedule"})
-    assert json.loads(global_plugin_state_path(tmp_path).read_text(encoding="utf-8")) == {
-        "disabled_plugins": ["jiang_schedule"],
-    }
-
-
-@pytest.mark.parametrize("payload", ["not JSON", "[]", "{}", '{"disabled_plugins":"jiang_schedule"}'])
-def test_corrupt_durable_global_policy_never_falls_back_to_live_marker(tmp_path: Path, payload: str) -> None:
-    path = global_plugin_state_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text(payload, encoding="utf-8")
-    with pytest.raises(ValueError, match="全局功能开关"):
-        load_global_disabled_plugins(tmp_path, {GLOBAL_DISABLED_PLUGINS_KEY: []})
 
 
 @pytest.mark.parametrize("retired_module", ["astrbot_plugin_mnemosyne", "jiang_yanyun_checkin"])

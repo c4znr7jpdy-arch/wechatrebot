@@ -151,7 +151,7 @@ window.createPreviewApi = function (helpers) {
     delete corePreviewTemplateSchema.wake_interaction.items.direct_wake_fast_path;
     const corePreviewDefaults = (schema) => Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, field.type === "object" ? corePreviewDefaults(field.items) : structuredClone(field.default)]));
     let corePreviewConfig = corePreviewDefaults(corePreviewSchema);
-    let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin"};
+    let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin", admin_ids: ["wxid_admin"]};
     const corePreviewTemplates = [];
     const corePreviewBindings = {};
     let corePreviewRevision = 1;
@@ -274,8 +274,12 @@ window.createPreviewApi = function (helpers) {
         ["baidu_app_builder", "百度 AI Search", "https://cloud.baidu.com/product/ai_search"], ["firecrawl", "Firecrawl", "https://www.firecrawl.dev/"], ["exa", "Exa", "https://exa.ai/"],
       ].map(([id, name, website_url]) => [id, {id, name, website_url, description: id === "tavily" ? "适合通用英文与国际资讯搜索。免费方案每月含 1,000 API credits，实际消耗按请求类型计算。" : "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
-    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
+    const previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    const previewGroupPolicies = new Map();
+    const previewPolicyOverview = (groupId) => {
+      const policy = previewGroupPolicies.get(groupId) || previewGroupPolicy;
+      return {policy: {...structuredClone(policy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: policy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}};
+    };
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
     const previewContacts = [
@@ -546,9 +550,11 @@ window.createPreviewApi = function (helpers) {
         const aliases = String(corePreviewConfig.wake_interaction?.alias || "").split("|").map((item) => item.trim()).filter((item) => item && ![oldName, name, "AI", "助手", "助理"].includes(item));
         corePreviewConfig.wake_interaction.alias = [name, ...aliases].join("|");
         corePreviewConfig.personality.ai_self_identity = String(corePreviewConfig.personality?.ai_self_identity || "").replaceAll(oldName, name).replaceAll("群聊里的熟人型助手", "群聊里的熟人型机器人").replaceAll("群聊助手", "群聊机器人");
-        corePreviewIdentity = {robot_name: name, admin_id: String(identity?.admin_id || "").trim()};
+        const adminIds = [...new Set((Array.isArray(identity?.admin_ids) ? identity.admin_ids : [identity?.admin_id])
+          .map((item) => String(item || "").trim()).filter(Boolean))];
+        corePreviewIdentity = {robot_name: name, admin_id: adminIds[0] || "", admin_ids: adminIds};
         corePreviewRevision += 1;
-        return ok({revision: String(corePreviewRevision), apply_state: "applied", brand: {display_name: name, short_name: name, persona_name: name, welcome_text: `你好，我是${name}。`, admin_id: corePreviewIdentity.admin_id}, message: "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"});
+        return ok({revision: String(corePreviewRevision), apply_state: "applied", brand: {display_name: name, short_name: name, persona_name: name, welcome_text: `你好，我是${name}。`, admin_id: corePreviewIdentity.admin_id, admin_ids: [...adminIds]}, message: "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"});
       },
       request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
@@ -567,10 +573,12 @@ window.createPreviewApi = function (helpers) {
         {user_id: "wxid_demo_02", wechat_id: "lisi_photo", name: "李四", group_nickname: "李四"},
         {user_id: "wxid_demo_03", name: "王五", group_nickname: ""},
       ]}),
-      get_global_plugin_states: () => ok({states: Object.fromEntries(features.map((item) => [item.id, item.enabled])), revision: "preview-global-1"}),
-      get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
+      get_group_policy: (_accountId, groupId, featuresOnly = false) => {
+        const result = previewPolicyOverview(groupId);
+        return ok(featuresOnly ? {policy: result.policy, features: result.features} : result);
+      },
       preview_group_policy: (_accountId, groupId, values) => ok({group_id: groupId, changed_fields: Object.keys(values || {}), impact: ["预览模式只影响当前群的机器人规则。"], will_send_messages: false}),
-      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok({...previewPolicyOverview(groupId).policy, saved: true, apply_state: "applied"}, "群聊策略已保存；未向群内发送消息。"); },
+      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicies.set(groupId, {...previewPolicyOverview(groupId).policy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}); return ok({...previewPolicyOverview(groupId).policy, saved: true, apply_state: "applied"}, "群聊策略已保存；未向群内发送消息。"); },
       get_contacts: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: previewContacts.length, truncated: false, items: structuredClone(previewContacts), message: "预览数据：正式版本从当前登录微信通讯录读取，刷新不会发送消息。"}),
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_contact_network_profile: (accountId, contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: accountId, item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },

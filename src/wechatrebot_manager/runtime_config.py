@@ -7,13 +7,7 @@ import re
 import secrets
 
 from .brand import BrandProfile
-from .feature_policy import (
-    RETIRED_PLUGIN_MODULES,
-    GLOBAL_DISABLED_PLUGINS_KEY,
-    global_plugin_state_path,
-    load_global_disabled_plugins,
-    load_delivery_features,
-)
+from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
 from .json_io import write_json_atomic
 from .port_config import RuntimePorts, _load_object, load_runtime_ports
 from .provider import (
@@ -31,10 +25,24 @@ _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
 def normalize_admin_id(value: str | None) -> str | None:
     if value is None:
         return None
+    if not isinstance(value, str):
+        raise ValueError("管理员 wxid 格式无效，只能使用字母、数字及 _ @ . -。")
     normalized = value.strip()
     if normalized and not _ADMIN_ID.fullmatch(normalized):
         raise ValueError("管理员 wxid 格式无效，只能使用字母、数字及 _ @ . -。")
     return normalized
+
+
+def normalize_admin_ids(value: list[str] | tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Validate the complete administrator list while keeping its stable order."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("管理员列表格式无效，请每行填写一个 wxid。")
+    if any(not isinstance(item, str) for item in value):
+        raise ValueError("管理员列表格式无效，请每行填写一个 wxid。")
+    normalized = [normalize_admin_id(item) for item in value]
+    return tuple(dict.fromkeys(item for item in normalized if item))
 
 
 def bridge_config_payload(
@@ -87,11 +95,15 @@ def astrbot_config_payload(
     brand_profile: BrandProfile | None = None,
     provider_profile: OpenAIProviderProfile | None = None,
     admin_id: str | None = None,
+    admin_ids: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    normalized_admin = normalize_admin_id(admin_id)
+    normalized_admins = normalize_admin_ids(admin_ids)
+    if normalized_admins is None:
+        normalized_admin = normalize_admin_id(admin_id)
+        normalized_admins = (normalized_admin,) if normalized_admin else ()
     payload: dict[str, object] = {
         "config_version": 2,
         "platform": [
@@ -133,7 +145,7 @@ def astrbot_config_payload(
             "websearch_exa_key": [],
             "web_search_link": False,
         },
-        "admins_id": [normalized_admin] if normalized_admin else [],
+        "admins_id": list(normalized_admins),
         "dashboard": {
             "enable": True,
             "username": "local-console",
@@ -328,18 +340,15 @@ def _sync_delivery_plugins(
     astrbot_payload: dict[str, object],
 ) -> None:
     features = load_delivery_features(root)
-    disabled = load_global_disabled_plugins(root, astrbot_payload)
-    # This mirror can be removed by AstrBot's integrity check; the manager file
-    # remains authoritative on the next save and startup configuration pass.
-    if disabled or GLOBAL_DISABLED_PLUGINS_KEY in astrbot_payload or global_plugin_state_path(root).exists():
-        astrbot_payload[GLOBAL_DISABLED_PLUGINS_KEY] = sorted(disabled)
     if features is not None:
-        # Legacy stale plugin_set values are migrated to the delivery defaults;
-        # explicit administrator disables remain effective across manager saves.
+        # Customer features stay loaded globally. Their actual use is granted
+        # per chat by group/private policy, so a stale global switch cannot
+        # silently override a chat selection. Hidden experimental features
+        # still follow their delivery default and remain outside customer UI.
         astrbot_payload["plugin_set"] = [
             feature.module
             for feature in features
-            if (feature.visible or feature.default_enabled) and feature.module not in disabled
+            if feature.visible or feature.default_enabled
         ]
         astrbot_payload["wechatrebot_feature_scope_version"] = 2
     configured = astrbot_payload.get("plugin_set")
@@ -555,7 +564,12 @@ def write_runtime_configs(
     provider_profile: OpenAIProviderProfile | None = None,
     provider_make_default: bool = True,
     admin_id: str | None = None,
+    admin_ids: list[str] | tuple[str, ...] | None = None,
 ) -> None:
+    normalized_admins = normalize_admin_ids(admin_ids)
+    if normalized_admins is None and admin_id is not None:
+        normalized_admin = normalize_admin_id(admin_id)
+        normalized_admins = (normalized_admin,) if normalized_admin else ()
     root = Path(install_root).expanduser().resolve()
     manager_path = root / "config" / "manager.json"
     manager_payload = _load_object(manager_path)
@@ -585,6 +599,7 @@ def write_runtime_configs(
         brand_profile=brand_profile,
         provider_profile=provider_profile,
         admin_id=admin_id,
+        admin_ids=normalized_admins,
     )
     astrbot_payload = _load_object(astrbot_path)
     if astrbot_payload:
@@ -624,11 +639,8 @@ def write_runtime_configs(
                 provider_profile,
                 make_default=provider_make_default,
             )
-        normalized_admin = normalize_admin_id(admin_id)
-        if normalized_admin is not None:
-            astrbot_payload["admins_id"] = (
-                [normalized_admin] if normalized_admin else []
-            )
+        if normalized_admins is not None:
+            astrbot_payload["admins_id"] = list(normalized_admins)
     else:
         astrbot_payload = generated_astrbot
     from .provider import repair_embedding_provider_types
@@ -673,9 +685,8 @@ def write_runtime_configs(
         manager_payload["provider_configured"] = True
     else:
         manager_payload.setdefault("provider_configured", False)
-    normalized_admin = normalize_admin_id(admin_id)
-    if normalized_admin is not None:
-        manager_payload["admin_configured"] = bool(normalized_admin)
+    if normalized_admins is not None:
+        manager_payload["admin_configured"] = bool(normalized_admins)
     else:
         manager_payload.setdefault("admin_configured", False)
     write_json_atomic(

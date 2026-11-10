@@ -37,71 +37,75 @@ window.createChatManagement = function (helpers) {
   let groupMemberRequestsActive = 0;
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
-  let globalPluginRevision = "";
-  let globalPluginStates = {};
-  let globalPluginPollBusy = false;
+  let groupPolicyPollBusy = false;
+  const groupPolicySaves = new Set();
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
 
-  function featureGloballyEnabled(feature) {
-    const module = feature.id.split(".", 1)[0];
-    return typeof globalPluginStates[module] === "boolean"
-      ? globalPluginStates[module] : feature.globally_enabled !== false;
+  function groupPolicyNote(groupId) {
+    if (groupDrafts[groupId]?.policyConflict) return "本群功能或规则已在机器人对话中修改；未保存的修改已保留，请重新读取规则后核对再保存。";
+    return groupDrafts[groupId] ? "有未保存修改，切换群聊会保留。" : "在线保存会立即应用到当前群。";
   }
 
-  function featureChoicesMarkup(data) {
-    const allowed = new Set(data.policy?.allowed_features || []);
-    return (data.features || []).map((feature) => {
-      const enabled = featureGloballyEnabled(feature);
-      const selected = allowed.has(feature.id);
-      return `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" data-scope-allowed="${selected}" ${selected && enabled ? "checked" : ""} ${enabled ? "" : "disabled"}><span>${escapeHtml(feature.name)}<small data-global-plugin-note ${enabled ? "hidden" : ""}>已全局关闭，请让机器人管理员开启。</small></span></label>`;
-    }).join("");
-  }
-
-  function updateGlobalFeatureChoices() {
-    for (const cache of [state.groupPolicies, state.privatePolicies, groupDrafts, privateDrafts]) {
-      for (const data of Object.values(cache)) {
-        const allowed = new Set(data.policy?.allowed_features || []);
-        for (const feature of data.features || []) {
-          feature.globally_enabled = featureGloballyEnabled(feature);
-          feature.allowed = feature.globally_enabled && allowed.has(feature.id);
-        }
-      }
+  function syncGroupPolicyForm(form, data, preserveOtherFields) {
+    const policy = data.policy;
+    const allowed = new Set(policy.allowed_features || []);
+    for (const input of $$('input[name="allowed_features"]', form)) {
+      input.checked = allowed.has(input.value);
     }
-    for (const selector of ["#groupPolicyForm", "#privatePolicyForm"]) {
-      const form = $(selector);
-      if (!form) continue;
-      for (const input of $$('input[name="allowed_features"]', form)) {
-        const enabled = featureGloballyEnabled({id: input.value, globally_enabled: !input.disabled});
-        if (!input.disabled) input.dataset.scopeAllowed = String(input.checked);
-        input.disabled = !enabled;
-        input.checked = enabled && input.dataset.scopeAllowed === "true";
-        const note = input.closest("label")?.querySelector("[data-global-plugin-note]");
-        if (note) note.hidden = enabled;
-      }
+    form.dataset.revision = policy.revision;
+    if (preserveOtherFields) return;
+    for (const name of ["bot_enabled", "scheduled_enabled", "quiet_enabled"]) {
+      const input = form.elements[name];
+      input.checked = name === "quiet_enabled" ? Boolean(policy.quiet_hours?.enabled) : policy[name] !== false;
+      updatePolicyToggle({currentTarget: input});
+    }
+    for (const [name, value] of Object.entries({reply_mode: policy.reply_mode, daily_limit: policy.daily_limit,
+      quiet_start: policy.quiet_hours?.start, quiet_end: policy.quiet_hours?.end})) {
+      if (value !== undefined) form.elements[name].value = value;
     }
   }
 
-  async function pollGlobalPluginStates() {
-    if (globalPluginPollBusy) return;
-    globalPluginPollBusy = true;
+  async function pollSelectedGroupPolicy() {
+    if (groupPolicyPollBusy) return;
+    groupPolicyPollBusy = true;
     try {
-      if (state.activePage !== "groups" || window.document?.hidden) return;
+      const groupId = state.selectedGroup, account = state.groupAccount;
+      const policies = state.groupPolicies;
+      if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || window.document?.hidden
+          || !groupId || !account || !policies[groupId]?.policy || groupPolicySaves.has(groupId)
+          || $("#modalBackdrop")?.hidden === false || !$("#groupPolicyForm")) return;
       const generation = chatContextGeneration;
-      const result = await api("get_global_plugin_states");
-      if (generation !== chatContextGeneration || !result?.revision
-          || !result.states || typeof result.states !== "object"
-          || Array.isArray(result.states) || Object.values(result.states).some((value) => typeof value !== "boolean")) return;
-      if (globalPluginRevision !== result.revision) {
-        globalPluginRevision = result.revision;
-        globalPluginStates = result.states;
-        updateGlobalFeatureChoices();
+      const result = await api("get_group_policy", account, groupId, true);
+      if (generation !== chatContextGeneration || state.groupAccount !== account || state.groupPolicies !== policies
+          || state.selectedGroup !== groupId || state.chatManagementTab !== "groups" || groupPolicySaves.has(groupId)
+          || $("#modalBackdrop")?.hidden === false || !result?.policy?.revision
+          || result.policy.account_id !== account || result.policy.group_id !== groupId
+          || !Array.isArray(result.policy.allowed_features) || !Array.isArray(result.features)) return;
+      const previous = policies[groupId];
+      if (previous?.policy?.revision === result.policy.revision) return;
+      const draft = groupDrafts[groupId];
+      const otherFieldsChanged = ["bot_enabled", "reply_mode", "scheduled_enabled", "quiet_hours", "daily_limit"]
+        .some((key) => JSON.stringify(previous.policy[key]) !== JSON.stringify(result.policy[key]));
+      policies[groupId] = {...previous, ...result};
+      if (draft && (draft.policyConflict || draft.featureDirty || otherFieldsChanged)) {
+        draft.policyConflict = true;
+      } else {
+        if (draft) groupDrafts[groupId] = {...draft, features: result.features, policy: {...draft.policy,
+          allowed_features: [...result.policy.allowed_features], revision: result.policy.revision}};
+        const form = $("#groupPolicyForm");
+        if (form) syncGroupPolicyForm(form, result, Boolean(draft));
       }
+      const note = $("#groupPolicyNote");
+      if (note) note.textContent = groupDrafts[groupId]?.policyConflict ? groupPolicyNote(groupId)
+        : draft ? "本群功能已同步；其他未保存修改已保留。" : "本群功能已从机器人对话同步。";
+      const button = $('button[form="groupPolicyForm"]');
+      if (button) button.disabled = Boolean(groupDrafts[groupId]?.policyConflict);
     } catch (_error) {
-      // Retain the last confirmed state and form drafts during a background read failure.
+      // A background read never discards edits or interrupts the current form.
       return false;
     } finally {
-      globalPluginPollBusy = false;
-      window.setTimeout(pollGlobalPluginStates, 4000);
+      groupPolicyPollBusy = false;
+      window.setTimeout(pollSelectedGroupPolicy, 4000);
     }
   }
   function hasGroupMemberCount(value) {
@@ -218,8 +222,7 @@ window.createChatManagement = function (helpers) {
     groupDrafts = {};
     privateDrafts = {};
     privatePolicySaves = new Set();
-    globalPluginRevision = "";
-    globalPluginStates = {};
+    groupPolicySaves.clear();
     chatProfiles.invalidate();
     for (const [selector, label] of [["#refreshGroups", "刷新群列表"], ["#refreshContacts", "刷新联系人"]]) {
       const button = $(selector);
@@ -447,7 +450,7 @@ window.createChatManagement = function (helpers) {
       : '<div class="member-empty">当前接口没有返回成员。</div>';
     const header = `<header class="inspector-hero"><div class="inspector-group-title">${avatarMarkup("group-avatar tone-0", group.name || "群", group.avatar)}<div><h2>${escapeHtml(group.name || "未命名群聊")}</h2><code class="inspector-id">${escapeHtml(group.group_id)} · ${escapeHtml(memberCount)}</code></div></div><button class="row-action chat-scheduled-entry" type="button">本群的定时任务</button></header>`;
     const tabs = `<div class="inspector-detail-actions"><button class="row-action" id="refreshGroupPolicy" type="button" ${state.groupPolicies[group.group_id]?.loading ? "disabled" : ""}>重新读取规则</button><button class="row-action" type="button" data-inspector-view="${state.groupInspectorView === "members" ? "policy" : "members"}">${state.groupInspectorView === "members" ? "返回群聊规则" : "查看群成员"}</button><button class="row-action copy-selected-group" type="button">复制群标识</button></div>`;
-    const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span id="groupPolicyNote">${groupDrafts[group.group_id] ? "有未保存修改，切换群聊会保留。" : "在线保存会立即应用到当前群。"}</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error ? "disabled" : ""}>保存群聊规则</button></footer>`;
+    const policyBody = `<div class="inspector-scroll">${groupPolicyMarkup(policyData)}</div><footer class="inspector-footer"><span id="groupPolicyNote" role="status">${groupPolicyNote(group.group_id)}</span><button class="button primary" type="submit" form="groupPolicyForm" ${policyData?.loading || policyData?.error || policyData?.policyConflict ? "disabled" : ""}>保存群聊规则</button></footer>`;
     const membersBody = `<div class="inspector-scroll members-view"><section class="members-section"><div class="members-heading"><div><strong>群成员</strong><span>按需读取，最多展示 500 人</span></div><button class="button ghost small" id="loadGroupMembers" type="button" ${memberData?.loading ? "disabled" : ""}>${memberData?.loading ? "正在读取…" : "重新读取"}</button></div>${memberMarkup}<div class="policy-summary">微信未提供的信息显示为“未知”。</div></section></div><footer class="inspector-footer"><span>成员列表不会写入配置。</span><button class="button ghost" type="button" data-inspector-view="policy">返回群规则</button></footer>`;
     panel.innerHTML = `${header}${tabs}${state.groupInspectorView === "members" ? membersBody : policyBody}`;
     $(".copy-selected-group", panel)?.addEventListener("click", () => copyText(group.group_id, "群标识"));
@@ -469,8 +472,10 @@ window.createChatManagement = function (helpers) {
       policyForm.addEventListener("submit", saveGroupPolicy);
       const rememberDraft = (event) => {
         if (!event.target.name) return;
-        groupDrafts[group.group_id] = {...policyData, policy: {...policyData.policy, ...readGroupPolicyForm(policyForm), daily_limit: policyForm.elements.daily_limit.value}};
-        $("#groupPolicyNote").textContent = "有未保存修改，切换群聊会保留。";
+        const current = groupDrafts[group.group_id] || state.groupPolicies[group.group_id] || policyData;
+        groupDrafts[group.group_id] = {...current, featureDirty: current.featureDirty || event.target.name === "allowed_features",
+          policy: {...current.policy, ...readGroupPolicyForm(policyForm), daily_limit: policyForm.elements.daily_limit.value}};
+        $("#groupPolicyNote").textContent = groupPolicyNote(group.group_id);
       };
       policyForm.addEventListener("input", rememberDraft);
       policyForm.addEventListener("change", rememberDraft);
@@ -484,7 +489,8 @@ window.createChatManagement = function (helpers) {
     if (data.error) return `<section class="group-policy-form"><h3>本群机器人规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
-    const featureChoices = featureChoicesMarkup(data);
+    const allowed = new Set(policy.allowed_features || []);
+    const featureChoices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span>${escapeHtml(feature.name)}</span></label>`).join("");
     return `<form class="group-policy-form" id="groupPolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div id="groupChatProfile" class="chat-profile"></div>
       <div class="toggle-line"><span><strong>在本群使用机器人</strong></span><span class="toggle"><input id="groupBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled ? "checked" : ""}><label class="toggle-track" for="groupBotEnabled" aria-label="切换本群机器人"></label><span>${policy.bot_enabled ? "已启用" : "已停用"}</span></span></div>
@@ -503,9 +509,7 @@ window.createChatManagement = function (helpers) {
     return {
       bot_enabled: form.elements.bot_enabled.checked,
       scheduled_enabled: form.elements.scheduled_enabled.checked,
-      allowed_features: $$('input[name="allowed_features"]', form)
-        .filter((input) => input.disabled ? input.dataset.scopeAllowed === "true" : input.checked)
-        .map((input) => input.value),
+      allowed_features: $$('input[name="allowed_features"]:checked', form).map((input) => input.value),
       quiet_hours: {
         enabled: form.elements.quiet_enabled.checked,
         start: form.elements.quiet_start.value,
@@ -537,14 +541,16 @@ window.createChatManagement = function (helpers) {
     const button = $('button[form="groupPolicyForm"]');
     if (!button) return;
     const groupId = state.selectedGroup;
+    if (groupDrafts[groupId]?.policyConflict) return;
     const account = state.groupAccount;
     const policies = state.groupPolicies;
     button.disabled = true;
     button.textContent = "正在检查影响…";
     try {
       const values = readGroupPolicyForm(form);
+      const revision = form.dataset.revision || "";
       const draft = groupDrafts[groupId];
-      const preview = await api("preview_group_policy", account, groupId, values, form.dataset.revision || "");
+      const preview = await api("preview_group_policy", account, groupId, values, revision);
       const impact = Array.isArray(preview.impact) ? preview.impact : ["本次修改只影响当前群的机器人规则。"];
       button.disabled = false;
       button.textContent = "保存群聊规则";
@@ -555,14 +561,17 @@ window.createChatManagement = function (helpers) {
         intent: "primary",
         onConfirm: async () => {
           if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
-          const saved = await api("save_group_policy", account, groupId, values, form.dataset.revision || "");
+          groupPolicySaves.add(groupId);
+          let saved;
+          try { saved = await api("save_group_policy", account, groupId, values, revision); }
+          finally { groupPolicySaves.delete(groupId); }
           if (state.groupAccount !== account || state.groupPolicies !== policies) return;
           if (!saved?.saved || saved.account_id !== account || saved.group_id !== groupId || !saved.revision) {
             throw new Error("未收到本群规则的保存确认，请重新读取规则后核对。");
           }
           const previous = policies[groupId] || {};
           policies[groupId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
-            ...feature, allowed: featureGloballyEnabled(feature) && (saved.allowed_features || []).includes(feature.id),
+            ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
           }))};
           if (groupDrafts[groupId] === draft) delete groupDrafts[groupId];
           else if (groupDrafts[groupId]) groupDrafts[groupId].policy.revision = saved.revision;
@@ -892,8 +901,9 @@ window.createChatManagement = function (helpers) {
     if (data.error) return `<section class="private-feature-policy"><h3>该联系人聊天规则</h3><div class="member-empty error">${escapeHtml(data.error)}</div></section>`;
     const policy = data.policy || {};
     const quiet = policy.quiet_hours || {};
+    const allowed = new Set(policy.allowed_features || []);
     const isWechatTeam = String(policy.contact_id || "").trim().toLowerCase() === "weixin";
-    const choices = featureChoicesMarkup(data);
+    const choices = (data.features || []).map((feature) => `<label class="option-check"><input name="allowed_features" type="checkbox" value="${escapeHtml(feature.id)}" ${allowed.has(feature.id) ? "checked" : ""}><span><strong>${escapeHtml(feature.name)}</strong></span></label>`).join("");
     return `<form class="private-feature-policy" id="privatePolicyForm" data-revision="${escapeHtml(policy.revision || "")}" novalidate>
       <div id="privateChatProfile" class="chat-profile"></div><div class="toggle-line"><span><strong>在此私聊使用机器人</strong></span><span class="toggle"><input id="privateBotEnabled" name="bot_enabled" type="checkbox" ${policy.bot_enabled !== false ? "checked" : ""}><label class="toggle-track" for="privateBotEnabled" aria-label="切换此私聊机器人"></label><span>${policy.bot_enabled !== false ? "已启用" : "已停用"}</span></span></div>
       ${isWechatTeam ? '<div class="toggle-line"><span><strong>微信团队私聊的模型回复</strong></span><span class="toggle"><input id="privateModelReplyDisabled" type="checkbox" disabled><label class="toggle-track" for="privateModelReplyDisabled" aria-label="微信团队私聊模型回复已关闭"></label><span>已关闭</span></span></div>' : ""}
@@ -986,7 +996,7 @@ window.createChatManagement = function (helpers) {
       }
       const previous = policies[contactId] || {};
       policies[contactId] = {...previous, policy: saved, features: (previous.features || []).map((feature) => ({
-        ...feature, allowed: featureGloballyEnabled(feature) && (saved.allowed_features || []).includes(feature.id),
+        ...feature, allowed: (saved.allowed_features || []).includes(feature.id),
       }))};
       if (privateDrafts[contactId] === draft) delete privateDrafts[contactId];
       else if (privateDrafts[contactId]) privateDrafts[contactId].policy.revision = saved.revision || "";
@@ -1002,7 +1012,7 @@ window.createChatManagement = function (helpers) {
     }
   }
 
-  window.setTimeout(pollGlobalPluginStates, 4000);
+  window.setTimeout(pollSelectedGroupPolicy, 4000);
 
   return {
     clearPendingGroupMemberLoading,

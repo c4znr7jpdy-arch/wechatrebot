@@ -18,9 +18,6 @@ from .plugin_configuration import _dashboard_path, _json_revision, _read_object,
 from .plugin_errors import ConfigConflictError, EngineUnavailableError, PluginCenterError, ProviderTestError
 from .customer_logs import sanitize_log_text
 from .error_catalog import provider_error_code
-from .feature_policy import (
-    GLOBAL_DISABLED_PLUGINS_KEY, globally_disabled_plugins, load_global_disabled_plugins,
-)
 from .port_config import load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
@@ -40,35 +37,10 @@ _LONG_MEME_REQUEST_PATHS = frozenset({
 })
 
 _PROVIDER_TEST_KINDS = frozenset({"chat", "embedding", "image", "voice", "stt", "tts", "rerank"})
-_UNCHANGED_PLUGIN_STATE = object()
 
 
 def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _plugin_state_map(
-    plugins: list[Any], enabled_names: set[str] | None = None,
-    disabled: frozenset[str] = frozenset(),
-) -> dict[str, bool]:
-    """Index the same activation state by directory and registered name."""
-    states: dict[str, bool] = {}
-    for plugin in plugins:
-        if not isinstance(plugin, dict):
-            continue
-        identifiers = tuple(
-            str(identifier or "").strip()
-            for identifier in (plugin.get("root_dir_name"), plugin.get("name"))
-            if str(identifier or "").strip()
-        )
-        activated = bool(plugin.get("activated"))
-        if enabled_names is not None:
-            activated = activated and (
-                "*" in enabled_names or any(name in enabled_names for name in identifiers)
-            ) and not any(name in disabled for name in identifiers)
-        for module_name in identifiers:
-            states[module_name] = activated
-    return states
 
 
 class EngineApiClient:
@@ -171,18 +143,10 @@ class EngineApiClient:
         except EngineUnavailableError:
             return False
 
-    def _registered_plugins(self) -> list[Any]:
+    def plugin_states(self) -> dict[str, bool]:
         plugins = self.request("GET", "/api/v1/plugins")
         if not isinstance(plugins, list):
             raise PluginCenterError("无法确认功能运行状态，请刷新后重试。")
-        return plugins
-
-    def plugin_activation_states(self) -> dict[str, bool]:
-        """Read raw activation separately from the message-pipeline filter."""
-        return _plugin_state_map(self._registered_plugins())
-
-    def plugin_states(self) -> dict[str, bool]:
-        plugins = self._registered_plugins()
         system = self.request("GET", "/api/v1/system-config")
         config = system.get("config") if isinstance(system, dict) else None
         if not isinstance(config, dict):
@@ -193,55 +157,40 @@ class EngineApiClient:
             if isinstance(configured, list)
             else {"*"}
         )
-        try:
-            disabled = load_global_disabled_plugins(self.install_root, config)
-        except ValueError as exc:
-            raise PluginCenterError(str(exc)) from exc
-        return _plugin_state_map(plugins, enabled_names, disabled)
-
-    def set_plugin_filter(
-        self, plugin_names: list[str] | None, *,
-        disabled_plugins: list[str] | None | object = _UNCHANGED_PLUGIN_STATE,
-    ) -> None:
-        """Sync global state fields; explicit ``None`` restores an absent field."""
-        desired = (
-            sorted({str(name).strip() for name in plugin_names if str(name).strip()})
-            if plugin_names is not None else None
-        )
-        try:
-            desired_disabled = (
-                sorted(globally_disabled_plugins({GLOBAL_DISABLED_PLUGINS_KEY: disabled_plugins}))
-                if disabled_plugins is not None and disabled_plugins is not _UNCHANGED_PLUGIN_STATE else disabled_plugins
+        allow_all = "*" in enabled_names
+        states: dict[str, bool] = {}
+        for plugin in plugins:
+            if not isinstance(plugin, dict):
+                continue
+            identifiers = tuple(
+                str(identifier or "").strip()
+                for identifier in (plugin.get("root_dir_name"), plugin.get("name"))
+                if str(identifier or "").strip()
             )
-        except ValueError as exc:
-            raise PluginCenterError(str(exc)) from exc
+            activated = bool(plugin.get("activated")) and (
+                allow_all or any(identifier in enabled_names for identifier in identifiers)
+            )
+            # AstrBot uses the directory name for delivery/catalog matching and
+            # the registered name for API routes.  They are usually equal, but
+            # third-party plugins may expose different values.  Index both so a
+            # live state is never mistaken for a locally disabled plugin.
+            for module_name in identifiers:
+                states[module_name] = activated
+        return states
+
+    def set_plugin_filter(self, plugin_names: list[str]) -> None:
+        desired = sorted({str(name).strip() for name in plugin_names if str(name).strip()})
         system = self.request("GET", "/api/v1/system-config")
         config = system.get("config") if isinstance(system, dict) else None
         if not isinstance(config, dict):
             raise PluginCenterError("无法读取当前功能启用范围，请刷新后重试。")
-        fields = {"plugin_set": desired}
-        if desired_disabled is not _UNCHANGED_PLUGIN_STATE:
-            fields[GLOBAL_DISABLED_PLUGINS_KEY] = desired_disabled
-        for key, value in fields.items():
-            if value is None:
-                config.pop(key, None)
-            else:
-                config[key] = value
+        config["plugin_set"] = desired
         self.request("PUT", "/api/v1/system-config", config)
         verified = self.request("GET", "/api/v1/system-config")
         verified_config = verified.get("config") if isinstance(verified, dict) else None
-        if not isinstance(verified_config, dict):
+        actual = verified_config.get("plugin_set") if isinstance(verified_config, dict) else None
+        if not isinstance(actual, list) or sorted({str(name) for name in actual}) != desired:
             raise PluginCenterError("功能启用范围未能保存，请刷新后重试。")
-        for key, expected in fields.items():
-            actual = verified_config.get(key)
-            if (expected is None and key in verified_config) or (
-                expected is not None and (
-                    not isinstance(actual, list)
-                    or any(not isinstance(name, str) for name in actual)
-                    or sorted(set(actual)) != expected
-                )
-            ):
-                raise PluginCenterError("功能启用范围未能保存，请刷新后重试。")
 
     def _provider_records(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         source_data = self.request("GET", "/api/v1/provider-sources")

@@ -79,9 +79,9 @@ def test_chat_configuration_keeps_paging_and_unsaved_form(browser, manager_url, 
         page.close()
 
 
-@pytest.mark.parametrize("chat_type", ["group", "private"])
-def test_global_plugin_switch_updates_checkbox_without_losing_chat_draft(
-    browser, manager_url, tmp_path, chat_type,
+@pytest.mark.parametrize("feature_draft", [False, True])
+def test_current_group_plugin_switch_preserves_drafts_and_handles_conflicts(
+    browser, manager_url, tmp_path, feature_draft,
 ):
     page = browser.new_page(viewport={"width": 1380, "height": 920})
     errors = []
@@ -92,71 +92,86 @@ def test_global_plugin_switch_updates_checkbox_without_losing_chat_draft(
         if page.locator("#onboardingRecommended").is_visible():
             page.locator("#onboardingRecommended").click()
         page.evaluate("""() => {
-          window.globalFeatureEnabled = true;
-          window.globalFeatureRevision = 1;
-          window.chatPolicyWrites = [];
-          const api = window.pywebview.api;
-          api.get_global_plugin_states = async () => ({ok:true, data:{
-            states:{'feature-commands':window.globalFeatureEnabled},
-            revision:String(window.globalFeatureRevision)}});
-          for (const method of ['save_group_policy', 'save_private_policy']) {
-            const save = api[method];
-            api[method] = async (...args) => {
-              window.chatPolicyWrites.push(structuredClone(args));
-              return save(...args);
-            };
-          }
+          window.groupFeatureEnabled = true;
+          window.groupFeatureRevision = 1;
+          window.groupPolicyWrites = [];
+          window.groupPolicyReads = [];
+          const api = window.pywebview.api, read = api.get_group_policy, save = api.save_group_policy;
+          api.get_group_policy = async (...args) => {
+            window.groupPolicyReads.push(structuredClone(args));
+            const result = await read(...args);
+            if (args[1] === '51632940287@chatroom') {
+              result.data.policy.revision = `remote-${window.groupFeatureRevision}`;
+              result.data.policy.allowed_features = result.data.policy.allowed_features
+                .filter(id => id !== 'feature-commands');
+              if (window.groupFeatureEnabled) result.data.policy.allowed_features.push('feature-commands');
+            }
+            return result;
+          };
+          api.save_group_policy = async (...args) => {
+            window.groupPolicyWrites.push(structuredClone(args));
+            return save(...args);
+          };
         }""")
         page.locator('.nav-item[data-page="groups"]').click()
-        if chat_type == "private":
-            page.locator("#privateManagementTab").click()
-            page.locator("#contactRows .contact-row").first.click()
-        else:
-            page.locator("#groupRows .group-row").first.click()
-        form_id = "#privatePolicyForm" if chat_type == "private" else "#groupPolicyForm"
-        form = page.locator(form_id)
+        page.locator('#groupRows .group-row[data-group-id="51632940287@chatroom"]').click()
+        form = page.locator("#groupPolicyForm")
         expect(form).to_be_visible()
-        form.locator("details").filter(has_text="可用功能").first.locator("summary").click()
+        form.locator("details").first.locator("summary").click()
         feature = form.locator('[name="allowed_features"][value="feature-commands"]')
         expect(feature).to_be_checked()
-        # Keep both a scalar draft and a deliberately unchecked second feature.
-        other_feature = form.locator('[name="allowed_features"][value="feature-music"]')
-        other_feature.uncheck()
-        if chat_type == "private":
-            form.locator("details").first.locator("summary").click()
-        else:
-            form.locator("details").nth(1).locator("summary").click()
+        other = form.locator('[name="allowed_features"][value="feature-music"]')
+        if feature_draft:
+            other.uncheck()
+        form.locator("details").nth(1).locator("summary").click()
         limit = form.locator('[name="daily_limit"]')
         limit.fill("17")
-        page.evaluate("""selector => {
-          window.retainedSwitchForm = document.querySelector(selector);
-          window.globalFeatureEnabled = false;
-          window.globalFeatureRevision++;
-        }""", form_id)
-        expect(feature).to_be_disabled(timeout=7000)
-        expect(feature).not_to_be_checked()
-        expect(feature.locator("..")).to_contain_text("已全局关闭")
-        expect(limit).to_have_value("17")
-        expect(other_feature).not_to_be_checked()
-        assert page.evaluate("selector => window.retainedSwitchForm === document.querySelector(selector)", form_id)
-
-        page.screenshot(path=str(tmp_path / f"{chat_type}-global-feature-disabled.png"), animations="disabled")
-        page.locator(f'button[form="{form_id[1:]}"]').click()
-        if chat_type == "group":
-            page.locator("#modalConfirm").click()
-            expect(page.locator("#modalBackdrop")).to_be_hidden()
-        page.wait_for_function("() => window.chatPolicyWrites.length === 1")
-        saved_values = page.evaluate("window.chatPolicyWrites[0][2]")
-        assert "feature-commands" in saved_values["allowed_features"]
-        assert "feature-music" not in saved_values["allowed_features"]
-        assert saved_values["daily_limit"] == 17
-        expect(feature).to_be_disabled()
-
-        page.evaluate("window.globalFeatureEnabled = true; window.globalFeatureRevision++")
-        expect(feature).to_be_enabled(timeout=7000)
+        page.evaluate("""() => {
+          window.retainedGroupPolicyForm = document.querySelector('#groupPolicyForm');
+          window.groupFeatureEnabled = false;
+          window.groupFeatureRevision++;
+        }""")
+        if feature_draft:
+            expect(page.locator('#groupPolicyNote')).to_contain_text('重新读取规则后核对', timeout=7000)
+            expect(feature).to_be_checked()
+            expect(other).not_to_be_checked()
+            expect(page.locator('button[form="groupPolicyForm"]')).to_be_disabled()
+            expect(form).to_have_attribute('data-revision', 'remote-1')
+        else:
+            expect(feature).not_to_be_checked(timeout=7000)
+            expect(feature).to_be_enabled()
+            expect(form).to_have_attribute('data-revision', 'remote-2')
+            expect(page.locator('#groupPolicyNote')).to_contain_text('其他未保存修改已保留')
+        expect(limit).to_have_value('17')
+        assert page.evaluate("window.retainedGroupPolicyForm === document.querySelector('#groupPolicyForm')")
+        reads = page.evaluate('window.groupPolicyReads')
+        assert len(reads[0]) == 2
+        assert any(args[1:] == ['51632940287@chatroom', True] for args in reads)
+        page.locator('#groupPolicyNote').scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"group-plugin-sync-{feature_draft}.png"), animations="disabled")
+        if feature_draft:
+            page.locator('#refreshGroupPolicy').click()
+            page.locator('#modalConfirm').click()
+            expect(page.locator('#modalBackdrop')).to_be_hidden()
+            expect(feature).not_to_be_checked()
+            expect(limit).to_have_value('3')
+            expect(page.locator('button[form="groupPolicyForm"]')).to_be_enabled()
+        else:
+            page.locator('button[form="groupPolicyForm"]').click()
+            page.locator('#modalConfirm').click()
+            expect(page.locator('#modalBackdrop')).to_be_hidden()
+            page.wait_for_function('window.groupPolicyWrites.length === 1')
+            values = page.evaluate('window.groupPolicyWrites[0]')
+            assert values[3] == 'remote-2'
+            assert 'feature-commands' not in values[2]['allowed_features']
+            assert values[2]['daily_limit'] == 17
+        page.locator('#groupRows .group-row[data-group-id="81263495012@chatroom"]').click()
         expect(feature).to_be_checked()
-        expect(limit).to_have_value("17")
-        expect(other_feature).not_to_be_checked()
+        page.locator('#privateManagementTab').click()
+        page.locator('#contactRows .contact-row').first.click()
+        expect(page.locator('#privatePolicyForm')).to_be_visible()
+        page.locator('#privatePolicyForm details').nth(1).locator('summary').click()
+        expect(page.locator('#privatePolicyForm [name="allowed_features"][value="feature-commands"]')).to_be_checked()
         assert not errors, errors
     finally:
         page.close()

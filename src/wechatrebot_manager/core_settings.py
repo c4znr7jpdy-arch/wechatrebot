@@ -16,7 +16,7 @@ from .plugin_center import (
     ROBOT_CORE_FEATURE_ID,
     _validate_config,
 )
-from .runtime_config import normalize_admin_id
+from .runtime_config import normalize_admin_id, normalize_admin_ids
 
 
 _READ_ENDPOINTS = frozenset({"profiles", "chats", "chat_status"})
@@ -36,6 +36,7 @@ class RobotCoreSettingsService:
         result["identity"] = {
             "robot_name": settings.profile.display_name,
             "admin_id": settings.admin_id,
+            "admin_ids": list(settings.admin_ids or ()),
         }
         robot = ContactDirectoryService(self.features.install_root).self_profile(wait=True)
         result["identity"]["wechat_nickname"] = str(robot.get("nickname") or robot.get("name") or "")
@@ -131,8 +132,17 @@ class RobotCoreSettingsService:
             robot_name = str(robot.get("nickname") or robot.get("name") or "").strip()
             if not robot_name:
                 raise PluginCenterError("尚未读取到机器人微信昵称，请连接微信或填写自定义名称。")
-        admin_id = str(values.get("admin_id") or "").strip()
-        normalized_admin_id = normalize_admin_id(admin_id) or ""
+        if "admin_ids" in values:
+            normalized_admins = normalize_admin_ids(values["admin_ids"])
+            if normalized_admins is None:
+                raise ValueError("管理员列表格式无效，请每行填写一个 wxid。")
+        elif "admin_id" in values:
+            normalized_admin = normalize_admin_id(values["admin_id"]) or ""
+            normalized_admins = current.admin_ids if normalized_admin == current.admin_id else (
+                (normalized_admin,) if normalized_admin else ()
+            )
+        else:
+            normalized_admins = current.admin_ids
         profile = BrandProfile(
             display_name=robot_name,
             short_name=robot_name,
@@ -200,12 +210,13 @@ class RobotCoreSettingsService:
         )
         saved_settings = save_robot_settings(
             self.features.install_root,
-            RobotSettings(profile=profile, admin_id=normalized_admin_id),
+            RobotSettings(profile=profile, admin_ids=normalized_admins),
             apply_reply_identity=True,
         )
         saved_core["brand"] = {
             **saved_settings.profile.to_dict(),
             "admin_id": saved_settings.admin_id,
+            "admin_ids": list(saved_settings.admin_ids or ()),
         }
         saved_core["message"] = (
             "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"

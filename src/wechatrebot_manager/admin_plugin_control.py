@@ -1,11 +1,11 @@
-"""Administrator-only natural-language access to the existing plugin transaction."""
+"""Administrator-only access to the current group's existing feature policy."""
 from __future__ import annotations
 
 from collections.abc import Mapping
 import re
 from typing import Any, TYPE_CHECKING
 
-from .customer_config import load_robot_settings
+from .customer_config import load_robot_admin_ids
 from .plugin_errors import PluginCenterError
 
 if TYPE_CHECKING:
@@ -17,59 +17,100 @@ CONTROL_DESCRIPTOR = "data/manager/plugin-control.json"
 _ENABLE = re.compile(r"开启|启用|打开|启动|恢复|开起来|打开来")
 _DISABLE = re.compile(r"关闭|禁用|停用|关掉|停掉|关了|关起来")
 _NON_ACTION = re.compile(
-    r"不要|别|不用|无需|不许|不想|不需要|不再|不.*(?:开|关|启|停)|"
-    r"怎么|如何|是否|有没有|已经|了吗|了没|能否|能不能|可不可以|可以.*吗|如果|假如"
+    r"不要|别|勿|禁止|不准|不必|不用|无需|不许|不想|不需要|不再|不.*(?:开|关|启|停)|没让|没叫|未要求|"
+    r"怎么|如何|是否|是不是|有没有|已经|了吗|了没|能否|能不能|可不可以|可以.*吗|如果|假如|"
+    r"引用|转发|他说|她说|曾经|上次|之前|昨天|当时|什么意思|是什么意思|含义|解释|举例|例如|比如|示例|这句话|"
+    r"明天|后天|稍后|以后|过会|待会|等.*再"
 )
+_FOREIGN_SCOPE = re.compile(r"全局|全部|所有|其它|其他|别的|另一个|隔壁|私聊|@chatroom")
+_CURRENT_GROUP = re.compile(r"当前群聊|当前群|这个群聊|这个群|本群聊|本群|此群|群聊内|群内|群里")
 
 
-def _validate_intent(message: object, plugin: Mapping[str, Any], enabled: bool) -> None:
-    if not isinstance(message, str) or not message.strip() or len(message) > 4000:
-        raise PluginCenterError("请在当前消息中明确说明要开启或关闭哪个插件。")
-    text = re.sub(r"\s+", "", message).casefold()
-    intended, opposite = (_ENABLE, _DISABLE) if enabled else (_DISABLE, _ENABLE)
-    if _NON_ACTION.search(text) or not intended.search(text) or opposite.search(text):
-        raise PluginCenterError("当前消息未明确要求这次操作，请直接说“全局开启点歌”或“全局关闭点歌”。")
-    names = [str(plugin.get(key) or "") for key in ("name", "module", "id")]
+def _names(plugin: Mapping[str, Any]) -> list[str]:
+    names = [plugin.get(key) for key in ("name", "module", "id")]
     names.extend(plugin.get("aliases") or [])
-    names = [re.sub(r"\s+", "", str(name)).casefold() for name in names]
-    if not any(name and name in text for name in names):
+    return [re.sub(r"\s+", "", str(name)).casefold() for name in names if name]
+
+
+def _validate_scope_text(message: object, catalog: list[dict[str, object]]) -> str:
+    if not isinstance(message, str) or not message.strip() or len(message) > 4000:
+        raise PluginCenterError("请在当前群聊中明确说明要管理哪个插件。")
+    text = re.sub(r"[^\S\n]+", "", message).casefold()
+    if _FOREIGN_SCOPE.search(text):
+        raise PluginCenterError("这里只能管理当前群聊，请在目标群中说“关闭点歌”或“开启点歌”。")
+    scope_text = text
+    # Feature names such as 群聊分析 are targets, not a requested group scope.
+    for name in sorted({name for item in catalog for name in _names(item)}, key=len, reverse=True):
+        scope_text = scope_text.replace(name, "")
+    if "群" in _CURRENT_GROUP.sub("", scope_text):
+        raise PluginCenterError("无法确认目标是当前群聊，请直接说“在本群关闭点歌”。")
+    return text
+
+
+def _validate_intent(text: str, plugin: Mapping[str, Any], enabled: bool) -> None:
+    names = _names(plugin)
+    # Quoted feature names are fine; quoted instructions are not an action.
+    for name in names:
+        for left, right in (("“", "”"), ("‘", "’"), ('"', '"'), ("'", "'"), ("`", "`")):
+            text = text.replace(f"{left}{name}{right}", name)
+    intended, opposite = (_ENABLE, _DISABLE) if enabled else (_DISABLE, _ENABLE)
+    if (_NON_ACTION.search(text) or re.search(r'''[“”‘’"'`「」?？]|[吗么呢]''', text)
+            or not intended.search(text) or opposite.search(text)):
+        raise PluginCenterError("当前消息未明确要求这次操作，请直接说“在本群开启点歌”或“在本群关闭点歌”。")
+    clauses = re.split(r"[，,。；;！!\n]|保留|保持|维持|别动|不要动|不用动|不动|但", text)
+    if not any(
+        intended.search(clause) and any(
+            re.search(r"(?<![a-z0-9_.-])" + re.escape(name) + r"(?![a-z0-9_.-])", clause)
+            if name.isascii() else name in clause for name in names
+        ) for clause in clauses
+    ):
         raise PluginCenterError("当前消息中的插件与操作目标不一致，请使用插件列表里的名称重试。")
 
 
 def handle_plugin_control(service: PluginCenterService, payload: Mapping[str, Any]) -> dict[str, object]:
-    """Authorize against the saved administrator, then delegate to one transaction."""
-    admin_id = load_robot_settings(service.install_root).admin_id.strip()
+    """Use trusted event scope and configured administrators; never change global plugins."""
+    from .group_policy import GroupPolicyError, GroupPolicyService
+
     sender_id = payload.get("sender_id")
-    if not admin_id or not isinstance(sender_id, str) or sender_id.strip() != admin_id:
+    if not isinstance(sender_id, str) or sender_id not in load_robot_admin_ids(service.install_root):
         raise PluginCenterError("这个管理功能只有配置中的管理员微信号可用。")
+    if payload.get("scope") != "current_group":
+        raise PluginCenterError("这里只支持当前群聊的插件开关。")
     action = payload.get("action")
     if action not in {"list", "set_enabled"}:
         raise PluginCenterError("不支持这项插件管理操作。")
-    catalog = service.global_control_catalog()
-    if action == "list":
-        return {"plugins": catalog}
-    module = payload.get("module")
-    enabled = payload.get("enabled")
-    if not isinstance(module, str) or not isinstance(enabled, bool):
-        raise PluginCenterError("插件标识或启用状态无效。")
-    plugin = next((item for item in catalog if item["module"] == module), None)
-    if plugin is None:
-        raise PluginCenterError("该插件不在可全局管理的正式插件列表中。")
-    _validate_intent(payload.get("message"), plugin, enabled)
-    result = service.set_enabled(str(plugin["id"]), enabled, require_online=True)
-    confirmed = next((item for item in service.global_control_catalog() if item["module"] == module), None)
-    if confirmed is None or confirmed.get("enabled") is not enabled:
-        raise PluginCenterError("插件状态未确认，请先查询当前全局状态。")
-    if result.get("applied") is not True:
-        return {
-            "module": module, "enabled": enabled, "applied": False,
-            "message": "全局开关配置已保存，但尚未确认运行中的插件生效，请恢复软件管理接口后重试。",
-        }
+    policies = GroupPolicyService(service.install_root)
+    account, group = payload.get("account_id"), payload.get("group_id")
+    try:
+        overview = policies.feature_permissions(account, group)
+        policy = overview["policy"]
+        catalog = [
+            {
+                "id": item["id"], "module": item["id"], "name": item["name"],
+                "enabled": item["allowed"],
+                "aliases": ["涩图", "色图"] if item["id"] == "jiang_commands.setu" else [],
+            }
+            for item in overview["features"]
+        ]
+        scope = {"scope": "current_group", "account_id": policy["account_id"], "group_id": policy["group_id"]}
+        text = _validate_scope_text(payload.get("message"), catalog)
+        if action == "list":
+            return {**scope, "plugins": catalog, "revision": policy["revision"]}
+        module, enabled = payload.get("module"), payload.get("enabled")
+        if not isinstance(module, str) or not isinstance(enabled, bool):
+            raise PluginCenterError("插件标识或启用状态无效。")
+        plugin = next((item for item in catalog if item["module"] == module), None)
+        if plugin is None:
+            raise PluginCenterError("该插件不在当前群聊可管理的功能列表中。")
+        _validate_intent(text, plugin, enabled)
+        saved = policies.set_feature_enabled(account, group, module, enabled, actor_id=sender_id)
+        if saved.get("saved") is not True or (module in saved["allowed_features"]) is not enabled:
+            raise PluginCenterError("本群插件状态未确认，请先查询当前群的插件状态。")
+    except GroupPolicyError as exc:
+        raise PluginCenterError(str(exc)) from exc
     state = "开启" if enabled else "关闭"
-    linked = "“图来”和“常用指令”属于同一个插件，已一并同步。" if plugin.get("aliases") else ""
     return {
-        "module": module,
-        "enabled": enabled,
-        "applied": True,
-        "message": f"已全局{state}“{plugin['name']}”，所有群聊和私聊均已同步，软件中的功能状态也会同步更新。{linked}",
+        **scope, "module": module, "enabled": enabled, "applied": True,
+        "revision": saved["revision"],
+        "message": f"已在当前群{state}“{plugin['name']}”的使用权限，软件中本群的功能勾选已同步。",
     }

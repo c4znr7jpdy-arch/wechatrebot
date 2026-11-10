@@ -34,11 +34,8 @@ from wechatrebot_manager.plugin_center import (
 )
 from wechatrebot_manager.runtime_config import write_runtime_configs
 from wechatrebot_manager.provider import OpenAIProviderProfile
-from wechatrebot_manager.customer_config import global_plugin_states, load_plugins, set_plugin_enabled
-from wechatrebot_manager.feature_policy import (
-    DeliveryFeature, GLOBAL_DISABLED_PLUGINS_KEY, global_plugin_state_path,
-    load_global_disabled_plugins, save_global_disabled_plugins,
-)
+from wechatrebot_manager.customer_config import load_plugins, set_plugin_enabled
+from wechatrebot_manager.feature_policy import DeliveryFeature
 
 
 def test_common_plugin_model_field_names_use_unified_provider_catalog() -> None:
@@ -290,15 +287,6 @@ def _install(tmp_path: Path) -> tuple[Path, str]:
     service.engine.is_available = lambda: False  # type: ignore[method-assign]
     public_id = service.catalog()["plugins"][0]["id"]
     return install, public_id
-
-
-def _deliver_global_control(install: Path, modules: tuple[str, ...] = ("sample_configurable_feature",)) -> None:
-    legal = install / "legal"
-    legal.mkdir(exist_ok=True)
-    (legal / "feature-set.json").write_text(json.dumps({"features": [
-        {"module": module, "display_name": module, "configuration": "schema-and-page"}
-        for module in modules
-    ]}), encoding="utf-8")
 
 
 class _ProviderHotApplyClient(EngineApiClient):
@@ -1405,7 +1393,6 @@ def test_offline_save_validates_field_types(tmp_path: Path) -> None:
 
 def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) -> None:
     install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
     service = PluginCenterService(install)
     config_path = (
         install
@@ -1420,7 +1407,6 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
     service.engine.plugin_states = lambda: {  # type: ignore[method-assign]
         "sample_configurable_feature": True
     }
-    service.engine.plugin_activation_states = service.engine.plugin_states  # type: ignore[method-assign]
     service.engine.get_config = lambda _module: {  # type: ignore[method-assign]
         "config": json.loads(config_path.read_text(encoding="utf-8")),
         "revision": _json_revision(json.loads(config_path.read_text(encoding="utf-8"))),
@@ -1432,7 +1418,7 @@ def test_online_save_enable_and_reload_use_live_engine_contract(tmp_path: Path) 
         return {"verified": True, "state": "applied", "revision": _json_revision(config)}
 
     service.engine.save_config = save_config  # type: ignore[method-assign]
-    service.engine.set_plugin_filter = lambda names, **_fields: calls.append(  # type: ignore[method-assign]
+    service.engine.set_plugin_filter = lambda names: calls.append(  # type: ignore[method-assign]
         ("filter", tuple(names))
     )
     service.engine.set_enabled = lambda module, enabled: calls.append(  # type: ignore[method-assign]
@@ -1563,11 +1549,10 @@ def test_plugin_extension_path_is_scoped_to_selected_feature(tmp_path: Path) -> 
             service.extension_path(public_id, endpoint)
 
 
-def test_customer_feature_can_be_globally_disabled_and_reenabled(
+def test_customer_feature_cannot_be_globally_disabled(
     tmp_path: Path,
 ) -> None:
     install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
     module_name = "sample_configurable_feature"
     service = PluginCenterService(install)
     set_plugin_enabled(install, module_name, False)
@@ -1575,7 +1560,6 @@ def test_customer_feature_can_be_globally_disabled_and_reenabled(
 
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
     service.engine.plugin_states = lambda: {module_name: live}  # type: ignore[method-assign]
-    service.engine.plugin_activation_states = service.engine.plugin_states  # type: ignore[method-assign]
 
     def set_live(_module_name: str, enabled: bool) -> None:
         nonlocal live
@@ -1583,7 +1567,7 @@ def test_customer_feature_can_be_globally_disabled_and_reenabled(
 
     service.engine.set_enabled = set_live  # type: ignore[method-assign]
     filters: list[list[str]] = []
-    service.engine.set_plugin_filter = lambda names, **_fields: filters.append(list(names))  # type: ignore[method-assign]
+    service.engine.set_plugin_filter = lambda names: filters.append(list(names))  # type: ignore[method-assign]
 
     assert service.catalog()["plugins"][0]["enabled"] is True
     assert service.detail(public_id)["enabled"] is True
@@ -1591,11 +1575,11 @@ def test_customer_feature_can_be_globally_disabled_and_reenabled(
         "/page/schedules"
     )
 
-    service.set_enabled(public_id, False)
-    assert live is False
+    with pytest.raises(PluginCenterError, match="按聊天取消"):
+        service.set_enabled(public_id, False)
+    assert live is True
     assert load_plugins(install)[0].enabled is False
-    assert module_name not in filters[-1]
-    assert service.global_control_catalog()[0]["enabled"] is False
+    assert filters == []
 
     service.set_enabled(public_id, True)
     assert live is True
@@ -1603,24 +1587,11 @@ def test_customer_feature_can_be_globally_disabled_and_reenabled(
     assert module_name in filters[-1]
 
 
-def test_natural_control_requires_online_before_persisting_any_change(tmp_path: Path) -> None:
-    install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
-    service = PluginCenterService(install)
-    service.engine.is_available = lambda: False
-    path = install / "app/astrbot/data/cmd_config.json"
-    before = path.read_bytes()
-    with pytest.raises(PluginCenterError, match="未修改全局开关"):
-        service.set_enabled(public_id, False, require_online=True)
-    assert path.read_bytes() == before
-
-
 def test_live_state_requires_activation_and_plugin_filter_membership(
     tmp_path: Path,
 ) -> None:
     client = EngineApiClient(tmp_path)
     configured: list[str] = []
-    disabled: list[str] = []
 
     def request(method: str, path: str, body=None):
         if path == "/api/v1/plugins":
@@ -1632,7 +1603,7 @@ def test_live_state_requires_activation_and_plugin_filter_membership(
                 }
             ]
         if path == "/api/v1/system-config":
-            return {"config": {"plugin_set": configured, GLOBAL_DISABLED_PLUGINS_KEY: disabled}}
+            return {"config": {"plugin_set": configured}}
         return {}
 
     client.request = request  # type: ignore[method-assign]
@@ -1640,20 +1611,10 @@ def test_live_state_requires_activation_and_plugin_filter_membership(
         "folder-name": False,
         "registered-name": False,
     }
-    assert client.plugin_activation_states() == {
-        "folder-name": True,
-        "registered-name": True,
-    }
     configured.append("folder-name")
     assert client.plugin_states() == {
         "folder-name": True,
         "registered-name": True,
-    }
-    disabled.append("folder-name")
-    save_global_disabled_plugins(tmp_path, disabled)
-    assert client.plugin_states() == {
-        "folder-name": False,
-        "registered-name": False,
     }
 
 
@@ -1661,7 +1622,6 @@ def test_online_toggle_rolls_back_filter_and_persisted_state_on_failure(
     tmp_path: Path,
 ) -> None:
     install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
     module_name = "sample_configurable_feature"
     service = PluginCenterService(install)
     set_plugin_enabled(install, module_name, False)
@@ -1670,8 +1630,7 @@ def test_online_toggle_rolls_back_filter_and_persisted_state_on_failure(
 
     service.engine.is_available = lambda: True  # type: ignore[method-assign]
     service.engine.plugin_states = lambda: {module_name: False}  # type: ignore[method-assign]
-    service.engine.plugin_activation_states = service.engine.plugin_states  # type: ignore[method-assign]
-    service.engine.set_plugin_filter = lambda names, **_fields: filters.append(list(names))  # type: ignore[method-assign]
+    service.engine.set_plugin_filter = lambda names: filters.append(list(names))  # type: ignore[method-assign]
 
     def set_live(_module_name: str, enabled: bool) -> None:
         activations.append(enabled)
@@ -1687,183 +1646,6 @@ def test_online_toggle_rolls_back_filter_and_persisted_state_on_failure(
     assert module_name in filters[0]
     assert module_name not in filters[-1]
     assert activations == [True, False]
-
-
-def test_failed_enable_restores_raw_activation_when_filter_was_closed(tmp_path: Path) -> None:
-    install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
-    module = "sample_configurable_feature"
-    path = install / "app/astrbot/data/cmd_config.json"
-    original = {"plugin_set": [], GLOBAL_DISABLED_PLUGINS_KEY: [module], "unrelated": "preserved"}
-    path.write_text(json.dumps(original), encoding="utf-8")
-    system_config = original.copy()
-    activated = True
-    activation_calls: list[bool] = []
-    service = PluginCenterService(install)
-
-    def request(method, endpoint, body=None):
-        nonlocal system_config, activated
-        if endpoint == "/api/v1/plugins":
-            return [{"root_dir_name": module, "name": "registered-sample", "activated": activated}]
-        if endpoint == "/api/v1/system-config":
-            if method == "PUT":
-                system_config = dict(body)
-                path.write_text(json.dumps(system_config), encoding="utf-8")
-            return {"config": dict(system_config)}
-        if endpoint == "/api/v1/plugins/registered-sample/enabled":
-            activation_calls.append(body["enabled"])
-            if len(activation_calls) == 1:
-                activated = False
-                raise PluginCenterError("模拟激活确认失败")
-            activated = body["enabled"]
-            return {}
-        raise AssertionError((method, endpoint, body))
-
-    service.engine.request = request  # type: ignore[method-assign]
-    assert service.engine.plugin_states()[module] is False
-    assert service.engine.plugin_activation_states()[module] is True
-    with pytest.raises(PluginCenterError, match="模拟激活确认失败"):
-        service.set_enabled(public_id, True)
-    assert activation_calls == [True, True]
-    assert activated is True
-    assert service.engine.plugin_states()[module] is False
-    assert system_config == original
-    assert json.loads(path.read_text(encoding="utf-8")) == original
-
-
-def test_global_control_requires_delivered_installed_customer_module(tmp_path: Path) -> None:
-    install, public_id = _install(tmp_path)
-    service = PluginCenterService(install)
-    service.engine.is_available = lambda: False  # type: ignore[method-assign]
-    assert service.global_control_catalog() == []
-    with pytest.raises(PluginCenterError, match="不允许全局控制"):
-        service.set_enabled(public_id, False)
-    modules = (
-        "sample_configurable_feature", "astrbot_plugin_self_learning",
-        "jiang_capability_router", "astrbot_plugin_angel_heart", "missing_feature",
-    )
-    for module in modules[:-1]:
-        (install / "app/astrbot/data/plugins" / module).mkdir(exist_ok=True)
-    _deliver_global_control(install, modules)
-    catalog = service.global_control_catalog()
-    assert {item["module"] for item in catalog} == {
-        "sample_configurable_feature", "astrbot_plugin_self_learning",
-    }
-    hidden = next(item for item in catalog if item["module"] == "astrbot_plugin_self_learning")
-    service.set_enabled(hidden["id"], False)
-    assert global_plugin_states(install)["astrbot_plugin_self_learning"] is False
-    assert all(item["id"] != hidden["id"] for item in service.catalog()["plugins"])
-    for module in ("jiang_capability_router", "astrbot_plugin_angel_heart", "missing_feature", "jiang_commands.setu"):
-        with pytest.raises(PluginCenterError, match="不允许全局控制"):
-            service.set_enabled(plugin_center._public_plugin_id(module), False)
-    with pytest.raises(PluginCenterError, match="格式不正确"):
-        service.set_enabled(public_id, "false")  # type: ignore[arg-type]
-
-
-def test_global_plugin_states_give_explicit_disables_precedence_and_virtual_fallback(tmp_path: Path) -> None:
-    install, _ = _install(tmp_path)
-    (install / "app/astrbot/data/plugins/jiang_commands").mkdir()
-    path = install / "app/astrbot/data/cmd_config.json"
-    path.write_text(json.dumps({
-        "plugin_set": ["*"], GLOBAL_DISABLED_PLUGINS_KEY: ["jiang_commands"],
-    }), encoding="utf-8")
-    assert global_plugin_states(install)["sample_configurable_feature"] is True
-    assert global_plugin_states(install)["jiang_commands"] is False
-    assert global_plugin_states(install)["jiang_commands.setu"] is False
-    set_plugin_enabled(install, "jiang_commands", True)
-    assert global_plugin_states(install)["jiang_commands.setu"] is True
-    assert json.loads(path.read_text(encoding="utf-8"))[GLOBAL_DISABLED_PLUGINS_KEY] == []
-
-
-@pytest.mark.parametrize("initial", [
-    {}, {"plugin_set": ["*"]},
-    {"plugin_set": [], GLOBAL_DISABLED_PLUGINS_KEY: ["other_feature"]},
-])
-@pytest.mark.parametrize("policy_text", [None, '\ufeff{ "disabled_plugins": ["other_feature"], "future": "保留" }\r\n'])
-def test_global_toggle_rollback_restores_exact_fields_and_preserves_other_saves(tmp_path: Path, initial: dict, policy_text: str | None) -> None:
-    install, public_id = _install(tmp_path)
-    _deliver_global_control(install)
-    path = install / "app/astrbot/data/cmd_config.json"
-    path.write_text(json.dumps(initial), encoding="utf-8")
-    policy_path = global_plugin_state_path(install)
-    if policy_text is not None:
-        policy_path.parent.mkdir(parents=True, exist_ok=True)
-        policy_path.write_bytes(policy_text.encode("utf-8"))
-    service = PluginCenterService(install)
-    service.engine.is_available = lambda: True  # type: ignore[method-assign]
-    service.engine.plugin_states = lambda: {"sample_configurable_feature": True}  # type: ignore[method-assign]
-    service.engine.plugin_activation_states = service.engine.plugin_states  # type: ignore[method-assign]
-
-    def sync_filter(names, *, disabled_plugins=None):
-        config = json.loads(path.read_text(encoding="utf-8"))
-        config["unrelated_concurrent_save"] = "preserved"
-        for key, value in (("plugin_set", names), (GLOBAL_DISABLED_PLUGINS_KEY, disabled_plugins)):
-            if value is None:
-                config.pop(key, None)
-            else:
-                config[key] = value
-        path.write_text(json.dumps(config), encoding="utf-8")
-
-    def set_live(_module, enabled):
-        if not enabled:
-            raise PluginCenterError("模拟停用失败")
-
-    service.engine.set_plugin_filter = sync_filter  # type: ignore[method-assign]
-    service.engine.set_enabled = set_live  # type: ignore[method-assign]
-    with pytest.raises(PluginCenterError, match="模拟停用失败"):
-        service.set_enabled(public_id, False)
-    assert json.loads(path.read_text(encoding="utf-8")) == {
-        **initial, "unrelated_concurrent_save": "preserved",
-    }
-    if policy_text is not None:
-        assert policy_path.read_bytes() == policy_text.encode("utf-8")
-    elif GLOBAL_DISABLED_PLUGINS_KEY in initial:
-        assert load_global_disabled_plugins(install) == frozenset(initial[GLOBAL_DISABLED_PLUGINS_KEY])
-    else:
-        assert not policy_path.exists()
-
-
-def test_engine_plugin_filter_preserves_explicit_disable_in_live_config(tmp_path: Path) -> None:
-    client = EngineApiClient(tmp_path)
-    config = {"plugin_set": ["*"], "unrelated": "preserved"}
-
-    def request(method, _path, body=None):
-        nonlocal config
-        if method == "PUT":
-            config = dict(body)
-        return {"config": dict(config)}
-
-    client.request = request  # type: ignore[method-assign]
-    client.set_plugin_filter(["other_feature"], disabled_plugins=["sample_configurable_feature"])
-    assert config == {
-        "plugin_set": ["other_feature"], "unrelated": "preserved",
-        GLOBAL_DISABLED_PLUGINS_KEY: ["sample_configurable_feature"],
-    }
-    client.set_plugin_filter(["other_feature", "additional_feature"])
-    assert config[GLOBAL_DISABLED_PLUGINS_KEY] == ["sample_configurable_feature"]
-    client.set_plugin_filter(None, disabled_plugins=None)
-    assert config == {"unrelated": "preserved"}
-
-
-def test_engine_live_states_use_durable_policy_when_command_marker_was_removed(tmp_path: Path) -> None:
-    client = EngineApiClient(tmp_path)
-    save_global_disabled_plugins(tmp_path, ["sample_configurable_feature"])
-
-    def request(_method, path, body=None):
-        if path == "/api/v1/plugins":
-            return [{"root_dir_name": "sample_configurable_feature", "name": "registered-sample", "activated": True}]
-        return {"config": {"plugin_set": ["*"]}}
-
-    client.request = request  # type: ignore[method-assign]
-    assert client.plugin_activation_states()["sample_configurable_feature"] is True
-    assert client.plugin_states() == {"sample_configurable_feature": False, "registered-sample": False}
-
-
-def test_engine_plugin_filter_rejects_unconfirmed_explicit_disable(tmp_path: Path) -> None:
-    client = EngineApiClient(tmp_path)
-    client.request = lambda _method, _path, body=None: {"config": {"plugin_set": ["other_feature"]}}  # type: ignore[method-assign]
-    with pytest.raises(PluginCenterError, match="未能保存"):
-        client.set_plugin_filter(["other_feature"], disabled_plugins=["sample_configurable_feature"])
 
 
 def test_offline_save_can_replace_and_explicitly_clear_secret(tmp_path: Path) -> None:

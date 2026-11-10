@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import hashlib
 import json
 import logging
 import os
@@ -28,7 +27,6 @@ from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     ProviderService,
-    global_plugin_states,
     load_provider_profile,
     load_provider_services,
     load_robot_settings,
@@ -104,7 +102,6 @@ PUBLIC_API_METHODS = (
     "select_wechat",
     "open_wechat_download",
     "get_features",
-    "get_global_plugin_states",
     "get_robot_core",
     "save_robot_core",
     "request_robot_core",
@@ -745,14 +742,6 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
     def get_features(self) -> dict[str, object]:
         try:
             return self._ok(self._features.catalog())
-        except (OSError, ValueError, PluginCenterError) as exc:
-            return self._failed(exc, "13003")
-
-    def get_global_plugin_states(self) -> dict[str, object]:
-        try:
-            states = global_plugin_states(self._install_root)
-            revision = hashlib.sha256(json.dumps(states, sort_keys=True).encode("utf-8")).hexdigest()
-            return self._ok({"states": states, "revision": revision})
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 

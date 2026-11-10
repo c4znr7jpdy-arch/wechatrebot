@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from collections.abc import Mapping
 import json
 from pathlib import Path
 import re
-import threading
 
-from .json_io import write_json_atomic
 
 FEATURE_CONFIGURATION_MODES = frozenset(
     {
@@ -27,61 +24,6 @@ RETIRED_PLUGIN_MODULES = frozenset({
     "astrbot_plugin_mnemosyne",
     "jiang_yanyun_checkin",
 })
-
-# The manager owns durable global policy. AstrBot removes unknown command
-# configuration keys on startup, so the cmd key is only a live mirror.
-GLOBAL_DISABLED_PLUGINS_KEY = "wechatrebot_disabled_plugins"
-GLOBAL_PLUGIN_STATE_PATH = "data/manager/global-plugin-state.json"
-_GLOBAL_STATE_LOCK = threading.RLock()
-
-# These modules are part of the product's message and control plane. They must
-# remain loaded so an administrator can recover a disabled customer feature.
-PROTECTED_PLUGIN_MODULES = frozenset({
-    "astrbot_plugin_angel_heart",
-    "astrbot_plugin_patch_at_wxid",
-    "jiang_capability_router",
-})
-
-
-def globally_disabled_plugins(config: Mapping[str, object]) -> frozenset[str]:
-    """Read explicit customer feature disables, excluding protected modules."""
-    values = config.get(GLOBAL_DISABLED_PLUGINS_KEY, [])
-    if not isinstance(values, list):
-        raise ValueError("全局功能开关配置格式不正确。")
-    if any(not isinstance(item, str) or not _MODULE_NAME.fullmatch(item) for item in values):
-        raise ValueError("全局功能开关包含无效的功能名称。")
-    return frozenset(values) - PROTECTED_PLUGIN_MODULES - RETIRED_PLUGIN_MODULES
-
-
-def global_plugin_state_path(install_root: str | Path) -> Path:
-    return Path(install_root).expanduser().resolve() / GLOBAL_PLUGIN_STATE_PATH
-
-
-def save_global_disabled_plugins(install_root: str | Path, modules: list[str]) -> None:
-    disabled = globally_disabled_plugins({GLOBAL_DISABLED_PLUGINS_KEY: modules})
-    with _GLOBAL_STATE_LOCK:
-        write_json_atomic(global_plugin_state_path(install_root), {"disabled_plugins": sorted(disabled)})
-
-
-def load_global_disabled_plugins(
-    install_root: str | Path, legacy_config: Mapping[str, object] | None = None,
-) -> frozenset[str]:
-    """Read durable policy, migrating a legacy command marker once if present."""
-    path = global_plugin_state_path(install_root)
-    with _GLOBAL_STATE_LOCK:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        except FileNotFoundError:
-            if legacy_config is None or GLOBAL_DISABLED_PLUGINS_KEY not in legacy_config:
-                return frozenset()
-            disabled = globally_disabled_plugins(legacy_config)
-            save_global_disabled_plugins(install_root, sorted(disabled))
-            return disabled
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ValueError("全局功能开关配置无法读取，请检查管理器数据。") from exc
-        if not isinstance(payload, dict) or "disabled_plugins" not in payload:
-            raise ValueError("全局功能开关配置格式不正确。")
-        return globally_disabled_plugins({GLOBAL_DISABLED_PLUGINS_KEY: payload["disabled_plugins"]})
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,13 +102,6 @@ def load_delivery_features(
 __all__ = [
     "DeliveryFeature",
     "FEATURE_CONFIGURATION_MODES",
-    "GLOBAL_DISABLED_PLUGINS_KEY",
-    "GLOBAL_PLUGIN_STATE_PATH",
-    "PROTECTED_PLUGIN_MODULES",
     "RETIRED_PLUGIN_MODULES",
-    "globally_disabled_plugins",
-    "global_plugin_state_path",
-    "load_global_disabled_plugins",
-    "save_global_disabled_plugins",
     "load_delivery_features",
 ]

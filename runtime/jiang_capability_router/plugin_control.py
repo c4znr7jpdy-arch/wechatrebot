@@ -1,4 +1,4 @@
-"""Small authenticated bridge to the manager's global plugin controls."""
+"""Small authenticated bridge to the manager's current-group plugin controls."""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +12,8 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 
 _MODULE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+_ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
+_GROUP_ID = re.compile(r"^[A-Za-z0-9_.-]{1,119}@chatroom$")
 _MAX_DESCRIPTOR_BYTES = 16 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 10.0
@@ -120,14 +122,37 @@ def is_configured_admin(context, event) -> bool:
     try:
         if str(event.get_platform_name() or "") != "aiocqhttp":
             return False
-        sender_id = str(event.get_sender_id() or "").strip()
+        sender_id = event.get_sender_id()
         config = context.get_config()
         admins = config.get("admins_id") if isinstance(config, dict) else None
-        return bool(sender_id and isinstance(admins, list) and sender_id in {
-            str(item).strip() for item in admins if str(item).strip()
+        return bool(isinstance(sender_id, str) and sender_id and isinstance(admins, list) and sender_id in {
+            item.strip() for item in admins if isinstance(item, str) and item.strip()
         })
     except (AttributeError, TypeError, ValueError):
         return False
+
+
+def current_group_scope(context, event) -> dict[str, str] | None:
+    """Bind management to the actual group event and a configured administrator."""
+    if not is_configured_admin(context, event):
+        return None
+    try:
+        if event.is_private_chat():
+            return None
+        account_id, group_id = event.get_self_id(), event.get_group_id()
+        if not (isinstance(account_id, str) and _ACCOUNT_ID.fullmatch(account_id)
+                and isinstance(group_id, str) and _GROUP_ID.fullmatch(group_id)):
+            return None
+        return {
+            "scope": "current_group", "account_id": account_id,
+            "group_id": group_id, "sender_id": event.get_sender_id(),
+        }
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def matches_group_scope(data: dict[str, object], scope: dict[str, str]) -> bool:
+    return all(data.get(key) == scope[key] for key in ("scope", "account_id", "group_id"))
 
 
 def valid_module_name(module: str) -> bool:

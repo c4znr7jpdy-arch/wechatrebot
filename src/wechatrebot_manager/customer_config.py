@@ -8,12 +8,7 @@ import threading
 from typing import Any
 
 from .brand import BrandProfile
-from .feature_policy import (
-    GLOBAL_DISABLED_PLUGINS_KEY,
-    RETIRED_PLUGIN_MODULES,
-    load_global_disabled_plugins,
-    save_global_disabled_plugins,
-)
+from .feature_policy import RETIRED_PLUGIN_MODULES
 from .json_io import write_json_atomic
 from .provider import (
     provider_service_label,
@@ -29,7 +24,7 @@ from .provider import (
     thinking_mode_matches,
     with_thinking_mode,
 )
-from .runtime_config import normalize_admin_id, write_runtime_configs
+from .runtime_config import normalize_admin_id, normalize_admin_ids, write_runtime_configs
 
 
 _UI_PREFERENCES_LOCK = threading.Lock()
@@ -232,6 +227,7 @@ def delete_provider_thinking_preference(root: str | Path, provider_id: str) -> N
 class RobotSettings:
     profile: BrandProfile
     admin_id: str = ""
+    admin_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,7 +382,7 @@ def replace_provider_references(
 
 
 def load_robot_settings(root: str | Path) -> RobotSettings:
-    install, _, engine_path = _paths(root)
+    install, _, _ = _paths(root)
     brand_payload = _object(install / "config" / "brand.json")
     profile = BrandProfile(
         display_name=str(brand_payload.get("display_name", "小妹")),
@@ -422,10 +418,17 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
                 .replace("\u59dc\u5c0f\u59b9", "小妹")
             ),
         )
-    engine = _object(engine_path)
-    admins = engine.get("admins_id")
-    admin_id = str(admins[0]) if isinstance(admins, list) and admins else ""
-    return RobotSettings(profile=profile, admin_id=admin_id)
+    admins = load_robot_admin_ids(root)
+    return RobotSettings(profile=profile, admin_id=admins[0] if admins else "", admin_ids=admins)
+
+
+def load_robot_admin_ids(root: str | Path) -> tuple[str, ...]:
+    """Return the same complete administrator allowlist used by AstrBot."""
+    _, _, engine_path = _paths(root)
+    configured = _object(engine_path).get("admins_id", [])
+    if not isinstance(configured, list):
+        raise ValueError("管理员列表格式无效，请重新保存机器人管理员。")
+    return normalize_admin_ids(configured) or ()
 
 
 def save_robot_settings(
@@ -434,7 +437,13 @@ def save_robot_settings(
     install, manager_path, _ = _paths(root)
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
-    normalized_admin = normalize_admin_id(settings.admin_id) or ""
+    normalized_admins = normalize_admin_ids(settings.admin_ids)
+    if normalized_admins is None:
+        normalized_admin = normalize_admin_id(settings.admin_id) or ""
+        existing = load_robot_admin_ids(install)
+        normalized_admins = existing if existing and normalized_admin == existing[0] else (
+            (normalized_admin,) if normalized_admin else ()
+        )
     from .brand import install_brand_profile
 
     profile = install_brand_profile(install, settings.profile)
@@ -444,9 +453,9 @@ def save_robot_settings(
         wechat_version=str(manager.get("wechat_version") or "") or None,
         brand_profile=profile,
         apply_brand_persona=apply_reply_identity,
-        admin_id=normalized_admin,
+        admin_ids=normalized_admins,
     )
-    return RobotSettings(profile=profile, admin_id=normalized_admin)
+    return RobotSettings(profile=profile, admin_id=normalized_admins[0] if normalized_admins else "", admin_ids=normalized_admins)
 
 
 def load_provider_services(
@@ -783,7 +792,6 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
     engine = _object(engine_path)
     configured = engine.get("plugin_set", ["*"])
     enabled_names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
-    disabled = load_global_disabled_plugins(install, engine)
     entries: list[PluginEntry] = []
     if plugin_root.is_dir():
         for path in sorted(plugin_root.iterdir(), key=lambda item: item.name.casefold()):
@@ -799,79 +807,37 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
                 PluginEntry(
                     module_name=path.name,
                     display_name=_plugin_display_name(path.name),
-                    enabled=("*" in enabled_names or path.name in enabled_names) and path.name not in disabled,
+                    enabled="*" in enabled_names or path.name in enabled_names,
                 )
             )
     return tuple(entries)
 
 
 def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> None:
-    if not isinstance(enabled, bool):
-        raise ValueError("功能开关格式不正确。")
     install, _, engine_path = _paths(root)
     engine = _object(engine_path)
-    available = _installed_plugin_modules(install)
+    plugins = load_plugins(root)
+    available = {item.module_name for item in plugins}
     if module_name not in available:
         raise ValueError("所选功能不存在或尚未交付。")
     configured = engine.get("plugin_set", ["*"])
     names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
     if "*" in names:
-        names = available
+        plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+        names = {
+            path.name
+            for path in plugin_root.iterdir()
+            if path.is_dir()
+            and not path.name.startswith((".", "__"))
+            and path.name not in {"data", "logs"}
+            and not path.name.endswith("_disabled")
+        }
     if enabled:
         names.add(module_name)
     else:
         names.discard(module_name)
     engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
-    disabled = set(load_global_disabled_plugins(install, engine))
-    if enabled:
-        disabled.discard(module_name)
-    else:
-        disabled.add(module_name)
-    engine[GLOBAL_DISABLED_PLUGINS_KEY] = sorted(disabled - RETIRED_PLUGIN_MODULES)
-    save_global_disabled_plugins(install, engine[GLOBAL_DISABLED_PLUGINS_KEY])
     write_json_atomic(engine_path, engine)
-
-
-def _installed_plugin_modules(install: Path) -> set[str]:
-    """Return installed plugin directory names, including hidden customer entries."""
-    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
-    if not plugin_root.is_dir():
-        return set()
-    return {
-        path.name
-        for path in plugin_root.iterdir()
-        if path.is_dir()
-        and not path.name.startswith((".", "__"))
-        and path.name not in {"data", "logs"}
-        and not path.name.endswith("_disabled")
-        and path.name not in RETIRED_PLUGIN_MODULES
-    }
-
-
-def global_plugin_states(root: str | Path) -> dict[str, bool]:
-    """Read durable global plugin states, migrating a legacy cmd marker once.
-
-    A literal ``*`` in ``plugin_set`` means every installed plugin is enabled;
-    the explicit disabled list takes precedence.  The result is intentionally
-    based on disk state so the manager can display the state while the engine
-    is offline.
-    """
-    install, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    configured = engine.get("plugin_set", ["*"])
-    names = (
-        {item.strip() for item in configured if isinstance(item, str) and item.strip()}
-        if isinstance(configured, list) else set()
-    )
-    allow_all = "*" in names
-    disabled = load_global_disabled_plugins(install, engine)
-    states = {
-        name: (name not in disabled and (allow_all or name in names))
-        for name in sorted(_installed_plugin_modules(install))
-    }
-    if "jiang_commands" in states:
-        states["jiang_commands.setu"] = states["jiang_commands"]
-    return states
 
 
 __all__ = [
@@ -885,12 +851,12 @@ __all__ = [
     "load_plugins",
     "load_provider_profile",
     "load_provider_services",
-    "global_plugin_states",
     "load_web_search_settings",
     "provider_reference_modules",
     "replace_provider_references",
     "replace_provider_value",
     "load_robot_settings",
+    "load_robot_admin_ids",
     "save_provider_profile",
     "save_provider_thinking_preference",
     "save_robot_settings",

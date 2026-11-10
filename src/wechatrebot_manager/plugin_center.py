@@ -5,7 +5,6 @@ Their existing imports from this module remain available for manager consumers.
 """
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 import hashlib
 from http.server import ThreadingHTTPServer
@@ -18,14 +17,11 @@ import threading
 from typing import Any
 from urllib.parse import quote
 
-from .customer_config import PluginEntry, global_plugin_states, load_plugins, load_robot_settings, set_plugin_enabled
+from .customer_config import PluginEntry, load_plugins, load_robot_settings, set_plugin_enabled
 from .engine_api import EngineApiClient as EngineApiClient
-from .feature_policy import (
-    DeliveryFeature, GLOBAL_DISABLED_PLUGINS_KEY, PROTECTED_PLUGIN_MODULES,
-    global_plugin_state_path, load_delivery_features,
-)
+from .feature_policy import DeliveryFeature, load_delivery_features
 from .group_analysis_settings import group_analysis_ui_schema as _group_analysis_ui_schema
-from .json_io import write_json_atomic, write_text_atomic
+from .json_io import write_json_atomic
 from .plugin_center_web import (
     _PAGE_ID,
     _asset_root as _asset_root,
@@ -145,31 +141,6 @@ class PluginCenterService:
             return True, self.engine.plugin_states()
         except EngineUnavailableError:
             return False, {}
-
-    def global_control_catalog(self) -> list[dict[str, Any]]:
-        """Return only installed, delivered customer modules allowed for global control."""
-        policies = load_delivery_features(self.install_root)
-        if policies is None:
-            return []
-        states = global_plugin_states(self.install_root)
-        online, live_states = self._runtime_plugin_states()
-        return [
-            {
-                "id": _public_plugin_id(policy.module),
-                "module": policy.module,
-                "name": policy.display_name,
-                "aliases": ["图来", "涩图"] if policy.module == _SETU_BACKING_MODULE else [],
-                "enabled": bool(
-                    states[policy.module]
-                    and (live_states.get(policy.module, False) if online else True)
-                ),
-            }
-            for policy in policies
-            if policy.visible
-            and policy.module not in PROTECTED_PLUGIN_MODULES
-            and policy.module in states
-            and (_plugin_root(self.install_root) / policy.module).is_dir()
-        ]
 
     def _catalog_items(
         self, enabled_overrides: dict[str, bool] | None = None
@@ -619,87 +590,45 @@ class PluginCenterService:
                         "已保存到本机，尚未确认生效。机器人启动后加载；若仍在运行，请恢复连接后重新保存。"),
         }
 
-    def set_enabled(
-        self, public_id: str, enabled: bool, *, require_online: bool = False,
-    ) -> dict[str, Any]:
-        if not isinstance(enabled, bool):
-            raise PluginCenterError("功能开关格式不正确。")
+    def set_enabled(self, public_id: str, enabled: bool) -> dict[str, Any]:
+        if enabled is not True:
+            raise PluginCenterError(
+                "功能统一保持加载；请在群聊&私聊管理中按聊天取消对应功能。"
+            )
         with _CONFIG_WRITE_LOCK:
-            item = next((item for item in self.global_control_catalog() if item["id"] == public_id), None)
-            if item is None:
-                raise PluginCenterError("所选功能不允许全局控制或尚未交付。")
-            module_name = item["module"]
-            online, _ = self._runtime_plugin_states()
-            if require_online and not online:
-                raise EngineUnavailableError("机器人管理接口暂时不可用，未修改全局开关，请恢复连接后重试。")
-            previous_live = item["enabled"]
+            item = self._plugin(public_id)
+            module_name = item.module_name
+            online, live_states = self._runtime_plugin_states()
+            previous_live = live_states.get(module_name, item.enabled)
+            # plugin_set is both the message-pipeline allowlist and the
+            # persisted startup state.  Update it before activation so the
+            # feature cannot appear enabled while the pipeline still skips it.
+            set_plugin_enabled(self.install_root, module_name, enabled)
             if online:
-                activations = self.engine.plugin_activation_states()
-                if module_name not in activations:
-                    raise PluginCenterError("无法确认这项功能的运行状态，请重启机器人后重试。")
-                previous_live = activations[module_name]
-            path = _dashboard_path(self.install_root)
-            original = _read_object(path)
-            state_keys = ("plugin_set", GLOBAL_DISABLED_PLUGINS_KEY)
-            snapshot = {key: copy.deepcopy(original[key]) for key in state_keys if key in original}
-            if any(not isinstance(value, list) for value in snapshot.values()):
-                raise PluginCenterError("全局功能开关配置格式不正确。")
-            policy_path = global_plugin_state_path(self.install_root)
-            try:
-                policy_snapshot = policy_path.read_bytes().decode("utf-8")
-            except FileNotFoundError:
-                policy_snapshot = None
-            try:
-                # Update the durable allowlist before activation; background
-                # deliveries and message handlers then share one global state.
-                set_plugin_enabled(self.install_root, module_name, enabled)
-                if online:
-                    persisted_config = _read_object(path)
-                    self.engine.set_plugin_filter(
-                        persisted_config["plugin_set"],
-                        disabled_plugins=persisted_config[GLOBAL_DISABLED_PLUGINS_KEY],
-                    )
+                try:
+                    persisted_config = _read_object(_dashboard_path(self.install_root))
+                    desired_plugins = persisted_config.get("plugin_set")
+                    if not isinstance(desired_plugins, list):
+                        raise PluginCenterError("功能启用范围未能保存，请停止机器人后重试。")
+                    self.engine.set_plugin_filter(desired_plugins)
                     self.engine.set_enabled(module_name, enabled)
-                if global_plugin_states(self.install_root).get(module_name) != enabled:
-                    raise PluginCenterError("功能开关未能保存，请停止机器人后重试。")
-            except (OSError, ValueError, PluginCenterError):
-                rollback_errors: list[Exception] = []
-                if online:
+                except PluginCenterError:
+                    # Restore both the on-disk allowlist and the running engine.
                     try:
-                        self.engine.set_plugin_filter(
-                            snapshot.get("plugin_set"),
-                            disabled_plugins=snapshot.get(GLOBAL_DISABLED_PLUGINS_KEY),
-                        )
-                    except (OSError, ValueError, PluginCenterError) as exc:
-                        rollback_errors.append(exc)
-                    try:
+                        set_plugin_enabled(self.install_root, module_name, item.enabled)
+                        rollback_config = _read_object(_dashboard_path(self.install_root))
+                        rollback_plugins = rollback_config.get("plugin_set")
+                        if isinstance(rollback_plugins, list):
+                            self.engine.set_plugin_filter(rollback_plugins)
                         self.engine.set_enabled(module_name, previous_live)
-                    except (OSError, ValueError, PluginCenterError) as exc:
-                        rollback_errors.append(exc)
-                try:
-                    if policy_snapshot is None:
-                        policy_path.unlink(missing_ok=True)
-                    else:
-                        write_text_atomic(policy_path, policy_snapshot)
-                except (OSError, ValueError) as exc:
-                    rollback_errors.append(exc)
-                try:
-                    # Engine PUT may also rewrite disk: restore these exact
-                    # fields last while preserving unrelated concurrent saves.
-                    restored = _read_object(path)
-                    for key in state_keys:
-                        if key in snapshot:
-                            restored[key] = snapshot[key]
-                        else:
-                            restored.pop(key, None)
-                    write_json_atomic(path, restored)
-                except (OSError, ValueError, PluginCenterError) as exc:
-                    rollback_errors.append(exc)
-                if rollback_errors:
-                    raise PluginCenterError(
-                        "功能状态更新失败，且无法恢复原状态；请停止机器人后重试。"
-                    ) from rollback_errors[0]
-                raise
+                    except (OSError, ValueError, PluginCenterError) as rollback_error:
+                        raise PluginCenterError(
+                            "功能状态更新失败，且无法恢复原状态；请停止机器人后重试。"
+                        ) from rollback_error
+                    raise
+            persisted = self._plugin(public_id).enabled
+            if persisted != enabled:
+                raise PluginCenterError("功能开关未能保存，请停止机器人后重试。")
             return {
                 "enabled": enabled,
                 "applied": online,
