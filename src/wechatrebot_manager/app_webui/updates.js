@@ -24,6 +24,13 @@ window.createUpdateNotifications = function (helpers) {
   let downloadStarting = false;
   let statusRevision = 0;
 
+  function renderVersionStatus(mode, label) {
+    $("#versionStatusDot").className = `health-dot${mode ? ` ${mode}` : ""}`;
+    const version = $("#versionStatus");
+    version.title = label;
+    version.setAttribute("aria-label", `${$("#versionText").textContent} · ${label}`);
+  }
+
   function isReadyForRelease(release, progress) {
     return progress?.state === "ready" && Boolean(progress.confirmation_token)
       && Boolean(release?.release_id) && progress.release_id === release.release_id;
@@ -209,15 +216,18 @@ window.createUpdateNotifications = function (helpers) {
       state.mandatoryUpdate = Boolean(data.release?.mandatory);
       if (state.status) renderStatus(state.status);
       if (!data.enabled) {
+        renderVersionStatus("", "在线更新未启用");
         renderUpdateCard(null, null);
         $("#updateStatus").textContent = "在线更新未启用";
       } else if (!data.release) {
+        renderVersionStatus("online", "已是最新版本");
         renderUpdateCard(null, null);
         $("#updateStatus").textContent = "已是最新版本";
         promptedReleaseId = "";
         if (manual) toast("当前已经是最新版本。 ");
       } else {
         const release = data.release;
+        renderVersionStatus("warning", `${release.mandatory ? "必须更新至" : "有可用更新"} v${release.version}`);
         $("#updateStatus").textContent = release.mandatory
           ? `必须更新至 v${release.version}`
           : `发现 v${release.version}`;
@@ -240,6 +250,10 @@ window.createUpdateNotifications = function (helpers) {
       $("#updateStatus").textContent = mandatoryUnavailable
         ? "当前版本已停止支持，暂未获取到可安装更新"
         : "检查失败";
+      renderVersionStatus(state.availableUpdate || state.mandatoryUpdate ? "warning" : "",
+        mandatoryUnavailable ? "当前版本已停止支持，暂未获取到可安装更新"
+          : state.availableUpdate ? `有可用更新 v${state.availableUpdate.version}，本次检查失败`
+            : state.mandatoryUpdate ? "当前版本需要更新，本次检查失败" : "更新检查失败");
       if (manual) reportError(error);
     } finally {
       state.updateChecking = false;

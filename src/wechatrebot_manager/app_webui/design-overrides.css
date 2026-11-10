@@ -402,6 +402,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 100%;
   min-width: 0;
 }
+.sidebar-version-status { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.sidebar-version-status .health-dot { flex-shrink: 0; }
 .sidebar-version {
   color: var(--muted);
   font: 700 11px/1.2 "Cascadia Mono", Consolas, monospace;

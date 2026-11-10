@@ -63,7 +63,10 @@
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
         <div class="sidebar-meta">
-          <span class="sidebar-version" id="versionText">v0.0.0</span>
+          <span class="sidebar-version-status" id="versionStatus" role="status" title="尚未检查更新">
+            <span class="health-dot" id="versionStatusDot" aria-hidden="true"></span>
+            <span class="sidebar-version" id="versionText">v0.0.0</span>
+          </span>
             <button class="nav-item help-toggle" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg></button>
           <button class="theme-toggle" id="themeToggle" type="button" data-action-bound disabled aria-pressed="false" aria-label="切换到深色模式" title="切换到深色模式">
             <svg aria-hidden="true"><use id="themeToggleIcon" href="#i-moon"/></svg>

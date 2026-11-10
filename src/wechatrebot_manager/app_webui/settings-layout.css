@@ -193,7 +193,8 @@
 #page-settings .core-form .config-section-header { margin-bottom: 8px; }
 #page-settings .web-search-provider-summary { margin: 20px 0 24px; }
 #page-settings #webSearchDetails { padding-top: 8px; }
-.sidebar-meta .help-toggle { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; margin: 0 6px 0 auto; border-radius: 50%; display: inline-flex; justify-content: center; }
+.sidebar-meta .help-toggle { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; margin: 0 6px 0 auto; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; gap: 0; flex-shrink: 0; }
+.sidebar-meta .help-toggle::before, .sidebar-meta .help-toggle::after { content: none; display: none; }
 .sidebar-meta .help-toggle svg { width: 20px; height: 20px; flex-shrink: 0; }
 .message-media { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
 .message-image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }

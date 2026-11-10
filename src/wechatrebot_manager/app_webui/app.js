@@ -425,10 +425,24 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
-    const confirmingConnection = !status.error && (current === "VERIFYING_CONNECTION"
+    const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    const confirmingConnection = !status.error && ((current === "VERIFYING_CONNECTION" && !wechatLoggedIn)
       || (current === "RUNNING" && !online && !accountStatusAvailable));
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
-    const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    const coreStarted = Boolean(runtime.engine_ready);
+    const messageConnected = online || Boolean(runtime.connection_ready && runtime.hook_ready
+      && wechatLoggedIn && runtime.upstream_connected && runtime.heartbeat_fresh);
+    const connectionProgress = wechatLoggedIn && active && !messageConnected && !status.error
+      && !["STOPPING", "STOP_WAIT_WECHAT"].includes(current)
+      ? !runtime.connection_ready || !runtime.hook_ready
+        ? {label: "确认微信连接", message: "已确认微信账号，正在重新检查微信连接，恢复后会自动继续。"}
+        : !coreStarted
+          ? {label: "等待功能就绪", message: "微信已登录，正在等待机器人功能就绪，完成后会自动建立消息连接。"}
+          : !runtime.upstream_connected
+            ? {label: "建立消息连接", message: "微信已登录，机器人功能已就绪，正在建立消息连接。"}
+            : {label: "确认消息通信", message: "消息连接已建立，正在确认通信状态，完成后会自动变为可用。"}
+      : null;
+    const verifyingLoggedIn = connectionProgress && ["VERIFYING_CONNECTION", "RUNNING"].includes(current);
     // The backend verifies both the entitlement and the current WeChat account.
     // Preview fixtures without this field continue to use their runtime identity.
     if (Object.hasOwn(status, "history_account")) {
@@ -478,10 +492,12 @@
       void openFeature(state.selectedFeature, false, true);
     }
 
-    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接" : status.title;
+    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接"
+      : verifyingLoggedIn ? (coreStarted ? "微信已登录，正在连接消息服务" : "微信已登录，正在启动机器人功能") : status.title;
     $("#stateMessage").textContent = current === "STOP_WAIT_WECHAT"
       ? "关闭微信后会自动完成停止，也可再次点击“停止运行”立即结束机器人服务。"
       : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。"
+      : verifyingLoggedIn ? connectionProgress.message
       : current === "LICENSE_PAUSED" ? subscription.formatMessage?.(undefined, status.message) || status.message : status.message;
     $("#accountText").textContent = !accountStatusAvailable ? (active || runtime.connection_ready ? "正在确认微信连接…" : "尚未连接")
       : runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
@@ -489,11 +505,11 @@
 
     const global = $("#globalStatus");
     global.className = `status-badge ${online ? "online" : problem ? "error" : waiting ? "warning" : "checking"}`;
-    const globalMarkup = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
+    const globalMarkup = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : verifyingLoggedIn ? connectionProgress.label : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
     if (global.innerHTML !== globalMarkup) global.innerHTML = globalMarkup;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
-    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
+    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : verifyingLoggedIn ? connectionProgress.label : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
 
     const orbit = $("#statusOrbit");
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting || confirmingConnection ? "waiting" : status.busy || active ? "starting" : "stopped";
@@ -557,21 +573,18 @@
     }
 
     setStage($("#stageEnvironment"), environment.ready ? "done" : "problem", environment.ready ? "已通过" : "未通过");
-    const coreStarted = Boolean(runtime.engine_ready);
     setStage($("#stageCore"), coreStarted ? "done" : active ? "current" : "", coreStarted ? "已就绪" : confirmingConnection ? "状态待确认" : active ? "启动中" : "未启动");
     const connectionStarting = current === "CONNECTION_STARTING";
     const connectionWaiting = ["WAITING_WECHAT", "VERIFYING_CONNECTION"].includes(current);
     const connectionRetained = licenseWaiting && runtime.connection_ready;
-    const messageConnected = online || Boolean(runtime.connection_ready && runtime.hook_ready
-      && wechatLoggedIn && runtime.upstream_connected && runtime.heartbeat_fresh);
     const connectionMode = messageConnected ? "done" : confirmingConnection || connectionWaiting || connectionStarting || wechatLoggedIn || connectionRetained ? "current" : problem && coreStarted ? "problem" : "";
-    setStage($("#stageConnection"), connectionMode, messageConnected ? "已连接" : confirmingConnection ? "确认中" : wechatLoggedIn ? (active ? "连接中" : "待启动") : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
+    setStage($("#stageConnection"), connectionMode, messageConnected ? "已连接" : confirmingConnection ? "确认中" : connectionProgress ? connectionProgress.label : wechatLoggedIn ? (active ? "连接中" : "待启动") : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     const wechatConnection = !accountStatusAvailable && (active || runtime.connection_ready) ? "状态待确认" : runtime.hook_ready || wechatLoggedIn ? "已连接" : "待连接";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${wechatConnection}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : confirmingConnection ? "状态待确认" : active ? "正在启动" : "未启动";
-    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : wechatLoggedIn ? (active ? (coreStarted ? "正在连接消息服务" : "已登录，功能启动中") : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
+    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : connectionProgress ? connectionProgress.label : wechatLoggedIn ? (active ? (coreStarted ? "正在连接消息服务" : "已登录，功能启动中") : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
     $("#wechatPath").textContent = environment.path || "尚未选择";
   }
 

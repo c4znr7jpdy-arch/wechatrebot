@@ -2331,7 +2331,22 @@ const cases = [
   {runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
     account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}},
   {state:"CORE_STARTING", busy:true, runtime:{connection_ready:true, hook_ready:false,
-    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}}
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:false, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:false, wechat_identity:'wxid_stale', upstream_connected:true, heartbeat_fresh:true}},
+    {state:"ERROR", title:"机器人核心服务已停止", error:{title:"错误", message:"核心服务退出"},
+      runtime:{engine_ready:false, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}}
 ];
 process.stdout.write(JSON.stringify(cases.map(changes => {
   renderStatus({...base, ...changes});
@@ -2348,7 +2363,8 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
     )
     (pending, offline, online, stopped, error, waiting, stopping, failed, retained,
      paused, logged_in, core_starting, core_ready, stale_heartbeat, connected,
-     hook_missing) = json.loads(result.stdout)
+     hook_missing, verifying_core, verifying_upstream, verifying_heartbeat,
+     verifying_stale_account, logged_in_error) = json.loads(result.stdout)
     assert pending["stateTitle"] == pending["sideHealthText"] == "正在确认连接"
     assert "正在确认连接" in pending["globalStatus"]
     assert "暂时无法确认" in pending["stateMessage"]
@@ -2371,13 +2387,29 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
     assert logged_in["signalMessage"] == "微信已登录，机器人未启动"
     assert logged_in["stageConnection"] == "待启动"
     assert logged_in["connectionMode"] == "current"
-    assert core_starting["stageConnection"] == core_ready["stageConnection"] == "连接中"
-    assert core_starting["signalMessage"] == "已登录，功能启动中"
-    assert core_ready["signalMessage"] == "正在连接消息服务"
+    assert core_starting["stageConnection"] == core_starting["signalMessage"] == "等待功能就绪"
+    assert core_ready["stageConnection"] == core_ready["signalMessage"] == "建立消息连接"
+    assert stale_heartbeat["stageConnection"] == stale_heartbeat["signalMessage"] == "确认消息通信"
+    assert hook_missing["stageConnection"] == hook_missing["signalMessage"] == "确认微信连接"
     for incomplete in (core_starting, core_ready, stale_heartbeat, hook_missing):
         assert incomplete["connectionMode"] == "current"
     assert connected["connectionMode"] == "done"
     assert connected["stageConnection"] == "已连接"
+    assert verifying_core["stateTitle"] == "微信已登录，正在启动机器人功能"
+    assert verifying_core["sideHealthText"] == "等待功能就绪"
+    assert "等待功能就绪" in verifying_core["globalStatus"]
+    assert verifying_upstream["stateTitle"] == verifying_heartbeat["stateTitle"] == "微信已登录，正在连接消息服务"
+    for status, label in ((verifying_core, "等待功能就绪"), (verifying_upstream, "建立消息连接"),
+                          (verifying_heartbeat, "确认消息通信")):
+        assert status["stageConnection"] == status["signalMessage"] == status["sideHealthText"] == label
+        assert status["connectionMode"] == "current"
+        assert "暂时无法确认" not in status["stateMessage"]
+        assert "停止机器人" in status["primaryAction"]
+    assert "消息连接已建立" in verifying_heartbeat["stateMessage"]
+    assert verifying_stale_account["stateTitle"] == verifying_stale_account["signalMessage"] == "正在确认连接"
+    assert verifying_stale_account["stageConnection"] == "确认中"
+    assert logged_in_error["stateTitle"] == "机器人核心服务已停止"
+    assert logged_in_error["sideHealthText"] == "需要处理"
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
