@@ -17,6 +17,7 @@ from wechatrebot_manager.provider import (
     PROVIDER_REQUEST_TIMEOUT_SECONDS,
     discover_openai_models,
     infer_provider_modalities,
+    normalize_api_base,
     provider_display_name,
     provider_source_id,
     supports_thinking_toggle,
@@ -58,6 +59,40 @@ def test_provider_profile_allows_loopback_http() -> None:
         model="model",
     )
     assert profile.validate() == ()
+
+
+@pytest.mark.parametrize("value,expected", [
+    (" https://api.example.test/ ", "https://api.example.test/v1"),
+    ("http://127.0.0.1:8000", "http://127.0.0.1:8000/v1"),
+    ("https://api.example.test/proxy", "https://api.example.test/proxy/v1"),
+    ("https://api.example.test/v1/", "https://api.example.test/v1"),
+    ("https://api.example.test/v1/v1/v1/", "https://api.example.test/v1"),
+    ("https://dashscope.aliyuncs.com/compatible-mode", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    ("https://dashscope.aliyuncs.com/compatible-mode/v1/v1", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    ("https://open.bigmodel.cn/api/paas/v4/", "https://open.bigmodel.cn/api/paas/v4"),
+    ("https://ark.cn-beijing.volces.com/api/v3", "https://ark.cn-beijing.volces.com/api/v3"),
+    ("https://generativelanguage.googleapis.com/v1beta/openai", "https://generativelanguage.googleapis.com/v1beta/openai"),
+    ("https://api.example.test/models", "https://api.example.test/models"),
+])
+def test_api_base_normalization_is_shared_and_idempotent(value, expected) -> None:
+    assert normalize_api_base(value) == expected
+    assert normalize_api_base(expected) == expected
+    profile = OpenAIProviderProfile(api_key="secret", api_base=value, model="model")
+    assert profile.validate() == ()
+    assert profile.normalized().api_base == expected
+    assert profile.astrbot_source()["api_base"] == expected
+    assert profile.astrbot_source()["embedding_api_base"] == expected
+
+
+@pytest.mark.parametrize("value", [
+    "https://user:password@api.example.test",
+    "https://api.example.test?key=secret/",
+    "https://api.example.test#secret/",
+    "api.example.test/v1",
+])
+def test_api_base_normalization_does_not_hide_invalid_configuration(value) -> None:
+    assert normalize_api_base(value) == value
+    assert OpenAIProviderProfile("secret", value, "model").validate()
 
 
 def test_thinking_switch_is_available_for_every_model_and_maps_known_protocols() -> None:
@@ -297,14 +332,28 @@ def test_invalid_model_service_kind_returns_customer_validation_error() -> None:
 def test_provider_presets_have_stable_hidden_ids_and_customer_labels() -> None:
     assert provider_source_id(DEFAULT_PROVIDER_API_BASE, DEFAULT_PROVIDER_MODEL) == "jyjapi"
     assert provider_source_id(DEEPSEEK_PROVIDER_API_BASE, DEEPSEEK_PROVIDER_MODEL) == "deepseek"
+    assert provider_source_id(f"{DEEPSEEK_PROVIDER_API_BASE}/v1", DEEPSEEK_PROVIDER_MODEL) == "deepseek"
+    assert provider_source_id("https://models.example.com", "chat") == provider_source_id(
+        "https://models.example.com/v1/v1/", "another-chat"
+    )
     assert provider_source_id("https://models.example.com/v1", "chat") == provider_source_id(
         "https://models.example.com/v1/", "another-chat"
     )
     assert provider_display_name("jyjapi", "grok-4.6") == "免费 Grok 4.6"
     assert provider_display_name("deepseek", "deepseek-flash") == "DeepSeek · flash"
+    assert not {"embedding_custom", "image_custom", "voice_custom"}.intersection(
+        item["id"] for item in MODEL_PROVIDER_PRESETS
+    )
 
 
-def test_model_directory_reads_openai_compatible_models(monkeypatch) -> None:
+@pytest.mark.parametrize("api_base,expected_path", [
+    ("https://models.example.test", "/v1/models"),
+    ("https://models.example.test/v1", "/v1/models"),
+    ("https://models.example.test/v1/v1/", "/v1/models"),
+    ("https://models.example.test/v1/v1/models", "/v1/models"),
+    ("https://models.example.test/models", "/models"),
+])
+def test_model_directory_reads_openai_compatible_models(monkeypatch, api_base, expected_path) -> None:
     captured = {}
 
     class Response:
@@ -326,12 +375,12 @@ def test_model_directory_reads_openai_compatible_models(monkeypatch) -> None:
     monkeypatch.setattr(provider, "urlopen", fake_urlopen)
 
     models = discover_openai_models(
-        api_key="secret", api_base="https://models.example.test/v1"
+        api_key="secret", api_base=api_base
     )
 
     assert models == ("chat-fast", "chat-pro")
     assert captured == {
-        "url": "https://models.example.test/v1/models",
+        "url": f"https://models.example.test{expected_path}",
         "authorization": "Bearer secret",
         "timeout": 15.0,
     }

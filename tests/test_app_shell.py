@@ -1102,6 +1102,52 @@ def test_model_credentials_reuse_requires_same_endpoint_or_explicit_key(
     assert keys == ["synthetic-new-secret" if changed_endpoint else selected.api_key]
 
 
+@pytest.mark.parametrize("operation", ["save_provider", "discover_provider_models"])
+@pytest.mark.parametrize("saved_base,submitted_base", [
+    ("https://saved.example.test/v1", "https://saved.example.test"),
+    ("https://saved.example.test", "https://saved.example.test/v1/v1/"),
+])
+def test_equivalent_api_bases_keep_saved_credentials_and_source_id(
+    monkeypatch, tmp_path: Path, operation: str, saved_base: str, submitted_base: str,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="legacy/chat", source_id="legacy", display_name="Saved",
+        api_base=saved_base, model="chat", api_key="synthetic-saved-secret",
+        is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    calls = []
+
+    def save(_root, profile, **kwargs):
+        calls.append(profile)
+        return profile.normalized()
+
+    def discover(**values):
+        calls.append(values)
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id, "api_base": submitted_base,
+        "api_key": "", "model": "chat",
+    })
+
+    assert result["ok"] is True
+    assert result["data"]["api_base"] == "https://saved.example.test/v1"
+    assert selected.api_key not in json.dumps(result)
+    if operation == "save_provider":
+        assert result["data"]["id"] == selected.provider_id
+        assert calls[0].source_id == selected.source_id
+        assert calls[0].api_key == selected.api_key
+        assert calls[0].api_base == "https://saved.example.test/v1"
+    else:
+        assert calls == [{"api_key": selected.api_key, "api_base": "https://saved.example.test/v1"}]
+
+
 def test_model_discovery_explains_missing_key_without_echoing_misplaced_credentials(
     monkeypatch, tmp_path: Path,
 ) -> None:
