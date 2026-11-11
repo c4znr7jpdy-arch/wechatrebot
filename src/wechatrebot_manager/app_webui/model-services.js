@@ -225,8 +225,11 @@ window.createModelServices = function (helpers) {
       } else {
         delete values.thinking_enabled;
       }
-      values.modalities = values.service_kind === "chat" ? "text,image,audio"
-        : inferProviderModalities(values.service_kind, values.model).join(",");
+      if (values.service_kind === "chat") {
+        values.modalities = "text,image,audio";
+      } else {
+        values.modalities = inferProviderModalities(values.service_kind, values.model).join(",");
+      }
       const data = await api("save_provider", values);
       acceptSavedProvider(data, submitted, generation);
       toast(data.is_default

@@ -117,8 +117,13 @@ def test_history_survives_refresh_and_same_title_source_merges(continuity_page):
     page.locator("#moreButton").click()
     page.locator("#sourceButton").click()
     page.locator("#sourceOptions button").filter(has_text="非凡").click()
-    page.wait_for_function("!document.getElementById('video').paused")
+    # The old source may still be playing while the replacement media loads.
+    page.wait_for_function("""() => {
+      const video = document.getElementById('video');
+      return video.currentSrc.includes('alternate-2.mp4') && video.readyState >= 2 && !video.paused;
+    }""")
     page.locator("#video").evaluate("video => {video.currentTime=3; video.pause()}")
+    page.wait_for_function("JSON.parse(localStorage.getItem('short-drama-watch-history'))[0]?.item.source === '非凡资源'")
     assert len(stored_history(page)) == 1
     assert stored_history(page)[0]["item"]["source"] == "非凡资源"
     page.reload()
@@ -292,10 +297,17 @@ def test_timeupdate_clears_stale_buffering_message(continuity_page):
     open_first(page)
     page.locator("#togglePlayback").click()
     page.wait_for_function("!document.getElementById('video').paused && document.getElementById('video').readyState >= 3")
-    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('waiting'))")
-    assert "缓冲" in page.locator("#status").inner_text()
-    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('timeupdate'))")
-    assert page.locator("#status").inner_text() == "正在播放"
+    # Capture each synchronous handler's result before native media events run.
+    waiting_status = page.locator("#video").evaluate("""video => {
+      video.dispatchEvent(new Event('waiting'));
+      return document.getElementById('status').textContent;
+    }""")
+    assert "缓冲" in waiting_status
+    playing_status = page.locator("#video").evaluate("""video => {
+      video.dispatchEvent(new Event('timeupdate'));
+      return document.getElementById('status').textContent;
+    }""")
+    assert playing_status == "正在播放"
 
 
 @pytest.mark.parametrize("error_name, expected_error", [("NotSupportedError", True), ("NetworkError", True), ("NotAllowedError", False)])
