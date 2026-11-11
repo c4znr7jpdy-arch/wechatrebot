@@ -99,13 +99,15 @@ def test_discovery_accepts_normalized_url_and_keeps_models_selectable(browser, m
         endpoint.fill("https://relay.example")
         expect(page.locator("#providerEditorStatus")).to_have_text("有未保存修改")
         page.evaluate("""() => {
-          window.pywebview.api.discover_provider_models = async values => {
+          window.pywebview.api.discover_provider_models = values => {
             window.discoverySubmittedUrl = values.api_base;
-            return {ok:true, data:{api_base:'https://relay.example/v1',
-              items:['saved-model', 'new-model']}};
+            return new Promise(resolve => { window.finishNormalizedDiscovery = resolve; });
           };
         }""")
         page.locator("#discoverProviderModels").click()
+        expect(page.locator("#discoverProviderModels")).to_be_disabled()
+        page.evaluate("""() => window.finishNormalizedDiscovery({ok:true, data:{
+          api_base:'https://relay.example/v1', items:['saved-model', 'new-model']}})""")
         expect(page.locator("#providerModelHint")).to_contain_text("已读取 2 个模型")
         expect(page.locator("#discoverProviderModels")).to_be_enabled()
         expect(page.locator("#discoverProviderModels")).to_have_text("获取可用模型")
