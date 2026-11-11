@@ -1,8 +1,11 @@
 """Public catalog search stays bounded and isolated from private selections."""
 
+import ast
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -51,6 +54,80 @@ def test_search_visits_every_source_and_keeps_playable_versions(state_module, mo
     assert not any(item["title"] == "完全不相关的纪录片" for item in response["items"])
     assert search.search("欢天喜地七仙女") == response
     assert len(calls) == len(sources)
+
+
+def test_plugin_hosted_and_browser_catalogs_share_all_sources(state_module, patched_plugins):
+    """A source must work from plugin cards, browser search, and source switching."""
+    search = ast.parse((patched_plugins / "jiang_short_drama/search.py").read_text("utf-8"))
+    defaults = next(node.value for node in search.body
+                    if isinstance(node, ast.AnnAssign) and node.target.id == "DEFAULT_SOURCES")
+    plugin_sources = {ast.literal_eval(call.args[0]): ast.literal_eval(call.args[1])
+                      for call in defaults.elts}
+    html = Path(state_module.__file__).with_name("index.html").read_text("utf-8")
+    browser_sources = ast.literal_eval(re.search(r"const metadataSources = new Set\((\[.*?\])\)", html)[1])
+    assert plugin_sources == state_module.SelectionResolver.SOURCES
+    assert set(browser_sources) == set(plugin_sources)
+    assert len(plugin_sources) == 12
+    assert plugin_sources["魔都资源"] == "https://www.mdzyapi.com/api.php/provide/vod/"
+    assert plugin_sources["新浪资源"] == "https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/"
+
+
+def test_xinlang_concurrent_catalog_requests_keep_interval(state_module, monkeypatch):
+    starts, lock = [], threading.Lock()
+    ready = threading.Barrier(2)
+
+    class Response:
+        sent = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read1(self, _size):
+            if self.sent:
+                return b""
+            self.sent = True
+            return b"{}"
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            with lock:
+                starts.append(state_module.time.monotonic())
+            return Response()
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *_args: Opener())
+    base = state_module.SelectionResolver.SOURCES["新浪资源"]
+
+    def fetch(index):
+        ready.wait(timeout=3)
+        return state_module._catalog_json(base, ac="detail", wd=str(index))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(fetch, i) for i in range(2)]
+        assert [future.result(timeout=3) for future in futures] == [{}, {}]
+    assert len(starts) == 2 and starts[1] - starts[0] >= 1.0
+
+
+def test_xinlang_late_wakeup_rechecks_slot_and_never_sends_timed_out_request(state_module, monkeypatch):
+    from types import SimpleNamespace
+    clock, starts = [100.0], []
+    base = state_module.SelectionResolver.SOURCES["新浪资源"]
+
+    def sleep(delay):
+        clock[0] += delay + 0.1
+        # Another HTTP request wins the now-available slot while this one wakes late.
+        state_module._wait_catalog_request(base)
+
+    monkeypatch.setattr(state_module, "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep))
+    monkeypatch.setattr("urllib.request.build_opener", lambda *_args: starts.append("unexpected GET"))
+    state_module._wait_catalog_request(base)
+    with pytest.raises(TimeoutError, match="request limit"):
+        state_module._catalog_json(base, ac="detail", wd="第二部")
+    assert starts == []
+    # The restriction is per provider; other catalog sources never sleep here.
+    state_module._wait_catalog_request(state_module.SelectionResolver.SOURCES["魔都资源"])
 
 
 @pytest.mark.parametrize("query", ["", " ", "?", "a" * 101, "剧\n名", "剧\x00名"])
