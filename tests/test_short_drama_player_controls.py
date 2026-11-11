@@ -1542,7 +1542,7 @@ def test_player_airplay_waits_for_wireless_event_and_can_disconnect(source_catal
       video.webkitCurrentPlaybackTargetIsWireless = true;
       video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
     }""")
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
     page.evaluate("""() => {
       const video = document.getElementById('video');
       video.webkitCurrentPlaybackTargetIsWireless = false;
@@ -1550,6 +1550,82 @@ def test_player_airplay_waits_for_wireless_event_and_can_disconnect(source_catal
     }""")
     assert page.locator("#castButton > span").inner_text() == "投屏"
     assert "断开" in page.locator("#actionStatus").inner_text()
+
+
+def test_native_airplay_without_js_picker_reports_pause_and_media_failure(source_catalog):
+    page, _ = source_catalog
+    before = page.locator("#video").evaluate("video => ({src: video.currentSrc, paused: video.paused})")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitShowPlaybackTargetPicker = undefined;
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "已连接"
+    assert "暂停" in page.locator("#actionStatus").inner_text()
+    assert page.locator("#video").evaluate("video => ({src: video.currentSrc, paused: video.paused})") == before
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
+    page.wait_for_function("!document.getElementById('actionStatus').textContent.includes('暂停')")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      Object.defineProperty(video, 'error', {configurable: true, value: {code: 4}});
+      video.dispatchEvent(new Event('error'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "投屏异常"
+    assert "播放失败" in page.locator("#actionStatus").inner_text()
+    assert page.locator("#castFallback").is_visible()
+    assert page.locator("#video").evaluate("video => video.currentSrc") == before["src"]
+    play_click(page)
+    page.wait_for_function("document.getElementById('video').paused")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      const src = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+      Object.defineProperty(video, 'src', {configurable: true, get: () => src.get.call(video),
+        set(value) { delete video.error; src.set.call(video, value); }});
+    }""")
+    page.locator("#workEpisodeButton").click()
+    page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
+    assert page.locator("#video").evaluate("video => video.paused")
+    assert page.locator("#castButton > span").inner_text() == "已连接"
+
+
+def test_airplay_media_events_do_not_overwrite_share_feedback(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      Object.defineProperty(navigator, 'share', {configurable: true, value: undefined});
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async () => {}}});
+    }""")
+    page.locator("#shareButton").click()
+    page.wait_for_function("document.getElementById('actionStatus').textContent.includes('已复制')")
+    message = page.locator("#actionStatus").inner_text()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#actionStatus").inner_text() == message
+
+
+def test_airplay_keeps_manual_link_visible_during_media_events(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        writeText: () => new Promise((_resolve, reject) => { window.rejectCastCopy = reject; })
+      }});
+    }""")
+    page.locator("#castCopyButton").click()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#castCopyButton").is_disabled()
+    page.evaluate("window.rejectCastCopy(new Error('clipboard unavailable'))")
+    page.locator("#castLink").wait_for(state="visible")
+    message = page.locator("#actionStatus").inner_text()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#castLink").is_visible()
+    assert page.locator("#actionStatus").inner_text() == message
 
 
 @pytest.mark.parametrize("error_name", ["NotSupportedError", "InvalidStateError", None])
@@ -1593,7 +1669,7 @@ def test_player_cast_state_events_are_real_connection_feedback_and_keep_local_pl
     page.wait_for_function("document.getElementById('actionStatus').textContent.includes('已连接')")
     after = page.locator("#video").evaluate("video => ({src: video.currentSrc, rate: video.playbackRate, paused: video.paused})")
     assert after == before
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
 
 
 def test_player_cast_copy_fallback_uses_current_original_hls_url(source_catalog):
@@ -1627,11 +1703,11 @@ def test_player_cast_connection_state_survives_episode_change(source_catalog):
       document.getElementById('video').webkitShowPlaybackTargetPicker = undefined;
     }""")
     page.locator("#castButton").click()
-    page.wait_for_function("document.querySelector('#castButton > span').textContent === '已投屏'")
+    page.wait_for_function("document.querySelector('#castButton > span').textContent === '已连接'")
     page.locator("#workEpisodeButton").click()
     page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集'")
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
 
 
 def test_player_cast_copy_recovers_after_new_request_and_clipboard_failure(source_catalog, screenshots):
