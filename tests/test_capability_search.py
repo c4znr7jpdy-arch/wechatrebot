@@ -68,6 +68,18 @@ def test_aliases_and_live_plugin_metadata_are_searchable():
     assert "command:drama.help" not in result
 
 
+def test_command_output_keeps_current_owner_aliases_and_parameters():
+    snapshot = catalog()
+    entry = snapshot["commands"][0]
+    entry["parameters"] = "account(str)"
+    result = discovery.render_catalog(snapshot, "", "twitter_list")
+    section = result.split("标准命令：", 1)[1].split("\n", 1)[1].split("\n\n", 1)[0]
+    current = next(row for row in json.loads(section) if row["id"] == "command:twitter.list")
+    assert current["plugin"] == "twitter"
+    assert current["aliases"] == ["twitter_list"]
+    assert current["parameters"] == "account(str)"
+
+
 @pytest.mark.parametrize("query", ["帮我一下", "帮我查一下量子隧穿", "handler_full_name", "read"])
 def test_no_match_explains_search_and_only_shows_authorized_summaries(query):
     result = discovery.render_catalog(catalog(), "", query)

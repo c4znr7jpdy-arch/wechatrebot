@@ -31,6 +31,7 @@ from .provider import (
     DEFAULT_PROVIDER_SOURCE_ID,
     OpenAIProviderProfile,
     discover_openai_models,
+    normalize_api_base,
     provider_source_id,
     supports_thinking_toggle,
 )
@@ -47,8 +48,8 @@ def _provider_api_key(values: dict[str, Any], selected: ProviderService | None) 
     if api_key:
         return api_key
     if selected is not None:
-        api_base = str(values.get("api_base") or "").strip().rstrip("/")
-        if api_base != selected.api_base.strip().rstrip("/"):
+        api_base = normalize_api_base(str(values.get("api_base") or ""))
+        if api_base != normalize_api_base(selected.api_base):
             raise ProviderTestError(
                 "API 地址已更改，请重新填写此地址对应的 API Key / Token Plan。",
                 code="15004",
@@ -84,7 +85,7 @@ class ModelApiMixin:
             )
             current = load_provider_profile(self._install_root)
             api_key = _provider_api_key(values, selected)
-            api_base = str(values.get("api_base") or "").strip()
+            api_base = normalize_api_base(str(values.get("api_base") or ""))
             model = str(values.get("model") or "").strip()
             profile = OpenAIProviderProfile(
                 api_key=api_key,
@@ -94,7 +95,7 @@ class ModelApiMixin:
                     selected.source_id
                     if (
                         selected is not None
-                        and selected.api_base.rstrip("/") == api_base.rstrip("/")
+                        and normalize_api_base(selected.api_base) == api_base
                     )
                     else provider_source_id(api_base, model)
                 ),
@@ -425,12 +426,13 @@ class ModelApiMixin:
                 None,
             )
             api_key = _provider_api_key(values, selected)
+            api_base = normalize_api_base(str(values.get("api_base") or ""))
             models = discover_openai_models(
                 api_key=api_key,
-                api_base=str(values.get("api_base") or "").strip(),
+                api_base=api_base,
             )
             return self._ok(
-                {"items": list(models), "total": len(models)},
+                {"items": list(models), "total": len(models), "api_base": api_base},
                 message=f"已读取 {len(models)} 个可用模型。",
             )
         except ProviderTestError as exc:

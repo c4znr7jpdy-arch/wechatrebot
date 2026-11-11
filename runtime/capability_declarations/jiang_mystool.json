@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "help",
+      "description": "查看米游社完整命令和账号绑定、游戏签到、米游币任务、便签、商品与设置用法。米游社与米游社帮助是同一帮助入口。",
+      "handler": "command_router",
+      "message_pattern": "/(?:米游社帮助|米游社)",
+      "examples": [
+        "/米游社帮助",
+        "/米游社"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "login",
+      "description": "发起当前用户自己的米游社扫码登录并绑定账号，会替换尚未完成的登录二维码；建议私聊操作，由用户在米游社确认授权。",
+      "handler": "command_router",
+      "message_pattern": "/登录",
+      "examples": [
+        "/登录"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "login_status",
+      "description": "查看当前用户米游社扫码登录的处理进度；二维码过期时需要重新登录。",
+      "handler": "command_router",
+      "message_pattern": "/登录状态",
+      "examples": [
+        "/登录状态"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "sign",
+      "description": "使用当前用户已绑定的米游社账号执行游戏签到，会向游戏服务提交签到；先登录，不能把询问签到用法当作执行授权。",
+      "handler": "command_router",
+      "message_pattern": "/签到",
+      "examples": [
+        "/签到"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "mission",
+      "description": "使用当前用户已绑定的米游社账号手动执行米游币任务，会提交任务操作。插件另按账号设置在登录后及每日 00:01 自动执行，无需重复创建定时任务。",
+      "handler": "command_router",
+      "message_pattern": "/任务",
+      "examples": [
+        "/任务"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "address",
+      "description": "查看米游社收货地址。会显示姓名、电话和详细地址，请由用户在私聊直接发送命令；多账号时填写账户ID。此目录仅解释用法，不代为读取或公开这些个人信息。",
+      "examples": [
+        "/地址",
+        "/地址 账户ID"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "goods",
+      "description": "查询米游社商品、商品ID、米游币价格和兑换时间，最多展示前 30 项；可选填写游戏名称。查询商品不会创建兑换计划。",
+      "handler": "command_router",
+      "message_pattern": "/商品(?: [^\\r\\n]+)?",
+      "examples": [
+        "/商品",
+        "/商品 原神"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "exchange_list",
+      "description": "只查看当前用户已有的米游社兑换计划，不添加、删除或执行兑换。需要已绑定自己的账号。",
+      "handler": "command_router",
+      "message_pattern": "/兑换",
+      "examples": [
+        "/兑换"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "exchange_manage",
+      "description": "为当前用户添加或删除米游社商品兑换计划，+ 表示添加，- 表示删除；需要查询得到的真实商品ID。添加使用已绑定账号及其默认可用地址，不代表已完成兑换。",
+      "handler": "command_router",
+      "message_pattern": "/兑换 [+-] [^\\s]+",
+      "examples": [
+        "/兑换 + 商品ID",
+        "/兑换 - 商品ID"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "genshin_note",
+      "description": "查询当前用户已绑定账号的原神实时便签：树脂、洞天宝钱、每日委托和探索派遣；需要先登录。",
+      "handler": "command_router",
+      "message_pattern": "/原神便签",
+      "examples": [
+        "/原神便签"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "starrail_note",
+      "description": "查询当前用户已绑定账号的崩坏：星穹铁道实时便签：开拓力、每日实训、模拟宇宙与委托；需要先登录。",
+      "handler": "command_router",
+      "message_pattern": "/星穹铁道便签",
+      "examples": [
+        "/星穹铁道便签"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "settings",
+      "description": "查看米游社账号设置与通知设置的用法；此命令只显示帮助，不修改配置。",
+      "handler": "command_router",
+      "message_pattern": "/设置",
+      "examples": [
+        "/设置"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "account_status",
+      "description": "只查看米游社账号的平台、游戏签到和米游币任务开关；多账号时填写账户ID，不传设置项和值。",
+      "handler": "command_router",
+      "message_pattern": "/账号设置(?: [^\\s]+)?",
+      "examples": [
+        "/账号设置",
+        "/账号设置 账户ID"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "account_settings",
+      "description": "修改当前用户米游社账号的平台或游戏签到、米游币任务开关。只有一个账号时可省略账户ID；多账号时必须明确选择。平台可选 ios/android，签到与任务可选开启/关闭。",
+      "handler": "command_router",
+      "message_pattern": "/账号设置(?: [^\\s]+)? (?:(?:平台 (?:ios|android))|(?:(?:签到|任务) (?:开启|关闭)))",
+      "examples": [
+        "/账号设置 平台 ios",
+        "/账号设置 账户ID 平台 android",
+        "/账号设置 账户ID 签到 开启",
+        "/账号设置 任务 关闭"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "notice_status",
+      "description": "只查看当前用户的米游社任务通知开关，不修改通知设置。",
+      "handler": "command_router",
+      "message_pattern": "/通知设置",
+      "examples": [
+        "/通知设置"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "notice_settings",
+      "description": "开启或关闭当前用户的米游社任务通知；不会给其他聊天授予主动发送权限。",
+      "handler": "command_router",
+      "message_pattern": "/通知设置 (?:开启|关闭)",
+      "examples": [
+        "/通知设置 开启",
+        "/通知设置 关闭"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "export_cookies",
+      "description": "私聊导出当前用户米游社账号的登录凭据，导出Cookie 与导出Cookies 是别名。凭据可访问账号，请由用户在私聊直接发送命令并自行保管；此目录仅解释用法，不代为导出、转述或收集凭据。群聊原插件会拒绝导出。",
+      "examples": [
+        "/导出Cookies",
+        "/导出Cookie"
+      ],
+      "effect": "write"
+    }
+  ]
+}

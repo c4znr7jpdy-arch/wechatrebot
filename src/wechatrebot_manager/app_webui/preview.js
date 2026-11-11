@@ -236,9 +236,6 @@ window.createPreviewApi = function (helpers) {
       {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text", "image", "audio"], description: "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。"},
       {id: "gemini_proxy", name: "Gemini", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。"},
       {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；按所选服务的实际能力使用。"},
-      {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
-      {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
-      {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
       {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写中转站或其他兼容接口地址、模型名称和凭据。"},
     ];
     const previewExperience = {
