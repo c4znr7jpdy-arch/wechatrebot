@@ -28,6 +28,7 @@ from .discovery import discover, natural_available, render_catalog
 from .execution import execute
 from .plugin_control import (
     PluginControlError,
+    control_message_candidate,
     current_group_scope,
     matches_group_scope,
     request_control,
@@ -65,6 +66,19 @@ def _original_message_text(event: AstrMessageEvent) -> str:
     return "".join(parts).strip()
 
 
+def _is_group_control_addressed_to_bot(event: AstrMessageEvent) -> bool:
+    """Treat mention components as authoritative, never a display-name prefix."""
+    mentioned_self = False
+    for component in getattr(getattr(event, "message_obj", None), "message", []) or []:
+        if isinstance(component, Comp.AtAll):
+            return False
+        if isinstance(component, Comp.At):
+            if str(component.qq) != str(event.get_self_id()):
+                return False
+            mentioned_self = True
+    return mentioned_self or not _original_message_text(event).lstrip().startswith("@")
+
+
 class Main(star.Star):
     def __init__(
         self,
@@ -98,6 +112,63 @@ class Main(star.Star):
                 tool for tool in tools
                 if getattr(tool, "name", "") not in _GROUP_PLUGIN_TOOL_NAMES
             ]
+
+    @filter.on_llm_request(priority=1_000_001)
+    async def apply_explicit_group_plugin_message(
+        self, event: AstrMessageEvent, req: ProviderRequest,
+    ) -> None:
+        """Resolve an explicit administrator request before asking the provider."""
+        scope = current_group_scope(self.context, event)
+        message = _original_message_text(event)
+        if (scope is None or not control_message_candidate(message)
+                or not _is_group_control_addressed_to_bot(event)):
+            return
+        attempts = event.get_extra("group_plugin_message_resolutions", {})
+        if not isinstance(attempts, dict):
+            attempts = {}
+        key = (scope["account_id"], scope["group_id"], scope["sender_id"], message)
+        cached = attempts.get(key)
+        if cached is None:
+            cached = {"pending": True}
+            attempts[key] = cached
+            event.set_extra("group_plugin_message_resolutions", attempts)
+            try:
+                data = await request_control({"action": "resolve_message", **scope, "message": message})
+                if (not matches_group_scope(data, scope) or type(data.get("resolved")) is not bool
+                        or (data["resolved"] and (not isinstance(data.get("module"), str)
+                            or not valid_module_name(data["module"]) or type(data.get("enabled")) is not bool))):
+                    raise PluginControlError("软件管理接口返回的解析结果无效，本次未自动修改本群插件。")
+                cached["resolved"] = data["resolved"]
+                if data["resolved"]:
+                    cached.update(module=data["module"], enabled=data["enabled"])
+            except PluginControlError as exc:
+                cached["error"] = str(exc)
+            finally:
+                cached["pending"] = False
+        elif cached.get("pending") or cached.get("handled"):
+            event.stop_event()
+            return
+        if cached.get("error"):
+            notice = (
+                "\n\n[当前群插件管理状态]\n"
+                f"本轮管理请求的只读解析未完成：{cached['error']}\n"
+                "尚未自动修改插件；不得宣称开关成功或自动重试。"
+                "普通对话可正常回应；若用户正在管理插件，请如实说明需恢复软件管理接口后重试。\n"
+                "[/当前群插件管理状态]\n"
+            )
+            if notice not in req.system_prompt:
+                req.system_prompt += notice
+            return
+        if cached.get("resolved") is not True:
+            return
+        cached["handled"] = True
+        try:
+            result = await self.group_plugin_set_enabled_tool(event, cached["module"], cached["enabled"])
+            await event.send(event.plain_result(result))
+        finally:
+            # Hook exceptions are swallowed by AstrBot, so a failed send must
+            # still prevent a provider fallback from repeating the operation.
+            event.stop_event()
 
     @filter.on_llm_request(priority=1_000_000)
     async def block_unhandled_slash_message(

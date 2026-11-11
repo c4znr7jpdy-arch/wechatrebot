@@ -7,9 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import inspect
 import json
+import logging
 from pathlib import Path
 import threading
 from types import SimpleNamespace as NS
+import traceback
 
 import pytest
 
@@ -24,6 +26,19 @@ control = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(control)
 
 
+class At:
+    def __init__(self, qq):
+        self.qq = qq
+
+
+class AtAll(At):
+    def __init__(self):
+        super().__init__("all")
+
+
+Comp = NS(At=At, AtAll=AtAll)
+
+
 class Event:
     unified_msg_origin = "adapter-instance:GroupMessage:untrusted-origin-group:untrusted-origin-sender"
 
@@ -33,6 +48,8 @@ class Event:
         self.account, self.group, self.private = account, group, private
         self.message_obj = NS(message_str=message, message=[])
         self.extras = {}
+        self.sent, self.stopped = [], False
+        self.plugins_name = None
 
     def get_sender_id(self):
         return self.sender
@@ -58,6 +75,18 @@ class Event:
     def set_extra(self, name, value):
         self.extras[name] = value
 
+    def plain_result(self, text):
+        return text
+
+    async def send(self, result):
+        self.sent.append(result)
+
+    def stop_event(self):
+        self.stopped = True
+
+    def is_stopped(self):
+        return self.stopped
+
 
 def context(admins=None):
     return NS(get_config=lambda: {"admins_id": ["wxid_admin"] if admins is None else admins},
@@ -67,6 +96,7 @@ def context(admins=None):
 def runtime_function(name, **extra):
     namespace = {
         "copy": copy,
+        "control_message_candidate": control.control_message_candidate,
         "current_group_scope": control.current_group_scope,
         "matches_group_scope": control.matches_group_scope,
         "valid_module_name": control.valid_module_name,
@@ -75,8 +105,13 @@ def runtime_function(name, **extra):
         "_GROUP_PLUGIN_TOOL_NAMES": {"group_plugin_list", "group_plugin_set_enabled"},
         "get_recent_actions": lambda _session: [],
         "_session": lambda event: event.unified_msg_origin,
+        "Comp": Comp,
     }
     namespace.update(extra)
+    if name != "_is_group_control_addressed_to_bot":
+        namespace["_is_group_control_addressed_to_bot"] = _runtime_function(
+            SOURCE, "_is_group_control_addressed_to_bot", namespace,
+        )
     return _runtime_function(SOURCE, name, namespace)
 
 
@@ -483,3 +518,223 @@ def test_group_tools_expose_only_module_and_enabled_model_parameters():
                   and node.func.attr == "llm_tool" for keyword in node.keywords if keyword.arg == "name"]
     assert {"group_plugin_list", "group_plugin_set_enabled"} <= set(tool_names)
     assert not any(name.startswith("global_plugin_") for name in tool_names)
+
+
+def control_hook(request, *, admins=None):
+    toggle = runtime_function("group_plugin_set_enabled_tool", request_control=request)
+    plugin = NS(context=context(admins), config={"inject_capability_prompt": False})
+    plugin.group_plugin_set_enabled_tool = lambda event, module, enabled: toggle(plugin, event, module, enabled)
+    hook = runtime_function("apply_explicit_group_plugin_message", request_control=request)
+    return plugin, hook
+
+
+async def dispatch_hook_before_provider(plugin, hook, event, req):
+    """Use the pinned hook dispatcher, with a provider that records actual fallthrough."""
+    async def handler(event, req):
+        await hook(plugin, event, req)
+
+    metadata = NS(handler=handler, handler_module_path="test.control", handler_name=hook.__name__)
+    source = (ROOT / "vendor/engine/astrbot/core/pipeline/context_utils.py").read_text("utf-8")
+    dispatcher = _runtime_function(source, "call_event_hook", {
+        "inspect": inspect, "traceback": traceback, "logger": logging.getLogger("test.control_hook"),
+        "star_handlers_registry": NS(get_handlers_by_event_type=lambda *a, **k: [metadata]),
+        "star_map": {"test.control": NS(name="test.control")},
+    })
+    if await dispatcher(event, NS(name="OnLLMRequestEvent"), req):
+        return 0
+    return 1
+
+
+def resolved_receipt(event=None, **changes):
+    return {**group_scope(event), "resolved": True, "module": "astrbot_plugin_proactive_chat",
+            "enabled": False, **changes}
+
+
+@pytest.mark.parametrize("sender", ["wxid_admin", "wxid_third"])
+def test_explicit_group_message_changes_plugin_and_replies_without_provider(sender):
+    calls = []
+    event = Event(sender=sender, message="@姜小妹 关闭该群的主动消息")
+    event.message_obj.message = [At(event.account)]
+    event.get_message_str = lambda: "模型改写后的无关内容"
+    receipt = applied_receipt(module="astrbot_plugin_proactive_chat",
+                              message="已在当前群关闭主动聊天，软件本群勾选已同步。")
+
+    async def request(payload):
+        calls.append(payload)
+        return resolved_receipt() if payload["action"] == "resolve_message" else receipt
+
+    plugin, hook = control_hook(request, admins=["wxid_admin", "wxid_third"])
+    req = NS(system_prompt="original")
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert event.sent == [receipt["message"]]
+    assert calls == [
+        {"action": "resolve_message", **group_scope(), "sender_id": sender,
+         "message": "@姜小妹 关闭该群的主动消息"},
+        {"action": "set_enabled", **group_scope(), "sender_id": sender,
+         "message": "@姜小妹 关闭该群的主动消息", "module": "astrbot_plugin_proactive_chat", "enabled": False},
+    ]
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert len(calls) == 2 and len(event.sent) == 1
+
+
+@pytest.mark.parametrize("message", ["关闭窗户", "不要关闭主动消息", "怎么关闭本群主动消息？"])
+def test_unresolved_message_continues_to_provider_without_writing_or_reply(message):
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        assert payload["action"] == "resolve_message"
+        return {**group_scope(), "resolved": False}
+
+    plugin, hook = control_hook(request)
+    event, req = Event(message=message), NS(system_prompt="original")
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert len(calls) == 1 and event.sent == [] and not event.stopped
+    assert req.system_prompt == "original"
+
+
+@pytest.mark.parametrize("event", [
+    Event(message="你好"), Event(message="查询本群插件"), Event(message="/clear 关闭主动消息"),
+    Event(message="\\clear 关闭主动消息"), Event(sender="wxid_other"), Event(platform="qq"),
+    Event(group=""), Event(private=True), Event(account=""),
+])
+def test_unrelated_slash_or_unauthorized_message_does_not_query_resolver(event):
+    async def forbidden(_payload):
+        pytest.fail("unrelated message reached resolver")
+
+    plugin, hook = control_hook(forbidden)
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, NS(system_prompt="original"))) == 1
+    assert not event.stopped and event.sent == []
+
+
+@pytest.mark.parametrize("message,mentions", [
+    ("@张三 关闭该群的主动消息", [At("wxid_other")]),
+    ("关闭该群的主动消息", [At("wxid_other")]),
+    ("@所有人 关闭该群的主动消息", [AtAll()]),
+    ("关闭该群的主动消息", [At("all")]),
+    ("@姜小妹 关闭该群的主动消息", []),
+    ("@张三 关闭该群的主动消息", []),
+    ("@姜小妹 @张三 关闭该群的主动消息", [At("wxid_bot"), At("wxid_other")]),
+    ("关闭该群的主动消息", [At("wxid_bot"), AtAll()]),
+], ids=["other-prefix", "other-component", "all-prefix", "all-component", "forged-bot-prefix",
+        "forged-other-prefix", "mixed-mentions", "self-and-all"])
+def test_other_or_unverified_mentions_never_trigger_automatic_control(message, mentions):
+    async def forbidden(_payload):
+        pytest.fail("message addressed elsewhere reached resolver")
+
+    event, req = Event(message=message), NS(system_prompt="original")
+    event.message_obj.message = mentions
+    plugin, hook = control_hook(forbidden)
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert not event.stopped and event.sent == [] and req.system_prompt == "original"
+
+
+def test_self_mention_component_works_when_platform_omits_it_from_original_text():
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        return resolved_receipt() if payload["action"] == "resolve_message" else applied_receipt(
+            module="astrbot_plugin_proactive_chat")
+
+    event, req = Event(message="关闭该群的主动消息"), NS(system_prompt="original")
+    event.message_obj.message = [At(event.account)]
+    plugin, hook = control_hook(request)
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert [item["action"] for item in calls] == ["resolve_message", "set_enabled"]
+    assert event.stopped and len(event.sent) == 1
+
+
+@pytest.mark.parametrize("changes", [
+    {"scope": "global"}, {"scope": None}, {"account_id": "other"}, {"group_id": "other@chatroom"},
+    {"resolved": None}, {"resolved": 1}, {"module": "../secret"}, {"module": None},
+    {"module": 12}, {"enabled": None}, {"enabled": 0}, {"enabled": "false"},
+], ids=["global", "missing-scope", "other-account", "other-group", "missing-resolved", "bad-resolved",
+        "invalid-module", "missing-module", "nonstring-module", "missing-state", "numeric-state", "string-state"])
+def test_invalid_resolution_receipt_does_not_write_and_allows_provider(changes):
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        assert payload["action"] == "resolve_message"
+        return resolved_receipt(**changes)
+
+    plugin, hook = control_hook(request)
+    event, req = Event(), NS(system_prompt="original")
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert not event.stopped and event.sent == [] and len(calls) == 1
+    assert "解析结果无效" in req.system_prompt and "尚未自动修改插件" in req.system_prompt
+
+
+def test_read_only_resolver_failure_is_cached_and_not_misreported_as_write_success():
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        raise control.PluginControlError("管理接口暂不可用")
+
+    plugin, hook = control_hook(request)
+    event, req = Event(message="关闭窗户"), NS(system_prompt="original")
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 1
+    assert len(calls) == 1 and event.sent == [] and not event.stopped
+    assert req.system_prompt.count("[当前群插件管理状态]") == 1
+    assert "尚未自动修改插件" in req.system_prompt and "不得宣称开关成功" in req.system_prompt
+
+
+def test_resolved_write_failure_replies_once_and_stops_provider_without_retry():
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        if payload["action"] == "resolve_message":
+            return resolved_receipt()
+        raise control.PluginControlError("处理结果未确认，请重新查询状态")
+
+    plugin, hook = control_hook(request)
+    event, req = Event(), NS(system_prompt="original")
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert len(calls) == 2 and len(event.sent) == 1
+    assert "未确认" in event.sent[0] and "已在当前群" not in event.sent[0]
+
+
+def test_reply_failure_still_stops_pinned_hook_dispatcher_before_provider():
+    calls, sends = [], []
+
+    async def request(payload):
+        calls.append(payload)
+        return resolved_receipt() if payload["action"] == "resolve_message" else applied_receipt(
+            module="astrbot_plugin_proactive_chat")
+
+    async def failed_send(result):
+        sends.append(result)
+        raise OSError("simulated adapter send failure")
+
+    plugin, hook = control_hook(request)
+    event, req = Event(), NS(system_prompt="original")
+    event.send = failed_send
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert event.stopped and len(sends) == 1
+    assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+    assert len(calls) == 2 and len(sends) == 1
+
+
+def test_resolution_cache_does_not_reuse_another_group_or_account():
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        return {key: payload[key] for key in ("scope", "account_id", "group_id")} | {"resolved": False}
+
+    plugin, hook = control_hook(request)
+    event, req = Event(), NS(system_prompt="original")
+    asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req))
+    event.group = "456@chatroom"
+    asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req))
+    event.account = "wxid_other_bot"
+    asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req))
+    assert [(item["account_id"], item["group_id"]) for item in calls] == [
+        ("wxid_bot", "123@chatroom"), ("wxid_bot", "456@chatroom"), ("wxid_other_bot", "456@chatroom"),
+    ]

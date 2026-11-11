@@ -23,7 +23,12 @@ _NON_ACTION = re.compile(
     r"明天|后天|稍后|以后|过会|待会|等.*再"
 )
 _FOREIGN_SCOPE = re.compile(r"全局|全部|所有|其它|其他|别的|另一个|隔壁|私聊|@chatroom")
-_CURRENT_GROUP = re.compile(r"当前群聊|当前群|这个群聊|这个群|本群聊|本群|此群|群聊内|群内|群里")
+_CURRENT_GROUP = re.compile(r"当前群聊|当前群|这个群聊|这个群|本群聊|本群|该群聊|该群|此群|群聊内|群内|群里")
+_PLUGIN_ALIASES = {
+    "jiang_commands.setu": ["涩图", "色图"],
+    "astrbot_plugin_proactive_chat": ["主动消息", "主动关心", "主动问候", "主动陪聊"],
+}
+_COMMAND_WORDS = re.compile(r"(?:请|麻烦|帮我|帮忙|劳烦|给我|把|将|在|的|插件|功能|使用权限|权限|开关|一下|吧|呀|啊|谢谢|[，,。.!！:：])*")
 
 
 def _names(plugin: Mapping[str, Any]) -> list[str]:
@@ -67,6 +72,38 @@ def _validate_intent(text: str, plugin: Mapping[str, Any], enabled: bool) -> Non
         raise PluginCenterError("当前消息中的插件与操作目标不一致，请使用插件列表里的名称重试。")
 
 
+def _resolve_intent(message: object, catalog: list[dict[str, object]]) -> tuple[str, bool] | None:
+    """Resolve only one explicitly requested target using the same write validation."""
+    if isinstance(message, str):
+        # An explicit @ address is not part of the requested operation.
+        message = re.sub(r"^(?:@[^\s@]+\s+)+", "", message.strip())
+    try:
+        text = _validate_scope_text(message, catalog)
+    except PluginCenterError:
+        return None
+    matches = []
+    for plugin in catalog:
+        for enabled in (False, True):
+            try:
+                _validate_intent(text, plugin, enabled)
+            except PluginCenterError:
+                continue
+            remaining = text
+            for name in sorted(_names(plugin), key=len, reverse=True):
+                for left, right in (("“", "”"), ("‘", "’"), ('"', '"'), ("'", "'"), ("`", "`")):
+                    remaining = remaining.replace(f"{left}{name}{right}", name)
+                remaining = remaining.replace(name, "")
+            action = _ENABLE if enabled else _DISABLE
+            # Automatic execution accepts simple imperative requests; longer
+            # discussion and multi-target sentences stay with the normal tools.
+            if len(action.findall(remaining)) != 1:
+                continue
+            remaining = _CURRENT_GROUP.sub("", action.sub("", remaining))
+            if _COMMAND_WORDS.fullmatch(remaining):
+                matches.append((str(plugin["module"]), enabled))
+    return matches[0] if len(matches) == 1 else None
+
+
 def handle_plugin_control(service: PluginCenterService, payload: Mapping[str, Any]) -> dict[str, object]:
     """Use trusted event scope and configured administrators; never change global plugins."""
     from .group_policy import GroupPolicyError, GroupPolicyService
@@ -77,7 +114,7 @@ def handle_plugin_control(service: PluginCenterService, payload: Mapping[str, An
     if payload.get("scope") != "current_group":
         raise PluginCenterError("这里只支持当前群聊的插件开关。")
     action = payload.get("action")
-    if action not in {"list", "set_enabled"}:
+    if action not in {"list", "set_enabled", "resolve_message"}:
         raise PluginCenterError("不支持这项插件管理操作。")
     policies = GroupPolicyService(service.install_root)
     account, group = payload.get("account_id"), payload.get("group_id")
@@ -88,11 +125,15 @@ def handle_plugin_control(service: PluginCenterService, payload: Mapping[str, An
             {
                 "id": item["id"], "module": item["id"], "name": item["name"],
                 "enabled": item["allowed"],
-                "aliases": ["涩图", "色图"] if item["id"] == "jiang_commands.setu" else [],
+                "aliases": list(_PLUGIN_ALIASES.get(item["id"], ())),
             }
             for item in overview["features"]
         ]
         scope = {"scope": "current_group", "account_id": policy["account_id"], "group_id": policy["group_id"]}
+        if action == "resolve_message":
+            target = _resolve_intent(payload.get("message"), catalog)
+            return {**scope, "resolved": target is not None,
+                    **({"module": target[0], "enabled": target[1]} if target else {})}
         text = _validate_scope_text(payload.get("message"), catalog)
         if action == "list":
             return {**scope, "plugins": catalog, "revision": policy["revision"]}

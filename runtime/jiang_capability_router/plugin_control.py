@@ -14,6 +14,8 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 _MODULE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _GROUP_ID = re.compile(r"^[A-Za-z0-9_.-]{1,119}@chatroom$")
+# Only a cheap read-only lookup hint; the manager owns intent authorization.
+_CONTROL_MESSAGE_HINT = re.compile(r"开启|启用|打开|启动|恢复|开起来|打开来|关闭|禁用|停用|关掉|停掉|关了|关起来")
 _MAX_DESCRIPTOR_BYTES = 16 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 10.0
@@ -153,6 +155,12 @@ def current_group_scope(context, event) -> dict[str, str] | None:
 
 def matches_group_scope(data: dict[str, object], scope: dict[str, str]) -> bool:
     return all(data.get(key) == scope[key] for key in ("scope", "account_id", "group_id"))
+
+
+def control_message_candidate(message: str) -> bool:
+    return bool(isinstance(message, str) and len(message) <= 4000
+                and not message.lstrip().startswith(("/", "\\"))
+                and _CONTROL_MESSAGE_HINT.search(message))
 
 
 def valid_module_name(module: str) -> bool:

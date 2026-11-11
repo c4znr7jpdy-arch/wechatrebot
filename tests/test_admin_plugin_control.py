@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import threading
@@ -19,6 +20,7 @@ from wechatrebot_manager.plugin_errors import PluginCenterError
 ACCOUNT = "wxid_robot"
 GROUP = "11111@chatroom"
 MUSIC = "astrbot_plugin_music"
+PROACTIVE = "astrbot_plugin_proactive_chat"
 
 
 @pytest.fixture
@@ -27,6 +29,7 @@ def plugins(tmp_path):
     legal.parent.mkdir(parents=True)
     legal.write_text(json.dumps({"features": [
         {"module": MUSIC, "display_name": "点歌", "configuration": "none"},
+        {"module": PROACTIVE, "display_name": "主动聊天", "configuration": "none"},
         {"module": "jiang_commands", "display_name": "常用指令", "configuration": "none"},
         {"module": "astrbot_plugin_angel_heart", "display_name": "机器人核心", "configuration": "none"},
         {"module": "jiang_capability_router", "display_name": "路由", "configuration": "none", "visible": False},
@@ -120,7 +123,7 @@ def test_picture_alias_only_toggles_independent_group_feature(plugins):
     assert result["applied"] is True
     assert "jiang_commands.setu" not in allowed and "jiang_commands" in allowed and MUSIC in allowed
     catalog = handle_plugin_control(plugins, _payload(action="list"))["plugins"]
-    assert {item["module"] for item in catalog} == {MUSIC, "jiang_commands", "jiang_commands.setu"}
+    assert {item["module"] for item in catalog} == {MUSIC, PROACTIVE, "jiang_commands", "jiang_commands.setu"}
 
 
 def test_quoted_plugin_name_is_still_an_explicit_command(plugins):
@@ -221,3 +224,84 @@ def test_checkbox_refresh_api_does_not_query_or_modify_schedules(plugins, monkey
     assert result["data"]["policy"]["group_id"] == GROUP
     assert result["data"]["features"][0]["allowed"] is True
     assert "proactive" not in result["data"]
+
+
+@pytest.mark.parametrize("message,enabled", [
+    ("@姜小妹 关闭该群的主动消息", False),
+    ("关闭该群聊的主动消息", False),
+    ("帮我把本群的主动消息关掉", False),
+    ("请在这个群开启主动消息", True),
+    ("打开“主动聊天”插件", True),
+    ("关闭点歌", False),
+])
+def test_explicit_group_command_resolves_without_writing_then_uses_existing_toggle(plugins, message, enabled):
+    path = plugins.install_root / "data/manager/group-policies.json"
+    before = path.read_bytes()
+    result = handle_plugin_control(plugins, _payload(action="resolve_message", message=message))
+    assert result["resolved"] is True and result["enabled"] is enabled
+    assert result["scope"] == "current_group" and result["account_id"] == ACCOUNT and result["group_id"] == GROUP
+    assert result["module"] == (MUSIC if "点歌" in message else PROACTIVE)
+    assert path.read_bytes() == before
+    applied = handle_plugin_control(plugins, _payload(message=message, module=result["module"], enabled=enabled))
+    assert applied["applied"] is True
+    assert (result["module"] in GroupPolicyService(plugins.install_root).get(ACCOUNT, GROUP)["allowed_features"]) is enabled
+
+
+@pytest.mark.parametrize("message", [
+    "关闭窗户", "你好", "关闭未知插件", "怎么关闭该群主动消息", "不要关闭该群主动消息",
+    "全局关闭主动消息", "关闭其他群的主动消息", "关闭该群的主动消息吗？",
+    "他说关闭该群主动消息", "明天关闭该群主动消息", "‘关闭主动消息’是什么意思",
+    "你觉得关闭主动消息会怎样", "关闭主动消息可能会更好吗", "关闭点歌和主动消息",
+    "关闭点歌，保留主动消息", "我想了解关闭主动消息后的效果",
+])
+def test_automatic_resolution_does_not_treat_discussion_as_a_command(plugins, message):
+    path = plugins.install_root / "data/manager/group-policies.json"
+    before = path.read_bytes()
+    result = handle_plugin_control(plugins, _payload(action="resolve_message", message=message))
+    assert result["resolved"] is False
+    assert "module" not in result and "enabled" not in result
+    assert path.read_bytes() == before
+
+
+def test_screenshot_command_through_real_bridge_stops_provider_and_only_changes_current_group(plugins, monkeypatch):
+    from test_admin_plugin_runtime import At, Event, control, control_hook, dispatch_hook_before_provider
+
+    policies = GroupPolicyService(plugins.install_root)
+    policies.set_feature_enabled(ACCOUNT, GROUP, PROACTIVE, True)
+    policies.save(ACCOUNT, "other@chatroom", {"allowed_features": [PROACTIVE]})
+    policies.save("wxid_other_bot", GROUP, {"allowed_features": [PROACTIVE]})
+    other_group = policies.get(ACCOUNT, "other@chatroom")
+    other_account = policies.get("wxid_other_bot", GROUP)
+    engine = plugins.install_root / "app/astrbot/data/cmd_config.json"
+    engine_before = engine.read_bytes()
+    api = app_shell.ApplicationApi.__new__(app_shell.ApplicationApi)
+    api._install_root, api._features = plugins.install_root, plugins
+    monkeypatch.setattr(control, "_install_root", lambda: plugins.install_root)
+    calls = []
+
+    async def request(payload):
+        calls.append(payload)
+        return await control.request_control(payload)
+
+    plugin, hook = control_hook(request, admins=["wxid_admin", "wxid_admin2"])
+    api._ensure_feature_page_server()
+    try:
+        for message, enabled in (("@姜小妹 关闭该群的主动消息", False), ("开启该群的主动消息", True)):
+            event = Event(sender="wxid_admin2", account=ACCOUNT, group=GROUP, message=message)
+            event.message_obj.message = [At(ACCOUNT)]
+            req = SimpleNamespace(system_prompt="original")
+            assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+            assert len(event.sent) == 1 and "已在当前群" in event.sent[0]
+            assert (PROACTIVE in policies.get(ACCOUNT, GROUP)["allowed_features"]) is enabled
+            assert policies.get(ACCOUNT, GROUP)["scheduled_enabled"] is True
+            assert policies.get(ACCOUNT, GROUP)["daily_limit"] == 7
+            feature = next(item for item in api.get_group_policy(ACCOUNT, GROUP, True)["data"]["features"] if item["id"] == PROACTIVE)
+            assert feature["allowed"] is enabled
+            assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
+            assert len(event.sent) == 1
+        assert [call["action"] for call in calls] == ["resolve_message", "set_enabled"] * 2
+        assert policies.get(ACCOUNT, "other@chatroom") == other_group
+        assert policies.get("wxid_other_bot", GROUP) == other_account
+        assert engine.read_bytes() == engine_before
+    finally:
+        api._close_feature_page_server()

@@ -446,8 +446,11 @@ def _handler(
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             try:
-                self._require_same_origin()
                 if urlsplit(self.path).path == CONTROL_PATH:
+                    # Consume the bounded request before rejecting it. Closing
+                    # with unread POST bytes can reset loopback sockets on Windows.
+                    payload = self._body()
+                    self._require_same_origin()
                     authorization = self.headers.get("Authorization", "")
                     if (
                         not plugin_control_token
@@ -456,9 +459,10 @@ def _handler(
                     ):
                         self._send_json(HTTPStatus.FORBIDDEN, {"ok": False, "message": "请求未获授权。"})
                         return
-                    data = handle_plugin_control(service, self._body())
+                    data = handle_plugin_control(service, payload)
                     self._send_json(HTTPStatus.OK, {"ok": True, "data": data})
                     return
+                self._require_same_origin()
                 if any(urlsplit(self.path).path.startswith(prefix) for prefix in _PROXY_PREFIXES):
                     self._proxy()
                     return
