@@ -1,4 +1,6 @@
 /* Model service controls share the active theme's readable action colors. */
+.provider-thinking-row[hidden] { display: none !important; }
+
 #page-settings .provider-back-button {
   padding: 0 10px;
   border-radius: 6px;

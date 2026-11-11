@@ -125,6 +125,146 @@ def test_embedding_delete_identifies_target_and_keeps_replacement(browser, manag
         page.close()
 
 
+@pytest.mark.parametrize("skin,theme,width", [
+    (skin, theme, 760 if theme == "dark" else 1380)
+    for skin in ("default", "soft", "sea-salt", "apricot")
+    for theme in ("light", "dark")
+])
+def test_provider_and_purpose_are_independent(browser, manager_url, tmp_path, skin, theme, width):
+    page = browser.new_page(viewport={"width": width, "height": 920})
+    errors, failures = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("response", lambda response: failures.append(response.url) if response.status >= 400 else None)
+    try:
+        page.add_init_script(f"localStorage.setItem('wechatrebot-theme', '{theme}')")
+        page.goto(manager_url + f"&style={skin}")
+        expect(page).to_have_title(re.compile("机器人管理$"))
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        expect(page.locator("html")).to_have_attribute("data-theme", theme)
+        assert page.locator("html").get_attribute("data-skin") == (None if skin == "default" else skin)
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        expect(page.locator('#providerPreset option[value$="_custom"]')).to_have_count(0)
+        page.locator("#providerPreset").select_option("qwen")
+        endpoint = page.locator('#providerForm [name="api_base"]')
+        original_url = endpoint.input_value()
+        page.locator("#providerModelInput").fill("text-embedding-v4")
+        page.locator("#providerApiKey").fill("preview-only-qwen")
+        for kind in ("embedding", "image", "voice", "chat", "embedding"):
+            page.locator("#providerServiceKind").select_option(kind)
+            expect(page.locator("#providerPreset")).to_have_value("qwen")
+            expect(page.locator("#providerPresetIcon")).to_have_attribute("data-preset", "qwen")
+            expect(endpoint).to_have_value(original_url)
+            expect(page.locator("#providerModelInput")).to_have_value("text-embedding-v4")
+            expect(page.locator("#providerApiKey")).to_have_value("preview-only-qwen")
+            if kind == "chat":
+                expect(page.locator("#providerThinkingRow")).to_be_visible()
+            else:
+                expect(page.locator("#providerThinkingRow")).to_be_hidden()
+        for preset in ("hunyuan", "qwen"):
+            page.locator("#providerPreset").select_option(preset)
+            expect(page.locator("#providerServiceKind")).to_have_value("embedding")
+            expect(page.locator("#providerPresetIcon")).to_have_attribute("data-preset", preset)
+            expect(page.locator("#providerApiKey")).to_have_value("preview-only-qwen")
+        page.locator("#providerModelInput").fill("text-embedding-v4")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, save = api.save_provider;
+          api.save_provider = async values => {
+            window.independentProviderValues = structuredClone(values);
+            const result = await save(values);
+            window.independentProviderId = result.data.id;
+            return result;
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        values = page.evaluate("window.independentProviderValues")
+        assert values["preset"] == "qwen" and values["service_kind"] == "embedding"
+        assert values["modalities"] == "embedding"
+        saved_id = page.evaluate("window.independentProviderId")
+        card = page.locator(".provider-service").filter(has=page.locator(f'footer [data-provider-edit="{saved_id}"]'))
+        expect(card.locator(".provider-logo img")).to_have_attribute("src", "assets/provider-qwen.png")
+        page.screenshot(path=str(tmp_path / f"qwen-vector-card-{skin}-{theme}.png"), animations="disabled")
+        card.locator('footer [data-provider-edit]').click()
+        expect(page.locator("#providerPreset")).to_have_value("qwen")
+        expect(page.locator("#providerServiceKind")).to_have_value("embedding")
+        expect(page.locator("#providerPresetIcon img")).to_have_attribute("src", "assets/provider-qwen.png")
+        expect(page.locator("#providerApiKey")).to_have_value("")
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(tmp_path / f"qwen-vector-editor-{skin}-{theme}.png"), animations="disabled")
+        # Relay addresses keep the generic identity, even with a branded model name.
+        page.locator("#providerPreset").select_option("custom")
+        expect(page.locator("#providerServiceKind")).to_have_value("embedding")
+        endpoint.fill("https://relay.example/v1")
+        page.locator("#providerModelInput").fill("qwen3-embedding-8b")
+        expect(page.locator("#providerPresetIcon svg")).to_be_visible()
+        page.locator("#saveProvider").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        saved_id = page.evaluate("window.independentProviderId")
+        relay = page.locator(".provider-service").filter(has=page.locator(f'footer [data-provider-edit="{saved_id}"]'))
+        expect(relay.locator(".provider-logo svg")).to_be_visible()
+        expect(relay.locator(".provider-logo img")).to_have_count(0)
+        relay.locator('footer [data-provider-edit]').click()
+        expect(page.locator("#providerPreset")).to_have_value("custom")
+        expect(page.locator("#providerServiceKind")).to_have_value("embedding")
+        assert not failures, failures
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("newer_url", [None, "https://new-draft.example/v1"])
+def test_provider_accepts_normalized_url_without_overwriting_newer_draft(browser, manager_url, tmp_path, newer_url):
+    page = browser.new_page(viewport={"width": 1380, "height": 920})
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator("[data-provider-create]").click()
+        page.locator("#providerPreset").select_option("custom")
+        endpoint = page.locator('#providerForm [name="api_base"]')
+        endpoint.fill("https://relay.example/v1/v1/")
+        page.locator("#providerModelInput").fill("saved-model")
+        page.locator("#providerApiKey").fill("preview-only-normalized")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, save = api.save_provider;
+          api.save_provider = async values => {
+            window.submittedProviderUrl = values.api_base;
+            const result = await save({...values, api_base:'https://relay.example/v1'});
+            window.normalizedProviderId = result.data.id;
+            return new Promise(resolve => { window.finishNormalizedSave = () => resolve(result); });
+          };
+        }""")
+        page.locator("#saveProvider").click()
+        expect(page.locator("#saveProvider")).to_be_disabled()
+        if newer_url:
+            endpoint.fill(newer_url)
+        page.evaluate("window.finishNormalizedSave()")
+        expect(page.locator("#saveProvider")).to_be_enabled()
+        if newer_url:
+            expect(page.locator("#providerEditorPage")).to_be_visible()
+            expect(endpoint).to_have_value(newer_url)
+            expect(page.locator("#providerEditorStatus")).to_have_text("有未保存修改")
+            # Returning to the canonical saved URL must be a clean form.
+            endpoint.fill("https://relay.example/v1")
+            expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
+            page.locator("#closeProviderEditor").click()
+        expect(page.locator("#providerOverview")).to_be_visible()
+        saved_id = page.evaluate("window.normalizedProviderId")
+        page.locator(f'footer [data-provider-edit="{saved_id}"]').click()
+        expect(endpoint).to_have_value("https://relay.example/v1")
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
+        page.screenshot(path=str(tmp_path / f"normalized-model-url-{bool(newer_url)}.png"), animations="disabled")
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("first_chat,width", [(True, 430), (False, 1380)])
 def test_provider_saved_identity_survives_list_failure(browser, manager_url, tmp_path, first_chat, width):
     page = browser.new_page(viewport={"width": width, "height": 920})

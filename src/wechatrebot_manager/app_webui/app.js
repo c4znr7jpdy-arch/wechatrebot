@@ -1234,20 +1234,8 @@
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
-    $("#providerServiceKind").addEventListener("change", (event) => {
-      const preset = $("#providerPreset").value;
-      const kind = event.currentTarget.value;
-      if (kind === "chat" && ["embedding_custom", "image_custom"].includes(preset)) {
-        $("#providerPreset").value = "custom";
-        applyProviderPreset("custom");
-        updateProviderDirty();
-        return;
-      }
-      if (kind !== "chat") {
-        const matching = kind === "embedding" ? "embedding_custom" : kind === "image" ? "image_custom" : "voice_custom";
-        $("#providerPreset").value = matching;
-        applyProviderPreset(matching);
-      }
+    $("#providerServiceKind").addEventListener("change", () => {
+      syncProviderServiceKind();
       updateProviderDirty();
     });
     $("#closeProviderEditor").addEventListener("click", requestProviderOverview);
@@ -1520,7 +1508,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderServiceKind, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),

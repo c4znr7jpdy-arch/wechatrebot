@@ -137,6 +137,10 @@ window.createModelServices = function (helpers) {
     if (generation !== providerEditorGeneration || state.providerScreen !== "editor") return;
     const form = $("#providerForm");
     form.elements.provider_id.value = data.id;
+    const savedBase = typeof data.api_base === "string" ? data.api_base : submitted.api_base;
+    if (form.elements.api_base.value === submitted.api_base) {
+      form.elements.api_base.value = savedBase;
+    }
     $("#providerEditorTitle").textContent = data.name;
     if (form.elements.api_key.value === submitted.api_key) {
       form.elements.api_key.value = "";
@@ -147,7 +151,7 @@ window.createModelServices = function (helpers) {
     $("#apiKeyHint").textContent = "已安全保存；留空不会覆盖";
     $("#testProvider").hidden = !data.configured;
     $("#deleteProvider").hidden = false;
-    markProviderClean("已保存", providerFormSnapshot({...submitted, provider_id: data.id}));
+    markProviderClean("已保存", providerFormSnapshot({...submitted, provider_id: data.id, api_base: savedBase}));
     updateProviderDirty();
     $("#providerNote").textContent = state.providerDirty
       ? "提交时的配置已保存；之后的修改仍未保存，请再次保存。" : "模型服务已保存。";
@@ -221,14 +225,8 @@ window.createModelServices = function (helpers) {
       } else {
         delete values.thinking_enabled;
       }
-      const preset = (state.bootstrap?.provider_presets || []).find(
-        (item) => item.id === form.elements.preset.value,
-      );
-      if (values.service_kind === "chat") {
-        values.modalities = "text,image,audio";
-      } else if (Array.isArray(preset?.modalities)) {
-        values.modalities = preset.modalities.join(",");
-      }
+      values.modalities = values.service_kind === "chat" ? "text,image,audio"
+        : inferProviderModalities(values.service_kind, values.model).join(",");
       const data = await api("save_provider", values);
       acceptSavedProvider(data, submitted, generation);
       toast(data.is_default
@@ -260,9 +258,6 @@ window.createModelServices = function (helpers) {
 
   function providerPresetFor(service) {
     if (!service) return "deepseek";
-    if (service.service_kind === "embedding") return "embedding_custom";
-    if (service.service_kind === "image") return "image_custom";
-    if (service.service_kind === "voice") return "voice_custom";
     // Model names are also used by relays; only an official endpoint gets a brand.
     const host = providerEndpointHost(service.api_base);
     return (state.bootstrap?.provider_presets || []).find((preset) =>
@@ -303,8 +298,7 @@ window.createModelServices = function (helpers) {
   function providerCardIdentity(service) {
     const preset = providerPresetFor(service);
     const definition = (state.bootstrap?.provider_presets || []).find((item) => item.id === preset);
-    const label = {embedding: "文本向量", image: "图片模型", voice: "语音模型"}[service.service_kind]
-      || (providerIconFiles[preset] ? definition?.name : "兼容服务");
+    const label = providerIconFiles[preset] ? definition?.name : "兼容服务";
     return {mark: providerIconMarkup(preset), label, className: "provider-brand-logo"};
   }
 
@@ -381,17 +375,21 @@ window.createModelServices = function (helpers) {
     const preset = (state.bootstrap?.provider_presets || []).find((item) => item.id === presetId);
     if (!preset) return;
     form.elements.api_base.value = preset.api_base || "";
-    form.elements.model.value = preset.model || "";
-    form.elements.service_kind.value = preset.service_kind || "chat";
+    form.elements.model.value = form.elements.service_kind.value === "chat" ? preset.model || "" : "";
     form.elements.service_kind.disabled = false;
     syncProviderIcon();
-    $("#providerThinkingRow").hidden = (preset.service_kind || "chat") !== "chat";
+    syncProviderServiceKind();
+  }
+
+  function syncProviderServiceKind() {
+    const form = $("#providerForm");
+    const kind = form.elements.service_kind.value;
+    $("#providerThinkingRow").hidden = kind !== "chat";
     clearProviderModels();
     $("#providerModelHint").textContent = "";
     syncProviderThinkingControl();
     renderProviderSaveIntent(
-      providerWillBeDefault(preset.service_kind || "chat", form.elements.provider_id.value),
-      preset.service_kind || "chat",
+      providerWillBeDefault(kind, form.elements.provider_id.value), kind,
     );
   }
 
@@ -646,6 +644,10 @@ window.createModelServices = function (helpers) {
     try {
       const data = await api("discover_provider_models", values);
       if (!current()) return;
+      if (typeof data.api_base === "string" && data.api_base !== form.elements.api_base.value) {
+        form.elements.api_base.value = data.api_base;
+        updateProviderDirty();
+      }
       const items = Array.isArray(data.items) ? data.items : [];
       state.providerModels = [...new Set(items.map((model) => String(model).trim()).filter(Boolean))];
       state.providerModelFiltering = false;
@@ -874,6 +876,7 @@ window.createModelServices = function (helpers) {
     setProviderDefault,
     setProviderThinking,
     showProviderOverview,
+    syncProviderServiceKind,
     syncProviderThinkingControl,
     testSelectedProvider,
     updateProviderDirty,
