@@ -79,6 +79,11 @@ def _is_group_control_addressed_to_bot(event: AstrMessageEvent) -> bool:
     return mentioned_self or not _original_message_text(event).lstrip().startswith("@")
 
 
+def _group_plugin_control_scope(context, event: AstrMessageEvent) -> dict[str, str] | None:
+    scope = current_group_scope(context, event)
+    return scope if scope is not None and _is_group_control_addressed_to_bot(event) else None
+
+
 class Main(star.Star):
     def __init__(
         self,
@@ -95,7 +100,7 @@ class Main(star.Star):
     def _remove_group_plugin_tools_outside_admin_group(
         self, req: ProviderRequest, event: AstrMessageEvent
     ) -> None:
-        if current_group_scope(self.context, event) is not None:
+        if _group_plugin_control_scope(self.context, event) is not None:
             return
         tools = req.func_tool
         if tools is None:
@@ -118,10 +123,9 @@ class Main(star.Star):
         self, event: AstrMessageEvent, req: ProviderRequest,
     ) -> None:
         """Resolve an explicit administrator request before asking the provider."""
-        scope = current_group_scope(self.context, event)
+        scope = _group_plugin_control_scope(self.context, event)
         message = _original_message_text(event)
-        if (scope is None or not control_message_candidate(message)
-                or not _is_group_control_addressed_to_bot(event)):
+        if scope is None or not control_message_candidate(message):
             return
         attempts = event.get_extra("group_plugin_message_resolutions", {})
         if not isinstance(attempts, dict):
@@ -202,7 +206,7 @@ class Main(star.Star):
         req: ProviderRequest,
     ) -> None:
         self._remove_group_plugin_tools_outside_admin_group(req, event)
-        if current_group_scope(self.context, event) is not None:
+        if _group_plugin_control_scope(self.context, event) is not None:
             req.system_prompt += (
                 "\n\n[管理员当前群插件管理]\n"
                 "只有配置中的管理员当前消息明确要求开启、关闭插件或查询本群开关时，"
@@ -285,7 +289,7 @@ class Main(star.Star):
     @filter.llm_tool(name="group_plugin_list")
     async def group_plugin_list_tool(self, event: AstrMessageEvent) -> str:
         """查询当前微信群的插件使用权限，包含本群已关闭插件；仅配置中的管理员群聊可用，账号和群由真实事件确定。"""
-        scope = current_group_scope(self.context, event)
+        scope = _group_plugin_control_scope(self.context, event)
         if scope is None:
             return "请由配置中的管理员在需要管理的微信群内操作，此功能只管理当前群。"
         try:
@@ -333,7 +337,7 @@ class Main(star.Star):
             module(string): group_plugin_list 返回的真实插件 module。
             enabled(boolean): true 表示开启本群使用权限，false 表示关闭本群使用权限。
         """
-        scope = current_group_scope(self.context, event)
+        scope = _group_plugin_control_scope(self.context, event)
         if scope is None:
             return "请由配置中的管理员在需要管理的微信群内操作，此功能只管理当前群。"
         module = str(module or "").strip()

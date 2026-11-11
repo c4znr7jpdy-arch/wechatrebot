@@ -112,6 +112,10 @@ def runtime_function(name, **extra):
         namespace["_is_group_control_addressed_to_bot"] = _runtime_function(
             SOURCE, "_is_group_control_addressed_to_bot", namespace,
         )
+    if name != "_group_plugin_control_scope":
+        namespace["_group_plugin_control_scope"] = _runtime_function(
+            SOURCE, "_group_plugin_control_scope", namespace,
+        )
     return _runtime_function(SOURCE, name, namespace)
 
 
@@ -644,6 +648,68 @@ def test_self_mention_component_works_when_platform_omits_it_from_original_text(
     assert asyncio.run(dispatch_hook_before_provider(plugin, hook, event, req)) == 0
     assert [item["action"] for item in calls] == ["resolve_message", "set_enabled"]
     assert event.stopped and len(event.sent) == 1
+
+
+@pytest.mark.parametrize("kind", ["other", "all", "mixed", "unverified", "non-admin", "private"])
+@pytest.mark.parametrize("inject_prompt", [False, True])
+def test_unaddressed_or_unauthorized_group_tools_are_hidden_and_cannot_read_or_write(kind, inject_prompt):
+    event = Event()
+    if kind == "other":
+        event.message_obj.message = [At("wxid_other")]
+    elif kind == "all":
+        event.message_obj.message = [AtAll()]
+    elif kind == "mixed":
+        event.message_obj.message = [At(event.account), At("wxid_other")]
+    elif kind == "unverified":
+        event.message_obj.message_str = "@姜小妹 关闭天气插件"
+    elif kind == "non-admin":
+        event.sender = "wxid_other"
+    else:
+        event.private = True
+
+    async def forbidden(_payload):
+        pytest.fail("unaddressed or unauthorized tool reached manager")
+
+    listing = runtime_function("group_plugin_list_tool", request_control=forbidden)
+    toggle = runtime_function("group_plugin_set_enabled_tool", request_control=forbidden)
+    plugin = NS(context=context(), config={"inject_capability_prompt": inject_prompt})
+    assert "只管理当前群" in asyncio.run(listing(plugin, event))
+    assert "只管理当前群" in asyncio.run(toggle(plugin, event, "jiang_weather", False))
+
+    remove = runtime_function("_remove_group_plugin_tools_outside_admin_group")
+    plugin._remove_group_plugin_tools_outside_admin_group = lambda req, event: remove(plugin, req, event)
+    shared = ToolSet([NS(name=name, description="tool") for name in (
+        "group_plugin_list", "group_plugin_set_enabled", "normal_tool")])
+    req = NS(func_tool=shared, system_prompt="original")
+    asyncio.run(runtime_function("inject_capability_context")(plugin, event, req))
+    assert [tool.name for tool in req.func_tool] == ["normal_tool"]
+    assert len(shared.tools) == 3
+    assert "管理员当前群插件管理" not in req.system_prompt
+
+
+def test_real_self_mention_keeps_read_write_and_management_tools_available():
+    calls = []
+    event = Event(message="@姜小妹 关闭天气插件")
+    event.message_obj.message = [At(event.account)]
+
+    async def request(payload):
+        calls.append(payload)
+        if payload["action"] == "list":
+            return {**group_scope(), "plugins": [{"name": "天气", "module": "jiang_weather", "enabled": True}]}
+        return applied_receipt()
+
+    plugin = NS(context=context(), config={"inject_capability_prompt": False})
+    listing = runtime_function("group_plugin_list_tool", request_control=request)
+    toggle = runtime_function("group_plugin_set_enabled_tool", request_control=request)
+    assert "天气（jiang_weather）：本群已开启" in asyncio.run(listing(plugin, event))
+    assert asyncio.run(toggle(plugin, event, "jiang_weather", False)) == applied_receipt()["message"]
+    assert [item["action"] for item in calls] == ["list", "set_enabled"]
+    tools = ToolSet([NS(name="group_plugin_set_enabled", description="tool")])
+    remove = runtime_function("_remove_group_plugin_tools_outside_admin_group")
+    plugin._remove_group_plugin_tools_outside_admin_group = lambda req, event: remove(plugin, req, event)
+    req = NS(func_tool=tools, system_prompt="original")
+    asyncio.run(runtime_function("inject_capability_context")(plugin, event, req))
+    assert req.func_tool is tools and "管理员当前群插件管理" in req.system_prompt
 
 
 @pytest.mark.parametrize("changes", [
