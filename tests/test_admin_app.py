@@ -257,6 +257,44 @@ async def test_password_reset_invalidates_session_but_preserves_encrypted_codes(
 
 
 @pytest.mark.asyncio
+async def test_paid_migration_quota_query_consumption_and_renewal(admin, env):
+    await login(admin)
+    env.store, env.now = admin.store, NOW
+    original_code = issue(env, owner="customer-one")
+    original = redeem(env, original_code)
+    admin.store.bind(env.device, {"license_id": original["id"], "account": "wxid_original"}, NOW)
+    path = "/codes/" + original_code["code_id"]
+    html = await (await admin.client.get(path, cookies=admin.cookies)).text()
+    assert "换绑剩余 1 次（累计 1 次，已用 0 次）" in html
+    await post(admin, "/codes", action="inspect", license_id=original["id"])
+    html = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    assert "换绑剩余 1 次（累计 1 次，已用 0 次）" in html
+    assert "迁移 / 换绑怎么操作" in html and "年付增加 10 次" in html
+    fields = dict(action="issue", mode="migration", plan="", owner_ref="customer-one",
+                  license_id=original["id"], device=env.device, reset_account="on", valid_days="30")
+    response = await post(admin, "/codes", **fields)
+    code_id = response.headers["Location"].rsplit("/", 1)[1]
+    detail = admin.store.admin_code_detail(code_id, now=NOW)
+    assert detail["migration_remaining"] == 1
+    moved = redeem(env, detail)
+    assert moved["account"] == "" and moved["valid_until"] == original["valid_until"]
+    html = await (await admin.client.get(path, cookies=admin.cookies)).text()
+    assert "换绑剩余 0 次（累计 1 次，已用 1 次）" in html
+    before = admin.store.inspect()["codes"]
+    response = await post(admin, "/codes", **fields)
+    assert response.status == 303
+    assert "换绑次数已用完" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    assert admin.store.inspect()["codes"] == before
+    renewal = issue(env, owner="customer-one", plan="year", mode="renewal", license_id=original["id"])
+    redeem(env, renewal)
+    html = await (await admin.client.get(path, cookies=admin.cookies)).text()
+    assert "换绑剩余 10 次（累计 11 次，已用 1 次）" in html
+    trial = issue(env, owner="trial-customer", plan="trial")
+    html = await (await admin.client.get("/codes/" + trial["code_id"], cookies=admin.cookies)).text()
+    assert "尚未关联授权；试用不增加换绑次数" in html
+
+
+@pytest.mark.asyncio
 async def test_contact_upload_rejects_oversize_and_gif_then_updates_and_clears(admin):
     await login(admin)
     for image, content_type in ((b"GIF89a" + b"x" * 20, "image/gif"), (PNG + b"x" * 600 * 1024, "image/png"), (PNG, "image/png")):

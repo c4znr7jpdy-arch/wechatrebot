@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from wechatrebot_manager.licensing.protocol import LicenseError
+from ..store import MIGRATION_CREDITS
 from .auth import PREFIX
 
 MODES = {"new": "新开通", "renewal": "续期", "recovery": "补领", "migration": "迁移"}
@@ -50,6 +51,35 @@ def _time(value) -> str:
     return datetime.fromtimestamp(value, ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def quota_text(record: dict) -> str:
+    plan = record.get("license_plan", record.get("plan", ""))
+    if not plan:
+        if record.get("plan") == "trial":
+            return "尚未关联授权；试用不增加换绑次数"
+        return "尚未关联授权，兑换开通后增加次数"
+    if plan == "trial":
+        return "试用授权沿用人工恢复流程，不计付费换绑次数"
+    total, used, remaining = (record[name] for name in ("migration_total", "migration_used", "migration_remaining"))
+    text = f"换绑剩余 {remaining} 次（累计 {total} 次，已用 {used} 次）"
+    forgiven = remaining + used - total
+    return text + (f"；历史超额 {forgiven} 次不抵扣新额度" if forgiven > 0 else "")
+
+
+def migration_help() -> str:
+    return ('<details class="migration-help"><summary>迁移 / 换绑怎么操作</summary><ol>'
+            '<li>在发码历史中查原授权，确认客户参考号、授权编号和剩余换绑次数。</li>'
+            '<li>客户在目标电脑的管理器打开“订阅与授权”→“授权编号与换机”，复制设备编号；'
+            '尚未生成时先点“获取本机设备编号”。</li>'
+            '<li>用途选“迁移”，套餐沿用原套餐，填写原客户参考号、原授权编号和目标设备编号。'
+            '同一电脑只换微信时填当前设备编号，并勾选清除原账号绑定；只换电脑保留微信时不勾选。</li>'
+            '<li>生成迁移码交给客户，客户先停止机器人，在目标电脑预览并确认兑换；需要换微信时再连接、确认绑定新账号。'
+            '原授权编号和到期时间保留，迁移不赠送时长。</li></ol>'
+            f'<p class="hint">每成功开通或续费一期：月付增加 {MIGRATION_CREDITS["month"]} 次，'
+            f'年付增加 {MIGRATION_CREDITS["year"]} 次，剩余可累计。'
+            '迁移码首次成功兑换扣 1 次，发码、预览、重复兑换和补领不扣；次数用完需续费增加。'
+            '试用授权沿用人工恢复流程，不产生付费额度。</p></details>')
+
+
 def history_html(result: dict, filters: dict) -> str:
     inputs = ''.join(f'<label>{label}<input name="{key}" maxlength="128" value="{escape(filters.get(key, ""), quote=True)}"></label>'
                      for key, label in FILTERS.items())
@@ -71,7 +101,8 @@ def history_html(result: dict, filters: dict) -> str:
         body += (f'<tr><td>{customer}<br><span class="hint">{_value(row["reference"])}</span></td>'
                  f'<td>{_value(MODES.get(row["mode"], row["mode"]))}<br>{_value(PLANS.get(row["plan"], row["plan"]))}</td>'
                  f'<td>{_value(STATUSES.get(row["status"], row["status"]))}<br><span class="hint">'
-                 f'{_value(LICENSE_STATUSES.get(row["license_status"], "尚未关联授权"))}</span></td>'
+                 f'{_value(LICENSE_STATUSES.get(row["license_status"], "尚未关联授权"))}</span><br>'
+                 f'<span class="hint">{_value(quota_text(row))}</span></td>'
                  f'<td>{_time(row["issued_at"])}<br><span class="hint">{_time(row["redeem_by"])}</span></td>'
                  f'<td>{_value(license_id)}<br><a href="{PREFIX}codes/{escape(row["id"], quote=True)}">查看详情 / 激活码</a></td></tr>')
     body += '</tbody></table></div><div class="pagination">'
@@ -105,6 +136,7 @@ def detail_html(row: dict) -> str:
         ("当前授权状态", LICENSE_STATUSES.get(row["license_status"], "尚未关联授权")),
         ("当前授权到期时间", _time(row["valid_until"])),
         ("当前绑定微信", row["account"]), ("当前设备指纹", row["device"]),
+        ("换绑额度", quota_text(row)),
     ]
     body += '</section><section class="panel"><h2>发码与授权信息</h2><dl class="code-details">'
     return body + ''.join(f'<dt>{label}</dt><dd>{_value(value)}</dd>' for label, value in fields) + '</dl></section>'

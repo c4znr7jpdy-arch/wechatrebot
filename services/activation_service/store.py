@@ -25,6 +25,7 @@ from .code_history import KEY_FILENAME, decrypt_payload, encrypt_payload, load_k
 from .rebinding import REBINDING_SCHEMA, RebindingMixin
 
 PREVIEW_SECONDS = 300
+MIGRATION_CREDITS = {"month": 1, "year": 10}
 _CODE = re.compile(r"WRB[A-Z2-7]{32}")
 _FINGERPRINT = re.compile(r"[a-f0-9]{64}")
 
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS codes (
     FOREIGN KEY(redeemed_replaces_id) REFERENCES licenses(id)
 );
 CREATE INDEX IF NOT EXISTS codes_owner ON codes(owner_hash);
+CREATE INDEX IF NOT EXISTS codes_redeemed_license ON codes(redeemed_license) WHERE redeemed_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS previews (
     id TEXT PRIMARY KEY, code_id TEXT NOT NULL, device TEXT NOT NULL,
     license_id TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -83,15 +85,47 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 """
 
+# Successful code redemptions are the sole migration-quota ledger, including
+# records issued before quota enforcement. Trial operations never enter it.
+# Historical overuse cannot become debt against a later purchase. Replay the
+# balance with a zero floor; for same-second records, credits precede migrations.
+_MIGRATION_LEDGER = """
+WITH migration_events AS (
+    SELECT c.id,c.redeemed_at,c.redeemed_license AS license_id,
+           CASE WHEN c.mode IN ('new','renewal') THEN credits.amount ELSE -1 END AS delta
+    FROM codes c JOIN (
+""" + " UNION ALL ".join(f"SELECT '{plan}' AS plan,{amount} AS amount" for plan, amount in MIGRATION_CREDITS.items()) + """
+    ) credits ON credits.plan=c.plan
+    WHERE c.redeemed_at IS NOT NULL AND c.mode IN ('new','renewal','migration')
+), migration_balances AS (
+    SELECT license_id,delta,SUM(delta) OVER (
+        PARTITION BY license_id ORDER BY redeemed_at,CASE WHEN delta>0 THEN 0 ELSE 1 END,id
+        ROWS UNBOUNDED PRECEDING
+    ) AS balance FROM migration_events
+)
+SELECT license_id,SUM(CASE WHEN delta>0 THEN delta ELSE 0 END) AS migration_total,
+       SUM(CASE WHEN delta<0 THEN 1 ELSE 0 END) AS migration_used,
+       SUM(delta)-MIN(0,MIN(balance)) AS migration_remaining
+FROM migration_balances GROUP BY license_id
+"""
+
+_LICENSE_QUOTA_SELECT = """
+SELECT l.*,COALESCE(q.migration_total,0) AS migration_total,
+       COALESCE(q.migration_used,0) AS migration_used,
+       COALESCE(q.migration_remaining,0) AS migration_remaining
+FROM licenses l LEFT JOIN (
+""" + _MIGRATION_LEDGER + ") q ON q.license_id=l.id"
+
 _HISTORY_SELECT = """
 SELECT c.id,c.owner_hash,c.reference_hash,c.encrypted_payload,c.plan,c.mode,c.target_id,
        c.target_device,c.reset_account,c.issued_at,c.redeem_by,c.revoked_at,c.redeemed_at,
-       c.redeemed_license,l.status AS linked_status,l.valid_until,l.account,l.device,
+       c.redeemed_license,l.status AS linked_status,l.valid_until,l.account,l.device,l.plan AS license_plan,
+       l.migration_total,l.migration_used,l.migration_remaining,
        CASE WHEN c.redeemed_at IS NOT NULL THEN 'redeemed'
             WHEN c.revoked_at IS NOT NULL THEN 'revoked'
             WHEN c.redeem_by<=? THEN 'expired' ELSE 'unredeemed' END AS status
-FROM codes c LEFT JOIN licenses l ON l.id=COALESCE(c.redeemed_license,c.target_id)
-"""
+FROM codes c LEFT JOIN (
+""" + _LICENSE_QUOTA_SELECT + ") l ON l.id=COALESCE(c.redeemed_license,c.target_id)"
 
 
 def _hash(value: str) -> str:
@@ -177,6 +211,23 @@ class LicenseStore(RebindingMixin):
         if record is None:
             raise LicenseError("license_unavailable", "当前设备没有可用的该项授权。")
         return record
+
+    @staticmethod
+    def _migration_quota(db, license_id: str) -> dict[str, int]:
+        row = db.execute("SELECT migration_total,migration_used,migration_remaining FROM ("
+                         + _LICENSE_QUOTA_SELECT + ") WHERE id=?", (license_id,)).fetchone()
+        if row is None:
+            raise LicenseError("license_unavailable", "当前设备没有可用的该项授权。")
+        return dict(row)
+
+    @classmethod
+    def _require_migration_quota(cls, db, target) -> None:
+        if target["plan"] in MIGRATION_CREDITS and cls._migration_quota(db, target["id"])["migration_remaining"] <= 0:
+            raise LicenseError("code_unavailable", "换绑次数已用完，请续费增加次数后再办理迁移。")
+
+    def migration_quota(self, license_id: str) -> dict[str, int]:
+        with self.connection() as db:
+            return self._migration_quota(db, _text(license_id))
 
     @classmethod
     def _owned(cls, db, license_id: str, device: str):
@@ -392,6 +443,7 @@ class LicenseStore(RebindingMixin):
         if mode == "migration":
             if not target_device:
                 raise LicenseError("invalid_data", "迁移必须提供已核实的新设备指纹。")
+            cls._require_migration_quota(db, target)
         elif target_device or reset_account:
             raise LicenseError("invalid_data", "只有迁移码可以修改设备或机器人绑定。")
         return target
@@ -418,6 +470,8 @@ class LicenseStore(RebindingMixin):
             cls._active(target)
             if code["mode"] == "migration" and code["target_revision"] != target["revision"]:
                 raise LicenseError("code_stale", "原授权已变更，请联系管理员重新核实迁移。")
+            if code["mode"] == "migration":
+                cls._require_migration_quota(db, target)
             if code["mode"] == "renewal":
                 cls._account_available(db, target["account_hash"], target["id"], now)
         if code["plan"] == "trial":
@@ -478,6 +532,9 @@ class LicenseStore(RebindingMixin):
             message = "该码已兑换，将恢复原授权，不增加时长。" if redeemed else "确认后兑换激活码。"
             if replaced and not redeemed:
                 message = "确认后将停用本机原试用或已到期授权，迁入原授权，到期时间不变。"
+            if not redeemed and code["mode"] == "migration" and target["plan"] in MIGRATION_CREDITS:
+                remaining = self._migration_quota(db, target["id"])["migration_remaining"]
+                message += f"本次迁移成功后扣除 1 次换绑次数，当前剩余 {remaining} 次；发码和预览不扣次数。"
             return {
                 "preview_id": preview_id, "expires_at": now + PREVIEW_SECONDS,
                 "plan": target["plan"] if redeemed else code["plan"], "mode": code["mode"],
@@ -619,11 +676,14 @@ class LicenseStore(RebindingMixin):
     def inspect(self, *, license_id: str = "", owner_ref: str = "") -> dict:
         with self.connection() as db:
             if license_id:
-                licenses = [dict(self._license(db, license_id))]
+                record = db.execute(_LICENSE_QUOTA_SELECT + " WHERE l.id=?", (license_id,)).fetchone()
+                if record is None:
+                    raise LicenseError("license_unavailable", "当前设备没有可用的该项授权。")
+                licenses = [dict(record)]
                 owner_hash = licenses[0]["owner_hash"]
             elif owner_ref:
                 owner_hash = _owner(owner_ref)
-                licenses = [dict(row) for row in db.execute("SELECT * FROM licenses WHERE owner_hash=?", (owner_hash,))]
+                licenses = [dict(row) for row in db.execute(_LICENSE_QUOTA_SELECT + " WHERE l.owner_hash=?", (owner_hash,))]
             else:
                 return {"licenses": db.execute("SELECT COUNT(*) FROM licenses").fetchone()[0],
                         "codes": db.execute("SELECT COUNT(*) FROM codes").fetchone()[0]}
@@ -663,7 +723,7 @@ class LicenseStore(RebindingMixin):
         saved = decrypt_payload(key, item["id"], payload) if payload else {"code": "", "owner_ref": "", "reference": ""}
         item.update(saved)
         item["reset_account"] = bool(item["reset_account"])
-        for name in ("account", "device"):
+        for name in ("account", "device", "license_plan"):
             item[name] = item[name] or ""
         if not include_code:
             item.pop("code")

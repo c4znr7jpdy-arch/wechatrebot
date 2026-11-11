@@ -19,7 +19,7 @@ from wechatrebot_manager.licensing.protocol import LicenseError
 from ..contact import CONTACT_FILENAME, clear_contact, parse_expiry
 from ..store import LicenseStore
 from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
-from .codes import FILTERS, checked_reference, detail_html, history_html, reference_fields
+from .codes import FILTERS, checked_reference, detail_html, history_html, migration_help, quota_text, reference_fields
 from .github import GitHubError, GitHubReleases
 from .release_cache import ReleaseReadCache
 from .release_editor import ReleaseEditor, is_pending_version
@@ -256,7 +256,10 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                     message = "已撤销：" + (result["license_id"] or result["code_id"])
                 elif action == "inspect":
                     result = await asyncio.to_thread(store.inspect, license_id=str(form.get("license_id", "")), owner_ref=str(form.get("owner_ref", "")))
-                    message = "查询结果（不包含明文激活码）：\n" + json.dumps(result, ensure_ascii=False, indent=2)
+                    licenses = result.get("licenses")
+                    quotas = "\n".join(f'{record["id"]}：{quota_text(record)}'
+                                       for record in licenses) if isinstance(licenses, list) else ""
+                    message = "查询结果（不包含明文激活码）：\n" + (quotas + "\n" if quotas else "") + json.dumps(result, ensure_ascii=False, indent=2)
                 else:
                     raise LicenseError("invalid_data", "请选择有效操作。")
             except LicenseError as exc:
@@ -280,7 +283,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         inspect = ('<input type="hidden" name="action" value="inspect">'
                    + _field("license_id", "授权编号", required=False) + _field("owner_ref", "客户参考号", required=False)
                    + '<button type="submit">查询状态</button>')
-        body = '<div class="grid"><section class="panel"><h2>人工发码</h2>' + _form(session, "codes", issue)
+        body = '<div class="grid"><section class="panel"><h2>人工发码</h2>' + migration_help() + _form(session, "codes", issue)
         body += '</section><div><section class="panel"><h2>撤销</h2>' + _form(session, "codes", revoke)
         body += '</section><section class="panel"><h2>查询</h2>' + _form(session, "codes", inspect) + '</section></div></div>'
         filters = {key: request.query.get(key, "").strip() for key in (*FILTERS, "status")}
@@ -289,7 +292,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         except ValueError:
             raise LicenseError("invalid_data", "历史记录页码无效。")
         history = await asyncio.to_thread(store.admin_code_history, now=int(clock()), page=page, **filters)
-        return await render(request, "激活码", body + history_html(history, filters))
+        return await render(request, "激活码", body + history_html(history, filters) + f'<script src="{PREFIX}codes.js" defer></script>')
 
     async def code_detail(request):
         record = await asyncio.to_thread(store.admin_code_detail, request.match_info["code_id"], now=int(clock()))
