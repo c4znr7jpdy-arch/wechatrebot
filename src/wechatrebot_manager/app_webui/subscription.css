@@ -54,6 +54,16 @@
 .subscription-support > div { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 10px; }
 .subscription-support > div > span { color: var(--muted); font-size: 12px; }
 .subscription-support code { overflow-wrap: anywhere; user-select: text; font-size: 12px; }
+#licenseOptions { margin-top: 24px; }
+#licenseOptions > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); background: var(--surface); font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; transition: background .16s ease, border-color .16s ease; }
+#licenseOptions > summary::-webkit-details-marker { display: none; }
+#licenseOptions > summary::after { content: ""; flex: 0 0 8px; width: 8px; height: 8px; margin-right: 3px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .16s ease; }
+#licenseOptions[open] > summary::after { transform: translateY(2px) rotate(225deg); }
+#licenseOptions > summary:hover { border-color: var(--line-strong); background: var(--surface-hover); }
+#licenseOptions > summary:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  #licenseOptions > summary, #licenseOptions > summary::after { transition: none; }
+}
 .subscription-plans-section { margin-top: 26px; }
 #page-subscription .section-heading p { margin-top: 5px; }
 .subscription-trial-status { margin: 0; color: var(--muted); font-size: 13px; }
