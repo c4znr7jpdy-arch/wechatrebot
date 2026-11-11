@@ -1162,8 +1162,8 @@ tbody tr:hover { background: #fbfdff; }
 .contact-facts dt { color: var(--muted); font-size: 11px; }
 .contact-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .contact-facts code { color: #435268; font: 11px "Cascadia Mono", Consolas, monospace; }
-.profile-state { min-height: 70px; padding: 16px; border-radius: 8px; color: var(--muted); background: #f5f8fc; font-size: 11px; }
-.profile-state.error { color: var(--red-700); background: var(--red-100); }
+.profile-state { min-height: 70px; padding: 16px; border-radius: 8px; color: var(--muted); background: var(--surface-2); font-size: 11px; }
+.profile-state.error { color: var(--ink); background: var(--red-100); }
 .private-feature-policy { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .private-feature-policy > p { margin: 5px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .private-feature-options { grid-template-columns: 1fr; }
