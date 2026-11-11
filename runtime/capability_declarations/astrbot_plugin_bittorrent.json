@@ -3,7 +3,7 @@
   "capabilities": [
     {
       "id": "search",
-      "description": "根据关键词检索资源索引，沿用原插件预览图配置。",
+      "description": "按关键词检索资源索引，查找磁力链接；沿用原插件预览图配置。",
       "handler": "magnet_search_handler",
       "message_pattern": "bt .+",
       "examples": [

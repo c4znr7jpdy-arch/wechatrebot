@@ -418,6 +418,51 @@
     },
     {
       "origin": "commercial",
+      "source": "runtime/jiang_capability_router/declarations.py",
+      "target": "app/astrbot/data/plugins/jiang_commands/declarations.py"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_angel_heart.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_angel_heart/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_music.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_music/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_parser.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_parser/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/astrbot_plugin_patch_at_wxid.json",
+      "target": "app/astrbot/data/plugins/astrbot_plugin_patch_at_wxid/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_group_notice.json",
+      "target": "app/astrbot/data/plugins/jiang_group_notice/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_mimo_emoji_voice.json",
+      "target": "app/astrbot/data/plugins/jiang_mimo_emoji_voice/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_mystool.json",
+      "target": "app/astrbot/data/plugins/jiang_mystool/capabilities.json"
+    },
+    {
+      "origin": "commercial",
+      "source": "runtime/capability_declarations/jiang_repeater.json",
+      "target": "app/astrbot/data/plugins/jiang_repeater/capabilities.json"
+    },
+    {
+      "origin": "commercial",
       "source": "runtime/capability_declarations/jiang_image.json",
       "target": "app/astrbot/data/plugins/jiang_image/capabilities.json"
     },

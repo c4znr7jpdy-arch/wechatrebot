@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import json
-import logging
-import re
-from pathlib import Path
 
+from .declarations import declaration_visible, load_declarations
 from .search import CatalogQuery, search_text
-
-logger = logging.getLogger(__name__)
 
 
 def identity(star) -> set[str]:
@@ -73,58 +69,6 @@ def command_entries(commands, stars, is_admin: bool) -> list[dict]:
     ]
 
 
-def load_declarations(star) -> list[dict]:
-    """Read optional metadata beside the already loaded plugin, never arbitrary paths."""
-    module_file = getattr(star.module, "__file__", None)
-    if not module_file:
-        return []
-    path = Path(module_file).parent / "capabilities.json"
-    if not path.is_file():
-        return []
-    try:
-        if path.stat().st_size > 65536:
-            raise ValueError("capabilities.json exceeds 64 KiB")
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-        if data.get("schema_version") != 1 or not isinstance(data.get("capabilities"), list):
-            raise ValueError("unsupported capability declaration")
-        result = []
-        seen = set()
-        for item in data["capabilities"]:
-            if not isinstance(item, dict):
-                raise ValueError("capability must be an object")
-            key = item.get("id")
-            if not isinstance(key, str) or not key.isidentifier() or key in seen:
-                raise ValueError("capability id must be unique and an identifier")
-            seen.add(key)
-            description = item.get("description")
-            examples = item.get("examples", [])
-            if not isinstance(description, str) or not description.strip():
-                raise ValueError("description is required")
-            if not isinstance(examples, list) or any(not isinstance(x, str) for x in examples):
-                raise ValueError("examples must be strings")
-            handler = item.get("handler", "")
-            if not isinstance(handler, str) or (handler and not handler.isidentifier()):
-                raise ValueError("handler must be a registered method name")
-            pattern = item.get("message_pattern", "")
-            if not isinstance(pattern, str) or len(pattern) > 1000:
-                raise ValueError("invalid message pattern")
-            if handler and not pattern:
-                raise ValueError("executable declarations require a message pattern")
-            if pattern:
-                re.compile(pattern)
-            # Declarations can only opt into read operations explicitly; unknown is write.
-            effect = item.get("effect", "write")
-            if effect not in {"read", "write"}:
-                raise ValueError("invalid effect")
-            result.append({"id": f"decl:{star.name}:{key}", "effect": effect,
-                           "description": description, "examples": examples,
-                           "handler": handler, "message_pattern": pattern})
-        return result
-    except (OSError, ValueError, TypeError, AttributeError, re.error):
-        logger.exception("Invalid capability declaration for %s", star.name)
-        return []
-
-
 async def discover(context, event, commands) -> dict:
     from astrbot.core.star.star_handler import star_handlers_registry
 
@@ -143,6 +87,8 @@ async def discover(context, event, commands) -> dict:
         plugins.append({"name": star.name, "description": star.desc or "",
                         "display_name": star.display_name or star.name})
         for item in load_declarations(star):
+            if not declaration_visible(item, event):
+                continue
             if item.get("handler"):
                 handlers = star_handlers_registry.get_handlers_by_module_name(star.module_path)
                 matching = [h for h in handlers if h.handler_name == item["handler"] and h.enabled]
@@ -186,16 +132,21 @@ def render_catalog(snapshot: dict, natural: str, query: str, tools=()) -> str:
     output.append("已启用插件（简介不代表已开放 AI 执行；后台功能按配置自动运行）：\n" +
                   json.dumps(plugins, ensure_ascii=False))
     commands = [{"id": "command:" + item["handler_full_name"],
+                 "plugin": item["plugin"],
                  "command": item["effective_command"],
+                 "aliases": item.get("aliases", []),
                  "description": item.get("description", ""),
                  "parameters": item.get("parameters", ""),
                  "permission": item.get("permission", "everyone")}
                 for item in selected_commands]
     output.append("标准命令：可用 capability_execute；未声明只读的操作需用户发送“执行 完整命令”。\n" +
                   json.dumps(commands, ensure_ascii=False))
-    output.append("插件声明的用法（handler 为空仅供说明；read 可自然调用，write 需明确执行完整命令）：\n" +
+    output.append("插件声明的用法（handler 为空仅供说明；read 可自然调用，write 需明确执行完整命令；"
+                  "仅供说明的原命令仍可由用户按示例发送）：\n" +
                   json.dumps(declarations, ensure_ascii=False))
     output.append("本轮模型已获授权的专用工具（优先直接调用）：\n" +
                   json.dumps(native, ensure_ascii=False))
-    output.append("未列出或未启用的能力不得声称可用。只凭简介不能推断参数或执行成功。")
+    output.append("询问用法时，按目录的真实命令、参数和示例解释，不执行登录、签到、兑换或设置。"
+                  "没有标准命令不等于没有功能：消息触发、自动行为和后台功能以声明为准。"
+                  "未列出或未启用的能力不得声称可用。只凭简介不能推断参数或执行成功。")
     return "\n\n".join(output)
