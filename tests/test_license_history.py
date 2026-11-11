@@ -1,129 +1,328 @@
-"""Expired subscriptions retain local data access without forging a WeChat login."""
+"""Message history requires a verified login and a matching valid subscription."""
 import sys
+import sqlite3
 from types import SimpleNamespace
+from unittest.mock import ANY, Mock
 
 import pytest
 
-from wechatrebot_manager import app_shell, chat_api, launcher, runtime_status, uninstaller
+from wechatrebot_manager import app_shell, chat_history, runtime_config
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 from test_app_shell import _api
-from test_license_client import running, setup
+from test_license_client import activate, running, setup
+from test_chat_history import _dated_history
 
 
-@pytest.fixture(autouse=True)
-def stopped_installation(monkeypatch):
-    monkeypatch.setattr(chat_api, "installation_services_stopped", lambda _root: True)
-
-
-def offline_api(setup):
-    client, service, clock, _ = setup
-    running(client)
-    clock.advance(3601)
-    api = _api(client.root)
-    runtime = RuntimeSnapshot(False, False, "", False, False, False, False)
-    view = SimpleNamespace(runtime=runtime, can_stop=False)
-    view.to_dict = lambda: {"state": "LICENSE_PAUSED", "runtime": {
+def history_api(root, client=None):
+    api = _api(root)
+    view = SimpleNamespace(runtime=RuntimeSnapshot(True, True, "wxid_customer"))
+    view.to_dict = lambda: {"state": "LICENSE_READY", "runtime": {
         key: getattr(view.runtime, key) for key in (
             "wechat_identity", "account_status_available", "connection_ready", "engine_ready")}}
-    api._lifecycle.licenses = client
+    if client is not None:
+        api._lifecycle.licenses = client
     api._lifecycle.refresh = lambda: view
     api._lifecycle.fresh_runtime_snapshot = lambda: view.runtime
-    queries = []
-    def conversations(**filters):
-        queries.append(filters)
-        return {"items": [{"conversation_id": "old@chatroom", "type": "group", "message_count": 1}], "summary": {}}
-    def messages(conversation, **filters):
-        queries.append(filters)
-        return [{"role": "user", "sender_id": "member", "content": "local history"}]
-    api._history = SimpleNamespace(conversations=conversations, messages=messages)
-    # The offline path must not touch live group/contact services.
-    api._groups = SimpleNamespace(list=lambda *_: pytest.fail("offline live directory lookup"))
-    return api, view, queries
+    api._history = SimpleNamespace(**{
+        name: Mock(side_effect=AssertionError("history must remain inaccessible"))
+        for name in ("conversations", "messages", "image_source_id", "export", "delete_conversation", "delete_before")
+    })
+    api._groups = SimpleNamespace(
+        list=Mock(side_effect=AssertionError("unverified live directory lookup")),
+        message_image=Mock(side_effect=AssertionError("unverified image lookup")),
+    )
+    api._window = SimpleNamespace(
+        create_file_dialog=Mock(side_effect=AssertionError("unverified export dialog")))
+    return api, view
 
 
-def test_expired_offline_history_reads_signed_account_without_enabling_runtime(setup):
-    api, _, queries = offline_api(setup)
-    client, service, _, _ = setup
+@pytest.mark.parametrize("condition", [
+    "unactivated", "unbound", "expired", "revoked", "wrong_account",
+    "logged_out", "stopped", "unknown_account", "invalid_cache",
+])
+def test_history_rejects_access_without_matching_authorization_and_login(setup, condition):
+    client, service, clock, _ = setup
+    if condition == "unbound":
+        activate(client)
+    elif condition != "unactivated":
+        running(client)
+    api, view = history_api(client.root, client)
+    if condition == "expired":
+        clock.advance(3601)
+    elif condition == "revoked":
+        service.status = "revoked"
+        service.revision += 1
+        client.refresh()
+    elif condition == "wrong_account":
+        view.runtime = RuntimeSnapshot(True, True, "wxid_other")
+        # This flag alone does not prove the actual account is licensed.
+        assert client.snapshot("wxid_other")["authorized"]
+    elif condition == "logged_out":
+        view.runtime = RuntimeSnapshot(True, True, "")
+    elif condition == "stopped":
+        view.runtime = RuntimeSnapshot(False, False, "", False, False, False, False)
+    elif condition == "unknown_account":
+        view.runtime = RuntimeSnapshot(True, True, "wxid_customer", account_status_available=False)
+    elif condition == "invalid_cache":
+        client.cache.path.write_text('{"protected":"tampered"}')
     before = len(service.calls)
-    result = api.get_conversations({"kind": "all", "account_id": "wxid_customer"})
-    assert result["ok"] and result["data"]["offline"] is True
-    assert result["data"]["items"][0]["conversation_id"] == "old@chatroom"
-    messages = api.get_messages("old@chatroom", {"paged": True, "account_id": "wxid_customer"})
-    assert messages["data"]["items"][0]["content"] == "local history"
-    assert all(query["account_id"] == "wxid_customer" for query in queries)
+
+    results = [
+        api.get_conversations({"account_id": "wxid_customer"}),
+        api.get_messages("old@chatroom", {"paged": True, "account_id": "wxid_customer"}),
+        api.get_messages("old@chatroom"),
+        api.get_message_image("old@chatroom", 1, 0, "wxid_customer"),
+        api.delete_conversation("old@chatroom", "wxid_customer"),
+        api.delete_history_before("2026-09-01", "wxid_customer"),
+        api.export_history("csv", "wxid_customer"),
+    ]
+    for result in results:
+        if result["ok"]:
+            data = result["data"]
+            assert data == [] or data.get("requires_login") is True
     status = api.get_status()["data"]
-    assert status["history_offline"] and status["history_account"] == "wxid_customer"
-    assert status["runtime"]["wechat_identity"] == ""
-    assert api.get_license_status()["data"]["current_account"] == ""
-    assert not api.start_robot()["ok"]
-    assert not api.bind_license_account("wxid_customer")["ok"]
-    assert not client.snapshot("wxid_customer")["can_run"]
+    assert status["history_account"] == ""
+    assert "history_offline" not in status
+    for method in vars(api._history).values():
+        method.assert_not_called()
+    api._groups.list.assert_not_called()
+    api._groups.message_image.assert_not_called()
+    api._window.create_file_dialog.assert_not_called()
     assert len(service.calls) == before
+    if condition in {"unactivated", "expired", "wrong_account", "unbound"}:
+        # History authorization must not hide the login needed for trial/binding.
+        assert api._history_account_id() == view.runtime.wechat_identity
+        assert api.get_license_status()["data"]["current_account"] == view.runtime.wechat_identity
 
 
-def test_offline_history_cannot_select_another_account_or_delete(setup):
-    api, _, queries = offline_api(setup)
-    result = api.get_conversations({"account_id": "wxid_other"})
-    assert result["data"]["account_changed"]
-    result = api.get_messages("chat", {"paged": True, "account_id": "wxid_other"})
-    assert result["data"]["account_changed"]
-    assert not api.delete_conversation("old@chatroom", "wxid_customer")["ok"]
-    assert queries == []
+def allow_private_history(api):
+    api._history.conversations.side_effect = None
+    api._history.conversations.return_value = {
+        "items": [{"conversation_id": "friend", "type": "private", "message_count": 1}],
+        "summary": {"messages": 1},
+    }
+    api._history.messages.side_effect = None
+    api._history.messages.return_value = [
+        {"role": "user", "sender_id": "friend", "content": "local history"}]
 
 
-def test_expired_offline_export_rechecks_signed_data_account(setup, monkeypatch, tmp_path):
-    api, _, queries = offline_api(setup)
-    api._window = SimpleNamespace(create_file_dialog=lambda *a, **kw: [str(tmp_path / "history.csv")])
-    api._history.export = lambda selected, **kw: (queries.append(kw), selected)[1]
-    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
-    result = api.export_history("csv", "wxid_customer")
-    assert result["ok"] and result["data"]["path"].endswith("history.csv")
-    assert queries == [{"format": "csv", "account_id": "wxid_customer"}]
+def test_valid_paused_subscription_can_read_and_recovers_after_reauthorization(setup):
+    client, service, clock, _ = setup
+    running(client)
+    client.pause()
+    assert client.snapshot("wxid_customer")["authorized"]
+    assert not client.snapshot("wxid_customer")["can_run"]
+    api, _ = history_api(client.root, client)
+    allow_private_history(api)
+
+    assert api.get_status()["data"]["history_account"] == "wxid_customer"
+    result = api.get_conversations({"kind": "private", "account_id": "wxid_customer"})
+    assert result["data"]["items"][0]["conversation_id"] == "friend"
+    assert "offline" not in result["data"]
+    messages = api.get_messages("friend", {"paged": True, "account_id": "wxid_customer"})
+    assert messages["data"]["items"][0]["content"] == "local history"
+
+    clock.advance(3601)
+    assert api.get_status()["data"]["history_account"] == ""
+    api._history.conversations.reset_mock()
+    assert api.get_conversations({"kind": "private"})["data"]["requires_login"]
+    api._history.conversations.assert_not_called()
+    service.renew()
+    client.refresh()
+    assert api.get_status()["data"]["history_account"] == "wxid_customer"
+    assert api.get_conversations({"kind": "private"})["data"]["items"]
+    assert not client.snapshot("wxid_customer")["can_run"]
 
 
-def test_offline_export_cancels_if_real_account_changes_during_dialog(setup, monkeypatch, tmp_path):
-    api, view, queries = offline_api(setup)
+def test_legacy_history_still_requires_login_but_not_a_subscription(tmp_path):
+    api, view = history_api(tmp_path)
+    allow_private_history(api)
+    assert api._license_client().snapshot()["enabled"] is False
+    assert api.get_status()["data"]["history_account"] == "wxid_customer"
+    assert api.get_conversations({"kind": "private"})["data"]["items"]
+    assert api.get_messages("friend", {"paged": True})["data"]["items"]
+    view.runtime = RuntimeSnapshot(False, False, "")
+    assert api.get_status()["data"]["history_account"] == ""
+    assert api.get_conversations({})["data"]["requires_login"]
+
+
+@pytest.mark.parametrize("action", ["check_environment", "select_wechat"])
+@pytest.mark.parametrize("authorized", [False, True])
+def test_environment_responses_include_authoritative_history_access(setup, monkeypatch, action, authorized):
+    client, _, _, _ = setup
+    if authorized:
+        running(client)
+    api, view = history_api(client.root, client)
+    api._lifecycle.check_environment = lambda: view
+    api._lifecycle.refresh = lambda: pytest.fail("reuse the environment check's runtime snapshot")
+    monkeypatch.setattr(app_shell, "validate_wechat_executable", lambda _path: SimpleNamespace(
+        supported=True, path=client.root / "Weixin.exe", version="4.1.8.27"))
+    monkeypatch.setattr(runtime_config, "write_runtime_configs", lambda *_args, **_kwargs: None)
+    result = api.check_environment() if action == "check_environment" else api.select_wechat("Weixin.exe")
+    assert result["ok"]
+    assert result["data"]["history_account"] == ("wxid_customer" if authorized else "")
+
+
+@pytest.mark.parametrize("operation", ["conversations", "messages", "unpaged_messages", "image"])
+@pytest.mark.parametrize("change", ["expired", "logged_out", "wrong_account"])
+def test_history_discards_data_when_access_changes_during_read(setup, operation, change):
+    client, _, clock, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    allow_private_history(api)
+    if operation == "image":
+        api._history.image_source_id.side_effect = None
+        api._history.image_source_id.return_value = 1
+        read = api._groups.message_image
+        read.return_value = {"image_data_url": "data:image/png;base64,cHJpdmF0ZQ==", "quality": "original"}
+    else:
+        read = api._history.conversations if operation == "conversations" else api._history.messages
+
+    def read_and_change_access(*_args, **_kwargs):
+        if change == "expired":
+            clock.advance(3601)
+        elif change == "logged_out":
+            view.runtime = RuntimeSnapshot(True, True, "")
+        else:
+            view.runtime = RuntimeSnapshot(True, True, "wxid_other")
+        return read.return_value
+
+    read.side_effect = read_and_change_access
+    if operation == "conversations":
+        result = api.get_conversations({"kind": "private", "account_id": "wxid_customer"})
+    elif operation == "image":
+        result = api.get_message_image("friend", 1, 0, "wxid_customer")
+    else:
+        result = api.get_messages("friend", {"paged": operation == "messages", "account_id": "wxid_customer"})
+
+    read.assert_called_once()
+    assert result["ok"] is False
+    assert "data" not in result
+    assert "local history" not in str(result)
+    assert "data:image/png" not in str(result)
+
+
+@pytest.mark.parametrize("change", ["none", "expired", "logged_out", "wrong_account"])
+def test_export_rechecks_authorization_and_login_after_dialog(setup, monkeypatch, tmp_path, change):
+    client, _, clock, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    target = tmp_path / "history.csv"
+
     def choose_file(*_args, **_kwargs):
-        view.runtime = RuntimeSnapshot(True, True, "wxid_other", True, True, True, True)
-        return [str(tmp_path / "history.csv")]
-    api._window = SimpleNamespace(create_file_dialog=choose_file)
-    api._history.export = lambda *_args, **_kwargs: pytest.fail("export crossed account boundary")
+        if change == "expired":
+            clock.advance(3601)
+        elif change == "logged_out":
+            view.runtime = RuntimeSnapshot(True, True, "")
+        elif change == "wrong_account":
+            view.runtime = RuntimeSnapshot(True, True, "wxid_other")
+        return [str(target)]
+
+    api._window.create_file_dialog.side_effect = choose_file
+    api._history.export.side_effect = None
+    api._history.export.return_value = target
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
     result = api.export_history("csv", "wxid_customer")
-    assert result["ok"] and result["data"] == {"cancelled": True, "account_changed": True}
-    assert queries == []
+    assert result["ok"]
+    if change == "none":
+        assert result["data"] == {"path": str(target)}
+        api._history.export.assert_called_once_with(
+            str(target), format="csv", account_id="wxid_customer", validate_access=ANY,
+        )
+    else:
+        assert result["data"] == {"cancelled": True, "account_changed": True}
+        api._history.export.assert_not_called()
 
 
-@pytest.mark.parametrize("port_error", [False, True])
-def test_unowned_bridge_or_unknown_port_state_cannot_enable_offline_history(setup, monkeypatch, port_error):
-    api, view, queries = offline_api(setup)
-    # The health endpoint is unavailable while the bridge still listens.
-    monkeypatch.setattr(runtime_status, "port_accepting", lambda _host, port: port == 5000)
-    monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_kw: runtime_status.BridgeHealth())
-    view.runtime = runtime_status.runtime_snapshot()
-    assert not view.runtime.connection_ready and not view.can_stop
-    monkeypatch.setattr(chat_api, "installation_services_stopped", launcher.installation_services_stopped)
-    monkeypatch.setattr(launcher, "build_service_specs", lambda _root: (
-        SimpleNamespace(argv=("python.exe",), ready_host="127.0.0.1", ready_port=5000),))
-    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_kwargs: iter(()))
-    def probe_port(_host, _port, *, timeout_seconds, strict):
-        assert timeout_seconds == 3
-        assert strict
-        if port_error:
-            raise OSError("port state unavailable")
-        return True
-    monkeypatch.setattr(launcher, "port_accepting", probe_port)
-    assert not api.get_conversations({})["ok"]
-    assert "history_account" not in api.get_status()["data"]
-    assert queries == []
+@pytest.mark.parametrize("operation", ["conversation", "date", "export"])
+@pytest.mark.parametrize("change", ["expired", "logged_out", "wrong_account", "unknown_account"])
+def test_history_mutations_revalidate_after_sync_before_touching_records(
+    setup, monkeypatch, tmp_path, operation, change,
+):
+    client, _, clock, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    history = _dated_history(client.root, "wxid_customer")
+    api._history = history
+    sync = history.sync
+
+    def sync_then_change_access(**kwargs):
+        result = sync(**kwargs)
+        if change == "expired":
+            clock.advance(3601)
+        elif change == "logged_out":
+            view.runtime = RuntimeSnapshot(True, True, "")
+        elif change == "wrong_account":
+            view.runtime = RuntimeSnapshot(True, True, "wxid_other")
+        else:
+            view.runtime = RuntimeSnapshot(True, True, "wxid_customer", account_status_available=False)
+        return result
+
+    monkeypatch.setattr(history, "sync", sync_then_change_access)
+    target = tmp_path / "existing.csv"
+    target.write_text("preserve existing file", encoding="utf-8")
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    if operation == "conversation":
+        result = api.delete_conversation("456@chatroom", "wxid_customer")
+    elif operation == "date":
+        result = api.delete_history_before("2026-10-12", "wxid_customer")
+    else:
+        result = api.export_history("csv", "wxid_customer")
+    assert result["ok"] is False
+    assert "data" not in result
+    assert target.read_text(encoding="utf-8") == "preserve existing file"
+    with sqlite3.connect(history.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 5
+    with sqlite3.connect(history.bridge_source) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 5
 
 
-def test_invalid_cache_or_unverified_live_bridge_never_uses_offline_identity(setup):
-    api, view, queries = offline_api(setup)
-    view.runtime = RuntimeSnapshot(False, True, "", True, False, False, False)
-    assert not api.get_conversations({})["ok"]
-    view.runtime = RuntimeSnapshot(False, False, "", False, False, False, False)
-    setup[0].cache.path.write_text('{"protected":"tampered"}')
-    assert not api.get_conversations({})["ok"]
-    assert "history_account" not in api.get_status()["data"]
-    assert queries == []
+@pytest.mark.parametrize("operation", ["conversations", "messages", "conversation", "date", "export"])
+def test_history_database_errors_use_the_existing_api_error_response(setup, monkeypatch, tmp_path, operation):
+    client, _, _, _ = setup
+    running(client)
+    api, _ = history_api(client.root, client)
+    method = {"conversation": "delete_conversation", "date": "delete_before"}.get(operation, operation)
+    getattr(api._history, method).side_effect = sqlite3.OperationalError("database is locked")
+    target = tmp_path / "history.csv"
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    if operation == "conversations":
+        result = api.get_conversations({"kind": "private", "account_id": "wxid_customer"})
+    elif operation == "messages":
+        result = api.get_messages("friend", {"paged": True, "account_id": "wxid_customer"})
+    elif operation == "conversation":
+        result = api.delete_conversation("friend", "wxid_customer")
+    elif operation == "date":
+        result = api.delete_history_before("2026-10-12", "wxid_customer")
+    else:
+        result = api.export_history("csv", "wxid_customer")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15007"
+    assert "data" not in result
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("format", ["csv", "json"])
+def test_export_rechecks_access_after_formatting_before_overwriting_file(setup, monkeypatch, tmp_path, format):
+    client, _, _, _ = setup
+    running(client)
+    api, view = history_api(client.root, client)
+    api._history = _dated_history(client.root, "wxid_customer")
+    target = tmp_path / f"existing.{format}"
+    target.write_text("existing file", encoding="utf-8")
+    api._window.create_file_dialog.side_effect = lambda *_args, **_kwargs: [str(target)]
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(SAVE_DIALOG=1))
+    display = chat_history._display_content
+
+    def format_and_logout(*args, **kwargs):
+        result = display(*args, **kwargs)
+        view.runtime = RuntimeSnapshot(True, True, "")
+        return result
+
+    monkeypatch.setattr(chat_history, "_display_content", format_and_logout)
+    result = api.export_history(format, "wxid_customer")
+    assert result["ok"] is False
+    assert "data" not in result
+    assert target.read_text(encoding="utf-8") == "existing file"

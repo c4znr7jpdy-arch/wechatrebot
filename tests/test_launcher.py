@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from wechatrebot_manager.launcher import (
     ProcessSupervisor,
     ServiceLaunchError,
     ServiceStopError,
+    ServiceStartCancelled,
     _normalized_executable,
     build_service_specs,
 )
@@ -164,6 +166,76 @@ def test_supervisor_uses_ordered_readiness_and_reverse_shutdown(
     assert events[-2:] == ["stop:new-hook-bridge", "stop:astrbot"]
 
 
+def test_default_readiness_cancellation_returns_owned_services_to_start_worker(tmp_path, monkeypatch):
+    _layout(tmp_path)
+    cancel, waiting = threading.Event(), threading.Event()
+    events, failures = [], []
+    supervisor = ProcessSupervisor(
+        build_service_specs(tmp_path), start_cancel_event=cancel,
+        popen_factory=lambda argv, **_: _FakeProcess(argv[-1], events),
+    )
+
+    def probe(*_args):
+        if supervisor.running:
+            waiting.set()
+        return False
+
+    def start():
+        try:
+            supervisor.start()
+        except Exception as exc:
+            failures.append(exc)
+
+    monkeypatch.setattr(launcher, "port_accepting", probe)
+    worker = threading.Thread(target=start)
+    worker.start()
+    try:
+        assert waiting.wait(2)
+        cancel.set()
+        worker.join(2)
+        assert not worker.is_alive()
+        assert len(failures) == 1 and isinstance(failures[0], ServiceStartCancelled)
+        # No second thread touches the handles; the action worker can now run
+        # its normal/force stop and preserve ownership if a process survives.
+        assert len(supervisor.running) == 2
+        assert all(not item.log_handle.closed for item in supervisor.running)
+        assert not events
+    finally:
+        cancel.set()
+        worker.join(2)
+        supervisor.stop(timeout_seconds=0)
+
+
+@pytest.mark.parametrize("boundary", ["starting", "custom_readiness"])
+def test_start_cancellation_checks_spawn_and_custom_waiter_boundaries(tmp_path, monkeypatch, boundary):
+    _layout(tmp_path)
+    cancel = threading.Event()
+    events = []
+
+    def progress(event, _spec):
+        if boundary == event:
+            cancel.set()
+
+    def ready(_spec, _process):
+        if boundary == "custom_readiness":
+            cancel.set()
+        return False
+
+    monkeypatch.setattr(launcher, "port_accepting", lambda *_: False)
+    supervisor = ProcessSupervisor(
+        build_service_specs(tmp_path), start_cancel_event=cancel,
+        readiness_waiter=ready, progress_callback=progress,
+        popen_factory=lambda argv, **_: _FakeProcess(argv[-1], events),
+    )
+    try:
+        with pytest.raises(ServiceStartCancelled):
+            supervisor.start()
+        assert len(supervisor.running) == (0 if boundary == "starting" else 2)
+        assert not events
+    finally:
+        supervisor.stop(timeout_seconds=0)
+
+
 def test_supervisor_reports_a_service_that_survives_all_stop_retries(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -232,7 +304,7 @@ def test_supervisor_force_stop_kills_services_in_reverse_order(
     assert supervisor.running == []
 
 
-def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path, monkeypatch):
+def test_confirmed_update_closes_only_captured_wechat_and_this_robot_runtime(tmp_path, monkeypatch):
     _layout(tmp_path)
     processes = {
         987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
@@ -242,10 +314,12 @@ def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path
     }
     calls = []
 
+    target = (987652, processes[987652])
+
     def snapshot(*, executable_names, strict):
-        assert executable_names == frozenset({"weixin.exe", "wechat.exe", "python.exe"})
+        assert executable_names == frozenset({"python.exe"})
         assert strict is True
-        return tuple(processes)
+        return tuple(pid for pid, identity in processes.items() if Path(identity.executable).name == "python.exe")
 
     def terminate(pid, *, expected_creation_time):
         assert expected_creation_time == processes[pid].creation_time
@@ -258,9 +332,87 @@ def test_confirmed_update_closes_all_wechat_but_only_this_robot_runtime(tmp_path
     monkeypatch.setattr(launcher, "process_identity", processes.get)
     monkeypatch.setattr(launcher, "installation_services_stopped", lambda root: True)
     monkeypatch.setattr(launcher.time, "sleep", lambda _: None)
-    launcher.force_stop_update_processes(tmp_path)
-    assert calls == [987651, 987652, 987653]
-    assert list(processes) == [987654]
+    launcher.force_stop_update_processes(tmp_path, wechat_process=target)
+    assert calls == [987652, 987653]
+    assert list(processes) == [987651, 987654]
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_capture_update_wechat_uses_exact_installation_hook_before_shutdown(tmp_path, monkeypatch, required):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
+    hook = tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
+    processes = {
+        987651: ProcessIdentity(str(tmp_path / "personal/WeChat.exe"), 101),
+        987652: ProcessIdentity(str(tmp_path / "Weixin.exe"), 102),
+        987653: ProcessIdentity(str(tmp_path / "elsewhere/Weixin.exe"), 103),
+    }
+    modules = {987651: (), 987652: (hook,), 987653: (tmp_path / "other" / hook.name,)}
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: tuple(processes))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: modules[pid])
+    monkeypatch.setattr(launcher, "process_identity", processes.get)
+    assert launcher.capture_update_wechat_process(tmp_path, required=required) == (987652, processes[987652])
+
+
+@pytest.mark.parametrize("failure", ["multiple", "missing", "modules", "identity", "enumeration"])
+def test_capture_update_wechat_refuses_ambiguous_or_unreadable_ownership(tmp_path, monkeypatch, failure):
+    hook = tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"
+    identity = ProcessIdentity(str(tmp_path / "Weixin.exe"), 101)
+
+    def snapshot(**_):
+        if failure == "enumeration":
+            raise OSError("incomplete process list")
+        return (987651, 987652) if failure == "multiple" else (987651,)
+
+    def modules(_pid, *, strict):
+        assert strict is True
+        if failure == "modules":
+            raise OSError("incomplete module list")
+        return () if failure == "missing" else (hook,)
+
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", snapshot)
+    monkeypatch.setattr(uninstaller, "_process_module_paths", modules)
+    monkeypatch.setattr(launcher, "process_identity", lambda _: None if failure == "identity" else identity)
+    with pytest.raises(ServiceStopError, match="微信") as error:
+        launcher.capture_update_wechat_process(tmp_path, required=True)
+    assert error.value.service_name == "wechat"
+
+
+def test_capture_update_without_robot_wechat_keeps_personal_wechat(tmp_path, monkeypatch):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **_: (987651,))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: ())
+    monkeypatch.setattr(launcher, "process_identity", lambda _: ProcessIdentity("personal/WeChat.exe", 101))
+    assert launcher.capture_update_wechat_process(tmp_path) is None
+
+
+@pytest.mark.parametrize("phase", ["capture", "stop", "terminate"])
+def test_confirmed_update_never_closes_a_reused_wechat_pid(tmp_path, monkeypatch, phase):
+    monkeypatch.setattr("wechatrebot_manager.windows_file_holders.file_holders", lambda files: ())
+    _layout(tmp_path)
+    original = ProcessIdentity(str(tmp_path / "Weixin.exe"), 101)
+    replacement = ProcessIdentity(original.executable, 102)
+    identities = iter((original, replacement)) if phase == "capture" else iter(
+        (original, replacement) if phase == "terminate" else (replacement,)
+    )
+    calls = []
+    monkeypatch.setattr(launcher, "process_identity", lambda _: next(identities))
+    monkeypatch.setattr(uninstaller, "_process_module_paths", lambda pid, *, strict: (
+        tmp_path / "app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll",
+    ))
+    monkeypatch.setattr(uninstaller, "_iter_windows_process_ids", lambda **kw: (987651,) if phase == "capture" else ())
+    monkeypatch.setattr(launcher, "installation_services_stopped", lambda _: True)
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == original.creation_time
+        calls.append(pid)
+        return False  # The real handle-level guard rejects the new creation time.
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+    if phase == "capture":
+        assert launcher.capture_update_wechat_process(tmp_path) is None
+    else:
+        launcher.force_stop_update_processes(tmp_path, wechat_process=(987651, original))
+    assert calls == ([987651] if phase == "terminate" else [])
 
 
 @pytest.mark.parametrize("query_error", [False, True])
@@ -297,7 +449,7 @@ def test_confirmed_update_blocks_on_failed_termination(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "process_identity", lambda _pid: identity)
     monkeypatch.setattr(uninstaller, "_terminate_windows_process", lambda *a, **kw: False)
     with pytest.raises(ServiceStopError) as error:
-        launcher.force_stop_update_processes(tmp_path)
+        launcher.force_stop_update_processes(tmp_path, wechat_process=(987651, identity))
     assert error.value.service_name == "wechat"
 
 
@@ -487,6 +639,50 @@ def test_supervisor_persists_and_readopts_owned_processes(
     getattr(adopted, stop_method)()
     assert not state_path.exists()
     assert terminated == [102, 101]
+
+
+@pytest.mark.parametrize("ready_ports", [set(), {6200}])
+def test_adoption_keeps_unready_owned_services_available_for_stop(
+    tmp_path: Path, monkeypatch, ready_ports,
+) -> None:
+    _layout(tmp_path)
+    specs = build_service_specs(tmp_path)
+    state_path = tmp_path / "data" / "manager" / "service-state.json"
+    state_path.parent.mkdir(parents=True)
+    identities = {
+        pid: ProcessIdentity(_normalized_executable(spec.argv[0]), pid * 10)
+        for pid, spec in enumerate(specs, 101)
+    }
+    state_path.write_text(json.dumps({
+        "schema_version": 1,
+        "complete": True,
+        "services": [
+            {"name": spec.name, "pid": pid, "executable": identities[pid].executable,
+             "creation_time": identities[pid].creation_time}
+            for pid, spec in enumerate(specs, 101)
+        ],
+    }), encoding="utf-8")
+    supervisor = ProcessSupervisor(
+        specs, state_path=state_path, identity_probe=identities.get,
+        readiness_probe=lambda _host, port: port in ready_ports,
+    )
+    terminated = []
+
+    def terminate(pid, *, expected_creation_time):
+        assert expected_creation_time == identities[pid].creation_time
+        terminated.append(pid)
+        identities.pop(pid)
+        return True
+
+    monkeypatch.setattr(uninstaller, "_terminate_windows_process", terminate)
+
+    assert supervisor.adopt() is True
+    assert supervisor.adoption_complete is False
+    assert [running.process.pid for running in supervisor.running] == [101, 102]
+    assert [entry["pid"] for entry in json.loads(state_path.read_text())["services"]] == [101, 102]
+    supervisor.force_stop()
+    assert terminated == [102, 101]
+    assert not state_path.exists()
 
 
 @pytest.mark.parametrize("method", ["terminate", "kill", "send_signal"])

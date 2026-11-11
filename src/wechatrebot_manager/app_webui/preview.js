@@ -151,7 +151,7 @@ window.createPreviewApi = function (helpers) {
     delete corePreviewTemplateSchema.wake_interaction.items.direct_wake_fast_path;
     const corePreviewDefaults = (schema) => Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, field.type === "object" ? corePreviewDefaults(field.items) : structuredClone(field.default)]));
     let corePreviewConfig = corePreviewDefaults(corePreviewSchema);
-    let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin"};
+    let corePreviewIdentity = {robot_name: "小妹", admin_id: "wxid_admin", admin_ids: ["wxid_admin"]};
     const corePreviewTemplates = [];
     const corePreviewBindings = {};
     let corePreviewRevision = 1;
@@ -236,9 +236,6 @@ window.createPreviewApi = function (helpers) {
       {id: "hunyuan", name: "腾讯混元", api_base: "https://tokenhub.tencentmaas.com/v1", model: "hy3-preview", service_kind: "chat", modalities: ["text", "image", "audio"], description: "腾讯 TokenHub 混元兼容接口；默认填入 hy3-preview。"},
       {id: "gemini_proxy", name: "Gemini", api_base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", service_kind: "chat", modalities: ["text", "image", "audio"], description: "Gemini 官方兼容接口；默认填入 gemini-3.8-flash。"},
       {id: "sub2", name: "Sub2 兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写 Sub2 兼容接口地址和模型名称；按所选服务的实际能力使用。"},
-      {id: "embedding_custom", name: "向量模型（兼容接口）", api_base: "", model: "", service_kind: "embedding", modalities: ["embedding"], description: "新增 Embedding 文本向量模型。"},
-      {id: "image_custom", name: "图片模型（兼容接口）", api_base: "", model: "", service_kind: "image", modalities: ["image"], description: "新增图片生成模型。"},
-      {id: "voice_custom", name: "语音模型（兼容接口）", api_base: "", model: "", service_kind: "voice", modalities: ["audio"], description: "新增语音模型。"},
       {id: "custom", name: "其他兼容服务", api_base: "", model: "", service_kind: "chat", modalities: ["text", "image", "audio"], description: "填写中转站或其他兼容接口地址、模型名称和凭据。"},
     ];
     const previewExperience = {
@@ -274,8 +271,12 @@ window.createPreviewApi = function (helpers) {
         ["baidu_app_builder", "百度 AI Search", "https://cloud.baidu.com/product/ai_search"], ["firecrawl", "Firecrawl", "https://www.firecrawl.dev/"], ["exa", "Exa", "https://exa.ai/"],
       ].map(([id, name, website_url]) => [id, {id, name, website_url, description: id === "tavily" ? "适合通用英文与国际资讯搜索。免费方案每月含 1,000 API credits，实际消耗按请求类型计算。" : "支持联网搜索与网页结果整理。", configured: id === "bocha", key_count: id === "bocha" ? 1 : 0}])),
     };
-    let previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
-    const previewPolicyOverview = (groupId) => ({policy: {...structuredClone(previewGroupPolicy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: previewGroupPolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}});
+    const previewGroupPolicy = {bot_enabled: true, reply_mode: "mention", allowed_features: ["feature-memory", "feature-music", "feature-parser", "feature-twitter", "feature-group-analysis", "feature-commands", "feature-group-notice", "feature-image"], scheduled_enabled: true, quiet_hours: {enabled: true, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-policy-1"};
+    const previewGroupPolicies = new Map();
+    const previewPolicyOverview = (groupId) => {
+      const policy = previewGroupPolicies.get(groupId) || previewGroupPolicy;
+      return {policy: {...structuredClone(policy), account_id: "wxid_demo_account", group_id: groupId, permissions: {group_role: "unknown", can_edit_local_policy: true}}, features: features.map((item) => ({id: item.id, name: item.display_name, allowed: policy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled})), proactive: {total: 2, running: 1, paused: 1, message: "主动聊天由各功能自行配置；定时任务按本群设置执行。"}, permissions: {group_role: "unknown", can_edit_local_policy: true}};
+    };
     let previewPrivatePolicy = {allowed_features: ["feature-memory", "feature-music", "feature-commands"], bot_enabled: true, scheduled_enabled: true, quiet_hours: {enabled: false, start: "22:00", end: "08:00", timezone: "Asia/Shanghai"}, daily_limit: 3, revision: "preview-private-1", configured: false};
     const previewPrivatePolicyOverview = (contactId) => ({policy: {...structuredClone(previewPrivatePolicy), account_id: "wxid_demo_account", contact_id: contactId}, features: features.filter((item) => item.id !== "feature-group-notice").map((item) => ({id: item.id, name: item.display_name, allowed: previewPrivatePolicy.allowed_features.includes(item.id), globally_enabled_by_default: item.enabled}))});
     const previewContacts = [
@@ -374,6 +375,9 @@ window.createPreviewApi = function (helpers) {
     }
     const previewCodes = new Map();
     const redeemedPreviewCodes = new Set();
+    let previewBindingRevision = previewLicense.account ? 2 : 1;
+    let previewRebindUsed = 0;
+    const previewRebindLimit = () => ({monthly: 1, month: 1, yearly: 10, year: 10, trial: 0}[previewLicense.plan] || 0);
     if (licenseDemo) {
       setPreviewRuntime(false);
       if (!["active", "expired", "offline"].includes(previewLicenseState)) status.runtime.wechat_identity = "";
@@ -385,15 +389,15 @@ window.createPreviewApi = function (helpers) {
       const configured = !["disabled", "unconfigured"].includes(previewLicenseState);
       const validLicense = Boolean(previewLicense.license_id) && previewLicense.valid_until > Date.now() / 1000;
       const canConnect = configured && (previewLicenseState === "unactivated" || validLicense);
-      const authorized = validLicense && Boolean(previewLicense.account);
+      const authorized = validLicense;
       const messages = {
         disabled: "此安装尚未启用商业授权，现有功能可按原方式使用。",
         unconfigured: "授权服务尚未配置，请联系软件提供者。",
         unactivated: "连接微信后可激活免费试用；已有激活码可在此查看并确认兑换。",
-        pending: "激活码已兑换，请连接微信并确认实际登录账号。",
+        pending: "订阅已生效，首次启动时确认微信账号。",
         active: "授权已生效，由你确认启动机器人。",
-        paused: "授权有效，自动化已暂停；请手动启动恢复。",
-        expired: "自动化已暂停。可兑换续期码，微信与本机数据保留。",
+        paused: "授权有效，机器人未运行；请手动启动。",
+        expired: "订阅已到期。可兑换续期码，微信与本机数据保留。",
         offline: "暂时无法连接授权服务，现有授权仍在离线有效期内。",
       };
       return {...previewLicense, enabled, configured, state: previewLicenseState, authorized, can_connect: canConnect,
@@ -412,6 +416,14 @@ window.createPreviewApi = function (helpers) {
     };
     const previewLicenseApi = {
       get_license_status: () => ok(licenseSnapshot()),
+      get_license_binding_status: () => {
+        if (!previewLicense.license_id) return licenseError("unactivated", "请先激活订阅后再查看换绑次数。");
+        const limit = previewRebindLimit();
+        const remaining = Math.max(0, limit - previewRebindUsed);
+        return ok({license_id: previewLicense.license_id, account: previewLicense.account, plan: previewLicense.plan,
+          revision: previewBindingRevision, rebind_limit: limit, rebind_used: previewRebindUsed,
+          rebind_remaining: remaining, can_rebind: Boolean(licenseSnapshot().authorized && previewLicense.account && remaining)});
+      },
       get_trial_status: () => status.runtime.wechat_identity ? ok({free_trial: trialSnapshot()})
         : licenseError("account_required", "请先连接微信，再激活免费试用。"),
       activate_free_trial: (expectedAccount) => {
@@ -467,11 +479,27 @@ window.createPreviewApi = function (helpers) {
       connect_license_wechat: () => {
         if (!licenseSnapshot().can_connect) return licenseError("NOT_AUTHORIZED", "请先激活授权。");
         status.runtime.wechat_identity = "wxid_demo_account";
+        status.runtime.connection_ready = true;
         return ok(licenseSnapshot());
       },
       bind_license_account: (expectedAccount) => {
         if (!licenseSnapshot().can_connect || expectedAccount !== status.runtime.wechat_identity) return licenseError("ACCOUNT_CHANGED", "微信账号已变化，请重新确认。");
+        if (previewLicense.account && previewLicense.account !== expectedAccount) return licenseError("account_bound", "请使用自助换绑入口。");
+        if (!previewLicense.account) previewBindingRevision++;
         previewLicense.account = expectedAccount; previewLicenseState = "active";
+        return ok(licenseSnapshot());
+      },
+      rebind_license_account: (newAccount, previousAccount, revision) => {
+        if (status.runtime.engine_ready) return licenseError("robot_running", "请先停止机器人，再更换绑定微信。");
+        if (!newAccount || newAccount !== status.runtime.wechat_identity) return licenseError("account_changed", "微信登录账号已变化，请重新读取。");
+        if (!licenseSnapshot().authorized) return licenseError("subscription_expired", "订阅暂不可用，请先处理授权问题。");
+        const limit = previewRebindLimit();
+        if (!previewLicense.account || !limit) return licenseError("rebind_unavailable", "当前套餐不支持换绑。");
+        if (newAccount === previewLicense.account) return ok(licenseSnapshot());
+        if (previousAccount !== previewLicense.account || revision !== previewBindingRevision) return licenseError("binding_changed", "授权绑定已变化，请重新读取。");
+        if (previewRebindUsed >= limit) return licenseError("rebind_exhausted", "当前套餐的换绑次数已用完。");
+        previewRebindUsed++; previewBindingRevision++;
+        previewLicense.account = newAccount; previewLicense.can_run = false; previewLicenseState = "active";
         return ok(licenseSnapshot());
       },
     };
@@ -504,6 +532,7 @@ window.createPreviewApi = function (helpers) {
       get_status: () => ok(status), check_environment: () => ok(status),
       start_robot: () => {
         if (licenseSnapshot().enabled && !licenseSnapshot().authorized) return licenseError("NOT_AUTHORIZED", "请完成授权后再启动。");
+        if (licenseSnapshot().enabled && (!previewLicense.account || (status.runtime.wechat_identity && status.runtime.wechat_identity !== previewLicense.account))) return licenseError("account_mismatch", "请先确认授权绑定的微信账号。");
         if (licenseSnapshot().enabled) status.runtime.wechat_identity = previewLicense.account;
         previewLicense.can_run = true; setPreviewRuntime(true); return ok({accepted: true});
       },
@@ -518,9 +547,11 @@ window.createPreviewApi = function (helpers) {
         const aliases = String(corePreviewConfig.wake_interaction?.alias || "").split("|").map((item) => item.trim()).filter((item) => item && ![oldName, name, "AI", "助手", "助理"].includes(item));
         corePreviewConfig.wake_interaction.alias = [name, ...aliases].join("|");
         corePreviewConfig.personality.ai_self_identity = String(corePreviewConfig.personality?.ai_self_identity || "").replaceAll(oldName, name).replaceAll("群聊里的熟人型助手", "群聊里的熟人型机器人").replaceAll("群聊助手", "群聊机器人");
-        corePreviewIdentity = {robot_name: name, admin_id: String(identity?.admin_id || "").trim()};
+        const adminIds = [...new Set((Array.isArray(identity?.admin_ids) ? identity.admin_ids : [identity?.admin_id])
+          .map((item) => String(item || "").trim()).filter(Boolean))];
+        corePreviewIdentity = {robot_name: name, admin_id: adminIds[0] || "", admin_ids: adminIds};
         corePreviewRevision += 1;
-        return ok({revision: String(corePreviewRevision), apply_state: "applied", brand: {display_name: name, short_name: name, persona_name: name, welcome_text: `你好，我是${name}。`, admin_id: corePreviewIdentity.admin_id}, message: "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"});
+        return ok({revision: String(corePreviewRevision), apply_state: "applied", brand: {display_name: name, short_name: name, persona_name: name, welcome_text: `你好，我是${name}。`, admin_id: corePreviewIdentity.admin_id, admin_ids: [...adminIds]}, message: "机器人名称与群聊身份已更新；管理员权限及底层初始人格重启机器人后生效。"});
       },
       request_robot_core: (method, endpoint, payload) => ok(corePreviewRequest(method, endpoint, payload)),
       get_feature: (id) => ok(previewFeatureDetail(id)),
@@ -539,14 +570,17 @@ window.createPreviewApi = function (helpers) {
         {user_id: "wxid_demo_02", wechat_id: "lisi_photo", name: "李四", group_nickname: "李四"},
         {user_id: "wxid_demo_03", name: "王五", group_nickname: ""},
       ]}),
-      get_group_policy: (_accountId, groupId) => ok(previewPolicyOverview(groupId)),
+      get_group_policy: (_accountId, groupId, featuresOnly = false) => {
+        const result = previewPolicyOverview(groupId);
+        return ok(featuresOnly ? {policy: result.policy, features: result.features} : result);
+      },
       preview_group_policy: (_accountId, groupId, values) => ok({group_id: groupId, changed_fields: Object.keys(values || {}), impact: ["预览模式只影响当前群的机器人规则。"], will_send_messages: false}),
-      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicy = {...previewGroupPolicy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}; return ok(previewPolicyOverview(groupId).policy, "群聊策略已保存；未向群内发送消息。"); },
+      save_group_policy: (_accountId, groupId, values) => { previewGroupPolicies.set(groupId, {...previewPolicyOverview(groupId).policy, ...structuredClone(values), revision: `preview-policy-${Date.now()}`}); return ok({...previewPolicyOverview(groupId).policy, saved: true, apply_state: "applied"}, "群聊策略已保存；未向群内发送消息。"); },
       get_contacts: () => ok({account_id: "wxid_demo_account", source: "wechat_cache", stale: false, updated_at: new Date().toISOString(), total: previewContacts.length, truncated: false, items: structuredClone(previewContacts), message: "预览数据：正式版本从当前登录微信通讯录读取，刷新不会发送消息。"}),
       get_contact_detail: (contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: "wxid_demo_account", item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_contact_network_profile: (accountId, contactId) => { const item = previewContacts.find((contact) => contact.user_id === contactId); return ok({account_id: accountId, item: structuredClone(item || {}), items: item ? [structuredClone(item)] : [], total: item ? 1 : 0}); },
       get_private_policy: (_accountId, contactId) => ok(previewPrivatePolicyOverview(contactId)),
-      save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok(previewPrivatePolicyOverview(contactId).policy, "联系人可用功能已保存。"); },
+      save_private_policy: (_accountId, contactId, values) => { previewPrivatePolicy = {...previewPrivatePolicy, ...structuredClone(values), configured: true, revision: `preview-private-${Date.now()}`}; return ok({...previewPrivatePolicyOverview(contactId).policy, saved: true, apply_state: "saved"}, "联系人可用功能已保存。"); },
       save_feature: (id, config) => { if (id === "feature-95a906d4b9173155") { corePreviewConfig = structuredClone(config); corePreviewRevision += 1; } else previewSavedConfigs.set(id, structuredClone(config)); return ok({revision: "preview-2", apply_state: "applied", message: "预览：已保存并确认生效，后续请求使用新设置。"}); }, reload_feature: () => ok({reloaded: true, message: "功能已经重新载入。"}), open_feature_center: () => ok({opened: true, message: "高级配置窗口正在打开。"}),
       get_conversations: (filters) => ok(previewConversations(filters)),
       get_group_qrcode: (accountId, groupId) => ok({account_id: accountId, group_id: groupId, image_data_url: ""}),
@@ -649,7 +683,7 @@ window.createPreviewApi = function (helpers) {
       save_theme: (theme) => ok({theme}),
       sync_window_theme: () => ok({applied: false}),
       save_skin: (skin) => ok({skin}),
-      get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
+      get_diagnostics: () => ok({summary: {error_count: 0, warning_count: 1, check_count: 14}}), export_diagnostics: () => ok({file_name: "robot-diagnostics-preview.json", path: "C:\\WeChatReBot\\logs\\robot-diagnostics-preview.json"}, "安全诊断摘要已导出。"),
       open_install_folder: () => ok({opened: true}), open_uninstaller: () => ok({opened: true}),
       check_update: () => ok({enabled: true, current: true, release: null}),
       get_update_status: () => ok(structuredClone(previewUpdateStatus)),

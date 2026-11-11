@@ -62,14 +62,14 @@ def test_source_switch_preserves_providers_and_rejects_other_works(state_module,
 
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
     items = resolver.alternatives(TITLE, sources[0], FINGERPRINT, **HINT)
-    assert len(items) == 7
+    assert len(items) == len(sources) - 1
     assert items[0]["source"] == sources[0]
     assert {item["source"] for item in items} == set(sources) - {"百度云资源"}
     assert all(item["year"] == "2005" and len(item["episodes"]) == 38 for item in items)
-    assert len(calls) == 8
+    assert len(calls) == len(sources)
     assert all(params == {"ac": "detail", "wd": TITLE, "pg": 1} for _, params in calls)
     assert resolver.alternatives(TITLE, sources[0], FINGERPRINT, **HINT) == items
-    assert len(calls) == 8
+    assert len(calls) == len(sources)
 
 
 def test_source_switch_uses_card_metadata_when_original_is_offline(state_module, monkeypatch):
@@ -87,7 +87,7 @@ def test_source_switch_uses_card_metadata_when_original_is_offline(state_module,
 
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
     items = resolver.alternatives(TITLE + " 2005", original, FINGERPRINT, **HINT)
-    assert len(items) == 7
+    assert len(items) == len(resolver.SOURCES) - 1
     assert all(item["source"] != original and item["year"] == "2005" for item in items)
     assert all(call["wd"] == TITLE for call in calls)
 
@@ -105,7 +105,7 @@ def test_source_switch_does_not_guess_between_remakes_without_metadata(state_mod
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
     assert resolver.alternatives(TITLE, original, FINGERPRINT) == []
     items = resolver.alternatives(TITLE, original, FINGERPRINT, **HINT)
-    assert len(items) == 7
+    assert len(items) == len(resolver.SOURCES) - 1
     assert all(item["year"] == "2005" for item in items)
 
 
@@ -150,17 +150,18 @@ def test_source_switch_limits_parallel_requests_and_coalesces_scans(state_module
                 active -= 1
 
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future = executor.submit(resolver.alternatives, TITLE, original, FINGERPRINT, **HINT)
         try:
             assert ready.wait(3)
-            with pytest.raises(OSError, match="busy"):
-                resolver.alternatives(TITLE, original, FINGERPRINT, **HINT)
+            duplicate = executor.submit(resolver.alternatives, TITLE, original, FINGERPRINT, **HINT)
+            assert not duplicate.done()
             assert calls == 4
         finally:
             release.set()
-        assert len(future.result(timeout=3)) == 8
-    assert peak == 4 and calls == 8
+        assert len(future.result(timeout=3)) == len(resolver.SOURCES)
+        assert duplicate.result(timeout=3) == future.result(timeout=3)
+    assert peak == 4 and calls == len(resolver.SOURCES)
 
 
 def test_source_switch_cache_bounds_bytes_entries_and_expiry(state_module, monkeypatch):
@@ -180,10 +181,10 @@ def test_source_switch_cache_bounds_bytes_entries_and_expiry(state_module, monke
     for title in ("作品甲", "作品乙", "作品丙"):
         assert resolver.alternatives(title, original, FINGERPRINT, **HINT)
     assert len(resolver.alternative_cache) == 2
-    assert len(calls) == 24
+    assert len(calls) == len(resolver.SOURCES) * 3
     now[0] += 301
     assert resolver.alternatives("作品丙", original, FINGERPRINT, **HINT)
-    assert len(calls) == 32
+    assert len(calls) == len(resolver.SOURCES) * 4
     assert len(resolver.alternative_cache) == 1
     resolver.alternative_cache_bytes = 100
     assert resolver.alternatives("作品丁", original, FINGERPRINT, **HINT)
@@ -279,13 +280,15 @@ def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(stat
     def catalog_json(_base, **params):
         calls.append(params)
         if params["ac"] == "list":
-            return {"class": [{"type_id": 3, "type_name": "短剧"}]}
+            return {"class": [{"type_id": 3, "type_name": "短剧"}, {"type_id": 4, "type_name": "AI漫剧"}]}
         if params["pg"] == 1:
             return {"pagecount": 100, "list": [_record("只在首页的新剧", category="短剧")]}
         assert params["pg"] == 100
+        category = "AI漫剧" if params["t"] == 4 else "短剧"
+        indices = range(14) if params["t"] == 4 else range(14, 20)
         return {"list": [
-            _record(f"随机作品{index}", category="短剧", count=2) for index in range(20)
-        ] + [_record("随机作品0 2005", category="短剧", count=2)]}
+            _record(f"随机作品{index}", category=category, count=2) for index in indices
+        ] + [_record("随机作品0 2005", category="AI漫剧", count=2)]}
 
     monkeypatch.setattr(module, "_catalog_json", catalog_json)
     first = catalog.get(set())
@@ -301,7 +304,7 @@ def test_recommendations_sample_random_catalog_pages_and_deduplicate_titles(stat
     assert catalog.get(seen) == []
     # Exclusions belong to the request; another viewer can still see every cached work.
     assert len(catalog.get(set())) == 12
-    assert len(calls) == 3
+    assert len(calls) == 5
     for item in first:
         assert store.get(item["selection_token"])["items"][0]["title"] == item["title"]
 
@@ -319,6 +322,7 @@ def test_recommendation_resampling_keeps_shared_cache_bounded(state_module, tmp_
         calls[0] += 1
         return [
             {**module._catalog_item(_record(f"作品{calls[0]}-{number}", category="短剧", count=1), "暴风资源"),
+             "recommendation_kind": "ai" if number < 4 else "live",
              "recommendation_id": f"{calls[0] * 10 + number:016x}"}
             for number in range(5)
         ]

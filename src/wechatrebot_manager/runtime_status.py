@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .launcher import port_accepting
-from .runtime_config import RuntimePorts
+from .runtime_config import RuntimePorts, load_runtime_ports
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,11 +154,19 @@ class RuntimeSnapshot:
         return "idle"
 
 
-def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
+def runtime_snapshot(
+    ports: RuntimePorts | None = None, *, install_root: str | Path | None = None,
+) -> RuntimeSnapshot:
+    if ports is None:
+        ports = load_runtime_ports(install_root) if install_root is not None else RuntimePorts()
+    errors = ports.validate()
+    if errors:
+        raise ValueError("；".join(errors))
     engine = port_accepting("127.0.0.1", ports.astrbot_ws)
     connection = port_accepting("127.0.0.1", ports.bridge_callback)
     health = probe_bridge_health(port=ports.bridge_callback) if connection else BridgeHealth()
-    identity = health.wechat_identity
+    account_status_available = health.service_ready and health.status_available and health.hook_ready
+    identity = health.wechat_identity if account_status_available and health.wechat_logged_in else ""
     # A current bridge explicitly reports whether its status is authoritative.
     # Do not call HOOK profile APIs before login: HOOK 4.1.8.27 may dereference
     # an uninitialised account object and crash the newly opened WeChat process.
@@ -165,6 +174,7 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
     # the status_available capability flag.
     if connection and not identity and health.legacy_profile_available:
         identity = probe_wechat_identity(port=ports.hook_api)
+        account_status_available = bool(identity)
     return RuntimeSnapshot(
         engine,
         connection and health.service_ready,
@@ -172,7 +182,7 @@ def runtime_snapshot(ports: RuntimePorts = RuntimePorts()) -> RuntimeSnapshot:
         hook_ready=health.hook_ready,
         upstream_connected=health.upstream_connected,
         heartbeat_fresh=health.heartbeat_fresh,
-        account_status_available=(health.status_available and health.hook_ready) or bool(identity),
+        account_status_available=account_status_available,
     )
 
 

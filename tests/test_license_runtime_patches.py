@@ -39,9 +39,10 @@ def patched(tmp_path_factory):
         result = subprocess.run(["git", "apply", "--check", "--ignore-space-change", str(patch)], cwd=checkout, capture_output=True, text=True)
         assert result.returncode == 0, f"{patch.name}: {result.stderr}"
         subprocess.run(["git", "apply", "--ignore-space-change", str(patch)], cwd=checkout, check=True, capture_output=True)
-    # The production staging step copies this shared scheduler model unchanged.
-    shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py",
-                 checkout / "hook_41827_astrbot_bridge/src/hook_bridge/task_store.py")
+    # Production staging copies these shared modules from their owning sources.
+    for name in ("task_store.py", "customer_logs.py"):
+        shutil.copy2(ROOT / "src/wechatrebot_manager" / name,
+                     checkout / "hook_41827_astrbot_bridge/src/hook_bridge" / name)
     for source in checkout.rglob("*.py"):
         ast.parse(source.read_text("utf-8"), filename=str(source))
     return checkout

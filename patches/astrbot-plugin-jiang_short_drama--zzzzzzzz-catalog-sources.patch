@@ -1,0 +1,79 @@
+diff --git a/search.py b/search.py
+--- a/search.py
++++ b/search.py
+@@ -178,6 +178,10 @@
+     Source("百度云资源", "https://api.apibdzy.com/api.php/provide/vod/"),
+     Source("金鹰资源", "https://jyzyapi.com/provide/vod/from/jinyingm3u8/at/json"),
+     Source("飘零资源", "https://p2100.net/api.php/provide/vod/"),
++    Source("360资源", "https://360zy.com/api.php/provide/vod/"),
++    Source("无尽资源", "https://api.wujinapi.com/api.php/provide/vod/"),
++    Source("魔都资源", "https://www.mdzyapi.com/api.php/provide/vod/"),
++    Source("新浪资源", "https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/"),
+ )
+ 
+ _MEDIA_COMMAND_RE = re.compile(
+@@ -849,6 +853,7 @@
+         min_fuzzy_score: int = DEFAULT_MIN_FUZZY_SCORE,
+     ) -> None:
+         self.sources = sources
++        self._xinlang_next_request = 0.0
+         self.timeout_seconds = max(2.0, float(timeout_seconds))
+         self.max_concurrent = max(1, min(int(max_concurrent), 8))
+         self.cache_ttl_seconds = max(0, int(cache_ttl_seconds))
+@@ -1670,6 +1675,24 @@
+     def _is_public_http_url(url: str) -> bool:
+         return _safe_public_https_url(url)
+ 
++    async def _wait_catalog_request(self, source: Source) -> None:
++        """Share Xinlang's request interval across this searcher's callers."""
++        if urlsplit(source.url).hostname != "api.xinlangapi.com":
++            return
++        deadline = time.monotonic() + 1.5
++        while True:
++            now = time.monotonic()
++            if now > deadline:
++                raise TimeoutError("catalog source request limit reached")
++            delay = self._xinlang_next_request - now
++            if delay <= 0:
++                # No await between checking and reserving in the robot's event loop.
++                self._xinlang_next_request = now + 1.1
++                return
++            if now + delay > deadline:
++                raise TimeoutError("catalog source request limit reached")
++            await asyncio.sleep(delay)
++
+     async def _search_source_variants(
+         self,
+         session: aiohttp.ClientSession,
+@@ -1684,6 +1707,7 @@
+             return []
+         try:
+             async with semaphore:
++                await self._wait_catalog_request(source)
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "wd": query},
+@@ -1724,6 +1748,7 @@
+             return []
+         try:
+             async with semaphore:
++                await self._wait_catalog_request(source)
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "wd": query},
+@@ -1764,6 +1789,7 @@
+             return source.name, [], 0
+         try:
+             async with semaphore:
++                await self._wait_catalog_request(source)
+                 async with session.get(
+                     source.url,
+                     params={
+@@ -1815,6 +1841,7 @@
+             return []
+         try:
+             async with semaphore:
++                await self._wait_catalog_request(source)
+                 async with session.get(
+                     source.url,
+                     params={"ac": "detail", "pg": page},

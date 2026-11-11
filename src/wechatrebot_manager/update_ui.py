@@ -48,6 +48,8 @@ class UpdateDialog:
             summary,
             text=release.title,
             style="Section.TLabel",
+            wraplength=500,
+            justify="left",
         ).pack(anchor="w")
         version_text = f"当前版本 v{current_version}    新版本 v{release.version}"
         ttk.Label(
@@ -80,7 +82,7 @@ class UpdateDialog:
         )
         notes.pack(fill="both", expand=True)
         lines = release.notes or ("性能与稳定性改进",)
-        notes.insert("1.0", "\n".join(f"• {item}" for item in lines))
+        notes.insert("1.0", "\n".join(lines))
         notes.configure(state="disabled")
 
         self.status_var = tk.StringVar(value="准备就绪")

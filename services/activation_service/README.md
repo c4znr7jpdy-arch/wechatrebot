@@ -95,11 +95,15 @@
 | `redeem` | `{code, preview_id, machine_id?}` | `{lease}`；新试用首次兑换必须提供 `machine_id` |
 | `refresh` | `{license_id}` | `{lease}`，包括过期和撤销状态 |
 | `bind` | `{license_id, account}` | `{lease}`，首次真实微信绑定后账号不再普通更改 |
+| `binding-status` | `{license_id}` | `{license_id, account, plan, revision, rebind_limit, rebind_used, rebind_remaining, can_rebind}`；设备签名鉴权，只读次数，不连接微信、不授予运行权限 |
+| `rebind` | `{license_id, account, expected_account, expected_revision}` | `{lease}`；有效付费授权在额度内原子换绑，保留套餐和截止时间，同目标重试不重复扣次 |
 | `trial-status` | `{account, machine_id}` | `{state, eligible, recoverable, account, valid_until, remaining_seconds}`；只读资格，不占用试用 |
 | `trial-claim` | `{account, machine_id}` | `{lease}`；原子创建或恢复原试用，签名凭证绑定账号与安装公钥 |
 | `GET /v1/contact` | 无，无需设备或激活码 | 当前二维码 record 或 `null`；响应顶层另有 `server_time` |
 
 成功为 `{ok:true,data:{...}}`，失败为 `{ok:false,error:{code,message}}`。`lease` 是 Ed25519 信封，包含当前 `request_nonce`，客户端应核对请求关联、设备、授权编号、版本高水位和截止时间。`account` 为空表示设备已激活但尚未授权任何微信业务。
+
+自助换绑额度由服务端 `rebinding.py` 唯一定义：月卡 1 次、年卡 10 次、试用 0 次。首次绑定不扣额度；`rebindings` 表记录同一授权编号下的累计成功换绑，续费和套餐变更不清零，剩余次数为当前套餐上限减累计已用次数（最少为 0）。历史表与账号、版本、审计在同一写事务中更新；并发不同目标仅允许匹配当前版本的请求成功。新表在服务初始化时兼容创建，保留已有授权和试用历史，签名 lease 的字段和版本保持不变。
 
 `trial-status.state` 为 `eligible`、`active`、`ended`、`used` 或 `paid`。资格响应仅供界面显示，不能授权运行；领取接口必须在写事务中重新检查。`machine_id` 为 64 位小写十六进制摘要，由管理器内部读取物理设备生成，不接受界面任意指定。普通管理器状态轮询只读取本地签名凭证，不联网查询试用资格。新增物理设备历史复用 `trials` 表的 `kind=machine`，无数据库结构升级，不删除既有历史。
 
@@ -109,7 +113,11 @@
 
 常见错误为 `code_unavailable`、`code_expired`、`code_stale`、`preview_required`、`preview_stale`、`trial_used`、`license_unavailable`、`license_revoked`、`active_license_conflict`、`subscription_expired`、`account_bound`、`account_unavailable`。签名/重放错误 HTTP 401；业务冲突 HTTP 409；过大请求 HTTP 413；限流 HTTP 429；服务异常 HTTP 503。客户端不能依据一条未签名错误延长授权或放行。
 
+换绑还可能返回 `rebind_unavailable`（试用或未绑定）、`rebind_exhausted`（次数耗尽）、`binding_changed`（绑定或授权版本已变化）。这些响应不更改账号或扣次。
+
 ## 运行与维护边界
+
+交付 1.0.5 管理器前须先更新服务端以支持 `binding-status`、`rebind`；旧客户端继续使用原签名 lease，不受新字段影响。新版首次启动须展示真实换绑次数，旧服务或网络不可用时不能伪造次数或绕过首次绑定提示。源码和隔离 HTTP 测试不表示线上服务已部署。
 
 部署顺序必须先更新授权服务，再分发新版管理器。新版管理器的激活码预览会附带 `machine_id`；旧服务会拒绝这一额外字段，连付费码预览也不兼容。应先在隔离服务验证新增试用接口与原付费预览、兑换、续期，再更新线上服务并核验协议兼容，最后交付客户端。此处仅说明部署依赖，源码和本地测试完成不代表线上已更新。开发机可用一键入口 `scripts/deploy-activation-service.ps1` 完成线上服务升级、切换前备份、公网验证与失败自动回滚，见[部署记录](../../deploy/activation-service/README.md#服务升级)。
 

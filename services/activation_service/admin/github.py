@@ -16,6 +16,9 @@ from packaging.version import InvalidVersion, Version
 from wechatrebot_manager.updates import (
     MAX_MANIFEST_BYTES, UpdateChannel, UpdateError, fresh_stable_manifest_url, load_update_channel,
 )
+from wechatrebot_manager.update_message import (
+    MAX_MESSAGE_BYTES, UpdateMessageError, message_asset_name, message_asset_url, parse_update_message,
+)
 from .auth import TOKEN_FILE, private_json, read_private_json
 
 _PUBLIC_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
@@ -183,34 +186,49 @@ class GitHubReleases:
         except InvalidVersion:
             raise GitHubError("版本号无效。") from None
         item = await self._api("GET", f"/releases/tags/v{version}")
+        return await self._candidate_manifest(item, version)
+
+    async def _candidate_manifest(self, item: dict, version: str) -> tuple[bytes, object]:
         if not isinstance(item, dict) or item.get("draft") or item.get("prerelease") or item.get("tag_name") != f"v{version}":
             raise GitHubError("只能选择已经公开发布的正式版本。")
         name = f"stable-{version}.json"
-        if not any(asset.get("name") == name for asset in item.get("assets", [])):
+        assets = item.get("assets", [])
+        if not isinstance(assets, list) or not any(isinstance(asset, dict) and asset.get("name") == name for asset in assets):
             raise GitHubError("该版本缺少签名清单。")
         raw = await self._download(f"https://github.com/{self.repo}/releases/download/v{version}/{name}", maximum=MAX_MANIFEST_BYTES)
         _, release = self._manifest(raw, version)
         return raw, release
 
     async def listing(self) -> list[dict]:
+        """List metadata only; selecting a candidate verifies its current signed manifest."""
         values = await self._api("GET", "/releases?per_page=100")
         if not isinstance(values, list):
             raise GitHubError("GitHub 发布列表格式无效。")
-        result = []
+        results = []
         for item in values:
-            tag = item.get("tag_name", "")
-            if not tag.startswith("v") or item.get("draft") or item.get("prerelease"):
+            if not isinstance(item, dict):
                 continue
-            entry = {"version": tag[1:], "published_at": item.get("published_at", ""),
-                     "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)} for a in item.get("assets", [])],
-                     "verified": False, "error": ""}
+            tag = item.get("tag_name", "")
+            if not isinstance(tag, str) or not tag.startswith("v") or item.get("draft") or item.get("prerelease"):
+                continue
+            assets = item.get("assets", [])
+            result = {"version": tag[1:], "published_at": item.get("published_at", ""),
+                      "assets": [{"name": a.get("name", ""), "size": a.get("size", 0)}
+                                 for a in assets if isinstance(a, dict)] if isinstance(assets, list) else [],
+                      "verified": False, "available": False, "error": ""}
             try:
-                await self.candidate(tag[1:])
-                entry["verified"] = True
+                version = str(Version(tag[1:]))
+                if tag != f"v{version}":
+                    raise GitHubError("版本标签格式无效。")
+                if not any(asset["name"] == f"stable-{version}.json" for asset in result["assets"]):
+                    raise GitHubError("该版本缺少签名清单。")
+                result["available"] = True
+            except InvalidVersion:
+                result["error"] = "版本号无效。"
             except GitHubError as exc:
-                entry["error"] = str(exc)
-            result.append(entry)
-        return result
+                result["error"] = str(exc)
+            results.append(result)
+        return results
 
     async def _readback(self, expected: bytes, *, attempts: int = 10) -> None:
         failure = None
@@ -242,7 +260,38 @@ class GitHubReleases:
             await self._api("DELETE", f"/releases/assets/{new_id}")
         (self.directory / _RECOVERY_FILE).unlink(missing_ok=True)
 
-    async def switch(self, version: str, expected_digest: str) -> dict:
+    async def _publish_message(self, version: str, manifest_digest: str, message: dict) -> None:
+        """An immutable message is bound to one exact, already verified signed manifest."""
+        try:
+            message = parse_update_message(message, version=version, manifest_sha256=manifest_digest)
+        except UpdateMessageError as exc:
+            raise GitHubError(str(exc)) from None
+        raw = json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        digest, name = hashlib.sha256(raw).hexdigest(), message_asset_name(manifest_digest)
+        item = await self._api("GET", f"/releases/tags/v{version}")
+        if (not isinstance(item, dict) or item.get("draft") or item.get("prerelease")
+                or item.get("tag_name") != f"v{version}"):
+            raise GitHubError("候选版本状态已变化，尚未发布更新说明。请刷新后重试。")
+        listed = item.get("assets", [])
+        if not isinstance(listed, list) or type(item.get("id")) is not int:
+            raise GitHubError("候选资产信息无效，稳定版本未改变。请刷新后重试。")
+        assets = [asset for asset in listed if isinstance(asset, dict) and asset.get("name") == name]
+        if len(assets) > 1:
+            raise GitHubError("候选更新说明资产重复，稳定版本未改变。请先核对候选。")
+        if assets:
+            uploaded = assets[0]
+        else:
+            uploaded = await self._api("POST", f"/releases/{int(item['id'])}/assets?name={name}", content=raw)
+        if (not isinstance(uploaded, dict) or uploaded.get("size") != len(raw)
+                or not isinstance(uploaded.get("digest"), str)
+                or uploaded["digest"].lower() != "sha256:" + digest):
+            raise GitHubError("当前候选文案已锁定或上传校验未通过，稳定版本未改变。请恢复同一文案重试，或准备新候选。")
+        public = await self._download(message_asset_url(self.channel, version, manifest_digest), maximum=MAX_MESSAGE_BYTES)
+        if public != raw:
+            raise GitHubError("更新说明未通过公网读回校验，稳定版本未改变。请保留同一文案重试。")
+
+    async def switch(self, version: str, expected_digest: str, *, message: dict | None = None,
+                     expected_candidate_digest: str = "") -> dict:
         """One operator at a time; retain old asset until public verification succeeds."""
         async with self.lock:
             recovery_path = self.directory / _RECOVERY_FILE
@@ -250,6 +299,18 @@ class GitHubReleases:
                 # An interrupted previous operation is recovered before any new promotion.
                 await self._restore(read_private_json(recovery_path, maximum=2 * MAX_MANIFEST_BYTES + 4096))
             raw, release = await self.candidate(version)
+            candidate_digest = hashlib.sha256(raw).hexdigest()
+            if expected_candidate_digest and candidate_digest != expected_candidate_digest:
+                raise GitHubError("候选签名清单已变化，请刷新后重新预览确认。")
+            if message is not None:
+                from .upload import _source_ready, _tag_matches
+
+                commit = await self._api("GET", f"/commits/v{release.version}")
+                target = commit.get("sha", "") if isinstance(commit, dict) else ""
+                if not re.fullmatch(r"[0-9a-f]{40}", target):
+                    raise GitHubError("候选版本标签缺少有效源提交，稳定版本未改变。")
+                await _source_ready(self, target)
+                await _tag_matches(self, release.version, target, missing_ok=False)
             for package in self.manifest_packages(json.loads(raw)):
                 await self._download(package.package_url, maximum=package.package_size,
                                      expected_size=package.package_size, expected_sha256=package.package_sha256)
@@ -258,6 +319,9 @@ class GitHubReleases:
             if hashlib.sha256(previous).hexdigest() != expected_digest:
                 raise GitHubError("稳定版本已变化，请刷新发布页后重试。")
             if previous == raw:
+                if message is not None:
+                    await _tag_matches(self, release.version, target, missing_ok=False)
+                    await self._publish_message(release.version, candidate_digest, message)
                 return {"version": release.version, "previous_version": old_release.version, "changed": False}
             stable = await self._api("GET", "/releases/tags/stable")
             if stable.get("draft") or stable.get("prerelease"):
@@ -267,6 +331,9 @@ class GitHubReleases:
                 raise GitHubError("stable Release 缺少当前清单。")
             if old.get("digest") != "sha256:" + hashlib.sha256(previous).hexdigest():
                 raise GitHubError("GitHub 资产摘要与公网稳定清单不符，请等待缓存刷新后重试。")
+            if message is not None:
+                await _tag_matches(self, release.version, target, missing_ok=False)
+                await self._publish_message(release.version, candidate_digest, message)
             staged_name = f"stable-pending-{secrets.token_hex(12)}.json"
             new = await self._api("POST", f"/releases/{int(stable['id'])}/assets?name={staged_name}", content=raw)
             if new.get("digest") != "sha256:" + hashlib.sha256(raw).hexdigest() or new.get("size") != len(raw):

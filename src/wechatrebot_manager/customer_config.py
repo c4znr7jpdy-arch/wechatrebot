@@ -24,7 +24,7 @@ from .provider import (
     thinking_mode_matches,
     with_thinking_mode,
 )
-from .runtime_config import normalize_admin_id, write_runtime_configs
+from .runtime_config import normalize_admin_id, normalize_admin_ids, write_runtime_configs
 
 
 _UI_PREFERENCES_LOCK = threading.Lock()
@@ -39,6 +39,11 @@ WEB_SEARCH_PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
     ("exa", "Exa", "适合语义检索与研究型搜索。", "https://exa.ai/"),
 )
 _WEB_SEARCH_PROVIDER_KEYS = {item[0] for item in WEB_SEARCH_PROVIDERS}
+# Keep the existing manager/API ID while using the pinned core's tool ID.
+_WEB_SEARCH_CORE_PROVIDER_IDS = {"baidu_app_builder": "baidu_ai_search"}
+_WEB_SEARCH_PROVIDER_ALIASES = {
+    core_id: public_id for public_id, core_id in _WEB_SEARCH_CORE_PROVIDER_IDS.items()
+}
 _WEB_SEARCH_KEY_FIELDS = {
     "tavily": "websearch_tavily_key",
     "bocha": "websearch_bocha_key",
@@ -77,6 +82,7 @@ def web_search_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(settings, dict):
         settings = {}
     provider = str(settings.get("websearch_provider") or "tavily").strip().casefold()
+    provider = _WEB_SEARCH_PROVIDER_ALIASES.get(provider, provider)
     if provider not in _WEB_SEARCH_PROVIDER_KEYS:
         provider = "tavily"
     return {
@@ -104,7 +110,7 @@ def apply_web_search_values(
     if not isinstance(link_enabled, bool):
         raise ValueError("搜索结果链接开关格式无效。")
     settings["web_search"] = enabled
-    settings["websearch_provider"] = provider
+    settings["websearch_provider"] = _WEB_SEARCH_CORE_PROVIDER_IDS.get(provider, provider)
     settings["web_search_link"] = link_enabled
 
     key_value = values.get("key")
@@ -147,7 +153,11 @@ def _object(path: Path) -> dict[str, Any]:
 
 
 def load_ui_theme(root: str | Path) -> str:
-    preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    try:
+        preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    except (OSError, ValueError):
+        # Optional appearance settings must not prevent the recovery UI opening.
+        return ""
     theme = preferences.get("theme")
     return theme if theme in ("light", "dark") else ""
 
@@ -217,6 +227,7 @@ def delete_provider_thinking_preference(root: str | Path, provider_id: str) -> N
 class RobotSettings:
     profile: BrandProfile
     admin_id: str = ""
+    admin_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,7 +382,7 @@ def replace_provider_references(
 
 
 def load_robot_settings(root: str | Path) -> RobotSettings:
-    install, _, engine_path = _paths(root)
+    install, _, _ = _paths(root)
     brand_payload = _object(install / "config" / "brand.json")
     profile = BrandProfile(
         display_name=str(brand_payload.get("display_name", "小妹")),
@@ -407,10 +418,17 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
                 .replace("\u59dc\u5c0f\u59b9", "小妹")
             ),
         )
-    engine = _object(engine_path)
-    admins = engine.get("admins_id")
-    admin_id = str(admins[0]) if isinstance(admins, list) and admins else ""
-    return RobotSettings(profile=profile, admin_id=admin_id)
+    admins = load_robot_admin_ids(root)
+    return RobotSettings(profile=profile, admin_id=admins[0] if admins else "", admin_ids=admins)
+
+
+def load_robot_admin_ids(root: str | Path) -> tuple[str, ...]:
+    """Return the same complete administrator allowlist used by AstrBot."""
+    _, _, engine_path = _paths(root)
+    configured = _object(engine_path).get("admins_id", [])
+    if not isinstance(configured, list):
+        raise ValueError("管理员列表格式无效，请重新保存机器人管理员。")
+    return normalize_admin_ids(configured) or ()
 
 
 def save_robot_settings(
@@ -419,7 +437,13 @@ def save_robot_settings(
     install, manager_path, _ = _paths(root)
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
-    normalized_admin = normalize_admin_id(settings.admin_id) or ""
+    normalized_admins = normalize_admin_ids(settings.admin_ids)
+    if normalized_admins is None:
+        normalized_admin = normalize_admin_id(settings.admin_id) or ""
+        existing = load_robot_admin_ids(install)
+        normalized_admins = existing if existing and normalized_admin == existing[0] else (
+            (normalized_admin,) if normalized_admin else ()
+        )
     from .brand import install_brand_profile
 
     profile = install_brand_profile(install, settings.profile)
@@ -429,15 +453,24 @@ def save_robot_settings(
         wechat_version=str(manager.get("wechat_version") or "") or None,
         brand_profile=profile,
         apply_brand_persona=apply_reply_identity,
-        admin_id=normalized_admin,
+        admin_ids=normalized_admins,
     )
-    return RobotSettings(profile=profile, admin_id=normalized_admin)
+    return RobotSettings(profile=profile, admin_id=normalized_admins[0] if normalized_admins else "", admin_ids=normalized_admins)
 
 
-def load_provider_services(root: str | Path) -> tuple[ProviderService, ...]:
+def load_provider_services(
+    root: str | Path, *, allow_unreadable_preferences: bool = False,
+) -> tuple[ProviderService, ...]:
     install, _, engine_path = _paths(root)
     engine = _object(engine_path)
-    thinking_preferences = _provider_thinking_preferences(root)
+    try:
+        thinking_preferences = _provider_thinking_preferences(root)
+    except (OSError, ValueError):
+        if not allow_unreadable_preferences:
+            raise
+        # Bootstrap must still display the lifecycle's configuration error.
+        # Model mutations keep the strict default and cannot overwrite damage.
+        thinking_preferences = {}
     settings = engine.get("provider_settings")
     default_id = (
         str(settings.get("default_provider_id", ""))
@@ -823,6 +856,7 @@ __all__ = [
     "replace_provider_references",
     "replace_provider_value",
     "load_robot_settings",
+    "load_robot_admin_ids",
     "save_provider_profile",
     "save_provider_thinking_preference",
     "save_robot_settings",

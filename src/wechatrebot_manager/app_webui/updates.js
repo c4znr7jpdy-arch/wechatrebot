@@ -6,20 +6,30 @@ window.createUpdateNotifications = function (helpers) {
     api,
     confirmAction,
     formatBytes,
+    managerCloseState,
     renderStatus,
     reportError,
     state,
+    syncShellInteractivity,
     toast,
   } = helpers;
 
   let promptedReleaseId = "";
   let promptedReadyToken = "";
+  let dismissedReadyToken = "";
   let pendingPrompt = null;
   let promptTimer = 0;
   let latestStatus = null;
   let statusRequest = null;
   let downloadStarting = false;
   let statusRevision = 0;
+
+  function renderVersionStatus(mode, label) {
+    $("#versionStatusDot").className = `health-dot${mode ? ` ${mode}` : ""}`;
+    const version = $("#versionStatus");
+    version.title = label;
+    version.setAttribute("aria-label", `${$("#versionText").textContent} · ${label}`);
+  }
 
   function isReadyForRelease(release, progress) {
     return progress?.state === "ready" && Boolean(progress.confirmation_token)
@@ -31,18 +41,23 @@ window.createUpdateNotifications = function (helpers) {
   }
 
   function renderUpdateCard(release, progress) {
+    state.updateInstalling = Boolean(progress?.state === "restarting" || progress?.close_pending
+      || (progress?.state === "running" && ["prepare", "stopping_services", "launching", "install"].includes(progress.phase)));
+    syncShellInteractivity();
     const card = $("#updateCard");
     const matching = matchesRelease(release, progress);
-    card.hidden = !matching || !["running", "ready", "failed", "restarting"].includes(progress.state);
+    const ready = isReadyForRelease(release, progress);
+    card.hidden = !matching || !["running", "ready", "failed", "restarting"].includes(progress.state)
+      || (ready && dismissedReadyToken === progress.confirmation_token);
     document.body.classList.toggle("has-update-card", !card.hidden);
     if (card.hidden) return;
-    const ready = isReadyForRelease(release, progress);
     const failed = progress.state === "failed" || (progress.state === "ready" && !ready);
+    const closing = ready && progress.close_pending;
     const percent = Math.min(100, Math.max(0, Number(progress.percent) || 0));
     const indeterminate = ["starting", "stopping_services", "waiting_wechat", "launching"].includes(progress.phase);
-    card.dataset.state = failed ? "failed" : progress.state;
-    $("#updateCardTitle").textContent = failed ? "更新未完成" : ready ? "更新已准备就绪" : `正在更新 v${release.version}`;
-    $("#updateCardMessage").textContent = failed
+    card.dataset.state = failed || closing ? "failed" : progress.state;
+    $("#updateCardTitle").textContent = closing ? "管理器未能关闭" : failed ? "更新未完成" : ready ? "更新已准备就绪" : `正在更新 v${release.version}`;
+    $("#updateCardMessage").textContent = failed || closing
       ? progress.error?.message || "更新包未完成校验，请重新下载。"
       : ready ? `v${release.version} 已下载并校验，可稍后安装。`
         : progress.message || "正在后台准备更新";
@@ -53,39 +68,14 @@ window.createUpdateNotifications = function (helpers) {
     bar.setAttribute("aria-valuetext", failed ? "更新未完成" : `${progress.message || "更新进度"} ${percent}%`);
     $("#updateCardProgressBar").style.width = `${indeterminate ? 36 : percent}%`;
     const action = $("#updateCardAction");
+    $("#updateCardDismiss").hidden = !ready || closing;
     action.hidden = !ready && !failed;
     action.disabled = downloadStarting;
-    action.textContent = ready ? "立即安装" : "重试下载";
-    $("#updateStatus").textContent = failed ? `更新准备失败 · ${progress.error?.code || "UPD-1003"}`
+    action.textContent = closing ? "再次关闭管理器" : ready ? "立即安装" : "重试下载";
+    $("#updateStatus").textContent = closing ? "更新正在等待管理器退出" : failed ? `更新准备失败 · ${progress.error?.code || "UPD-1003"}`
       : ready ? `v${release.version} 已下载，等待安装`
         : progress.state === "restarting" ? "正在重新启动管理器" : `${progress.message || "后台下载"} · ${percent}%`;
-    $("#checkUpdate").textContent = failed ? "重试更新" : ready ? "安装更新" : "查看更新";
-  }
-
-  async function waitForUpdate(release, targetState) {
-    $("#modalProgress").hidden = false;
-    while (true) {
-      const progress = await api("get_update_status");
-      if (progress.release_id !== release.release_id) {
-        throw new Error("更新包已变更，请取消并重新检查更新。 ");
-      }
-      const percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
-      const bar = $("#modalProgressBar");
-      const indeterminate = ["stopping_services", "waiting_wechat", "launching"].includes(progress.phase);
-      bar.classList.toggle("is-indeterminate", indeterminate);
-      bar.style.width = indeterminate ? "36%" : `${Math.min(100, Math.max(0, percent))}%`;
-      const percentPhases = ["download", "extract", "verify", "prepare", "install"];
-      const phaseSuffix = percentPhases.includes(progress.phase) ? ` · ${percent}%` : "";
-      $("#modalMessage").textContent = `${progress.message || "正在准备更新"}${phaseSuffix}。请保持管理器打开。`;
-      if (progress.state === "failed") {
-        const error = new Error(progress.error?.message || progress.message || "更新未能完成。 ");
-        error.product = progress.error || null;
-        throw error;
-      }
-      if (progress.state === targetState) return progress;
-      if (progress.state === "idle") throw new Error("更新任务已停止，请重试。 ");
-      await new Promise((resolve) => window.setTimeout(resolve, 400));
-    }
+    $("#checkUpdate").textContent = closing ? "继续更新" : failed ? "重试更新" : ready ? "安装更新" : "查看更新";
   }
 
   function queueUpdatePrompt(release, ready = null) {
@@ -147,19 +137,34 @@ window.createUpdateNotifications = function (helpers) {
   }
 
   function showInstallConfirmation(release, ready) {
+    const closing = Boolean(ready.close_pending);
+    dismissedReadyToken = "";
+    renderUpdateCard(release, ready);
     promptedReadyToken = ready.confirmation_token;
     confirmAction({
-      title: `安装 v${release.version}？`,
-      message: "更新包已下载并校验完成。更新会强制关闭机器人程序和所有微信窗口，是否确认？正在处理的消息和微信中未发送的内容可能丢失。安装完成后会自动打开新版管理器。",
-      confirmText: "确认关闭并安装",
-      cancelText: "稍后安装",
+      title: closing ? "再次关闭管理器以继续更新？" : `安装 v${release.version}？`,
+      message: closing ? "上次未能自动关闭管理器，更新程序仍在等待。确认后会再次尝试关闭本窗口，继续同一次更新；无需重新下载。请先保存正在编辑的设置。"
+        : "更新包已下载并校验完成。更新会强制关闭机器人程序及当前连接的微信，是否确认？该微信中正在处理的消息和未发送的内容可能丢失。管理器会关闭并重新打开；请先保存正在编辑的设置。安装完成后会自动打开新版管理器。",
+      confirmText: closing ? "再次关闭管理器" : "确认关闭并安装",
+      cancelText: closing ? "返回管理器" : "稍后安装",
       intent: "danger",
-      pendingText: "正在安装…",
-      pendingMessage: "正在关闭机器人程序和微信，准备安装更新。请保持管理器打开。",
+      pendingText: closing ? "正在关闭管理器…" : "正在安装…",
+      pendingMessage: closing ? "正在再次关闭管理器以继续更新。" : "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
+        // This confirmation is already busy; keep checking other operations.
+        const pending = managerCloseState({ignoreModalBusy: true});
+        if (pending.busy) throw new Error("机器人正在启动、停止或处理其他操作，请稍候；也可选择“稍后安装”，更新包会保留。");
+        if (pending.dirty) throw new Error("有设置尚未保存。请选择“稍后安装”，保存或处理修改后再安装；更新包会保留，无需重新下载。");
         const accepted = await api("install_update", release.version, ready.confirmation_token);
-        if (!accepted?.accepted) throw new Error("更新任务已经在处理中。 ");
-        await waitForUpdate(release, "restarting");
+        if (!accepted?.accepted) throw new Error("机器人或更新操作尚未完成，请稍后再次确认安装；更新包会保留。");
+        // Consent is consumed once accepted; progress reads must never retry it.
+        statusRevision += 1;
+        latestStatus = {...ready, state: closing ? "restarting" : "running",
+          phase: closing ? "restarting" : "prepare", confirmation_token: "", close_pending: false,
+          error: null, message: closing ? "正在再次关闭管理器以继续更新。请保持管理器打开。"
+            : "安装请求已接受，正在确认更新进度。请保持管理器打开。"};
+        renderUpdateCard(release, latestStatus);
+        void pollUpdateStatus();
       },
     });
   }
@@ -168,7 +173,12 @@ window.createUpdateNotifications = function (helpers) {
     const mandatory = Boolean(release.mandatory);
     confirmAction({
       title: mandatory ? `必须更新到 v${release.version}` : `发现新版本 v${release.version}`,
-      message: `${release.title || "新版本已就绪"}${release.notes?.length ? `：${release.notes.join("；")}` : ""}。更新包约 ${formatBytes(release.package_size)}。点击更新后开始下载，下载完成后会请你确认关闭机器人和微信，再安装更新。`,
+      message: [
+        release.title || "新版本已就绪",
+        release.notes?.length ? release.notes.join("\n") : "",
+        `更新包约 ${formatBytes(release.package_size)}。`,
+        "点击更新后开始下载。下载完成后，会再次请你确认关闭机器人及当前连接的微信，再安装更新。",
+      ].filter(Boolean).join("\n\n"),
       confirmText: "立即更新",
       cancelText: mandatory ? "稍后更新" : "稍后提醒",
       intent: "primary",
@@ -186,9 +196,11 @@ window.createUpdateNotifications = function (helpers) {
     button.textContent = "检查中…";
     try {
       if (manual && state.availableUpdate) {
-        const progress = await pollUpdateStatus();
+        const progress = await pollUpdateStatus()
+          || (state.updateInstalling && ["running", "restarting"].includes(latestStatus?.state) ? latestStatus : null);
         if (matchesRelease(state.availableUpdate, progress)) {
           if (progress.state === "running" || progress.state === "restarting") {
+            renderUpdateCard(state.availableUpdate, progress);
             $("#updateCard").focus();
             return;
           }
@@ -204,15 +216,18 @@ window.createUpdateNotifications = function (helpers) {
       state.mandatoryUpdate = Boolean(data.release?.mandatory);
       if (state.status) renderStatus(state.status);
       if (!data.enabled) {
+        renderVersionStatus("", "在线更新未启用");
         renderUpdateCard(null, null);
         $("#updateStatus").textContent = "在线更新未启用";
       } else if (!data.release) {
+        renderVersionStatus("online", "已是最新版本");
         renderUpdateCard(null, null);
         $("#updateStatus").textContent = "已是最新版本";
         promptedReleaseId = "";
         if (manual) toast("当前已经是最新版本。 ");
       } else {
         const release = data.release;
+        renderVersionStatus("warning", `${release.mandatory ? "必须更新至" : "有可用更新"} v${release.version}`);
         $("#updateStatus").textContent = release.mandatory
           ? `必须更新至 v${release.version}`
           : `发现 v${release.version}`;
@@ -235,6 +250,10 @@ window.createUpdateNotifications = function (helpers) {
       $("#updateStatus").textContent = mandatoryUnavailable
         ? "当前版本已停止支持，暂未获取到可安装更新"
         : "检查失败";
+      renderVersionStatus(state.availableUpdate || state.mandatoryUpdate ? "warning" : "",
+        mandatoryUnavailable ? "当前版本已停止支持，暂未获取到可安装更新"
+          : state.availableUpdate ? `有可用更新 v${state.availableUpdate.version}，本次检查失败`
+            : state.mandatoryUpdate ? "当前版本需要更新，本次检查失败" : "更新检查失败");
       if (manual) reportError(error);
     } finally {
       state.updateChecking = false;
@@ -289,6 +308,13 @@ window.createUpdateNotifications = function (helpers) {
       try { await beginUpdateDownload(release); }
       catch (error) { reportError(error); }
     }
+  });
+
+  $("#updateCardDismiss").addEventListener("click", () => {
+    if (!isReadyForRelease(state.availableUpdate, latestStatus)) return;
+    dismissedReadyToken = latestStatus.confirmation_token;
+    renderUpdateCard(state.availableUpdate, latestStatus);
+    toast("更新包已保留，可在“机器人总设置 → 系统与更新”中点击“安装更新”。");
   });
 
   return {

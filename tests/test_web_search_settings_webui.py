@@ -1,0 +1,319 @@
+"""Search-key replacement keeps the user's final intent, without a live robot."""
+import re
+
+import pytest
+from playwright.sync_api import expect
+
+from test_manager_startup import browser, manager_url  # noqa: F401
+from wechatrebot_manager.windows_tray import _BEFORE_UNLOAD_SCRIPT
+
+
+@pytest.mark.parametrize("replace,width", [(False, 1380), (True, 760)])
+def test_search_key_clear_and_replace(browser, manager_url, tmp_path, replace, width):
+    page = browser.new_page(viewport={"width": width, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        page.locator('#webSearchForm [name="enabled"]').check(force=True)
+        page.evaluate("""() => {
+          const save = window.pywebview.api.save_web_search_settings;
+          window.pywebview.api.save_web_search_settings = async values => {
+            window.searchSaveValues = structuredClone(values);
+            return await save(values);
+          };
+        }""")
+        page.locator("#clearWebSearchKey").click()
+        expect(page.locator("#webSearchNote")).to_have_text("当前服务商密钥将在保存时清除。")
+        if replace:
+            page.locator("#webSearchKey").fill("preview-only-replacement")
+            expect(page.locator("#webSearchNote")).to_have_text("新密钥将在保存时替换当前服务商密钥。")
+            page.locator("#revealWebSearchKey").click()
+            expect(page.locator("#webSearchKey")).to_have_attribute("type", "text")
+        page.locator('#webSearchForm button[type="submit"]').click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        assert page.evaluate("window.searchSaveValues.clear_key") is (not replace)
+        assert page.evaluate("Boolean(window.searchSaveValues.key)") is replace
+        expect(page.locator("#webSearchProviderSummary")).to_contain_text("已配置 1 个密钥" if replace else "尚未配置")
+        expect(page.locator("#webSearchKey")).to_have_value("")
+        expect(page.locator("#webSearchKey")).to_have_attribute("type", "password")
+        expect(page.locator("#revealWebSearchKey")).to_have_attribute("aria-pressed", "false")
+        assert page.url == manager_url
+        expect(page).to_have_title(re.compile("机器人总设置"))
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(tmp_path / f"search-key-{replace}.png"), animations="disabled")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("change", ["key", "provider"])
+def test_search_save_preserves_newer_draft(browser, manager_url, tmp_path, change):
+    page = browser.new_page(viewport={"width": 760, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        page.locator('#webSearchForm [name="enabled"]').check(force=True)
+        page.locator("#webSearchKey").fill("preview-only-submitted")
+        page.evaluate("""() => {
+          const save = window.pywebview.api.save_web_search_settings;
+          window.searchSaveCalls = [];
+          window.pywebview.api.save_web_search_settings = async values => {
+            window.searchSaveCalls.push(structuredClone(values));
+            const result = await save(values);
+            if (window.searchSaveCalls.length === 1) return new Promise(resolve => {
+              window.finishPendingSearchSave = () => resolve(result);
+            });
+            return result;
+          };
+        }""")
+        button = page.locator('#webSearchForm button[type="submit"]')
+        button.click()
+        expect(button).to_be_disabled()
+        if change == "provider":
+            options = page.locator("#webSearchProvider option").evaluate_all("items => items.map(item => item.value)")
+            current = page.locator("#webSearchProvider").input_value()
+            page.locator("#webSearchProvider").select_option(next(item for item in options if item != current))
+        provider = page.locator("#webSearchProvider").input_value()
+        page.locator("#webSearchKey").fill("preview-only-newer-draft")
+        page.locator('#webSearchForm [name="link_enabled"]').select_option("true")
+        page.evaluate("window.finishPendingSearchSave()")
+        expect(button).to_be_enabled()
+        expect(page.locator("#webSearchKey")).to_have_value("preview-only-newer-draft")
+        expect(page.locator("#webSearchProvider")).to_have_value(provider)
+        expect(page.locator('#webSearchForm [name="link_enabled"]')).to_have_value("true")
+        expect(page.locator("#webSearchNote")).to_contain_text("之后的修改仍未保存")
+        # Returning to the section must keep the dirty draft instead of reloading it.
+        page.locator('[data-settings-tab="skin"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        expect(page.locator("#webSearchKey")).to_have_value("preview-only-newer-draft")
+        page.screenshot(path=str(tmp_path / f"search-save-{change}.png"), animations="disabled")
+        button.click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        expect(page.locator("#webSearchKey")).to_have_value("")
+        assert page.evaluate("window.searchSaveCalls[1].key") == "preview-only-newer-draft"
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("change", ["enabled", "key", "clear", "provider", "links"])
+def test_search_draft_protects_browser_and_native_exit(browser, manager_url, tmp_path, change):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        expect(page.locator("#webSearchProvider option")).not_to_have_count(0)
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        enabled = page.locator('#webSearchForm [name="enabled"]')
+        if change == "enabled":
+            enabled.set_checked(not enabled.is_checked(), force=True)
+        else:
+            enabled.check(force=True)
+            if change == "key":
+                page.locator("#webSearchKey").fill("preview-only-draft")
+            elif change == "clear":
+                page.locator("#clearWebSearchKey").click()
+            elif change == "provider":
+                page.locator("#webSearchProvider").select_option("tavily")
+            else:
+                page.locator('#webSearchForm [name="link_enabled"]').select_option("true")
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.locator('[data-settings-tab="skin"]').click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.locator('[data-settings-tab="search"]').click()
+        if change == "key":
+            expect(page.locator("#webSearchKey")).to_have_value("preview-only-draft")
+            with page.expect_event("dialog") as pending:
+                page.evaluate("setTimeout(() => location.reload(), 0)")
+            dialog = pending.value
+            assert dialog.type == "beforeunload"
+            dialog.dismiss()
+            expect(page.locator("#webSearchKey")).to_have_value("preview-only-draft")
+        page.locator('#webSearchForm button[type="submit"]').click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        page.screenshot(path=str(tmp_path / f"search-exit-{change}.png"), animations="disabled")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+def test_search_save_in_progress_remains_protected(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="search"]').click()
+        expect(page.locator("#webSearchProvider option")).not_to_have_count(0)
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        page.evaluate("""() => {
+          const save = window.pywebview.api.save_web_search_settings;
+          window.pywebview.api.save_web_search_settings = async values => {
+            const result = await save(values);
+            return new Promise(resolve => { window.finishSearchSave = () => resolve(result); });
+          };
+        }""")
+        button = page.locator('#webSearchForm button[type="submit"]')
+        button.click()
+        expect(button).to_be_disabled()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        page.evaluate("window.finishSearchSave()")
+        expect(button).to_be_enabled()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+    finally:
+        page.close()
+
+
+def _open_search_readback(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    page.goto(manager_url)
+    expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
+    if page.locator("#onboardingRecommended").is_visible():
+        page.locator("#onboardingRecommended").click()
+    page.locator('.nav-item[data-page="settings"]').click()
+    page.locator('[data-settings-tab="search"]').click()
+    expect(page.locator("#webSearchProvider option")).not_to_have_count(0)
+    page.locator('#webSearchForm [name="enabled"]').check(force=True)
+    page.locator("#webSearchKey").fill("preview-readback-draft")
+    return page
+
+
+def test_search_unconfirmed_save_blocks_resubmit_and_reload_cancel_keeps_draft(browser, manager_url, tmp_path):
+    page = _open_search_readback(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_web_search_settings;
+          window.readbackSaves = 0; window.readbackReads = 0;
+          api.save_web_search_settings = async () => {
+            window.readbackSaves++;
+            return {ok:false,error:{code:'15006',title:'配置生效结果待确认',
+              message:'设置已提交，请重新读取核对，不要连续重复提交。',recorded:true}};
+          };
+          api.get_web_search_settings = (...args) => {window.readbackReads++; return read(...args);};
+        }""")
+        save = page.locator('#webSearchForm button[type="submit"]')
+        save.click()
+        expect(page.locator("#webSearchNote")).to_contain_text("重新读取")
+        expect(save).to_be_disabled()
+        page.locator("#webSearchKey").fill("preview-newer-unconfirmed-draft")
+        page.locator("#webSearchForm").evaluate("form => form.dispatchEvent(new Event('submit', {cancelable:true}))")
+        assert page.evaluate("window.readbackSaves") == 1
+        expect(page.locator("#webSearchNote")).to_contain_text("重新读取")
+        reload = page.locator("#reloadWebSearch")
+        expect(reload).to_be_enabled()
+        reload.click()
+        expect(page.locator("#modalTitle")).to_have_text("重新读取联网搜索设置？")
+        page.locator("#modalCancel").click()
+        expect(page.locator("#webSearchKey")).to_have_value("preview-newer-unconfirmed-draft")
+        expect(save).to_be_disabled()
+        expect(reload).to_be_enabled()
+        assert page.evaluate("window.readbackReads") == 0
+        page.screenshot(path=str(tmp_path / "search-readback-cancel.png"), animations="disabled")
+    finally:
+        page.close()
+
+
+def test_search_failed_readback_keeps_draft_and_retry_is_reachable(browser, manager_url, tmp_path):
+    page = _open_search_readback(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_web_search_settings;
+          window.readbackReads = 0;
+          api.save_web_search_settings = async () => ({ok:false,error:{code:'15006',
+            message:'请重新读取核对',recorded:true}});
+          api.get_web_search_settings = (...args) => {
+            window.readbackReads++;
+            return window.readbackReads === 1 ? Promise.resolve({ok:false,error:{code:'19000',
+              message:'模拟重新读取失败',recorded:true}}) : read(...args);
+          };
+        }""")
+        save = page.locator('#webSearchForm button[type="submit"]')
+        save.click()
+        expect(save).to_be_disabled()
+        reload = page.locator("#reloadWebSearch")
+        reload.click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#webSearchNote")).to_contain_text("模拟重新读取失败")
+        expect(page.locator("#webSearchKey")).to_have_value("preview-readback-draft")
+        expect(save).to_be_disabled()
+        expect(reload).to_be_enabled()
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        reload.click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已重新读取实际保存")
+        expect(page.locator("#webSearchKey")).to_have_value("")
+        expect(save).to_be_enabled()
+        assert page.evaluate("window.readbackReads") == 2
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is False
+        page.screenshot(path=str(tmp_path / "search-readback-retry.png"), animations="disabled")
+    finally:
+        page.close()
+
+
+def test_search_readback_preserves_input_started_while_get_waits(browser, manager_url, tmp_path):
+    page = _open_search_readback(browser, manager_url)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.locator('#webSearchForm button[type="submit"]').click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        page.evaluate("""() => {
+          const api = window.pywebview.api, read = api.get_web_search_settings, save = api.save_web_search_settings;
+          window.readbackReads = 0;
+          api.get_web_search_settings = async (...args) => {
+            window.readbackReads++;
+            const result = await read(...args);
+            return new Promise(resolve => {window.finishReadback = () => resolve(result);});
+          };
+          api.save_web_search_settings = (...args) => {window.savedReadbackDraft = structuredClone(args[0]); return save(...args);};
+        }""")
+        reload = page.locator("#reloadWebSearch")
+        reload.click()
+        page.wait_for_function("typeof window.finishReadback === 'function'")
+        expect(reload).to_be_disabled()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.locator("#webSearchProvider").select_option("tavily")
+        page.locator("#webSearchKey").fill("preview-input-during-readback")
+        page.locator('#webSearchForm [name="link_enabled"]').select_option("true")
+        page.evaluate("window.finishReadback()")
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        expect(page.locator("#webSearchKey")).to_have_value("preview-input-during-readback")
+        expect(page.locator("#webSearchProvider")).to_have_value("tavily")
+        expect(page.locator('#webSearchForm [name="link_enabled"]')).to_have_value("true")
+        expect(page.locator("#webSearchNote")).to_contain_text("读取期间的新修改仍未保存")
+        assert page.evaluate(_BEFORE_UNLOAD_SCRIPT) is True
+        save = page.locator('#webSearchForm button[type="submit"]')
+        expect(save).to_be_enabled()
+        save.click()
+        expect(page.locator("#webSearchNote")).to_contain_text("已热更新")
+        assert page.evaluate("window.savedReadbackDraft.key") == "preview-input-during-readback"
+        assert page.evaluate("window.savedReadbackDraft.provider") == "tavily"
+        assert page.evaluate("window.savedReadbackDraft.link_enabled") is True
+        page.screenshot(path=str(tmp_path / "search-readback-kept-draft.png"), animations="disabled")
+        assert not errors, errors
+    finally:
+        page.close()

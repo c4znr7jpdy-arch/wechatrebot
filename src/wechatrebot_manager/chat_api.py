@@ -9,8 +9,8 @@ from .group_directory import GroupDirectoryError
 from .error_catalog import AccountStatusUnavailableError
 from .customer_config import load_robot_settings
 from .group_policy import GroupPolicyError
-from .launcher import installation_services_stopped
 from .private_policy import PrivatePolicyError
+from .licensing.protocol import LicenseError
 
 
 class ChatApiMixin:
@@ -34,46 +34,27 @@ class ChatApiMixin:
             raise AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。")
         return str(getattr(runtime, "wechat_identity", "") or "").strip()
 
-    def _offline_history_account(self, view) -> str:
-        """A signed device binding grants data access, never a live login identity."""
-        runtime = getattr(view, "runtime", None)
-        if (runtime is None or getattr(runtime, "connection_ready", None) is not False
-                or getattr(runtime, "engine_ready", None) is not False
-                or getattr(view, "can_stop", False)
-                or any(getattr(runtime, field, None) for field in (
-                    "wechat_identity", "hook_ready", "upstream_connected", "heartbeat_fresh"))):
+    def _authorized_history_account(self, account: str) -> str:
+        """Grant history access only to the currently logged-in licensed account."""
+        if not account:
             return ""
-        status = self._license_client().snapshot()
-        if (status.get("enabled") and status.get("device_id") and status.get("license_id")
-                and status.get("account") and installation_services_stopped(self._install_root)):
-            # Signature/device validation still applies to expired entitlements.
-            # An invalid local cache returns no bound account.
-            return str(status.get("account") or "")
+        status = self._license_client().snapshot(account)
+        if status.get("enabled") is False:
+            return account
+        if status.get("authorized") is True and status.get("account") == account:
+            return account
         return ""
 
-    def _history_data_identity(self) -> tuple[str, bool]:
-        failure = None
-        try:
-            actual = self._history_account_id()
-            if actual:
-                return actual, False
-        except OSError as exc:
-            failure = exc
-        if not self._license_client().snapshot().get("account"):
-            if failure is not None:
-                raise failure
-            return "", False
-        try:
-            account = self._offline_history_account(self._lifecycle.refresh())
-            if account:
-                return account, True
-        except (AttributeError, OSError, ValueError) as exc:
-            if failure is not None:
-                raise failure
-            raise OSError("无法确认本机历史记录的数据身份，请稍后重试。") from exc
-        if failure is not None:
-            raise failure
-        return "", False
+    def _history_data_identity(self) -> str:
+        return self._authorized_history_account(self._history_account_id())
+
+    def _require_history_account(self, account_id: str) -> None:
+        if self._history_data_identity() != account_id:
+            raise ValueError("微信登录或授权状态已变化，请刷新消息中心后重试。")
+
+    def _history_read_result(self, account_id: str, data: object) -> dict[str, object]:
+        self._require_history_account(account_id)
+        return self._ok(data)
 
     def _history_contacts(self, user_ids: list[str]) -> dict[str, dict[str, str]]:
         resolver = getattr(getattr(self, "_contacts", None), "contacts", None)
@@ -82,8 +63,8 @@ class ChatApiMixin:
         try:
             return resolver(user_ids)
         except (OSError, ValueError, GroupDirectoryError):
-            # History remains usable while WeChat is offline; stored portraits
-            # or the stable text fallback continue to render in that state.
+            # A failed contact lookup can still use the stored portrait or
+            # stable text fallback for the verified history account.
             return {}
 
     def get_conversations(self, filters: dict[str, Any] | None = None) -> dict[str, object]:
@@ -94,7 +75,7 @@ class ChatApiMixin:
             expected_account = str(values.get("account_id") or "").strip()
             start_time = self._date_timestamp(values.get("start"))
             end_time = self._date_timestamp(values.get("end"), end=True)
-            runtime_account, offline = self._history_data_identity()
+            runtime_account = self._history_data_identity()
             empty = {
                 "messages": 0,
                 "conversations": 0,
@@ -118,7 +99,7 @@ class ChatApiMixin:
                     "account_changed": True,
                 })
             directory = {"items": [], "account_id": runtime_account}
-            if kind in {"all", "group"} and not offline:
+            if kind in {"all", "group"}:
                 directory = self._groups.list(values.get("refresh_groups") is True)
             directory_account = str(directory.get("account_id") or "").strip()
             if (
@@ -140,7 +121,7 @@ class ChatApiMixin:
                 account_id=account_id,
             )
             items = list(history.get("items") or [])
-            private_contacts = {} if offline else self._history_contacts(
+            private_contacts = self._history_contacts(
                 [
                     str(item.get("conversation_id") or "")
                     for item in items
@@ -203,13 +184,12 @@ class ChatApiMixin:
             summary = dict(history.get("summary") or {})
             summary["visible_conversations"] = len(items)
             summary["directory_groups"] = len(directory.get("items") or [])
-            return self._ok({
+            return self._history_read_result(account_id, {
                 "items": items,
                 "summary": summary,
                 "account_id": account_id,
-                **({"offline": True} if offline else {}),
             })
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def get_groups(self, refresh: bool = False) -> dict[str, object]:
@@ -229,12 +209,23 @@ class ChatApiMixin:
     def get_group_qrcode(self, account_id: str, group_id: str) -> dict[str, object]:
         try:
             return self._ok(self._groups.qrcode(account_id, group_id))
+        except LicenseError as exc:
+            paused = exc.code == "automation_paused"
+            result = self._license_failed(exc, record=not paused)
+            if paused:
+                result["error"]["retryable"] = False
+            return result
         except GroupDirectoryError as exc:
             return {"ok": False, "error": {"title": "群二维码暂不可用", "message": str(exc)}}
 
-    def get_group_policy(self, account_id: str, group_id: str) -> dict[str, object]:
+    def get_group_policy(
+        self, account_id: str, group_id: str, features_only: bool = False,
+    ) -> dict[str, object]:
         try:
-            return self._ok(self._group_policy_service().overview(account_id, group_id))
+            service = self._group_policy_service()
+            data = (service.feature_permissions(account_id, group_id) if features_only is True
+                    else service.overview(account_id, group_id))
+            return self._ok(data)
         except (OSError, ValueError, GroupPolicyError) as exc:
             return self._failed(exc, "15001")
 
@@ -334,7 +325,7 @@ class ChatApiMixin:
     ) -> dict[str, object]:
         try:
             values = filters or {}
-            account_id, offline = self._history_data_identity()
+            account_id = self._history_data_identity()
             expected_account = str(values.get("account_id") or "").strip()
             paged = values.get("paged") is True
             if not account_id:
@@ -396,7 +387,7 @@ class ChatApiMixin:
                 for old_key in tuple(member_cache):
                     if old_key[0] != account_id:
                         member_cache.pop(old_key, None)
-                members = {} if offline else member_cache.get(cache_key)
+                members = member_cache.get(cache_key)
                 if members is None:
                     members = {}
                     try:
@@ -430,7 +421,7 @@ class ChatApiMixin:
                         or message.get("sender_id")
                         or ""
                     )
-            elif not offline and any(
+            elif any(
                 message.get("role") != "assistant"
                 and (
                     not message.get("avatar")
@@ -457,20 +448,20 @@ class ChatApiMixin:
                         )
             replies = [message for message in messages if message.get("role") == "assistant"]
             if replies:
-                robot = self._contacts.self_profile() if not offline and hasattr(getattr(self, "_contacts", None), "self_profile") else {}
+                robot = self._contacts.self_profile() if hasattr(getattr(self, "_contacts", None), "self_profile") else {}
                 name = load_robot_settings(self._install_root).profile.display_name
                 for message in replies:
-                    message["avatar"] = str(robot.get("avatar") or (message.get("avatar") if offline else "") or "")
+                    message["avatar"] = str(robot.get("avatar") or "")
                     message["sender_id"] = account_id
                     message["sender_name"] = name
             if paged:
-                return self._ok({
+                return self._history_read_result(account_id, {
                     "items": messages,
                     "has_more": has_more,
                     "account_id": account_id,
                 })
-            return self._ok(messages)
-        except (OSError, ValueError) as exc:
+            return self._history_read_result(account_id, messages)
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def get_message_image(
@@ -481,11 +472,9 @@ class ChatApiMixin:
         expected_account_id: str = "",
     ) -> dict[str, object]:
         try:
-            account_id, offline = self._history_data_identity()
+            account_id = self._history_data_identity()
             if not account_id or not expected_account_id or expected_account_id != account_id:
                 raise ValueError("微信账号已变化，请刷新消息中心后重试。")
-            if offline:
-                raise OSError("微信当前离线，无法获取原图。")
             source_id = self._history.image_source_id(
                 conversation_id, message_id, image_index, account_id=account_id,
             )
@@ -495,7 +484,7 @@ class ChatApiMixin:
                 source_id,
                 image_index,
             )
-            return self._ok({
+            return self._history_read_result(account_id, {
                 "account_id": account_id,
                 "src": image["image_data_url"],
                 "quality": image["quality"],
@@ -510,7 +499,7 @@ class ChatApiMixin:
         self, conversation_id: str, expected_account_id: str = ""
     ) -> dict[str, object]:
         try:
-            account_id = self._history_account_id()
+            account_id = self._history_data_identity()
             if not account_id:
                 return self._ok({"deleted": 0, "requires_login": True})
             if expected_account_id and expected_account_id != account_id:
@@ -518,16 +507,17 @@ class ChatApiMixin:
             count = self._history.delete_conversation(
                 conversation_id,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"deleted": count})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def delete_history_before(
         self, value: str, expected_account_id: str = ""
     ) -> dict[str, object]:
         try:
-            account_id = self._history_account_id()
+            account_id = self._history_data_identity()
             if not account_id:
                 return self._ok({"deleted": 0, "requires_login": True})
             if expected_account_id and expected_account_id != account_id:
@@ -538,16 +528,17 @@ class ChatApiMixin:
             count = self._history.delete_before(
                 timestamp,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"deleted": count})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)
 
     def export_history(
         self, format: str = "csv", expected_account_id: str = ""
     ) -> dict[str, object]:
         try:
-            account_id, _ = self._history_data_identity()
+            account_id = self._history_data_identity()
             if not account_id:
                 return self._ok({"cancelled": True, "requires_login": True})
             if expected_account_id and expected_account_id != account_id:
@@ -569,14 +560,15 @@ class ChatApiMixin:
             )
             if not result:
                 return self._ok({"cancelled": True})
-            if self._history_data_identity()[0] != account_id:
+            if self._history_data_identity() != account_id:
                 return self._ok({"cancelled": True, "account_changed": True})
             selected = result[0] if isinstance(result, (list, tuple)) else result
             target = self._history.export(
                 selected,
                 format=suffix,
                 account_id=account_id,
+                validate_access=lambda: self._require_history_account(account_id),
             )
             return self._ok({"path": str(target)})
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)

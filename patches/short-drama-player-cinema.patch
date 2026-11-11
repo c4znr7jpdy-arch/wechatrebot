@@ -1,7 +1,7 @@
 diff --git a/index.html b/index.html
 --- a/index.html
 +++ b/index.html
-@@ -5,369 +5,317 @@
+@@ -5,369 +5,343 @@
    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
    <title>短剧播放</title>
    <style>
@@ -223,15 +223,19 @@ diff --git a/index.html b/index.html
 +    .eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; letter-spacing: .14em; }
 +    .catalog-heading h2 { margin: 0 0 12px; font: 700 clamp(26px, 4vw, 42px)/1.3 var(--display-font); overflow-wrap: anywhere; }
 +    #recommendationsSummary { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.7; }
-+    .catalog-search { width: min(100%, 300px); flex-shrink: 0; }
++    .catalog-search { position: relative; width: min(100%, 300px); flex-shrink: 0; }
 +    .catalog-search label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
 +    .search-field { display: flex; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 0 6px 0 14px; }
 +    .search-field:focus-within { border-color: var(--accent); }
 +    .search-field svg { flex-shrink: 0; width: 18px; color: var(--muted); }
-+    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 14px; }
++    .search-field input { width: 100%; min-width: 0; padding: 14px 10px; border: 0; color: var(--text); background: transparent; font-size: 16px; }
 +    .search-field input::placeholder { color: var(--muted); }
 +    .search-field input::-webkit-search-cancel-button { appearance: none; }
 +    .search-field button { flex-shrink: 0; width: 44px; border: 0; background: transparent; font-size: 22px; }
++    .search-field #clearSearch { width: 32px; }
++    .search-autocomplete { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; left: 0; max-height: min(360px, 50vh); overflow: auto; padding: 5px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 12px 28px #0006; }
++    .search-autocomplete button { display: block; width: 100%; padding: 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; overflow-wrap: anywhere; font-size: 14px; }
++    .search-autocomplete button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
 +    .recommendation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px 22px; }
 +    .recommend-card { display: flex; min-width: 0; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius); background: transparent; text-align: left; transition: border-color 160ms ease, background 160ms ease; }
 +    .recommend-card:hover:not(:disabled) { background: var(--surface); }
@@ -296,7 +300,7 @@ diff --git a/index.html b/index.html
 +    .speed-button { flex: 0 0 44px; font: 600 12px/1 "Bahnschrift", var(--body-font); white-space: nowrap; }
 +    .controls-row { gap: 4px; }
 +    @media (max-width: 420px) { .controls-row { gap: 2px; } .controls-row .control-button { min-width: 38px; flex-basis: 38px; } .playback-time { font-size: 11px; } }
-+    .video-hint { position: absolute; z-index: 5; top: 42%; left: 50%; transform: translate(-50%, -50%); padding: 10px 18px; max-width: calc(100% - 40px); border-radius: 10px; color: var(--text); background: #080b0edf; font-size: 14px; text-align: center; pointer-events: none; }
++    .video-hint { position: absolute; z-index: 5; bottom: calc(84px + env(safe-area-inset-bottom)); left: 12px; padding: 6px 10px; max-width: calc(100% - 24px); border-radius: 6px; color: var(--text); background: #080b0edb; font-size: 12px; line-height: 1.5; text-align: left; pointer-events: none; }
 +    .video-controls, .video-header, .speed-button { transition: opacity 180ms ease; }
 +    .controls-hidden .video-controls, .controls-hidden .video-header, .controls-hidden .speed-button { opacity: 0; pointer-events: none; }
 +    .keyboard-navigation .controls-hidden:has(:focus-visible) .video-controls, .keyboard-navigation .controls-hidden:has(:focus-visible) .video-header, .keyboard-navigation .controls-hidden:has(:focus-visible) .speed-button { opacity: 1; pointer-events: auto; }
@@ -412,6 +416,7 @@ diff --git a/index.html b/index.html
 +    .related-card { position: relative; min-width: 0; aspect-ratio: 6 / 5; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
 +    .related-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 +    .related-card .initial { color: var(--accent); font-size: 28px; }
++    .related-kind { position: absolute; top: 6px; left: 6px; padding: 3px 5px; border-radius: 4px; background: #000b; color: #eee; font-size: 10px; line-height: 1.2; }
 +    .related-card strong { position: absolute; inset: auto 0 0; padding: 24px 7px 7px; font-size: 12px; font-weight: 500; line-height: 1.4; background: linear-gradient(transparent, #000e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 +    #relatedStatus { min-height: 20px; margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
 +    @media (min-width: 761px) { main.watch-mode { margin-top: 24px; } .related-card { aspect-ratio: 16 / 9; } }
@@ -567,6 +572,24 @@ diff --git a/index.html b/index.html
 +    @media (max-width: 380px) { .episode-grid { gap: 7px; grid-template-columns: repeat(5, minmax(0, 1fr)); } .controls-row { gap: 2px; } .video-heading { font-size: 13px; } .playback-time { font-size: 12px; } }
 +    @media (orientation: portrait) { .video-shell:fullscreen .sheet-panel, .video-shell:-webkit-full-screen .sheet-panel { width: 100%; } .video-shell:fullscreen .sheet, .video-shell:-webkit-full-screen .sheet { align-items: flex-end; padding: 0; } }
 +
++    .skip-settings { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
++    .skip-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
++    .skip-times label { font-size: 12px; color: var(--muted); }
++    .skip-times input { display: block; width: 100%; min-height: 40px; margin-top: 5px; padding: 6px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
++    .skip-settings p { margin: 7px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
++    .watch-history { width: 100%; margin: 12px 0 18px; padding: 12px 14px; border: 1px solid #ffffff16; border-radius: 12px; background: var(--surface); }
++    .watch-history h2 { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 500; }
++    .history-list { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 2px; }
++    .history-row { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 7px 2px; border: 0; border-radius: 5px; background: transparent; text-align: left; font-size: 12px; }
++    .history-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
++    .history-row span { flex-shrink: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: 11px; white-space: nowrap; }
++    #historyStatus { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
++    #historyStatus:empty { display: none; }
++    #searchAllSources { width: 62px; min-height: 40px; padding: 0 8px; color: var(--accent); background: var(--accent-soft); border-radius: 8px; font-size: 14px; }
++    #searchSuggestions { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 18px; }
++    #searchSuggestions:empty { display: none; }
++    #searchSuggestions button { min-height: 34px; padding: 0 10px; font-size: 12px; }
++    .catalog-history { margin-top: 24px; }
 +    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 +    @media (forced-colors: active) { :root { scrollbar-color: auto; } button, .search-field { border: 1px solid ButtonText; } .episode-item.active { outline: 2px solid Highlight; } }
    </style>
@@ -604,6 +627,7 @@ diff --git a/index.html b/index.html
 +        </div>
 +        <section id="morePanel" class="more-panel" aria-label="播放设置" hidden>
 +          <label class="switch-label"><input id="autoNext" type="checkbox" checked><span>自动连播</span></label>
++          <div class="skip-settings"><label class="switch-label"><input id="skipEnabled" type="checkbox"><span>跳过片头片尾</span></label><div class="skip-times"><label for="skipIntro">片头（秒）<input id="skipIntro" type="number" min="0" max="300" step="1" inputmode="numeric" value="0"></label><label for="skipOutro">片尾（秒）<input id="skipOutro" type="number" min="0" max="300" step="1" inputmode="numeric" value="0"></label></div><p>按当前作品记忆，每项最多 300 秒；片头片尾重叠时不跳过。</p></div>
 +          <div class="episode-navigation"><button id="previous" type="button">上一集</button><button id="next" type="button">下一集</button></div>
 +          <div class="quality-control"><button id="qualityButton" type="button" aria-label="选择清晰度" aria-expanded="false" disabled><span id="qualityLabel">原画</span></button><div id="qualityMenu" class="quality-menu" hidden></div></div>
 +        </section>
@@ -621,9 +645,9 @@ diff --git a/index.html b/index.html
 +      <div class="below-player"><p id="status" role="status" aria-live="polite">正在连接视频…</p><button id="retry" type="button" hidden>重试</button><button id="switchSourceOnError" type="button" hidden>切换资源</button><a id="direct" hidden aria-hidden="true"></a></div>
 +      <div class="metadata-feedback"><p id="metadataStatus" role="status"></p><button id="metadataRetry" type="button" hidden>重试获取选集</button></div>
 +    </section>
-+    <section id="recommendations" class="recommendations-page" hidden>
++    <section id="recommendations" class="recommendations-page" aria-busy="true" hidden>
 +      <header class="catalog-heading"><div><p id="catalogEyebrow" class="eyebrow">为你选片</p><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary" role="status"></p></div>
-+        <div class="catalog-search"><label for="catalogSearch">在当前片单中查找</label><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 0 4.9 12l5.5 5.5 1.4-1.4-5.5-5.5A7 7 0 0 0 10 3Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg><input id="catalogSearch" type="search" placeholder="输入片名" autocomplete="off"><button id="clearSearch" type="button" aria-label="清除片名筛选" hidden>×</button></div></div>
++        <div class="catalog-search"><label for="catalogSearch">查找片名 · 支持全源搜索</label><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 0 4.9 12l5.5 5.5 1.4-1.4-5.5-5.5A7 7 0 0 0 10 3Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg><input id="catalogSearch" type="search" placeholder="输入片名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="searchAutocomplete" aria-expanded="false" enterkeyhint="search"><button id="clearSearch" type="button" aria-label="清除片名筛选" hidden>×</button><button id="searchAllSources" type="button" aria-label="搜索全部资源">搜索</button></div><div id="searchAutocomplete" class="search-autocomplete" role="listbox" aria-label="片名联想" hidden></div></div>
        </header>
 -      <div class="episode-meta"><span class="episode-meta-label">当前：</span><span id="meta">正在载入剧集…</span></div>
 -      <div id="videoShell" class="video-shell">
@@ -648,12 +672,14 @@ diff --git a/index.html b/index.html
 -      </div>
 -      <div class="below-player"><label class="switch-label"><input id="autoNext" type="checkbox" checked><span class="switch"></span><span>自动连播</span></label><p id="status">正在连接资源站……</p><button id="retry" type="button" hidden>重试</button><a id="direct" hidden aria-hidden="true"></a></div>
 -      <div id="episodeSheet" class="sheet" hidden><button id="sheetBackdrop" class="sheet-backdrop" type="button" aria-label="关闭选集"></button><section class="sheet-panel"><header class="sheet-header"><span>选择剧集</span><button id="sheetClose" class="sheet-close" type="button">×</button></header><div id="sheetEpisodeGrid" class="episode-grid"></div></section></div>
++      <div id="searchSuggestions" aria-label="相关片名"></div>
 +      <section id="recommendationGrid" class="recommendation-grid" aria-label="作品列表"></section>
 +      <div id="catalogEmpty" class="catalog-empty" hidden><strong>没有找到匹配的作品</strong><p>试试更短的片名，或清除筛选查看全部。</p></div>
-+      <p class="recommendation-tip">选择海报进入播放。想找其他作品？回到微信重新搜索。</p>
++      <p class="recommendation-tip">选择海报进入播放。输入片名并搜索全部资源，可查找其他作品。</p>
      </section>
 -    <section id="recommendations" class="recommendations-page" hidden><header><h2 id="recommendationsTitle">选择作品</h2><p id="recommendationsSummary"></p></header><section id="recommendationGrid" class="recommendation-grid"></section><p class="recommendation-tip">点击任一作品即可进入播放器；推荐结果会随资源站更新。</p></section>
 -    <section id="episodes" class="inline-episodes"><header class="inline-episodes-header"><span class="inline-episodes-title">选集</span><span class="inline-episodes-tools"><span id="episodeCount"></span><button id="episodeExpand" class="episode-expand-button" type="button" aria-label="展开选集" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z"/></svg></button></span></header><div id="episodeGrid" class="inline-episode-grid"></div></section>
++    <section id="watchHistory" class="watch-history" aria-label="本地观看记录" hidden><h2>继续观看 · 仅保存在当前设备</h2><div id="historyList" class="history-list"></div><p id="historyStatus" role="status" aria-live="polite"></p></section>
 +    <section id="episodes" class="inline-episodes"><header class="inline-episodes-header"><span class="inline-episodes-title">选集</span><span class="inline-episodes-tools"><span id="episodeCount"></span><button id="episodeExpand" class="episode-expand-button" type="button" aria-label="展开选集" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z"/></svg></button></span></header><div id="episodeRanges" hidden></div><div id="episodeGrid" class="inline-episode-grid"></div></section>
 +    <section id="related" class="related" hidden><header class="related-header"><h2>为你推荐</h2><button id="refreshRelated" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V3h2v8h-8V9h4.5a6 6 0 1 0 .4 6H20A8 8 0 1 1 19 7Z"/></svg><span>换一换</span></button></header><div id="relatedGrid" class="related-grid"></div><p id="relatedStatus" role="status"></p></section>
    </main>
@@ -667,7 +693,7 @@ diff --git a/index.html b/index.html
        const fragment = new URLSearchParams(location.hash.slice(1));
        const titleNode = document.getElementById('title');
        const episodeNode = document.getElementById('meta');
-@@ -377,9 +325,28 @@
+@@ -377,9 +351,43 @@
        const videoShell = document.getElementById('videoShell');
        const fallback = document.getElementById('direct');
        const retry = document.getElementById('retry');
@@ -689,6 +715,21 @@ diff --git a/index.html b/index.html
 +      const castLink = document.getElementById('castLink');
 +      const workBackdrop = document.getElementById('workBackdrop');
 +      let sourceSession = null, actionGeneration = 0;
++      const skipEnabled = document.getElementById('skipEnabled');
++      const skipIntro = document.getElementById('skipIntro');
++      const skipOutro = document.getElementById('skipOutro');
++      const watchHistory = document.getElementById('watchHistory');
++      const historyList = document.getElementById('historyList');
++      const historyStatus = document.getElementById('historyStatus');
++      const searchAllSources = document.getElementById('searchAllSources');
++      const searchSuggestions = document.getElementById('searchSuggestions');
++      const searchAutocomplete = document.getElementById('searchAutocomplete');
++      let searchController = null, historyController = null, catalogSummary = '';
++      let catalogSuggestions = [], autocompleteItems = [], autocompleteIndex = -1;
++      let autocompleteTimer = null, autocompleteController = null, autocompleteVersion = 0;
++      let sharedSelection = null, sharedNotice = '';
++      let historyReady = false, historyPlaylist = null, historyEpisode = -1, historySavedAt = 0, skipIntroDone = false, finishedLoadId = -1;
++      let stalledTimer = null, stalledProgress = 0, stalledProgressAt = 0, recoveryAttempts = 0, recoveryProgress = 0;
        const previous = document.getElementById('previous');
        const next = document.getElementById('next');
        const episodeOpen = document.getElementById('episodeOpen');
@@ -696,7 +737,7 @@ diff --git a/index.html b/index.html
        const episodeSheet = document.getElementById('episodeSheet');
        const sheetEpisodeGrid = document.getElementById('sheetEpisodeGrid');
        const sheetBackdrop = document.getElementById('sheetBackdrop');
-@@ -406,24 +373,408 @@
+@@ -406,24 +414,417 @@
        let removeEpisodeReadyListener = () => {};
        const playbackRate = document.getElementById('playbackRate');
        const episodeCount = document.getElementById('episodeCount');
@@ -803,7 +844,7 @@ diff --git a/index.html b/index.html
 +      };
 +      ['timeupdate', 'durationchange', 'loadedmetadata', 'emptied'].forEach((event) => video.addEventListener(event, syncTimeline));
 +      video.addEventListener('loadedmetadata', () => watchStage.classList.add('video-ready'));
-+      video.addEventListener('emptied', () => watchStage.classList.remove('video-ready'));
++      video.addEventListener('emptied', () => { if (!playlist) watchStage.classList.remove('video-ready'); });
 +      seek.addEventListener('pointerdown', () => { isSeeking = true; showControls(); });
 +      seek.addEventListener('input', () => {
 +        if (!Number.isFinite(video.duration) || video.duration <= 0) return;
@@ -1009,31 +1050,40 @@ diff --git a/index.html b/index.html
 +          if (relatedSeen.has(key)) rememberRelated(item);
 +          else unique.set(key, item);
 +        });
-+        const selected = shuffle([...unique.values()]).slice(0, 3);
++        const available = [...unique.values()];
++        const ai = shuffle(available.filter((item) => item.recommendation_kind === 'ai')).slice(0, 2);
++        const live = shuffle(available.filter((item) => item.recommendation_kind === 'live')).slice(0, 1);
++        const selected = [...ai, ...live];
 +        selected.forEach(rememberRelated);
 +        relatedGrid.replaceChildren();
 +        selected.forEach((item) => {
 +          const button = document.createElement('button'); button.type = 'button'; button.className = 'related-card';
 +          button.dataset.relatedTitle = relatedTitle(item);
++          button.dataset.recommendationKind = item.recommendation_kind;
 +          button.setAttribute('aria-label', `播放${item.title}`);
 +          const initial = document.createElement('span'); initial.className = 'initial'; initial.textContent = Array.from(item.title)[0] || '剧'; button.appendChild(initial);
 +          if (item.cover) {
 +            const cover = document.createElement('img'); cover.src = item.cover; cover.alt = ''; cover.loading = 'lazy'; cover.referrerPolicy = 'no-referrer';
 +            cover.addEventListener('error', () => cover.remove(), {once: true}); button.appendChild(cover);
 +          }
++          const kind = document.createElement('span'); kind.className = 'related-kind';
++          kind.textContent = item.recommendation_kind === 'ai' ? 'AI 剧' : '真人短剧'; button.appendChild(kind);
 +          const title = document.createElement('strong'); title.textContent = item.title; button.appendChild(title);
 +          button.addEventListener('click', () => {
++            saveWatchHistory();
 +            playlist = item; current = 0; resetSources(item);
 +            titleNode.textContent = item.title; document.title = item.title;
-+            fragment.delete('i'); fragment.delete('ep');
++            ['i', 'ep', 'resume', 'search', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
 +            // A new same-origin selection token makes refreshed recommendations shareable.
 +            if (item.selectionToken) { fragment.delete('p'); fragment.delete('r'); fragment.set('i', '0'); params.set('s', item.selectionToken); }
 +            history.replaceState(null, '', `${location.pathname}?${params}#${fragment}`);
-+            watchStage.hidden = false; updateWatchDetails(); renderEpisodes(); loadEpisode(0); hydrateMetadata(item); window.scrollTo(0, 0); focusForKeyboard(togglePlayback);
++            watchStage.hidden = false; renderWatchHistory(); updateWatchDetails(); renderEpisodes(); loadEpisode(0); hydrateMetadata(item); window.scrollTo(0, 0); focusForKeyboard(togglePlayback);
 +          });
 +          relatedGrid.appendChild(button);
 +        });
-+        relatedStatus.textContent = selected.length === 3 ? '' : selected.length ? '本次新的推荐较少，可稍后再换一换。' : '暂时没有新的推荐，稍后再试。';
++        const missing = [ai.length < 2 ? 'AI 剧' : '', live.length < 1 ? '真人短剧' : ''].filter(Boolean);
++        relatedStatus.textContent = selected.length === 3 ? '' : selected.length
++          ? `新的${missing.join('、')}暂时不足，稍后可再换一换。` : '暂时没有新的推荐，稍后再试。';
 +      };
 +      const refreshRelated = async (force = false) => {
 +        if (!playlist) return;
@@ -1110,7 +1160,7 @@ diff --git a/index.html b/index.html
        };
  
        const isSafePublicHttpsUrl = (value) => {
-@@ -521,7 +872,7 @@
+@@ -521,7 +922,7 @@
            }
            return { name, url };
          });
@@ -1119,14 +1169,12 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -535,6 +886,310 @@
-           throw new Error('选集数据不合法');
-         }
+@@ -537,8 +938,673 @@
          return payload.items.map(validateSelectionItem);
-+      };
-+
+       };
+ 
 +      const metadataRequests = new WeakMap();
-+      const metadataSources = new Set(['暴风资源', '非凡资源', '量子资源', '红牛资源', '极速资源', '百度云资源', '金鹰资源', '飘零资源']);
++      const metadataSources = new Set(['暴风资源', '非凡资源', '量子资源', '红牛资源', '极速资源', '百度云资源', '金鹰资源', '飘零资源', '360资源', '无尽资源', '魔都资源', '新浪资源']);
 +      const sourceDisplayName = (source) => String(source || '').replace(/资源$/, '');
 +      workBackdrop.addEventListener('error', () => { workBackdrop.hidden = true; });
 +      const currentAction = (generation) => generation === actionGeneration && !watchStage.hidden;
@@ -1140,27 +1188,38 @@ diff --git a/index.html b/index.html
 +      const observeCastConnection = () => {
 +        removeCastListeners();
 +        const generation = actionGeneration, request = castRequest;
-+        const webkit = typeof video.webkitShowPlaybackTargetPicker === 'function';
-+        const target = webkit ? video : video.remote;
-+        const state = () => webkit ? (video.webkitCurrentPlaybackTargetIsWireless ? 'connected' : 'disconnected')
-+          : target?.state || 'disconnected';
++        const remote = video.remote;
++        const state = () => typeof video.webkitCurrentPlaybackTargetIsWireless === 'boolean'
++          || typeof video.webkitShowPlaybackTargetPicker === 'function'
++          ? (video.webkitCurrentPlaybackTargetIsWireless ? 'connected' : 'disconnected')
++          : remote?.state || 'disconnected';
 +        let previousState = state();
 +        const changed = (announce = true) => {
 +          if (!currentAction(generation) || request !== castRequest) return;
 +          const currentState = state();
-+          const label = currentState === 'connected' ? '已投屏' : currentState === 'connecting' ? '连接中' : '投屏';
++          const label = currentState === 'connected' ? (video.error ? '投屏异常' : '已连接')
++            : currentState === 'connecting' ? '连接中' : '投屏';
 +          castButton.querySelector('span').textContent = label;
 +          castButton.setAttribute('aria-label', currentState === 'connected' ? '投屏，已连接，点击管理设备' : '投屏');
 +          if (announce) {
-+            if (currentState === 'connected') castStatus('已连接投屏设备，点击“已投屏”可管理连接。');
++            if (currentState === 'connected') {
++              const message = video.error ? '设备已连接，但视频播放失败。请换源后重试，或复制视频链接到投屏应用。'
++                : video.ended ? '已连接投屏设备，当前视频已播放结束。'
++                : video.paused ? '已连接投屏设备，视频已暂停，请点击播放继续。'
++                : '已连接投屏设备；若电视无画面，可换源或复制视频链接重试。';
++              castStatus(message, true);
++            }
 +            else if (currentState === 'connecting') castStatus('正在连接投屏设备…');
 +            else if (previousState !== 'disconnected') castStatus('投屏连接已断开，可重新选择设备。');
 +          }
 +          previousState = currentState;
 +        };
-+        const events = webkit ? ['webkitcurrentplaybacktargetiswirelesschanged'] : ['connecting', 'connect', 'disconnect'];
-+        events.forEach((event) => target?.addEventListener?.(event, changed));
-+        removeCastListeners = () => events.forEach((event) => target?.removeEventListener?.(event, changed));
++        const mediaChanged = () => changed(castOwnsStatus && castLink.hidden && !castCopyButton.disabled && state() === 'connected');
++        const listeners = [[video, 'webkitcurrentplaybacktargetiswirelesschanged', changed],
++          ...['connecting', 'connect', 'disconnect'].map((event) => [remote, event, changed]),
++          ...['loadedmetadata', 'playing', 'pause', 'ended', 'error'].map((event) => [video, event, mediaChanged])];
++        listeners.forEach(([target, event, listener]) => target?.addEventListener?.(event, listener));
++        removeCastListeners = () => listeners.forEach(([target, event, listener]) => target?.removeEventListener?.(event, listener));
 +        changed(false);
 +        return changed;
 +      };
@@ -1238,7 +1297,15 @@ diff --git a/index.html b/index.html
 +        castOwnsStatus = false;
 +        shareButton.disabled = true; actionStatus.textContent = '';
 +        try {
-+          const data = {title: playlist.title, url: location.href};
++          let url = location.href;
++          if (fragment.has('resume') || fragment.has('search') || fragment.has('watch')
++            || (sourceSession?.item && sourceSession.item.source !== playlist.source)) {
++            const shared = new URLSearchParams({watch: '1', title: playlist.title, source: String(playlist.source || ''),
++              year: String(playlist.year || ''), category: String(playlist.category || ''),
++              episode: playlist.episodes[current].name, ep: String(current + 1)});
++            url = `${location.origin}${location.pathname}#${shared}`;
++          }
++          const data = {title: playlist.title, url};
 +          if (typeof navigator.share === 'function') await navigator.share(data);
 +          else if (typeof navigator.clipboard?.writeText === 'function') {
 +            await navigator.clipboard.writeText(data.url);
@@ -1260,6 +1327,7 @@ diff --git a/index.html b/index.html
 +      };
 +      const resetSources = (item = null) => {
 +        sourceSession?.controller?.abort();
++        historyController?.abort();
 +        actionGeneration++;
 +        resetCast();
 +        castButton.disabled = shareButton.disabled = false;
@@ -1273,8 +1341,8 @@ diff --git a/index.html b/index.html
 +        sourceLabel.textContent = sourceDisplayName(item?.source);
 +        sourceButton.setAttribute('aria-label', `换源，当前${sourceDisplayName(item?.source)}`);
 +      };
-+      const matchingEpisode = (target) => {
-+        const name = playlist?.episodes[current]?.name || '';
++      const matchingEpisode = (target, reference = playlist, index = current) => {
++        const name = reference?.episodes[index]?.name || '';
 +        const exact = target.episodes.findIndex((episode) => episode.name.trim() === name.trim());
 +        if (exact >= 0) return exact;
 +        const number = (value) => {
@@ -1283,7 +1351,7 @@ diff --git a/index.html b/index.html
 +        };
 +        const episodeNumber = number(name);
 +        if (episodeNumber !== null) return target.episodes.findIndex((episode) => number(episode.name) === episodeNumber);
-+        return playlist?.episodes.length === 1 && playlist.episodeCount === 1 && target.episodes.length === 1 ? 0 : -1;
++        return reference?.episodes.length === 1 && reference.episodeCount === 1 && target.episodes.length === 1 ? 0 : -1;
 +      };
 +      const selectSource = (item) => {
 +        if (!playlist || item.source === playlist.source) { closeSourceMenu(); return; }
@@ -1293,14 +1361,15 @@ diff --git a/index.html b/index.html
 +          return;
 +        }
 +        const resumeTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
-+        const autoplay = !video.paused || statusNode.classList.contains('error');
++        const autoplay = true;
++        saveWatchHistory();
 +        playlist = item; current = index;
 +        closeSourceMenu();
 +        metadataStatus.textContent = ''; metadataRetry.hidden = true;
 +        titleNode.textContent = item.title;
 +        updateWatchDetails(); renderEpisodes();
 +        loadEpisode(index, {autoplay, resumeTime});
-+        showHint(`已切换至${sourceDisplayName(item.source)}`);
++        showHint(`已切换至${sourceDisplayName(item.source)}，继续第 ${index + 1} 集`, 2400);
 +        focusForKeyboard(sourceButton);
 +      };
 +      const renderSources = () => {
@@ -1318,7 +1387,7 @@ diff --git a/index.html b/index.html
 +        const session = sourceSession;
 +        if (!session || session.controller || session.loaded) return;
 +        const controller = new AbortController(); session.controller = controller;
-+        const timeout = setTimeout(() => controller.abort(), 12000);
++        const timeout = setTimeout(() => controller.abort(), 30000);
 +        sourceStatus.textContent = '正在查找同剧资源…'; sourceRetry.hidden = true;
 +        sourceMenu.setAttribute('aria-busy', 'true');
 +        try {
@@ -1328,7 +1397,7 @@ diff --git a/index.html b/index.html
 +          const response = await fetch(`/short-drama/api/resolve?${query}`, {cache: 'no-store', credentials: 'omit', signal: controller.signal});
 +          if (!response.ok) throw new Error('sources unavailable');
 +          const payload = await response.json();
-+          if (payload?.v !== 1 || payload.kind !== 'search' || !Array.isArray(payload.items) || payload.items.length > metadataSources.size) throw new Error('invalid sources');
++          if (payload?.v !== 1 || payload.kind !== 'search' || !Array.isArray(payload.items) || payload.items.length > 32) throw new Error('invalid sources');
 +          const items = payload.items.map(validateSelectionItem);
 +          if (session !== sourceSession || watchStage.hidden) return;
 +          // The server matches work identity; keep the original playable choice even if its catalog is offline.
@@ -1398,6 +1467,7 @@ diff --git a/index.html b/index.html
 +            }
 +            if (playlist === item && !watchStage.hidden) {
 +              current = Math.max(0, item.episodes.findIndex((episode) => episode.url === currentUrl));
++              if (historyPlaylist === item) historyEpisode = current;
 +              updateWatchDetails(); renderEpisodes(); updateButtons();
 +              metadataStatus.textContent = ''; metadataRetry.hidden = true;
 +            }
@@ -1427,10 +1497,358 @@ diff --git a/index.html b/index.html
 +        await Promise.all(Array.from({length: Math.min(3, pending.length)}, async () => {
 +          while (cursor < pending.length) await hydrateMetadata(pending[cursor++]);
 +        }));
-       };
- 
++      };
++
++      const HISTORY_KEY = 'short-drama-watch-history';
++      const SKIP_KEY = 'short-drama-skip-settings';
++      const historyKey = (title) => String(title || '').normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/(?:\s+|[（(])(?:19|20)\d{2}[）)]?\s*$/, '').replace(/[\s\p{P}\p{S}]+/gu, '').slice(0, 300);
++      const readLocal = (key, fallback, maximum = 1900000) => {
++        try {
++          const value = localStorage.getItem(key);
++          return value && value.length <= maximum ? JSON.parse(value) : fallback;
++        } catch (_error) { return fallback; }
++      };
++      const writeLocal = (key, value) => {
++        try { localStorage.setItem(key, JSON.stringify(value)); return true; }
++        catch (_error) { return false; }
++      };
++      const safeHistoryEntry = (entry) => {
++        if (!entry || typeof entry !== 'object' || !entry.item || typeof entry.item !== 'object') return null;
++        try {
++          const item = validateSelectionItem(entry.item);
++          const episode = Number(entry.episode), position = Number(entry.position);
++          if (!Number.isInteger(episode) || episode < 0 || episode >= item.episodes.length
++            || !Number.isFinite(position) || position < 0 || position > 86400
++            || typeof item.source !== 'string' || item.source.length > 100) return null;
++          return {title: item.title, item, episode, position, updated: Number(entry.updated) || 0};
++        } catch (_error) { return null; }
++      };
++      const storedEntries = readLocal(HISTORY_KEY, []);
++      let watchEntries = [];
++      if (Array.isArray(storedEntries)) {
++        const seen = new Set();
++        storedEntries.slice(0, 3).map(safeHistoryEntry).filter(Boolean).forEach((entry) => {
++          const key = historyKey(entry.title);
++          if (key && !seen.has(key)) { seen.add(key); watchEntries.push(entry); }
++        });
++      }
++      const storedSkip = readLocal(SKIP_KEY, {}, 50000);
++      let skipSettings = storedSkip && typeof storedSkip === 'object' && !Array.isArray(storedSkip) ? storedSkip : {};
++      const skipSeconds = (value) => Number.isFinite(Number(value)) ? Math.min(300, Math.max(0, Math.round(Number(value)))) : 0;
++      function syncSkipSettings() {
++        const key = historyKey(playlist?.title);
++        const saved = skipSettings.works?.[key] || {};
++        skipEnabled.checked = skipSettings.enabled === true;
++        skipIntro.value = String(skipSeconds(saved.intro));
++        skipOutro.value = String(skipSeconds(saved.outro));
++        if (playlist) playlist.skipKey = key;
++      }
++      function updateSkipSettings() {
++        if (!playlist) return;
++        const key = historyKey(playlist.title);
++        const works = skipSettings.works && typeof skipSettings.works === 'object' && !Array.isArray(skipSettings.works) ? skipSettings.works : {};
++        const intro = skipSeconds(skipIntro.value), outro = skipSeconds(skipOutro.value);
++        const others = Object.entries(works).filter(([name]) => name !== key).slice(-39);
++        skipSettings = {enabled: skipEnabled.checked, works: Object.fromEntries([...others, [key, {intro, outro}]])};
++        skipIntro.value = String(intro); skipOutro.value = String(outro);
++        const persisted = writeLocal(SKIP_KEY, skipSettings);
++        skipIntroDone = false;
++        showHint(persisted ? (skipEnabled.checked ? '已保存本剧片头片尾设置' : '已关闭跳过片头片尾') : '浏览器限制存储，设置仅本次页面有效', 2400);
++      }
++      [skipEnabled, skipIntro, skipOutro].forEach((input) => input.addEventListener('change', updateSkipSettings));
++      function finishEpisode() {
++        if (!playlist || !historyReady || finishedLoadId === episodeLoadId) return;
++        finishedLoadId = episodeLoadId;
++        saveWatchHistory(true);
++        if (autoNext.checked && current < playlist.episodes.length - 1) {
++          loadEpisode(current + 1, {autoplay: true});
++        } else {
++          if (!video.ended) video.pause();
++          statusNode.textContent = current < playlist.episodes.length - 1 ? '本集播放结束，可选择下一集' : '播放结束';
++          showControls();
++        }
++      }
++      function applySkipSettings() {
++        if (!historyReady || video.paused || video.seeking || isSeeking || !skipEnabled.checked || !Number.isFinite(video.duration)) return;
++        const intro = skipSeconds(skipIntro.value), outro = skipSeconds(skipOutro.value);
++        if (video.duration <= intro + outro + 1) return;
++        if (!skipIntroDone && intro > 0 && video.currentTime < intro - .25) {
++          skipIntroDone = true; video.currentTime = intro; showHint(`已跳过片头 ${intro} 秒`, 1800); return;
++        }
++        if (video.currentTime >= intro) skipIntroDone = true;
++        if (outro > 0 && video.currentTime >= video.duration - outro && video.currentTime > intro) {
++          showHint(`已跳过片尾 ${outro} 秒`, 1800); finishEpisode();
++        }
++      }
++      function saveWatchHistory(force = false) {
++        if (!historyReady || !playlist || playlist !== historyPlaylist || current !== historyEpisode || watchStage.hidden || !Number.isFinite(video.currentTime) || video.readyState < 1) return;
++        if (!force && Date.now() - historySavedAt < 4000) return;
++        historySavedAt = Date.now();
++        const fields = ['title', 'source', 'year', 'category', 'actor', 'director', 'cover', 'episode_count'];
++        const item = Object.fromEntries(fields.map((field) => [field, String(playlist[field] || '').slice(0, field === 'cover' ? 3000 : 300)]));
++        item.episodes = playlist.episodes.map((episode) => ({name: episode.name, url: episode.url}));
++        item.episode_count = playlist.episodeCount || item.episodes.length;
++        let episode = current;
++        if (JSON.stringify(item).length > 550000) { item.episodes = [item.episodes[current]]; episode = 0; }
++        const entry = safeHistoryEntry({item, episode, position: Math.max(0, video.currentTime), updated: Date.now()});
++        if (!entry) return;
++        watchEntries = [entry, ...watchEntries.filter((old) => historyKey(old.title) !== historyKey(entry.title))].slice(0, 3);
++        if (!writeLocal(HISTORY_KEY, watchEntries)) historyStatus.textContent = '浏览器限制本地存储，记录仅在本次页面保留。';
++        renderWatchHistory();
++      }
++      let historyRenderSignature = '';
++      function renderWatchHistory() {
++        watchHistory.hidden = watchEntries.length === 0;
++        watchHistory.classList.toggle('catalog-history', watchStage.hidden);
++        const historyParent = watchStage.hidden ? recommendationsNode : watchStage;
++        const description = watchStage.querySelector('.watch-description');
++        if (watchHistory.parentElement !== historyParent || (!watchStage.hidden && watchHistory.previousElementSibling !== description)) {
++          if (watchStage.hidden) recommendationsNode.appendChild(watchHistory);
++          else description.after(watchHistory);
++        }
++        const signature = JSON.stringify(watchEntries.map((entry) => [entry.title, entry.item.source, entry.item.episodes[entry.episode].name]));
++        if (signature === historyRenderSignature) return;
++        historyRenderSignature = signature; historyList.replaceChildren();
++        watchEntries.forEach((entry) => {
++          const button = document.createElement('button'); button.type = 'button'; button.className = 'history-row';
++          const name = document.createElement('strong'); name.textContent = entry.title;
++          const detail = document.createElement('span');
++          detail.textContent = `${entry.item.episodes[entry.episode].name} · ${sourceDisplayName(entry.item.source)}`;
++          button.setAttribute('aria-label', `继续观看${entry.title} ${detail.textContent}`);
++          button.append(name, detail);
++          button.addEventListener('click', () => { const latest = watchEntries.find((value) => historyKey(value.title) === historyKey(entry.title)); if (latest) restoreWatchHistory(latest); });
++          historyList.appendChild(button);
++        });
++      }
++      async function fetchSearch(query, signal) {
++        const response = await fetch(`/short-drama/api/search?${new URLSearchParams({q: query})}`, {cache: 'no-store', credentials: 'omit', signal});
++        if (!response.ok) throw new Error('search unavailable');
++        const payload = await response.json();
++        if (payload?.v !== 1 || payload.kind !== 'search' || !Array.isArray(payload.items) || payload.items.length > 24) throw new Error('invalid search');
++        return payload;
++      }
++      function normalizeSearchQuery(value) {
++        return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
++      }
++      function getSearchSuggestions(values, query) {
++        const seen = new Set([normalizeSearchQuery(query).toLocaleLowerCase('zh-CN')]);
++        const suggestions = [];
++        for (const value of Array.isArray(values) ? values.slice(0, 30) : []) {
++          if (typeof value !== 'string') continue;
++          const title = normalizeSearchQuery(value), key = title.toLocaleLowerCase('zh-CN');
++          if (!title || title.length > 100 || seen.has(key)) continue;
++          seen.add(key); suggestions.push(title);
++          if (suggestions.length === 6) break;
++        }
++        return suggestions;
++      }
++      function closeAutocomplete() {
++        clearTimeout(autocompleteTimer); autocompleteTimer = null;
++        autocompleteController?.abort(); autocompleteController = null; autocompleteVersion++;
++        autocompleteItems = []; autocompleteIndex = -1;
++        searchAutocomplete.hidden = true; searchAutocomplete.replaceChildren();
++        catalogSearch.setAttribute('aria-expanded', 'false');
++        catalogSearch.setAttribute('aria-busy', 'false');
++        catalogSearch.removeAttribute('aria-activedescendant');
++      }
++      function selectSearchSuggestion(value) {
++        catalogSearch.value = value; clearSearch.hidden = false;
++        searchCatalog();
++      }
++      function renderSearchSuggestions() {
++        searchSuggestions.replaceChildren();
++        if (selectionKind !== 'search') return;
++        catalogSuggestions.forEach((value) => {
++          const button = document.createElement('button'); button.type = 'button'; button.textContent = value;
++          button.addEventListener('click', () => selectSearchSuggestion(value)); searchSuggestions.appendChild(button);
++        });
++      }
++      function setAutocompleteIndex(index) {
++        autocompleteIndex = index;
++        [...searchAutocomplete.children].forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === index)));
++        if (index >= 0) {
++          catalogSearch.setAttribute('aria-activedescendant', `searchOption-${index}`);
++          searchAutocomplete.children[index].scrollIntoView({block: 'nearest'});
++        }
++        else catalogSearch.removeAttribute('aria-activedescendant');
++      }
++      function renderAutocomplete(values) {
++        autocompleteItems = values; autocompleteIndex = -1;
++        searchAutocomplete.replaceChildren(); catalogSearch.removeAttribute('aria-activedescendant');
++        values.forEach((value, index) => {
++          const option = document.createElement('button'); option.type = 'button'; option.tabIndex = -1;
++          option.id = `searchOption-${index}`; option.textContent = value;
++          option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false');
++          option.addEventListener('pointerdown', (event) => event.preventDefault());
++          option.addEventListener('click', () => selectSearchSuggestion(value)); searchAutocomplete.appendChild(option);
++        });
++        searchAutocomplete.hidden = !values.length;
++        catalogSearch.setAttribute('aria-expanded', String(!!values.length));
++      }
++      function scheduleAutocomplete() {
++        closeAutocomplete();
++        const query = normalizeSearchQuery(catalogSearch.value), version = autocompleteVersion;
++        if (composing || document.activeElement !== catalogSearch || query.length < 2 || query.length > 100) return;
++        autocompleteTimer = setTimeout(async () => {
++          autocompleteTimer = null;
++          const controller = new AbortController(); autocompleteController = controller;
++          const timeout = setTimeout(() => controller.abort(), 15000);
++          catalogSearch.setAttribute('aria-busy', 'true');
++          try {
++            const payload = await fetchSearch(query, controller.signal);
++            if (controller !== autocompleteController || version !== autocompleteVersion || composing
++              || document.activeElement !== catalogSearch || normalizeSearchQuery(catalogSearch.value) !== query) return;
++            renderAutocomplete(getSearchSuggestions([...(Array.isArray(payload.suggestions) ? payload.suggestions.slice(0, 6) : []), ...payload.items.map((item) => item?.title)], query));
++          } catch (_error) {
++            if (controller === autocompleteController) renderAutocomplete([]);
++          } finally {
++            clearTimeout(timeout);
++            if (controller === autocompleteController) { autocompleteController = null; catalogSearch.setAttribute('aria-busy', 'false'); }
++          }
++        }, 350);
++      }
++      async function restoreWatchHistory(entry) {
++        saveWatchHistory(true);
++        historyController?.abort();
++        const controller = new AbortController();
++        const item = validateSelectionItem(structuredClone(entry.item));
++        playlist = item; current = entry.episode; resetSources(item); historyController = controller;
++        watchStage.hidden = false; recommendationsNode.style.display = 'none';
++        titleNode.textContent = item.title; updateWatchDetails(); renderEpisodes(); renderWatchHistory();
++        ['p', 'r', 'i', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
++        fragment.set('resume', historyKey(item.title));
++        loadEpisode(current, {autoplay: true, resumeTime: entry.position});
++        showHint(`继续观看 ${item.episodes[current].name}`, 2200);
++        window.scrollTo(0, 0);
++        const session = sourceSession;
++        const timeout = setTimeout(() => controller.abort(), 20000);
++        try {
++          let resolved;
++          try {
++            const query = await selectionQuery(item);
++            const response = await fetch(`/short-drama/api/resolve?${query}`, {cache: 'no-store', credentials: 'omit', signal: controller.signal});
++            if (!response.ok) throw new Error('history metadata unavailable');
++            resolved = validateSelectionPayload(await response.json())[0];
++          } catch (error) {
++            if (controller.signal.aborted || session !== sourceSession || watchStage.hidden) return;
++            const payload = await fetchSearch(item.title, controller.signal);
++            const matches = payload.items.map(validateSelectionItem).filter((candidate) => candidate.source === item.source
++              && historyKey(candidate.title) === historyKey(item.title)
++              && (!item.year || candidate.year === item.year));
++            if (matches.length !== 1) throw error;
++            resolved = matches[0];
++          }
++          if (controller.signal.aborted || session !== sourceSession || playlist !== item || watchStage.hidden) return;
++          if (resolved.source !== item.source || historyKey(resolved.title) !== historyKey(item.title)) throw new Error('history mismatch');
++          const previousEpisode = item.episodes[current];
++          const index = resolved.episodes.findIndex((episode) => episode.url === previousEpisode.url || episode.name === previousEpisode.name);
++          if (index < 0) return;
++          const changedUrl = resolved.episodes[index].url !== previousEpisode.url;
++          const position = historyReady && Number.isFinite(video.currentTime) ? video.currentTime : entry.position;
++          const activePlayback = !video.paused && video.readyState >= 2 && !statusNode.classList.contains('error');
++          Object.assign(item, resolved); current = index; historyEpisode = index;
++          updateWatchDetails(); renderEpisodes();
++          if (changedUrl && !activePlayback) loadEpisode(index, {autoplay: true, resumeTime: position});
++          else saveWatchHistory(true);
++        } catch (_error) {
++          if (session === sourceSession && !controller.signal.aborted && statusNode.classList.contains('error')) {
++            historyStatus.textContent = '该来源暂时不可用，可换源继续观看。';
++          }
++        } finally { clearTimeout(timeout); if (historyController === controller) historyController = null; }
++      }
++      async function searchCatalog() {
++        closeAutocomplete();
++        const query = normalizeSearchQuery(catalogSearch.value);
++        if (!query || query.length > 100) { recommendationsSummary.textContent = '请输入 1–100 字的片名。'; catalogSearch.focus(); return; }
++        catalogSearch.value = query; clearSearch.hidden = false;
++        searchController?.abort(); historyController?.abort();
++        const controller = new AbortController(); searchController = controller;
++        const timeout = setTimeout(() => controller.abort(), 30000);
++        const generation = ++actionGeneration;
++        searchAllSources.textContent = '搜索中';
++        searchAllSources.setAttribute('aria-busy', 'true');
++        recommendationsSummary.textContent = '正在查询所有资源，单个来源失败不会影响其他结果…';
++        recommendationsNode.setAttribute('aria-busy', 'true');
++        try {
++          const payload = await fetchSearch(query, controller.signal);
++          if (controller !== searchController || generation !== actionGeneration) return;
++          const items = payload.items.map(validateSelectionItem);
++          recommendationItems = items; selectionKind = 'search'; playlist = null;
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, query);
++          ['i', 'ep', 'resume', 'q', 'watch', 'title', 'source', 'year', 'category', 'episode'].forEach((key) => fragment.delete(key));
++          fragment.set('search', query);
++          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++          recommendationsTitle.textContent = String(payload.heading || `搜索：${query}`).slice(0, 300);
++          document.title = recommendationsTitle.textContent;
++          renderCatalog();
++          const total = Number(payload.sources_total), searched = Number(payload.sources_searched);
++          const failures = Array.isArray(payload.failures) ? payload.failures.length : 0;
++          const coverage = Number.isFinite(total) && Number.isFinite(searched) ? ` · 已查询 ${searched}/${total} 个来源` : '';
++          catalogSummary = `找到 ${items.length} 个结果${coverage}${failures ? ` · ${failures} 个来源暂不可用` : ''}`;
++          recommendationsSummary.textContent = catalogSummary;
++          if (normalizeSearchQuery(catalogSearch.value) !== query) filterCatalog();
++          renderWatchHistory(); hydrateCatalog();
++        } catch (_error) {
++          if (controller === searchController) {
++            recommendationsSummary.textContent = '全源搜索暂时未完成，请重试；当前片单仍可播放。';
++            [...recommendationGrid.children].forEach((card) => { card.hidden = false; });
++            document.getElementById('catalogEmpty').hidden = recommendationItems.length > 0;
++          }
++        } finally {
++          clearTimeout(timeout);
++          if (controller === searchController) {
++            searchController = null; searchAllSources.textContent = '搜索';
++            searchAllSources.setAttribute('aria-busy', 'false'); recommendationsNode.setAttribute('aria-busy', 'false');
++          }
++        }
++      }
++
        try {
-@@ -552,22 +1207,30 @@
+-        if (params.get('s')) {
++        if (fragment.get('watch')) {
++          const allowed = new Set(['watch', 'title', 'source', 'year', 'category', 'episode', 'ep']);
++          if (fragment.get('watch') !== '1' || [...fragment.keys()].some((key) => !allowed.has(key) || fragment.getAll(key).length !== 1)) throw new Error('invalid shared selection');
++          const fields = {title: 100, source: 100, year: 20, category: 100, episode: 200};
++          const target = {};
++          for (const [key, limit] of Object.entries(fields)) {
++            target[key] = fragment.get(key) || '';
++            if (target[key].length > limit || /[\u0000-\u001f]/.test(target[key])) throw new Error('invalid shared selection');
++          }
++          if (!target.title.trim() || !target.source.trim() || !target.episode.trim() || !/^[1-9]\d{0,3}$/.test(fragment.get('ep') || '') || Number(fragment.get('ep')) > 2000) throw new Error('invalid shared selection');
++          const payload = await fetchSearch(target.title);
++          recommendationItems = payload.items.map(validateSelectionItem);
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, target.title);
++          sharedSelection = target; selectionKind = 'search';
++          recommendationsTitle.textContent = `查找分享的作品：${target.title}`;
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++        } else if (fragment.get('resume')) {
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++          const entry = watchEntries.find((item) => historyKey(item.title) === fragment.get('resume'));
++          if (!entry) {
++            const query = fragment.get('resume');
++            const payload = await fetchSearch(query);
++            recommendationItems = payload.items.map(validateSelectionItem); selectionKind = 'search';
++            catalogSuggestions = getSearchSuggestions(payload.suggestions, query);
++            recommendationsTitle.textContent = `搜索：${query}`;
++            sharedNotice = '本设备没有这条观看记录，请选择来源继续观看。';
++            fragment.delete('resume'); fragment.set('search', query);
++          }
++        } else if (fragment.get('search')) {
++          const payload = await fetchSearch(fragment.get('search'));
++          recommendationItems = payload.items.map(validateSelectionItem);
++          catalogSuggestions = getSearchSuggestions(payload.suggestions, fragment.get('search'));
++          selectionKind = 'search'; recommendationsTitle.textContent = payload.heading || '搜索结果';
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++        } else if (params.get('s')) {
+           const selectionToken = params.get('s');
+           if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
+             || [...params.keys()].some((key) => key !== 's')) {
+@@ -549,31 +1615,39 @@
+           if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
+           recommendationItems = validateSelectionPayload(payload);
+           selectionKind = String(payload.kind || 'recommendations');
++          if (selectionKind === 'search') catalogSuggestions = getSearchSuggestions(payload.suggestions, payload.query);
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1441,6 +1859,7 @@ diff --git a/index.html b/index.html
 +          const payload = await decodePlaylist(fragment.get('r'));
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
++          if (selectionKind === 'search') catalogSuggestions = getSearchSuggestions(payload.suggestions, payload.query);
            recommendationsTitle.textContent = String(payload.heading || '选择作品');
            document.title = recommendationsTitle.textContent;
            watchStage.hidden = true;
@@ -1452,19 +1871,28 @@ diff --git a/index.html b/index.html
            if (!payload || payload.v !== 1) throw new Error('播放数据不合法');
            playlist = validateSelectionItem(payload);
          } else {
-           throw new Error('缺少安全播放参数');
+-          throw new Error('缺少安全播放参数');
++          watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++          recommendationsTitle.textContent = '搜索影视';
          }
        } catch (_error) {
 -        fail('分集数据已损坏，请回到微信重新搜索。');
-+        fail('片单无法打开或已过期，请重试，或回到微信重新搜索。');
-+        retry.addEventListener('click', () => location.reload());
-+        pageBackButton.hidden = true;
-+        previous.disabled = next.disabled = true;
-+        episodeButtons.forEach((button) => { button.disabled = true; });
-         return;
+-        return;
++        watchStage.hidden = true; document.querySelector('main').classList.remove('watch-mode');
++        recommendationsTitle.textContent = fragment.has('watch') ? '分享的作品暂时无法打开，可重新搜索' : '片单已过期，可重新搜索';
++        recommendationItems = [];
        }
  
-@@ -581,19 +1244,24 @@
+-      if (!recommendationItems.length && (!playlist || !Array.isArray(playlist.episodes) || !playlist.episodes.length)) {
+-        fail('没有可播放的分集，请回到微信重新搜索。');
+-        return;
++      if (!recommendationItems.length && !playlist) {
++        watchStage.hidden = true;
++        document.querySelector('main').classList.remove('watch-mode');
+       }
+       if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
+ 
+@@ -581,19 +1655,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1496,7 +1924,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1282,15 @@
+@@ -614,27 +1693,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1531,7 +1959,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1352,85 @@
+@@ -696,27 +1763,90 @@
          updateQualityActive();
        };
  
@@ -1613,10 +2041,15 @@ diff --git a/index.html b/index.html
          if (!playlist) return;
          if (index < 0 || index >= playlist.episodes.length) return;
          const resumePlayback = autoplay || (!video.paused && !video.ended);
++        saveWatchHistory(true);
++        historyReady = false; skipIntroDone = false; finishedLoadId = -1;
++        recoveryAttempts = 0; recoveryProgress = 0;
++        clearTimeout(stalledTimer); stalledTimer = null;
          const loadId = ++episodeLoadId;
 +        resetCast();
          removeEpisodeReadyListener();
          current = index;
++        historyPlaylist = playlist; historyEpisode = current;
 +        if (episodePage !== Math.floor(current / EPISODES_PER_PAGE)) {
 +          episodePage = Math.floor(current / EPISODES_PER_PAGE);
 +          renderEpisodePage();
@@ -1624,7 +2057,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1438,35 @@
+@@ -724,24 +1854,42 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -1635,39 +2068,51 @@ diff --git a/index.html b/index.html
 +          fail('资源站响应超时，请重试或切换资源。');
          }, 15000);
 -        const onEpisodeReady = () => {
--          if (loadId !== episodeLoadId) return;
--          if (loadTimer) clearTimeout(loadTimer);
--          applyVideoAspect();
 +        let playbackRequested = false;
 +        let seekPending = resumeTime > 0;
 +        const resumeEpisode = () => {
-           video.playbackRate = Number(playbackRate.value) || 1;
--          if (resumePlayback && video.paused) {
++          video.playbackRate = Number(playbackRate.value) || 1;
 +          if (resumePlayback && !playbackRequested) {
 +            playbackRequested = true;
-             video.play().catch((error) => {
-               if (loadId === episodeLoadId && error.name !== 'AbortError') {
-                 statusNode.textContent = '已就绪，点击播放。';
-               }
-             });
--          } else if (video.paused) {
-+          } else if (!resumePlayback && video.paused) {
-             statusNode.textContent = '已连接，点击播放。';
-           }
++            video.play().catch((error) => {
++              if (loadId !== episodeLoadId || error?.name === 'AbortError' || statusNode.classList.contains('error')) return;
++              if (error?.name === 'NotAllowedError' && !video.error) {
++                statusNode.textContent = '已就绪，点击播放。';
++                showHint('已就绪，点击左下角播放继续观看', 4000);
++                showControls();
++              } else {
++                fail('视频加载失败，请重试或切换资源。');
++              }
++            });
++          } else if (!resumePlayback && video.paused && !video.error && !statusNode.classList.contains('error')) {
++            statusNode.textContent = '已连接，点击播放。';
++          }
 +        };
 +        const onEpisodeReady = (event) => {
-+          if (loadId !== episodeLoadId) return;
-+          if (loadTimer) clearTimeout(loadTimer);
+           if (loadId !== episodeLoadId) return;
+           if (loadTimer) clearTimeout(loadTimer);
 +          if (seekPending && event?.type === 'loadedmetadata' && video.readyState >= 1 && Number.isFinite(video.duration)) {
 +            video.currentTime = Math.max(0, Math.min(resumeTime, video.duration - 0.25));
 +            seekPending = false;
 +          }
-+          applyVideoAspect();
++          if (event?.type === 'loadedmetadata') { historyReady = true; saveWatchHistory(true); }
+           applyVideoAspect();
+-          video.playbackRate = Number(playbackRate.value) || 1;
+-          if (resumePlayback && video.paused) {
+-            video.play().catch((error) => {
+-              if (loadId === episodeLoadId && error.name !== 'AbortError') {
+-                statusNode.textContent = '已就绪，点击播放。';
+-              }
+-            });
+-          } else if (video.paused) {
+-            statusNode.textContent = '已连接，点击播放。';
+-          }
++          if (seekPending && event?.type !== 'loadedmetadata') return;
 +          resumeEpisode();
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,19 +1474,18 @@
+@@ -749,21 +1897,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -1690,19 +2135,40 @@ diff --git a/index.html b/index.html
 -          removeEpisodeReadyListener = () => video.removeEventListener('loadedmetadata', onEpisodeReady);
 +          resumeEpisode();
          } else if (window.Hls && Hls.isSupported()) {
-           hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
+-          hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 });
++          hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 60, backBufferLength: 30, maxBufferSize: 60000000 });
            hls.loadSource(source);
-@@ -775,7 +1499,7 @@
+           hls.attachMedia(video);
+           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+@@ -773,68 +1920,148 @@
+           });
+           hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
-             if (loadId === episodeLoadId && data && data.fatal) {
-               if (loadTimer) clearTimeout(loadTimer);
+-            if (loadId === episodeLoadId && data && data.fatal) {
+-              if (loadTimer) clearTimeout(loadTimer);
 -              fail('资源站拒绝了浏览器直连，请重试或回到微信更换资源。');
-+              fail('视频加载失败，请重试或切换资源。');
++            if (loadId !== episodeLoadId || !data?.fatal) return;
++            if (recoveryAttempts < 2 && !video.paused && !document.hidden) {
++              if (recoveryAttempts === 0) recoveryProgress = video.currentTime;
++              recoveryAttempts++;
++              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
++                statusNode.textContent = '网络波动，正在重新连接…'; hls.startLoad(video.currentTime); return;
++              }
++              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
++                statusNode.textContent = '正在恢复播放…'; hls.recoverMediaError(); return;
++              }
              }
++            if (loadTimer) clearTimeout(loadTimer);
++            fail('视频加载失败，请重试或切换资源。');
            });
          } else {
-@@ -784,44 +1508,82 @@
+           fail('当前浏览器不支持 HLS 播放。');
+         }
          fragment.set('ep', String(current + 1));
++        if (fragment.has('watch')) {
++          ['title', 'source', 'year', 'category'].forEach((key) => fragment.set(key, String(playlist[key] || '')));
++          fragment.set('episode', item.name);
++        }
          history.replaceState(null, '', `${location.pathname}${location.search}#${fragment.toString()}`);
          updateButtons();
 -      };
@@ -1779,6 +2245,9 @@ diff --git a/index.html b/index.html
 -          });
 -        });
 -        updateButtons();
+-      };
+-
+-      const selectRecommendation = (index) => {
 +        playlist?.episodes.forEach((item, index) => episodeGrid.appendChild(episodeButton(item, index)));
 +        episodePage = Math.floor(current / EPISODES_PER_PAGE);
 +        renderEpisodePage();
@@ -1800,38 +2269,69 @@ diff --git a/index.html b/index.html
 +        document.getElementById('videoTitle').textContent = playlist.title;
 +        document.title = playlist.title;
 +        document.querySelector('main').classList.add('watch-mode');
++        syncSkipSettings();
 +        refreshRelated();
-       };
- 
-       const selectRecommendation = (index) => {
++        queueMicrotask(() => { if (!watchStage.hidden) loadSources(); });
++      };
++
++      const selectRecommendation = (index, {restoreSavedSource = false, sharedEpisode = -1} = {}) => {
          const selected = recommendationItems[index];
          if (!selected || !Array.isArray(selected.episodes) || !selected.episodes.length) return;
++        const saved = sharedEpisode < 0 && watchEntries.find((entry) => historyKey(entry.title) === historyKey(selected.title)
++          && (!selected.year || !entry.item.year || selected.year === entry.item.year)
++          && (!selected.category || !entry.item.category || selected.category === entry.item.category));
++        if (saved) {
++          lastSelectedCard = recommendationGrid.children[index];
++          if (restoreSavedSource || saved.item.source === selected.source) { restoreWatchHistory(saved); return; }
++          const lastEpisode = saved.item.episodes[saved.episode];
++          const indexInSelected = matchingEpisode(selected, saved.item, saved.episode);
++          if (indexInSelected >= 0) {
++            restoreWatchHistory({...saved, item: selected, episode: indexInSelected}); return;
++          }
++          recommendationsSummary.textContent = `该来源暂无上次观看的${lastEpisode.name}，可选择其他来源或从观看记录继续。`;
++          return;
++        }
 +        lastSelectedCard = recommendationGrid.children[index];
++        saveWatchHistory();
          playlist = selected;
 +        resetSources(selected);
-+        current = 0;
++        current = sharedEpisode >= 0 ? sharedEpisode : 0;
 +        updateWatchDetails();
          titleNode.textContent = String(playlist.title || '短剧播放');
          document.title = String(playlist.title || '短剧播放');
          watchStage.hidden = false;
-@@ -830,11 +1592,16 @@
-         fragment.delete('ep');
+         recommendationsNode.style.display = 'none';
+-        fragment.set('i', String(index));
+-        fragment.delete('ep');
++        renderWatchHistory();
++        if (sharedEpisode < 0) fragment.set('i', String(index)); else fragment.delete('i');
++        fragment.delete('ep'); fragment.delete('resume');
++        if (fragment.has('watch') || fragment.has('search')) {
++          [...fragment.keys()].forEach((key) => fragment.delete(key));
++          fragment.set('watch', '1');
++        }
          renderEpisodes();
-         loadEpisode(0);
+-        loadEpisode(0);
+-      };
+-
+-      if (recommendationItems.length) {
++        loadEpisode(current);
 +        metadataStatus.textContent = needsMetadata(selected) && selected.episodeCount > selected.episodes.length ? '正在获取完整选集…' : '';
 +        metadataRetry.hidden = true; hydrateMetadata(selected);
 +        window.scrollTo(0, 0);
 +        focusForKeyboard(pageBackButton);
-       };
- 
-       if (recommendationItems.length) {
++      };
++
++      const renderCatalog = () => {
++        recommendationGrid.replaceChildren();
++        renderSearchSuggestions();
          recommendationsNode.removeAttribute('hidden');
          recommendationsNode.style.display = 'block';
 +        document.getElementById('catalogEyebrow').textContent = selectionKind === 'search' ? '搜索片单' : '为你选片';
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +1623,11 @@
+@@ -856,10 +2083,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -1844,7 +2344,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +1650,7 @@
+@@ -882,7 +2110,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -1853,40 +2353,75 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -891,21 +1659,77 @@
+@@ -890,22 +2118,117 @@
+         });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
-       }
-+      const summaryText = recommendationsSummary.textContent;
+-      }
++        recommendationsNode.style.display = playlist && !watchStage.hidden ? 'none' : 'block';
++        catalogSummary = recommendationsSummary.textContent;
++        document.getElementById('catalogEmpty').hidden = recommendationItems.length !== 0;
++      };
++      renderCatalog();
 +      const filterCatalog = () => {
-+        const query = catalogSearch.value.trim().toLocaleLowerCase('zh-CN');
++        const inputQuery = normalizeSearchQuery(catalogSearch.value).toLocaleLowerCase('zh-CN');
++        const searchedQuery = normalizeSearchQuery(fragment.get('search')).toLocaleLowerCase('zh-CN');
++        const query = selectionKind === 'search' && inputQuery === searchedQuery ? '' : inputQuery;
 +        clearSearch.hidden = !catalogSearch.value;
 +        let matches = 0;
 +        [...recommendationGrid.children].forEach((card, index) => {
 +          card.hidden = !recommendationItems[index].title.toLocaleLowerCase('zh-CN').includes(query);
 +          if (!card.hidden) matches++;
 +        });
-+        recommendationsSummary.textContent = query ? `找到 ${matches} 部作品 · 当前片单共 ${recommendationItems.length} 部` : summaryText;
++        recommendationsSummary.textContent = query ? `找到 ${matches} 部作品 · 当前片单共 ${recommendationItems.length} 部` : catalogSummary;
 +        document.getElementById('catalogEmpty').hidden = matches !== 0;
 +        // The signed query contract stays untouched; local list state belongs in the fragment.
 +        if (query) fragment.set('q', catalogSearch.value); else fragment.delete('q');
 +        history.replaceState(null, '', `${location.pathname}${location.search}#${fragment}`);
 +      };
-+      catalogSearch.value = fragment.get('q') || '';
++      catalogSearch.value = fragment.get('q') || fragment.get('search') || '';
++      clearSearch.hidden = !catalogSearch.value;
 +      if (recommendationItems.length) filterCatalog();
-+      catalogSearch.addEventListener('compositionstart', () => { composing = true; });
-+      catalogSearch.addEventListener('compositionend', () => { composing = false; filterCatalog(); });
-+      catalogSearch.addEventListener('input', () => { clearSearch.hidden = !catalogSearch.value; if (!composing) filterCatalog(); });
-+      clearSearch.addEventListener('click', () => { catalogSearch.value = ''; composing = false; filterCatalog(); catalogSearch.focus(); });
++      catalogSearch.addEventListener('keydown', (event) => {
++        if (composing || event.isComposing || event.keyCode === 229) return;
++        if (event.key === 'Escape') { event.preventDefault(); closeAutocomplete(); return; }
++        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && autocompleteItems.length) {
++          event.preventDefault();
++          const offset = event.key === 'ArrowDown' ? 1 : -1;
++          const index = autocompleteIndex < 0 ? (offset > 0 ? 0 : autocompleteItems.length - 1)
++            : (autocompleteIndex + offset + autocompleteItems.length) % autocompleteItems.length;
++          setAutocompleteIndex(index); return;
++        }
++        if (event.key === 'Enter') {
++          event.preventDefault();
++          if (autocompleteIndex >= 0) selectSearchSuggestion(autocompleteItems[autocompleteIndex]);
++          else searchCatalog();
++        }
++      });
++      searchAllSources.addEventListener('click', searchCatalog);
++      catalogSearch.addEventListener('compositionstart', () => { composing = true; closeAutocomplete(); });
++      catalogSearch.addEventListener('compositionend', () => { composing = false; filterCatalog(); scheduleAutocomplete(); });
++      catalogSearch.addEventListener('input', (event) => {
++        clearSearch.hidden = !catalogSearch.value;
++        if (!composing && !event.isComposing) { filterCatalog(); scheduleAutocomplete(); }
++      });
++      catalogSearch.addEventListener('focus', scheduleAutocomplete);
++      catalogSearch.addEventListener('blur', closeAutocomplete);
++      document.addEventListener('pointerdown', (event) => { if (!catalogSearch.closest('.catalog-search').contains(event.target)) closeAutocomplete(); });
++      clearSearch.addEventListener('click', () => {
++        closeAutocomplete(); catalogSearch.value = ''; composing = false; filterCatalog(); catalogSearch.focus();
++      });
++      recommendationsNode.setAttribute('aria-busy', 'false');
 +      hydrateCatalog();
 +      if (playlist) resetSources(playlist);
 +      updateWatchDetails();
        renderEpisodes();
        previous.addEventListener('click', () => loadEpisode(current - 1));
        next.addEventListener('click', () => loadEpisode(current + 1));
-+      fullscreenNext.addEventListener('click', () => loadEpisode(current + 1));
-       retry.addEventListener('click', () => loadEpisode(current));
+-      retry.addEventListener('click', () => loadEpisode(current));
 -      episodeOpen.addEventListener('click', openEpisodeSheet);
++      fullscreenNext.addEventListener('click', () => loadEpisode(current + 1));
++      retry.addEventListener('click', () => loadEpisode(current, {autoplay: true, resumeTime: Number.isFinite(video.currentTime) ? video.currentTime : 0}));
 +      episodeButtons.forEach((button) => button.addEventListener('click', openEpisodeSheet));
        pageBackButton.addEventListener('click', () => {
 -        if (history.length > 1) history.back();
@@ -1903,7 +2438,13 @@ diff --git a/index.html b/index.html
 +          fullButton.click();
 +          return;
 +        }
-+        if (recommendationItems.length) {
++        if (recommendationItems.length || fragment.get('search')) {
++          saveWatchHistory();
++          if (fragment.has('watch')) {
++            const query = fragment.get('title') || playlist?.title || '';
++            ['watch', 'title', 'source', 'year', 'category', 'episode', 'resume'].forEach((key) => fragment.delete(key));
++            fragment.set('search', query);
++          }
 +          resetSources();
 +          closeEpisodeSheet();
 +          video.pause();
@@ -1925,6 +2466,7 @@ diff --git a/index.html b/index.html
 +          refreshRelatedButton.disabled = false;
 +          relatedNode.setAttribute('aria-busy', 'false');
 +          relatedStatus.textContent = '';
++          if (fragment.get('search')) { renderWatchHistory(); lastSelectedCard?.focus(); return; }
 +          const filter = fragment.get('q');
 +          [...fragment.keys()].forEach((key) => fragment.delete(key));
 +          originalFragment.forEach((value, key) => fragment.set(key, value));
@@ -1941,13 +2483,14 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,15 +1742,17 @@
+@@ -918,19 +2241,56 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
 +        syncSpeed();
        });
        video.addEventListener('playing', () => {
++        clearTimeout(stalledTimer); stalledTimer = null;
          if (loadTimer) clearTimeout(loadTimer);
          retry.hidden = true;
 +        switchSourceOnError.hidden = true;
@@ -1956,11 +2499,53 @@ diff --git a/index.html b/index.html
        });
        video.addEventListener('pause', () => {
 -        if (!video.ended && video.readyState >= 2) statusNode.textContent = '已暂停';
+-      });
+-      video.addEventListener('waiting', () => {
+-        if (!video.paused) statusNode.textContent = '正在缓冲…';
+-      });
++        clearTimeout(stalledTimer); stalledTimer = null; saveWatchHistory(true);
 +        if (!video.ended && video.readyState >= 2 && !statusNode.classList.contains('error')) statusNode.textContent = '已暂停';
++      });
++      const observeStall = () => {
++        if (video.paused || video.seeking || watchStage.hidden || document.hidden || statusNode.classList.contains('error')) return;
++        statusNode.textContent = '正在缓冲…';
++        if (stalledTimer) return;
++        const loadId = episodeLoadId;
++        stalledProgress = video.currentTime; stalledProgressAt = Date.now();
++        const checkStall = () => {
++          stalledTimer = null;
++          if (loadId !== episodeLoadId || video.paused || video.seeking || watchStage.hidden || document.hidden || video.readyState >= 3 || statusNode.classList.contains('error')) return;
++          if (video.currentTime > stalledProgress) {
++            stalledProgress = video.currentTime; stalledProgressAt = Date.now();
++            statusNode.textContent = '正在播放';
++          }
++          const remaining = 18000 - (Date.now() - stalledProgressAt);
++          if (remaining > 0) stalledTimer = setTimeout(checkStall, remaining);
++          else fail('当前网络或片源持续缓冲，可重试或切换资源。');
++        };
++        stalledTimer = setTimeout(checkStall, 18000);
++      };
++      video.addEventListener('waiting', observeStall);
++      video.addEventListener('stalled', observeStall);
++      video.addEventListener('seeking', () => { clearTimeout(stalledTimer); stalledTimer = null; });
++      video.addEventListener('seeked', () => { if (video.readyState < 3) observeStall(); });
++      video.addEventListener('timeupdate', () => {
++        if (recoveryAttempts && !video.seeking && video.currentTime > recoveryProgress + 10) { recoveryAttempts = 0; recoveryProgress = video.currentTime; }
++        if (video.readyState >= 3) {
++          clearTimeout(stalledTimer); stalledTimer = null;
++          if (!video.paused && !statusNode.classList.contains('error')) statusNode.textContent = '正在播放';
++        } else if (stalledTimer && !video.seeking && video.currentTime > stalledProgress) {
++          stalledProgress = video.currentTime; stalledProgressAt = Date.now();
++          if (!video.paused && !statusNode.classList.contains('error')) statusNode.textContent = '正在播放';
++        }
++        applySkipSettings(); saveWatchHistory();
++      });
++      window.addEventListener('pagehide', () => saveWatchHistory(true));
++      document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(stalledTimer); stalledTimer = null; saveWatchHistory(true); } });
+       video.addEventListener('error', () => {
+         if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-       video.addEventListener('waiting', () => {
-         if (!video.paused) statusNode.textContent = '正在缓冲…';
-@@ -941,6 +1767,15 @@
+@@ -941,6 +2301,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -1976,19 +2561,51 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -958,12 +1793,21 @@
-         }
-       });
+@@ -950,20 +2319,45 @@
+       document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
+       window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
+       video.addEventListener('loadedmetadata', applyVideoAspect);
+-      video.addEventListener('ended', () => {
+-        if (autoNext.checked && playlist && current < playlist.episodes.length - 1) {
+-          loadEpisode(current + 1, { autoplay: true });
+-        } else {
+-          statusNode.textContent = '播放结束';
+-        }
+-      });
++      video.addEventListener('ended', () => { if (video.ended) finishEpisode(); });
        syncNativeControls();
+-      if (playlist) {
++      renderWatchHistory();
++      if (sharedSelection) {
++        const matches = recommendationItems.map((item, index) => ({item, index})).filter(({item}) =>
++          historyKey(item.title) === historyKey(sharedSelection.title) && item.source === sharedSelection.source
++          && (!sharedSelection.year || item.year === sharedSelection.year)
++          && (!sharedSelection.category || item.category === sharedSelection.category));
++        const match = matches.length === 1 ? matches[0] : null;
++        const index = match ? matchingEpisode(match.item, {episodes: [{name: sharedSelection.episode}], episodeCount: 2}, 0) : -1;
++        if (match && index >= 0) selectRecommendation(match.index, {sharedEpisode: index});
++        else {
++          sharedNotice = match ? `分享的${sharedSelection.episode}暂不可用，请选择其他剧集或来源。`
++            : '分享的作品来源暂不可用，以下为搜索结果，请自行选择。';
++        }
++      }
++      if (sharedNotice) { catalogSummary = sharedNotice; recommendationsSummary.textContent = sharedNotice; }
++      if (fragment.get('resume')) {
++        const entry = watchEntries.find((item) => historyKey(item.title) === fragment.get('resume'));
++        if (entry) restoreWatchHistory(entry);
++      }
 +      if (!playlist && recommendationItems.length && /^\d+$/.test(fragment.get('i') || '')) {
 +        const selectedIndex = Number(fragment.get('i'));
 +        if (recommendationItems[selectedIndex]) {
 +          const savedEpisode = fragment.get('ep');
-+          selectRecommendation(selectedIndex);
-+          if (savedEpisode) fragment.set('ep', savedEpisode);
++          selectRecommendation(selectedIndex, {restoreSavedSource: true});
++          if (savedEpisode && !fragment.get('resume')) {
++            const savedIndex = Math.max(0, Math.min(playlist.episodes.length - 1, Number.parseInt(savedEpisode, 10) - 1));
++            if (Number.isFinite(savedIndex)) loadEpisode(savedIndex);
++          }
 +        }
 +      }
-       if (playlist) {
++      if (playlist && episodeLoadId === 0) {
          const initial = Math.max(0, Math.min(
            playlist.episodes.length - 1,
            Number.parseInt(fragment.get('ep') || '1', 10) - 1
@@ -2001,7 +2618,16 @@ diff --git a/index.html b/index.html
 diff --git a/state_server.py b/state_server.py
 --- a/state_server.py
 +++ b/state_server.py
-@@ -187,6 +187,369 @@
+@@ -29,6 +29,8 @@
+ MAX_BODY_BYTES = 4 * 1024 * 1024
+ MAX_ITEMS = 24
+ MAX_EPISODES = 2000
++CATALOG_SCAN_QUEUE_SECONDS = 4
++CATALOG_SCAN_RESULT_SECONDS = 28
+ 
+ 
+ class StateStore:
+@@ -187,6 +189,584 @@
      return payload, None
  
  
@@ -2013,11 +2639,40 @@ diff --git a/state_server.py b/state_server.py
 +        return None
 +
 +
++import threading
++
++_CATALOG_REQUEST_LOCK = threading.Lock()
++_XINLANG_NEXT_REQUEST = 0.0
++
++
++def _wait_catalog_request(base: str) -> None:
++    """Respect Xinlang's published interval without queuing a long scan."""
++    from urllib.parse import urlsplit
++    global _XINLANG_NEXT_REQUEST
++    if urlsplit(base).hostname != 'api.xinlangapi.com':
++        return
++    deadline = time.monotonic() + 1.5
++    while True:
++        with _CATALOG_REQUEST_LOCK:
++            now = time.monotonic()
++            if now > deadline:
++                raise TimeoutError('catalog source request limit reached')
++            delay = _XINLANG_NEXT_REQUEST - now
++            if delay <= 0:
++                _XINLANG_NEXT_REQUEST = now + 1.1
++                return
++        if now + delay > deadline:
++            raise TimeoutError('catalog source request limit reached')
++        # Recheck after waking: delayed threads must not start together.
++        time.sleep(delay)
++
++
 +def _catalog_json(base: str, **params: object) -> dict:
 +    """Read bounded metadata from a fixed, existing product source, never media."""
 +    from urllib.parse import urlencode
 +    from urllib.request import Request, build_opener
 +    request = Request(base + '?' + urlencode(params), headers={'User-Agent': 'ShortDramaPlayer/1.0'})
++    _wait_catalog_request(base)
 +    deadline = time.monotonic() + 4
 +    with build_opener(_NoRedirect()).open(request, timeout=3) as response:
 +        chunks, size = [], 0
@@ -2073,11 +2728,35 @@ diff --git a/state_server.py b/state_server.py
 +    return best
 +
 +
++def _recommendation_kind(category: object, title: object = '') -> str:
++    """Only explicit AI/comic dramas and live short-drama categories qualify."""
++    import unicodedata
++    name = re.sub(r'\s+', '', unicodedata.normalize('NFKC', str(category or ''))).casefold()
++    if '漫剧' in name or re.search(r'(?<![a-z])ai(?:短剧|剧|动画|动漫)', name):
++        return 'ai'
++    if '短剧' not in name or re.search(r'动漫|动画', name):
++        return ''
++    label = unicodedata.normalize('NFKC', str(title or '')).casefold()
++    tagged_ai = re.search(r'(?:^|[\s(\[])ai(?:$|[\s)\]])|(?<![a-z])ai(?:短剧|漫剧|剧)', label)
++    return 'ai' if tagged_ai else 'live'
++
++
++def _recommendation_candidates(items: list[dict], limit: int) -> list[dict]:
++    """Reserve two AI slots per live slot, including in the bounded shared pool."""
++    ai = [item for item in items if item.get('recommendation_kind') == 'ai']
++    live = [item for item in items if item.get('recommendation_kind') == 'live']
++    selected = []
++    for index in range((limit + 2) // 3):
++        selected.extend(ai[index * 2:index * 2 + 2] + live[index:index + 1])
++    return selected[:limit]
++
++
 +class RecommendationCatalog:
 +    """Public source metadata only; never enumerate private stored user selections."""
 +    # Same sources already maintained by jiang_short_drama/search.py.
 +    SOURCES = (('暴风资源', 'https://bfzyapi.com/api.php/provide/vod/'),
-+               ('非凡资源', 'https://cj.ffzyapi.com/api.php/provide/vod/'))
++               ('非凡资源', 'https://cj.ffzyapi.com/api.php/provide/vod/'),
++               ('量子资源', 'https://cj.lziapi.com/api.php/provide/vod/'))
 +
 +    def __init__(self, state: StateStore):
 +        import threading
@@ -2101,43 +2780,52 @@ diff --git a/state_server.py b/state_server.py
 +                if time.monotonic() >= deadline:
 +                    break
 +                listing = _catalog_json(base, ac='list')
-+                categories = [category.get('type_id') for category in listing.get('class', [])
-+                              if isinstance(category, dict) and re.search(r'短剧|漫剧', str(category.get('type_name') or ''))]
-+                if not categories:
++                categories = {'ai': [], 'live': []}
++                for category in listing.get('class', []):
++                    if isinstance(category, dict) and (kind := _recommendation_kind(category.get('type_name'))):
++                        categories[kind].append(category.get('type_id'))
++                if not any(categories.values()):
 +                    completed = True
-+                    continue
-+                category = secrets.choice(categories)
-+                if time.monotonic() >= deadline:
-+                    break
-+                details = _catalog_json(base, ac='detail', t=category, pg=1)
-+                page_count = max(1, min(100000, int(details.get('pagecount') or 1)))
-+                page = secrets.randbelow(page_count) + 1
-+                if page != 1:
-+                    if time.monotonic() >= deadline:
-+                        break
-+                    details = _catalog_json(base, ac='detail', t=category, pg=page)
-+                completed = True
-+                for record in details.get('list', [])[:100]:
-+                    item = _catalog_item(record, source_name)
-+                    if item:
-+                        item['recommendation_id'] = hashlib.sha256(_source_identity(item)[0].encode()).hexdigest()[:16]
-+                        found.setdefault(item['recommendation_id'], item)
-+                if len(found) >= 6:
++                for kind, identifiers in categories.items():
++                    if not identifiers or time.monotonic() >= deadline:
++                        continue
++                    try:
++                        category = secrets.choice(identifiers)
++                        details = _catalog_json(base, ac='detail', t=category, pg=1)
++                        page_count = max(1, min(100000, int(details.get('pagecount') or 1)))
++                        page = secrets.randbelow(page_count) + 1
++                        if page != 1:
++                            if time.monotonic() >= deadline:
++                                break
++                            details = _catalog_json(base, ac='detail', t=category, pg=page)
++                        completed = True
++                        for record in details.get('list', [])[:100]:
++                            if not isinstance(record, dict) or not (record_kind := _recommendation_kind(record.get('type_name'), record.get('vod_name'))):
++                                continue
++                            item = _catalog_item(record, source_name, short_only=False)
++                            if item:
++                                item['recommendation_kind'] = record_kind
++                                item['recommendation_id'] = hashlib.sha256(_source_identity(item)[0].encode()).hexdigest()[:16]
++                                found.setdefault(item['recommendation_id'], item)
++                    except (OSError, ValueError, TypeError, KeyError, AttributeError):
++                        LOGGER.warning('recommendation category unavailable: %s/%s', source_name, kind)
++                if (sum(item['recommendation_kind'] == 'ai' for item in found.values()) >= 8
++                        and sum(item['recommendation_kind'] == 'live' for item in found.values()) >= 4):
 +                    break
 +            except (OSError, ValueError, TypeError, KeyError, AttributeError):
 +                LOGGER.warning('recommendation catalog source unavailable: %s', source_name)
 +        if not completed:
 +            raise OSError('recommendation catalogs unavailable')
-+        return list(found.values())[:self.max_candidates]
++        return _recommendation_candidates(list(found.values()), self.max_candidates)
 +
 +    def _select(self, excluded: set[str] | None) -> list[dict]:
 +        if time.time() >= self.expires_at:
 +            return []
-+        if excluded is None:
-+            return self.cached[:12]
-+        available = [item for item in self.cached if item['recommendation_id'] not in excluded]
++        available = [item for item in self.cached if not excluded or item['recommendation_id'] not in excluded]
++        if excluded is not None:
++            secrets.SystemRandom().shuffle(available)
 +        selected, size = [], 2048
-+        for item in secrets.SystemRandom().sample(available, min(12, len(available))):
++        for item in _recommendation_candidates(available, 12):
 +            size += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
 +            if size > MAX_BODY_BYTES:
 +                break
@@ -2179,7 +2867,7 @@ diff --git a/state_server.py b/state_server.py
 +                combined[item['recommendation_id']] = item
 +            # Keep only bounded public metadata; request-specific exclusions are never stored.
 +            size, bounded = 0, []
-+            for item in reversed(list(combined.values())):
++            for item in _recommendation_candidates(list(reversed(list(combined.values()))), self.max_candidates):
 +                item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
 +                if len(bounded) >= self.max_candidates or size + item_size > self.max_cache_bytes:
 +                    break
@@ -2222,20 +2910,26 @@ diff --git a/state_server.py b/state_server.py
 +class SelectionResolver:
 +    """Recover compact-link metadata from the original fixed product source."""
 +    SOURCES = dict(RecommendationCatalog.SOURCES + (
-+        ('量子资源', 'https://cj.lziapi.com/api.php/provide/vod/'),
 +        ('红牛资源', 'https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/'),
 +        ('极速资源', 'https://jszyapi.com/api.php/provide/vod'),
 +        ('百度云资源', 'https://api.apibdzy.com/api.php/provide/vod/'),
 +        ('金鹰资源', 'https://jyzyapi.com/provide/vod/from/jinyingm3u8/at/json'),
 +        ('飘零资源', 'https://p2100.net/api.php/provide/vod/'),
++        ('360资源', 'https://360zy.com/api.php/provide/vod/'),
++        ('无尽资源', 'https://api.wujinapi.com/api.php/provide/vod/'),
++        ('魔都资源', 'https://www.mdzyapi.com/api.php/provide/vod/'),
++        ('新浪资源', 'https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/'),
 +    ))
 +
 +    def __init__(self):
 +        import threading
 +        self.lock = threading.Lock()
-+        self.slots = threading.BoundedSemaphore(4)
++        self.slots = threading.BoundedSemaphore(8)
++        self.scan_slots = threading.BoundedSemaphore(2)
++        self.scan_requests = threading.BoundedSemaphore(24)
++        self.scan_inflight = {}
++        self.scan_times = []
 +        self.cache = {}
-+        self.alternative_slot = threading.Lock()
 +        self.alternative_cache = {}
 +        self.alternative_cache_limit = 64
 +        self.alternative_cache_bytes = 8 * 1024 * 1024
@@ -2245,7 +2939,7 @@ diff --git a/state_server.py b/state_server.py
 +            raise ValueError('invalid metadata request')
 +
 +    def _records(self, title: str, source: str) -> list:
-+        if not self.slots.acquire(timeout=1):
++        if not self.slots.acquire(timeout=4):
 +            raise OSError('metadata resolver busy')
 +        try:
 +            details = _catalog_json(self.SOURCES[source], ac='detail', wd=title, pg=1)
@@ -2255,6 +2949,47 @@ diff --git a/state_server.py b/state_server.py
 +            return records[:100]
 +        finally:
 +            self.slots.release()
++
++    def _scan(self, key: tuple, load):
++        """Share identical scans and bound both active fanout and waiting callers."""
++        from concurrent.futures import Future, TimeoutError as FutureTimeout
++        if not self.scan_requests.acquire(blocking=False):
++            raise OSError('catalog scan busy')
++        owner = False
++        try:
++            with self.lock:
++                future = self.scan_inflight.get(key)
++                if future is None:
++                    now = time.monotonic()
++                    self.scan_times = [started for started in self.scan_times if started > now - 60]
++                    if len(self.scan_times) >= 120:
++                        raise OSError('catalog scan request limit reached')
++                    self.scan_times.append(now)
++                    future = self.scan_inflight[key] = Future()
++                    owner = True
++            if not owner:
++                try:
++                    return future.result(timeout=CATALOG_SCAN_RESULT_SECONDS)
++                except FutureTimeout as error:
++                    raise OSError('catalog scan wait timed out') from error
++            try:
++                if not self.scan_slots.acquire(timeout=CATALOG_SCAN_QUEUE_SECONDS):
++                    raise OSError('catalog scan busy')
++                try:
++                    result = load()
++                finally:
++                    self.scan_slots.release()
++            except BaseException as error:
++                future.set_exception(error)
++                raise
++            else:
++                future.set_result(result)
++                return result
++            finally:
++                with self.lock:
++                    self.scan_inflight.pop(key, None)
++        finally:
++            self.scan_requests.release()
 +
 +    def get(self, title: str, source: str, fingerprint: str) -> dict | None:
 +        self._validate_request(title, source, fingerprint)
@@ -2338,10 +3073,7 @@ diff --git a/state_server.py b/state_server.py
 +            cached = self.alternative_cache.get(key)
 +            if cached and cached[0] > time.time():
 +                return cached[1]
-+        # One scan per service, including identical requests, bounds public fanout.
-+        if not self.alternative_slot.acquire(blocking=False):
-+            raise OSError('alternative catalog busy')
-+        try:
++        def load():
 +            from concurrent.futures import ThreadPoolExecutor
 +            with self.lock:
 +                cached = self.alternative_cache.get(key)
@@ -2362,19 +3094,144 @@ diff --git a/state_server.py b/state_server.py
 +                while self.alternative_cache and (len(self.alternative_cache) >= self.alternative_cache_limit or sum(value[2] for value in self.alternative_cache.values()) + size > self.alternative_cache_bytes):
 +                    self.alternative_cache.pop(next(iter(self.alternative_cache)))
 +                if size <= self.alternative_cache_bytes:
-+                    self.alternative_cache[key] = (now + (300 if items else 30), items, size)
++                    lifetime = 30 if any(result is None for result in results) or not items else 300
++                    self.alternative_cache[key] = (now + lifetime, items, size)
 +            return items
-+        finally:
-+            self.alternative_slot.release()
++        return self._scan(('alternatives', *key), load)
++
++
++class CatalogSearch:
++    """Bounded full-source search over the resolver's existing public catalogs."""
++
++    def __init__(self, resolver: SelectionResolver):
++        import threading
++        self.resolver = resolver
++        self.lock = threading.Lock()
++        self.cache = {}
++        self.cache_limit = 64
++        self.cache_bytes = 8 * 1024 * 1024
++
++    @staticmethod
++    def normalize_query(value: str) -> str:
++        import unicodedata
++        if not isinstance(value, str) or len(value) > 100 or any(ord(char) < 32 for char in value):
++            raise ValueError('invalid search query')
++        query = re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', value)).strip()
++        query = re.sub(r'^(?:短剧|电视剧|电影|动漫|综艺)\s+', '', query)
++        # Chinese users commonly paste a title with spaces; preserve spaces in Latin titles.
++        query = re.sub(r'(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])', '', query)
++        if not query or len(query) > 100 or not re.search(r'\w', query):
++            raise ValueError('invalid search query')
++        return query
++
++    def _cached(self, query: str) -> dict | None:
++        cached = self.cache.get(query)
++        return cached[1] if cached and cached[0] > time.time() else None
++
++    def _source_items(self, query: str, source: str) -> list[dict] | None:
++        try:
++            return [item for record in self.resolver._records(query, source)
++                    if (item := _catalog_item(record, source, short_only=False))]
++        except (OSError, ValueError, TypeError, KeyError, AttributeError):
++            LOGGER.warning('search catalog source unavailable: %s', source)
++            return None
++
++    def _response(self, query: str, results: list[tuple[str, list[dict] | None]]) -> dict:
++        from difflib import SequenceMatcher
++        wanted = _source_identity({'title': query})[0]
++        source_order = {source: index for index, source in enumerate(self.resolver.SOURCES)}
++        unique = {}
++        for source, items in results:
++            for item in items or []:
++                key = (source, *_source_identity(item))
++                previous = unique.get(key)
++                if previous is None or len(item['episodes']) > len(previous['episodes']):
++                    unique[key] = item
++
++        def rank(item):
++            title = _source_identity(item)[0]
++            similarity = SequenceMatcher(None, wanted, title).ratio()
++            match = 0 if title == wanted else 1 if wanted in title else 2
++            return match, -similarity, source_order[item['source']], item['title']
++
++        # Several catalogs use OR matching for individual Han characters. Keep
++        # their useful related titles without filling the page with unrelated hits.
++        candidates = sorted((item for item in unique.values()
++                             if rank(item)[0] < 2 or -rank(item)[1] >= 0.45), key=rank)
++        suggestions = list(dict.fromkeys(item['title'] for item in candidates
++                                        if _source_identity(item)[0] != wanted))[:6]
++        response = {'v': 1, 'kind': 'search', 'heading': f'搜索：{query}', 'query': query,
++                    'sources_total': len(self.resolver.SOURCES),
++                    'sources_searched': sum(items is not None for _, items in results),
++                    'failures': [source for source, items in results if items is None],
++                    'suggestions': suggestions, 'items': []}
++        size = len(json.dumps(response, ensure_ascii=False).encode('utf-8')) + 1024
++        for item in candidates:
++            item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8')) + 1
++            if size + item_size > MAX_BODY_BYTES:
++                continue
++            response['items'].append(item)
++            size += item_size
++            if len(response['items']) >= MAX_ITEMS:
++                break
++        return response
++
++    def search(self, value: str) -> dict:
++        query = self.normalize_query(value)
++        with self.lock:
++            cached = self._cached(query)
++            if cached is not None:
++                return cached
++        def load():
++            with self.lock:
++                cached = self._cached(query)
++                if cached is not None:
++                    return cached
++            from concurrent.futures import ThreadPoolExecutor
++            with ThreadPoolExecutor(max_workers=4) as executor:
++                futures = [(source, executor.submit(self._source_items, query, source))
++                           for source in self.resolver.SOURCES]
++                results = [(source, future.result()) for source, future in futures]
++            if all(items is None for _, items in results):
++                raise OSError('search catalogs unavailable')
++            response = self._response(query, results)
++            size = len(json.dumps(response, ensure_ascii=False).encode('utf-8'))
++            with self.lock:
++                now = time.time()
++                self.cache = {key: entry for key, entry in self.cache.items() if entry[0] > now}
++                while self.cache and (len(self.cache) >= self.cache_limit
++                                     or sum(entry[2] for entry in self.cache.values()) + size > self.cache_bytes):
++                    self.cache.pop(next(iter(self.cache)))
++                if size <= self.cache_bytes:
++                    lifetime = 30 if response['failures'] or not response['items'] else 120
++                    self.cache[query] = (now + lifetime, response, size)
++            return response
++        return self.resolver._scan(('search', query), load)
 +
 +
  class Handler(BaseHTTPRequestHandler):
      server_version = "short-drama-state/1.0"
  
-@@ -211,6 +574,55 @@
+@@ -211,6 +791,71 @@
          path = unquote(urlsplit(self.path).path)
          if path == "/health":
              self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
++            return
++        if path == "/search":
++            from urllib.parse import parse_qs
++            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
++            if len(self.path) > 2048 or set(query) != {'q'} or len(query['q']) != 1:
++                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid search query'})
++                return
++            try:
++                response = self.server.catalog_search.search(query['q'][0])
++            except ValueError:
++                self._send_json(HTTPStatus.BAD_REQUEST, {'error': 'invalid search query'})
++                return
++            except (OSError, TypeError, KeyError, AttributeError):
++                self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {'error': 'search unavailable'})
++                return
++            self._send_json(HTTPStatus.OK, response)
 +            return
 +        if path == "/recommendations":
 +            from urllib.parse import parse_qs
@@ -2427,12 +3284,13 @@ diff --git a/state_server.py b/state_server.py
              return
          prefix = "/selections/"
          if path.startswith(prefix):
-@@ -272,6 +684,8 @@
+@@ -272,6 +917,9 @@
      logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
      server = ThreadingHTTPServer((args.host, args.port), Handler)
      server.state_store = StateStore(Path(args.directory), args.ttl, args.max_entries)  # type: ignore[attr-defined]
 +    server.recommendation_catalog = RecommendationCatalog(server.state_store)
 +    server.selection_resolver = SelectionResolver()
++    server.catalog_search = CatalogSearch(server.selection_resolver)
      server.api_token = api_token  # type: ignore[attr-defined]
      LOGGER.info("short-drama state listening on %s:%s", args.host, args.port)
      try:

@@ -1,9 +1,12 @@
 import asyncio
 import importlib
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
+from urllib.request import Request
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
@@ -11,7 +14,83 @@ import pytest
 from wechatrebot_manager.licensing.protocol import LicenseError, public_key
 from wechatrebot_manager.licensing.runtime_guard import RuntimeGuard, guard_provider_class, resolve_install_root
 
+from test_license_client import activate, setup as license_setup
+
 module = importlib.import_module("wechatrebot_manager.licensing.runtime_guard")
+
+
+def test_delayed_bridge_health_reads_current_account_without_caching(monkeypatch):
+    payload = {
+        "service_ready": True, "status_available": True, "hook_ready": True,
+        "wechat_logged_in": True, "wechat_identity": "wxid_current",
+    }
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            # A healthy bridge can reply outside the old 0.5s deadline.
+            time.sleep(.65)
+            raw = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(module, "Request", lambda _url, **kwargs: Request(
+        f"http://127.0.0.1:{server.server_port}/api/health", **kwargs,
+    ))
+    try:
+        assert module.probe_account() == "wxid_current"
+        # A cached identity must never turn an authoritative logout into access.
+        payload.update(wechat_logged_in=False, wechat_identity="")
+        assert module.probe_account() == ""
+        assert requests == ["/api/health", "/api/health"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize("payload", [
+    {"service_ready": True, "status_available": False},
+    {"service_ready": True, "status_available": True, "hook_ready": False},
+    {"service_ready": True, "status_available": True, "hook_ready": True,
+     "wechat_logged_in": True, "wechat_identity": ""},
+])
+def test_inconclusive_bridge_health_is_distinct_from_logout(monkeypatch, payload):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, _size):
+            return json.dumps(payload).encode()
+
+    monkeypatch.setattr(module, "build_opener", lambda *_args: SimpleNamespace(
+        open=lambda *_args, **_kwargs: Response(),
+    ))
+    with pytest.raises(LicenseError) as error:
+        module.probe_account()
+    assert error.value.code == "account_status_unavailable"
+
+
+def test_bridge_health_transport_failure_is_inconclusive(monkeypatch):
+    def unavailable(*_args, **_kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(module, "build_opener", lambda *_args: SimpleNamespace(open=unavailable))
+    with pytest.raises(LicenseError) as error:
+        module.probe_account()
+    assert error.value.code == "account_status_unavailable"
 
 
 class FakeClient:
@@ -95,6 +174,118 @@ def test_old_core_stays_blocked_after_subscription_restored(runtime, monkeypatch
     assert runtime.guard.require()["can_run"]
     with pytest.raises(LicenseError):
         runtime.guard.require_core()
+
+
+def test_unconfirmed_account_blocks_work_and_recovers_same_core_session(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
+    source = runtime.guard.account_source
+
+    def unavailable():
+        raise LicenseError("account_status_unavailable", "重新确认连接")
+
+    runtime.guard.account_source = unavailable
+    writes = []
+
+    class Provider:
+        async def text_chat(self):
+            writes.append("model_call")
+            return "answer"
+
+    guard_provider_class(Provider)
+    for action in (runtime.guard.require_core,
+                   lambda: runtime.guard.require_hook("/api/send_text_msg"),
+                   lambda: asyncio.run(Provider().text_chat())):
+        with pytest.raises(LicenseError) as error:
+            action()
+        assert error.value.code == "account_status_unavailable"
+    assert not writes and not runtime.guard._core_blocked
+    assert not runtime.guard.allow_event({"post_type": "message", "self_id": "wxid_actual"})
+
+    runtime.guard.account_source = source
+    assert runtime.guard.require_core()["run_id"] == "a" * 32
+    assert asyncio.run(Provider().text_chat()) == "answer"
+    assert writes == ["model_call"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"can_run": False, "state": "paused"},
+    {"can_run": False, "state": "expired"},
+    {"can_run": False, "state": "revoked"},
+    {"run_id": "b" * 32},
+])
+def test_unconfirmed_account_cannot_hide_invalid_or_replaced_run(runtime, monkeypatch, changes):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
+    source = runtime.guard.account_source
+
+    def unavailable():
+        raise LicenseError("account_status_unavailable", "重新确认连接")
+
+    runtime.guard.account_source = unavailable
+    runtime.client.state.update(changes)
+    with pytest.raises(LicenseError) as error:
+        runtime.guard.require_core()
+    assert error.value.code == "automation_paused" and runtime.guard._core_blocked
+    runtime.guard.account_source = source
+    runtime.client.state.update(can_run=True, state="running", run_id="a" * 32)
+    with pytest.raises(LicenseError):
+        runtime.guard.require_core()
+
+
+def test_signed_run_grant_survives_unconfirmed_account_without_allowing_sends(license_setup, monkeypatch):
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_actual")
+    grant = client.authorize_run("wxid_actual")
+    guard = RuntimeGuard(client.root, client=client, account_source=lambda: "wxid_actual")
+    monkeypatch.setattr(guard, "start_refresh", lambda: None)
+    guard.claim_core_session()
+
+    def unavailable():
+        raise LicenseError("account_status_unavailable", "重新确认连接")
+
+    guard.account_source = unavailable
+    for action in (guard.require_core, lambda: guard.require_hook("/api/send_text_msg")):
+        with pytest.raises(LicenseError) as error:
+            action()
+        assert error.value.code == "account_status_unavailable"
+    assert not guard._core_blocked
+    assert client.snapshot("wxid_actual")["run_id"] == grant["run_id"]
+    guard.account_source = lambda: "wxid_actual"
+    assert guard.require_core()["run_id"] == grant["run_id"]
+
+
+def test_signed_grant_expiry_stops_core_even_while_account_remains_unconfirmed(license_setup, monkeypatch):
+    client, _, clock, _ = license_setup
+    activate(client)
+    client.bind("wxid_actual")
+    client.authorize_run("wxid_actual")
+    guard = RuntimeGuard(client.root, client=client, account_source=lambda: "wxid_actual")
+    monkeypatch.setattr(guard, "start_refresh", lambda: None)
+    monkeypatch.setattr(module, "_guard", guard)
+    guard.claim_core_session()
+    probes, calls = [], []
+
+    def unavailable():
+        probes.append(True)
+        if len(probes) == 2:
+            clock.advance(3600)
+        raise LicenseError("account_status_unavailable", "重新确认连接")
+
+    guard.account_source = unavailable
+
+    class Lifecycle:
+        async def stop(self):
+            calls.append("graceful_stop")
+
+    async def check():
+        async with asyncio.timeout(2):
+            await module.watch_core(Lifecycle(), interval=0.001)
+
+    asyncio.run(check())
+    assert len(probes) == 2 and calls == ["graceful_stop"]
+    assert guard._core_blocked and client.snapshot("wxid_actual")["state"] == "expired"
 
 
 def test_queued_events_are_bound_to_run_session_and_pre_resume_events_are_dropped(runtime):
@@ -217,6 +408,39 @@ def test_core_expiry_does_not_wait_for_blocked_network_refresh(runtime):
         assert calls == ["graceful_stop"] and not release.is_set()
     finally:
         release.set()
+
+
+def test_core_watch_waits_for_unconfirmed_account_then_recovers(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
+    calls = []
+    probes = []
+
+    def account():
+        probes.append(True)
+        if len(probes) == 1:
+            raise LicenseError("account_status_unavailable", "重新确认连接")
+        return "wxid_actual"
+
+    runtime.guard.account_source = account
+
+    class Lifecycle:
+        async def stop(self):
+            calls.append("stop")
+
+    async def check():
+        task = asyncio.create_task(module.watch_core(Lifecycle(), interval=0.001))
+        try:
+            async with asyncio.timeout(2):
+                while len(probes) < 3:
+                    await asyncio.sleep(0.001)
+            assert not calls and not runtime.guard._core_blocked
+            assert runtime.guard.require_core()["can_run"]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(check())
 
 
 def test_missing_or_invalid_runtime_configuration_fails_closed(runtime):

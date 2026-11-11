@@ -1,0 +1,25 @@
+diff --git a/main.py b/main.py
+index 0b04812..59bc35c 100644
+--- a/main.py
++++ b/main.py
+@@ -146,9 +146,17 @@ class MusicPlugin(Star):
+             index = 1
+             song_name = arg.strip()
+         else:
+-            args = arg.split()
+-            index: int = int(args[-1]) if args[-1].isdigit() else 0
+-            song_name = arg.removesuffix(str(index))
++            song_name, index = arg.strip(), 0
++            # An index must be a separate final token after a nonempty title.
++            # Keep numeric titles and embedded trailing digits intact.
++            parts = arg.rsplit(maxsplit=1)
++            if len(parts) == 2 and parts[1].isdecimal():
++                try:
++                    index = int(parts[1])
++                except ValueError:
++                    pass  # Excessively long numeric text remains a search term.
++                else:
++                    song_name = parts[0].strip()
+         if not song_name:
+             yield event.plain_result("未指定歌名")
+             event.stop_event()

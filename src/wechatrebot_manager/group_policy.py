@@ -108,7 +108,7 @@ _PROACTIVE_SPECS = (
     _ProactiveSpec(
         "astrbot_plugin_proactive_chat",
         "主动聊天",
-        (("group_settings", "session_list"),),
+        (),
         (("group_settings", "enable"),),
     ),
     _ProactiveSpec(
@@ -297,6 +297,7 @@ class GroupPolicyService:
         current: GroupPolicy,
         *,
         actor_id: str,
+        preserve_existing_features: bool = False,
     ) -> GroupPolicy:
         if not isinstance(values, dict):
             raise GroupPolicyError("群聊策略格式不正确。")
@@ -322,6 +323,10 @@ class GroupPolicyService:
         allowed = list(dict.fromkeys(allowed))
         if "allowed_features" in values:
             available = {feature.module for feature in self._features()}
+            if preserve_existing_features:
+                # A single toggle must leave unrelated inherited/legacy grants
+                # intact; ordinary complete-list saves remain strictly checked.
+                available.update(current.allowed_features)
             unavailable = sorted(set(allowed).difference(available))
             if unavailable:
                 raise GroupPolicyError("允许功能清单包含未交付或已移除的功能。")
@@ -386,6 +391,7 @@ class GroupPolicyService:
         *,
         expected_revision: str | None = None,
         actor_id: str = "local-console",
+        _preserve_existing_features: bool = False,
     ) -> dict[str, object]:
         account, group = self._validate_scope(account_id, group_id)
         with _STORE_LOCK:
@@ -394,7 +400,10 @@ class GroupPolicyService:
             current = self._policy(raw)
             if expected_revision and expected_revision != self._revision(current):
                 raise GroupPolicyError("群聊策略已在其他窗口修改，请刷新后重试。")
-            normalized = self._normalize(values, current, actor_id=actor_id)
+            normalized = self._normalize(
+                values, current, actor_id=actor_id,
+                preserve_existing_features=_preserve_existing_features,
+            )
             accounts = payload.setdefault("accounts", {})
             account_payload = accounts.setdefault(account, {"groups": {}})
             if not isinstance(account_payload, dict):
@@ -433,6 +442,37 @@ class GroupPolicyService:
             "apply_state": "applied",
             "message": "群聊策略已安全保存；未向群内发送消息。",
         }
+
+    def set_feature_enabled(
+        self, account_id: str, group_id: str, module: str, enabled: bool, *,
+        actor_id: str = "local-console", expected_revision: str | None = None,
+    ) -> dict[str, object]:
+        """Change one delivered feature grant without losing another admin's edit."""
+        account, group = self._validate_scope(account_id, group_id)
+        if not isinstance(module, str) or not isinstance(enabled, bool):
+            raise GroupPolicyError("功能标识或启用状态无效。")
+        available = {
+            item.module for item in self._features()
+            if item.visible and item.module != "astrbot_plugin_angel_heart"
+        }
+        if module not in available:
+            raise GroupPolicyError("该功能不在本群可管理的正式功能列表中。")
+        with _STORE_LOCK:
+            current = self.get(account, group)
+            allowed = list(current["allowed_features"])
+            if enabled and module not in allowed:
+                allowed.append(module)
+            elif not enabled:
+                allowed = [item for item in allowed if item != module]
+            saved = self.save(
+                account, group, {"allowed_features": allowed},
+                expected_revision=expected_revision or str(current["revision"]),
+                actor_id=actor_id,
+                _preserve_existing_features=True,
+            )
+            if (module in saved["allowed_features"]) != enabled:
+                raise GroupPolicyError("本群功能状态未确认，请重新查询后重试。")
+        return {**saved, "module": module, "enabled": enabled}
 
     def preview(
         self,
@@ -507,7 +547,7 @@ class GroupPolicyService:
         names = {str(item) for item in plugin_set}
         return None if "*" in names else names
 
-    def _plugin_sources(self, group_id: str) -> list[dict[str, object]]:
+    def _plugin_sources(self, group_id: str, policy: dict[str, object]) -> list[dict[str, object]]:
         config_root = self.install_root / "app" / "astrbot" / "data" / "config"
         enabled_plugins = self._enabled_plugins()
         result: list[dict[str, object]] = []
@@ -517,14 +557,32 @@ class GroupPolicyService:
                 payload = json.loads(path.read_text(encoding="utf-8-sig"))
             except (FileNotFoundError, OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(payload, dict) or not any(
+            if not isinstance(payload, dict):
+                continue
+            if spec.target_paths and not any(
                 _contains_group(_nested(payload, item), group_id) for item in spec.target_paths
             ):
                 continue
+            if not spec.target_paths and spec.module not in policy["allowed_features"]:
+                continue
+            if not spec.target_paths:
+                schema_path = config_root.parent / "plugins" / spec.module / "_conf_schema.json"
+                try:
+                    schema = json.loads(schema_path.read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError):
+                    schema = {}
+                managed_scope = _nested(schema, ("group_settings", "_wechatrebot_managed_scope")) is True
+                if not managed_scope and not _contains_group(
+                    _nested(payload, ("group_settings", "session_list")), group_id
+                ):
+                    continue
             flags = [_nested(payload, item) for item in spec.enable_paths]
             configured_enabled = any(value is True for value in flags)
             globally_enabled = enabled_plugins is None or spec.module in enabled_plugins
-            enabled = configured_enabled and globally_enabled
+            group_enabled = bool(spec.target_paths) or (
+                policy["bot_enabled"] is True and policy["reply_mode"] != "off"
+            )
+            enabled = configured_enabled and globally_enabled and group_enabled
             result.append(
                 {
                     "id": f"feature:{spec.module}",
@@ -536,6 +594,8 @@ class GroupPolicyService:
                         if enabled
                         else "功能未启用"
                         if not globally_enabled
+                        else "本群已停用"
+                        if not group_enabled
                         else "已暂停"
                     ),
                     "next_run_time": "",
@@ -563,7 +623,7 @@ class GroupPolicyService:
             and item.get("target_type") == "group"
             and item.get("target_id") == group_id
         ]
-        items = schedule_items + self._plugin_sources(group_id)
+        items = schedule_items + self._plugin_sources(group_id, policy)
         deduplicated = {str(item["id"]): item for item in items}
         items = list(deduplicated.values())
         enabled_count = sum(1 for item in items if item["enabled"])
@@ -577,7 +637,8 @@ class GroupPolicyService:
             "message": "主动聊天由各功能自行配置；定时任务按本群设置执行。",
         }
 
-    def overview(self, account_id: str, group_id: str) -> dict[str, object]:
+    def feature_permissions(self, account_id: str, group_id: str) -> dict[str, object]:
+        """Read feature grants without querying or reconciling scheduled tasks."""
         policy = self.get(account_id, group_id)
         allowed = set(policy["allowed_features"])
         features = [
@@ -593,8 +654,14 @@ class GroupPolicyService:
         return {
             "policy": policy,
             "features": features,
+        }
+
+    def overview(self, account_id: str, group_id: str) -> dict[str, object]:
+        result = self.feature_permissions(account_id, group_id)
+        return {
+            **result,
             "proactive": self.proactive_summary(account_id, group_id),
-            "permissions": policy["permissions"],
+            "permissions": result["policy"]["permissions"],
         }
 
 

@@ -1,13 +1,75 @@
 from __future__ import annotations
 
 import json
+import ctypes
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from wechatrebot_manager.install_paths import INSTALL_MARKER
 from wechatrebot_manager import uninstaller
+
+
+def _module_kernel(monkeypatch, *, snapshot_error=False, first_error=None, end_error=18):
+    monkeypatch.setattr(uninstaller, "os", SimpleNamespace(name="nt"))
+    error = [5 if snapshot_error else 0]
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error[0], raising=False)
+    paths = iter(("C:/robot/app/bridge/vendor/hook/bot.dll", "C:/Windows/system32/kernel32.dll"))
+
+    def advance(_handle, pointer):
+        try:
+            path = next(paths)
+        except StopIteration:
+            error[0] = end_error
+            return False
+        pointer._obj.szExePath = path
+        return True
+
+    def first(handle, pointer):
+        if first_error is not None:
+            error[0] = first_error
+            return False
+        return advance(handle, pointer)
+
+    kernel = SimpleNamespace(
+        CreateToolhelp32Snapshot=Mock(return_value=ctypes.c_void_p(-1).value if snapshot_error else 42),
+        Module32FirstW=Mock(side_effect=first),
+        Module32NextW=Mock(side_effect=advance),
+        CloseHandle=Mock(return_value=True),
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
+    return kernel
+
+
+def test_strict_module_snapshot_returns_full_paths_and_closes_handle(monkeypatch):
+    kernel = _module_kernel(monkeypatch)
+    assert uninstaller._process_module_paths(987651, strict=True) == (
+        Path("C:/robot/app/bridge/vendor/hook/bot.dll"), Path("C:/Windows/system32/kernel32.dll"),
+    )
+    kernel.CloseHandle.assert_called_once_with(42)
+
+
+@pytest.mark.parametrize("failure", ["snapshot", "first", "partial"])
+def test_strict_module_snapshot_rejects_unreadable_or_partial_results(monkeypatch, failure):
+    kernel = _module_kernel(
+        monkeypatch, snapshot_error=failure == "snapshot",
+        first_error=5 if failure == "first" else None, end_error=5,
+    )
+    with pytest.raises(OSError):
+        uninstaller._process_module_paths(987651, strict=True)
+    if failure != "snapshot":
+        kernel.CloseHandle.assert_called_once_with(42)
+    _module_kernel(monkeypatch, snapshot_error=True)
+    assert uninstaller._process_module_paths(987651) == ()  # Existing uninstall behavior.
+
+
+def test_strict_module_snapshot_rejects_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(uninstaller, "os", SimpleNamespace(name="unsupported"))
+    with pytest.raises(OSError):
+        uninstaller._process_module_paths(987651, strict=True)
+    assert uninstaller._process_module_paths(987651) == ()
 
 
 def _installation(root: Path) -> Path:

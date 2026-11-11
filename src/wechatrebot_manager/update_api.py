@@ -1,16 +1,15 @@
 """Background update checks, progress and installation lifecycle."""
 from __future__ import annotations
 
-import hashlib
-import json
 import secrets
-import shutil
 import sys
 import threading
+from pathlib import Path
 
 from . import __version__
 from .json_io import write_json_atomic
 from .payload import PayloadError
+from .update_cache import update_release_id
 from .updates import (
     MandatoryUpdateUnavailable,
     PreparedUpdate,
@@ -32,10 +31,7 @@ from .update_errors import UpdateFailure
 class UpdateApiMixin:
     @staticmethod
     def _release_id(release: UpdateRelease) -> str:
-        identity = (release.version, release.build, release.package_url,
-                    release.package_sha256, release.package_size,
-                    release.package_kind, release.base_fingerprint)
-        return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+        return update_release_id(release)
 
     def _load_update_channel(self) -> UpdateChannel | None:
         if getattr(self, "_development", False):
@@ -238,25 +234,9 @@ class UpdateApiMixin:
                 state="success",
                 version=self._startup_update_to,
             )
-            journal_path = self._install_root / "updates" / "update-journal.json"
-            try:
-                journal = json.loads(journal_path.read_text(encoding="utf-8-sig"))
-                if (
-                    isinstance(journal, dict)
-                    and journal.get("update_id") == update_id
-                    and journal.get("state") == "awaiting_startup"
-                ):
-                    rollback = (
-                        self._install_root
-                        / str(journal.get("rollback_root") or "")
-                    ).resolve()
-                    rollback.relative_to((self._install_root / "updates").resolve())
-                    shutil.rmtree(rollback, ignore_errors=True)
-                    journal_path.unlink(missing_ok=True)
-            except (OSError, ValueError, json.JSONDecodeError):
-                # The detached updater also performs this cleanup after seeing
-                # the handshake; leave its recovery journal alone on mismatch.
-                pass
+            # The helper owns the transaction and its backups. Reading or
+            # deleting them here races its commit and can trigger a rollback
+            # after this window has already confirmed a successful startup.
         except OSError as exc:
             self._update_logger.write(
                 "startup_confirmation_failed",
@@ -267,8 +247,64 @@ class UpdateApiMixin:
             )
 
     def get_update_status(self) -> dict[str, object]:
+        if getattr(self, "_update_installing", False) and self._update_lock.acquire(blocking=False):
+            try:
+                self._refresh_update_close_helper()
+            finally:
+                self._update_lock.release()
         with self._update_status_lock:
             return self._ok(dict(self._update_status))
+
+    def _refresh_update_close_helper(self) -> None:
+        if not getattr(self, "_update_installing", False):
+            return
+        helper = getattr(self, "_update_helper", None)
+        try:
+            if helper is None or helper.poll() is None:
+                return
+            # A one-file bootloader may have exited while its application still
+            # maps the copied helper EXE. Only an empty verified holder list
+            # proves that launching another installer cannot overlap it.
+            from .windows_file_holders import file_holders
+            if file_holders((Path(helper.args[0]),)):
+                return
+        except OSError:
+            # An unverified helper must still block another installation.
+            return
+        self._update_helper = None
+        self._update_close_generation += 1
+        self._update_close_pending = False
+        self._update_installing = False
+        self._update_confirmation_token = ""
+        failure = self._update_failed(UpdateFailure(
+            "UPD-1007", public_message="等待关闭管理器的更新任务已结束，请重试更新；已校验的更新包会保留。",
+        ))
+        self._set_update_status(
+            state="failed", phase="failed", close_pending=False,
+            confirmation_token="", message=failure["error"]["message"], error=failure["error"],
+        )
+
+    def _report_update_close_failure(self, exc: BaseException) -> None:
+        self._update_close_pending = True
+        self._update_confirmation_token = secrets.token_hex(32)
+        failure = self._update_failed(UpdateFailure(
+            "UPD-1007", str(exc),
+            public_message="管理器未能自动关闭，更新正在等待退出。请点击“再次关闭管理器”，或手动关闭本窗口后重新打开软件；无需重新下载。",
+        ))
+        self._set_update_status(
+            state="ready", phase="close_failed", close_pending=True,
+            confirmation_token=self._update_confirmation_token,
+            message=failure["error"]["message"], error=failure["error"],
+        )
+
+    def _schedule_update_close(self) -> None:
+        # Installation and close retries call this while holding _update_lock.
+        # Capture the exact helper as well as the close attempt's generation.
+        self._update_close_generation += 1
+        helper, generation = self._update_helper, self._update_close_generation
+        threading.Timer(
+            0.35, lambda: self._close_window_for_update(helper, generation),
+        ).start()
 
     def _prepared_matches(self, release: UpdateRelease) -> bool:
         prepared = self._prepared_update
@@ -282,7 +318,7 @@ class UpdateApiMixin:
     def _mark_update_ready(self, release: UpdateRelease) -> None:
         self._update_confirmation_token = secrets.token_hex(32)
         self._set_update_status(
-            state="ready", phase="ready_to_install", completed=1, total=1,
+            state="ready", phase="ready_to_install", completed=1, total=1, close_pending=False,
             percent=100, message="更新已下载并校验，等待确认关闭机器人和微信后安装",
             error=None, release_id=self._release_id(release),
             version=release.version,
@@ -332,7 +368,7 @@ class UpdateApiMixin:
             )
             self._set_update_status(
                 state="running", phase="stopping_services", percent=100,
-                message="正在强制关闭机器人程序和所有微信窗口", error=None,
+                message="正在关闭机器人程序及当前连接的微信", error=None,
             )
             try:
                 self._lifecycle.force_stop_for_update()
@@ -349,15 +385,24 @@ class UpdateApiMixin:
                 state="running", phase="launching", percent=100,
                 message="正在安装更新并启动新版客户端", error=None,
             )
-            launch_update_helper(plan)
+            try:
+                self._update_helper = launch_update_helper(plan)
+            except (OSError, ValueError) as exc:
+                raise UpdateFailure(
+                    "UPD-1007", str(exc),
+                    public_message="更新安装程序未能启动，原版本文件未更改。机器人和当前连接的微信已停止；可重试更新，或回到运行中心手动启动机器人。",
+                ) from exc
             self._set_update_status(
                 state="restarting", phase="restarting", completed=1, total=1,
                 percent=100, message="更新已准备完成，客户端正在重启", error=None,
             )
             succeeded = True
             if self._window is not None:
-                threading.Timer(0.35, self._close_window_for_update).start()
+                self._schedule_update_close()
         except Exception as exc:
+            if succeeded:
+                self._report_update_close_failure(exc)
+                return
             code = "UPD-1003" if isinstance(exc, (PayloadError, UpdateError)) else "UPD-1007"
             if code == "UPD-1003":
                 self._prepared_update = None
@@ -380,7 +425,9 @@ class UpdateApiMixin:
         action_locked = False
         handed_off = False
         try:
-            if getattr(self, "_update_installing", False):
+            self._refresh_update_close_helper()
+            closing_retry = getattr(self, "_update_close_pending", False)
+            if getattr(self, "_update_installing", False) and not closing_retry:
                 return self._ok({"accepted": False, "busy": True}, message="更新正在安装，请稍候。")
             if not getattr(sys, "frozen", False):
                 raise UpdateFailure("UPD-1013", "开发运行方式不执行自更新。")
@@ -397,6 +444,17 @@ class UpdateApiMixin:
                     "UPD-1003", "安装确认已失效或更新文件尚未准备完成。",
                     public_message="请重新打开更新，下载完成后确认安装。",
                 )
+            if closing_retry:
+                self._update_confirmation_token = ""
+                self._set_update_status(
+                    state="restarting", phase="restarting", close_pending=False,
+                    confirmation_token="", error=None, message="正在再次关闭管理器以继续更新",
+                )
+                try:
+                    self._schedule_update_close()
+                except RuntimeError as exc:
+                    self._report_update_close_failure(exc)
+                return self._ok({"accepted": True, "version": release.version})
             if not self._action_lock.acquire(blocking=False):
                 return self._ok({"accepted": False, "busy": True}, message="机器人正在执行其他操作，请稍后确认安装。")
             action_locked = True
@@ -415,7 +473,8 @@ class UpdateApiMixin:
             handed_off = True
             return self._ok({"accepted": True, "version": release.version}, message="已确认关闭机器人和微信，正在安装。")
         except (OSError, RuntimeError, ValueError, UpdateError, UpdateFailure) as exc:
-            self._update_installing = False
+            if not getattr(self, "_update_close_pending", False):
+                self._update_installing = False
             failure = self._update_failed(
                 exc if isinstance(exc, UpdateFailure) else UpdateFailure("UPD-1013", str(exc))
             )
@@ -437,6 +496,7 @@ class UpdateApiMixin:
         handed_off = False
         started = False
         try:
+            self._refresh_update_close_helper()
             if not getattr(sys, "frozen", False):
                 raise UpdateFailure("UPD-1013", "开发运行方式不执行自更新。")
             if getattr(self, "_update_installing", False):

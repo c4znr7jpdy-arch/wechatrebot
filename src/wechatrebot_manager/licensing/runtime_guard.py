@@ -13,6 +13,7 @@ import threading
 from typing import Callable
 from urllib.request import ProxyHandler, Request, build_opener
 
+from ..port_config import load_runtime_ports
 from .client import LicenseClient, _NoRedirect
 from .config import load_channel
 from .protocol import ACCOUNT_PATTERN, LicenseError, parse_json
@@ -51,23 +52,37 @@ def resolve_install_root(module_file: str | Path = __file__, environ=None) -> Pa
     return Path(configured).expanduser().resolve() if configured else None
 
 
-def probe_account() -> str:
+def probe_account(install_root: str | Path | None = None) -> str:
     """Read the bridge's actual identity, independently of the manager window."""
-    request = Request("http://127.0.0.1:5000/api/health", method="GET")
     try:
-        with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=0.5) as response:
+        port = load_runtime_ports(install_root).bridge_callback if install_root is not None else 5000
+    except (OSError, ValueError, TypeError):
+        # Invalid saved configuration is not a temporary health-query failure.
+        # Keep it denied without falling back to another installation's port.
+        return ""
+    try:
+        request = Request(f"http://127.0.0.1:{port}/api/health", method="GET")
+        # Match the manager's health budget: a fresh response can take longer
+        # than 0.5s while the bridge verifies HOOK connectivity during startup.
+        with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=2.0) as response:
             raw = response.read(16_385)
         if len(raw) > 16_384:
-            return ""
+            raise ValueError()
         value = parse_json(raw)
         if any(value.get(field) is not True for field in (
-            "service_ready", "status_available", "hook_ready", "wechat_logged_in",
+            "service_ready", "status_available", "hook_ready",
         )):
+            raise ValueError()
+        if value.get("wechat_logged_in") is False:
             return ""
         account = value.get("wechat_identity")
-        return account if isinstance(account, str) and ACCOUNT_PATTERN.fullmatch(account) else ""
-    except (OSError, ValueError, TypeError):
-        return ""
+        if value.get("wechat_logged_in") is not True or not isinstance(account, str) or not ACCOUNT_PATTERN.fullmatch(account):
+            raise ValueError()
+        return account
+    except (OSError, ValueError, TypeError) as exc:
+        raise LicenseError(
+            "account_status_unavailable", "微信账号状态暂时不可用，正在重新确认连接。"
+        ) from exc
 
 
 class RuntimeGuard:
@@ -77,7 +92,7 @@ class RuntimeGuard:
         # accepted once the bundled commercial channel is enabled.
         self._channel_root = self.root or Path(__file__).resolve().parents[1]
         self.client = client or LicenseClient(self._channel_root)
-        self.account_source: Callable[[], str] = account_source or probe_account
+        self.account_source: Callable[[], str] = account_source or (lambda: probe_account(self.root))
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
         self._refresh_lock = threading.Lock()
@@ -88,6 +103,18 @@ class RuntimeGuard:
     def _denied(reason: str, message: str) -> dict:
         return {"enabled": True, "can_run": False, "state": reason, "message": message, "run_id": ""}
 
+    def _unavailable_account_status(self) -> dict:
+        # The signed bound account is used only to check whether the existing
+        # run grant survives. It never substitutes for an actual login probe.
+        state = self.client.snapshot()
+        account = state.get("account")
+        if isinstance(account, str) and ACCOUNT_PATTERN.fullmatch(account):
+            state = self.client.snapshot(account)
+        if not state.get("can_run"):
+            return state
+        return {**state, "can_run": False, "state": "account_status_unavailable",
+                "message": "微信账号状态暂时不可用，正在重新确认连接。"}
+
     def status(self, expected_account: str = "") -> dict:
         try:
             channel = load_channel(self._channel_root)
@@ -95,7 +122,12 @@ class RuntimeGuard:
                 return {"enabled": False, "can_run": True, "state": "legacy", "run_id": ""}
             if self.root is None:
                 return self._denied("runtime_root_unavailable", "无法确认安装目录，自动化已暂停。")
-            actual = self.account_source()
+            try:
+                actual = self.account_source()
+            except LicenseError as exc:
+                if exc.code != "account_status_unavailable":
+                    raise
+                return self._unavailable_account_status()
             actual = actual if isinstance(actual, str) and ACCOUNT_PATTERN.fullmatch(actual) else ""
             state = self.client.snapshot(actual)
             if not actual or (expected_account and expected_account != actual):
@@ -112,8 +144,11 @@ class RuntimeGuard:
         state = self.status(expected_account)
         if not state.get("enabled"):
             return state
-        if not state.get("can_run") or (session is not None and session != state.get("run_id")):
+        if session is not None and session != state.get("run_id"):
             raise LicenseError("automation_paused", state.get("message") or "自动化已暂停，请在管理器中确认恢复。")
+        if not state.get("can_run"):
+            code = "account_status_unavailable" if state.get("state") == "account_status_unavailable" else "automation_paused"
+            raise LicenseError(code, state.get("message") or "自动化已暂停，请在管理器中确认恢复。")
         return state
 
     def claim_core_session(self) -> None:
@@ -127,10 +162,11 @@ class RuntimeGuard:
             raise LicenseError("automation_paused", "本次自动化运行已停止，请在管理器中确认恢复。")
         try:
             return self.require(expected_account, session=self._core_session)
-        except LicenseError:
+        except LicenseError as exc:
             # Recovery is a fresh core process/session. A still-unwinding old
             # task must not resume merely because the subscription was renewed.
-            self._core_blocked = True
+            if exc.code != "account_status_unavailable":
+                self._core_blocked = True
             raise
 
     def allow_event(self, event: dict, *, queued: bool = False) -> bool:
@@ -284,7 +320,10 @@ async def watch_core(lifecycle, *, interval: float = 1.0) -> None:
             state = await asyncio.to_thread(guard.require_core)
             if not state.get("enabled"):
                 return
-        except LicenseError:
+        except LicenseError as exc:
+            if exc.code == "account_status_unavailable":
+                await asyncio.sleep(interval)
+                continue
             lifecycle._license_stopping = True
             _LOG.warning("Subscription unavailable; stopping automation and retaining WeChat/data.")
             pending = list(getattr(getattr(lifecycle, "event_bus", None), "_pending_tasks", ()))

@@ -51,10 +51,11 @@ diff --git a/core/message_sender.py b/core/message_sender.py
              try:
                  logger.debug(
                      f"[主动消息] 正在执行装饰钩子: {handler.handler_full_name} ({handler.handler_module_path}) 喵"
-@@ -309,69 +324,48 @@
+@@ -308,76 +323,57 @@
+         except Exception as e:
              logger.warning(f"[主动消息] 补写平台流水失败喵: {e}", exc_info=True)
  
-     async def _send_chain_with_hooks(self, session_id: str, components: list) -> None:
+-    async def _send_chain_with_hooks(self, session_id: str, components: list) -> None:
 -        """发送消息链（含装饰钩子）。"""
 -        processed_chain_list = await self._trigger_decorating_hooks(
 -            session_id, components
@@ -102,6 +103,7 @@ diff --git a/core/message_sender.py b/core/message_sender.py
 -                await self._persist_proactive_message_to_platform_history(
 -                    session_id, chain
 -                )
++    async def _send_chain_with_hooks(self, session_id: str, components: list) -> bool:
 +        """Decorate and send under the same verified account and current grants."""
 +        from astrbot.core.platform.wechat_background_policy import (
 +            background_event, send_background_message,
@@ -113,12 +115,12 @@ diff --git a/core/message_sender.py b/core/message_sender.py
 +            )
 +            if authorized[0].status != PlatformStatus.RUNNING:
 +                logger.warning("Proactive platform is not running; delivery skipped.")
-+                return
++                return False
 +            processed = await self._trigger_decorating_hooks(
 +                session_id, components, authorized=authorized,
 +            )
 +            if not processed:
-+                return
++                return False
 +            chain = MessageChain(processed)
 +            sent = await send_background_message(
 +                self.context, session_id, chain, "astrbot_plugin_proactive_chat",
@@ -126,6 +128,7 @@ diff --git a/core/message_sender.py b/core/message_sender.py
 +            )
 +            if sent and authorized[0].meta().id != "webchat":
 +                await self._persist_proactive_message_to_platform_history(session_id, chain)
++            return bool(sent)
 +        except PermissionError:
 +            logger.info("Proactive permission revoked or account changed; delivery skipped.")
          except Exception as e:
@@ -142,18 +145,114 @@ diff --git a/core/message_sender.py b/core/message_sender.py
 -                        )
 -                    )
 -                )
+-
+-    async def _send_proactive_message(self, session_id: str, text: str) -> None:
 +                self._track_task(asyncio.create_task(self.telemetry.track_error(
 +                    e, module="core.message_sender._send_chain_with_hooks",
 +                )))
- 
-     async def _send_proactive_message(self, session_id: str, text: str) -> None:
++        return False
++
++    async def _send_proactive_message(self, session_id: str, text: str) -> bool:
          """发送主动消息（支持TTS与分段）。"""
 +        from astrbot.core.platform.wechat_background_policy import background_event
 +        try:
 +            await background_event(self.context, session_id, "astrbot_plugin_proactive_chat")
 +        except PermissionError:
 +            logger.info("Proactive permission unavailable; generation skipped.")
-+            return
++            return False
          session_config = self._get_session_config(session_id)
-         if not session_config:
+-        if not session_config:
++        if not session_config or not session_config.get("enable", False):
              logger.info(
+                 f"[主动消息] 无法获取会话配置，跳过 {self._get_session_log_str(session_id)} 的消息发送喵。"
+             )
+-            return
++            return False
+ 
+         logger.info(
+             f"[主动消息] 开始发送 {self._get_session_log_str(session_id, session_config)} 的主动消息喵。"
+@@ -395,11 +391,11 @@
+                 if tts_provider:
+                     audio_path = await tts_provider.get_audio(text)
+                     if audio_path:
+-                        await self._send_chain_with_hooks(
++                        is_tts_sent = await self._send_chain_with_hooks(
+                             session_id, [Record(file=audio_path)]
+                         )
+-                        is_tts_sent = True
+-                        await asyncio.sleep(0.5)
++                        if is_tts_sent:
++                            await asyncio.sleep(0.5)
+             except Exception as e:
+                 logger.error(f"[主动消息] 手动TTS流程发生异常喵: {e}")
+                 if self.telemetry and self.telemetry.enabled:
+@@ -416,6 +412,7 @@
+         # 是否继续发送文本：未发出 TTS 或配置要求始终发文本
+         should_send_text = not is_tts_sent or tts_conf.get("always_send_text", True)
+ 
++        text_sent = False
+         if should_send_text:
+             enable_seg = seg_conf.get("enable", False)
+             threshold = seg_conf.get("words_count_threshold", 150)
+@@ -434,6 +431,16 @@
+                 logger.info(
+                     f"[主动消息] 分段回复已启用，将发送 {len(segments)} 条消息喵。"
+                 )
++                # 分段顺序发送；只有全部分段提交成功才归档完整回复。
++                text_sent = True
++                for idx, seg in enumerate(segments):
++                    if not await self._send_chain_with_hooks(session_id, [Plain(text=seg)]):
++                        text_sent = False
++                        break
++                    if idx < len(segments) - 1:
++                        interval = await self._calc_interval(seg, seg_conf)
++                        logger.debug(f"[主动消息] 分段回复等待 {interval:.2f} 秒喵。")
++                        await asyncio.sleep(interval)
+                 if self.telemetry and self.telemetry.enabled:
+                     # 这里只记录分段数、文本长度、TTS 开关等统计值，不上传任何消息正文内容。
+                     self._track_task(
+@@ -451,21 +458,14 @@
+                                     "segmented_enabled": True,
+                                     "segment_count": len(segments),
+                                     "text_length": len(text),
+-                                    "success": True,
++                                    "success": bool(is_tts_sent or text_sent),
+                                 },
+                             )
+                         )
+                     )
+ 
+-                # 分段顺序发送，段间按策略等待，模拟自然输出节奏
+-                for idx, seg in enumerate(segments):
+-                    await self._send_chain_with_hooks(session_id, [Plain(text=seg)])
+-                    if idx < len(segments) - 1:
+-                        interval = await self._calc_interval(seg, seg_conf)
+-                        logger.debug(f"[主动消息] 分段回复等待 {interval:.2f} 秒喵。")
+-                        await asyncio.sleep(interval)
+             else:
+-                await self._send_chain_with_hooks(session_id, [Plain(text=text)])
++                text_sent = await self._send_chain_with_hooks(session_id, [Plain(text=text)])
+                 if self.telemetry and self.telemetry.enabled:
+                     # 非分段文本发送同样记录统一的发送统计，便于后续比较不同发送策略的使用占比。
+                     self._track_task(
+@@ -483,15 +483,17 @@
+                                     "segmented_enabled": False,
+                                     "segment_count": 1,
+                                     "text_length": len(text),
+-                                    "success": True,
++                                    "success": bool(is_tts_sent or text_sent),
+                                 },
+                             )
+                         )
+                     )
+ 
+-        # Bot 在群聊发言后需要重置沉默计时
+-        if "group" in session_id.lower():
++        sent = bool(is_tts_sent or text_sent)
++        # 仅实际提交完整消息后重置群聊沉默计时。
++        if sent and "group" in session_id.lower():
+             await self._reset_group_silence_timer(session_id)
+             logger.info(
+                 f"[主动消息] Bot主动消息已发送，已重置 {self._get_session_log_str(session_id, session_config)} 的沉默倒计时喵。"
+             )
++        return sent

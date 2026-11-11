@@ -117,6 +117,26 @@ def test_confirmed_logout_is_authoritative(monkeypatch):
     assert snapshot.stage == "login"
 
 
+@pytest.mark.parametrize("field", [
+    "service_ready", "status_available", "hook_ready", "wechat_logged_in",
+])
+def test_cached_account_without_current_login_signals_is_ignored(monkeypatch, field):
+    health = {
+        "service_ready": True, "status_available": True, "hook_ready": True,
+        "wechat_logged_in": True, "wechat_identity": "wxid_cached",
+        "upstream_connected": True, "heartbeat_fresh": True,
+    }
+    health[field] = False
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda *_args: True)
+    monkeypatch.setattr(runtime_status, "probe_bridge_health", lambda **_kw: BridgeHealth(**health))
+    monkeypatch.setattr(runtime_status, "probe_wechat_identity", lambda **_kw: pytest.fail("unsafe HOOK probe"))
+
+    snapshot = runtime_status.runtime_snapshot()
+
+    assert snapshot.wechat_identity == "" and not snapshot.online
+    assert snapshot.account_status_available is (field == "wechat_logged_in")
+
+
 def test_delayed_bridge_health_keeps_refresh_authoritative(monkeypatch):
     requests = []
     payload = {

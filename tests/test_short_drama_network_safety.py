@@ -23,6 +23,9 @@ def _load_patched_search(tmp_path: Path):
     patch = ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzz-network-safety.patch"
     subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
     subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
+    catalog_patch = ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzzzzzz-catalog-sources.patch"
+    subprocess.run(["git", "apply", "--check", str(catalog_patch)], cwd=checkout, check=True)
+    subprocess.run(["git", "apply", str(catalog_patch)], cwd=checkout, check=True)
     patched_source = (checkout / "search.py").read_text(encoding="utf-8")
     compile(patched_source, str(checkout / "search.py"), "exec")
 
@@ -33,6 +36,82 @@ def _load_patched_search(tmp_path: Path):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module, patched_source
+
+
+@pytest.mark.asyncio
+async def test_xinlang_catalog_gate_is_shared_by_search_people_collection_and_recommendations(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    module, _ = _load_patched_search(tmp_path)
+    searcher = module.ShortDramaSearcher()
+    source = next(value for value in module.DEFAULT_SOURCES if value.name == "新浪资源")
+    clock, starts = [100.0], []
+    semaphore = asyncio.Semaphore(4)
+
+    class Response:
+        status = 404
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+    class Session:
+        def get(self, *_args, **_kwargs):
+            starts.append(clock[0])
+            return Response()
+
+    session = Session()
+    raced = False
+
+    async def sleep(delay):
+        nonlocal raced
+        clock[0] += delay
+        if not raced:
+            raced = True
+            clock[0] += 0.1
+            await searcher._search_source_people(session, semaphore, source, "演员")
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    await searcher._search_source_variants(session, semaphore, source, "第一部")
+    # A late wakeup loses to a concurrent caller and expires without another GET.
+    assert await searcher._search_source_variants(session, semaphore, source, "第二部") == []
+    assert starts == pytest.approx([100.0, 101.2])
+    clock[0] = 103.0
+    await searcher._recommendation_source_page(session, semaphore, source, 1, None)
+    await searcher._collection_source_page(session, semaphore, source, "NBA", "2026", 1)
+    assert starts == pytest.approx([100.0, 101.2, 103.0, 104.1])
+    assert all(b - a >= 1.0 for a, b in zip(starts, starts[1:]))
+
+
+@pytest.mark.asyncio
+async def test_cancelled_xinlang_wait_never_starts_request_or_reserves_future_slot(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    module, _ = _load_patched_search(tmp_path)
+    searcher = module.ShortDramaSearcher()
+    source = next(value for value in module.DEFAULT_SOURCES if value.name == "新浪资源")
+    clock, sleeping = [100.0], asyncio.Event()
+
+    async def sleep(_delay):
+        sleeping.set()
+        await asyncio.Event().wait()
+
+    class Session:
+        def get(self, *_args, **_kwargs):
+            pytest.fail("cancelled catalog wait started a GET")
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    await searcher._wait_catalog_request(source)
+    task = asyncio.create_task(searcher._search_source_variants(Session(), asyncio.Semaphore(4), source, "片名"))
+    await sleeping.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    clock[0] = 102.0
+    await searcher._wait_catalog_request(source)
+    assert searcher._xinlang_next_request == 103.1
 
 
 def test_network_patch_rejects_unsafe_urls_and_filters_episodes(tmp_path: Path) -> None:

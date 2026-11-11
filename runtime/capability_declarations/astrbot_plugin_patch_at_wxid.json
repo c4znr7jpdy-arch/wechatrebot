@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "mention_compatibility",
+      "description": "微信点名兼容功能，自动处理 wxid 形式的 @ 消息，避免适配器将微信ID误转成数字；保持启用即可，无需参数或聊天命令。它本身不发送消息，也不授予其他插件使用权限。",
+      "examples": [],
+      "effect": "read"
+    }
+  ]
+}

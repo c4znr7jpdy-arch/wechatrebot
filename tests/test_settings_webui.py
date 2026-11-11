@@ -8,6 +8,173 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+def _open_feature_draft_page(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    page.add_init_script("""(() => {
+      Object.defineProperty(window, 'createFeatureController', {configurable:true, set(create) {
+        Object.defineProperty(window, 'createFeatureController', {value:helpers => {
+          window.featureDraftState=helpers.state;
+          return create(helpers);
+        }});
+      }});
+    })();""")
+    page.goto(manager_url)
+    expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+    if page.locator("#onboardingRecommended").is_visible():
+        page.locator("#onboardingRecommended").click()
+    page.locator('.nav-item[data-page="features"]').click()
+    page.locator('.feature-item[data-feature-id="feature-group-analysis"]').click()
+    expect(page.locator("#config-basic--analysis_days")).to_have_value("1")
+    return page
+
+
+@pytest.mark.parametrize("trigger", ["reload", "focus"])
+@pytest.mark.parametrize("result", ["network", "license", "success"])
+def test_feature_refresh_keeps_edits_started_during_read(browser, manager_url, tmp_path, trigger, result):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""async () => {
+          const api=window.pywebview.api, read=api.get_feature;
+          window.pendingFeatureResponse=await read('feature-group-analysis');
+          window.featureReadCalls=0;
+          api.get_feature=id => {
+            if (id !== 'feature-group-analysis') return read(id);
+            window.featureReadCalls++;
+            return new Promise(resolve => { window.finishFeatureRead=resolve; });
+          };
+        }""")
+        if trigger == "reload":
+            page.locator("#refreshFeature").click()
+        else:
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+        page.wait_for_function("window.featureReadCalls === 1")
+        field = page.locator("#config-basic--analysis_days")
+        expect(field).to_be_enabled()
+        field.fill("7")
+        page.evaluate("""result => {
+          const response=result === 'success' ? window.pendingFeatureResponse : {ok:false,error:{
+            code:result === 'license' ? 'LIC-subscription_expired' : '19000',
+            title:'设置读取失败',message:'模拟读取失败，请稍后重试',recorded:true}};
+          if (result === 'success') {
+            response.data.revision='newer-unedited-revision';
+            response.data.config.basic.analysis_days=3;
+            response.data.advanced_config.basic.analysis_days=3;
+          }
+          window.finishFeatureRead(response);
+        }""", result)
+        if result == "success":
+            page.wait_for_function("window.featureDraftState.featureDetails['feature-group-analysis'].revision === 'newer-unedited-revision'")
+        else:
+            expect(page.locator("#featureNote")).to_contain_text("未保存的修改已保留")
+        expect(field).to_have_value("7")
+        expect(field).to_be_enabled()
+        expect(page.locator("#saveFeature")).to_be_enabled()
+        assert page.evaluate("""() => ({dirty:featureDraftState.featureDirty,
+          revision:featureDraftState.featureDetail.revision,
+          baseline:featureDraftState.featureBaseline.basic.analysis_days})""") == {
+            "dirty": True, "revision": "preview", "baseline": 1,
+        }
+        page.locator('.nav-item[data-page="home"]').click()
+        expect(page.locator("#modalTitle")).to_have_text("离开前丢弃修改？")
+        page.locator("#modalCancel").click()
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"feature-{trigger}-{result}-draft.png"))
+        assert page.url == manager_url and page.title().startswith("功能中心")
+    finally:
+        page.close()
+
+
+def test_feature_readiness_refresh_cancel_keeps_save_context_and_new_revision(browser, manager_url, tmp_path):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, save=api.save_feature, read=api.get_feature;
+          window.originalFeatureDetail=featureDraftState.featureDetail;
+          window.featureSaveCalls=[];
+          api.save_feature=(...args) => {window.featureSaveCalls.push(args); return save(...args);};
+          api.get_feature=async id => {
+            const result=await read(id);
+            if (id === 'feature-group-analysis' && window.featureSaveCalls.length) {
+              result.data.revision=`saved-revision-${window.featureSaveCalls.length}`;
+            }
+            return result;
+          };
+        }""")
+        field = page.locator("#config-basic--analysis_days")
+        field.fill("7")
+        page.locator("#refreshFeatures").click()
+        expect(page.locator("#modalTitle")).to_have_text("离开前丢弃修改？")
+        page.locator("#modalCancel").click()
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        assert page.evaluate("""() => featureDraftState.selectedFeature === 'feature-group-analysis'
+          && featureDraftState.featureDetail === window.originalFeatureDetail
+          && featureDraftState.featureDetail.revision === 'preview' && featureDraftState.featureDirty""")
+        expect(field).to_have_value("7")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("featureDraftState.featureDetail.revision === 'saved-revision-1' && !featureDraftState.featureSaving")
+        expect(field).to_have_value("7")
+        assert not page.evaluate("featureDraftState.featureDirty")
+        field.fill("14")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("featureDraftState.featureDetail.revision === 'saved-revision-2' && !featureDraftState.featureSaving")
+        writes = page.evaluate("window.featureSaveCalls")
+        assert len(writes) == 2
+        assert [(call[0], call[1]["basic"]["analysis_days"], call[2], call[3]["basic"]["analysis_days"]) for call in writes] == [
+            ("feature-group-analysis", 7, "preview", 1),
+            ("feature-group-analysis", 14, "saved-revision-1", 7),
+        ]
+        expect(field).to_have_value("14")
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / "feature-refresh-cancel-saved.png"))
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("outcome", ["success", "network", "license"])
+def test_feature_readiness_refresh_is_blocked_during_save(browser, manager_url, tmp_path, outcome):
+    page = _open_feature_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, save=api.save_feature, read=api.get_feature, list=api.get_features;
+          window.featureSaveCalls=[]; window.featureListReads=0;
+          api.get_features=(...args) => {window.featureListReads++; return list(...args);};
+          api.get_feature=async id => {
+            const result=await read(id);
+            if (id === 'feature-group-analysis') result.data.revision='saved-revision';
+            return result;
+          };
+          api.save_feature=(...args) => {
+            window.featureSaveCalls.push(args);
+            return new Promise(resolve => {window.finishFeatureSave=async outcome => resolve(outcome === 'success'
+              ? await save(...args) : {ok:false,error:{code:outcome === 'license' ? 'LIC-subscription_expired' : '19000',
+                title:'设置保存失败',message:'模拟保存失败，请稍后重试',recorded:true}});});
+          };
+        }""")
+        field = page.locator("#config-basic--analysis_days")
+        field.fill("7")
+        page.locator("#saveFeature").click()
+        page.wait_for_function("window.featureSaveCalls.length === 1")
+        expect(field).to_be_disabled()
+        page.locator("#refreshFeatures").click()
+        assert page.evaluate("""() => featureDraftState.selectedFeature === 'feature-group-analysis'
+          && featureDraftState.featureDetail.revision === 'preview' && window.featureListReads === 0""")
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        page.evaluate("outcome => window.finishFeatureSave(outcome)", outcome)
+        page.wait_for_function("!featureDraftState.featureSaving")
+        expect(field).to_have_value("7")
+        expect(field).to_be_enabled()
+        expect(page.locator("#saveFeature")).to_be_enabled()
+        assert page.evaluate("featureDraftState.featureDirty") is (outcome != "success")
+        if outcome == "success":
+            assert page.evaluate("featureDraftState.featureDetail.revision") == "saved-revision"
+        else:
+            expect(page.locator("#featureNote")).to_contain_text("模拟保存失败")
+        field.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"feature-save-{outcome}-refresh-blocked.png"))
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("code,save_failure", [("11007", False), ("19000", True)])
 def test_expected_account_state_does_not_claim_log_write_failure(browser, manager_url, code, save_failure):
     page = browser.new_page()
@@ -152,7 +319,8 @@ def test_chat_profile_selection_preserves_scope_and_confirms_readback(browser, s
             expected = "wechat:FriendMessage:person" if scenario == "private" else "group"
             assert result["writes"][0] == {"chat_id": expected, "template_id": "custom"}
             if scenario == "readback":
-                assert result["error"] and result["after"] == ""
+                assert not result["error"] and result["after"] == ""
+                assert "当前方案与所选方案不同" in result["text"]
             else:
                 assert result["before"] == "" and result["after"] == "custom"
                 assert "回读确认" in result["text"]
@@ -221,7 +389,7 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         page.locator('#modalConfirm').click()
         expect(page.locator('#groupPolicyNote')).not_to_contain_text('未保存')
         expect(mode).to_have_value('off')
-        assert page.evaluate('window.policyReads') == 4
+        assert page.evaluate('window.policyReads') == 3  # Save already returns the verified policy.
     finally:
         page.close()
 
@@ -541,5 +709,269 @@ def test_schedule_list_renders_before_slow_context_and_keeps_draft_on_account_ch
         page.screenshot(path=str(tmp_path / "schedules-account-change.png"))
         assert page.url == manager_url and page.title().startswith("定时任务")
         assert not errors, errors
+    finally:
+        page.close()
+
+
+def _open_core_draft_page(browser, manager_url):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    page.add_init_script("""(() => {
+      Object.defineProperty(window, 'createRobotCoreSettings', {configurable:true, set(create) {
+        Object.defineProperty(window, 'createRobotCoreSettings', {value:helpers => {
+          window.coreDraftController=create(helpers);
+          return window.coreDraftController;
+        }});
+      }});
+    })();""")
+    page.goto(manager_url)
+    expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+    if page.locator("#onboardingRecommended").is_visible():
+        page.locator("#onboardingRecommended").click()
+    page.locator('.nav-item[data-page="settings"]').click()
+    page.locator('[data-settings-tab="core"]').click()
+    expect(page.locator('#coreForm [name="robot_name"]')).to_have_value("小妹")
+    page.wait_for_function("!window.coreDraftController.busy")
+    return page
+
+
+@pytest.mark.parametrize("phase", ["detail", "profiles"])
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_core_reload_preserves_edits_during_pending_reads(browser, manager_url, tmp_path, phase, outcome):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""phase => {
+          const api=window.pywebview.api, read=api.get_robot_core, request=api.request_robot_core;
+          window.originalCoreForm=document.querySelector('#coreForm');
+          window.coreSaveCalls=[];
+          api.save_robot_core=(...args) => {window.coreSaveCalls.push(args); return {ok:false,error:{
+            code:'15001',title:'配置冲突',message:'配置已变化，请重新读取后确认',recorded:true}};};
+          api.get_robot_core=async () => {
+            const result=await read();
+            result.data.revision='newer-server-revision';
+            result.data.identity.robot_name='服务器中的其他名称';
+            if (phase !== 'detail') return result;
+            return new Promise(resolve => {window.finishCoreRead=outcome => resolve(outcome === 'success' ? result
+              : {ok:false,error:{code:'15001',title:'读取失败',message:'模拟核心读取失败',recorded:true}});});
+          };
+          api.request_robot_core=async (...args) => {
+            const result=await request(...args);
+            if (phase !== 'profiles' || args[1] !== 'profiles') return result;
+            return new Promise(resolve => {window.finishCoreRead=outcome => resolve(outcome === 'success' ? result
+              : {ok:false,error:{code:'15001',title:'读取失败',message:'模拟模板读取失败',recorded:true}});});
+          };
+        }""", phase)
+        page.locator("#refreshCore").click()
+        page.wait_for_function("typeof window.finishCoreRead === 'function'")
+        name = page.locator('#coreForm [name="robot_name"]')
+        identity = page.locator("#core-config-personality--ai_self_identity")
+        expect(name).to_be_enabled()
+        expect(page.locator("#saveCore")).to_be_disabled()
+        name.fill("读取期间输入的新名称")
+        identity.fill("读取期间输入的新身份")
+        page.evaluate("outcome => window.finishCoreRead(outcome)", outcome)
+        page.wait_for_function("!window.coreDraftController.busy")
+        expect(name).to_have_value("读取期间输入的新名称")
+        expect(identity).to_have_value("读取期间输入的新身份")
+        expect(page.locator("#coreNote")).to_contain_text("未保存的修改已保留")
+        expect(page.locator("#saveCore")).to_be_enabled()
+        assert page.evaluate("window.originalCoreForm === document.querySelector('#coreForm') && window.coreDraftController.dirty")
+        page.locator("#saveCore").click()
+        expect(page.locator("#coreNote")).to_contain_text("配置已变化")
+        writes = page.evaluate("window.coreSaveCalls")
+        assert len(writes) == 1
+        assert writes[0][1] == "1", "A late read must not replace the draft's original revision"
+        assert writes[0][0]["personality"]["ai_self_identity"] == "读取期间输入的新身份"
+        assert writes[0][2]["robot_name"] == "读取期间输入的新名称"
+        expect(name).to_have_value("读取期间输入的新名称")
+        assert page.evaluate("window.coreDraftController.dirty")
+        name.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"core-read-{phase}-{outcome}-draft.png"))
+        assert page.url == manager_url and page.title().startswith("机器人总设置")
+    finally:
+        page.close()
+
+
+def test_core_pending_reload_blocks_duplicate_read_save_and_navigation(browser, manager_url):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, read=api.get_robot_core;
+          window.coreReadCount=0; window.coreSaveCount=0;
+          api.get_robot_core=async () => {
+            window.coreReadCount++;
+            const result=await read();
+            return new Promise(resolve => {window.finishCoreRead=() => resolve(result);});
+          };
+          api.save_robot_core=() => {window.coreSaveCount++; return {ok:true,data:{}};};
+        }""")
+        page.locator("#refreshCore").click()
+        page.wait_for_function("typeof window.finishCoreRead === 'function'")
+        expect(page.locator("#refreshCore")).to_be_disabled()
+        expect(page.locator("#activeCoreTemplate")).to_be_disabled()
+        expect(page.locator("#newCoreTemplate")).to_be_disabled()
+        expect(page.locator("#saveCore")).to_be_disabled()
+        page.locator("#refreshCore").dispatch_event("click")
+        page.evaluate("window.coreDraftController.load(true)")
+        page.locator("#coreForm").dispatch_event("submit")
+        page.locator('[data-settings-tab="model"]').click()
+        page.locator('.nav-item[data-page="home"]').click()
+        expect(page.locator('#page-settings')).to_have_attribute("data-settings-section", "core")
+        expect(page.locator('#page-settings')).to_have_class(re.compile("active"))
+        expect(page.locator("#modalBackdrop")).to_be_hidden()
+        assert page.evaluate("({reads:window.coreReadCount,saves:window.coreSaveCount})") == {"reads": 1, "saves": 0}
+        name = page.locator('#coreForm [name="robot_name"]')
+        name.fill("读取结束前的草稿")
+        page.evaluate("window.finishCoreRead()")
+        page.wait_for_function("!window.coreDraftController.busy")
+        expect(name).to_have_value("读取结束前的草稿")
+        page.locator('.nav-item[data-page="home"]').click()
+        expect(page.locator("#modalTitle")).to_have_text("离开前丢弃核心配置修改？")
+        page.locator("#modalCancel").click()
+        expect(name).to_have_value("读取结束前的草稿")
+        page.locator('.nav-item[data-page="home"]').click()
+        page.locator("#modalConfirm").click()
+        expect(page.locator('#page-home')).to_have_class(re.compile("active"))
+        assert page.evaluate("({reads:window.coreReadCount,saves:window.coreSaveCount})") == {"reads": 1, "saves": 0}
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("failure", ["network", "license"])
+def test_core_save_failure_keeps_draft_and_can_retry(browser, manager_url, tmp_path, failure):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""failure => {
+          const api=window.pywebview.api, save=api.save_robot_core;
+          window.coreSaveCalls=[];
+          api.save_robot_core=(...args) => {
+            window.coreSaveCalls.push(structuredClone(args));
+            if (window.coreSaveCalls.length > 1) return save(...args);
+            return {ok:false,error:{code:failure === 'license' ? 'LIC-subscription_expired' : '15001',
+              title:'保存未完成',message:'模拟保存失败，请重试',recorded:true}};
+          };
+        }""", failure)
+        name = page.locator('#coreForm [name="robot_name"]')
+        name.fill("失败后重试的机器人名称")
+        page.locator("#saveCore").click()
+        expect(page.locator("#coreNote")).to_contain_text("模拟保存失败")
+        expect(name).to_have_value("失败后重试的机器人名称")
+        expect(page.locator("#saveCore")).to_be_enabled()
+        assert page.evaluate("window.coreDraftController.dirty")
+        page.locator("#saveCore").click()
+        expect(page.locator("#coreNote")).to_contain_text("已更新")
+        page.wait_for_function("!window.coreDraftController.busy")
+        expect(name).to_have_value("失败后重试的机器人名称")
+        assert not page.evaluate("window.coreDraftController.dirty")
+        writes = page.evaluate("window.coreSaveCalls")
+        assert len(writes) == 2 and writes[0] == writes[1]
+        assert writes[1][1] == "1"
+        name.fill("使用新版本号的第二次修改")
+        page.locator("#saveCore").click()
+        page.wait_for_function("window.coreSaveCalls.length === 3 && !window.coreDraftController.busy")
+        assert page.evaluate("window.coreSaveCalls[2][1]") == "2"
+        name.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / f"core-save-{failure}-retry.png"))
+    finally:
+        page.close()
+
+
+def test_core_clean_reload_failure_keeps_form_and_can_retry(browser, manager_url):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, read=api.get_robot_core;
+          window.originalCoreForm=document.querySelector('#coreForm'); window.coreReads=0;
+          api.get_robot_core=() => ++window.coreReads === 1 ? {ok:false,error:{code:'15001',
+            message:'模拟读取失败，请重试',recorded:true}} : read();
+        }""")
+        page.locator("#refreshCore").click()
+        expect(page.locator("#coreNote")).to_contain_text("读取失败")
+        expect(page.locator('#coreForm [name="robot_name"]')).to_have_value("小妹")
+        assert page.evaluate("window.originalCoreForm === document.querySelector('#coreForm') && !window.coreDraftController.dirty")
+        expect(page.locator("#refreshCore")).to_be_enabled()
+        page.locator("#refreshCore").click()
+        page.wait_for_function("window.coreReads === 2 && !window.coreDraftController.busy")
+        expect(page.locator("#coreNote")).not_to_contain_text("读取失败")
+        expect(page.locator('#coreForm [name="robot_name"]')).to_have_value("小妹")
+    finally:
+        page.close()
+
+
+def test_core_template_reload_keeps_description_overrides_and_conflict_revision(browser, manager_url, tmp_path):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.locator('.template-create > summary').click()
+        page.locator('#newCoreTemplate').click()
+        page.locator('#modalConfirm').click()
+        expect(page.locator('#coreDetail h2')).to_have_text('默认模板')
+        page.wait_for_function("!window.coreDraftController.busy")
+        page.evaluate("""async () => {
+          const api=window.pywebview.api, request=api.request_robot_core;
+          const original=await request('GET','profiles');
+          window.originalTemplate=original.data.templates[0]; window.templateWrites=[];
+          api.request_robot_core=async (...args) => {
+            if (args[1] === 'profiles/update') {
+              window.templateWrites.push(args[2]);
+              return {ok:false,error:{code:'15001',message:'模板已在其他窗口修改，请重新读取',recorded:true}};
+            }
+            const result=await request(...args);
+            if (args[1] !== 'profiles') return result;
+            result.data.templates[0].updated_at=999;
+            result.data.templates[0].description='来自其他窗口的说明';
+            result.data.templates[0].config={personality:{ai_self_identity:'来自其他窗口的身份'}};
+            return new Promise(resolve => {window.finishTemplateRead=() => resolve(result);});
+          };
+        }""")
+        page.locator('#refreshCore').click()
+        page.wait_for_function("typeof window.finishTemplateRead === 'function'")
+        page.locator('#coreForm [name="template_description"]').fill('读取期间输入的说明')
+        control = page.locator('#core-config-personality--ai_self_identity')
+        row = page.locator('.form-field').filter(has=control)
+        row.locator('.core-override input').check()
+        control.fill('读取期间输入的模板身份')
+        page.locator('#activeCoreTemplate').dispatch_event('change')
+        page.evaluate('window.finishTemplateRead()')
+        page.wait_for_function("!window.coreDraftController.busy")
+        expect(page.locator('#coreDetail h2')).to_have_text('默认模板')
+        expect(page.locator('#coreForm [name="template_description"]')).to_have_value('读取期间输入的说明')
+        expect(control).to_have_value('读取期间输入的模板身份')
+        expect(row.locator('.core-override input')).to_be_checked()
+        page.locator('#saveCore').click()
+        expect(page.locator('#coreNote')).to_contain_text('其他窗口修改')
+        writes = page.evaluate('window.templateWrites')
+        assert len(writes) == 1
+        assert writes[0]['updated_at'] == page.evaluate('window.originalTemplate.updated_at')
+        assert writes[0]['updated_at'] != 999
+        assert writes[0]['description'] == '读取期间输入的说明'
+        assert writes[0]['config']['personality']['ai_self_identity'] == '读取期间输入的模板身份'
+        expect(control).to_have_value('读取期间输入的模板身份')
+        assert page.evaluate('window.coreDraftController.dirty')
+        control.scroll_into_view_if_needed()
+        page.screenshot(path=str(tmp_path / 'core-template-read-draft.png'))
+    finally:
+        page.close()
+
+
+def test_core_reset_during_reload_remains_a_saveable_draft(browser, manager_url):
+    page = _open_core_draft_page(browser, manager_url)
+    try:
+        page.evaluate("""() => {
+          const api=window.pywebview.api, read=api.get_robot_core;
+          api.get_robot_core=async () => {
+            const result=await read();
+            result.data.identity.robot_name='新的远端名称';
+            return new Promise(resolve => {window.finishCoreRead=() => resolve(result);});
+          };
+        }""")
+        page.locator('#refreshCore').click()
+        page.wait_for_function("typeof window.finishCoreRead === 'function'")
+        page.locator('#coreForm [name="robot_name"]').fill('读取中的名称草稿')
+        page.locator('#coreForm .core-reset').first.click()
+        expect(page.locator('#saveCore')).to_be_disabled()
+        page.evaluate('window.finishCoreRead()')
+        page.wait_for_function("!window.coreDraftController.busy")
+        expect(page.locator('#coreForm [name="robot_name"]')).to_have_value('读取中的名称草稿')
+        expect(page.locator('#saveCore')).to_be_enabled()
+        assert page.evaluate('window.coreDraftController.dirty')
     finally:
         page.close()

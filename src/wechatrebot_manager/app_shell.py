@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import logging
 import os
+import secrets
 from pathlib import Path
 import sqlite3
 import sys
@@ -14,6 +16,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
 
 from . import __version__
+from .admin_plugin_control import CONTROL_DESCRIPTOR, CONTROL_PATH
 from .chat_api import ChatApiMixin
 from .activity_api import ActivityApiMixin
 from .schedule_api import ScheduleApiMixin
@@ -30,7 +33,7 @@ from .customer_config import (
     load_ui_theme,
     save_ui_theme,
 )
-from .customer_maintenance import CustomerMaintenanceService, MaintenanceError
+from .customer_maintenance import CustomerMaintenanceService, MaintenanceBusyError, MaintenanceError
 from .environment import WECHAT_DOWNLOAD_URL
 from .error_catalog import load_error_catalog, classify_error
 from .experience import ExperienceError, ExperienceService
@@ -67,6 +70,7 @@ from .update_logger import UpdateLogger
 from .shortcuts import refresh_windows_shortcuts
 from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .installed_entries import ensure_launcher_executable
+from .json_io import write_json_atomic
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
 from .windows_titlebar import apply_window_theme
@@ -80,6 +84,7 @@ PUBLIC_API_METHODS = (
     "save_skin",
     "get_status",
     "get_license_status",
+    "get_license_binding_status",
     "get_trial_status",
     "activate_free_trial",
     "prepare_license_device",
@@ -88,6 +93,7 @@ PUBLIC_API_METHODS = (
     "refresh_license",
     "connect_license_wechat",
     "bind_license_account",
+    "rebind_license_account",
     "get_license_contact",
     "check_environment",
     "start_robot",
@@ -222,6 +228,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._tray: WindowsTrayController | None = None
         self._feature_page_server: ThreadingHTTPServer | None = None
         self._feature_page_thread: threading.Thread | None = None
+        self._plugin_control_token = ""
         self._history_group_members: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
         self._action_lock = threading.Lock()
         self._ui_error_lock = threading.Lock()
@@ -243,6 +250,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._prepared_update = None
         self._update_confirmation_token = ""
         self._update_installing = False
+        self._update_helper = None
+        self._update_close_pending = False
+        self._update_close_generation = 0
         self._mandatory_update = False
         self._update_result = None
         if not development:
@@ -254,9 +264,8 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             ).start()
 
     def _runtime_active(self) -> bool:
-        status = self._lifecycle.refresh()
-        state = getattr(getattr(status, "state", ""), "value", getattr(status, "state", ""))
-        return str(state) != "STOPPED"
+        self._lifecycle.refresh()
+        return not self._lifecycle.maintenance_stopped()
 
     def _runtime_online(self) -> bool:
         return bool(getattr(self._lifecycle.refresh(), "online", False))
@@ -284,9 +293,12 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         server = getattr(self, "_feature_page_server", None)
         if server is not None:
             return server
+        token = secrets.token_urlsafe(32)
         server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            plugin_center_handler(self._features, manager_assets=_asset_root()),
+            plugin_center_handler(
+                self._features, manager_assets=_asset_root(), plugin_control_token=token,
+            ),
         )
         server.daemon_threads = True
         thread = threading.Thread(
@@ -294,9 +306,24 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             daemon=True,
             name="wechatrebot-feature-page",
         )
-        thread.start()
+        published_token = token
+        try:
+            write_json_atomic(self._install_root / CONTROL_DESCRIPTOR, {
+                "url": f"http://127.0.0.1:{server.server_port}{CONTROL_PATH}",
+                "token": token,
+                "pid": os.getpid(),
+            })
+        except OSError:
+            published_token = ""
+            logging.getLogger(__name__).warning("插件管理接口描述文件无法写入，自然语言插件开关暂不可用。")
+        try:
+            thread.start()
+        except Exception:
+            server.server_close()
+            raise
         self._feature_page_server = server
         self._feature_page_thread = thread
+        self._plugin_control_token = published_token
         return server
 
     def _close_feature_page_server(self) -> None:
@@ -306,6 +333,16 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         if server is not None:
             server.shutdown()
             server.server_close()
+        path = self._install_root / CONTROL_DESCRIPTOR
+        token = getattr(self, "_plugin_control_token", "")
+        self._plugin_control_token = ""
+        if token:
+            try:
+                descriptor = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(descriptor, dict) and descriptor.get("token") == token:
+                    path.unlink(missing_ok=True)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                logging.getLogger(__name__).warning("插件管理接口描述文件未能清理，下次启动将重新生成。")
 
     def get_feature_page(self, feature_id: str) -> dict[str, object]:
         try:
@@ -379,12 +416,29 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "13003")
 
-    def _close_window_for_update(self) -> None:
-        self._close_feature_page_server()
-        if self._tray is not None:
-            self._tray.permit_programmatic_close()
-        if self._window is not None:
-            self._window.destroy()
+    def _close_window_for_update(self, helper: Any, generation: int) -> None:
+        with self._update_lock:
+            if (not self._update_installing or helper is None
+                    or helper is not self._update_helper
+                    or generation != self._update_close_generation):
+                return
+            self._refresh_update_close_helper()
+            if (helper is not self._update_helper
+                    or generation != self._update_close_generation):
+                return
+            # Consume this callback before any native side effects. A late or
+            # repeated callback must never close a recovered/newer session.
+            self._update_close_generation += 1
+            try:
+                if self._tray is not None:
+                    self._tray.permit_programmatic_close()
+                if self._window is not None:
+                    self._window.destroy()
+                self._close_feature_page_server()
+            except Exception as exc:
+                if self._tray is not None:
+                    self._tray.cancel_programmatic_close()
+                self._report_update_close_failure(exc)
 
     @staticmethod
     def _ok(data: Any = None, *, message: str = "") -> dict[str, object]:
@@ -399,7 +453,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         # filesystem/transport errors, which can contain paths or credentials.
         if isinstance(exc, (GroupPolicyError, PrivatePolicyError, ConfigConflictError)):
             error["detail"] = str(exc)
-        if isinstance(exc, AnalysisModelBindingError):
+        if isinstance(exc, (AnalysisModelBindingError, MaintenanceBusyError)):
             error["message"] = str(exc)
         event_id, saved = self._record_error(exc, definition.code, operation=operation)
         error.update(event_id=event_id, recorded=saved)
@@ -433,7 +487,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         try:
             started = time.perf_counter()
             settings = load_robot_settings(self._install_root)
-            providers = load_provider_services(self._install_root)
+            providers = load_provider_services(
+                self._install_root, allow_unreadable_preferences=True,
+            )
             provider = load_provider_profile(self._install_root, services=providers)
             channel = self._load_update_channel()
             configured = time.perf_counter()
@@ -496,17 +552,41 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         except (OSError, ValueError) as exc:
             return self._failed(exc)
 
-    def _status_data(self) -> dict:
-        view = self._lifecycle.refresh()
+    def _status_data(self, view=None) -> dict:
+        if view is None:
+            view = self._lifecycle.refresh()
+        resume_ready = getattr(self._lifecycle, "pending_start_ready", None)
+        if callable(resume_ready) and resume_ready():
+            self._queue_robot_action("resume_pending_start", "正在继续启动机器人。", "13001")
         result = view.to_dict()
-        account = self._offline_history_account(view)
-        if account:
-            result.update(history_account=account, history_offline=True)
+        robot_action = getattr(self, "_robot_action", "")
+        if robot_action in {"start", "resume_pending_start"}:
+            # Queue acceptance precedes the worker's first lifecycle transition.
+            # Keep that interval busy too, so polling cannot re-enable Start.
+            result.update(start_pending=True, busy=True, can_start=False, can_stop=True)
+            if not view.busy:
+                result.update(state="CORE_STARTING", title="正在启动机器人",
+                              message="启动请求已接收，正在检查账号和准备机器人功能。")
+        if getattr(self, "_robot_stop_action", ""):
+            result.update(state="STOPPING", title="正在取消启动", busy=True,
+                          can_start=False, can_stop=False, start_pending=False,
+                          message="停止请求已接收，当前启动步骤结束后会立即停止机器人。")
+        elif robot_action in {"request_stop", "force_stop"}:
+            result.update(state="STOPPING", title="正在停止机器人", busy=True,
+                          can_start=False, can_stop=False, start_pending=False,
+                          message="停止请求已接收，正在安全结束后台服务。")
+        runtime = getattr(view, "runtime", None)
+        account = (
+            str(getattr(runtime, "wechat_identity", "") or "").strip()
+            if runtime is not None and getattr(runtime, "account_status_available", True) is not False
+            else ""
+        )
+        result["history_account"] = self._authorized_history_account(account)
         return result
 
     def check_environment(self) -> dict[str, object]:
         try:
-            return self._ok(self._lifecycle.check_environment().to_dict())
+            return self._ok(self._status_data(self._lifecycle.check_environment()))
         except (OSError, ValueError) as exc:
             return self._failed(exc, "11004")
 
@@ -530,32 +610,89 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         return self._queue_robot_action("force_stop", "正在强制停止机器人。")
 
     def _queue_robot_action(self, action: str, message: str, error_code: str = "19000") -> dict[str, object]:
+        action_state_lock = self.__dict__.setdefault("_robot_action_state_lock", threading.Lock())
         if not self._action_lock.acquire(blocking=False):
+            if action in {"request_stop", "force_stop"}:
+                with action_state_lock:
+                    if getattr(self, "_robot_action", "") in {"start", "resume_pending_start"}:
+                        previous = getattr(self, "_robot_stop_action", "")
+                        self._robot_stop_action = "force_stop" if "force_stop" in {previous, action} else action
+                        self._lifecycle.cancel_start_request()
+                    else:
+                        return self._ok({"accepted": False}, message="正在处理上一个操作。")
+                return self._ok({"accepted": True}, message="停止请求已接收，正在取消本次启动。")
             return self._ok({"accepted": False}, message="正在处理上一个操作。")
         if getattr(self, "_update_installing", False):
             self._action_lock.release()
             return self._ok({"accepted": False}, message="更新正在安装，请稍候。")
-        if action in {"start", "connect_wechat"}:
+        if action in {"start", "connect_wechat", "resume_pending_start"}:
             try:
                 if (has_pending_migrations(self._install_root)
                         or has_pending_group_analysis_migration(self._install_root)):
+                    if action == "resume_pending_start":
+                        self._lifecycle.cancel_pending_start()
                     self._action_lock.release()
                     return self._ok({"accepted": False}, message="请先在定时任务页完成中断的旧任务迁移，再启动机器人。")
             except (OSError, ValueError, sqlite3.Error, PayloadError):
+                if action == "resume_pending_start":
+                    self._lifecycle.cancel_pending_start()
                 self._action_lock.release()
                 return self._ok({"accepted": False}, message="旧任务迁移记录暂时无法确认，请先检查后再启动。")
 
-        def worker() -> None:
+        with action_state_lock:
+            generation_reader = getattr(self._lifecycle, "start_request_generation", None)
+            start_generation = (generation_reader() if action in {"start", "resume_pending_start"}
+                                and callable(generation_reader) else None)
+            self._robot_action = action
+            self._robot_stop_action = ""
+
+        def perform(current_action: str) -> None:
             try:
-                getattr(self._lifecycle, action)()
+                operation = getattr(self._lifecycle, current_action)
+                if current_action in {"start", "resume_pending_start"} and start_generation is not None:
+                    operation(start_generation=start_generation)
+                else:
+                    operation()
             except LicenseError as exc:
+                if current_action in {"start", "resume_pending_start"}:
+                    self._lifecycle.cancel_pending_start()
                 self._lifecycle.events.emit("APP_ERROR", "failed", code=f"LIC-{exc.code}", message=str(exc))
             except Exception as exc:  # pragma: no cover - final UI safety net
+                if current_action in {"start", "resume_pending_start"}:
+                    self._lifecycle.cancel_pending_start()
                 self._failed(exc, error_code)
-            finally:
-                self._action_lock.release()
 
-        threading.Thread(target=worker, daemon=True).start()
+        def worker() -> None:
+            released = False
+            current_action = action
+            try:
+                while True:
+                    with action_state_lock:
+                        current_action = self._robot_stop_action or current_action
+                        self._robot_stop_action = ""
+                        self._robot_action = current_action
+                    perform(current_action)
+                    with action_state_lock:
+                        if not self._robot_stop_action:
+                            self._robot_action = ""
+                            self._action_lock.release()
+                            released = True
+                            return
+            finally:
+                if not released:
+                    with action_state_lock:
+                        self._robot_action = self._robot_stop_action = ""
+                        self._action_lock.release()
+
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except (OSError, RuntimeError) as exc:
+            if action == "resume_pending_start":
+                self._lifecycle.cancel_pending_start()
+            with action_state_lock:
+                self._robot_action = self._robot_stop_action = ""
+                self._action_lock.release()
+            return self._failed(exc, error_code)
         return self._ok({"accepted": True}, message=message)
 
     def select_wechat(self, value: str = "") -> dict[str, object]:
@@ -594,7 +731,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                 item.path,
                 wechat_version=item.version,
             )
-            return self._ok(self._lifecycle.check_environment().to_dict())
+            return self._ok(self._status_data(self._lifecycle.check_environment()))
         except (OSError, ValueError) as exc:
             return self._failed(exc, "11002")
 
@@ -695,6 +832,10 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         runtime = view.get("runtime") if isinstance(view, dict) else {}
         environment = environment if isinstance(environment, dict) else {}
         runtime = runtime if isinstance(runtime, dict) else {}
+        if provider_services is None:
+            provider_services = load_provider_services(
+                self._install_root, allow_unreadable_preferences=True,
+            )
         provider = load_provider_profile(self._install_root, services=provider_services)
         account_id = str(runtime.get("wechat_identity") or "").strip()
         if runtime.get("account_status_available") is False:
@@ -856,12 +997,20 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
 
     def create_backup(self) -> dict[str, object]:
         try:
-            return self._ok(
-                self._maintenance_service().create_backup(),
-                message="设置、人格和长期记忆已备份。",
-            )
+            result = self._run_backup_mutation(self._maintenance_service().create_backup)
+            return self._ok(result, message="设置、人格和长期记忆已备份。")
         except (OSError, ValueError, MaintenanceError) as exc:
             return self._failed(exc, "15001")
+
+    def _run_backup_mutation(self, operation: Callable[[], dict[str, object]]) -> dict[str, object]:
+        if not self._action_lock.acquire(blocking=False):
+            raise MaintenanceBusyError("机器人正在执行其他操作，请完成后再备份或恢复。")
+        try:
+            if getattr(self, "_update_installing", False):
+                raise MaintenanceBusyError("更新正在安装，请完成后再备份或恢复。")
+            return operation()
+        finally:
+            self._action_lock.release()
 
     def validate_restore(self, backup_id: str) -> dict[str, object]:
         try:
@@ -871,10 +1020,10 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
 
     def restore_backup(self, backup_id: str) -> dict[str, object]:
         try:
-            return self._ok(
-                self._maintenance_service().restore_backup(backup_id),
-                message="备份已经恢复，并已保留恢复前副本。",
+            result = self._run_backup_mutation(
+                lambda: self._maintenance_service().restore_backup(backup_id),
             )
+            return self._ok(result, message="备份已经恢复，并已保留恢复前副本。")
         except (OSError, ValueError, MaintenanceError) as exc:
             return self._failed(exc, "15001")
 

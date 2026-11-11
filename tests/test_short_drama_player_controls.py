@@ -30,8 +30,8 @@ def player_assets(tmp_path_factory):
     media = root / "sample.mp4"
     subprocess.run([
         ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-        "testsrc2=size=320x180:rate=12", "-t", "8", "-c:v", "libx264",
-        "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "testsrc2=size=320x180:rate=12", "-t", "8", "-c:v", "libvpx-vp9",
+        "-deadline", "realtime", "-cpu-used", "8", "-pix_fmt", "yuv420p", "-f", "webm",
         str(media),
     ], check=True, timeout=20)
     return (checkout / "index.html").read_text("utf-8"), media.read_bytes()
@@ -98,7 +98,7 @@ def player_page(browser, player_assets, request):
             route.fulfill(json=payload)
         elif path.endswith("/api/recommendations"):
             route.fulfill(json={"v": 1, "kind": "recommendations", "heading": "猜你喜欢", "items": [
-                {"title": f"推荐短剧{index}", "category": "短剧", "cover": "", "selection_token": f"abcdefghijklmnop{index}", "recommendation_id": f"{index:016x}",
+                {"title": f"推荐短剧{index}", "category": "AI漫剧" if index % 3 else "短剧", "recommendation_kind": "ai" if index % 3 else "live", "cover": "", "selection_token": f"abcdefghijklmnop{index}", "recommendation_id": f"{index:016x}",
                  "episodes": [{"name": "第1集", "url": f"https://media.example/related{index}.m3u8"}]}
                 for index in range(1, 10)
             ]})
@@ -110,9 +110,9 @@ def player_page(browser, player_assets, request):
                 end = min(int(requested_range[2] or len(media) - 1), len(media) - 1)
                 headers["Content-Range"] = f"bytes {start}-{end}/{len(media)}"
                 route.fulfill(body=media[start:end + 1], status=206,
-                              content_type="video/mp4", headers=headers)
+                              content_type="video/webm", headers=headers)
             else:
-                route.fulfill(body=media, content_type="video/mp4", headers=headers)
+                route.fulfill(body=media, content_type="video/webm", headers=headers)
         else:
             route.fulfill(body="", content_type="application/javascript")
 
@@ -240,7 +240,7 @@ def test_episode_switch_and_auto_next_preserve_playback_speed(player_page):
 def test_disabled_auto_next_stays_on_current_episode(player_page):
     page = player_page
     page.get_by_label("更多播放设置").click()
-    page.locator(".switch-label").click()
+    page.get_by_label("自动连播", exact=True).click()
     page.get_by_label("更多播放设置").click()
     assert not page.get_by_label("自动连播").is_checked()
     play_click(page)
@@ -288,7 +288,7 @@ def cinema_catalog(player_page):
 
 def test_catalog_filter_clear_ime_and_return_keep_context(cinema_catalog):
     page = cinema_catalog
-    search = page.get_by_label("在当前片单中查找")
+    search = page.get_by_label("查找片名 · 支持全源搜索")
     search.dispatch_event("compositionstart")
     search.fill("山海")
     assert page.locator(".recommend-card:visible").count() == 8
@@ -484,7 +484,8 @@ def test_random_recommendations_do_not_repeat_across_rounds_and_exhaust_cleanly(
 def test_random_recommendations_failure_retry_excludes_previously_seen_cards(cinema_catalog):
     page = cinema_catalog
     state = {"fail": False, "requests": []}
-    items = [{"title": f"随机影片{index}", "category": "电影", "source": "非凡资源",
+    items = [{"title": f"随机短剧{index}", "category": "AI漫剧" if index % 3 else "短剧", "source": "非凡资源",
+              "recommendation_kind": "ai" if index % 3 else "live",
               "recommendation_id": f"{index:016x}",
               "episodes": [{"name": "正片", "url": f"https://media.example/movie-{index}.m3u8"}]}
              for index in range(21, 30)]
@@ -521,7 +522,7 @@ def test_random_recommendations_failure_retry_excludes_previously_seen_cards(cin
 @pytest.mark.parametrize("player_page", [ANDROID_BROWSER], indirect=True)
 def test_fullscreen_back_button_exits_before_navigation(cinema_catalog):
     page = cinema_catalog
-    search = page.get_by_label("在当前片单中查找")
+    search = page.get_by_label("查找片名 · 支持全源搜索")
     search.fill("山海")
     filtered_titles = page.locator(".recommend-card:visible strong").all_text_contents()
     assert len(filtered_titles) == 2
@@ -793,7 +794,7 @@ def test_native_fullscreen_auto_next_keeps_video_and_speed_then_can_be_disabled(
             assert events[index + 1] == {"action": "play", "sameTurn": True}
     page.evaluate("window.endVideoFullscreen()")
     page.get_by_label("更多播放设置").click()
-    page.locator(".switch-label").click()
+    page.get_by_label("自动连播", exact=True).click()
     assert not page.get_by_label("自动连播").is_checked()
     page.get_by_label("更多播放设置").click()
     page.get_by_role("button", name="选择剧集", exact=True).click()
@@ -920,9 +921,9 @@ def test_video_aspect_fit_with_real_media(player_page, tmp_path, aspect):
     width, height, mode = aspect
     clip = tmp_path / "aspect.mp4"
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-                    f"testsrc2=size={width}x{height}:rate=12", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast",
-                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(clip)], check=True, timeout=15)
-    page.route("**/aspect.mp4", lambda route: route.fulfill(body=clip.read_bytes(), content_type="video/mp4", headers={"Access-Control-Allow-Origin": "*"}))
+                    f"testsrc2=size={width}x{height}:rate=12", "-t", "2", "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8",
+                    "-pix_fmt", "yuv420p", "-f", "webm", str(clip)], check=True, timeout=15)
+    page.route("**/aspect.mp4", lambda route: route.fulfill(body=clip.read_bytes(), content_type="video/webm", headers={"Access-Control-Allow-Origin": "*"}))
     page.locator("#video").evaluate("video => { video.src = 'https://media.example/aspect.mp4'; video.load(); }")
     page.wait_for_function(f"document.getElementById('videoShell').classList.contains('player--{mode}') && document.getElementById('video').readyState >= 2")
     if mode == "portrait":
@@ -984,7 +985,8 @@ def test_compact_link_recovers_cover_full_strip_and_next_episode(player_page):
     page.wait_for_function("document.querySelectorAll('#episodeGrid button').length === 16")
     assert page.locator("#episodes").is_visible()
     assert page.locator("#workEpisodeButton").is_enabled()
-    assert len(requests) == 1
+    assert len([url for url in requests if "alternatives=1" not in url]) == 1
+    assert any("alternatives=1" in url for url in requests)
     assert "https%3A" not in requests[0]  # Resolver accepts a fingerprint, never a fetch URL.
     page.get_by_label("更多播放设置").click()
     assert page.get_by_role("button", name="上一集", exact=True).is_disabled()
@@ -1066,6 +1068,8 @@ def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page, scr
     page.route("**/api/selections/**", lambda route: route.fulfill(json=payload))
     page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
     page.locator(".recommend-card").click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
     page.evaluate("window.scrollTo(0, 60)")
     previous_scroll = page.evaluate("window.scrollY")
     previous_top = page.locator("#videoShell").bounding_box()["y"]
@@ -1102,7 +1106,7 @@ def test_mobile_sheet_owns_touch_scroll_and_restores_background(player_page, scr
 
 
 @pytest.fixture
-def source_catalog(player_page):
+def source_catalog(player_page, request):
     """A single search result with two independently served playback sources."""
     page = player_page
     variants = [
@@ -1115,7 +1119,7 @@ def source_catalog(player_page):
                 for index in range(1, 4)
             ],
         }
-        for source, code in [("暴风资源", "bf"), ("非凡资源", "ff")]
+        for source, code in [("暴风资源", "bf"), (getattr(request, "param", "非凡资源"), "ff")]
     ]
     payload = {"v": 1, "kind": "search", "heading": "搜索结果", "items": [variants[0]]}
     state = {"variants": variants, "requests": [], "fail": False}
@@ -1123,7 +1127,10 @@ def source_catalog(player_page):
     def resolve(route):
         query = parse_qs(urlsplit(route.request.url).query)
         state["requests"].append(query)
-        assert query.get("alternatives") == ["1"]
+        if query.get("alternatives") != ["1"]:
+            matching = next((value for value in state["variants"] if value["source"] == query.get("source", [None])[0]), state["variants"][0])
+            route.fulfill(json={**payload, "items": [matching]})
+            return
         if state["fail"]:
             route.fulfill(status=503, json={"error": "temporarily unavailable"})
         else:
@@ -1134,6 +1141,7 @@ def source_catalog(player_page):
     page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
     page.locator(".recommend-card").click()
     page.wait_for_function("document.getElementById('video').readyState >= 2")
+    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length === 2")
     return page, state
 
 
@@ -1143,13 +1151,19 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     page, state = source_catalog
     state["variants"].extend(
         {**state["variants"][1], "source": source}
-        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源")
+        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源",
+                       "飘零资源", "360资源", "无尽资源", "魔都资源", "新浪资源")
     )
+    page.get_by_label("返回", exact=True).click()
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
+    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length === 12")
     page.set_viewport_size({"width": width, "height": 844})
     button = page.locator("#sourceButton")
     assert button.inner_text().strip() == "暴风"
     assert button.is_enabled()
-    assert not state["requests"]  # Opening the default result does not query every source.
+    assert state["requests"]  # Same-work sources are preloaded before the menu opens.
     assert button.evaluate("node => parseFloat(getComputedStyle(node).fontSize)") <= 13
     bounds = button.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
@@ -1183,14 +1197,15 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     assert menu["x"] >= 0 and menu["x"] + menu["width"] <= width
     assert menu["y"] < 844 and menu["y"] + menu["height"] > 0
     assert menu["y"] >= actions["y"] + actions["height"] + 7
-    assert page.locator("#sourceOptions button").count() == 7
+    assert page.locator("#sourceOptions button").count() == 12
     for option in page.locator("#sourceOptions button").all():
         assert option.is_visible() and option.is_enabled()
         # Page scrolling may leave a fractional menu border outside the viewport;
         # each actual control must still scroll fully into view and receive input.
         option.click(trial=True)
         option_bounds = option.bounding_box()
-        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844
+        # Nested scrolling can round the bottom edge by a fraction of a CSS pixel.
+        assert option_bounds["y"] >= 0 and option_bounds["y"] + option_bounds["height"] <= 844.5
         assert option.evaluate("""node => {
           const bounds = node.getBoundingClientRect();
           return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
@@ -1210,8 +1225,10 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
 
 
 @pytest.mark.parametrize("playing", [False, True])
-def test_source_switch_preserves_episode_position_speed_and_play_intent(source_catalog, playing):
-    page, _ = source_catalog
+@pytest.mark.parametrize("source_catalog", ["非凡资源", "魔都资源", "新浪资源"], indirect=True)
+def test_source_switch_preserves_episode_position_speed_and_starts_playback(source_catalog, playing):
+    page, state = source_catalog
+    alternative = state["variants"][1]["source"].removesuffix("资源")
     page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
     page.wait_for_function("document.getElementById('video').readyState >= 2")
     page.locator("#speedButton").click()
@@ -1222,18 +1239,23 @@ def test_source_switch_preserves_episode_position_speed_and_play_intent(source_c
         page.wait_for_function("!document.getElementById('video').paused")
     before = page.locator("#video").evaluate("video => video.currentTime")
     page.locator("#sourceButton").click()
-    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.locator("#sourceMenu").get_by_role("button", name=alternative, exact=True).click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-2.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
     assert page.locator("#meta").inner_text() == "第2集"
+    assert page.locator("#sourceButton").inner_text().strip() == alternative
     assert page.locator("#video").evaluate("video => video.playbackRate") == 1.5
-    assert page.locator("#video").evaluate("video => video.paused") is not playing
+    page.wait_for_function("!document.getElementById('video').paused")
     assert before - .15 <= page.locator("#video").evaluate("video => video.currentTime") < before + 2
 
 
 def test_source_switch_does_not_substitute_another_episode_when_missing(source_catalog):
     page, state = source_catalog
+    page.get_by_label("返回", exact=True).click()
     state["variants"][1]["episodes"] = state["variants"][1]["episodes"][:2]
     state["variants"][1]["episode_count"] = 2
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
     page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-3.mp4')")
     page.locator("#sourceButton").click()
@@ -1249,7 +1271,12 @@ def test_source_switch_does_not_substitute_another_episode_when_missing(source_c
 
 def test_source_switch_lookup_failure_can_retry_without_losing_current_video(source_catalog):
     page, state = source_catalog
+    page.get_by_label("返回", exact=True).click()
+    state["requests"].clear()
     state["fail"] = True
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
     page.locator("#sourceButton").click()
     page.locator("#sourceRetry").wait_for(state="visible")
     assert page.locator("#sourceStatus").inner_text()
@@ -1258,7 +1285,8 @@ def test_source_switch_lookup_failure_can_retry_without_losing_current_video(sou
     page.locator("#sourceRetry").click()
     page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).wait_for(state="visible")
     assert page.locator("#sourceRetry").is_hidden()
-    assert len(state["requests"]) == 2
+    # Failed preload is retried on menu open, then once explicitly.
+    assert len(state["requests"]) == 3
 
 
 def test_source_switch_is_available_after_media_error(source_catalog, screenshots):
@@ -1280,13 +1308,16 @@ def test_source_switch_is_available_after_media_error(source_catalog, screenshot
 
 def test_source_switch_late_response_does_not_reopen_player_after_return(source_catalog):
     page, state = source_catalog
+    page.get_by_label("返回", exact=True).click()
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
     page.evaluate("""payload => {
       const originalFetch = window.fetch;
       window.fetch = (input, options) => String(input).includes('alternatives=1')
         ? new Promise(resolve => { window.releaseSourceResponse = () => resolve(new Response(JSON.stringify(payload), {status: 200, headers: {'Content-Type': 'application/json'}})); })
         : originalFetch(input, options);
     }""", {"v": 1, "kind": "search", "heading": "搜索结果", "items": state["variants"]})
-    page.locator("#sourceButton").click()
+    page.locator(".recommend-card").click()
     page.wait_for_function("typeof window.releaseSourceResponse === 'function'")
     page.get_by_label("返回", exact=True).click()
     page.evaluate("window.releaseSourceResponse()")
@@ -1320,7 +1351,7 @@ def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming
     page.evaluate("window.testHls.video.src = window.testHls.url")
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
     assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.1)
-    assert page.locator("#video").evaluate("video => video.paused")
+    page.wait_for_function("!document.getElementById('video').paused")
 
 
 def test_source_switch_keyboard_escape_restores_button_focus(source_catalog):
@@ -1417,7 +1448,6 @@ def test_portrait_container_fullscreen_controls_do_not_overlap(source_catalog, w
     page.locator("#episodeOpen").click()
     page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
-    page.locator("#togglePlayback").click()
     page.wait_for_function("!document.getElementById('video').paused")
     page.locator("#fullscreenNext").click()
     page.wait_for_function("document.getElementById('meta').textContent === '第3集' && !document.getElementById('video').paused")
@@ -1512,7 +1542,7 @@ def test_player_airplay_waits_for_wireless_event_and_can_disconnect(source_catal
       video.webkitCurrentPlaybackTargetIsWireless = true;
       video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
     }""")
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
     page.evaluate("""() => {
       const video = document.getElementById('video');
       video.webkitCurrentPlaybackTargetIsWireless = false;
@@ -1520,6 +1550,82 @@ def test_player_airplay_waits_for_wireless_event_and_can_disconnect(source_catal
     }""")
     assert page.locator("#castButton > span").inner_text() == "投屏"
     assert "断开" in page.locator("#actionStatus").inner_text()
+
+
+def test_native_airplay_without_js_picker_reports_pause_and_media_failure(source_catalog):
+    page, _ = source_catalog
+    before = page.locator("#video").evaluate("video => ({src: video.currentSrc, paused: video.paused})")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitShowPlaybackTargetPicker = undefined;
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "已连接"
+    assert "暂停" in page.locator("#actionStatus").inner_text()
+    assert page.locator("#video").evaluate("video => ({src: video.currentSrc, paused: video.paused})") == before
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
+    page.wait_for_function("!document.getElementById('actionStatus').textContent.includes('暂停')")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      Object.defineProperty(video, 'error', {configurable: true, value: {code: 4}});
+      video.dispatchEvent(new Event('error'));
+    }""")
+    assert page.locator("#castButton > span").inner_text() == "投屏异常"
+    assert "播放失败" in page.locator("#actionStatus").inner_text()
+    assert page.locator("#castFallback").is_visible()
+    assert page.locator("#video").evaluate("video => video.currentSrc") == before["src"]
+    play_click(page)
+    page.wait_for_function("document.getElementById('video').paused")
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      const src = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+      Object.defineProperty(video, 'src', {configurable: true, get: () => src.get.call(video),
+        set(value) { delete video.error; src.set.call(video, value); }});
+    }""")
+    page.locator("#workEpisodeButton").click()
+    page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('meta').textContent === '第2集' && document.getElementById('video').readyState >= 2")
+    assert page.locator("#video").evaluate("video => video.paused")
+    assert page.locator("#castButton > span").inner_text() == "已连接"
+
+
+def test_airplay_media_events_do_not_overwrite_share_feedback(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      Object.defineProperty(navigator, 'share', {configurable: true, value: undefined});
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async () => {}}});
+    }""")
+    page.locator("#shareButton").click()
+    page.wait_for_function("document.getElementById('actionStatus').textContent.includes('已复制')")
+    message = page.locator("#actionStatus").inner_text()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#actionStatus").inner_text() == message
+
+
+def test_airplay_keeps_manual_link_visible_during_media_events(source_catalog):
+    page, _ = source_catalog
+    page.evaluate("""() => {
+      const video = document.getElementById('video');
+      video.webkitCurrentPlaybackTargetIsWireless = true;
+      video.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        writeText: () => new Promise((_resolve, reject) => { window.rejectCastCopy = reject; })
+      }});
+    }""")
+    page.locator("#castCopyButton").click()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#castCopyButton").is_disabled()
+    page.evaluate("window.rejectCastCopy(new Error('clipboard unavailable'))")
+    page.locator("#castLink").wait_for(state="visible")
+    message = page.locator("#actionStatus").inner_text()
+    page.locator("#video").evaluate("video => video.dispatchEvent(new Event('pause'))")
+    assert page.locator("#castLink").is_visible()
+    assert page.locator("#actionStatus").inner_text() == message
 
 
 @pytest.mark.parametrize("error_name", ["NotSupportedError", "InvalidStateError", None])
@@ -1563,7 +1669,7 @@ def test_player_cast_state_events_are_real_connection_feedback_and_keep_local_pl
     page.wait_for_function("document.getElementById('actionStatus').textContent.includes('已连接')")
     after = page.locator("#video").evaluate("video => ({src: video.currentSrc, rate: video.playbackRate, paused: video.paused})")
     assert after == before
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
 
 
 def test_player_cast_copy_fallback_uses_current_original_hls_url(source_catalog):
@@ -1597,11 +1703,11 @@ def test_player_cast_connection_state_survives_episode_change(source_catalog):
       document.getElementById('video').webkitShowPlaybackTargetPicker = undefined;
     }""")
     page.locator("#castButton").click()
-    page.wait_for_function("document.querySelector('#castButton > span').textContent === '已投屏'")
+    page.wait_for_function("document.querySelector('#castButton > span').textContent === '已连接'")
     page.locator("#workEpisodeButton").click()
     page.locator("#sheetEpisodeGrid").get_by_role("button", name="第2集", exact=True).click()
     page.wait_for_function("document.getElementById('meta').textContent === '第2集'")
-    assert page.locator("#castButton > span").inner_text() == "已投屏"
+    assert page.locator("#castButton > span").inner_text() == "已连接"
 
 
 def test_player_cast_copy_recovers_after_new_request_and_clipboard_failure(source_catalog, screenshots):

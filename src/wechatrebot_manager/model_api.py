@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .customer_config import (
+    ProviderService,
     delete_provider_profile,
     delete_provider_thinking_preference,
     apply_web_search_values,
@@ -30,6 +31,7 @@ from .provider import (
     DEFAULT_PROVIDER_SOURCE_ID,
     OpenAIProviderProfile,
     discover_openai_models,
+    normalize_api_base,
     provider_source_id,
     supports_thinking_toggle,
 )
@@ -38,6 +40,23 @@ from .runtime_config import bind_missing_analysis_model
 
 class AnalysisModelBindingError(PluginCenterError):
     """A provider was saved, but its dependent analysis binding was not confirmed."""
+
+
+def _provider_api_key(values: dict[str, Any], selected: ProviderService | None) -> str:
+    """Reuse a saved secret only when editing its unchanged API endpoint."""
+    api_key = str(values.get("api_key") or "").strip()
+    if api_key:
+        return api_key
+    if selected is not None:
+        api_base = normalize_api_base(str(values.get("api_base") or ""))
+        if api_base != normalize_api_base(selected.api_base):
+            raise ProviderTestError(
+                "API 地址已更改，请重新填写此地址对应的 API Key / Token Plan。",
+                code="15004",
+            )
+        if selected.api_key:
+            return selected.api_key
+    raise ProviderTestError("模型 API Key / Token Plan 不能为空。", code="15004")
 
 
 class ModelApiMixin:
@@ -65,12 +84,8 @@ class ModelApiMixin:
                 not chat_services or bool(selected is not None and selected.is_default)
             )
             current = load_provider_profile(self._install_root)
-            api_key = str(values.get("api_key") or "").strip()
-            if not api_key and selected is not None:
-                api_key = selected.api_key
-            elif not api_key and not original_id and current is not None:
-                api_key = current.api_key
-            api_base = str(values.get("api_base") or "").strip()
+            api_key = _provider_api_key(values, selected)
+            api_base = normalize_api_base(str(values.get("api_base") or ""))
             model = str(values.get("model") or "").strip()
             profile = OpenAIProviderProfile(
                 api_key=api_key,
@@ -80,7 +95,7 @@ class ModelApiMixin:
                     selected.source_id
                     if (
                         selected is not None
-                        and selected.api_base.rstrip("/") == api_base.rstrip("/")
+                        and normalize_api_base(selected.api_base) == api_base
                     )
                     else provider_source_id(api_base, model)
                 ),
@@ -165,6 +180,10 @@ class ModelApiMixin:
                     else "模型服务已保存，当前回复模型保持不变。"
                 ),
             )
+        except ProviderTestError as exc:
+            result = self._failed(exc, exc.error_code)
+            result["error"].update(message=str(exc), detail=str(exc))
+            return result
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
@@ -239,6 +258,7 @@ class ModelApiMixin:
             return self._failed(exc, "15001")
 
     def save_web_search_settings(self, values: dict[str, Any]) -> dict[str, object]:
+        submitted = False
         try:
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
@@ -247,12 +267,25 @@ class ModelApiMixin:
                 config = system.get("config") if isinstance(system, dict) else None
                 if not isinstance(config, dict):
                     raise PluginCenterError("无法读取当前机器人核心配置，请刷新后重试。")
+                # Build the expected patch with the same validation used for
+                # saving. An empty key intentionally leaves saved secrets alone.
+                expected = {"provider_settings": {}}
+                apply_web_search_values(expected, values)
                 apply_web_search_values(config, values)
+                # A transport failure during PUT may follow a successful write.
+                # Ask for a readback instead of inviting repeated submission.
+                submitted = True
                 client.request("PUT", "/api/v1/system-config", config)
                 verified = client.request("GET", "/api/v1/system-config")
                 verified_config = verified.get("config") if isinstance(verified, dict) else None
                 if not isinstance(verified_config, dict):
                     raise PluginCenterError("联网搜索设置已提交，但没有收到生效确认，请刷新后重试。")
+                verified_settings = verified_config.get("provider_settings")
+                if not isinstance(verified_settings, dict) or any(
+                    verified_settings.get(key) != value
+                    for key, value in expected["provider_settings"].items()
+                ):
+                    raise PluginCenterError("联网搜索设置已提交，但未能确认生效，请刷新后重试。")
                 saved = web_search_settings_from_config(verified_config)
             else:
                 saved = save_web_search_settings(self._install_root, values)
@@ -266,7 +299,7 @@ class ModelApiMixin:
                 ),
             )
         except (OSError, ValueError, PluginCenterError, EngineUnavailableError) as exc:
-            return self._failed(exc, "15001")
+            return self._failed(exc, "15006" if submitted else "15001")
 
     def set_default_provider(self, provider_id: str) -> dict[str, object]:
         try:
@@ -369,11 +402,14 @@ class ModelApiMixin:
         try:
             client = EngineApiClient(self._install_root)
             if not client.is_available():
-                raise EngineUnavailableError("请先启动机器人，再测试模型服务。")
+                raise ProviderTestError(
+                    "回复引擎尚未就绪。请先到运行中心启动机器人，待服务就绪后再返回测试模型。",
+                    code="13002",
+                )
             return self._ok(client.test_provider(provider_id))
         except ProviderTestError as exc:
             result = self._failed(exc, exc.error_code)
-            result["error"]["detail"] = str(exc)
+            result["error"].update(message=str(exc), detail=str(exc))
             return result
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
@@ -389,15 +425,14 @@ class ModelApiMixin:
                 ),
                 None,
             )
-            api_key = str(values.get("api_key") or "").strip()
-            if not api_key and selected is not None:
-                api_key = selected.api_key
+            api_key = _provider_api_key(values, selected)
+            api_base = normalize_api_base(str(values.get("api_base") or ""))
             models = discover_openai_models(
                 api_key=api_key,
-                api_base=str(values.get("api_base") or "").strip(),
+                api_base=api_base,
             )
             return self._ok(
-                {"items": list(models), "total": len(models)},
+                {"items": list(models), "total": len(models), "api_base": api_base},
                 message=f"已读取 {len(models)} 个可用模型。",
             )
         except ProviderTestError as exc:

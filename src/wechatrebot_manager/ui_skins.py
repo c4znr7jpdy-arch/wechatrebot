@@ -54,7 +54,11 @@ def load_skin_catalog(asset_root: Path | None = None) -> list[dict[str, str]]:
 
 
 def load_ui_skin(root: str | Path, *, asset_root: Path | None = None) -> str:
-    preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    try:
+        preferences = _object(Path(root) / "data/manager/ui-preferences.json")
+    except (OSError, ValueError):
+        # Keep the original file intact; saving preferences remains strict.
+        preferences = {}
     skin = preferences.get("skin")
     return skin if any(item["id"] == skin for item in load_skin_catalog(asset_root)) else ""
 

@@ -6,7 +6,7 @@
     const {read, request, save, applyBrand, schemaMarkup, configFromForm, escapeHtml: esc, confirmAction, toast, reportError, growTextarea} = helpers;
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-    const state = {detail: null, stale: false, view: "global", templateId: null, templates: [], bindings: {}, config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", feedback: ""};
+    const state = {detail: null, stale: false, view: "global", templateId: null, templates: [], bindings: {}, config: {}, identity: {}, dirty: false, busy: false, loading: false, profilesAvailable: false, capabilityWarning: "", feedback: "", readbackPending: "", readbackScope: ""};
     const root = () => $("#coreDetail");
     const clone = (value) => structuredClone(value || {});
     const currentTemplate = () => state.templates.find((item) => item.id === state.templateId);
@@ -23,7 +23,7 @@
     }
 
     function guard(next) {
-      if (state.busy) return true;
+      if (state.busy || state.loading) return true;
       if (!state.dirty) return false;
       confirmAction({title: "离开前丢弃核心配置修改？", message: "这些修改尚未保存。留在此页可继续编辑或保存。", confirmText: "丢弃修改并继续", onConfirm: async () => { resetDraft(); render(); await next(); }});
       return true;
@@ -37,61 +37,93 @@
     }
 
     async function load(force = false) {
-      if (state.loading) return;
+      if (state.busy || state.loading) return;
       if (state.detail && !force && (!state.stale || state.dirty)) return;
       if (force && guard(() => load(true))) return;
-      state.loading = true;
+      state.loading = true; renderNavigation();
       try {
         const detail = await read();
+        const templateReadback = state.readbackPending && state.readbackScope === "template";
+        const profiles = detail.engine_online ? await readProfiles(Boolean(templateReadback)) : {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: ""};
+        if (templateReadback && !detail.engine_online) {
+          throw new Error("请恢复机器人连接后重新读取模板列表。");
+        }
+        if (state.dirty) {
+          state.stale = true;
+          state.feedback = "未保存的修改已保留；本次读取未覆盖当前草稿。保存时仍会检查配置是否冲突。";
+          $("#coreNote").textContent = note();
+          return;
+        }
         state.detail = detail; state.stale = false;
-        state.profilesAvailable = false; state.capabilityWarning = "";
+        Object.assign(state, profiles);
         if (!detail.engine_online) { state.view = "global"; state.templateId = null; }
-        if (detail.engine_online) await loadProfiles();
         if (!state.profilesAvailable) { state.view = "global"; state.templateId = null; }
         if (state.view === "template" && !currentTemplate()) { state.view = "global"; state.templateId = null; }
+        state.readbackPending = "";
+        state.readbackScope = "";
         resetDraft(); render();
       } catch (error) {
-        root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
-        reportError(error);
+        state.stale = true;
+        if (state.detail) {
+          state.feedback = state.readbackPending ? readbackWarning() : state.dirty ? "核心配置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。" : "核心配置读取失败；当前内容已保留，请稍后重新读取。";
+          $("#coreNote").textContent = note();
+        } else root().innerHTML = '<div class="empty-state"><h2>核心配置暂时无法读取</h2><p>请确认完整程序已安装，再点击“重新读取”。</p></div>';
+        if (state.readbackPending) reportReadbackError(error);
+        else reportError(error);
       } finally { state.loading = false; renderNavigation(); }
     }
 
-    async function loadProfiles(strict = false) {
+    async function readProfiles(strict = false) {
       try {
         const profiles = await request("GET", "profiles");
-        state.templates = profiles.templates || [];
-        state.bindings = profiles.bindings || {};
-        state.profilesAvailable = true; state.capabilityWarning = "";
+        return {templates: profiles.templates || [], bindings: profiles.bindings || {}, profilesAvailable: true, capabilityWarning: ""};
       } catch (error) {
-        state.profilesAvailable = false;
-        state.capabilityWarning = `模板接口暂不可用：${error.message}。全局配置仍可编辑和保存。`;
         if (strict) throw error;
-        return;
+        return {templates: [], bindings: {}, profilesAvailable: false, capabilityWarning: `模板接口暂不可用：${error.message}。全局配置仍可编辑和保存。`};
       }
     }
 
+    async function loadProfiles(strict = false) {
+      Object.assign(state, await readProfiles(strict));
+    }
+
     function renderNavigation() {
+      const pending = state.busy || state.loading;
+      const writeBlocked = pending || Boolean(state.readbackPending);
       const online = state.detail?.engine_online && state.profilesAvailable;
-      $("#coreStatus").textContent = state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
-      $("#newCoreTemplate").disabled = state.busy || !online || !Object.keys(state.detail?.template_schema || {}).length;
+      $("#coreStatus").textContent = state.readbackPending ? "已提交 · 等待读取核对" : state.detail?.engine_online ? "在线 · 保存后应用" : "离线 · 启动时使用";
+      $("#newCoreTemplate").disabled = writeBlocked || !online || !Object.keys(state.detail?.template_schema || {}).length;
       $("#coreTemplateSource").disabled = $("#newCoreTemplate").disabled;
-      $("#refreshCore").disabled = state.busy;
+      $("#refreshCore").disabled = pending;
+      $$('#saveCore, #renameCoreTemplate, #deleteCoreTemplate, #backCoreGlobal', root()).forEach((button) => { button.disabled = writeBlocked; });
+      $$('input, select, textarea, .core-reset', root()).forEach((control) => {
+        if (state.readbackPending) {
+          if (!('coreReadbackDisabled' in control.dataset)) control.dataset.coreReadbackDisabled = String(control.disabled);
+          control.disabled = true;
+        } else if ('coreReadbackDisabled' in control.dataset) {
+          control.disabled = control.dataset.coreReadbackDisabled === 'true';
+          delete control.dataset.coreReadbackDisabled;
+        }
+      });
       const count = (id) => Object.values(state.bindings).filter((value) => value === id).length;
-      $("#coreTemplateList").innerHTML = `<label class="template-picker"><span>正在编辑</span><select id="activeCoreTemplate" ${state.busy ? "disabled" : ""}><option value="">全局默认</option>${state.templates.map((item) => `<option value="${esc(item.id)}" ${state.templateId === item.id ? "selected" : ""} ${!online ? "disabled" : ""}>${esc(item.name)} · ${count(item.id)} 个聊天使用</option>`).join("")}</select></label><p class="template-help">${state.view === "template" ? `修改仅影响使用此模板的 ${count(state.templateId)} 个聊天，其他聊天不受影响。` : state.templates.length ? `已有 ${state.templates.length} 个模板，可在上方选择查看和编辑。` : "还没有模板。大多数聊天使用全局默认即可；需要不同回复风格时再新建。"}</p>`;
+      $("#coreTemplateList").innerHTML = `<label class="template-picker"><span>正在编辑</span><select id="activeCoreTemplate" ${writeBlocked ? "disabled" : ""}><option value="">全局默认</option>${state.templates.map((item) => `<option value="${esc(item.id)}" ${state.templateId === item.id ? "selected" : ""} ${!online ? "disabled" : ""}>${esc(item.name)} · ${count(item.id)} 个聊天使用</option>`).join("")}</select></label><p class="template-help">${state.view === "template" ? `修改仅影响使用此模板的 ${count(state.templateId)} 个聊天，其他聊天不受影响。` : state.templates.length ? `已有 ${state.templates.length} 个模板，可在上方选择查看和编辑。` : "还没有模板。大多数聊天使用全局默认即可；需要不同回复风格时再新建。"}</p>`;
       $("#activeCoreTemplate").addEventListener("change", (event) => {
         const id = event.target.value;
         event.target.value = state.templateId || "";
         void selectView(id ? "template" : "global", id || null);
       });
+      if (state.readbackPending) $("#coreTemplateList").insertAdjacentHTML("afterbegin", `<p class="form-note" role="status">${esc(state.feedback || readbackWarning())}</p>`);
     }
 
     async function selectView(view, templateId = null) {
+      if (state.readbackPending) return;
       if (guard(() => selectView(view, templateId))) return;
       state.view = view; state.templateId = templateId; resetDraft(); render();
     }
 
     function note() {
       if (state.feedback) return state.feedback;
+      if (state.readbackPending) return readbackWarning();
       if (state.dirty) return "有修改尚未保存。";
       if (state.view === "template") return "打开“单独设置”来修改这一项；关闭时跟随全局，后续全局调整也会同步。";
       if (state.capabilityWarning) return state.capabilityWarning;
@@ -108,10 +140,11 @@
     function draftFromForm() {
       if (state.view === "global") {
         const nameInput = $("#coreForm")?.elements.robot_name;
-        const adminInput = $("#coreForm")?.elements.admin_id;
+        const adminInput = $("#coreForm")?.elements.admin_ids;
         if (nameInput) {
           const robotName = String(nameInput.value || "").trim();
-          state.identity = {robot_name: robotName, admin_id: String(adminInput?.value || "").trim()};
+          const adminIds = [...new Set(String(adminInput?.value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean))];
+          state.identity = {robot_name: robotName, admin_ids: adminIds, admin_id: adminIds[0] || ""};
         }
       }
       const draft = configFromForm($("#coreForm"), state.config);
@@ -132,7 +165,8 @@
       const schemas = {basic: state.detail.basic_schema || {}, models: state.detail.model_schema || {}, advanced: state.detail.advanced_schema || {}};
       const templateBasic = Object.fromEntries(Object.entries(state.detail.template_schema || {}).filter(([key]) => key in schemas.basic));
       const templateMore = remainingSchema(state.detail.template_schema, templateBasic);
-      const identityMarkup = state.view === "global" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><h3 id="coreIdentityTitle">机器人名称与管理员</h3></div></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信号</span><input name="admin_id" autocomplete="username" placeholder="wxid_..." value="${esc(state.identity.admin_id || "")}"><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
+      const adminIds = Array.isArray(state.identity.admin_ids) ? state.identity.admin_ids : [state.identity.admin_id].filter(Boolean);
+      const identityMarkup = state.view === "global" ? `<section class="core-identity-card" aria-labelledby="coreIdentityTitle"><div class="core-section-heading"><div><h3 id="coreIdentityTitle">机器人名称与管理员</h3></div></div><div class="config-section-grid"><label class="form-field"><span>机器人名称</span><input name="robot_name" maxlength="32" placeholder="${esc(state.identity.wechat_nickname || "连接微信后读取昵称")}" value="${esc(state.identity.robot_name || "")}"><span class="field-error" role="alert" hidden></span></label><label class="form-field"><span>管理员微信标识（每行一个）</span><textarea name="admin_ids" rows="3" aria-label="管理员微信标识" aria-describedby="adminPluginControlHint" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="wxid_admin_1&#10;wxid_admin_2">${esc(adminIds.join("\n"))}</textarea><small id="adminPluginControlHint">可配置多位管理员，填写微信 ID，不能填写昵称。管理员可在目标群说“关闭点歌”或“开启点歌”，只调整当前群的功能权限；其他群聊和私聊不受影响。</small><span class="field-error" role="alert" hidden></span></label></div></section>` : "";
       root().innerHTML = `<summary><div class="core-detail-heading"><div><h2>${esc(state.view === "template" ? template?.name || "配置模板" : "机器人配置")}</h2></div>${state.view === "template" ? '<div class="button-row"><button class="button ghost small" id="renameCoreTemplate" type="button">重命名</button><button class="button danger small" id="deleteCoreTemplate" type="button">删除</button></div>' : ""}</div></summary>
         <form class="feature-form core-form" id="coreForm" novalidate>${state.view === "template" ? `<button class="row-action" id="backCoreGlobal" type="button">返回全局机器人配置</button><label class="form-field full"><span>模板说明</span><textarea class="resize-none" name="template_description" rows="2">${esc(template?.description || "")}</textarea></label>${schemaMarkup(templateBasic, state.config, [], "core-")}${Object.keys(templateMore).length ? `<details class="core-advanced"><summary>更多模板设置</summary>${schemaMarkup(templateMore, state.config, [], "core-")}</details>` : ""}` : `${identityMarkup}${schemaMarkup(schemas.basic, state.config, [], "core-")}<details class="core-advanced"><summary>模型设置</summary>${schemaMarkup(remainingSchema(schemas.models, schemas.basic), state.config, [], "core-")}</details><details class="core-advanced"><summary>高级设置</summary>${schemaMarkup(remainingSchema(schemas.advanced, schemas.basic, schemas.models), state.config, [], "core-")}</details>`}</form>
         <p class="form-note" id="coreNote" role="status">${esc(note())}</p><div class="core-savebar"><button class="button primary" id="saveCore" type="button">${state.view === "template" ? "保存模板" : state.detail.engine_online ? "保存并应用" : "保存设置"}</button></div>`;
@@ -147,6 +181,7 @@
       $("#saveCore").addEventListener("click", saveCurrent);
       $("#renameCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); renameTemplate(); });
       $("#deleteCoreTemplate")?.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); deleteTemplate(); });
+      renderNavigation();
     }
 
     function attachOverrides() {
@@ -205,15 +240,59 @@
     }
 
     async function busy(action) {
-      if (state.busy) return;
+      if (state.busy || state.loading || state.readbackPending) return;
       state.busy = true; renderNavigation();
       $$('input, select, textarea, button', root()).forEach((input) => { input.dataset.coreDisabled = String(input.disabled); input.disabled = true; });
       try { await action(); window.dispatchEvent(new Event("chat-profiles-changed")); }
       catch (error) { showError(error); }
-      finally { state.busy = false; renderNavigation(); $$('[data-core-disabled]', root()).forEach((input) => { input.disabled = input.dataset.coreDisabled === 'true'; delete input.dataset.coreDisabled; }); }
+      finally { state.busy = false; $$('[data-core-disabled]', root()).forEach((input) => { input.disabled = input.dataset.coreDisabled === 'true'; delete input.dataset.coreDisabled; }); renderNavigation(); }
+    }
+
+    function acceptTemplate(item) {
+      state.templates = [...state.templates.filter((template) => template.id !== item.id), clone(item)];
+    }
+
+    function readbackWarning() {
+      return `${state.readbackPending} 后续读取暂未完成，请点击“重新读取”核对；核对前暂停编辑，避免重复提交。`;
+    }
+
+    function reportReadbackError(error) {
+      const readError = new Error(`操作已提交，后续读取未完成。${error.message}`, {cause: error});
+      if (error.product) readError.product = {...error.product, title: "操作已提交，后续读取未完成", message: readError.message};
+      reportError(readError);
+    }
+
+    async function confirmWrite(message, readback, scope = "template") {
+      state.readbackPending = message;
+      state.readbackScope = scope;
+      state.dirty = false;
+      state.feedback = `${message} 正在重新读取核对…`;
+      render();
+      try {
+        await readback();
+        let feedback = message;
+        if (scope === "template" && state.view === "template" && state.templateId && !currentTemplate()) {
+          state.view = "global";
+          state.templateId = null;
+          feedback = `${message} 该模板已不在当前列表中，已返回全局配置。`;
+        }
+        state.readbackPending = "";
+        state.readbackScope = "";
+        state.stale = false;
+        resetDraft();
+        state.feedback = feedback;
+        render();
+        toast(feedback);
+      } catch (error) {
+        state.stale = true;
+        state.feedback = readbackWarning();
+        $("#coreNote").textContent = state.feedback;
+        reportReadbackError(error);
+      }
     }
 
     async function saveCurrent() {
+      if (state.busy || state.loading || state.readbackPending) return;
       let config;
       try { config = draftFromForm(); } catch (error) { showError(error); return; }
       await busy(async () => {
@@ -222,11 +301,13 @@
           ? await request('POST', 'profiles/update', {id: state.templateId, updated_at: currentTemplate().updated_at, description: $("#coreForm").elements.template_description.value, config})
           : await save(config, state.detail.revision, state.identity);
         if (result?.brand) applyBrand(result.brand);
-        // Always read back the authoritative persisted/runtime result.
-        if (state.view === 'template') await loadProfiles(true);
-        else state.detail = await read();
-        resetDraft(); state.feedback = result?.message || (state.view === 'template' ? '模板已保存，绑定聊天的后续消息使用新配置。' : '已保存，请确认生效状态。');
-        render(); toast(state.feedback);
+        if (state.view === 'template') { acceptTemplate(result); state.config = clone(result.config); }
+        else state.config = clone(config);
+        const message = result?.message || (state.view === 'template' ? '模板已保存，绑定聊天的后续消息使用新配置。' : '已保存，请确认生效状态。');
+        await confirmWrite(message, async () => {
+          if (state.view === 'template') await loadProfiles(true);
+          else state.detail = await read();
+        }, state.view);
       });
     }
 
@@ -235,7 +316,13 @@
       const fromGlobal = $("#coreTemplateSource").value === 'global';
       confirmAction({title: '新建配置模板', message: fromGlobal ? '从当前已保存的全局配置复制，创建后可编辑覆盖项，再到群聊&私聊管理选择使用。' : '创建空白模板，所有参数先跟随全局；打开需要单独设置的项后，再到聊天中选择此模板。', confirmText: '创建', intent: 'primary', field: {label: '模板名称', type: 'text', value: '默认模板'}, onConfirm: async (name) => {
         if (!String(name || '').trim()) throw new Error('请填写模板名称。');
-        await busy(async () => { const item = await request('POST', 'profiles/create', {name: name.trim(), from_global: fromGlobal}); await loadProfiles(true); state.view = 'template'; state.templateId = item.id; resetDraft(); render(); $(".template-create").open = false; $("#coreDetail h2").setAttribute("tabindex", "-1"); $("#coreDetail h2").focus({preventScroll: true}); toast('模板已创建。'); });
+        await busy(async () => {
+          const item = await request('POST', 'profiles/create', {name: name.trim(), from_global: fromGlobal});
+          acceptTemplate(item); state.view = 'template'; state.templateId = item.id; resetDraft();
+          await confirmWrite('模板已创建。', () => loadProfiles(true));
+          $(".template-create").open = false;
+          $("#coreDetail h2").setAttribute("tabindex", "-1"); $("#coreDetail h2").focus({preventScroll: true});
+        });
       }});
     }
 
@@ -243,14 +330,25 @@
       if (guard(renameTemplate)) return;
       confirmAction({title: '重命名配置模板', message: '绑定关系不变。', confirmText: '保存', intent: 'primary', field: {label: '模板名称', type: 'text', value: currentTemplate().name}, onConfirm: async (name) => {
         if (!String(name || '').trim()) throw new Error('请填写模板名称。');
-        await busy(async () => { await request('POST', 'profiles/update', {id: state.templateId, updated_at: currentTemplate().updated_at, name: name.trim()}); await loadProfiles(true); render(); });
+        await busy(async () => {
+          const item = await request('POST', 'profiles/update', {id: state.templateId, updated_at: currentTemplate().updated_at, name: name.trim()});
+          acceptTemplate(item);
+          await confirmWrite('模板已重命名。', () => loadProfiles(true));
+        });
       }});
     }
 
     function deleteTemplate() {
       if (guard(deleteTemplate)) return;
       confirmAction({title: '删除配置模板？', message: '所有绑定此模板的聊天会自动回到全局配置。删除后无法撤销。', confirmText: '删除模板', onConfirm: async () => {
-        await busy(async () => { await request('POST', 'profiles/delete', {id: state.templateId}); await loadProfiles(true); state.view = 'global'; state.templateId = null; resetDraft(); render(); toast('模板已删除，绑定聊天已回到全局配置。'); });
+        await busy(async () => {
+          const id = state.templateId;
+          await request('POST', 'profiles/delete', {id});
+          state.templates = state.templates.filter((item) => item.id !== id);
+          state.bindings = Object.fromEntries(Object.entries(state.bindings).filter(([, templateId]) => templateId !== id));
+          state.view = 'global'; state.templateId = null; resetDraft();
+          await confirmWrite('模板已删除，绑定聊天已回到全局配置。', () => loadProfiles(true));
+        });
       }});
     }
 
@@ -259,6 +357,15 @@
       $("#refreshCore").addEventListener('click', () => load(true));
       $("#newCoreTemplate").addEventListener('click', createTemplate);
     }
-    return {init, load, guard, invalidate() { state.stale = true; }, get dirty() { return state.dirty; }, get busy() { return state.busy || state.loading; }};
+    function invalidate(clear = false) {
+      state.stale = true;
+      if (!clear) return;
+      state.detail = null;
+      state.templates = []; state.bindings = {}; state.view = "global"; state.templateId = null;
+      state.readbackPending = ""; state.readbackScope = "";
+      resetDraft();
+      root().innerHTML = '<div class="loading-row">配置已恢复，请重新读取。</div>';
+    }
+    return {init, load, guard, invalidate, get dirty() { return state.dirty; }, get busy() { return state.busy || state.loading; }};
   };
 })();

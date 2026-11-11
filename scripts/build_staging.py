@@ -496,6 +496,14 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
         commercial_root / "patches/astrbot-4.26.6-background-permissions.patch"
     ):
         raise RuntimeError("Runtime background permissions are stale; rebuild the runtime")
+    if runtime_manifest.get("astrbot_patch_sha256") != _sha256(
+        commercial_root / "patches/astrbot-4.26.6-wechat.patch"
+    ):
+        raise RuntimeError("Runtime WeChat patch is stale; rebuild the runtime")
+    if runtime_manifest.get("astrbot_outbound_policy_patch_sha256") != _sha256(
+        commercial_root / "patches/astrbot-4.26.6-outbound-policy.patch"
+    ):
+        raise RuntimeError("Runtime outbound policy patch is stale; rebuild the runtime")
     return runtime_manifest
 
 

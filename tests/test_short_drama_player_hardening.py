@@ -151,11 +151,12 @@ def test_recommendations_are_public_validated_cached_and_reopenable(tmp_path, mo
     def catalog_json(base, **params):
         calls.append(params)
         if params["ac"] == "list":
-            return {"class": [{"type_id": 3, "type_name": "短剧"}]}
+            return {"class": [{"type_id": 3, "type_name": "短剧"}, {"type_id": 4, "type_name": "AI漫剧"}]}
         return {"list": [
-            {"vod_name": f"公开短剧{index}", "type_name": "短剧", "vod_pic": "https://cdn.example/poster.jpg",
+            {"vod_name": f"公开短剧{index}", "type_name": "AI漫剧" if index < 6 else "短剧", "vod_pic": "https://cdn.example/poster.jpg",
              "vod_play_url": "第1集$https://cdn.example/one.m3u8#第2集$https://cdn.example/two.m3u8"}
             for index in range(9)
+            if (index < 6) == (params["t"] == 4)
         ] + [
             {"vod_name": "unsafe", "type_name": "短剧", "vod_play_url": "第1集$https://127.0.0.1/private.m3u8"},
             {"vod_name": "movie", "type_name": "电影", "vod_play_url": "完整版$https://cdn.example/movie.m3u8"},
@@ -165,8 +166,9 @@ def test_recommendations_are_public_validated_cached_and_reopenable(tmp_path, mo
     catalog = module.RecommendationCatalog(store)
     items = catalog.get()
     assert len(items) == 9
-    assert len(calls) == 2
-    assert catalog.get() == items and len(calls) == 2
+    # Each source has only six AI and three live titles, below the 8/4 reserve.
+    assert len(calls) == len(catalog.SOURCES) * 3
+    assert catalog.get() == items and len(calls) == len(catalog.SOURCES) * 3
     for item in items:
         assert item["title"] not in {"private title", "unsafe", "movie"}
         saved = store.get(item["selection_token"])

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from wechatrebot_manager import native_setup
+import pytest
+
+from wechatrebot_manager import installer, native_setup
+from wechatrebot_manager.brand import BrandProfile, install_brand_profile
+from wechatrebot_manager.install_paths import InstallPathValidation
+from wechatrebot_manager.provider import OpenAIProviderProfile
+from wechatrebot_manager.runtime_config import RuntimePorts, write_runtime_configs
 
 
 def test_native_setup_uses_verified_backend_without_duplicate_entrypoints(
@@ -31,7 +39,10 @@ def test_native_setup_uses_verified_backend_without_duplicate_entrypoints(
     request, options = calls[0]
     assert request.payload_root == tmp_path / "payload"
     assert request.install_root == tmp_path / "install"
-    assert options == {"create_shortcuts": False, "create_entrypoints": False}
+    assert options == {
+        "create_shortcuts": False, "create_entrypoints": False,
+        "preserve_existing_settings": False,
+    }
     assert result["file_count"] == 2
     assert result["stopped_processes"] == 0
     assert (request.install_root / "启动机器人.exe").read_bytes() == b"manager"
@@ -64,6 +75,114 @@ def test_native_setup_stops_existing_install_before_replacing_files(
 
     assert events == [f"stop:{install.resolve()}", f"install:{install.resolve()}"]
     assert result["stopped_processes"] == 2
+
+
+@pytest.mark.parametrize("repair", [False, True, "incomplete"])
+def test_native_install_preserves_customer_settings_only_for_existing_install(
+    monkeypatch, tmp_path: Path, repair: bool | str,
+) -> None:
+    install = tmp_path / "install"
+    payload = tmp_path / "payload"
+    plugin_config = "app/astrbot/data/config/customer_feature_config.json"
+    payload_files = {
+        "manager/WeChatReBot.exe": b"synthetic-manager",
+        "app/astrbot/data/cmd_config.json": json.dumps({
+            "native_payload_default": True, "admins_id": [], "persona": [],
+            "provider": [], "provider_sources": [],
+        }).encode(),
+        plugin_config: b'{"template": "default"}',
+    }
+    for name, content in payload_files.items():
+        target = payload / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    (payload / "release-manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "files": [{"path": name, "sha256": hashlib.sha256(content).hexdigest()}
+                  for name, content in payload_files.items()],
+    }), encoding="utf-8")
+    monkeypatch.setattr(installer, "validate_install_path", lambda path, **_kwargs: InstallPathValidation(
+        Path(path), (), (), 10 * 1024**3,
+    ))
+    monkeypatch.setattr(installer, "save_install_location", lambda _root: None)
+    monkeypatch.setattr(native_setup, "stop_installation_processes", lambda _root: 0)
+    engine_path = install / "app/astrbot/data/cmd_config.json"
+    manager_path = install / "config/manager.json"
+    brand_path = install / "config/brand.json"
+    wechat = tmp_path / "Weixin.exe"
+    if repair is True:
+        wechat.write_bytes(b"synthetic-wechat")
+        profile = BrandProfile("客户机器人", "客户", "客户人格", name_source="wechat")
+        install_brand_profile(install, profile)
+        write_runtime_configs(
+            install, wechat, wechat_version="4.1.8.27", brand_profile=profile,
+            ports=RuntimePorts(dashboard=16185, astrbot_ws=16200, bridge_callback=15000, hook_api=29088),
+            provider_profile=OpenAIProviderProfile(
+                api_key="synthetic-secret", api_base="https://example.test/v1", model="customer-model",
+            ), admin_id="wxid_customer_admin",
+        )
+        (install / native_setup.INSTALL_MARKER).write_text(
+            json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+        )
+        engine = json.loads(engine_path.read_text("utf-8"))
+        engine["admins_id"].append("wxid_second_admin")
+        engine["persona"][0]["prompt"] = "客户独立编辑的人格提示词"
+        engine_path.write_text(json.dumps(engine), encoding="utf-8")
+        (install / plugin_config).write_bytes(b'{"customer": "saved"}')
+        original_brand = brand_path.read_bytes()
+    elif repair == "incomplete":
+        install.mkdir()
+        (install / native_setup.INSTALL_MARKER).write_text(
+            json.dumps({"schema_version": 1, "state": "failed"}), encoding="utf-8",
+        )
+
+    result = native_setup.install_from_native_setup(payload, install)
+
+    saved_engine = json.loads(engine_path.read_text("utf-8"))
+    saved_manager = json.loads(manager_path.read_text("utf-8"))
+    assert result["ok"] is True
+    assert (install / "启动机器人.exe").read_bytes() == b"synthetic-manager"
+    if repair is True:
+        assert brand_path.read_bytes() == original_brand
+        assert saved_engine["admins_id"] == engine["admins_id"]
+        assert saved_engine["persona"] == engine["persona"]
+        assert saved_engine["provider"] == engine["provider"]
+        assert saved_engine["provider_sources"] == engine["provider_sources"]
+        assert saved_engine["provider_settings"]["default_provider_id"] == engine["provider_settings"]["default_provider_id"]
+        assert "native_payload_default" not in saved_engine
+        assert (install / plugin_config).read_bytes() == b'{"customer": "saved"}'
+        assert saved_manager["wechat_exe_path"] == str(wechat.resolve())
+        assert saved_manager["wechat_version"] == "4.1.8.27"
+        assert saved_manager["ports"]["dashboard"] == 16185
+    else:
+        assert json.loads(brand_path.read_text("utf-8")) == native_setup.DEFAULT_NATIVE_BRAND.to_dict()
+        assert saved_engine["admins_id"] == []
+        assert saved_engine["native_payload_default"] is True
+        assert (install / plugin_config).read_bytes() == payload_files[plugin_config]
+        assert saved_manager["wechat_exe_path"] == ""
+        assert saved_manager["wechat_version"] is None
+
+
+@pytest.mark.parametrize("config", ["config/brand.json", "config/manager.json", "app/astrbot/data/cmd_config.json"])
+def test_native_repair_rejects_broken_settings_before_replacing_payload(
+    monkeypatch, tmp_path: Path, config: str,
+) -> None:
+    install = tmp_path / "install"
+    damaged = install / config
+    damaged.parent.mkdir(parents=True)
+    damaged.write_text("{broken", encoding="utf-8")
+    marker = install / native_setup.INSTALL_MARKER
+    marker.write_text('{"schema_version": 1, "state": "ready"}', encoding="utf-8")
+    original_marker = marker.read_bytes()
+    monkeypatch.setattr(native_setup, "stop_installation_processes", lambda _root: 0)
+    monkeypatch.setattr(installer.InstallRequest, "validate", lambda _request: ())
+    monkeypatch.setattr(installer, "install_payload", lambda *_args, **_kwargs: pytest.fail("replaced payload before validating settings"))
+
+    with pytest.raises(ValueError, match="配置.*读取"):
+        native_setup.install_from_native_setup(tmp_path / "payload", install)
+
+    assert damaged.read_text("utf-8") == "{broken"
+    assert marker.read_bytes() == original_marker
 
 
 def test_native_uninstall_stops_owned_processes_and_removes_locator(

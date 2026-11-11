@@ -6,6 +6,7 @@ import pytest
 from wechatrebot_manager.runtime_config import (
     RuntimePorts,
     normalize_admin_id,
+    normalize_admin_ids,
     write_runtime_configs,
 )
 from wechatrebot_manager.brand import BrandProfile
@@ -68,6 +69,89 @@ def test_runtime_ports_must_be_unique() -> None:
     ports = RuntimePorts(dashboard=6200, astrbot_ws=6200)
     with pytest.raises(ValueError, match="不能重复"):
         write_runtime_configs(Path.cwd(), Path.cwd() / "Weixin.exe", ports=ports)
+
+
+def test_saving_customer_settings_preserves_custom_runtime_ports(tmp_path: Path) -> None:
+    from wechatrebot_manager.customer_config import (
+        RobotSettings, save_provider_profile, save_robot_settings,
+    )
+
+    ports = RuntimePorts(dashboard=16185, astrbot_ws=16200, bridge_callback=15000, hook_api=29088)
+    write_runtime_configs(tmp_path, ports=ports)
+    save_provider_profile(tmp_path, OpenAIProviderProfile(
+        api_key="test-secret", api_base="https://example.com/v1", model="chat-model",
+    ))
+    save_robot_settings(tmp_path, RobotSettings(
+        profile=BrandProfile(display_name="测试助手", short_name="助手", persona_name="测试助手"),
+        admin_id="wxid_test",
+    ))
+
+    manager = json.loads((tmp_path / "config/manager.json").read_text("utf-8"))
+    bridge = json.loads((tmp_path / "app/bridge/config.json").read_text("utf-8"))
+    engine = json.loads((tmp_path / "app/astrbot/data/cmd_config.json").read_text("utf-8"))
+    assert manager["ports"] == {"dashboard": 16185, "astrbot_ws": 16200, "bridge_callback": 15000, "hook_api": 29088}
+    assert bridge["hook_api_port"] == ports.hook_api
+    assert bridge["callback_port"] == ports.bridge_callback
+    assert bridge["astrbot_ws_url"] == "ws://127.0.0.1:16200/ws"
+    assert engine["dashboard"]["port"] == ports.dashboard
+    assert engine["platform"][0]["ws_reverse_port"] == ports.astrbot_ws
+
+
+@pytest.mark.parametrize("invalid", ["6200", True, [], 0, 65536])
+def test_invalid_saved_ports_fail_before_writing_config(tmp_path: Path, invalid) -> None:
+    write_runtime_configs(tmp_path)
+    path = tmp_path / "config/manager.json"
+    manager = json.loads(path.read_text("utf-8"))
+    manager["ports"]["astrbot_ws"] = invalid
+    path.write_text(json.dumps(manager), encoding="utf-8")
+    bridge = tmp_path / "app/bridge/config.json"
+    before = bridge.read_bytes()
+    with pytest.raises(ValueError, match="端口"):
+        write_runtime_configs(tmp_path)
+    assert bridge.read_bytes() == before
+
+
+@pytest.mark.parametrize("service_kind", ["embedding", "image", "voice"])
+def test_memory_only_seeds_chat_model_and_repairs_non_chat_binding(tmp_path: Path, service_kind: str) -> None:
+    data = tmp_path / "app/astrbot/data"
+    (data / "plugins/astrbot_plugin_livingmemory").mkdir(parents=True)
+    non_chat = OpenAIProviderProfile(
+        api_key="test-secret", api_base="https://example.com/v1", model="non-chat-model",
+        service_kind=service_kind,
+    )
+    write_runtime_configs(tmp_path, provider_profile=non_chat, provider_make_default=False)
+    path = data / "config/astrbot_plugin_livingmemory_config.json"
+    living = json.loads(path.read_text("utf-8"))
+    assert not living.get("provider_settings", {}).get("llm_provider_id")
+    living["provider_settings"] = {"llm_provider_id": non_chat.model_id}
+    path.write_text(json.dumps(living), encoding="utf-8")
+    chat = OpenAIProviderProfile(
+        api_key="test-secret", api_base="https://example.com/v1", model="chat-model",
+    )
+    write_runtime_configs(tmp_path, provider_profile=chat)
+    assert json.loads(path.read_text("utf-8"))["provider_settings"]["llm_provider_id"] == chat.model_id
+    living["provider_settings"]["llm_provider_id"] = "customer-chat-model"
+    path.write_text(json.dumps(living), encoding="utf-8")
+    write_runtime_configs(tmp_path, provider_profile=chat)
+    assert json.loads(path.read_text("utf-8"))["provider_settings"]["llm_provider_id"] == "customer-chat-model"
+
+
+@pytest.mark.parametrize("current_id", ["", None, "custom/unknown"])
+def test_memory_repairs_empty_binding_but_preserves_custom_adapter(tmp_path: Path, current_id) -> None:
+    data = tmp_path / "app/astrbot/data"
+    (data / "plugins/astrbot_plugin_livingmemory").mkdir(parents=True)
+    write_runtime_configs(tmp_path)
+    engine_path = data / "cmd_config.json"
+    engine = json.loads(engine_path.read_text("utf-8"))
+    engine["provider"] = [{"id": "custom/unknown", "type": "custom_chat_adapter"}]
+    engine_path.write_text(json.dumps(engine), encoding="utf-8")
+    path = data / "config/astrbot_plugin_livingmemory_config.json"
+    path.write_text(json.dumps({"provider_settings": {"llm_provider_id": current_id}}), encoding="utf-8")
+    chat = OpenAIProviderProfile(
+        api_key="test-secret", api_base="https://example.com/v1", model="chat-model",
+    )
+    write_runtime_configs(tmp_path, provider_profile=chat)
+    assert json.loads(path.read_text("utf-8"))["provider_settings"]["llm_provider_id"] == (current_id or chat.model_id)
 
 
 def test_runtime_reconfiguration_preserves_customer_provider_and_dashboard_hash(
@@ -165,6 +249,28 @@ def test_admin_id_validation_and_reconfiguration_preservation(tmp_path: Path) ->
         )
     )
     assert astrbot["admins_id"] == ["wxid_customer"]
+
+
+def test_admin_list_validation_round_trip_and_omitted_update_preserves_all(tmp_path: Path) -> None:
+    assert normalize_admin_ids([" wxid_first ", "wxid_second", "wxid_first", ""]) == ("wxid_first", "wxid_second")
+    write_runtime_configs(tmp_path, admin_ids=["wxid_first", "wxid_second"])
+    write_runtime_configs(tmp_path)
+    path = tmp_path / "app/astrbot/data/cmd_config.json"
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == ["wxid_first", "wxid_second"]
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is True
+    write_runtime_configs(tmp_path, admin_ids=[])
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == []
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is False
+
+
+@pytest.mark.parametrize("admins", ["wxid_first", [None], [True], ["bad wxid"]])
+def test_bad_admin_list_cannot_partially_write_runtime_configuration(tmp_path: Path, admins) -> None:
+    write_runtime_configs(tmp_path, admin_id="wxid_first")
+    paths = [tmp_path / name for name in ("app/astrbot/data/cmd_config.json", "app/bridge/config.json", "config/manager.json")]
+    before = [path.read_bytes() for path in paths]
+    with pytest.raises(ValueError, match="管理员"):
+        write_runtime_configs(tmp_path, admin_ids=admins)
+    assert [path.read_bytes() for path in paths] == before
 
 
 def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path) -> None:

@@ -10,5 +10,17 @@
     "name": "柔和",
     "description": "柔和配色、圆角面板与轻盈阴影。",
     "stylesheet": "soft-theme.css"
+  },
+  {
+    "id": "sea-salt",
+    "name": "海盐蓝",
+    "description": "清透蓝灰底色，搭配沉静的海蓝重点色。",
+    "stylesheet": "sea-salt-theme.css"
+  },
+  {
+    "id": "apricot",
+    "name": "暖杏色",
+    "description": "温暖米杏底色，搭配克制的陶棕重点色。",
+    "stylesheet": "apricot-theme.css"
   }
 ]

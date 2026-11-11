@@ -26,7 +26,7 @@ def configured_wechat_path(install_root: str | Path) -> str:
     )
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
         return ""
     if not isinstance(payload, dict):
         return ""

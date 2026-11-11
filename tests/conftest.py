@@ -14,6 +14,126 @@ sys.path.insert(0, str(ROOT / "scripts"))
 SOURCE = ROOT / "vendor/data/plugins/jiang_image"
 
 
+def _chromium_socket_launch_options(arguments):
+    disabled = [arg for arg in arguments if arg.startswith("--disable-features=")]
+    if len(disabled) > 1:
+        raise RuntimeError("Expected at most one Chromium --disable-features default")
+    features = disabled[0].split("=", 1)[1].split(",") if disabled else []
+    features = list(dict.fromkeys([*filter(None, features), "TcpPortRandomizationWin"]))
+    return {"ignore_default_args": disabled, "args": ["--disable-features=" + ",".join(features)]}
+
+
+@pytest.fixture(scope="session")
+def manager_browser_launch_options():
+    if sys.platform != "win32":
+        return {}
+    from playwright.sync_api import sync_playwright
+
+    # Backport https://github.com/microsoft/playwright/pull/43605 without
+    # replacing Playwright's other disabled features or reading driver internals.
+    # A single short-lived probe captures the installed version's real defaults.
+    with sync_playwright() as runtime:
+        instance = runtime.chromium.launch(args=["--enable-automation"])
+        try:
+            arguments = instance.new_browser_cdp_session().send("Browser.getBrowserCommandLine")["arguments"]
+        finally:
+            instance.close()
+    return _chromium_socket_launch_options(arguments)
+
+
+@pytest.fixture(autouse=True)
+def manager_browser_failure_evidence(request, monkeypatch):
+    """Keep startup evidence even when an early assertion skips final error checks."""
+    # These servers contain synthetic preview data; native/account sessions are
+    # intentionally outside automatic screenshot and browser-event capture.
+    if "browser" not in request.fixturenames or not {"manager_url", "upload_server"}.intersection(request.fixturenames):
+        return
+    tmp_path = request.getfixturevalue("tmp_path")
+    browser = request.getfixturevalue("browser")
+    new_page = browser.new_page
+    page_number = 0
+
+    def observed_page(*args, **kwargs):
+        nonlocal page_number
+        page_number += 1
+        page = new_page(*args, **kwargs)
+        events = []
+        page.add_init_script("""(() => {
+          const failures = [];
+          window.__managerTestErrors = failures;
+          Object.defineProperty(window, 'managerErrorReporter', {
+            configurable: true,
+            set(value) {
+              const capture = value?.capture;
+              if (capture) value.capture = function(error, operation) {
+                failures.push({message: String(error?.message || error),
+                  stack: String(error?.stack || ''), operation});
+                return capture.apply(this, arguments);
+              };
+              Object.defineProperty(window, 'managerErrorReporter', {value, writable: true, configurable: true});
+            }
+          });
+        })();""")
+        page.on("console", lambda message: events.append({"kind": "console", "level": message.type, "text": message.text})
+                if message.type in {"error", "warning"} else None)
+        page.on("pageerror", lambda error: events.append({"kind": "pageerror", "text": str(error)}))
+        page.on("requestfailed", lambda item: events.append({"kind": "requestfailed", "url": item.url,
+                                                            "resource_type": item.resource_type, "error": item.failure}))
+        page.on("response", lambda response: events.append({"kind": "response", "url": response.url, "status": response.status})
+                if response.status >= 400 else None)
+        close = page.close
+        number = page_number
+
+        def report(text):
+            try:
+                for phase in ("setup", "call", "teardown"):
+                    request.node.add_report_section(phase, "manager browser failure", text)
+            except Exception:
+                # Diagnostics must never replace the test's original failure.
+                return
+
+        def close_with_evidence(*close_args, **close_kwargs):
+            original_error = sys.exc_info()[1]
+            result = None
+            try:
+                if original_error is not None and not page.is_closed():
+                    directory = tmp_path / "browser-failure" / str(number)
+                    directory.mkdir(parents=True, exist_ok=True)
+                    evidence = {"url": page.url, "events": events}
+                    try:
+                        evidence["state"] = page.evaluate("""() => ({
+                          readyState: document.readyState,
+                          reportedErrors: window.__managerTestErrors,
+                          text: Object.fromEntries(['versionText', 'stateTitle', 'stateMessage', 'toastRegion']
+                            .map(id => [id, document.getElementById(id)?.textContent])),
+                          scripts: [...document.scripts].map(script => ({src: script.src})),
+                          resources: performance.getEntriesByType('resource').map(item => ({
+                            name: item.name, startTime: item.startTime, duration: item.duration,
+                            transferSize: item.transferSize, responseStatus: item.responseStatus}))
+                        })""")
+                        page.screenshot(path=str(directory / "page.png"), timeout=5000)
+                    except Exception as error:
+                        evidence["capture_error"] = f"{type(error).__name__}: {error}"
+                    serialized = json.dumps(evidence, ensure_ascii=False, indent=2)
+                    (directory / "browser.json").write_text(serialized, encoding="utf-8")
+                    report(serialized)
+            except Exception as error:
+                report(f"Evidence capture failed: {type(error).__name__}: {error}")
+            finally:
+                try:
+                    result = close(*close_args, **close_kwargs)
+                except Exception as error:
+                    if original_error is None:
+                        raise
+                    report(f"Page close failed: {type(error).__name__}: {error}")
+            return result
+
+        monkeypatch.setattr(page, "close", close_with_evidence)
+        return page
+
+    monkeypatch.setattr(browser, "new_page", observed_page)
+
+
 @pytest.fixture(autouse=True)
 def packaged_channel_disabled(tmp_path_factory, monkeypatch):
     """Tests drive licensing through config/licensing.json; the shipped commercial

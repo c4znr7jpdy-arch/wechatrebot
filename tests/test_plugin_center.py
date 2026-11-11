@@ -77,6 +77,22 @@ def test_meme_prompt_schema_is_hidden_from_customer_configuration() -> None:
     assert "prompt" in schema["generation"]["items"]
 
 
+@pytest.mark.parametrize("managed_scope", [False, True])
+def test_proactive_group_list_is_hidden_only_with_a_compatible_runtime(managed_scope) -> None:
+    schema = {
+        "group_settings": {
+            "type": "object",
+            "_wechatrebot_managed_scope": managed_scope,
+            "items": {"enable": {"type": "bool"}, "session_list": {"type": "list"}},
+        },
+        "friend_settings": {"type": "object", "items": {"session_list": {"type": "list"}}},
+    }
+    visible = _hide_customer_internal_schema("astrbot_plugin_proactive_chat", schema)
+    assert ("session_list" in visible["group_settings"]["items"]) is not managed_scope
+    assert "session_list" in visible["friend_settings"]["items"]
+    assert "session_list" in schema["group_settings"]["items"]
+
+
 def test_angel_heart_exposes_curated_basics_and_keeps_full_page() -> None:
     schema = {
         "analyzer_model": {
@@ -1169,6 +1185,20 @@ def test_plugin_center_launch_reports_an_existing_window_that_cannot_be_focused(
     monkeypatch.setattr(plugin_center.subprocess, "Popen", lambda *args, **kwargs: ExitedProcess())
     with pytest.raises(PluginCenterError, match="任务栏"):
         plugin_center.launch_plugin_center(tmp_path, "feature-0123456789abcdef")
+
+
+def test_plugin_center_launch_has_independent_bundle_environment(tmp_path, monkeypatch):
+    captured = []
+    monkeypatch.setenv("PYINSTALLER_RESET_ENVIRONMENT", "0")
+    monkeypatch.setenv("WECHATREBOT_TEST_CONTEXT", "preserved")
+    monkeypatch.setattr(plugin_center.subprocess, "Popen", lambda *args, **kwargs:
+                        captured.append(kwargs) or SimpleNamespace(wait=lambda **_: 0))
+
+    plugin_center.launch_plugin_center(tmp_path)
+
+    assert captured[0]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert captured[0]["env"]["WECHATREBOT_TEST_CONTEXT"] == "preserved"
+    assert plugin_center.os.environ["PYINSTALLER_RESET_ENVIRONMENT"] == "0"
 
 
 def test_meme_market_requests_wait_for_install_and_other_posts_keep_short_timeout(

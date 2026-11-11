@@ -13,6 +13,7 @@ from wechatrebot_manager.customer_config import (
     load_provider_services,
     load_web_search_settings,
     load_robot_settings,
+    load_robot_admin_ids,
     provider_reference_modules,
     replace_provider_references,
     save_provider_profile,
@@ -61,6 +62,20 @@ def test_robot_and_provider_settings_round_trip(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.api_key == "customer-key"
     assert loaded.model == "chat-model"
+
+
+def test_robot_settings_keep_all_admins_during_legacy_identity_save(tmp_path: Path) -> None:
+    install, _ = _install(tmp_path)
+    profile = BrandProfile("多管理员机器人", "管家", "管家")
+    result = save_robot_settings(install, RobotSettings(profile, admin_ids=("wxid_first", "wxid_second")))
+    assert result.admin_id == "wxid_first"
+    assert result.admin_ids == ("wxid_first", "wxid_second")
+    assert load_robot_admin_ids(install) == result.admin_ids
+    renamed = save_robot_settings(install, RobotSettings(BrandProfile("新名称", "新名", "新名"), result.admin_id))
+    assert renamed.admin_ids == result.admin_ids
+    replaced = save_robot_settings(install, RobotSettings(profile, "wxid_replacement"))
+    assert replaced.admin_ids == ("wxid_replacement",)
+    assert save_robot_settings(install, RobotSettings(profile, admin_ids=())).admin_ids == ()
 
 
 def test_web_search_settings_round_trip_and_key_redaction(tmp_path: Path) -> None:

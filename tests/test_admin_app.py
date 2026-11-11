@@ -82,11 +82,20 @@ async def issuance_fields(admin):
             for name in ("reference", "reference_signature")}
 
 
+async def release_status(admin, *, scope="releases"):
+    async with asyncio.timeout(3):
+        response = await admin.client.get("/releases/status", params={"scope": scope}, cookies=admin.cookies)
+        assert response.status == 200
+        value = await response.json()
+        assert not any(item["loading"] for item in value.values())
+        return value
+
+
 @pytest.mark.asyncio
 async def test_uninitialized_all_routes_have_no_login_form(tmp_path):
     app = create_admin_app(LicenseStore(tmp_path / "license.sqlite3"), tmp_path, github=FakeGitHub())
     async with TestClient(TestServer(app)) as client:
-        for path in ("/", "/login", "/codes", "/contact", "/releases", "/style.css", "/missing"):
+        for path in ("/", "/login", "/codes", "/contact", "/releases", "/releases/status", "/releases.js", "/style.css", "/missing"):
             response = await client.get(path)
             html = await response.text()
             assert response.status == 503 and "未初始化" in html and "<form" not in html
@@ -312,7 +321,13 @@ async def test_release_switch_requires_fresh_totp_csrf_and_audit(admin):
     await login(admin)
     response = await admin.client.get("/releases", cookies=admin.cookies)
     html = await response.text()
-    assert 'value="1.0.1"' in html and 'value="0.9.9"' not in html
+    assert 'action="' + PREFIX + 'releases/upload"' in html and 'releases.js' in html
+    status = await release_status(admin)
+    assert status["stable"]["value"]["version"] == "1.0.0"
+    assert [item["version"] for item in status["listing"]["value"] if item["verified"]] == ["1.0.1"]
+    denied = await admin.client.post("/releases", data={"version": "1.0.1", "stable_digest": "a" * 64,
+        "totp": totp(admin.secret, NOW // 30)}, cookies=admin.cookies, allow_redirects=False)
+    assert denied.status == 403 and not admin.github.calls
     await post(admin, "/releases", version="1.0.1", stable_digest="a" * 64, totp=totp(admin.secret, NOW // 30))
     assert not admin.github.calls
     admin.now[0] += 30
@@ -321,8 +336,176 @@ async def test_release_switch_requires_fresh_totp_csrf_and_audit(admin):
     with admin.store.connection() as db:
         assert db.execute("SELECT COUNT(*) FROM audit WHERE event='stable_switch' AND actor='admin-web'").fetchone()[0] == 1
     admin.github.failed = True
-    assert "GitHub 请求失败" in await (await admin.client.get("/releases", cookies=admin.cookies)).text()
+    await admin.client.get("/releases", cookies=admin.cookies)
+    status = await release_status(admin)
+    assert status["stable"]["value"] is None and "GitHub 请求失败" in status["stable"]["error"]
     assert (await admin.client.get("/codes", cookies=admin.cookies)).status == 200
+
+
+@pytest.mark.asyncio
+async def test_release_pages_render_and_remain_navigable_while_github_is_blocked(admin, monkeypatch):
+    await login(admin)
+    gates = {name: asyncio.Event() for name in ("stable", "listing")}
+    started = {name: asyncio.Event() for name in gates}
+    calls = dict.fromkeys(gates, 0)
+    originals = {name: getattr(admin.github, name) for name in gates}
+
+    def blocked(name):
+        async def read():
+            calls[name] += 1
+            started[name].set()
+            await gates[name].wait()
+            return await originals[name]()
+        return read
+
+    for name in gates:
+        monkeypatch.setattr(admin.github, name, blocked(name))
+    pending = []
+    try:
+        async with asyncio.timeout(2):
+            response = await admin.client.get("/", cookies=admin.cookies)
+            html = await response.text()
+            assert response.status == 200 and "授权数据库连接正常" in html and "授权数" in html
+            assert "releases.js" in html
+            await started["stable"].wait()
+            pending.append(asyncio.create_task(release_status(admin, scope="overview")))
+            assert calls["listing"] == 0
+            response = await admin.client.get("/releases", cookies=admin.cookies)
+            html = await response.text()
+            assert response.status == 200 and "上传已签名更新包" in html
+            assert 'action="' + PREFIX + 'releases/upload"' in html
+            assert "<script src=" in html and "releases.js" in html
+            await started["listing"].wait()
+            pending.append(asyncio.create_task(release_status(admin)))
+            assert (await admin.client.get("/codes", cookies=admin.cookies)).status == 200
+            assert not any(task.done() for task in pending)
+            assert calls == {"stable": 1, "listing": 1}
+        gates["stable"].set()
+        gates["listing"].set()
+        overview_status, status = await asyncio.gather(*pending)
+        assert set(overview_status) == {"stable"}
+        assert overview_status["stable"]["value"]["version"] == "1.0.0"
+        assert status["stable"]["value"]["version"] == "1.0.0"
+        assert status["listing"]["value"][0]["version"] == "1.0.1"
+        assert calls == {"stable": 1, "listing": 1}
+    finally:
+        for gate in gates.values():
+            gate.set()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_release_status_and_script_require_login_and_preserve_response_boundaries(admin):
+    for path in ("/releases/status?scope=overview", "/releases.js"):
+        response = await admin.client.get(path, allow_redirects=False)
+        assert response.status == 303 and response.headers["Location"] == PREFIX + "login"
+    response = await admin.client.post("/releases/refresh", data={"scope": "releases"}, allow_redirects=False)
+    assert response.status == 303 and response.headers["Location"] == PREFIX + "login"
+    await login(admin)
+    response = await admin.client.get("/releases/status", params={"scope": "overview"}, cookies=admin.cookies)
+    assert response.content_type == "application/json" and set(await response.json()) == {"stable"}
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "connect-src 'self'" in response.headers["Content-Security-Policy"]
+    response = await admin.client.get("/releases.js", cookies=admin.cookies)
+    assert response.status == 200 and response.content_type == "application/javascript"
+    assert response.headers["Cache-Control"] == "no-store"
+    response = await admin.client.get("/releases/status", params={"scope": "unknown"}, cookies=admin.cookies)
+    assert response.status == 400
+    await post(admin, "/logout")
+    response = await admin.client.get("/releases/status", cookies=admin.cookies, allow_redirects=False)
+    assert response.status == 303 and response.headers["Location"] == PREFIX + "login"
+
+
+@pytest.mark.asyncio
+async def test_cached_release_display_never_substitutes_for_switch_preflight(admin, monkeypatch):
+    await login(admin)
+    status = await release_status(admin)
+    assert status["stable"]["value"]["digest"] == "a" * 64
+    submitted = []
+
+    async def reject(version, digest):
+        submitted.append((version, digest))
+        raise GitHubError("稳定清单已变更，请刷新页面重新核对。")
+
+    monkeypatch.setattr(admin.github, "switch", reject)
+    admin.now[0] += 30
+    response = await post(admin, "/releases", version="1.0.1", stable_digest="b" * 64,
+                          totp=totp(admin.secret, admin.now[0] // 30))
+    assert response.status == 303 and submitted == [("1.0.1", "b" * 64)]
+    with admin.store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE event='stable_switch_failed'").fetchone()[0] == 1
+    html = await (await admin.client.get("/releases", cookies=admin.cookies)).text()
+    assert "稳定清单已变更" in html
+
+
+@pytest.mark.asyncio
+async def test_refresh_requires_csrf_and_switch_invalidates_both_display_caches(admin, monkeypatch):
+    await login(admin)
+    assert (await release_status(admin))["stable"]["value"]["version"] == "1.0.0"
+    denied = await admin.client.post("/releases/refresh", data={"scope": "releases"}, cookies=admin.cookies)
+    assert denied.status == 403
+    assert (await release_status(admin))["listing"]["value"]
+    gates = {name: asyncio.Event() for name in ("stable", "listing")}
+    started = {name: asyncio.Event() for name in gates}
+
+    def blocked(name):
+        async def read():
+            started[name].set()
+            await gates[name].wait()
+            return {"version": "1.0.1", "verified": True, "digest": "b" * 64} if name == "stable" else []
+        return read
+
+    for name in gates:
+        monkeypatch.setattr(admin.github, name, blocked(name))
+    pending = []
+    try:
+        async with asyncio.timeout(2):
+            pending.append(asyncio.create_task(post(admin, "/releases/refresh", scope="overview")))
+            await started["stable"].wait()
+            assert not pending[0].done() and not started["listing"].is_set()
+            admin.now[0] += 30
+            response = await post(admin, "/releases", version="1.0.1", stable_digest="a" * 64,
+                                  totp=totp(admin.secret, admin.now[0] // 30))
+            assert response.status == 303 and admin.github.calls == [("1.0.1", "a" * 64)]
+            pending.append(asyncio.create_task(release_status(admin)))
+            await started["listing"].wait()
+            assert not any(task.done() for task in pending)
+    finally:
+        for gate in gates.values():
+            gate.set()
+        results = await asyncio.gather(*pending)
+    response, status = results
+    assert response.status == 200
+    overview_status = await response.json()
+    assert set(overview_status) == {"stable"} and not overview_status["stable"]["loading"]
+    assert overview_status["stable"]["value"]["version"] == "1.0.1"
+    assert status["stable"]["value"]["version"] == "1.0.1" and status["listing"]["value"] == []
+
+
+@pytest.mark.asyncio
+async def test_admin_cleanup_cancels_pending_release_reads(tmp_path):
+    secret = initialize(tmp_path, PASSWORD)["secret"]
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    github = FakeGitHub()
+
+    async def blocked():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    github.stable = blocked
+    store = LicenseStore(tmp_path / "activation.sqlite3")
+    app = create_admin_app(store, tmp_path, clock=lambda: NOW, github=github)
+    async with TestClient(TestServer(app), cookie_jar=aiohttp.DummyCookieJar()) as client:
+        admin = SimpleNamespace(client=client, secret=secret, now=[NOW], github=github, store=store,
+                                root=tmp_path, cookies={}, csrf="")
+        await login(admin)
+        async with asyncio.timeout(2):
+            assert (await client.get("/", cookies=admin.cookies)).status == 200
+            await started.wait()
+    assert cancelled.is_set()
 
 
 @pytest.mark.asyncio
@@ -336,7 +519,7 @@ async def test_public_and_admin_listeners_share_store_but_not_routes(tmp_path, u
     _attach_admin(public, store, tmp_path, "127.0.0.1", unused_tcp_port)
     async with TestClient(TestServer(public)) as client:
         assert (await client.get("/health")).status == 200
-        for path in ("/login", "/codes", "/codes/example", "/codes.js"):
+        for path in ("/login", "/codes", "/codes/example", "/codes.js", "/releases/status", "/releases.js"):
             assert (await client.get(path)).status == 404
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://127.0.0.1:{unused_tcp_port}/login") as response:

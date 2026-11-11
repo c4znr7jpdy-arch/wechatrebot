@@ -27,7 +27,14 @@ jobs:
       - name: Verify independent source inputs
         run: python scripts/source_inputs.py
       - name: Test
-        run: python -m pytest -q -ra --ignore=tests/test_short_drama_player_controls.py
+        run: python -m pytest -q -ra --ignore=tests/test_short_drama_player_controls.py --basetemp "${{ runner.temp }}/manager-tests"
+      - name: Upload manager browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-browser-failure-evidence
+          path: ${{ runner.temp }}/manager-tests/**/browser-failure/**
+          if-no-files-found: ignore
       - name: Test player browser controls
         run: python -m pytest -q -ra tests/test_short_drama_player_controls.py --basetemp "${{ runner.temp }}/player-browser" --junitxml "${{ runner.temp }}/player-browser-results.xml"
       - name: Upload player browser evidence

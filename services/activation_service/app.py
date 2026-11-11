@@ -70,6 +70,8 @@ def create_app(
             data = await asyncio.to_thread(store.preview, device, body, now)
         elif action == "trial-status":
             data = await asyncio.to_thread(store.trial_status, device, body, now)
+        elif action == "binding-status":
+            data = await asyncio.to_thread(store.binding_status, device, body, now)
         else:
             if action == "redeem":
                 record = await asyncio.to_thread(store.redeem, device, value["public_key"], body, now)
@@ -91,7 +93,7 @@ def create_app(
         return web.json_response({"ok": True, "data": record, "server_time": int(clock())})
 
     app = web.Application(middlewares=[boundary], client_max_size=16 * 1024)
-    app.router.add_post("/v1/{action:preview|redeem|refresh|bind|trial-status|trial-claim}", dispatch)
+    app.router.add_post("/v1/{action:preview|redeem|refresh|bind|rebind|binding-status|trial-status|trial-claim}", dispatch)
     app.router.add_get(CONTACT_ENDPOINT, contact)
     app.router.add_get("/health", health)
     return app

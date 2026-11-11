@@ -30,6 +30,7 @@ from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
+    _checked_target,
     _is_user_config,
     _read_installed_manifest_for_merge,
     _valid_digest,
@@ -43,8 +44,15 @@ from .payload import (
     verify_payload,
 )
 from .single_instance import SingleInstanceLock
+from .update_cache import (
+    UPDATE_CACHE_MAX_AGE_SECONDS,
+    has_update_cache_receipt,
+    record_update_archive,
+    restore_update_archive,
+)
 from .update_errors import UpdateFailure
 from .update_logger import UpdateLogger
+from .windows_process_job import OwnedProcess, ProcessTreeStopError, start_owned_process
 
 
 PRODUCT_ID = "wechatrebot-desktop"
@@ -481,13 +489,21 @@ def check_for_update(
         raise UpdateError("更新清单不是有效 JSON。") from exc
     if not isinstance(payload, dict):
         raise UpdateError("更新清单根节点格式错误。")
-    return parse_update_manifest(
+    release = parse_update_manifest(
         payload,
         channel,
         current_version=current_version,
         current_build=current_build,
         install_root=install_root,
     )
+    if release is not None:
+        from .update_message import load_update_message
+
+        message = load_update_message(channel, version=release.version,
+                                      manifest_sha256=hashlib.sha256(content).hexdigest())
+        if message is not None:
+            release = replace(release, title=message["title"], notes=(message["notes"],))
+    return release
 
 
 def _safe_archive_path(value: str) -> Path:
@@ -603,6 +619,37 @@ def _validate_update_baseline(payload_root: Path, install_root: Path) -> None:
     validate_incremental_base(payload_root, install_root)
 
 
+def _assert_manager_executable_available(
+    payload_root: Path, install_root: Path, *, source_executable: Path | None = None,
+) -> None:
+    """Leave independent configuration windows open and ask for an explicit close."""
+    if os.name != "nt" or Path("manager/WeChatReBot.exe") not in payload_relative_paths(payload_root):
+        return
+    from .launcher import _normalized_executable, process_identity
+    from .windows_file_holders import file_holders
+
+    retry_hint = "；已下载的更新会保留。" if source_executable is not None else "。"
+    try:
+        allowed = {}
+        if source_executable is not None:
+            for pid in _update_wait_pids(source_executable, os.getpid(), include_bootloader=True):
+                identity = process_identity(pid)
+                if identity is not None and identity.executable == _normalized_executable(source_executable):
+                    allowed[pid] = identity
+        target = _checked_target(install_root, Path("manager/WeChatReBot.exe"))
+        blockers = [pid for pid, identity in file_holders((target,)) if allowed.get(pid) != identity]
+    except (OSError, PayloadError) as exc:
+        raise UpdateFailure(
+            "UPD-1005", str(exc),
+            public_message="暂时无法确认客户端文件占用，请关闭独立配置窗口后重试更新" + retry_hint,
+        ) from exc
+    if blockers:
+        raise UpdateFailure(
+            "UPD-1005", "客户端文件仍被进程占用：" + ", ".join(map(str, blockers)),
+            public_message="请先关闭独立的功能配置窗口及其他客户端窗口，再重试更新" + retry_hint,
+        )
+
+
 def assert_update_runtime_stopped(
     payload_root: str | Path, install_root: str | Path
 ) -> None:
@@ -615,16 +662,20 @@ def assert_update_runtime_stopped(
         raise UpdateError("当前平台无法确认机器人运行状态，已取消运行时更新。")
     from .launcher import process_identity
     from .uninstaller import _iter_windows_process_ids, _process_module_paths
+    from .windows_file_holders import file_holders
 
     processes = _iter_windows_process_ids()
     if not processes:
         raise UpdateError("无法检查机器人进程状态，已取消运行时更新。")
-    changed_binaries = {
-        os.path.normcase(str((root / relative).resolve()))
-        for relative in _update_target_paths(payload)
-        if relative.suffix.casefold() in {".dll", ".pyd", ".exe"}
-        and relative.parts[0].casefold() in {"app", "runtime"}
-    }
+    try:
+        changed_binaries = {
+            os.path.normcase(str(_checked_target(root, relative)))
+            for relative in _update_target_paths(payload)
+            if relative.suffix.casefold() in {".dll", ".pyd", ".exe"}
+            and relative.parts[0].casefold() in {"app", "runtime"}
+        }
+    except PayloadError as exc:
+        raise UpdateError("更新文件路径无法安全校验，已取消运行时更新。") from exc
     blockers: list[int] = []
     for pid in processes:
         if pid in {0, os.getpid()}:
@@ -643,6 +694,13 @@ def assert_update_runtime_stopped(
         )
         if in_runtime or holds_binary:
             blockers.append(pid)
+    try:
+        # ToolHelp omits some image/resource mappings. Register only the exact
+        # binaries in this update, then validate each native process identity.
+        blockers.extend(pid for pid, _identity in file_holders(changed_binaries))
+    except OSError as exc:
+        raise UpdateError("无法确认更新文件的占用状态，已取消运行时更新。") from exc
+    blockers = sorted(set(blockers))
     if blockers:
         raise UpdateFailure(
             "UPD-1005",
@@ -780,39 +838,45 @@ def prepare_update(
         working.mkdir()
     except OSError as exc:
         raise UpdateFailure("UPD-1015", str(exc)) from exc
-    archive = working / "update.zip.download"
-    request = urllib.request.Request(
-        release.package_url,
-        headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
-    )
     try:
-        logger.write("download_started", state="downloading", version=release.version)
-        digest = hashlib.sha256()
-        received = 0
-        with urllib.request.urlopen(
-            request, timeout=channel.request_timeout_seconds
-        ) as response, archive.open("wb") as output:
-            _safe_https_url(response.geturl())
-            length = response.headers.get("Content-Length")
-            if length is not None and int(length) != release.package_size:
-                raise UpdateError("更新包大小与发布清单不一致。")
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                received += len(chunk)
-                if received > min(channel.max_package_bytes, release.package_size):
-                    raise UpdateError("更新包下载体积超出发布清单。")
-                output.write(chunk)
-                digest.update(chunk)
-                if progress_callback is not None:
-                    progress_callback("download", received, release.package_size)
-        if received != release.package_size:
-            raise UpdateError("更新包下载不完整。")
-        if digest.hexdigest().upper() != release.package_sha256:
-            raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
         final_archive = working / "update.zip"
-        os.replace(archive, final_archive)
+        cached = restore_update_archive(
+            updates_root, release, final_archive, progress_callback=progress_callback,
+        )
+        if cached is None:
+            archive = working / "update.zip.download"
+            request = urllib.request.Request(
+                release.package_url,
+                headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
+            )
+            logger.write("download_started", state="downloading", version=release.version)
+            digest = hashlib.sha256()
+            received = 0
+            with urllib.request.urlopen(
+                request, timeout=channel.request_timeout_seconds
+            ) as response, archive.open("wb") as output:
+                _safe_https_url(response.geturl())
+                length = response.headers.get("Content-Length")
+                if length is not None and int(length) != release.package_size:
+                    raise UpdateError("更新包大小与发布清单不一致。")
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > min(channel.max_package_bytes, release.package_size):
+                        raise UpdateError("更新包下载体积超出发布清单。")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    if progress_callback is not None:
+                        progress_callback("download", received, release.package_size)
+            if received != release.package_size:
+                raise UpdateError("更新包下载不完整。")
+            if digest.hexdigest().upper() != release.package_sha256:
+                raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
+            os.replace(archive, final_archive)
+        else:
+            logger.write("download_restored", state="verified", version=release.version)
         try:
             payload_root = extract_update_archive(
                 final_archive,
@@ -844,6 +908,11 @@ def prepare_update(
         manager = payload_root / "manager" / "WeChatReBot.exe"
         if not manager.is_file() and verified.manifest.get("schema_version") != 2:
             raise UpdateError("更新包缺少桌面管理器。")
+        try:
+            record_update_archive(working, release, previous=cached)
+        except OSError as exc:
+            logger.write("cache_receipt_failed", state="verified", version=release.version,
+                         message=str(exc))
         logger.write("package_verified", state="verified", version=release.version)
         return PreparedUpdate(release, working, payload_root, final_archive)
     except Exception as exc:
@@ -908,6 +977,7 @@ def create_update_plan(
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
+    _assert_manager_executable_available(prepared.payload_root, root, source_executable=source_executable)
     helper = working / "WeChatReBot-Updater.exe"
     helper_source = prepared.payload_root / "manager" / "WeChatReBot.exe"
     if not helper_source.is_file():
@@ -943,13 +1013,13 @@ def create_update_plan(
     return UpdatePlan(plan_path, helper)
 
 
-def launch_update_helper(plan: UpdatePlan) -> None:
+def launch_update_helper(plan: UpdatePlan) -> subprocess.Popen:
     environment = os.environ.copy()
     environment["WECHATREBOT_UPDATE_HELPER"] = "1"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "DETACHED_PROCESS", 0
     )
-    subprocess.Popen(
+    return subprocess.Popen(
         [str(plan.helper_executable), "apply-update", "--plan", str(plan.plan_path)],
         cwd=plan.plan_path.parent,
         env=environment,
@@ -968,17 +1038,33 @@ def _wait_for_process_exit(pid: int, timeout_seconds: int = 180) -> None:
         import ctypes
 
         synchronize = 0x00100000
-        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        handle = kernel32.OpenProcess(synchronize, False, pid)
         if not handle:
-            return
+            error = ctypes.get_last_error()
+            # A PID can disappear between planning and the wait. Every other
+            # failure is ambiguous and must block replacement of live files.
+            if error == 87:  # ERROR_INVALID_PARAMETER: the nonzero PID no longer exists.
+                return
+            raise UpdateError(f"无法确认旧版本进程是否已退出（错误 {error}）。")
         try:
-            result = ctypes.windll.kernel32.WaitForSingleObject(
+            result = kernel32.WaitForSingleObject(
                 handle, timeout_seconds * 1000
             )
+            error = ctypes.get_last_error() if result == 0xFFFFFFFF else None
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(handle)
         if result == 0x00000102:
             raise UpdateError("等待旧版本退出超时。")
+        if result != 0:  # WAIT_OBJECT_0 is the only confirmed process exit.
+            detail = f"错误 {error}" if error is not None else f"等待结果 {result}"
+            raise UpdateError(f"无法确认旧版本进程是否已退出（{detail}）。")
         return
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -1106,7 +1192,7 @@ def _restart_manager(
     update_id: str = "",
     current_version: str = "",
     version: str = "",
-) -> subprocess.Popen | None:
+) -> subprocess.Popen | OwnedProcess | None:
     if not target.is_file():
         return None
     environment = os.environ.copy()
@@ -1115,9 +1201,14 @@ def _restart_manager(
         ("WECHATREBOT_UPDATE_FROM", current_version),
         ("WECHATREBOT_UPDATE_TO", version),
     ):
-        if value:
+        # A failed update restarts the previous manager without a handshake.
+        # Never inherit a successful earlier update's confirmation into it.
+        environment.pop(name, None)
+        if update_id and value:
             environment[name] = value
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt":
+        return start_owned_process([str(target)], cwd=install_root, env=environment)
     return subprocess.Popen(
         [str(target)],
         cwd=install_root,
@@ -1182,11 +1273,10 @@ def _restore_update_targets(
     journal: dict[str, object], install_root: Path
 ) -> None:
     rollback_relative = Path(*PurePosixPath(str(journal.get("rollback_root") or "")).parts)
-    rollback_root = (install_root / rollback_relative).resolve()
     try:
-        rollback_root.relative_to(install_root)
-    except ValueError as exc:
-        raise UpdateFailure("UPD-1010", "回滚目录越过安装根目录。") from exc
+        rollback_root = _checked_target(install_root, rollback_relative, allow_directory=True)
+    except PayloadError as exc:
+        raise UpdateFailure("UPD-1010", str(exc)) from exc
     files = journal.get("files")
     if not isinstance(files, list):
         raise UpdateFailure("UPD-1010", "回滚清单格式无效。")
@@ -1196,20 +1286,20 @@ def _restore_update_targets(
             if not isinstance(entry, dict):
                 raise OSError("回滚文件条目无效")
             relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
-            target = (install_root / relative).resolve()
-            target.relative_to(install_root)
+            target = _checked_target(install_root, relative)
             if entry.get("existed") is True:
-                backup = (rollback_root / str(entry.get("backup") or "")).resolve()
-                backup.relative_to(rollback_root)
+                backup = _checked_target(rollback_root, Path(str(entry.get("backup") or "")))
                 if not backup.is_file():
                     raise OSError(f"回滚备份缺失：{relative.as_posix()}")
+                if target.is_file() and sha256_file(target) == sha256_file(backup):
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 staged = target.with_name(f".{target.name}.restore-{uuid.uuid4().hex}")
                 shutil.copy2(backup, staged)
                 os.replace(staged, target)
             else:
                 target.unlink(missing_ok=True)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, PayloadError) as exc:
             failures.append(str(exc))
     if failures:
         raise UpdateFailure("UPD-1010", "；".join(failures[:5]))
@@ -1243,8 +1333,13 @@ def _wait_for_startup_confirmation(
     raise UpdateFailure("UPD-1009", "新版本未在规定时间内完成启动确认。")
 
 
-def _stop_restarted_manager(process: subprocess.Popen | None) -> None:
-    if process is None or process.poll() is not None:
+def _stop_restarted_manager(process: subprocess.Popen | OwnedProcess | None) -> None:
+    if process is None:
+        return
+    if isinstance(process, OwnedProcess):
+        process.terminate_tree()
+        return
+    if process.poll() is not None:
         return
     try:
         process.terminate()
@@ -1253,8 +1348,52 @@ def _stop_restarted_manager(process: subprocess.Popen | None) -> None:
         try:
             process.kill()
             process.wait(timeout=5)
-        except Exception:
-            return
+        except Exception as exc:
+            raise ProcessTreeStopError("无法确认本次重启的客户端已退出。") from exc
+
+
+def _complete_successful_update(
+    root: Path,
+    journal: dict[str, object],
+    logger: UpdateLogger,
+    *,
+    current_version: str | None = None,
+) -> None:
+    """Commit a confirmed update; cleanup failures must never roll it back."""
+    update_id = str(journal["update_id"])
+    version = str(journal.get("version") or "")
+    updates_root = root / "updates"
+    journal_path = updates_root / UPDATE_JOURNAL_FILE
+    flag_path = updates_root / f"startup-success-{update_id}.json"
+    rollback_root = (root / str(journal["rollback_root"])).resolve()
+    rollback_root.relative_to(updates_root.resolve())
+    try:
+        write_json_atomic(
+            updates_root / UPDATE_RESULT_FILE,
+            {
+                "schema_version": 1,
+                "ok": True,
+                "version": version,
+                **(
+                    {"status": "success", "from_version": current_version}
+                    if current_version is not None else {}
+                ),
+                "message": "更新已完成。",
+            },
+        )
+        # Keep the startup proof and backups until the journal is gone. If
+        # Windows temporarily locks it, the next startup can safely retry.
+        journal_path.unlink(missing_ok=True)
+        if rollback_root.exists():
+            shutil.rmtree(_extended_windows_path(rollback_root))
+        flag_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.write(
+            "cleanup_deferred",
+            state="success",
+            version=version,
+            message=str(exc),
+        )
 
 
 def apply_update_plan(
@@ -1277,7 +1416,7 @@ def apply_update_plan(
     rollback_root: Path | None = None
     journal_path: Path | None = None
     journal: dict[str, object] | None = None
-    restarted: subprocess.Popen | None = None
+    restarted: subprocess.Popen | OwnedProcess | None = None
     lock: SingleInstanceLock | None = None
     failure: BaseException | None = None
     result = 1
@@ -1300,6 +1439,7 @@ def apply_update_plan(
         verify_payload(payload_root)
         _validate_update_baseline(payload_root, root)
         assert_update_runtime_stopped(payload_root, root)
+        _assert_manager_executable_available(payload_root, root)
         rollback_root = root / "updates" / f".rollback-{update_id}"
         rollback_root.mkdir(parents=True, exist_ok=False)
         journal = _snapshot_update_targets(
@@ -1362,21 +1502,14 @@ def apply_update_plan(
             if restarted is None:
                 raise UpdateFailure("UPD-1009", "更新后的管理器程序不存在。")
             _wait_for_startup_confirmation(flag_path, update_id, restarted)
-        write_json_atomic(
-            root / "updates" / UPDATE_RESULT_FILE,
-            {
-                "schema_version": 1,
-                "ok": True,
-                "version": version,
-                **({"status": "success", "from_version": current_version} if restart else {}),
-                "message": "更新已完成。",
-            },
+        else:
+            # Local updates intentionally do not start the manager, but need
+            # the same durable commit proof if result/cleanup writes fail.
+            write_json_atomic(flag_path, {"update_id": update_id, "ok": True})
+        _complete_successful_update(
+            root, journal, logger,
+            current_version=current_version if restart else None,
         )
-        if journal_path is not None:
-            journal_path.unlink(missing_ok=True)
-        if rollback_root is not None:
-            shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
-        flag_path.unlink(missing_ok=True)
         logger.write("apply_succeeded", state="success", version=version)
         result = 0
     except Exception as exc:
@@ -1399,29 +1532,43 @@ def apply_update_plan(
                 message=detail or str(exc),
             )
         if journal is not None and root is not None:
-            _stop_restarted_manager(restarted)
+            processes_stopped = False
             try:
-                journal["state"] = "rolling_back"
-                if journal_path is not None:
-                    write_json_atomic(journal_path, journal)
-                _restore_update_targets(journal, root)
-                if journal_path is not None:
-                    journal_path.unlink(missing_ok=True)
-                if rollback_root is not None:
-                    shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
-                result = 1
-            except UpdateFailure as rollback_error:
-                failure = rollback_error
-                code = rollback_error.definition.code
+                if isinstance(exc, ProcessTreeStopError):
+                    raise exc
+                _stop_restarted_manager(restarted)
+                processes_stopped = True
+            except (OSError, RuntimeError) as stop_error:
+                failure = UpdateFailure(
+                    "UPD-1010", str(stop_error),
+                    public_message="新版本客户端尚未完全退出，已保留恢复文件。请关闭所有机器人客户端窗口后重新打开软件，以继续恢复。",
+                )
+                restart = False
                 if logger is not None:
                     logger.write(
-                        "rollback_failed",
-                        state="failed",
-                        version=version,
-                        error_code=code,
-                        message=rollback_error.detail,
+                        "rollback_blocked", state="failed", version=version,
+                        error_code="UPD-1010", message=str(stop_error),
                     )
-                result = 1
+            if processes_stopped:
+                try:
+                    journal["state"] = "rolling_back"
+                    if journal_path is not None:
+                        write_json_atomic(journal_path, journal)
+                    _restore_update_targets(journal, root)
+                    if journal_path is not None:
+                        journal_path.unlink(missing_ok=True)
+                    if rollback_root is not None:
+                        shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
+                    result = 1
+                except UpdateFailure as rollback_error:
+                    failure = rollback_error
+                    code = rollback_error.definition.code
+                    if logger is not None:
+                        logger.write(
+                            "rollback_failed", state="failed", version=version,
+                            error_code=code, message=rollback_error.detail,
+                        )
+                    result = 1
         elif rollback_root is not None:
             shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
         if root is not None:
@@ -1499,21 +1646,14 @@ def recover_update_plan(plan_path: str | Path) -> int:
         rollback_root.relative_to(updates_root)
         flag_path = updates_root / f"startup-success-{update_id}.json"
         if _startup_confirmed(flag_path, update_id):
-            write_json_atomic(
-                updates_root / UPDATE_RESULT_FILE,
-                {
-                    "schema_version": 1,
-                    "ok": True,
-                    "status": "success",
-                    "version": journal.get("version", ""),
-                    "message": "更新已完成。",
-                },
-            )
+            _complete_successful_update(root, journal, logger, current_version="")
             logger.write(
                 "recovery_confirmed_success",
                 state="success",
                 version=str(journal.get("version") or ""),
             )
+            _restart_manager(target, root)
+            return 0
         else:
             try:
                 _restore_update_targets(journal, root)
@@ -1618,7 +1758,14 @@ def recover_interrupted_update(
     if not journal_path.is_file():
         return False
     logger = UpdateLogger(root)
+    lock = SingleInstanceLock(f"update-helper:{root}")
     try:
+        if not lock.acquire():
+            # The helper owns both the journal and its cleanup until it exits.
+            # Let its new manager open normally and emit the startup handshake.
+            return False
+        if not journal_path.is_file():
+            return False
         journal = _read_json_object(journal_path)
         update_id = str(journal.get("update_id") or "")
         if len(update_id) != 32 or any(
@@ -1632,79 +1779,59 @@ def recover_interrupted_update(
             )
             rollback_root = (root / rollback_relative).resolve()
             rollback_root.relative_to(updates_root)
-            write_json_atomic(
-                updates_root / UPDATE_RESULT_FILE,
-                {
-                    "schema_version": 1,
-                    "ok": True,
-                    "status": "success",
-                    "version": journal.get("version", ""),
-                    "message": "更新已完成。",
-                },
-            )
-            shutil.rmtree(_extended_windows_path(rollback_root), ignore_errors=True)
-            journal_path.unlink(missing_ok=True)
-            flag_path.unlink(missing_ok=True)
+            _complete_successful_update(root, journal, logger, current_version="")
             logger.write(
                 "startup_recovery_cleanup",
                 state="success",
                 version=str(journal.get("version") or ""),
             )
             return False
-        lock = SingleInstanceLock(f"update-helper:{root}")
-        if not lock.acquire():
-            # An active updater is waiting for this manager to acknowledge its
-            # startup. Let the normal window open and emit that handshake.
-            return False
-        try:
-            source = Path(executable or sys.executable).expanduser().resolve()
-            if not source.is_file() or source.suffix.casefold() != ".exe":
-                raise UpdateError("无法创建独立恢复程序。")
-            helper = updates_root / f".recovery-helper-{update_id}.exe"
-            shutil.copy2(source, helper)
-            pid = int(parent_pid if parent_pid is not None else os.getpid())
-            plan_path = updates_root / f".recovery-plan-{update_id}.json"
-            write_json_atomic(
-                plan_path,
-                {
-                    "schema_version": 1,
-                    "action": "recover-interrupted-update",
-                    "update_id": update_id,
-                    "install_root": str(root),
-                    "target_executable": str(root / "manager" / "WeChatReBot.exe"),
-                    "parent_pid": pid,
-                    "wait_pids": list(
-                        _update_wait_pids(
-                            source,
-                            pid,
-                            include_bootloader=parent_pid is None,
-                        )
-                    ),
-                },
-            )
-            environment = os.environ.copy()
-            environment["WECHATREBOT_UPDATE_HELPER"] = "1"
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-                subprocess, "DETACHED_PROCESS", 0
-            )
-            subprocess.Popen(
-                [str(helper), "apply-update", "--plan", str(plan_path)],
-                cwd=root,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-                creationflags=flags,
-            )
-            logger.write(
-                "recovery_helper_started",
-                state="interrupted_update",
-                version=str(journal.get("version") or ""),
-            )
-            return True
-        finally:
-            lock.release()
+        source = Path(executable or sys.executable).expanduser().resolve()
+        if not source.is_file() or source.suffix.casefold() != ".exe":
+            raise UpdateError("无法创建独立恢复程序。")
+        helper = updates_root / f".recovery-helper-{update_id}.exe"
+        shutil.copy2(source, helper)
+        pid = int(parent_pid if parent_pid is not None else os.getpid())
+        plan_path = updates_root / f".recovery-plan-{update_id}.json"
+        write_json_atomic(
+            plan_path,
+            {
+                "schema_version": 1,
+                "action": "recover-interrupted-update",
+                "update_id": update_id,
+                "install_root": str(root),
+                "target_executable": str(root / "manager" / "WeChatReBot.exe"),
+                "parent_pid": pid,
+                "wait_pids": list(
+                    _update_wait_pids(
+                        source,
+                        pid,
+                        include_bootloader=parent_pid is None,
+                    )
+                ),
+            },
+        )
+        environment = os.environ.copy()
+        environment["WECHATREBOT_UPDATE_HELPER"] = "1"
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+            subprocess, "DETACHED_PROCESS", 0
+        )
+        subprocess.Popen(
+            [str(helper), "apply-update", "--plan", str(plan_path)],
+            cwd=root,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=flags,
+        )
+        logger.write(
+            "recovery_helper_started",
+            state="interrupted_update",
+            version=str(journal.get("version") or ""),
+        )
+        return True
     except (OSError, ValueError, UpdateError) as exc:
         logger.write(
             "recovery_helper_start_failed",
@@ -1728,6 +1855,8 @@ def recover_interrupted_update(
         except OSError:
             pass
         return False
+    finally:
+        lock.release()
 
 
 def cleanup_stale_update_workdirs(
@@ -1751,6 +1880,9 @@ def cleanup_stale_update_workdirs(
             if not candidate.is_dir() or candidate.stat().st_mtime > cutoff:
                 continue
             candidate.resolve().relative_to(updates.resolve())
+            if (candidate.stat().st_mtime > time.time() - UPDATE_CACHE_MAX_AGE_SECONDS
+                    and has_update_cache_receipt(candidate)):
+                continue
             shutil.rmtree(_extended_windows_path(candidate))
             removed += 1
         except (OSError, ValueError):

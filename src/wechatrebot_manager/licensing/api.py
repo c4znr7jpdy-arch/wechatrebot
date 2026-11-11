@@ -17,8 +17,8 @@ class LicensingApiMixin:
             self._licenses = client = LicenseClient(self._install_root)
         return client
 
-    def _license_failed(self, exc: LicenseError) -> dict:
-        event_id, saved = self._record_error(exc, f"LIC-{exc.code}", operation="subscription")
+    def _license_failed(self, exc: LicenseError, *, record: bool = True) -> dict:
+        event_id, saved = self._record_error(exc, f"LIC-{exc.code}", operation="subscription") if record else ("", None)
         return {"ok": False, "error": {"code": f"LIC-{exc.code}", "message": str(exc), "event_id": event_id, "recorded": saved}}
 
     def _license_operation(self, action: Callable[[], dict]) -> dict:
@@ -44,6 +44,9 @@ class LicensingApiMixin:
 
     def get_license_status(self) -> dict:
         return self._license_operation(self._license_status)
+
+    def get_license_binding_status(self) -> dict:
+        return self._license_operation(self._license_client().binding_status)
 
     def get_trial_status(self) -> dict:
         def status() -> dict:
@@ -94,6 +97,27 @@ class LicensingApiMixin:
             self._license_client().bind(actual)
             return self._license_status()
         return self._license_operation(bind)
+
+    def rebind_license_account(self, new_account: str, previous_account: str, revision: int) -> dict:
+        if not self._action_lock.acquire(blocking=False):
+            return self._license_failed(LicenseError("busy", "正在处理机器人操作，请稍后重试换绑。"))
+        try:
+            def rebind() -> dict:
+                if getattr(self, "_update_installing", False):
+                    raise LicenseError("busy", "更新正在安装，请稍后重试换绑。")
+                runtime = self._lifecycle.fresh_runtime_snapshot()
+                if getattr(runtime, "engine_ready", False):
+                    raise LicenseError("robot_running", "请先停止机器人，再更换绑定微信。")
+                actual = self._license_account(required=True)
+                if not isinstance(new_account, str) or new_account != actual:
+                    raise LicenseError("account_changed", "微信登录账号已变化，请重新读取并确认换绑。")
+                self._license_client().rebind(actual, expected_account=previous_account, expected_revision=revision)
+                if self._license_account(required=True) != actual:
+                    raise LicenseError("account_changed", "换绑已提交，微信账号随后发生变化，请切回换绑后的账号查看。")
+                return self._license_status()
+            return self._license_operation(rebind)
+        finally:
+            self._action_lock.release()
 
     def _check_license_start(self) -> None:
         client = self._license_client()

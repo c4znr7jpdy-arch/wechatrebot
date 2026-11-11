@@ -300,7 +300,12 @@ def test_install_uses_flat_transaction_paths_for_deep_payload(
     tmp_path: Path,
 ) -> None:
     archive_path = tmp_path / "payload.wrb"
-    relative = "runtime/" + "deep/" * 17 + "module.py"
+    install_root = tmp_path / "install"
+    relative = "runtime/module.py"
+    # Keep the actual target below MAX_PATH while the former nested rollback
+    # path exceeds it, independently of the runner's temporary-directory length.
+    while len(str(install_root / Path(*relative.split("/")))) < 220:
+        relative = "runtime/deep/" + relative.removeprefix("runtime/")
     content = b"payload"
     digest = hashlib.sha256(content).hexdigest().upper()
     manifest = {
@@ -310,7 +315,6 @@ def test_install_uses_flat_transaction_paths_for_deep_payload(
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("release-manifest.json", json.dumps(manifest))
         archive.writestr(relative, content)
-    install_root = tmp_path / "install"
     legacy_transaction_chars = (
         len(str(install_root)) + len("\\updates\\.rollback-") + 32 + 1 + len(relative)
     )

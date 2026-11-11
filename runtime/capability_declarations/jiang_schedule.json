@@ -13,11 +13,86 @@
     },
     {
       "id": "manage",
-      "description": "添加、删除或修改定时计划请先使用原插件帮助或管理器定时任务页；不会根据简介擅自构造任务。",
+      "description": "在管理器定时任务页选择内容、接收聊天和执行时间，可编辑、启停或删除任务。聊天命令只管理当前聊天；群聊写操作需可靠管理员身份，私聊原命令只允许本人会话。天气等内容与定时接收开关需分别授权。已移除旧式定时签到，不支持凭简介构造任务。",
       "examples": [
         "/定时帮助"
       ],
       "effect": "write"
+    },
+    {
+      "id": "help",
+      "description": "查看当前插件支持的定时新闻、天气、油价、Epic、疯狂星期四和B站动态订阅命令用法。",
+      "handler": "schedule",
+      "message_pattern": "/定时帮助",
+      "examples": [
+        "/定时帮助"
+      ],
+      "effect": "read"
+    },
+    {
+      "id": "create",
+      "description": "为当前聊天创建定时新闻、天气、油价、Epic或疯狂星期四任务；时间为24小时制，可写周一至周日，天气需城市、油价需省份。不指定星期时通常每日执行，疯狂星期四默认周四。群聊需管理员，私聊仅限本人；原插件仍校验当前聊天身份及内容授权。",
+      "handler": "schedule",
+      "message_pattern": "/定时(?:新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四) (?:周[一二三四五六日天] )?(?:[一-鿿]{2,6} )?(?:[01]?\\d|2[0-3])(?::[0-5]\\d)?点?",
+      "examples": [
+        "/定时新闻 8点",
+        "/定时天气 北京 08:30",
+        "/定时油价 四川 8点",
+        "/定时epic 9点",
+        "/定时kfc 周四 12点"
+      ],
+      "effect": "write",
+      "permission": "group_admin"
+    },
+    {
+      "id": "delete",
+      "description": "删除当前聊天指定类型的定时任务，支持新闻、天气、油价、Epic、疯狂星期四或B站动态。可能移除当前聊天此类型的多个任务；不替其他聊天删除。群聊需管理员，私聊仅限本人。",
+      "handler": "schedule",
+      "message_pattern": "/定时删除(?:新闻|热点|天气|epic|喜加一|免费游戏|油价|kfc|KFC|疯狂星期四|B站动态|b站动态)",
+      "examples": [
+        "/定时删除新闻",
+        "/定时删除天气",
+        "/定时删除油价",
+        "/定时删除epic",
+        "/定时删除kfc",
+        "/定时删除B站动态"
+      ],
+      "effect": "write",
+      "permission": "group_admin"
+    },
+    {
+      "id": "bili_subscribe",
+      "description": "在当前聊天订阅或修改指定B站UID的动态检查间隔，发现新动态后推送。UID为数字，间隔可省略，默认5分钟，原插件限制在2至60分钟。群聊需管理员，私聊仅限本人，仍受聊天推送权限限制。",
+      "handler": "schedule",
+      "message_pattern": "/订阅动态 \\d+(?: (?:[2-9]|[1-5]\\d|60) 分钟)?",
+      "examples": [
+        "/订阅动态 123456",
+        "/订阅动态 123456 10 分钟"
+      ],
+      "effect": "write",
+      "permission": "group_admin"
+    },
+    {
+      "id": "bili_unsubscribe",
+      "description": "取消当前聊天指定UID的B站动态订阅；不填写UID会取消当前聊天全部B站动态订阅，必须明确告知取消范围。群聊需管理员，私聊仅限本人。",
+      "handler": "schedule",
+      "message_pattern": "/取消订阅动态(?: \\d+)?",
+      "examples": [
+        "/取消订阅动态 123456",
+        "/取消订阅动态"
+      ],
+      "effect": "write",
+      "permission": "group_admin"
+    },
+    {
+      "id": "bili_list",
+      "description": "只查看当前聊天已订阅的B站动态UID和检查间隔，不修改订阅。",
+      "handler": "schedule",
+      "message_pattern": "/订阅列表",
+      "examples": [
+        "/订阅列表"
+      ],
+      "effect": "read"
     }
   ]
 }

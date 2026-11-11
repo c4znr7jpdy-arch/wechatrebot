@@ -132,6 +132,51 @@ def test_group_qrcode_discards_late_response_after_switch(browser, manager_url):
         page.close()
 
 
+@pytest.mark.parametrize("retryable,expected_calls", [(False, 1), (True, 2)])
+def test_group_qrcode_poll_respects_retryability_and_keeps_manual_retry(browser, manager_url, tmp_path, retryable, expected_calls):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        open_history(page, manager_url)
+        page.clock.install()
+        page.evaluate("""retryable => {
+          window.qrCalls = 0;
+          window.pywebview.api.get_group_qrcode = async () => {
+            window.qrCalls += 1;
+            return {ok:false, error:{code:'LIC-automation_paused', retryable, recorded:null,
+              message:'自动化已暂停，请在运行中心启动后重试。'}};
+          };
+        }""", retryable)
+        page.locator('.nav-item[data-page="history"]').click()
+        retry = page.get_by_role("button", name="重新获取群二维码")
+        expect(retry).to_be_visible()
+        expect(retry).to_have_attribute("title", "自动化已暂停，请在运行中心启动后重试。")
+        assert page.evaluate("window.qrCalls") == 1
+        # Polling renders a replacement inspector after the old failure TTL.
+        retry.evaluate("button => button.dataset.expiryProbe = 'old'")
+        page.clock.fast_forward(16000)
+        expect(page.locator('[data-expiry-probe="old"]')).to_have_count(0)
+        expect(page.get_by_role("button", name="重新获取群二维码")).to_be_visible()
+        page.wait_for_function("expected => window.qrCalls >= expected", arg=expected_calls)
+        assert page.evaluate("window.qrCalls") == expected_calls
+        expect(page.get_by_text("错误记录未能保存，请截图联系技术支持。", exact=True)).to_have_count(0)
+        page.screenshot(path=str(tmp_path / f"qrcode-paused-retryable-{retryable}.png"))
+        page.evaluate("""src => {
+          window.pywebview.api.get_group_qrcode = async (account, group) => {
+            window.qrCalls += 1;
+            return {ok:true, data:{account_id:account, group_id:group, image_data_url:src}};
+          };
+        }""", qr_image())
+        page.get_by_role("button", name="重新获取群二维码").click()
+        expect(page.get_by_role("button", name="放大查看群二维码").locator("img")).to_be_visible()
+        assert page.evaluate("window.qrCalls") == expected_calls + 1
+        assert page.url == manager_url and page.title().startswith("消息中心")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 def test_group_qrcode_closes_on_account_change_and_preserves_report_preview(browser, manager_url):
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     try:

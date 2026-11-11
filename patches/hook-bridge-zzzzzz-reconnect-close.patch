@@ -1,0 +1,16 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index a7e9e8e..ff4893b 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1432,6 +1432,11 @@ class OneBotClient:
+                     await asyncio.wait_for(self._closed_event.wait(), timeout=delay)
+                 except TimeoutError:
+                     pass
++                except asyncio.CancelledError:
++                    if (self._close_cancelled_run
++                            and asyncio.current_task().cancelling() == 1):
++                        break
++                    raise
+                 delay = min(self.reconnect_max, max(self.reconnect_min, delay * 2))
+         finally:
+             self._run_task = None

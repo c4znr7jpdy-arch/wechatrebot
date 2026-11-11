@@ -29,7 +29,8 @@ def install_from_native_setup(
 
     root = Path(install_root).expanduser().resolve()
     stopped = 0
-    if (root / INSTALL_MARKER).is_file():
+    existing_install = (root / INSTALL_MARKER).is_file()
+    if existing_install:
         stopped = stop_installation_processes(root)
     verified = perform_install(
         InstallRequest(
@@ -39,6 +40,7 @@ def install_from_native_setup(
         ),
         create_shortcuts=False,
         create_entrypoints=False,
+        preserve_existing_settings=existing_install,
     )
     if verified is None:
         raise RuntimeError("原生安装程序未提供有效载荷。")

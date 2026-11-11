@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import json
 import os
 from pathlib import Path
 import signal
 import socket
 import subprocess
+import threading
 import time
 from typing import Callable, IO, Mapping, Protocol
 
 from .json_io import write_json_atomic
-from .runtime_config import RuntimePorts
-from .payload import sha256_file
+from .runtime_config import RuntimePorts, load_runtime_ports
+from .payload import PayloadError, _checked_target, sha256_file
 
 
 class ProcessLike(Protocol):
@@ -73,6 +75,10 @@ class RunningService:
 
 class ServiceLaunchError(RuntimeError):
     """Raised when the managed startup sequence cannot complete."""
+
+
+class ServiceStartCancelled(ServiceLaunchError):
+    """Return startup ownership to its caller before serial service teardown."""
 
 
 class ServiceStopError(ServiceLaunchError):
@@ -222,14 +228,21 @@ def port_accepting(
         return False
 
 
-def wait_until_ready(spec: ServiceSpec, process: ProcessLike) -> bool:
+def wait_until_ready(
+    spec: ServiceSpec, process: ProcessLike, *, cancel_event: threading.Event | None = None,
+) -> bool:
     deadline = time.monotonic() + spec.ready_timeout_seconds
     while time.monotonic() < deadline:
+        if cancel_event is not None and cancel_event.is_set():
+            return False
         if process.poll() is not None:
             return False
         if port_accepting(spec.ready_host, spec.ready_port):
             return True
-        time.sleep(0.2)
+        if cancel_event is None:
+            time.sleep(0.2)
+        else:
+            cancel_event.wait(0.2)
     return False
 
 
@@ -270,12 +283,14 @@ def _hook_integrity_files(root: Path) -> tuple[tuple[Path, str], ...]:
 def build_service_specs(
     install_root: str | Path,
     *,
-    ports: RuntimePorts = RuntimePorts(),
+    ports: RuntimePorts | None = None,
 ) -> tuple[ServiceSpec, ServiceSpec]:
+    root = Path(install_root).expanduser().resolve()
+    if ports is None:
+        ports = load_runtime_ports(root)
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    root = Path(install_root).expanduser().resolve()
     python_exe = root / "runtime" / "python" / "python.exe"
     astrbot_root = root / "app" / "astrbot"
     bridge_root = root / "app" / "bridge"
@@ -384,8 +399,65 @@ def installation_services_stopped(install_root: str | Path) -> bool:
         return False
 
 
-def force_stop_update_processes(install_root: str | Path) -> None:
-    """Close all WeChat instances and surviving services of this installation.
+def capture_update_wechat_process(
+    install_root: str | Path, *, required: bool = False,
+) -> tuple[int, ProcessIdentity] | None:
+    """Capture the unique WeChat using this installation's injected HOOK.
+
+    The bridge can choose a dynamic API port, so a process name or the default
+    port cannot establish ownership. The exact loaded DLL path can. Image
+    mappings absent from ToolHelp are checked with Restart Manager. Capture
+    before stopping the bridge and retain the creation time through shutdown.
+    """
+    from .uninstaller import _iter_windows_process_ids, _process_module_paths
+
+    names = frozenset({"weixin.exe", "wechat.exe"})
+    candidates = []
+    try:
+        hook_dll = _normalized_executable(_checked_target(
+            Path(install_root).expanduser().resolve(),
+            Path("app/bridge/vendor/hook/libGLESv1-c2c-video-v2.dll"),
+        ))
+        for pid in _iter_windows_process_ids(executable_names=names, strict=True):
+            identity = process_identity(pid)
+            if identity is None or not identity.executable:
+                if pid not in _iter_windows_process_ids(executable_names=names, strict=True):
+                    continue
+                raise OSError("微信进程身份无法读取。")
+            if Path(identity.executable).name.casefold() not in names:
+                continue
+            try:
+                modules = _process_module_paths(pid, strict=True)
+            except OSError:
+                if pid not in _iter_windows_process_ids(executable_names=names, strict=True):
+                    continue
+                raise
+            owns_hook = any(_normalized_executable(path) == hook_dll for path in modules)
+            if owns_hook and process_identity(pid) == identity:
+                candidates.append((pid, identity))
+        from .windows_file_holders import file_holders
+
+        by_pid = dict(candidates)
+        for pid, identity in file_holders((hook_dll,)):
+            if Path(identity.executable).name.casefold() not in names:
+                continue
+            if pid in by_pid and by_pid[pid] != identity:
+                raise OSError("微信进程身份在查询过程中发生变化。")
+            by_pid[pid] = identity
+        candidates = list(by_pid.items())
+    except (OSError, PayloadError) as exc:
+        raise ServiceStopError("wechat", "机器人连接的微信（无法确认进程归属）") from exc
+    if len(candidates) > 1:
+        raise ServiceStopError("wechat", "本安装连接的多个微信进程")
+    if not candidates and required:
+        raise ServiceStopError("wechat", "机器人连接的微信（无法确认进程归属）")
+    return candidates[0] if candidates else None
+
+
+def force_stop_update_processes(
+    install_root: str | Path, *, wechat_process: tuple[int, ProcessIdentity] | None = None,
+) -> None:
+    """Close the captured robot WeChat and surviving installation services.
 
     Called only after the update's explicit shutdown confirmation. Process
     creation times are rechecked on the termination handle to avoid PID reuse.
@@ -394,8 +466,19 @@ def force_stop_update_processes(install_root: str | Path) -> None:
 
     specs = build_service_specs(install_root)
     executables = {_normalized_executable(spec.argv[0]) for spec in specs}
-    wechat_names = frozenset({"weixin.exe", "wechat.exe"})
-    names = wechat_names | {Path(path).name.casefold() for path in executables}
+    names = frozenset(Path(path).name.casefold() for path in executables)
+    if wechat_process is not None:
+        pid, identity = wechat_process
+        current = process_identity(pid)
+        if current is None:
+            if pid in _iter_windows_process_ids(strict=True):
+                raise ServiceStopError("wechat", "机器人连接的微信")
+        elif current == identity:
+            if not _terminate_windows_process(pid, expected_creation_time=identity.creation_time):
+                current = process_identity(pid)
+                if current == identity or (current is None and pid in _iter_windows_process_ids(strict=True)):
+                    raise ServiceStopError("wechat", "机器人连接的微信")
+
     for attempt in range(3):
         candidates = []
         for pid in _iter_windows_process_ids(executable_names=frozenset(names), strict=True):
@@ -407,22 +490,20 @@ def force_stop_update_processes(install_root: str | Path) -> None:
                 # inaccessible process; unknown live state blocks installation.
                 if pid not in _iter_windows_process_ids(executable_names=frozenset(names), strict=True):
                     continue
-                raise ServiceStopError("wechat", "微信或机器人进程")
-            is_wechat = Path(identity.executable).name.casefold() in wechat_names
-            if is_wechat or _normalized_executable(identity.executable) in executables:
-                candidates.append((pid, identity, is_wechat))
+                raise ServiceStopError("new-hook-bridge", "机器人后台服务")
+            if _normalized_executable(identity.executable) in executables:
+                candidates.append((pid, identity))
         if not candidates:
             if not installation_services_stopped(install_root):
                 raise ServiceStopError("new-hook-bridge", "机器人后台服务")
             return
         if attempt == 2:
-            name = "wechat" if any(item[2] for item in candidates) else "new-hook-bridge"
-            raise ServiceStopError(name, "微信或机器人进程")
-        for pid, identity, is_wechat in candidates:
+            raise ServiceStopError("new-hook-bridge", "机器人后台服务")
+        for pid, identity in candidates:
             if not _terminate_windows_process(pid, expected_creation_time=identity.creation_time):
                 current = process_identity(pid)
                 if current is not None:
-                    raise ServiceStopError("wechat" if is_wechat else "new-hook-bridge", "微信或机器人进程")
+                    raise ServiceStopError("new-hook-bridge", "机器人后台服务")
         time.sleep(0.2)
 
 
@@ -432,7 +513,8 @@ class ProcessSupervisor:
         specs: tuple[ServiceSpec, ...],
         *,
         popen_factory: Callable[..., ProcessLike] = subprocess.Popen,
-        readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] = wait_until_ready,
+        readiness_waiter: Callable[[ServiceSpec, ProcessLike], bool] | None = None,
+        start_cancel_event: threading.Event | None = None,
         progress_callback: Callable[[str, ServiceSpec], None] | None = None,
         state_path: str | Path | None = None,
         identity_probe: Callable[[int], ProcessIdentity | None] = process_identity,
@@ -440,7 +522,10 @@ class ProcessSupervisor:
     ) -> None:
         self.specs = specs
         self._popen_factory = popen_factory
-        self._readiness_waiter = readiness_waiter
+        self._start_cancel_event = start_cancel_event
+        self._readiness_waiter = readiness_waiter or (
+            lambda spec, process: wait_until_ready(spec, process, cancel_event=start_cancel_event)
+        )
         self._progress_callback = progress_callback
         self._state_path = Path(state_path).resolve() if state_path is not None else None
         self._identity_probe = identity_probe
@@ -508,6 +593,8 @@ class ProcessSupervisor:
         by_name = {spec.name: spec for spec in self.specs}
         adopted: list[RunningService] = []
         adopted_names: set[str] = set()
+        ready_names: set[str] = set()
+        recovery_failed = False
         try:
             for entry in entries:
                 if not isinstance(entry, dict):
@@ -529,11 +616,17 @@ class ProcessSupervisor:
                         str(entry.get("executable") or "")
                     )
                     or identity.executable != expected_executable
-                    or not self._readiness_probe(spec.ready_host, spec.ready_port)
                 ):
                     continue
-                spec.log_file.parent.mkdir(parents=True, exist_ok=True)
-                log_handle = spec.log_file.open("ab", buffering=0)
+                try:
+                    spec.log_file.parent.mkdir(parents=True, exist_ok=True)
+                    log_handle = spec.log_file.open("ab", buffering=0)
+                except OSError:
+                    # Existing processes own their original stdout handles.
+                    # Keep a closeable placeholder so log I/O cannot erase
+                    # their verified identities or prevent a safe stop.
+                    log_handle = io.BytesIO()
+                    recovery_failed = True
                 adopted.append(
                     RunningService(
                         spec,
@@ -542,16 +635,27 @@ class ProcessSupervisor:
                     )
                 )
                 adopted_names.add(spec.name)
+                # Readiness may still be pending after a UI restart, or a live
+                # service may have stopped listening. Preserve its identity so
+                # the user can still stop it instead of orphaning the process.
+                if self._readiness_probe(spec.ready_host, spec.ready_port):
+                    ready_names.add(spec.name)
         except OSError:
-            for running in adopted:
-                running.log_handle.close()
-            return False
+            recovery_failed = True
         self.running = adopted
         if not self.running:
+            if recovery_failed:
+                return False
             self._clear_state()
             return False
-        self.adoption_complete = len(self.running) == len(self.specs)
-        self._persist_state()
+        self.adoption_complete = not recovery_failed and len(ready_names) == len(self.specs)
+        if recovery_failed:
+            raise ServiceLaunchError("后台服务状态恢复未完成，请停止已确认的进程后重试。")
+        try:
+            self._persist_state()
+        except (OSError, ServiceLaunchError):
+            self.adoption_complete = False
+            raise
         return True
 
     def start(self) -> tuple[RunningService, ...]:
@@ -571,6 +675,7 @@ class ProcessSupervisor:
         return self._start_specs(selected) if selected else tuple(self.running)
 
     def _start_specs(self, specs: tuple[ServiceSpec, ...]) -> tuple[RunningService, ...]:
+        self._check_start_cancelled()
         self._check_authorization(specs)
         validation_errors = [
             error
@@ -600,8 +705,10 @@ class ProcessSupervisor:
         # plugin startup sequence before a login window can appear.
         names = tuple(spec.name for spec in specs)
         for spec in specs:
+            self._check_start_cancelled()
             if self._progress_callback is not None:
                 self._progress_callback("starting", spec)
+            self._check_start_cancelled()
             spec.log_file.parent.mkdir(parents=True, exist_ok=True)
             log_handle = spec.log_file.open("ab", buffering=0)
             environment = os.environ.copy()
@@ -635,8 +742,11 @@ class ProcessSupervisor:
             spec = running.spec
             if spec.name not in names:
                 continue
+            self._check_start_cancelled()
             process = running.process
-            if not self._readiness_waiter(spec, process):
+            ready = self._readiness_waiter(spec, process)
+            self._check_start_cancelled()
+            if not ready:
                 exit_code = process.poll()
                 self.stop_names(names)
                 raise ServiceLaunchError(
@@ -644,6 +754,7 @@ class ProcessSupervisor:
                 )
             if self._progress_callback is not None:
                 self._progress_callback("ready", spec)
+        self._check_start_cancelled()
         self.adoption_complete = len(self.running) == len(self.specs)
         try:
             self._persist_state()
@@ -651,6 +762,12 @@ class ProcessSupervisor:
             self.stop_names(names)
             raise ServiceLaunchError(str(exc)) from exc
         return tuple(self.running)
+
+    def _check_start_cancelled(self) -> None:
+        if self._start_cancel_event is not None and self._start_cancel_event.is_set():
+            # Only the startup/action worker may mutate running handles and
+            # state. Its queued stop retains normal/force/fail-closed semantics.
+            raise ServiceStartCancelled("本次启动已取消。")
 
     def _check_authorization(self, specs: tuple[ServiceSpec, ...]) -> None:
         # Also covers CLI and the legacy control centre, before any subprocess

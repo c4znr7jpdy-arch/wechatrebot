@@ -1,0 +1,378 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+index 54e3ffd..f5fb697 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -43,3 +43,3 @@ from .models import GroupMemberIdentity, NormalizedEvent, RecallRecord, ReplyTar
+ from .onebot_client import OneBotActionRouter, OneBotClient
+-from .state import BridgeState
++from .state import AccountChangedError, BridgeState, account_bound, ensure_current_account
+ 
+@@ -328,2 +328,6 @@ class BridgeApplication:
+                 event = normalize_event(payload)
++                callback_account = event.account_id or scalar(payload.get("account_wxid"))
++                if (event.kind != "login" and callback_account
++                        and callback_account != self.state.bot_wxid):
++                    continue
+                 self._observe_outgoing_image_receipt(payload, event)
+@@ -333,5 +337,7 @@ class BridgeApplication:
+                     avatar = scalar(details.get("head") or details.get("avatar"))
+-                    self.state.set_identity(
++                    if self.state.set_identity(
+                         event.account_id, event.sender_name, avatar
+-                    )
++                    ):
++                        self._polled_group_members.clear()
++                        self._polled_group_names.clear()
+                     await self.onebot.set_identity(
+@@ -522,2 +528,4 @@ class BridgeApplication:
+                         )
++            except AccountChangedError:
++                logger.debug("discarded callback from a previous account session")
+             except Exception:
+@@ -527,2 +535,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _record_inbound_history(self, event: NormalizedEvent) -> None:
+@@ -674,2 +683,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _enrich_group_sender(self, event):
+@@ -723,2 +733,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _resolve_group_member_notice(self, event):
+@@ -831,2 +842,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _enrich_group_member_notice(self, event):
+@@ -876,2 +888,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _forward_group_member_notice(self, event, *, source: str) -> bool:
+@@ -945,2 +958,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _poll_group_member_changes_once(self) -> int:
+@@ -959,4 +973,6 @@ class BridgeApplication:
+         groups = await self.hook.get_groups()
++        ensure_current_account()
+         emitted = 0
+         for raw_group in groups:
++            ensure_current_account()
+             if self._hook_check_overlapped_native_download(generation):
+@@ -983,2 +999,3 @@ class BridgeApplication:
+                 continue
++            ensure_current_account()
+             if self._hook_check_overlapped_native_download(generation):
+@@ -1000,2 +1017,3 @@ class BridgeApplication:
+             ):
++                ensure_current_account()
+                 self._polled_group_members[room_id] = current
+@@ -1023,2 +1041,3 @@ class BridgeApplication:
+ 
++            ensure_current_account()
+             self._polled_group_members[room_id] = current
+@@ -1075,2 +1094,4 @@ class BridgeApplication:
+                 )
++            except AccountChangedError:
++                logger.debug("discarded group poll from a previous account session")
+             except Exception:
+@@ -1110,2 +1131,5 @@ class BridgeApplication:
+         account_id = scalar(payload.get("account_wxid") or data.get("account_wxid"))
++        current_account = getattr(getattr(self, "state", None), "bot_wxid", "")
++        if account_id and current_account and account_id != current_account:
++            return
+         message_name = scalar(
+@@ -1428,2 +1452,3 @@ class BridgeApplication:
+ 
++    @account_bound
+     async def _prepare_inbound_media(self, event):
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+index 4dd57e5..0351775 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/hook_client.py
+@@ -17,2 +17,3 @@ from aiohttp import ClientConnectionError, ClientResponse, ClientSession, Client
+ from .cgi_offsets import cgi_offset_summary
++from .state import ensure_current_account
+ from .models import SendResult, VideoUpload
+@@ -470,2 +471,3 @@ class HookClient:
+             try:
++                ensure_current_account()
+                 runtime_guard().require_hook(path)
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index 37f894d..ff83aff 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -25,3 +25,3 @@ from .outbound_policy import OutboundGroupPolicy
+ from .scheduled_policy import ScheduledDeliveryPolicy
+-from .state import BridgeState
++from .state import AccountChangedError, BridgeState, account_bound, ensure_current_account
+ 
+@@ -250,2 +250,3 @@ class OneBotActionRouter:
+         ] = {}
++        self._image_receipt_epochs: dict[asyncio.Future[RecallRecord], int] = {}
+ 
+@@ -293,2 +294,3 @@ class OneBotActionRouter:
+ 
++    @account_bound
+     async def _execute_command(
+@@ -496,3 +498,5 @@ class OneBotActionRouter:
+     ) -> asyncio.Future[RecallRecord]:
++        ensure_current_account()
+         waiter = asyncio.get_running_loop().create_future()
++        self._image_receipt_epochs[waiter] = self.state.account_epoch
+         self._pending_image_receipts.setdefault(target, deque()).append(waiter)
+@@ -503,2 +507,3 @@ class OneBotActionRouter:
+     ) -> None:
++        self._image_receipt_epochs.pop(waiter, None)
+         waiters = self._pending_image_receipts.get(target)
+@@ -524,2 +529,5 @@ class OneBotActionRouter:
+             return False
++        for pending in tuple(waiters):
++            if self._image_receipt_epochs.get(pending) != self.state.account_epoch:
++                self._cancel_image_receipt_waiter(record.to_user_name, pending)
+         waiter = next((item for item in waiters if not item.done()), None)
+@@ -552,2 +560,4 @@ class OneBotActionRouter:
+             )
++        except AccountChangedError:
++            logger.info("discarded image recall from a previous account session")
+         finally:
+@@ -557,2 +567,3 @@ class OneBotActionRouter:
+ 
++    @account_bound
+     async def _send_message(
+@@ -735,2 +746,3 @@ class OneBotActionRouter:
+         recorder = getattr(self.history, "record_outbound", None)
++        ensure_current_account()
+         if callable(recorder):
+@@ -769,2 +781,3 @@ class OneBotActionRouter:
+         try:
++            ensure_current_account()
+             result = await self.hook.recall(
+@@ -790,2 +803,9 @@ class OneBotActionRouter:
+     async def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
++        try:
++            return await self._handle_current_account(request)
++        except AccountChangedError as exc:
++            return self._failed(str(exc), request.get("echo"), 1403)
++
++    @account_bound
++    async def _handle_current_account(self, request: Mapping[str, Any]) -> dict[str, Any]:
+         action = str(request.get("action", ""))
+@@ -1161,2 +1181,9 @@ class OneBotActionRouter:
+ 
++    def cancel_account_tasks(self) -> None:
++        for task in tuple(self._scheduled):
++            task.cancel()
++        for target, waiters in tuple(self._pending_image_receipts.items()):
++            for waiter in tuple(waiters):
++                self._cancel_image_receipt_waiter(target, waiter)
++
+     async def close(self) -> None:
+@@ -1201,2 +1228,3 @@ class OneBotClient:
+     async def _send_json(self, payload: Mapping[str, Any]) -> None:
++        # A queued/retried event can outlive the socket and its login identity.
+         connection = self._connection
+@@ -1205,3 +1233,11 @@ class OneBotClient:
+         async with self._send_lock:
+-            outgoing = runtime_guard().delivery_event(dict(payload))
++            state = getattr(self.router, "state", None)
++            epoch = payload.get("_hook_bridge_account_epoch")
++            account = getattr(state, "bot_wxid", self._self_id)
++            if ((account and payload.get("self_id") not in (None, "", account))
++                    or (epoch is not None and epoch != getattr(state, "account_epoch", 0))):
++                return
++            clean = {key: value for key, value in payload.items()
++                     if key != "_hook_bridge_account_epoch"}
++            outgoing = runtime_guard().delivery_event(clean)
+             if outgoing is None:
+@@ -1349,2 +1385,8 @@ class OneBotClient:
+             state.set_identity(wxid, nickname)
++        if changed:
++            # Cancel synchronously so new-account tasks created during socket
++            # shutdown cannot be swept into the old account's cleanup.
++            retire = getattr(self.router, "cancel_account_tasks", None)
++            if callable(retire):
++                retire()
+         if changed and self._connection is not None and self._connected_identity != wxid:
+@@ -1353,4 +1395,7 @@ class OneBotClient:
+     async def send_event(self, event: Mapping[str, Any]) -> None:
++        ensure_current_account()
+         queued = runtime_guard().queue_event(dict(event))
+         if queued is not None:
++            state = getattr(self.router, "state", None)
++            queued["_hook_bridge_account_epoch"] = getattr(state, "account_epoch", 0)
+             await self._events.put(queued)
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/state.py b/hook_41827_astrbot_bridge/src/hook_bridge/state.py
+index 5fbcecb..24c1c6b 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/state.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/state.py
+@@ -3,2 +3,5 @@ from __future__ import annotations
+ from collections import OrderedDict, deque
++from contextlib import contextmanager
++from contextvars import ContextVar
++from functools import wraps
+ from copy import deepcopy
+@@ -11,2 +14,44 @@ from .models import GroupMemberIdentity, RecallRecord, ReplyTarget
+ 
++class AccountChangedError(RuntimeError):
++    """An asynchronous operation still belongs to a previous account session."""
++
++
++_account_scope: ContextVar[tuple[object, int] | None] = ContextVar("bridge_account_scope", default=None)
++
++
++def ensure_current_account() -> None:
++    scope = _account_scope.get()
++    if scope is not None and getattr(scope[0], "account_epoch", 0) != scope[1]:
++        raise AccountChangedError("微信账号已变化，原账号操作已取消。")
++
++
++@contextmanager
++def account_scope(state):
++    inherited = _account_scope.get()
++    token = None
++    if inherited is None or inherited[0] is not state:
++        token = _account_scope.set((state, getattr(state, "account_epoch", 0)))
++    try:
++        ensure_current_account()
++        yield
++    finally:
++        if token is not None:
++            _account_scope.reset(token)
++
++
++def account_bound(function):
++    """Child tasks inherit the original epoch, including an A -> B -> A switch."""
++    @wraps(function)
++    async def bound(self, *args, **kwargs):
++        with account_scope(self.state):
++            event = args[0] if args else None
++            account = getattr(event, "account_id", "")
++            if account and self.state.bot_wxid and account != self.state.bot_wxid:
++                raise AccountChangedError("微信账号已变化，原账号事件已取消。")
++            result = await function(self, *args, **kwargs)
++            ensure_current_account()
++            return result
++    return bound
++
++
+ @dataclass(slots=True)
+@@ -25,3 +70,3 @@ class BridgeState:
+     _dedup: OrderedDict[str, float] = field(default_factory=OrderedDict, init=False)
+-    _recalls: dict[int, RecallRecord] = field(default_factory=dict, init=False)
++    _recalls: OrderedDict[int, tuple[RecallRecord, float]] = field(default_factory=OrderedDict, init=False)
+     _latest_by_conversation: dict[str, RecallRecord] = field(default_factory=dict, init=False)
+@@ -47,2 +92,3 @@ class BridgeState:
+     _message_id: int = field(default=0, init=False)
++    account_epoch: int = field(default=0, init=False)
+ 
+@@ -57,2 +103,3 @@ class BridgeState:
+     def accept_message(self, message_id: str, now: float | None = None) -> bool:
++        ensure_current_account()
+         if not message_id:
+@@ -74,2 +121,3 @@ class BridgeState:
+     def forget_message(self, message_id: str) -> None:
++        ensure_current_account()
+         self._dedup.pop(message_id, None)
+@@ -78,2 +126,12 @@ class BridgeState:
+         changed = wxid != self.bot_wxid
++        if changed:
++            self.account_epoch += 1
++            for cache in (
++                self.friends, self.groups, self.group_members, self._dedup,
++                self._recalls, self._latest_by_conversation, self._group_history,
++                self._messages, self._latest_message_by_conversation,
++                self._pending_reply_by_conversation, self._reply_target_by_message_id,
++                self._reply_target_conversation_by_message_id, self._group_member_snapshots,
++            ):
++                cache.clear()
+         self.bot_wxid = wxid
+@@ -87,10 +145,27 @@ class BridgeState:
+ 
++    def _expire_recalls(self) -> None:
++        """Old handles expire under the existing history bound and de-dup TTL."""
++        cutoff = time.monotonic() - self.dedup_ttl_seconds
++        while self._recalls:
++            message_id, (_record, timestamp) = next(iter(self._recalls.items()))
++            if timestamp > cutoff and len(self._recalls) <= self.history_capacity:
++                break
++            self.forget_recall(message_id)
++
+     def remember_recall(self, onebot_message_id: int, record: RecallRecord) -> None:
+-        self._recalls[onebot_message_id] = record
++        ensure_current_account()
++        self._recalls[onebot_message_id] = (record, time.monotonic())
++        self._recalls.move_to_end(onebot_message_id)
+         self._latest_by_conversation[record.to_user_name] = record
++        self._expire_recalls()
+ 
+     def get_recall(self, onebot_message_id: int) -> RecallRecord | None:
+-        return self._recalls.get(onebot_message_id)
++        ensure_current_account()
++        self._expire_recalls()
++        entry = self._recalls.get(onebot_message_id)
++        return entry[0] if entry else None
+ 
+     def latest_recall(self, conversation_id: str) -> RecallRecord | None:
++        ensure_current_account()
++        self._expire_recalls()
+         return self._latest_by_conversation.get(conversation_id)
+@@ -102,2 +177,3 @@ class BridgeState:
+     ) -> None:
++        ensure_current_account()
+         self.group_members[room_id] = dict(members)
+@@ -106,2 +182,3 @@ class BridgeState:
+     def has_group_member_snapshot(self, room_id: str) -> bool:
++        ensure_current_account()
+         return room_id in self._group_member_snapshots
+@@ -114,2 +191,3 @@ class BridgeState:
+     ) -> None:
++        ensure_current_account()
+         if not room_id or not member_wxid:
+@@ -121,2 +199,3 @@ class BridgeState:
+     ) -> GroupMemberIdentity | None:
++        ensure_current_account()
+         return self.group_members.get(room_id, {}).get(member_wxid)
+@@ -124,3 +203,4 @@ class BridgeState:
+     def forget_recall(self, onebot_message_id: int) -> None:
+-        record = self._recalls.pop(onebot_message_id, None)
++        entry = self._recalls.pop(onebot_message_id, None)
++        record = entry[0] if entry else None
+         if record and self._latest_by_conversation.get(record.to_user_name) == record:
+@@ -129,2 +209,5 @@ class BridgeState:
+     def remember_group_message(self, event: Mapping[str, Any]) -> None:
++        ensure_current_account()
++        if event.get("self_id") not in (None, "", self.bot_wxid):
++            return
+         if event.get("message_type") != "group":
+@@ -141,2 +224,5 @@ class BridgeState:
+         """Cache a OneBot message so AstrBot can resolve a Reply segment."""
++        ensure_current_account()
++        if event.get("self_id") not in (None, "", self.bot_wxid):
++            return
+         if message_id <= 0:
+@@ -156,2 +242,3 @@ class BridgeState:
+     def get_message(self, message_id: int) -> dict[str, Any] | None:
++        ensure_current_account()
+         event = self._messages.get(message_id)
+@@ -160,2 +247,3 @@ class BridgeState:
+     def latest_message_id(self, conversation_id: str) -> int | None:
++        ensure_current_account()
+         return self._latest_message_by_conversation.get(str(conversation_id))
+@@ -168,2 +256,3 @@ class BridgeState:
+     ) -> None:
++        ensure_current_account()
+         key = str(conversation_id)
+@@ -184,2 +273,3 @@ class BridgeState:
+     ) -> ReplyTarget | None:
++        ensure_current_account()
+         message_key = str(message_id)
+@@ -196,2 +286,3 @@ class BridgeState:
+     def take_reply_target(self, conversation_id: str) -> ReplyTarget | None:
++        ensure_current_account()
+         return self._pending_reply_by_conversation.pop(str(conversation_id), None)
+@@ -199,2 +290,3 @@ class BridgeState:
+     def group_history(self, group_id: str, count: int = 100) -> list[dict[str, Any]]:
++        ensure_current_account()
+         items = list(self._group_history.get(group_id, ()))

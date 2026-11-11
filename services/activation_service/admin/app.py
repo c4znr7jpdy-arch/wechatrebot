@@ -21,6 +21,8 @@ from ..store import LicenseStore
 from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
 from .codes import FILTERS, checked_reference, detail_html, history_html, migration_help, quota_text, reference_fields
 from .github import GitHubError, GitHubReleases
+from .release_cache import ReleaseReadCache
+from .release_editor import ReleaseEditor, is_pending_version
 from .upload import MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, UPLOAD_ROUTE, authenticate_upload, receive_candidate
 
 _LOG = logging.getLogger(__name__)
@@ -66,10 +68,23 @@ def _time(value: int | float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _release_status(session: dict, scope: str) -> str:
+    return (f'<div id="release-data" data-release-scope="{scope}">'
+            '<p>当前稳定版本：<strong id="stable-version">正在读取…</strong></p>'
+            '<p id="stable-status" class="hint" role="status">版本信息在后台读取，可继续使用其他功能。</p>'
+            f'<button id="refresh-releases" type="button" data-csrf="{escape(session["csrf"], quote=True)}">刷新版本信息</button>'
+            '<noscript><p>请启用 JavaScript 后查看版本信息和切换稳定版本。</p></noscript>')
+
+
+def _release_script() -> str:
+    return f'<script src="{PREFIX}releases.js" defer></script>'
+
+
 def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                      github: GitHubReleases | None = None) -> web.Application:
     auth = AuthStore(data_dir)
     releases = github or GitHubReleases(data_dir)
+    release_reads = ReleaseReadCache(releases)
     transactions: set[asyncio.Task] = set()
     upload_lock = asyncio.Lock()
 
@@ -116,7 +131,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
         response.headers.update({
             "Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer", "Content-Security-Policy":
-                "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+                "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
         })
         return response
 
@@ -169,13 +184,10 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             backup = _time(int(value["completed_at"]))
         except FileNotFoundError:
             pass
-        try:
-            stable = await releases.stable()
-            version = f'{stable["version"]}（签名已验证）'
-        except GitHubError:
-            version = "GitHub 暂不可用，其他管理功能正常可用"
+        release_reads.snapshot("stable")
         body = (f'<p class="status">授权数据库连接正常</p><div class="grid">{cards}</div>'
-                f'<section class="panel"><p>当前稳定版本：{escape(version)}</p><p>最近备份：{escape(backup)}</p></section>')
+                '<section class="panel">' + _release_status(request["admin_session"], "overview")
+                + f'</div><p>最近备份：{escape(backup)}</p></section>' + _release_script())
         return await render(request, "概览", body)
 
     async def contact(request):
@@ -303,40 +315,55 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                 except GitHubError as exc:
                     await audit("stable_switch_failed")
                     return str(exc)
+                finally:
+                    release_reads.invalidate()
 
             task = asyncio.create_task(switch_and_audit())
             transactions.add(task)
             task.add_done_callback(transactions.discard)
             message = await asyncio.shield(task)
             return await redirect(request, "releases", message)
-        upload_form = ('<section class="panel"><h2>上传已签名更新包</h2>'
+        upload_form = ('<details class="panel"><summary>高级操作：手动上传更新包</summary><h2>上传已签名更新包</h2>'
             '<p class="hint">选择本地发布入口生成的候选记录、签名清单和全部更新 ZIP。总大小最多 4 GiB。上传通过后，再在下方确认切换稳定版本才会通知客户端。</p>'
             + _form(session, "releases/upload", _field("totp", "上传动态码", extra='inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"')
                 + _field("candidate", "发布候选记录", kind="file", extra='accept=".json"')
                 + _field("manifest", "签名稳定清单", kind="file", extra='accept=".json"')
                 + _field("packages", "更新 ZIP（选择清单要求的全部包）", kind="file", extra='accept=".zip" multiple')
-                + '<button type="submit">上传并验证</button>', multipart=True) + '</section>')
-        try:
-            stable, listing = await asyncio.gather(releases.stable(), releases.listing())
-        except GitHubError as exc:
-            return await render(request, "发布版本", upload_form + '<section class="panel"><p>' + escape(str(exc)) + '</p></section>')
-        rows, options = [], []
-        for item in listing:
-            assets = '<br>'.join(f'{escape(str(a["name"]))} · {int(a["size"]):,} 字节' for a in item["assets"])
-            verified = "签名通过" if item["verified"] else "不可选：" + item["error"]
-            rows.append(f'<tr><td>{escape(item["version"])}</td><td>{escape(item["published_at"])}</td><td>{assets}</td><td>{escape(verified)}</td></tr>')
-            if item["verified"]:
-                options.append(f'<option value="{escape(item["version"], quote=True)}">{escape(item["version"])}</option>')
-        body = (upload_form + f'<section class="panel"><p>当前稳定版本：<strong>{escape(stable["version"])}</strong> · 签名通过</p>'
-                '<p class="hint">选择较早版本即为回滚发布清单；已经升级的客户端不会自动降级。</p>'
+                + '<button type="submit">上传并验证</button>', multipart=True) + '</details>')
+        release_reads.snapshot("stable")
+        release_reads.snapshot("listing")
+        body = (editor.panel(session) + '<section class="panel">' + _release_status(session, "releases")
+                + '<details><summary>高级操作：切换或回滚稳定清单</summary>'
+                + '<p class="hint">选择较早版本即为回滚发布清单；已经升级的客户端不会自动降级。</p>'
                 '<p class="hint">切换前会下载并校验更新包，可能需要几分钟。登录使用过的动态码不可重复使用。</p>'
-                + _form(session, "releases", f'<input type="hidden" name="stable_digest" value="{stable["digest"]}">'
-                    + '<label>目标版本<select name="version">' + ''.join(options) + '</select></label>'
+                + _form(session, "releases", '<fieldset id="release-switch-fields" disabled><input type="hidden" name="stable_digest" value="">'
+                    + '<label>目标版本<select name="version"><option value="">正在读取版本…</option></select></label>'
                     + _field("totp", "重新输入当前动态码", extra='inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"')
-                    + '<button type="submit">确认切换稳定版本</button>') + '</section>'
-                + '<section class="panel scroll"><h2>最近 100 个发布记录</h2><table><thead><tr><th>版本</th><th>发布时间</th><th>资产</th><th>签名</th></tr></thead><tbody>'
-                + ''.join(rows) + '</tbody></table></section>')
+                    + '<button type="submit">确认切换稳定版本</button></fieldset>') + '</details>'
+                + '<p id="release-listing-status" class="hint" role="status">正在读取发布记录…</p>'
+                + '<div class="scroll"><h2>最近 100 个发布记录</h2><table><thead><tr><th>版本</th><th>发布时间</th><th>资产</th><th>签名</th></tr></thead>'
+                + '<tbody id="release-rows"></tbody></table></div></div></section>' + upload_form
+                + f'<script src="{PREFIX}release-editor.js" defer></script>' + _release_script())
         return await render(request, "发布版本", body)
+
+    async def release_status(request):
+        scope = (str(request["admin_form"].get("scope", "releases")) if request.method == "POST"
+                 else request.query.get("scope", "releases"))
+        if scope not in {"overview", "releases"}:
+            raise web.HTTPBadRequest(text="版本查询范围无效。")
+        kinds = ("stable", "listing") if scope == "releases" else ("stable",)
+        if request.method == "POST":
+            release_reads.invalidate(*kinds)
+        values = await asyncio.gather(*(release_reads.read(kind) for kind in kinds))
+        data = dict(zip(kinds, values))
+        stable = data["stable"]["value"]
+        listing = data.get("listing", {}).get("value")
+        if stable and listing is not None:
+            data["listing"] = {**data["listing"], "value": [
+                {**item, "pending": bool(item.get("available", item.get("verified", False))
+                    and is_pending_version(item["version"], stable["version"]))}
+                for item in listing]}
+        return web.json_response(data)
 
     async def upload(request):
         if upload_lock.locked():
@@ -353,6 +380,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
                         except Exception:
                             await audit("release_upload_failed", release.version)
                             raise
+                        finally:
+                            release_reads.invalidate()
 
                     task = asyncio.create_task(publish_and_audit())
                     transactions.add(task)
@@ -381,6 +410,15 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     async def code_script(request):
         return web.Response(text=(_TEMPLATES / "codes.js").read_text("utf-8"), content_type="application/javascript")
 
+    async def release_script(request):
+        return web.Response(text=(_TEMPLATES / "releases.js").read_text("utf-8"), content_type="application/javascript")
+
+    async def editor_script(request):
+        return web.Response(text=(_TEMPLATES / "release-editor.js").read_text("utf-8"), content_type="application/javascript")
+
+    editor = ReleaseEditor(releases, auth, data_dir, clock=clock, audit=audit, render=render,
+        redirect=redirect, form=_form, field=_field, release_reads=release_reads, transactions=transactions)
+
     # The upload handler enforces the package and metadata limits while
     # streaming. Keep aiohttp's outer limit aligned so it does not reject a
     # valid multi-gigabyte multipart request before the handler can inspect CSRF
@@ -389,6 +427,14 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     app.router.add_get("/", overview)
     app.router.add_get("/style.css", style)
     app.router.add_get("/codes.js", code_script)
+    app.router.add_get("/releases.js", release_script)
+    app.router.add_get("/release-editor.js", editor_script)
+    app.router.add_get("/releases/editor", editor.load)
+    app.router.add_post("/releases/draft", editor.save)
+    app.router.add_post("/releases/preview", editor.preview)
+    app.router.add_post("/releases/publish", editor.publish)
+    app.router.add_get("/releases/status", release_status)
+    app.router.add_post("/releases/refresh", release_status)
     app.router.add_get("/codes/{code_id}", code_detail)
     app.router.add_get("/contact/image", contact_image)
     for path, handler in (("login", login), ("contact", contact), ("codes", codes), ("releases", release_page)):
@@ -397,6 +443,7 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     app.router.add_post("/logout", logout)
     app.router.add_post(UPLOAD_ROUTE, upload)
     async def finish_transactions(application):
+        await release_reads.close()
         if transactions:
             await asyncio.gather(*transactions, return_exceptions=True)
     app.on_cleanup.append(finish_transactions)

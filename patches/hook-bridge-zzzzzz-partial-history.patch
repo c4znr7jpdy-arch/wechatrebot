@@ -1,0 +1,229 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+index 007bc44..eaf4803 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -652,100 +652,126 @@ class OneBotActionRouter:
+                 return self._failed("auto_recall_delay must be a number", echo, 10003)
+ 
+         completed = 0
++        sent_commands: list[OutboundCommand] = []
+         history_media_paths: list[Path] = []
+         latest_receipt: SendResult | None = None
+         onebot_id = self.state.next_message_id()
+-        for index, command in enumerate(commands, start=1):
+-            pending_waiter: asyncio.Future[RecallRecord] | None = None
+-            try:
+-                if command.kind in {"image", "emotion"}:
+-                    media_path = await self.media.materialize(command.source)
+-                    command = replace(command, source=str(media_path))
+-                    history_media_paths.append(media_path)
+-                if auto_recall_delay is not None and command.kind == "image":
+-                    pending_waiter = self._new_image_receipt_waiter(command.target)
+-                    logger.info(
+-                        "waiting for outgoing image receipt target=%s auto_recall_delay=%.1fs",
+-                        command.target,
+-                        auto_recall_delay,
+-                    )
+-                if scheduled:
+-                    # Media preparation may await downloads; recheck the live
+-                    # account and task after it and immediately before HOOK.
+-                    path = await self.media.materialize(command.source) if command.kind == "image" else None
+-                    decision = await self.scheduled_policy.authorize(
+-                        self.state.bot_wxid, target, is_group=is_group, params=params
+-                    )
+-                    if not decision.allowed or self.state.bot_wxid != params.get("_wechatrebot_account"):
+-                        return self._failed(
+-                            decision.message if not decision.allowed else "机器人账号已变化，定时推送已取消。",
+-                            echo, 1403,
++        try:
++            for index, command in enumerate(commands, start=1):
++                pending_waiter: asyncio.Future[RecallRecord] | None = None
++                media_path: Path | None = None
++                try:
++                    if command.kind in {"image", "emotion"}:
++                        media_path = await self.media.materialize(command.source)
++                        command = replace(command, source=str(media_path))
++                    if auto_recall_delay is not None and command.kind == "image":
++                        pending_waiter = self._new_image_receipt_waiter(command.target)
++                        logger.info(
++                            "waiting for outgoing image receipt target=%s auto_recall_delay=%.1fs",
++                            command.target,
++                            auto_recall_delay,
+                         )
+-                    if command.kind == "image":
+-                        result = await self.hook.send_image(target, path)
+-                    elif command.kind == "link_card":
+-                        result = await self.hook.send_link_card(
+-                            command.target, command.title, command.description,
+-                            command.thumb_url, command.url,
++                    if scheduled:
++                        # Media preparation may await downloads; recheck the live
++                        # account and task after it and immediately before HOOK.
++                        path = await self.media.materialize(command.source) if command.kind == "image" else None
++                        decision = await self.scheduled_policy.authorize(
++                            self.state.bot_wxid, target, is_group=is_group, params=params
+                         )
++                        if not decision.allowed or self.state.bot_wxid != params.get("_wechatrebot_account"):
++                            return self._failed(
++                                decision.message if not decision.allowed else "机器人账号已变化，定时推送已取消。",
++                                echo, 1403,
++                            )
++                        if command.kind == "image":
++                            result = await self.hook.send_image(target, path)
++                        elif command.kind == "link_card":
++                            result = await self.hook.send_link_card(
++                                command.target, command.title, command.description,
++                                command.thumb_url, command.url,
++                            )
++                        else:
++                            result = await self.hook.send_text(target, command.text)
+                     else:
+-                        result = await self.hook.send_text(target, command.text)
+-                else:
+-                    result = await self._execute_command(
+-                        command,
+-                        reply_target if index == 1 else None,
+-                    )
+-                if not result.ok:
+-                    detail = result.error or "HOOK rejected request"
+-                    return self._failed(
+-                        f"segment {index} failed after {completed} completed: {detail}",
+-                        echo,
+-                    )
+-                completed += 1
+-                if (
+-                    result.message_id
+-                    and result.create_time is not None
+-                    and result.to_user_name
+-                ):
+-                    latest_receipt = result
+-                    if pending_waiter is not None and not pending_waiter.done():
+-                        pending_waiter.set_result(
+-                            RecallRecord(
+-                                result.message_id,
+-                                result.create_time,
+-                                result.to_user_name,
++                        result = await self._execute_command(
++                            command,
++                            reply_target if index == 1 else None,
++                        )
++                    if not result.ok:
++                        detail = result.error or "HOOK rejected request"
++                        return self._failed(
++                            f"segment {index} failed after {completed} completed: {detail}",
++                            echo,
++                        )
++                    completed += 1
++                    sent_commands.append(command)
++                    if media_path is not None:
++                        history_media_paths.append(media_path)
++                    if (
++                        result.message_id
++                        and result.create_time is not None
++                        and result.to_user_name
++                    ):
++                        latest_receipt = result
++                        if pending_waiter is not None and not pending_waiter.done():
++                            pending_waiter.set_result(
++                                RecallRecord(
++                                    result.message_id,
++                                    result.create_time,
++                                    result.to_user_name,
++                                )
+                             )
++                    if pending_waiter is not None:
++                        deadline = (
++                            asyncio.get_running_loop().time()
++                            + max(0.0, auto_recall_delay or 0.0)
+                         )
+-                if pending_waiter is not None:
+-                    deadline = (
+-                        asyncio.get_running_loop().time()
+-                        + max(0.0, auto_recall_delay or 0.0)
+-                    )
+-                    # This image has already been sent. A later segment's
+-                    # failure or cancellation must not revoke its recall owner.
+-                    self._schedule_image_recall(
+-                        command.target, pending_waiter, onebot_id, deadline
++                        # This image has already been sent. A later segment's
++                        # failure or cancellation must not revoke its recall owner.
++                        self._schedule_image_recall(
++                            command.target, pending_waiter, onebot_id, deadline
++                        )
++                        pending_waiter = None
++                except (HookApiError, MediaError, OSError, asyncio.TimeoutError) as exc:
++                    return self._failed(
++                        f"segment {index} failed after {completed} completed: {exc}", echo
+                     )
+-                    pending_waiter = None
+-            except (HookApiError, MediaError, OSError, asyncio.TimeoutError) as exc:
+-                return self._failed(
+-                    f"segment {index} failed after {completed} completed: {exc}", echo
++                finally:
++                    # Covers cancellation and unexpected exceptions as well as
++                    # rejected sends, without touching earlier successful images.
++                    if pending_waiter is not None:
++                        self._cancel_image_receipt_waiter(command.target, pending_waiter)
++
++            if latest_receipt is not None:
++                recall_record = RecallRecord(
++                    latest_receipt.message_id or "",
++                    latest_receipt.create_time or 0,
++                    latest_receipt.to_user_name or target,
+                 )
+-            finally:
+-                # Covers cancellation and unexpected exceptions as well as
+-                # rejected sends, without touching earlier successful images.
+-                if pending_waiter is not None:
+-                    self._cancel_image_receipt_waiter(command.target, pending_waiter)
+-
+-        if latest_receipt is not None:
+-            recall_record = RecallRecord(
+-                latest_receipt.message_id or "",
+-                latest_receipt.create_time or 0,
+-                latest_receipt.to_user_name or target,
+-            )
+-            self.state.remember_recall(onebot_id, recall_record)
++                self.state.remember_recall(onebot_id, recall_record)
++        finally:
++            # A rejected or cancelled later segment cannot erase confirmed sends.
++            # Unconfirmed commands and media must never enter the journal.
++            if sent_commands:
++                await self._record_outbound_history(
++                    target, is_group, sent_commands, latest_receipt, history_media_paths
++                )
++
++        return self._ok({"message_id": onebot_id}, echo)
++
++    async def _record_outbound_history(
++        self,
++        target: str,
++        is_group: bool,
++        commands: list[OutboundCommand],
++        latest_receipt: SendResult | None,
++        media_paths: list[Path],
++    ) -> None:
+         recorder = getattr(self.history, "record_outbound", None)
+-        ensure_current_account()
++        try:
++            ensure_current_account()
++        except AccountChangedError:
++            return
+         if callable(recorder):
+             try:
+                 await asyncio.to_thread(
+@@ -757,13 +783,12 @@ class OneBotActionRouter:
+                     create_time=latest_receipt.create_time if latest_receipt else None,
+                     sender_id=self.state.bot_wxid,
+                     sender_name=self.state.bot_nickname,
+-                    media_paths=history_media_paths,
++                    media_paths=media_paths,
+                 )
+             except Exception:
+                 logger.exception(
+                     "failed to persist outbound message history target=%s", target
+                 )
+-        return self._ok({"message_id": onebot_id}, echo)
+ 
+     async def _recall_record(
+         self, record: RecallRecord | None, echo: Any

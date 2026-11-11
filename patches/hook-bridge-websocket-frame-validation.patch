@@ -1,0 +1,19 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/onebot_client.py
+@@ -1076,11 +1076,11 @@
+ 
+     async def _receive_loop(self, connection: ClientConnection) -> None:
+         async for raw in connection:
+-            if isinstance(raw, bytes):
+-                raw = raw.decode("utf-8")
+-            try:
++            try:
++                if isinstance(raw, bytes):
++                    raw = raw.decode("utf-8")
+                 request = json.loads(raw)
+-            except json.JSONDecodeError:
++            except (ValueError, RecursionError):
+                 logger.warning("ignored invalid JSON from AstrBot")
+                 continue
+             if not isinstance(request, Mapping) or not request.get("action"):

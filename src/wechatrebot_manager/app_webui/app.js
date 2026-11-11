@@ -17,8 +17,11 @@
     featureReferenceOpen: {},
     featureDirty: false,
     featureSaving: false,
+    featurePageDirty: false,
+    featurePageBusy: false,
     featureLoad: 0,
     featurePrefetch: 0,
+    featuresLoad: 0,
     featureDetails: {},
     imageServiceChoicesStale: false,
     featureFeedback: "",
@@ -50,6 +53,7 @@
     privatePolicies: {},
     contactLoad: 0,
     historyKind: "all",
+    historyAccessAccount: undefined,
     historyAccount: "",
     historyReadyAccount: "",
     historyConversationSnapshot: null,
@@ -66,6 +70,8 @@
     historyHasNewer: false,
     historyLoadingOlder: false,
     historyManualRefresh: false,
+    historyExporting: false,
+    historyActionNotice: null,
     historyOlderLoad: 0,
     historyMessageQuery: "",
     historyMessageCache: new Map(),
@@ -87,11 +93,18 @@
     experience: null,
     readiness: null,
     maintenance: null,
+    restorePending: false,
+    restoreRefreshing: false,
     responseTraces: [],
     activityItems: [],
     activityPage: 1,
     polling: false,
+    lastRuntimeStatus: null,
+    startActionRevision: 0,
     startPending: false,
+    startPreparing: false,
+    stopPending: false,
+    stopRequestPending: false,
     composing: false,
     availableUpdate: null,
     mandatoryUpdate: false,
@@ -100,6 +113,9 @@
     settingsSection: "model",
     webSearch: null,
     webSearchDirty: false,
+    webSearchSaving: false,
+    webSearchLoading: false,
+    webSearchUnconfirmed: false,
     providerScreen: "overview",
     providerDirty: false,
     providerBaseline: "",
@@ -280,8 +296,10 @@
   function reportError(error) {
     const product = error?.product;
     const title = product?.title || "操作未完成";
-    const detail = (typeof product?.detail === "string" ? product.detail.trim() : "")
+    const originalDetail = (typeof product?.detail === "string" ? product.detail.trim() : "")
       || (typeof product?.message === "string" ? product.message.trim() : "");
+    const detail = String(product?.code || "").startsWith("LIC-")
+      ? subscription?.formatMessage?.({...product, message: originalDetail}) || originalDetail : originalDetail;
     const message = product
       ? `${title}${detail && detail !== title ? `：${detail}` : ""}${product.code ? `（${product.code}）` : ""}`
       : (error?.message || "操作未完成，请稍后重试。 ");
@@ -353,10 +371,25 @@
     };
   }
 
-  function reconcileStartPending(status) {
-    if (!state.startPending) return status;
+  function reconcileStartPending(status, {optimistic = false} = {}) {
     const current = status?.state || "STOPPED";
-    if (current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy) {
+    if (state.startPreparing && ["STOPPED", "LICENSE_READY"].includes(current)
+      && status?.environment?.ready && !status?.error) {
+      const loggedIn = status.runtime?.account_status_available !== false && Boolean(status.runtime?.wechat_identity);
+      return {...startingStatus(status),
+        title: loggedIn ? "微信已登录，正在确认启动" : "正在准备启动机器人",
+        message: loggedIn ? "正在核对当前账号与授权，确认后会继续启动，无需再次点击启动。" : "正在检查授权与微信连接，请按提示完成确认。"};
+    }
+    if (status?.start_pending === true) {
+      state.startPending = false;
+      return status;
+    }
+    if (!optimistic && Object.hasOwn(status || {}, "start_pending") && !state.startPreparing) {
+      state.startPending = false;
+      return status;
+    }
+    if (!state.startPending) return status;
+    if (!optimistic && current === "LICENSE_READY" && status?.runtime?.connection_ready && !status?.busy && !state.startPreparing) {
       state.startPending = false;
       return status;
     }
@@ -367,10 +400,19 @@
     return status;
   }
 
-  function renderStatus(rawStatus) {
+  function renderStatus(rawStatus, {optimistic = false} = {}) {
+    if (!optimistic) {
+      state.lastRuntimeStatus = rawStatus;
+      const stopped = ["STOPPED", "LICENSE_READY", "LICENSE_PAUSED", "ERROR", "STOP_WAIT_WECHAT"].includes(rawStatus?.state);
+      // A status read may finish before the stop request's own response.
+      if (!state.stopRequestPending && (rawStatus?.state === "STOPPING"
+        || (stopped && !rawStatus?.start_pending && !rawStatus?.busy))) {
+        state.stopPending = false;
+      }
+    }
     const wasOnline = Boolean(state.status?.online);
     const wasAccountUnavailable = state.status?.runtime?.account_status_available === false;
-    const status = reconcileStartPending(rawStatus);
+    const status = reconcileStartPending(rawStatus, {optimistic});
     state.status = status;
     subscription.updateRuntime(status);
     const runtime = status.runtime || {};
@@ -383,20 +425,37 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
-    const confirmingConnection = !status.error && (current === "VERIFYING_CONNECTION"
+    const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    const confirmingConnection = !status.error && ((current === "VERIFYING_CONNECTION" && !wechatLoggedIn)
       || (current === "RUNNING" && !online && !accountStatusAvailable));
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
-    const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
-    const offlineHistory = status.history_offline === true && !runtime.connection_ready && !runtime.engine_ready && !runtime.wechat_identity
-      ? String(status.history_account || "").trim() : "";
-    // A failed probe is not a logout. Keep the displayed account snapshot,
-    // while the backend independently refuses unverified reads and mutations.
-    const historyAccount = offlineHistory || (accountStatusAvailable
-      ? String(runtime.wechat_identity || "").trim() : state.historyAccount);
+    const coreStarted = Boolean(runtime.engine_ready);
+    const messageConnected = online || Boolean(runtime.connection_ready && runtime.hook_ready
+      && wechatLoggedIn && runtime.upstream_connected && runtime.heartbeat_fresh);
+    const connectionProgress = wechatLoggedIn && active && !messageConnected && !status.error
+      && !["STOPPING", "STOP_WAIT_WECHAT"].includes(current)
+      ? !runtime.connection_ready || !runtime.hook_ready
+        ? {label: "确认微信连接", message: "已确认微信账号，正在重新检查微信连接，恢复后会自动继续。"}
+        : !coreStarted
+          ? {label: "等待功能就绪", message: "微信已登录，正在等待机器人功能就绪，完成后会自动建立消息连接。"}
+          : !runtime.upstream_connected
+            ? {label: "建立消息连接", message: "微信已登录，机器人功能已就绪，正在建立消息连接。"}
+            : {label: "确认消息通信", message: "消息连接已建立，正在确认通信状态，完成后会自动变为可用。"}
+      : null;
+    const verifyingLoggedIn = connectionProgress && ["VERIFYING_CONNECTION", "RUNNING"].includes(current);
+    // The backend verifies both the entitlement and the current WeChat account.
+    // Preview fixtures without this field continue to use their runtime identity.
+    if (Object.hasOwn(status, "history_account")) {
+      state.historyAccessAccount = String(status.history_account || "").trim();
+    }
+    const historyAccount = state.historyAccessAccount === undefined
+      ? (accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : state.historyAccount)
+      : (wechatLoggedIn && String(runtime.wechat_identity).trim() === state.historyAccessAccount ? state.historyAccessAccount : "");
 
     if (historyAccount !== state.historyAccount) {
       state.historyAccount = historyAccount;
       invalidateHistoryState();
+      renderHistoryAccountGate(historyAccount);
       invalidateScheduledContext();
       invalidateChatManagementContext();
       if (state.activePage === "schedules") void loadSchedules();
@@ -405,14 +464,13 @@
         else void loadContacts(false);
       }
       if (state.activePage === "history") {
-        renderHistoryAccountGate(historyAccount);
         if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
       }
     } else if (wasAccountUnavailable && accountStatusAvailable) {
       void refreshVisibleChatData().catch(reportError);
     }
     setHistoryActionsEnabled(
-      (wechatLoggedIn || Boolean(offlineHistory)) && state.historyReadyAccount === historyAccount
+      wechatLoggedIn && Boolean(historyAccount) && state.historyReadyAccount === historyAccount
     );
 
     // Details prefetched while the engine is starting can carry a stale
@@ -434,20 +492,24 @@
       void openFeature(state.selectedFeature, false, true);
     }
 
-    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接" : status.title;
+    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接"
+      : verifyingLoggedIn ? (coreStarted ? "微信已登录，正在连接消息服务" : "微信已登录，正在启动机器人功能") : status.title;
     $("#stateMessage").textContent = current === "STOP_WAIT_WECHAT"
       ? "关闭微信后会自动完成停止，也可再次点击“停止运行”立即结束机器人服务。"
-      : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。" : status.message;
+      : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。"
+      : verifyingLoggedIn ? connectionProgress.message
+      : current === "LICENSE_PAUSED" ? subscription.formatMessage?.(undefined, status.message) || status.message : status.message;
     $("#accountText").textContent = !accountStatusAvailable ? (active || runtime.connection_ready ? "正在确认微信连接…" : "尚未连接")
       : runtime.wechat_identity ? `已登录：${runtime.wechat_identity}` : "尚未连接";
     $("#lastCheckText").textContent = `检查于 ${new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})}`;
 
     const global = $("#globalStatus");
     global.className = `status-badge ${online ? "online" : problem ? "error" : waiting ? "warning" : "checking"}`;
-    global.innerHTML = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? status.title : active ? "正在启动" : environment.ready ? "等待启动" : "环境未就绪")}`;
+    const globalMarkup = `<span></span>${escapeHtml(online ? "机器人可用" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : verifyingLoggedIn ? connectionProgress.label : waiting ? status.title : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : environment.ready ? "等待启动" : "环境未就绪")}`;
+    if (global.innerHTML !== globalMarkup) global.innerHTML = globalMarkup;
     const sideDot = $("#sideHealthDot");
     sideDot.className = `health-dot ${online ? "online" : problem ? "error" : waiting || !environment.ready ? "warning" : ""}`;
-    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
+    $("#sideHealthText").textContent = online ? "机器人在线" : problem ? "需要处理" : confirmingConnection ? "正在确认连接" : verifyingLoggedIn ? connectionProgress.label : waiting ? "等待操作" : active ? (current === "STOPPING" ? "正在停止" : "正在启动") : "当前未运行";
 
     const orbit = $("#statusOrbit");
     orbit.dataset.state = online ? "online" : problem ? "error" : waiting || confirmingConnection ? "waiting" : status.busy || active ? "starting" : "stopped";
@@ -467,16 +529,26 @@
     }
     const primary = $("#primaryAction");
     const stopMode = !status.can_start && (status.can_stop || online);
-    const primaryLabel = starting ? "启动中…" : stopMode ? "停止运行" : "启动";
-    primary.innerHTML = `${icon(starting ? "i-refresh" : stopMode ? "i-stop" : "i-play")}<span>${primaryLabel}</span>`;
+    const cancelStart = stopMode && status.start_pending && !online;
+    const verificationStop = current === "VERIFYING_CONNECTION" && status.can_stop
+      && !status.start_pending;
+    const stopping = state.stopPending || current === "STOPPING";
+    const primaryLabel = stopping ? "正在停止…" : cancelStart ? "取消启动"
+      : stopMode ? (verificationStop ? "停止机器人" : "停止运行") : starting ? "启动中…" : "启动";
+    const primarySymbol = stopping || (starting && !cancelStart) ? "i-refresh" : stopMode ? "i-stop" : "i-play";
+    if (primary.querySelector("use")?.getAttribute("href") !== `#${primarySymbol}`
+      || primary.querySelector("span")?.textContent !== primaryLabel) {
+      primary.innerHTML = `${icon(primarySymbol)}<span>${primaryLabel}</span>`;
+    }
     primary.dataset.action = stopMode ? "stop" : "start";
-    primary.disabled = Boolean(status.busy)
+    primary.disabled = Boolean(state.startPreparing || state.stopPending
+      || (status.busy && !cancelStart && !verificationStop))
       || (!status.can_start && !status.can_stop)
       || (state.mandatoryUpdate && !stopMode);
-    primary.setAttribute("aria-busy", String(Boolean(status.busy)));
+    primary.setAttribute("aria-busy", String(Boolean(status.busy || state.stopPending)));
     primary.setAttribute("aria-label", primaryLabel);
     primary.title = current === "STOP_WAIT_WECHAT" ? "立即停止机器人，保留微信窗口"
-      : stopMode ? "安全停止机器人" : primaryLabel;
+      : cancelStart ? "取消本次启动，停止机器人功能" : stopMode ? "安全停止机器人" : primaryLabel;
     const stopRetainedConnection = $("#stopRetainedConnection");
     const canStopRetainedConnection = licenseWaiting && status.can_start && status.can_stop && !status.busy;
     stopRetainedConnection.hidden = !canStopRetainedConnection;
@@ -501,27 +573,29 @@
     }
 
     setStage($("#stageEnvironment"), environment.ready ? "done" : "problem", environment.ready ? "已通过" : "未通过");
-    const coreStarted = Boolean(runtime.engine_ready);
     setStage($("#stageCore"), coreStarted ? "done" : active ? "current" : "", coreStarted ? "已就绪" : confirmingConnection ? "状态待确认" : active ? "启动中" : "未启动");
     const connectionStarting = current === "CONNECTION_STARTING";
     const connectionWaiting = ["WAITING_WECHAT", "VERIFYING_CONNECTION"].includes(current);
     const connectionRetained = licenseWaiting && runtime.connection_ready;
-    const connectionMode = online || wechatLoggedIn || connectionRetained ? "done" : confirmingConnection || connectionWaiting || connectionStarting ? "current" : problem && coreStarted ? "problem" : "";
-    setStage($("#stageConnection"), connectionMode, online ? "已连接" : confirmingConnection ? "确认中" : wechatLoggedIn ? "已登录" : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
+    const connectionMode = messageConnected ? "done" : confirmingConnection || connectionWaiting || connectionStarting || wechatLoggedIn || connectionRetained ? "current" : problem && coreStarted ? "problem" : "";
+    setStage($("#stageConnection"), connectionMode, messageConnected ? "已连接" : confirmingConnection ? "确认中" : connectionProgress ? connectionProgress.label : wechatLoggedIn ? (active ? "连接中" : "待启动") : connectionRetained ? "连接已保留" : connectionStarting ? "正在打开" : connectionWaiting ? "连接中" : problem && coreStarted ? "未完成" : "未连接");
 
     $("#signalWechat").textContent = environment.ready ? "版本兼容" : "未就绪";
     const wechatConnection = !accountStatusAvailable && (active || runtime.connection_ready) ? "状态待确认" : runtime.hook_ready || wechatLoggedIn ? "已连接" : "待连接";
     $("#signalWechatDetail").textContent = environment.ready ? `${environment.version || "已检测"} · ${wechatConnection}` : "请安装或重新选择微信";
     $("#signalCore").textContent = runtime.engine_ready ? "运行正常" : confirmingConnection ? "状态待确认" : active ? "正在启动" : "未启动";
-    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : wechatLoggedIn ? (active ? "已登录，功能启动中" : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
+    $("#signalMessage").textContent = online ? "通信正常" : confirmingConnection ? "正在确认连接" : connectionProgress ? connectionProgress.label : wechatLoggedIn ? (active ? (coreStarted ? "正在连接消息服务" : "已登录，功能启动中") : "微信已登录，机器人未启动") : connectionRetained ? "连接已保留" : runtime.connection_ready ? "正在确认" : "未连接";
     $("#wechatPath").textContent = environment.path || "尚未选择";
   }
 
   async function refreshStatus() {
     if (state.polling) return;
     state.polling = true;
+    const revision = state.startActionRevision;
     try {
-      renderStatus(await api("get_status"));
+      const status = await api("get_status");
+      // A read started before the current action cannot restore its old idle state.
+      if (revision === state.startActionRevision) renderStatus(status);
     } catch (error) {
       reportError(error);
     } finally {
@@ -530,26 +604,53 @@
   }
 
   async function runPrimaryAction() {
+    if (state.restorePending) { toast("备份已恢复，请先到系统设置重新读取恢复结果。", "error"); return; }
     const button = $("#primaryAction");
     const action = button.dataset.action === "stop" ? "stop" : "start";
-    if (action === "stop" && ["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)) {
+    const cancelStart = action === "stop" && state.status?.start_pending && state.status?.can_stop;
+    const verificationStop = action === "stop" && state.status?.state === "VERIFYING_CONNECTION"
+      && state.status?.can_stop && !state.status?.start_pending;
+    if (state.startPreparing || state.stopPending
+      || (state.status?.busy && !cancelStart && !verificationStop)) return;
+    if (action === "start" && state.status?.start_pending) return;
+    if (action === "stop" && !cancelStart && (["STOP_WAIT_WECHAT", "LICENSE_READY", "LICENSE_PAUSED"].includes(state.status?.state)
+      || ["13001", "13002", "13008"].includes(state.status?.error?.code))) {
       runForceStop();
       return;
     }
     button.disabled = true;
-    if (action === "start" && !await subscription.beforeStart()) { renderStatus(state.status); return; }
-    if (action === "start") {
-      state.startPending = true;
-      renderStatus(startingStatus(state.status));
+    state.startActionRevision += 1;
+    state.startPreparing = action === "start";
+    state.stopPending = action === "stop";
+    state.stopRequestPending = action === "stop";
+    if (state.startPreparing || state.stopPending) {
+      renderStatus(state.lastRuntimeStatus || state.status, {optimistic: true});
     }
     try {
+      if (action === "start" && !await subscription.beforeStart()) return;
+      if (action === "start") {
+        state.startPending = true;
+        renderStatus(startingStatus(state.lastRuntimeStatus || state.status), {optimistic: true});
+      }
       const result = await api(action === "stop" ? "stop_robot" : "start_robot");
-      if (action === "start" && result?.accepted === false) state.startPending = false;
+      if (action === "stop" && result?.accepted === false) {
+        throw new Error("停止请求未被接受，请稍后重试。");
+      }
+      if (action === "start" && result?.accepted === false) {
+        state.startPending = false;
+        await refreshStatus();
+      }
       window.setTimeout(refreshStatus, 250);
     } catch (error) {
       if (action === "start") state.startPending = false;
+      if (action === "stop") state.stopPending = false;
       reportError(error);
       await refreshStatus();
+    } finally {
+      state.startPreparing = false;
+      state.stopRequestPending = false;
+      state.startActionRevision += 1;
+      renderStatus(state.startPending ? state.status : state.lastRuntimeStatus || state.status, {optimistic: true});
     }
   }
 
@@ -560,23 +661,41 @@
       confirmText: "停止运行",
       pendingText: "正在停止…",
       onConfirm: async () => {
-        const result = await api("force_stop_robot");
-        if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
-        window.setTimeout(refreshStatus, 150);
+        if (state.stopPending) return;
+        state.stopPending = true;
+        state.stopRequestPending = true;
+        state.startActionRevision += 1;
+        renderStatus(state.status, {optimistic: true});
+        try {
+          const result = await api("force_stop_robot");
+          if (result?.accepted === false) throw new Error(result.message || "正在处理上一个操作。 ");
+          window.setTimeout(refreshStatus, 150);
+        } catch (error) {
+          state.stopPending = false;
+          throw error;
+        } finally {
+          state.stopRequestPending = false;
+          state.startActionRevision += 1;
+          renderStatus(state.lastRuntimeStatus || state.status, {optimistic: true});
+        }
       },
     });
   }
 
   async function checkEnvironment() {
-    try { renderStatus(await api("check_environment")); }
-    catch (error) { reportError(error); }
+    const revision = state.startActionRevision;
+    try {
+      const status = await api("check_environment");
+      if (revision === state.startActionRevision) renderStatus(status);
+    } catch (error) { reportError(error); }
   }
 
   async function chooseWechat() {
+    const revision = state.startActionRevision;
     try {
       const result = await api("select_wechat", "");
       if (!result?.cancelled) {
-        renderStatus(result);
+        if (revision === state.startActionRevision) renderStatus(result);
         toast("微信路径已保存。 ");
       }
     } catch (error) { reportError(error); }
@@ -592,15 +711,19 @@
   const retainedPageScroll = new Map(["groups", "history", "schedules", "activity"].map(page => [page, 0]));
 
   async function navigate(page) {
-    if (!PAGE_TITLES[page] || state.featureSaving || state.scheduledBusy || coreSettings.busy) return;
+    if (state.restorePending && page !== "settings") { toast("备份已恢复，请先重新读取恢复结果。", "error"); return; }
+    if (!PAGE_TITLES[page] || state.featureSaving || state.featurePageBusy || state.scheduledBusy || coreSettings.busy) return;
     if (page !== state.activePage && coreSettings.guard(() => navigate(page))) return;
-    if (page !== state.activePage && state.featureDirty) { discardFeatureChanges(() => navigate(page)); return; }
+    if (page !== state.activePage && (state.featureDirty || state.featurePageDirty)) { discardFeatureChanges(() => navigate(page)); return; }
     if (page !== state.activePage && guardProviderDraft(() => navigate(page))) return;
     if (page !== state.activePage && state.activePage === "schedules" && guardScheduledDraft(() => navigate(page))) return;
     const leavingGroupManagement = state.activePage === "groups" && page !== "groups";
     const content = $(".content-scroll");
     if (content && retainedPageScroll.has(state.activePage)) retainedPageScroll.set(state.activePage, content.scrollTop);
-    if (state.activePage === "settings" && page !== "settings") clearProviderTest();
+    if (state.activePage === "settings" && page !== "settings") {
+      clearProviderTest();
+      clearProviderModels();
+    }
     state.activePage = page;
     if (leavingGroupManagement) {
       window.clearTimeout(state.groupRefreshRetryTimer);
@@ -658,8 +781,12 @@
     }
     if (page === "settings") {
       setSettingsSection(state.settingsSection);
-      if (!state.maintenance) await loadMaintenance();
     }
+  }
+
+  async function openModelSettings() {
+    await navigate("settings");
+    if (state.activePage === "settings") selectSettingsSection("model");
   }
 
   async function copyText(value, label = "群标识") {
@@ -717,7 +844,27 @@
   }
 
   let modalResolve = null;
-  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", onConfirm}) {
+  function syncShellInteractivity() {
+    const shell = $(".app-shell");
+    const inert = Boolean(state.updateInstalling
+      || !$("#modalBackdrop").hidden || !$("#onboardingBackdrop").hidden);
+    if (shell && shell.inert !== inert) shell.inert = inert;
+  }
+
+  function managerCloseState({ignoreModalBusy = false} = {}) {
+    return {
+      dirty: Boolean(state.featureDirty || state.featurePageDirty || state.providerDirty || state.webSearchDirty
+        || state.scheduledDirty || coreSettings.dirty || hasChatDrafts()),
+      busy: Boolean(state.featureSaving || state.featurePageBusy || state.webSearchSaving || state.scheduledBusy
+        || coreSettings.busy || isProviderSaving() || isPrivatePolicySaving() || state.historyExporting
+        || state.startPreparing || state.startPending || state.stopPending
+        || state.stopRequestPending || state.status?.busy || state.restoreRefreshing
+        || (!ignoreModalBusy && $("#modalBackdrop")?.dataset.busy === "true")),
+      updating: Boolean(state.updateInstalling),
+    };
+  }
+
+  function confirmAction({title, message, subject = null, confirmText = "确认", cancelText = "取消", pendingText = "处理中…", pendingMessage = "", field = null, intent = "danger", dismissible = true, onConfirm, onCancel}) {
     const backdrop = $("#modalBackdrop");
     const cancel = $("#modalCancel");
     const confirm = $("#modalConfirm");
@@ -740,16 +887,28 @@
     $("#modalError").textContent = "";
     backdrop.dataset.busy = "false";
     backdrop.hidden = false;
+    const body = $("#modalBody");
+    body.scrollTop = 0;
+    const updateScrollFocus = () => { body.tabIndex = body.scrollHeight > body.clientHeight ? 0 : -1; };
+    updateScrollFocus();
     cancel.disabled = false;
+    confirm.disabled = false;
+    let complete;
+    const completed = new Promise((resolve) => { complete = resolve; });
     const restoreFocus = document.activeElement;
-    const shell = $(".app-shell");
-    if (shell) shell.inert = true;
-    cancel.focus();
-    const close = () => { backdrop.hidden = true; if (shell) shell.inert = false; restoreFocus?.focus(); };
-    modalResolve = async (confirmed) => {
+    syncShellInteractivity();
+    // Login returns from another window; do not leave Enter focused on Cancel.
+    if (dismissible) cancel.focus();
+    else body.focus();
+    const close = () => { backdrop.hidden = true; syncShellInteractivity(); restoreFocus?.focus(); };
+    let settled = false;
+    modalResolve = async (confirmed, {implicit = false} = {}) => {
+      if (settled || backdrop.dataset.busy === "true" || (implicit && !dismissible)) return;
       if (!confirmed) {
-        if (backdrop.dataset.busy === "true") return;
+        settled = true;
         close();
+        try { await onCancel?.(); }
+        finally { complete(false); }
         return;
       }
       backdrop.dataset.busy = "true";
@@ -760,7 +919,9 @@
       if (pendingMessage) $("#modalMessage").textContent = pendingMessage;
       try {
         await onConfirm(field ? $("#modalInput").value : undefined);
+        settled = true;
         close();
+        complete(true);
       } catch (error) {
         const product = error?.product;
         const detail = product
@@ -769,6 +930,7 @@
         $("#modalMessage").textContent = message;
         $("#modalError").textContent = detail;
         $("#modalError").hidden = false;
+        updateScrollFocus();
         reportError(error);
       } finally {
         backdrop.dataset.busy = "false";
@@ -777,6 +939,7 @@
         cancel.disabled = false;
       }
     };
+    return completed;
   }
 
   function requiredValues(form) {
@@ -846,10 +1009,7 @@
         </div>
       </article>`).join("");
     container.hidden = reminders.length === 0;
-    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", async () => {
-      await navigate("settings");
-      if (state.activePage === "settings") selectSettingsSection("model");
-    }));
+    $$('[data-home-setup-configure]', container).forEach((button) => button.addEventListener("click", openModelSettings));
     $$('[data-home-setup-dismiss]', container).forEach((button) => button.addEventListener("click", () => {
       state.dismissedHomeSetupAlerts.add(button.dataset.homeSetupDismiss);
       try {
@@ -910,7 +1070,8 @@
       try { input.showPicker(); } catch (_error) { /* browser may already have opened it */ }
     });
     $$(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.page)));
-    $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => navigate(item.dataset.homePage)));
+    $$('[data-home-page]').forEach((item) => item.addEventListener("click", () => item.dataset.homePage === "settings"
+      ? openModelSettings() : navigate(item.dataset.homePage)));
     $("#themeToggle").addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -955,7 +1116,8 @@
       button.disabled = false;
     });
     $$("[data-help-target]").forEach((button) => {
-      button.addEventListener("click", () => navigate(button.dataset.helpTarget));
+      button.addEventListener("click", () => button.dataset.helpTarget === "settings"
+        ? openModelSettings() : navigate(button.dataset.helpTarget));
       button.disabled = false;
     });
     $("#refreshGroups").addEventListener("click", () => loadGroups(true));
@@ -996,16 +1158,23 @@
       if (!state.historyHasNewer && list.scrollHeight - list.scrollTop - list.clientHeight < 80) $("#newMessageButton").hidden = true;
     });
     $("#exportHistory").addEventListener("click", async () => {
+      if (state.historyExporting || !canEditHistory()) return;
       const accountId = state.historyAccount;
+      const button = $("#exportHistory");
+      const buttonContent = button.innerHTML;
+      state.historyExporting = true;
+      button.textContent = "导出中…";
+      setHistoryActionsEnabled(canEditHistory());
       try {
         const result = await api("export_history", "csv", accountId);
-        if (result?.requires_login || result?.account_changed || accountId !== state.historyAccount) {
-          invalidateHistoryState();
-          renderHistoryAccountGate(state.historyAccount);
-          return;
-        }
+        if (handleHistoryActionDenied(result, accountId, "导出")) return;
         if (!result?.cancelled) toast(`已导出到 ${result.path}`);
       } catch (error) { reportError(error); }
+      finally {
+        state.historyExporting = false;
+        button.innerHTML = buttonContent;
+        setHistoryActionsEnabled(canEditHistory());
+      }
     });
     $("#refreshSchedules").addEventListener("click", loadSchedules);
     $("#newScheduledTask").addEventListener("click", () => openScheduledEditor());
@@ -1018,19 +1187,26 @@
     coreSettings.init();
     $("#openChatRules").addEventListener("click", () => navigate("groups"));
     $("#webSearchForm").addEventListener("submit", saveWebSearchSettings);
+    $("#reloadWebSearch").addEventListener("click", reloadWebSearchSettings);
     $("#webSearchProvider").addEventListener("change", () => {
       $("#webSearchKey").value = "";
       state.webSearchClearKey = false;
       updateWebSearchProviderCopy();
     });
-    $("#webSearchForm").addEventListener("input", () => { state.webSearchDirty = true; });
+    $("#webSearchForm").addEventListener("input", (event) => {
+      state.webSearchDirty = true;
+      if (event.target.name === "key" && event.target.value.trim()) {
+        state.webSearchClearKey = false;
+        if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "新密钥将在保存时替换当前服务商密钥。";
+      }
+    });
     $("#webSearchForm").addEventListener("change", (event) => {
       state.webSearchDirty = true;
       if (event.target.name === "enabled") {
         updateToggleCopy({currentTarget: event.target});
         $("#webSearchDetails").hidden = !event.target.checked;
         $("#clearWebSearchKey").hidden = !event.target.checked;
-        $("#webSearchNote").textContent = "有修改尚未保存。";
+        if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "有修改尚未保存。";
       }
     });
     $("#revealWebSearchKey").addEventListener("click", (event) => {
@@ -1044,10 +1220,11 @@
       $("#webSearchKey").value = "";
       state.webSearchClearKey = true;
       state.webSearchDirty = true;
-      $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
+      if (!state.webSearchUnconfirmed) $("#webSearchNote").textContent = "当前服务商密钥将在保存时清除。";
     });
     $("#manageMemories").addEventListener("click", openMemoryManager);
     $("#providerForm").addEventListener("submit", saveProvider);
+    $("#reloadProviderServices").addEventListener("click", reloadProviderServices);
     $("#providerForm").addEventListener("input", updateProviderDirty);
     $("#providerForm").addEventListener("change", updateProviderDirty);
     $("#providerForm").addEventListener("input", (event) => {
@@ -1057,20 +1234,8 @@
       if (["api_base", "model", "thinking_enabled"].includes(event.target.name)) syncProviderThinkingControl();
     });
     $("#providerPreset").addEventListener("change", (event) => { applyProviderPreset(event.currentTarget.value); updateProviderDirty(); });
-    $("#providerServiceKind").addEventListener("change", (event) => {
-      const preset = $("#providerPreset").value;
-      const kind = event.currentTarget.value;
-      if (kind === "chat" && ["embedding_custom", "image_custom"].includes(preset)) {
-        $("#providerPreset").value = "custom";
-        applyProviderPreset("custom");
-        updateProviderDirty();
-        return;
-      }
-      if (kind !== "chat") {
-        const matching = kind === "embedding" ? "embedding_custom" : kind === "image" ? "image_custom" : "voice_custom";
-        $("#providerPreset").value = matching;
-        applyProviderPreset(matching);
-      }
+    $("#providerServiceKind").addEventListener("change", () => {
+      syncProviderServiceKind();
       updateProviderDirty();
     });
     $("#closeProviderEditor").addEventListener("click", requestProviderOverview);
@@ -1108,6 +1273,7 @@
     $("#createBackup").addEventListener("click", createBackup);
     $("#restoreBackup").addEventListener("click", chooseRestoreBackup);
     $("#exportDiagnostics").addEventListener("click", exportDiagnostics);
+    $("#copyDiagnosticPath").addEventListener("click", () => { void copyText($("#diagnosticExportPath").textContent, "保存位置"); });
     $("#openOnboarding").addEventListener("click", () => { showOnboarding(true); });
     $("#cleanHistory").addEventListener("click", () => {
       const accountId = state.historyAccount;
@@ -1118,13 +1284,9 @@
         confirmText: "开始清理",
         field: {label: "保留此日期及之后的记录", type: "date", value: ""},
         onConfirm: async (value) => {
-          if (!canEditHistory(accountId)) { toast("请连接原微信账号后再清理记录。"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "清理"); return; }
           const result = await api("delete_history_before", value, accountId);
-          if (result.requires_login || result.account_changed || accountId !== state.historyAccount) {
-            invalidateHistoryState();
-            renderHistoryAccountGate(state.historyAccount);
-            return;
-          }
+          if (handleHistoryActionDenied(result, accountId, "清理")) return;
           toast(`已清理 ${result.deleted} 条记录。 `);
           // Cleanup is opened from settings: refresh the retained records even
           // while the history page is hidden, including its directory snapshot.
@@ -1136,7 +1298,7 @@
     });
     $("#checkUpdate").addEventListener("click", () => refreshUpdate(true));
     $("#modalCancel").addEventListener("click", () => modalResolve?.(false));
-    window.addEventListener("beforeunload", (event) => { if (state.featureDirty || state.featureSaving || state.providerDirty || state.scheduledDirty || coreSettings.dirty || coreSettings.busy || hasGroupDrafts()) { event.preventDefault(); event.returnValue = ""; } });
+    window.addEventListener("beforeunload", (event) => { const pending = managerCloseState(); if (pending.dirty || pending.busy || pending.updating) { event.preventDefault(); event.returnValue = ""; } });
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
@@ -1144,14 +1306,14 @@
     });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const targets = $$("button:not(:disabled), input:not(:disabled), select:not(:disabled)", $("#modalBackdrop"));
+      const targets = $$("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex='0']", $("#modalBackdrop"));
       const first = targets[0], last = targets[targets.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     });
     $("#modalConfirm").addEventListener("click", () => modalResolve?.(true));
-    $("#modalBackdrop").addEventListener("click", (event) => { if (event.target === event.currentTarget) modalResolve?.(false); });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modalBackdrop").hidden) modalResolve?.(false); });
+    $("#modalBackdrop").addEventListener("click", (event) => { if (event.target === event.currentTarget) modalResolve?.(false, {implicit: true}); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("#modalBackdrop").hidden) modalResolve?.(false, {implicit: true}); });
     $("#onboardingRecommended").addEventListener("click", () => closeOnboarding(false));
     $("#onboardingConfigure").addEventListener("click", () => closeOnboarding(true));
     $("#onboardingBackdrop").addEventListener("keydown", (event) => {
@@ -1221,6 +1383,33 @@
     }
   }
 
+  async function refreshRestoredSettings() {
+    state.featuresLoad += 1;
+    state.featureLoad += 1;
+    state.featurePrefetch += 1;
+    state.featurePageLoad += 1;
+    state.featuresLoaded = false;
+    state.features = [];
+    state.selectedFeature = null;
+    state.featureDetail = null;
+    state.featureDetails = {};
+    $("#featureDetail").innerHTML = '<div class="loading-row">配置已恢复，请重新读取功能设置。</div>';
+    $("#featurePageFrame")?.removeAttribute("src");
+    state.webSearch = null;
+    state.webSearchUnconfirmed = false;
+    $("#webSearchForm").elements.key.value = "";
+    clearProviderModels();
+    clearProviderTest();
+    coreSettings.invalidate(true);
+    invalidateHistoryState();
+    invalidateScheduledContext({clearEditor: true});
+    invalidateChatManagementContext();
+    const data = await api("bootstrap");
+    state.bootstrap = data;
+    fillSettings(data);
+    renderStatus(data.status);
+  }
+
   // Assemble existing page controllers before attaching the application lifecycle.
   const { configFromForm, discardFeatureChanges, growTextarea, loadFeatures, openFeature, refreshFeatures, refreshVisibleFeatureState, renderFeatureList, renderHelp, schemaMarkup } = createPageController("createFeatureController", {
     $,
@@ -1246,7 +1435,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasGroupDrafts, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,
@@ -1280,7 +1469,7 @@
     updatePolicyToggle: (...args) => updatePolicyToggle(...args),
   });
 
-  const { canEditHistory, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
+  const { canEditHistory, handleHistoryActionDenied, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
     $,
     $$,
     HISTORY_MESSAGE_CACHE_LIMIT,
@@ -1296,6 +1485,7 @@
     copyText: (...args) => copyText(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
+    navigate: (...args) => navigate(...args),
     reportError: (...args) => reportError(...args),
     state,
     toast: (...args) => toast(...args),
@@ -1318,7 +1508,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, providerCapabilityLabel, providerThinkingSupported, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderServiceKind, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),
@@ -1333,25 +1523,30 @@
     getCoreSettings: () => coreSettings,
   });
 
-  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, loadMaintenance, openMemoryManager, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
+  const { chooseRestoreBackup, closeOnboarding, createBackup, exportDiagnostics, fillSettings, formatBytes, initializeSkins, openMemoryManager, reloadWebSearchSettings, saveWebSearchSettings, selectSettingsSection, setSettingsSection, showOnboarding, updateWebSearchProviderCopy } = createPageController("createManagerSettings", {
     $,
     $$,
     SETTINGS_SECTIONS,
     api: (...args) => api(...args),
     applyBrand: (...args) => applyBrand(...args),
+    clearProviderModels: (...args) => clearProviderModels(...args),
     clearProviderTest: (...args) => clearProviderTest(...args),
     confirmAction: (...args) => confirmAction(...args),
     escapeHtml,
     fullTime: (...args) => fullTime(...args),
     guardProviderDraft: (...args) => guardProviderDraft(...args),
     loadFeatures: (...args) => loadFeatures(...args),
+    managerCloseState,
     navigate: (...args) => navigate(...args),
     openFeature: (...args) => openFeature(...args),
+    openModelSettings: (...args) => openModelSettings(...args),
     renderProviderServices: (...args) => renderProviderServices(...args),
     reportError: (...args) => reportError(...args),
+    refreshRestoredSettings,
     safeImageUrl: (...args) => safeImageUrl(...args),
     showProviderOverview: (...args) => showProviderOverview(...args),
     state,
+    syncShellInteractivity,
     toast: (...args) => toast(...args),
     updateToggleCopy: (...args) => updateToggleCopy(...args),
     getCoreSettings: () => coreSettings,
@@ -1385,9 +1580,11 @@
     api: (...args) => api(...args),
     confirmAction: (...args) => confirmAction(...args),
     formatBytes: (...args) => formatBytes(...args),
-    renderStatus: (...args) => renderStatus(...args),
+    managerCloseState,
+    renderStatus: (status) => renderStatus(status, {optimistic: true}),
     reportError: (...args) => reportError(...args),
     state,
+    syncShellInteractivity,
     toast: (...args) => toast(...args),
   });
 

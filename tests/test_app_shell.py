@@ -16,6 +16,7 @@ from wechatrebot_manager import app_shell, chat_api, group_directory, model_api,
 from wechatrebot_manager.customer_config import ProviderService
 from wechatrebot_manager.error_catalog import load_error_catalog
 from wechatrebot_manager.launcher import ServiceStopError
+from wechatrebot_manager.licensing.protocol import LicenseError
 from wechatrebot_manager.payload import PayloadError
 from wechatrebot_manager.updates import UpdateChannel, UpdateRelease
 from wechatrebot_manager.update_logger import UpdateLogger
@@ -53,6 +54,9 @@ def _api(tmp_path: Path) -> app_shell.ApplicationApi:
     value._prepared_update = None
     value._update_confirmation_token = ""
     value._update_installing = False
+    value._update_helper = None
+    value._update_close_pending = False
+    value._update_close_generation = 0
     value._mandatory_update = False
     value._update_channel_error = ""
     value._update_result = None
@@ -99,6 +103,55 @@ def test_group_qrcode_api_preserves_account_scope_and_reports_errors(tmp_path):
     result = api.get_group_qrcode("wxid_bot", "room@chatroom")
     assert result["ok"] is False
     assert "群二维码读取失败" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("code,recorded", [("automation_paused", None), ("license_revoked", True)])
+def test_group_qrcode_license_denial_reuses_license_response_and_only_silences_manual_pause(tmp_path, code, recorded):
+    api = _api(tmp_path)
+
+    def denied(*_args):
+        raise LicenseError(code, "请在运行中心启动机器人后重试。")
+
+    api._groups = SimpleNamespace(qrcode=denied)
+    result = api.get_group_qrcode("wxid_bot", "room@chatroom")
+    assert result["ok"] is False and result["error"]["code"] == f"LIC-{code}"
+    assert result["error"]["recorded"] is recorded
+    assert bool(api._lifecycle.events.items) is bool(recorded)
+    if recorded is None:
+        assert result["error"]["retryable"] is False
+
+
+def test_group_qrcode_expected_pause_does_not_show_ui_recording_failure(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the delivered API error handler")
+    api = _api(tmp_path)
+    error = LicenseError("automation_paused", "请在运行中心启动机器人后重试。")
+    responses = [api._license_failed(error, record=False)]
+    api._record_error = lambda *_args, **_kwargs: ("", False)
+    responses.append(api._license_failed(error))
+    script = manager_script()
+    source = script[script.index("  async function api(method, ...args)"):script.index("  function debounce(fn, wait = 280)")]
+    probe = r"""
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const run = new Function('window', 'toast', 'subscription', 'state', payload.source +
+  '\nreturn api("get_group_qrcode", "wxid_bot", "room@chatroom").catch(reportError);');
+(async () => {
+  const messages = [];
+  for (const response of payload.responses) {
+    const toasts = [];
+    await run({pywebview:{api:{get_group_qrcode:async () => response}}},
+      message => toasts.push(message), {formatMessage: error => error.message}, {activePage:'history'});
+    messages.push(toasts);
+  }
+  process.stdout.write(JSON.stringify(messages));
+})();
+"""
+    result = subprocess.run([node, "-e", probe], input=json.dumps({"source": source, "responses": responses}),
+                            capture_output=True, text=True, encoding="utf-8", check=True)
+    expected_pause, failed_recording = json.loads(result.stdout)
+    assert len(expected_pause) == 1 and "运行中心" in expected_pause[0]
+    assert len(failed_recording) == 2 and "错误记录未能保存" in failed_recording[1]
 
 
 def test_theme_save_failure_is_not_reported_as_success(monkeypatch, tmp_path: Path) -> None:
@@ -276,7 +329,7 @@ def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monk
     api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
     loaded = []
 
-    def services(_root):
+    def services(_root, **_options):
         model = f"model-{len(loaded)}"
         loaded.append(model)
         return (ProviderService(
@@ -300,8 +353,6 @@ def test_bootstrap_uses_one_provider_snapshot_and_next_request_refreshes_it(monk
 
 
 def test_independent_readiness_still_loads_current_provider_settings(monkeypatch, tmp_path):
-    from wechatrebot_manager import customer_config
-
     api = _api(tmp_path)
     refreshes = []
     loads = []
@@ -311,7 +362,7 @@ def test_independent_readiness_still_loads_current_provider_settings(monkeypatch
         return SimpleNamespace(to_dict=lambda: {"state": "STOPPED"})
 
     api._lifecycle.refresh = refresh
-    monkeypatch.setattr(customer_config, "load_provider_services", lambda root: loads.append(root) or ())
+    monkeypatch.setattr(app_shell, "load_provider_services", lambda root, **_options: loads.append(root) or ())
     assert api.get_onboarding_readiness()["ok"] is True
     assert refreshes == [True]
     assert loads == [tmp_path]
@@ -514,6 +565,89 @@ def test_web_search_settings_hot_apply_and_startup_fallback(monkeypatch, tmp_pat
     assert fallback["ok"] is True
     assert fallback["data"]["apply_state"] == "saved_for_start"
     assert captured["values"]["provider"] == "tavily"
+
+
+@pytest.mark.parametrize("ignored", ["web_search", "websearch_provider", "web_search_link", "websearch_bocha_key"])
+def test_web_search_hot_apply_requires_requested_values_in_readback(monkeypatch, tmp_path, ignored):
+    api = _api(tmp_path)
+    config = {"provider_settings": {
+        "web_search": False, "websearch_provider": "tavily", "web_search_link": False,
+        "websearch_bocha_key": ["synthetic-old-key"],
+    }}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                previous = config["provider_settings"][ignored]
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"][ignored] = previous
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({
+        "enabled": True, "provider": "bocha", "link_enabled": True,
+        "key": "synthetic-new-key",
+    })
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15006"
+    assert "synthetic" not in str(result)
+
+
+def test_web_search_hot_apply_preserves_unspecified_secrets_and_unrelated_changes(monkeypatch, tmp_path):
+    api = _api(tmp_path)
+    config = {"provider_settings": {"websearch_bocha_key": ["synthetic-saved-key"]}}
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            if method == "PUT":
+                config.update(copy.deepcopy(payload))
+                config["provider_settings"]["unrelated_setting"] = "changed"
+            return {"config": copy.deepcopy(config)}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({"enabled": True, "provider": "bocha", "link_enabled": False})
+    assert result["ok"] is True
+    assert result["data"]["providers"]["bocha"]["configured"] is True
+    assert "synthetic" not in str(result)
+
+
+@pytest.mark.parametrize("phase", ["before_submit", "submit", "readback"])
+def test_web_search_submission_uncertainty_uses_readback_guidance(monkeypatch, tmp_path, phase):
+    api = _api(tmp_path)
+    calls = []
+
+    class Client:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def request(method, _path, payload=None):
+            calls.append(method)
+            if (phase == "before_submit" and calls == ["GET"]
+                    or phase == "submit" and method == "PUT"
+                    or phase == "readback" and calls == ["GET", "PUT", "GET"]):
+                raise model_api.EngineUnavailableError("synthetic-private-transport-details")
+            return {"config": {"provider_settings": {}}}
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: Client())
+    result = api.save_web_search_settings({"enabled": True, "provider": "bocha", "link_enabled": False})
+    assert result["ok"] is False
+    assert result["error"]["code"] == ("15001" if phase == "before_submit" else "15006")
+    if phase != "before_submit":
+        assert "重新读取" in result["error"]["message"]
+        assert result["error"]["retryable"] is False
+    assert "synthetic-private" not in str(result)
 
 
 def test_card_thinking_switch_reports_hot_effect_only_after_readback(monkeypatch, tmp_path: Path) -> None:
@@ -780,12 +914,87 @@ def test_adding_extra_model_keeps_analysis_on_default_chat(
     assert config.get("analyzer_model", "") == (default.model_id if kind == "chat" else "")
 
 
+def test_model_test_explains_how_to_start_robot_and_recovers_after_start(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+    online = False
+    calls = []
+    probe_calls = []
+    expected = {
+        "id": "test/chat", "model": "chat", "status": "available",
+        "test_kind": "chat", "response_text": "测试回复", "elapsed_ms": 12,
+    }
+
+    def available():
+        probe_calls.append(online)
+        return online
+
+    def test(provider_id):
+        calls.append(provider_id)
+        return expected
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=available, test_provider=test,
+    ))
+
+    stopped = api.test_provider("test/chat")
+
+    assert stopped["ok"] is False
+    assert stopped["error"]["code"] == "13002"
+    assert "运行中心" in stopped["error"]["message"]
+    assert "启动机器人" in stopped["error"]["message"]
+    assert "测试模型" in stopped["error"]["message"]
+    assert stopped["error"]["detail"] == stopped["error"]["message"]
+    assert stopped["error"]["retryable"] is True
+    assert calls == []
+    assert probe_calls == [False]
+
+    online = True
+    started = api.test_provider("test/chat")
+
+    assert started["ok"] is True
+    assert started["data"] == expected
+    assert calls == ["test/chat"]
+    assert probe_calls == [False, True]
+
+
+def test_model_test_preserves_provider_failure_codes_and_hides_unexpected_errors(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    api = _api(tmp_path)
+
+    def denied(_provider_id):
+        raise model_api.ProviderTestError("API Key 未通过验证，请检查密钥。", code="16002")
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=lambda: True, test_provider=denied,
+    ))
+    result = api.test_provider("test/chat")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "16002"
+    assert "API Key" in result["error"]["detail"]
+
+    def broken_probe():
+        raise ValueError("synthetic-private-configuration")
+
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(
+        is_available=broken_probe, test_provider=denied,
+    ))
+    unexpected = api.test_provider("test/chat")
+    assert unexpected["ok"] is False
+    assert unexpected["error"]["code"] == "19000"
+    assert "detail" not in unexpected["error"]
+    assert "synthetic-private-configuration" not in json.dumps(unexpected)
+
+
 def test_model_discovery_reuses_saved_key_without_exposing_it(
     monkeypatch, tmp_path: Path
 ) -> None:
     api = _api(tmp_path)
     selected = SimpleNamespace(
         provider_id="deepseek/deepseek-chat",
+        api_base="https://api.deepseek.com/v1",
         api_key="saved-secret",
     )
     captured = {}
@@ -808,6 +1017,135 @@ def test_model_discovery_reuses_saved_key_without_exposing_it(
     assert result["ok"] is True
     assert result["data"]["items"] == ["deepseek-chat", "deepseek-reasoner"]
     assert captured["api_key"] == "saved-secret"
+
+
+@pytest.mark.parametrize("operation,editing,endpoint", [
+    ("save_provider", False, "https://other.example.test/v1"),
+    ("save_provider", False, "https://saved.example.test/v1"),
+    ("save_provider", True, "https://other.example.test/v1"),
+    ("discover_provider_models", True, "https://other.example.test/v1"),
+])
+def test_model_credentials_are_not_inherited_by_new_or_changed_endpoints(
+    monkeypatch, tmp_path: Path, operation: str, editing: bool, endpoint: str,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="saved/chat", source_id="saved", display_name="Saved",
+        api_base="https://saved.example.test/v1", model="chat",
+        api_key="synthetic-saved-secret", is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: model_api.OpenAIProviderProfile(
+        api_key=selected.api_key, api_base=selected.api_base,
+        model=selected.model, source_id=selected.source_id,
+    ))
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    calls = []
+
+    def save(_root, profile, **kwargs):
+        calls.append(profile.api_key)
+        return profile.normalized()
+
+    def discover(**values):
+        calls.append(values["api_key"])
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id if editing else "",
+        "api_base": endpoint, "api_key": "", "model": "chat",
+    })
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "15004"
+    assert "API Key / Token Plan" in result["error"]["message"]
+    assert calls == []
+    assert selected.api_key not in json.dumps(result)
+    assert selected.api_key not in repr(api._lifecycle.events.items)
+
+
+@pytest.mark.parametrize("operation", ["save_provider", "discover_provider_models"])
+@pytest.mark.parametrize("changed_endpoint", [False, True])
+def test_model_credentials_reuse_requires_same_endpoint_or_explicit_key(
+    monkeypatch, tmp_path: Path, operation: str, changed_endpoint: bool,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="saved/chat", source_id="saved", display_name="Saved",
+        api_base="https://saved.example.test/v1", model="chat",
+        api_key="synthetic-saved-secret", is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    keys = []
+
+    def save(_root, profile, **kwargs):
+        keys.append(profile.api_key)
+        return profile.normalized()
+
+    def discover(**values):
+        keys.append(values["api_key"])
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id,
+        "api_base": "https://other.example.test/v1" if changed_endpoint else f"{selected.api_base}/",
+        "api_key": "synthetic-new-secret" if changed_endpoint else "",
+        "model": "chat",
+    })
+
+    assert result["ok"] is True
+    assert keys == ["synthetic-new-secret" if changed_endpoint else selected.api_key]
+
+
+@pytest.mark.parametrize("operation", ["save_provider", "discover_provider_models"])
+@pytest.mark.parametrize("saved_base,submitted_base", [
+    ("https://saved.example.test/v1", "https://saved.example.test"),
+    ("https://saved.example.test", "https://saved.example.test/v1/v1/"),
+])
+def test_equivalent_api_bases_keep_saved_credentials_and_source_id(
+    monkeypatch, tmp_path: Path, operation: str, saved_base: str, submitted_base: str,
+) -> None:
+    api = _api(tmp_path)
+    selected = ProviderService(
+        provider_id="legacy/chat", source_id="legacy", display_name="Saved",
+        api_base=saved_base, model="chat", api_key="synthetic-saved-secret",
+        is_default=True, is_recommended=False,
+    )
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (selected,))
+    monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
+    monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
+    calls = []
+
+    def save(_root, profile, **kwargs):
+        calls.append(profile)
+        return profile.normalized()
+
+    def discover(**values):
+        calls.append(values)
+        return ("chat",)
+
+    monkeypatch.setattr(model_api, "save_provider_profile", save)
+    monkeypatch.setattr(model_api, "discover_openai_models", discover)
+    result = getattr(api, operation)({
+        "provider_id": selected.provider_id, "api_base": submitted_base,
+        "api_key": "", "model": "chat",
+    })
+
+    assert result["ok"] is True
+    assert result["data"]["api_base"] == "https://saved.example.test/v1"
+    assert selected.api_key not in json.dumps(result)
+    if operation == "save_provider":
+        assert result["data"]["id"] == selected.provider_id
+        assert calls[0].source_id == selected.source_id
+        assert calls[0].api_key == selected.api_key
+        assert calls[0].api_base == "https://saved.example.test/v1"
+    else:
+        assert calls == [{"api_key": selected.api_key, "api_base": "https://saved.example.test/v1"}]
 
 
 def test_model_discovery_explains_missing_key_without_echoing_misplaced_credentials(
@@ -1442,6 +1780,54 @@ def test_mandatory_update_blocks_robot_start(monkeypatch, tmp_path: Path) -> Non
     assert result["error"]["code"] == "UPD-1016"
 
 
+@pytest.mark.parametrize("journal_locked", [False, True])
+def test_update_startup_confirmation_leaves_transaction_cleanup_to_helper(
+    monkeypatch, tmp_path: Path, journal_locked: bool,
+) -> None:
+    api = _api(tmp_path)
+    update_id = "a" * 32
+    api._startup_update_id = update_id
+    api._startup_update_from = "1.0.4"
+    api._startup_update_to = "1.0.5"
+    updates = tmp_path / "updates"
+    rollback = updates / f".rollback-{update_id}"
+    rollback.mkdir(parents=True)
+    backup = rollback / "old-manager"
+    backup.write_bytes(b"previous manager")
+    journal = updates / "update-journal.json"
+    journal.write_text(json.dumps({
+        "update_id": update_id,
+        "state": "awaiting_startup",
+        "rollback_root": rollback.relative_to(tmp_path).as_posix(),
+    }), encoding="utf-8")
+    original_journal = journal.read_bytes()
+    read_attempts = []
+    original_read_text = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == journal:
+            read_attempts.append(path)
+            if journal_locked:
+                raise PermissionError("update helper owns the journal")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    api.confirm_update_startup()
+
+    assert read_attempts == []
+    assert journal.read_bytes() == original_journal
+    assert backup.read_bytes() == b"previous manager"
+    flag = updates / f"startup-success-{update_id}.json"
+    assert json.loads(flag.read_text(encoding="utf-8")) == {
+        "schema_version": 1, "update_id": update_id, "ok": True, "version": "1.0.5",
+    }
+    assert api._update_result == {
+        "schema_version": 1, "ok": True, "status": "success",
+        "from_version": "1.0.4", "version": "1.0.5", "message": "更新已完成。",
+    }
+
+
 def _downloadable_update(monkeypatch, tmp_path: Path):
     api = _api(tmp_path)
     release = UpdateRelease(
@@ -1468,7 +1854,8 @@ def _downloadable_update(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(update_api, "prepare_update", prepare)
     monkeypatch.setattr(update_api, "create_update_plan", lambda *_a, **_kw: events.append("verify_plan") or "plan")
     monkeypatch.setattr(update_api, "assert_update_runtime_stopped", lambda *_a: events.append("verify_stopped"))
-    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: events.append("launch"))
+    helper = SimpleNamespace(poll=lambda: None, args=[str(tmp_path / "helper.exe")])
+    monkeypatch.setattr(update_api, "launch_update_helper", lambda _plan: events.append("launch") or helper)
     api._lifecycle.force_stop_for_update = lambda: events.append("stop_all")
     return api, prepared, events
 
@@ -1512,7 +1899,7 @@ def test_update_download_waits_for_explicit_confirmation(monkeypatch, tmp_path):
     assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
     assert api.get_update_status()["data"]["confirmation_token"] == ""
     assert api._update_installing is True
-    assert close_timers == [(0.35, api._close_window_for_update)]
+    assert len(close_timers) == 1 and close_timers[0][0] == 0.35
     assert api.start_robot()["data"]["accepted"] is False
     assert api._queue_robot_action("connect_wechat", "连接")["data"]["accepted"] is False
     assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"] is False
@@ -1615,6 +2002,46 @@ def test_update_rechecks_payload_before_stopping_anything(monkeypatch, tmp_path)
     assert events == ["download", "download"]
 
 
+def test_independent_configuration_window_blocks_shutdown_and_reuses_download(monkeypatch, tmp_path):
+    from wechatrebot_manager import updates, windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    blocked = [True]
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+    monkeypatch.setattr(updates, "os", SimpleNamespace(name="nt", getpid=lambda: 999))
+    monkeypatch.setattr(updates, "_update_wait_pids", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(updates, "payload_relative_paths", lambda _: (Path("manager/WeChatReBot.exe"),))
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: (
+        ((123, ProcessIdentity(str(tmp_path / "manager/WeChatReBot.exe"), 456)),) if blocked[0] else ()
+    ))
+
+    def plan(*_args, **_kwargs):
+        updates._assert_manager_executable_available(
+            prepared.payload_root, tmp_path, source_executable=tmp_path / "manager/WeChatReBot.exe",
+        )
+        events.append("verify_plan")
+        return "plan"
+
+    monkeypatch.setattr(update_api, "create_update_plan", plan)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1005"
+    assert "配置窗口" in failed["error"]["message"]
+    assert "已下载的更新会保留" in failed["error"]["message"]
+    assert events == ["download"] and not closes
+    assert api._prepared_update is prepared and not api._update_installing
+    blocked[0] = False
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    api._window = None
+    assert api.install_update(prepared.release.version, retry["confirmation_token"])["data"]["accepted"]
+    assert _wait_update_worker(api)["state"] == "restarting"
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "launch"]
+
+
 @pytest.mark.parametrize("newer_version", [False, True])
 def test_update_rechecks_installed_release_before_stopping_anything(monkeypatch, tmp_path, newer_version):
     api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
@@ -1650,6 +2077,34 @@ def test_update_maps_managed_service_stop_failures(monkeypatch, tmp_path, servic
     assert result["error"]["code"] == error_code
     assert events == ["download", "verify_plan"]
     assert api._update_installing is False
+
+
+def test_update_helper_start_failure_keeps_manager_open_with_accurate_retry_feedback(monkeypatch, tmp_path):
+    api, prepared, events = _downloadable_update(monkeypatch, tmp_path)
+    status = _download_ready(api)
+    closes = []
+    api._window = SimpleNamespace(destroy=lambda: closes.append(True))
+
+    def cannot_launch(_plan):
+        events.append("helper_failed")
+        raise OSError("synthetic process startup failure")
+
+    monkeypatch.setattr(update_api, "launch_update_helper", cannot_launch)
+    assert api.install_update(prepared.release.version, status["confirmation_token"])["data"]["accepted"]
+    failed = _wait_update_worker(api)
+    assert failed["state"] == "failed" and failed["error"]["code"] == "UPD-1007"
+    assert "安装程序未能启动" in failed["error"]["message"]
+    assert "原版本文件未更改" in failed["error"]["message"]
+    assert "手动启动机器人" in failed["error"]["message"]
+    assert "恢复原版本" not in failed["error"]["message"]
+    assert events == ["download", "verify_plan", "stop_all", "verify_stopped", "helper_failed"]
+    assert not closes and not api._update_installing
+    assert api._prepared_update is prepared
+    assert api._action_lock.acquire(blocking=False)
+    api._action_lock.release()
+    retry = _download_ready(api)
+    assert retry["confirmation_token"] != status["confirmation_token"]
+    assert events.count("download") == 1
 
 
 @pytest.mark.parametrize("error,code", [(PayloadError("坏文件"), "UPD-1003"),
@@ -1734,21 +2189,25 @@ def test_stop_actions_preserve_licensed_restart_and_complete_shutdown() -> None:
 const assert = require('node:assert/strict');
 const nodes = new Map();
 const $ = selector => {
-  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}});
+  if (!nodes.has(selector)) nodes.set(selector, {dataset:{}, setAttribute(){}, querySelector(){ return null; }});
   return nodes.get(selector);
 };
 const state = {mandatoryUpdate:false};
 const icon = () => '';
 const subscription = {beforeStart:async () => true};
 const calls = [];
-const api = async name => {calls.push(name); return {accepted:true};};
+let rejectForce = false;
+const api = async name => {calls.push(name); return {accepted:!(rejectForce && name === 'force_stop_robot')};};
 const window = {setTimeout(){}};
 const refreshStatus = async () => {};
 const reportError = error => {throw error;};
 let dialog;
 const confirmAction = options => {dialog = options;};
 const startingStatus = status => ({...status, state:'CORE_STARTING', busy:true, can_start:false, can_stop:false});
-const select = (current, can_start=true, can_stop=true, busy=false) => renderStatus({state:current, can_start, can_stop, busy});
+const select = (current, can_start=true, can_stop=true, busy=false) => {
+  state.stopPending = false;
+  renderStatus({state:current, can_start, can_stop, busy});
+};
 (async () => {
   for (const current of ['LICENSE_READY', 'LICENSE_PAUSED']) {
     select(current);
@@ -1762,6 +2221,8 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
     assert.match(dialog.message, /保留微信窗口/);
     await dialog.onConfirm();
     assert.equal(calls.at(-1), 'force_stop_robot');
+    assert.equal($('#primaryAction').disabled, true, 'a stop awaiting status must stay disabled');
+    select(current);
     await runPrimaryAction();
     assert.equal(calls.at(-1), 'start_robot');
     assert.equal($('#stopRetainedConnection').hidden, true, 'starting must not offer force stop');
@@ -1778,6 +2239,13 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
   assert.equal($('#stopRetainedConnection').hidden, true);
   await runPrimaryAction();
   assert.equal(calls.at(-1), 'stop_robot');
+  select('VERIFYING_CONNECTION', false, true, true);
+  assert.equal($('#primaryAction').dataset.action, 'stop');
+  assert.equal($('#primaryAction').disabled, false, 'unknown connection state must keep safe stop available');
+  const verificationStopBefore = calls.length;
+  await runPrimaryAction();
+  assert.equal(calls.length, verificationStopBefore + 1);
+  assert.equal(calls.at(-1), 'stop_robot', 'verification stop must not force-kill services');
   select('STOP_WAIT_WECHAT', false);
   assert.equal($('#primaryAction').disabled, false);
   const before = calls.length;
@@ -1790,6 +2258,12 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
   assert.equal($('#primaryAction').disabled, true);
   select('LICENSE_PAUSED', true, false);
   assert.equal($('#stopRetainedConnection').hidden, true, 'no stop without owned services');
+  select('LICENSE_READY');
+  runForceStop();
+  rejectForce = true;
+  await assert.rejects(dialog.onConfirm());
+  assert.equal(state.stopPending, false);
+  assert.equal($('#primaryAction').disabled, false, 'rejected force stop must restore the primary action');
   process.stdout.write('ok');
 })().catch(error => {console.error(error); process.exitCode = 1;});
 """
@@ -1803,6 +2277,51 @@ const select = (current, can_start=true, can_stop=true, busy=false) => renderSta
         ["node"], input=render + actions + harness, text=True, encoding="utf-8",
         capture_output=True, check=True, timeout=10,
     )
+    assert result.stdout == "ok"
+
+
+def test_environment_actions_render_only_responses_from_the_current_robot_action() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    actions = script[script.index("  async function checkEnvironment()"):script.index("  const PAGE_TITLES =")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {startActionRevision:0};
+const rendered = [], errors = [], notices = [];
+const renderStatus = status => rendered.push(status);
+const reportError = error => errors.push(error.message);
+const toast = message => notices.push(message);
+let complete;
+const api = () => new Promise((resolve, reject) => {complete = {resolve, reject};});
+(async () => {
+  for (const run of [checkEnvironment, chooseWechat]) {
+    const before = rendered.length;
+    const stale = run();
+    state.startActionRevision++;
+    complete.resolve({state:'CORE_STARTING', start_pending:true});
+    await stale;
+    assert.equal(rendered.length, before, 'an environment response from before stop must be ignored');
+    const current = run();
+    complete.resolve({state:'STOPPED'});
+    await current;
+    assert.equal(rendered.length, before + 1, 'a current response must still render');
+    assert.equal(rendered.at(-1).state, 'STOPPED');
+    const failed = run();
+    complete.reject(new Error('expected environment failure'));
+    await failed;
+    assert.equal(errors.at(-1), 'expected environment failure');
+  }
+  const before = rendered.length;
+  const cancelled = chooseWechat();
+  complete.resolve({cancelled:true});
+  await cancelled;
+  assert.equal(rendered.length, before);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=actions + harness, text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
     assert result.stdout == "ok"
 
 
@@ -1822,6 +2341,7 @@ const subscription = {updateRuntime(){}};
 const contactProfile = {updateAccount(){}};
 const reconcileStartPending = status => status;
 const invalidateHistoryState = () => {};
+const renderHistoryAccountGate = () => {};
 const invalidateScheduledContext = () => {};
 const invalidateChatManagementContext = () => {};
 const refreshVisibleChatData = async () => {};
@@ -1829,7 +2349,7 @@ const reportError = error => { throw error; };
 const setHistoryActionsEnabled = () => {};
 const escapeHtml = value => value;
 const icon = () => "";
-const setStage = (node, mode, label) => {node.textContent = label;};
+const setStage = (node, mode, label) => {node.textContent = label; node.mode = mode;};
 const base = {
   state:"RUNNING", title:"机器人可用", message:"微信连接和全部功能运行正常。",
   online:false, busy:false, can_start:false, can_stop:true,
@@ -1847,21 +2367,50 @@ const cases = [
   {state:"LICENSE_READY", title:"机器人未启动", can_start:true, runtime:{connection_ready:true}},
   {state:"LICENSE_PAUSED", title:"自动化已暂停", can_start:true, runtime:{connection_ready:false}},
   {state:"LICENSE_READY", title:"机器人未启动", can_start:true,
-    runtime:{connection_ready:true, account_status_available:true, wechat_identity:'wxid_current'}}
+    runtime:{connection_ready:true, account_status_available:true, wechat_identity:'wxid_current'}},
+  {state:"CORE_STARTING", busy:true, runtime:{connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+  {state:"CORE_READY", busy:true, runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+  {runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:false}},
+  {runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+    account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}},
+  {state:"CORE_STARTING", busy:true, runtime:{connection_ready:true, hook_ready:false,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:true}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:false, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:true, heartbeat_fresh:false}},
+    {state:"VERIFYING_CONNECTION", title:"正在确认连接", busy:true,
+      runtime:{engine_ready:true, connection_ready:true, hook_ready:true,
+      account_status_available:false, wechat_identity:'wxid_stale', upstream_connected:true, heartbeat_fresh:true}},
+    {state:"ERROR", title:"机器人核心服务已停止", error:{title:"错误", message:"核心服务退出"},
+      runtime:{engine_ready:false, connection_ready:true, hook_ready:true,
+      account_status_available:true, wechat_identity:'wxid_current', upstream_connected:false, heartbeat_fresh:false}}
 ];
 process.stdout.write(JSON.stringify(cases.map(changes => {
   renderStatus({...base, ...changes});
-  return Object.fromEntries([
+  return {...Object.fromEntries([
     "stateTitle", "stateMessage", "globalStatus", "sideHealthText",
     "stageConnection", "signalMessage", "primaryAction"
-  ].map(id => [id, $("#" + id).textContent || $("#" + id).innerHTML]));
+  ].map(id => [id, $("#" + id).textContent || $("#" + id).innerHTML])),
+    connectionMode: $('#stageConnection').mode};
 })));
 """
     result = subprocess.run(
         ["node"], input=render + harness, text=True, encoding="utf-8",
         capture_output=True, check=True, timeout=10,
     )
-    pending, offline, online, stopped, error, waiting, stopping, failed, retained, paused, logged_in = json.loads(result.stdout)
+    (pending, offline, online, stopped, error, waiting, stopping, failed, retained,
+     paused, logged_in, core_starting, core_ready, stale_heartbeat, connected,
+     hook_missing, verifying_core, verifying_upstream, verifying_heartbeat,
+     verifying_stale_account, logged_in_error) = json.loads(result.stdout)
     assert pending["stateTitle"] == pending["sideHealthText"] == "正在确认连接"
     assert "正在确认连接" in pending["globalStatus"]
     assert "暂时无法确认" in pending["stateMessage"]
@@ -1878,9 +2427,35 @@ process.stdout.write(JSON.stringify(cases.map(changes => {
     assert stopping["stateTitle"] == "正在停止机器人"
     assert failed["stateTitle"] != "正在确认连接"
     assert retained["stageConnection"] == retained["signalMessage"] == "连接已保留"
+    assert retained["connectionMode"] == "current"
     assert "等待启动" in retained["globalStatus"]
     assert paused["stageConnection"] == "未连接"
     assert logged_in["signalMessage"] == "微信已登录，机器人未启动"
+    assert logged_in["stageConnection"] == "待启动"
+    assert logged_in["connectionMode"] == "current"
+    assert core_starting["stageConnection"] == core_starting["signalMessage"] == "等待功能就绪"
+    assert core_ready["stageConnection"] == core_ready["signalMessage"] == "建立消息连接"
+    assert stale_heartbeat["stageConnection"] == stale_heartbeat["signalMessage"] == "确认消息通信"
+    assert hook_missing["stageConnection"] == hook_missing["signalMessage"] == "确认微信连接"
+    for incomplete in (core_starting, core_ready, stale_heartbeat, hook_missing):
+        assert incomplete["connectionMode"] == "current"
+    assert connected["connectionMode"] == "done"
+    assert connected["stageConnection"] == "已连接"
+    assert verifying_core["stateTitle"] == "微信已登录，正在启动机器人功能"
+    assert verifying_core["sideHealthText"] == "等待功能就绪"
+    assert "等待功能就绪" in verifying_core["globalStatus"]
+    assert verifying_upstream["stateTitle"] == verifying_heartbeat["stateTitle"] == "微信已登录，正在连接消息服务"
+    for status, label in ((verifying_core, "等待功能就绪"), (verifying_upstream, "建立消息连接"),
+                          (verifying_heartbeat, "确认消息通信")):
+        assert status["stageConnection"] == status["signalMessage"] == status["sideHealthText"] == label
+        assert status["connectionMode"] == "current"
+        assert "暂时无法确认" not in status["stateMessage"]
+        assert "停止机器人" in status["primaryAction"]
+    assert "消息连接已建立" in verifying_heartbeat["stateMessage"]
+    assert verifying_stale_account["stateTitle"] == verifying_stale_account["signalMessage"] == "正在确认连接"
+    assert verifying_stale_account["stageConnection"] == "确认中"
+    assert logged_in_error["stateTitle"] == "机器人核心服务已停止"
+    assert logged_in_error["sideHealthText"] == "需要处理"
 
 
 def test_provider_thinking_mode_has_create_and_hot_update_controls() -> None:
@@ -1942,7 +2517,16 @@ def test_feature_details_are_warmed_but_revalidated_before_editing() -> None:
     )[0]
     assert "if (!force) return;" not in open_feature
     assert "Never expose a cached revision for edit" in open_feature
-    assert "当前仅显示上次内容，请重新读取后再修改" in open_feature
+    assert "readOnlyFeatures.add(featureId);" in open_feature
+    assert "readOnlyFeatures.delete(featureId);" in open_feature
+    feature_renderer = script[
+        script.index("function renderFeatureDetail") : script.index(
+            "function helpAudienceMatch"
+        )
+    ]
+    assert "if (readOnlyFeatures.has(state.selectedFeature))" in feature_renderer
+    assert "input.disabled = true" in feature_renderer
+    assert "当前仅显示上次内容，请重新读取后再修改" in feature_renderer
 
 
 def test_feature_filters_show_all_then_common_and_default_to_all() -> None:
@@ -1989,7 +2573,13 @@ def test_feature_center_reloads_offline_cache_after_robot_becomes_online() -> No
     assert "const wasOnline = Boolean(state.status?.online);" in script
     assert "state.featureDetails = {};" in script
     assert "!wasOnline" in script and "void openFeature(state.selectedFeature, false, true);" in script
-    assert "const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);" in script
+    open_feature = script.split("async function openFeature", 1)[1].split(
+        "\n  function getAtPath", 1
+    )[0]
+    cache_refresh = open_feature.split("const cacheNeedsRefresh = ", 1)[1].split(";", 1)[0]
+    assert "cached &&" in cache_refresh
+    assert "readOnlyFeatures.has(featureId) ||" in cache_refresh
+    assert "state.status?.online && !cached.engine_online" in cache_refresh
     assert "if (!force && !cacheNeedsRefresh) return;" in script
     assert "if (!detail.engine_online && !state.status?.online)" in script
 
@@ -2135,7 +2725,7 @@ def test_message_center_clears_data_when_the_robot_account_changes() -> None:
     assert 'api("delete_conversation", item.conversation_id, accountId)' in script
     assert 'api("delete_history_before", value, accountId)' in script
     assert 'api("export_history", "csv", accountId)' in script
-    assert "聊天记录只展示当前机器人微信账号的内容" in script
+    assert "请先完成订阅授权，并登录授权绑定的机器人微信账号" in script
     assert 'setHistoryActionsEnabled(false);' in script
 
 
@@ -2295,8 +2885,8 @@ def test_start_action_shows_pending_state_before_bridge_returns() -> None:
     assert '["STOPPED", "LICENSE_READY"].includes(current) && status?.environment?.ready' in script
     assert '"启动中…"' in script
     assert "const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);" in script
-    assert 'wechatLoggedIn ? "已登录"' in script
-    assert 'active ? "已登录，功能启动中" : "微信已登录，机器人未启动"' in script
+    assert 'wechatLoggedIn ? (active ? "连接中" : "待启动")' in script
+    assert 'coreStarted ? "正在连接消息服务" : "已登录，功能启动中"' in script
     assert 'role="status" aria-live="polite" aria-atomic="true"' in markup
     assert '.status-orbit[data-state="starting"] .power-button' in styles
 
@@ -2665,7 +3255,35 @@ def test_update_close_bypasses_minimize_to_tray(tmp_path: Path) -> None:
         permit_programmatic_close=lambda: calls.append("permit")
     )
     api._window = SimpleNamespace(destroy=lambda: calls.append("destroy"))
+    api._update_installing = True
+    api._update_helper = SimpleNamespace(poll=lambda: None)
 
-    api._close_window_for_update()
+    api._close_window_for_update(api._update_helper, api._update_close_generation)
 
     assert calls == ["permit", "destroy"]
+
+
+@pytest.mark.parametrize("code", ["13001", "13002", "13008"])
+def test_failed_stop_reuses_force_stop_confirmation_before_retrying(code) -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is unavailable")
+    script = manager_script()
+    action = script[script.index("  async function runPrimaryAction()"):script.index("  function runForceStop()")]
+    harness = r"""
+const assert = require('node:assert/strict');
+const state = {status:{state:'ERROR', can_start:false, can_stop:true,
+  error:{code:'13008'}}, startPreparing:false, stopPending:false};
+const $ = () => ({dataset:{action:'stop'}});
+let confirmations = 0;
+const runForceStop = () => {confirmations++;};
+const api = () => {throw new Error('a retry requires explicit force-stop confirmation');};
+(async () => {
+  await runPrimaryAction();
+  assert.equal(confirmations, 1);
+  assert.equal(state.stopPending, false);
+  process.stdout.write('ok');
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    result = subprocess.run(["node"], input=action + harness.replace("13008", code), text=True, encoding="utf-8",
+                            capture_output=True, check=True, timeout=10)
+    assert result.stdout == "ok"

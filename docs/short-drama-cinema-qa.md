@@ -181,3 +181,55 @@ Codex 内置浏览器另打开隔离的本机预览，以来源目录中的《�
 自动化验证使用 Browser plugin not available 路径和项目 Chromium Playwright 夹具，覆盖接口优先级、点击手势、错误分类、连接事件、播放不受干扰、换集保持连接、过期回调及复制备用路径。实际执行结果记录在 PR。此修复没有新增 Google Cast SDK、DLNA 发现服务或第三方投屏应用；手机浏览器、电视协议、同网段条件和接收端 HLS 兼容性需按实际设备验收，不能以模拟 API 测试代替。
 
 目标版本保持 0.9.9，候选类型为托管静态页面更新；状态服务、Nginx、客户端载荷和依赖无变化。用户确认失败环境为 iPhone 微信 / Safari，并要求兼顾其他设备；当前实现覆盖浏览器提供的原生通道与链接转接，具体电视及实机结果仍待确认，不能宣称所有电视协议已获支持。
+
+## iPhone 已选设备但无画面的排查（2026-11-09）
+
+系统选择框中的设备勾选不代表电视已经播放。现有同一 video、原生 HLS 优先路径与投屏事件监听继续复用；无线目标事件独立于网页选择器接口监听，以覆盖从 iPhone 原生全屏选择设备的情况。按钮使用“已连接”，媒体报错时显示“投屏异常”，状态区区分暂停、结束和播放失败，并保留复制原始视频链接的备用入口。分享提示与手动复制链接不会被后续媒体事件覆盖；投屏操作仍不自动播放、暂停或重载媒体。
+
+持续缓冲判断同时检查播放进度。即使接收端反馈的 readyState 较低，只要时间持续推进，就清除旧缓冲提示并更新最近进度时间，保留同一缓冲检测计时器；连续 18 秒没有观测到进度时显示重试与换源入口，无需再次触发 waiting。timeupdate 不重建计时器；缺少该事件时，由计时器检查当前进度后继续观察。拖动期间暂停检测，拖动结束后重新建立基线。定向测试使用本地媒体、原生接口模拟与可控时钟验证最后一帧轻微推进、多轮持续推进后停止、缺少 timeupdate 及前后拖动这些分支，不能替代真实 AirPlay 验收。
+
+本次红牛《欢天喜地七仙女 2005》第 5 集的有界检查发现：HLS v3、AES-128，密钥在清单域名的 HTTPS 443 端口，分片位于另一域名的 HTTPS 65 端口；首片为 H.264 High 与 AAC-LC。服务器默认 TLS、无代理直连可读取清单、16 字节密钥和有限首片数据，清单首轮曾握手超时。开发电脑经过代理，Python 与系统证书栈结果不同，不能据此认定片源证书全局失效；也不能由服务器可达推断用户电视可达。
+
+真机验收需分别记录：同一 iPhone 在微信和 Safari 播放同一集的差异、原生无线状态是否改变、暂停后点击播放的结果、电视是无反应还是黑屏/仅声音，以及本地照片视频投同一电视的结果。若只有该源失败，再对照其他源，核查接收端访问密钥和 65 端口分片的能力。当前已复现并修正的是页面反馈与缓冲误报，电视无画面根因仍待真机确认。本次只涉及托管页面，无客户端版本或更新包变化。
+
+## 推荐比例与输入联想（2026-11-09）
+
+变更文件为 `patches/short-drama-player-cinema.patch`、本文件，以及 `tests/test_short_drama_{recommendation_ratio,search_interactions,player_continuity,player_controls,player_hardening,source_switching}.py`。沿用本仓库 `vendor/deploy/short_drama_player` 和 hosted-only、controls、cinema 补丁组合；状态服务的 Twitter 扩展另按原顺序应用。
+
+复用现有推荐目录、公开地址校验、跨源标题去重、推荐排除列表、搜索缓存和全源 GET 接口。服务端统一识别明确 AI/漫剧分类及 AI 片名标记，候选池按 AI 2、真人短剧 1 保留名额；前端每批显示两部 AI 剧和一部真人短剧并加角标。缺少某类时显示不足提示，普通动漫及电影不用于填补名额。推荐采样增加已经接入的量子源，搜索和换源仍使用原有十源。
+
+搜索输入使用 16px 字体，保留正常页面缩放。全源搜索按钮移至输入行右侧，加载文案保持固定宽度。输入至少两字、停顿 350ms 后查询现有全源接口，联想下拉最多六个片名；结果页继续展示服务端联想词。支持中文输入法、方向键选择、回车搜索、点击选择、Esc/清空/失焦关闭；独立取消和版本检查阻止旧词的响应覆盖新词。保留已提交的搜索词，并避免按原词再次过滤而隐藏模糊匹配结果。
+
+本地实际定向验证共 202 项通过：
+
+- `python -m pytest tests/test_short_drama_recommendation_ratio.py tests/test_short_drama_source_switching.py tests/test_short_drama_player_hardening.py tests/test_short_drama_player_controls.py tests/test_short_drama_catalog_search.py tests/test_hosted_tweet_pages.py -q --tb=short`：153 passed。
+- `python -m pytest tests/test_short_drama_player_continuity.py -q --tb=short`：37 passed。
+- `python -m pytest tests/test_short_drama_search_interactions.py -q`：12 passed；最后与 continuity 合跑为 49 passed，覆盖正式搜索未返回时继续编辑的筛选保持。
+- 抽取候选页面内联脚本运行 `node --check`，以及 `python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。
+
+Browser 插件在本机候选页面验证 390×844 与 1440×960 布局、页面身份、非空内容、无错误覆盖层、控制台、推荐换一换与搜索交互；320px 布局另由定向测试覆盖。最初预览的固定联想样本没有“走马上任”，已切换为真实全源搜索响应重验：输入“走马”下拉出现“走马上任”，点击后查询十源并显示对应版本，回车搜索同样生效。源覆盖会随网络变化，另一次查询为 9/10 并正确提示一个来源暂不可用。截图保存在任务工作区外。
+
+候选类型为托管页面与状态服务更新，需要同时更新二者以提供推荐分类字段；无数据库结构或依赖变化。线上客户端最新为 v1.0.14，后续客户端待发布目标保持 1.0.15，本次不制作客户端包。CI、合并及实际服务器部署分别以 PR 和部署记录为准；真实 iPhone/微信聚焦缩放和各网络播放能力仍需实机验收。
+
+## 新增魔都与新浪资源（2026-11-10）
+
+变更文件为 `patches/short-drama-player-cinema.patch`、`patches/astrbot-plugin-jiang_short_drama--zzzzzzzz-catalog-sources.patch`、`tests/test_short_drama_catalog_search.py`、`tests/test_short_drama_network_safety.py`、`tests/test_short_drama_player_controls.py` 和本文件。复用现有源注册、目录解析、公共 HTTPS 地址过滤、搜索合并与缓存、同剧换源及进度恢复；固定 `vendor/` 输入和依赖不变。
+
+从 kanju.ai 用户截图中的普通源名单追查原站公开接口，新增魔都与新浪，保留原有十源，与其在搜索和换源菜单平级展示。接口分别来自 [魔都官方采集说明](https://mdzyapi.com/caiji/) 与 [新浪官方帮助](https://xinlangzy.cc/index.php/help/index.html)：
+
+- 魔都：`https://www.mdzyapi.com/api.php/provide/vod/`
+- 新浪：`https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/`
+
+kanju.ai 的内容接口需要请求签名，未作为新源接入；索尼、ikun、1080 等候选在本轮验证中未通过，因此没有仅按名称添加。新浪官方要求请求间隔超过一秒：托管服务的目录入口共享线程锁，插件同一 searcher 实例的搜索、人物、合集、推荐入口共用异步限频；请求开始间隔 1.1 秒，等待超过 1.5 秒则沿用单源失败降级。等待后重新检查时隙，取消不预占未来时隙。不增加全源扫描线程、队列或前端超时；共享槽竞争和上游慢响应仍可能使一次全源搜索超时，不能把估算耗时当作硬上界。
+
+服务器仅进行无代理、默认 TLS、无 Referer 的只读验证，未修改线上服务。使用生产 reader 的 `ShortDramaPlayer/1.0`、禁止重定向、3 秒超时和 4MiB 上限查询《欢天喜地七仙女》：魔都返回同名 38 集（5463 字节、0.264 秒），新浪返回带 2005 年份后缀的 38 集（5383 字节、0.539 秒），可由现有作品身份归一化匹配。
+
+两源第 3、5 集均验证播放清单、必要的 AES key、开头三片和约 122 秒后的连续三片；分片完整累计读取并核对大小，均为 HTTP 206、CORS `*`。每集两轮共读 3.70–6.42MiB，没有下载整集。魔都使用标准 443、未加密，两分钟后单片下载 1.31–2.23 秒；新浪使用 AES-128（key 200、16 字节），分片端口为 9999，两分钟后单片 1.63–2.49 秒，部分用户网络可能限制该端口。这是两个集数的有限抽样，不能据此宣称所有影片、所有用户网络或连续整集播放稳定。
+
+另观察到暴风该片的 `c1.rrcdnbf6.com` 证书 SAN 包含该域名，但有效期止于 2026-11-06 15:35:09 UTC，本轮默认 TLS 校验失败。未关闭证书校验，未将单片证书故障推断为所有周期卡顿的根因，亦未移除整个暴风源。
+
+自动化验证覆盖插件/后端/前端十二源同步、全源扫描与同剧身份匹配、失败源隔离和四线程上限、限频并发/晚唤醒/取消，以及 320/390/1280 视口的十二源菜单和非凡/魔都/新浪同集换源后进度、倍速与播放恢复。当前会话未提供 Browser 技能，按 `frontend-testing-debugging` 的 Browser plugin not available 路径运行现有 Chromium Playwright 与本地媒体夹具；真实 iPhone、微信、用户网络和 AirPlay 连接仍待实机验证。实际定向检查及 CI 结果见本次 PR；没有启动机器人或执行本地全量测试。
+
+本地实际执行：`python -m pytest tests/test_short_drama_catalog_search.py tests/test_short_drama_network_safety.py tests/test_short_drama_source_switching.py -q --tb=short` 为 38 passed；`python -m pytest tests/test_short_drama_player_controls.py tests/test_short_drama_player_hardening.py tests/test_hosted_tweet_pages.py -q --tb=short` 为 106 passed。候选内联脚本 `node --check`、候选 Python 编译、改动测试文件 `compileall`、`python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。菜单边界断言允许不超过半个 CSS 像素的嵌套滚动取整误差，并继续检查每个按钮中心命中与可点击。
+
+本次候选为托管页面与状态服务更新，并同步后续客户端交付的插件源列表；客户端待发布目标保持 1.0.15，不制作客户端包。代码提交、合并与服务器部署分别记录，本次不宣称已上线。iPhone 用户反馈的问题是选中设备后未建立投屏连接，不能将本轮新增资源或分片成功视为该连接问题已经解决。

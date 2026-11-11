@@ -20,12 +20,16 @@ window.createFeatureController = function (helpers) {
     toast,
     getCoreSettings,
   } = helpers;
+  const readOnlyFeatures = new Set();
+  let featurePageEditorSession = "";
 
   async function loadFeatures() {
+    const request = state.featuresLoad = (state.featuresLoad || 0) + 1;
     const list = $("#featureList");
     list.innerHTML = '<div class="loading-row">正在读取功能…</div>';
     try {
       const data = await api("get_features");
+      if (request !== state.featuresLoad) return false;
       state.features = data.plugins || [];
       state.featuresEngineOnline = Boolean(data.engine_online);
       state.featuresLoaded = true;
@@ -34,21 +38,26 @@ window.createFeatureController = function (helpers) {
       renderHelp();
       if (!state.selectedFeature && state.features.length) await openFeature(state.features[0].id);
       void prefetchFeatureDetails(++state.featurePrefetch);
+      return true;
     } catch (error) {
+      if (request !== state.featuresLoad) return false;
       list.innerHTML = '<div class="loading-row">功能暂时无法读取</div>';
+      $("#featureSummary").textContent = "读取失败，请重新检查";
       reportError(error);
+      return false;
     }
   }
 
   async function refreshFeatures() {
+    if (state.featureSaving || state.featurePageBusy) return;
+    if (state.featureDirty || state.featurePageDirty) { discardFeatureChanges(refreshFeatures); return; }
     state.featurePrefetch += 1;
     state.featuresLoaded = false;
     state.selectedFeature = null;
     state.featureDetail = null;
     state.featureDetails = {};
     getCoreSettings().invalidate();
-    await loadFeatures();
-    toast("功能准备情况已重新检查。 ");
+    if (await loadFeatures()) toast("功能准备情况已重新检查。 ");
   }
 
   async function prefetchFeatureDetails(generation) {
@@ -72,6 +81,11 @@ window.createFeatureController = function (helpers) {
     await Promise.all(Array.from({length: Math.min(3, pending.length)}, () => worker()));
   }
 
+  function featureLoadState(item) {
+    if (!state.featuresEngineOnline) return {label: "启动后检查", loaded: false};
+    return {label: item.enabled === true ? "已加载" : "未加载", loaded: item.enabled === true};
+  }
+
   function renderFeatureList() {
     const keyword = $("#featureSearch").value.trim().toLocaleLowerCase("zh-CN");
     const audienceMatch = (item) => {
@@ -81,17 +95,22 @@ window.createFeatureController = function (helpers) {
     };
     const items = state.features.filter((item) => audienceMatch(item) && (!keyword || item.display_name.toLocaleLowerCase("zh-CN").includes(keyword)));
     $("#featureSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
-    $("#featureList").innerHTML = items.length ? items.map((item) => `
+    $("#featureList").innerHTML = items.length ? items.map((item) => {
+      const availability = featureLoadState(item);
+      return `
       <button class="feature-item ${state.selectedFeature === item.id ? "active" : ""}" data-feature-id="${escapeHtml(item.id)}">
-        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "已加载")}</small></span>
-        <span class="feature-state enabled" title="已加载"></span>
-      </button>`).join("") : '<div class="loading-row">没有符合条件的功能</div>';
+        <span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.audience || "按需使用")} · ${escapeHtml(item.readiness || "请按说明准备")} · <span class="feature-load-state">${availability.label}</span></small></span>
+        <span class="feature-state ${availability.loaded ? "enabled" : ""}" title="${availability.label}" role="img" aria-label="${availability.label}"></span>
+      </button>`;
+    }).join("") : '<div class="loading-row">没有符合条件的功能</div>';
     $$(".feature-item").forEach((button) => button.addEventListener("click", () => openFeature(button.dataset.featureId)));
   }
 
   function discardFeatureChanges(next) {
     confirmAction({title: "离开前丢弃修改？", message: "这些设置还没有保存。留在此页可继续编辑或保存。", confirmText: "丢弃修改并继续", onConfirm: async () => {
+      if (state.featurePageBusy) throw new Error("专属配置页正在处理操作，请完成后再离开。");
       state.featureDirty = false;
+      state.featurePageDirty = false;
       if (state.featureDetail && state.featureBaseline) state.featureDetail.config = structuredClone(state.featureBaseline);
       renderFeatureDetail();
       await next();
@@ -131,14 +150,14 @@ window.createFeatureController = function (helpers) {
   }
 
   async function openFeature(featureId, afterSave = false, force = false) {
-    if (state.featureSaving && !afterSave) return;
-    if (state.featureDirty && !afterSave) { discardFeatureChanges(() => openFeature(featureId, false, force)); return; }
+    if ((state.featureSaving || state.featurePageBusy) && !afterSave) return;
+    if ((state.featureDirty || state.featurePageDirty) && !afterSave) { discardFeatureChanges(() => openFeature(featureId, false, force)); return; }
     const load = ++state.featureLoad;
     const preserveTab = state.selectedFeature === featureId;
     state.selectedFeature = featureId;
     renderFeatureList();
     const cached = state.featureDetails[featureId];
-    const cacheNeedsRefresh = Boolean(cached && state.status?.online && !cached.engine_online);
+    const cacheNeedsRefresh = Boolean(cached && (readOnlyFeatures.has(featureId) || (state.status?.online && !cached.engine_online)));
     if (cached) {
       useFeatureDetail(cached, afterSave, preserveTab);
       renderFeatureDetail();
@@ -156,21 +175,22 @@ window.createFeatureController = function (helpers) {
       const detail = await api("get_feature", featureId);
       if (load !== state.featureLoad) return;
       state.featureDetails[featureId] = structuredClone(detail);
-      if (cached && state.featureDirty) return;
+      readOnlyFeatures.delete(featureId);
+      if (cached && (state.featureDirty || state.featurePageDirty || state.featurePageBusy)) return;
       useFeatureDetail(detail, afterSave, preserveTab);
       renderFeatureDetail();
       if (!preserveTab && !cached) window.managerMotion?.enter($("#featureDetail"));
     } catch (error) {
       if (load !== state.featureLoad) return;
       if (!cached) $("#featureDetail").innerHTML = '<div class="empty-state"><h2>设置暂时无法读取</h2><p>机器人未启动时仍可修改大部分基础设置，请稍后重试。</p></div>';
+      else if (state.featureDirty) {
+        const note = $("#featureNote");
+        if (note) note.textContent = "最新设置读取失败；未保存的修改已保留。可稍后重试保存，或重新读取设置。";
+      }
       else {
+        readOnlyFeatures.add(featureId);
         useFeatureDetail(cached, afterSave, preserveTab);
         renderFeatureDetail();
-        $$("#featureForm input, #featureForm select, #featureForm textarea, #featureForm button").forEach((input) => { input.disabled = true; });
-        const save = $("#saveFeature");
-        if (save) save.disabled = true;
-        const note = $("#featureNote");
-        if (note) note.textContent = "最新设置读取失败；当前仅显示上次内容，请重新读取后再修改。";
       }
       reportError(error);
     }
@@ -224,7 +244,7 @@ window.createFeatureController = function (helpers) {
       const inputType = ["int", "float"].includes(type) || uiControl === "proxy-port" ? "number" : (field.secret ? "password" : "text");
       const step = type === "float" ? "any" : "1";
       const slider = field.slider && typeof field.slider === "object" ? field.slider : {};
-      const numericRules = inputType === "number" ? `step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
+      const numericRules = inputType === "number" ? `data-nullable="${field._nullable === true}" step="${escapeHtml(field.step ?? slider.step ?? step)}" ${(field.min ?? slider.min) !== undefined ? `min="${escapeHtml(field.min ?? slider.min)}"` : ""} ${(field.max ?? slider.max) !== undefined ? `max="${escapeHtml(field.max ?? slider.max)}"` : ""}` : "";
       const secretRules = field.secret ? `autocomplete="new-password" placeholder="${field._secret_configured ? "已安全保存；留空保持不变" : "请输入后保存"}"` : "";
       control = `<input class="config-input" data-path="${encodedPath}" data-label="${encodedLabel}" data-type="${escapeHtml(uiControl === "proxy-port" ? uiControl : type)}" type="${inputType}" ${numericRules} ${secretRules} value="${escapeHtml(value ?? "")}">${field.secret && field._secret_configured ? `<label class="secret-clear"><input class="config-secret-clear" data-path="${encodedPath}" type="checkbox" ${value === null ? "checked" : ""}>清除已保存的密钥</label>` : ""}`;
     }
@@ -330,6 +350,9 @@ window.createFeatureController = function (helpers) {
   function renderFeatureDetail() {
     const detail = state.featureDetail;
     if (!detail) return;
+    featurePageEditorSession = "";
+    state.featurePageDirty = false;
+    state.featurePageBusy = false;
     const previousReference = $("#featureQuickReference");
     if (previousReference) state.featureReferenceOpen[previousReference.dataset.featureId] = previousReference.open;
     $("#featureDetail").dataset.featureId = detail.id || "";
@@ -440,6 +463,11 @@ window.createFeatureController = function (helpers) {
     $("#openFeatureCenter")?.addEventListener("click", openFeatureCenter);
     $("#openFeatureHelp")?.addEventListener("click", () => openHelpForFeature(detail.display_name));
     $$("[data-action-bound]", $("#featureDetail")).forEach((button) => { button.disabled = false; });
+    if (readOnlyFeatures.has(state.selectedFeature)) {
+      $$("#featureForm input, #featureForm select, #featureForm textarea, #featureForm button, #saveFeature").forEach((input) => { input.disabled = true; });
+      const note = $("#featureNote");
+      if (note) note.textContent = "最新设置读取失败；当前仅显示上次内容，请重新读取后再修改。";
+    }
     if (pageOnly) void openEmbeddedFeaturePage(detail);
   }
 
@@ -457,11 +485,20 @@ window.createFeatureController = function (helpers) {
       if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
       frame.hidden = true;
       status.hidden = false;
-      frame.onload = () => syncEmbeddedTheme(frame, () => {
+      featurePageEditorSession = "";
+      frame.onload = () => {
         if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id) return;
-        frame.hidden = false;
-        status.hidden = true;
-      });
+        // A WindowProxy survives document reloads; bind editor state to this load.
+        const session = crypto.randomUUID();
+        featurePageEditorSession = session;
+        sendEmbeddedEditorContext(frame);
+        syncEmbeddedTheme(frame, () => {
+          if (loadId !== state.featurePageLoad || state.selectedFeature !== detail.id
+            || featurePageEditorSession !== session) return;
+          frame.hidden = false;
+          status.hidden = true;
+        });
+      };
       frame.src = page.url;
       syncEmbeddedTheme(frame);
     } catch (error) {
@@ -472,6 +509,13 @@ window.createFeatureController = function (helpers) {
   }
 
   const featurePageChannel = "astrbot-plugin-page";
+  function sendEmbeddedEditorContext(frame) {
+    if (!featurePageEditorSession || !state.selectedFeature
+      || state.featureDetail?.id !== state.selectedFeature || !state.featureDetail.pages?.length) return;
+    frame.contentWindow.postMessage({channel: featurePageChannel, kind: "editor-context",
+      session: featurePageEditorSession}, window.location.origin);
+  }
+
   async function handleEmbeddedFeaturePageRequest(message) {
     const detail = state.featureDetail;
     if (!detail || detail.configuration !== "page" || !state.selectedFeature) {
@@ -493,6 +537,16 @@ window.createFeatureController = function (helpers) {
       || message.channel !== featurePageChannel) return;
     if (message.kind === "ready") {
       window.sendFeaturePageContext(frame);
+      sendEmbeddedEditorContext(frame);
+      return;
+    }
+    if (message.kind === "editor-state") {
+      if (!state.selectedFeature || state.featureDetail?.id !== state.selectedFeature
+        || !state.featureDetail.pages?.length || message.featureId !== state.selectedFeature
+        || !featurePageEditorSession || message.session !== featurePageEditorSession
+        || typeof message.dirty !== "boolean" || typeof message.busy !== "boolean") return;
+      state.featurePageDirty = message.dirty;
+      state.featurePageBusy = message.busy;
       return;
     }
     if (message.kind !== "request" || typeof message.requestId !== "string") return;
@@ -523,9 +577,10 @@ window.createFeatureController = function (helpers) {
     $("#helpSummary").textContent = `${items.length} / ${state.features.length} 项功能`;
     root.innerHTML = items.length ? items.map((item) => {
       const guide = item.guide || {};
+      const availability = featureLoadState(item);
       const steps = guide.setup_steps?.length ? guide.setup_steps : ["在功能中心完成必要配置，再到群聊中勾选使用范围。", "在测试聊天中验证一次实际效果。"];
       const prerequisite = (guide.prerequisites || []).join(" ");
-      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="feature-state enabled" title="已加载"></span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
+      return `<article class="help-feature-card panel" data-help-name="${escapeHtml(item.display_name)}"><div class="help-feature-head"><div><span class="help-audience-chip">${escapeHtml(item.audience || "按需使用")}</span><h3>${escapeHtml(item.display_name)}</h3></div><span class="status-badge ${availability.loaded ? "online" : ""}">${availability.label}</span></div><p>${escapeHtml(guide.summary || item.description || "按需使用此功能。")}</p><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>${prerequisite ? `<div class="help-prerequisite"><strong>使用前确认</strong><span>${escapeHtml(prerequisite)}</span></div>` : ""}<button class="row-action help-configure-feature" type="button" data-feature-id="${escapeHtml(item.id)}">前往功能设置</button></article>`;
     }).join("") : '<div class="empty-state compact panel"><h2>没有找到相关帮助</h2><p>换一个功能名或用法关键词试试。</p></div>';
     $$(".help-configure-feature", root).forEach((button) => button.addEventListener("click", async () => {
       await navigate("features");
@@ -602,6 +657,9 @@ window.createFeatureController = function (helpers) {
         }
       }
       else value = input.value;
+      if (["int", "float"].includes(input.dataset.type) && value === null && input.dataset.nullable !== "true") {
+        throw new Error(`${input.dataset.label || "数字配置"}不能为空，请填写数字。`);
+      }
       if (input.dataset.required === "true" && !String(value ?? "").trim()) {
         throw new Error(`${input.dataset.label || "此配置"}不能为空，请先选择可用模型。`);
       }
@@ -619,7 +677,7 @@ window.createFeatureController = function (helpers) {
   }
 
   async function saveFeature() {
-    if (state.featureSaving) return;
+    if (state.featureSaving || readOnlyFeatures.has(state.selectedFeature)) return;
     const button = $("#saveFeature");
     try {
       const config = configFromForm();

@@ -159,6 +159,97 @@ def offer_migration(client, service, *, corruption=None):
     return client.preview("WRB-MIGRATION-CODE")
 
 
+def offer_reactivation(client, service, *, preview_change=None, corruption=None):
+    service.plan = "year"
+    service.valid_until = int(service.clock.server) + 365 * 86400
+    running(client)
+    service.status = "revoked"
+    service.revision += 1
+    assert client.refresh()["state"] == "revoked"
+    service.plan = "month"
+    service.status = "active"
+    service.account = ""
+    service.revision = 1
+    service.valid_until = int(service.clock.server) + 30 * 86400
+
+    def response_payload(payload):
+        payload["license_id"] = "license-new"
+        if corruption:
+            corruption(payload)
+
+    def transport(url, request):
+        response = service(url, request)
+        if url.endswith("/preview"):
+            response["data"]["license_id"] = ""
+            if preview_change:
+                preview_change(response["data"])
+        return response
+
+    service.transform = response_payload
+    client.transport = transport
+    return client.preview("WRB-NEW-MONTH-CODE")
+
+
+@pytest.mark.parametrize("change", [
+    lambda p: p.update(mode="renewal", license_id="license-other"),
+    lambda p: p.update(mode="recovery", license_id="license-other"),
+    lambda p: p.update(mode="migration", license_id="license-other"),
+    lambda p: p.update(plan="trial"),
+    lambda p: p.update(license_id="license-1", already_redeemed=True),
+    lambda p: p.update(license_id="license-new"),
+    lambda p: p.update(already_redeemed=True),
+])
+def test_revoked_license_rejects_unsupported_preview_before_consuming_code(setup, change):
+    client, service, _, _ = setup
+    with pytest.raises(LicenseError) as error:
+        offer_reactivation(client, service, preview_change=change)
+    assert error.value.code == "code_unavailable"
+    assert service.calls[-1][0].endswith("/preview")
+    assert client.snapshot()["state"] == "revoked"
+
+
+@pytest.mark.parametrize("corruption,error_code", [
+    (lambda p: p.update(license_id="license-1"), "identity_mismatch"),
+    (lambda p: p.update(plan="year"), "identity_mismatch"),
+    (lambda p: p.update(status="revoked"), "identity_mismatch"),
+    (lambda p: p.update(issued_at=p["issued_at"] - 1, lease_until=p["lease_until"] - 1), "lease_rollback"),
+])
+def test_reactivation_requires_expected_fresh_signed_new_license(setup, corruption, error_code):
+    client, service, clock, protection = setup
+    preview = offer_reactivation(client, service, corruption=corruption)
+    assert "license_id" not in service.calls[-1][1]["body"]
+    restarted = LicenseClient(client.root, transport=client.transport, clock=clock, protection=protection)
+    with pytest.raises(LicenseError) as error:
+        restarted.redeem("WRB-NEW-MONTH-CODE", preview["preview_id"])
+    assert error.value.code == error_code
+    assert restarted.snapshot()["state"] == "revoked"
+    assert restarted.snapshot()["license_id"] == "license-1"
+
+
+@pytest.mark.parametrize("corruption", [
+    lambda p: p.update(license_id="different-license"),
+    lambda p: p.update(valid_until=p["valid_until"] + 1),
+])
+def test_reactivation_recovery_requires_previewed_license_and_term(setup, corruption):
+    client, service, _, _ = setup
+    preview = offer_reactivation(client, service, corruption=corruption, preview_change=lambda p: p.update(
+        license_id="license-new", already_redeemed=True,
+    ))
+    with pytest.raises(LicenseError) as error:
+        client.redeem("WRB-NEW-MONTH-CODE", preview["preview_id"])
+    assert error.value.code == "identity_mismatch"
+    assert client.snapshot()["state"] == "revoked"
+
+
+def test_reactivation_preview_cannot_authorize_refresh_switch(setup):
+    client, service, _, _ = setup
+    offer_reactivation(client, service)
+    with pytest.raises(LicenseError) as error:
+        client.refresh()
+    assert error.value.code == "identity_mismatch"
+    assert client.snapshot()["state"] == "revoked"
+
+
 def test_legacy_and_unconfigured_status_do_not_create_device_or_network(tmp_path):
     client = LicenseClient(tmp_path, transport=lambda *_: pytest.fail("unexpected network"))
     result = client.snapshot()

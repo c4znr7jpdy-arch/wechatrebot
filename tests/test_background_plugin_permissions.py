@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from types import SimpleNamespace as NS
+from types import ModuleType, SimpleNamespace as NS
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -121,31 +121,66 @@ def test_twitter_send_wrapper_reuses_background_policy(background):
     background.bot.send_group_msg.assert_not_called()
 
 
-def test_proactive_send_checks_permission_before_decorators(background, tmp_path):
+@pytest.fixture
+def proactive_sender(background, tmp_path, monkeypatch):
     directory = tmp_path / "plugin"
     directory.mkdir()
     source = _patched(directory, "astrbot_plugin_proactive_chat", "core/message_sender.py", all_patches=True)
-    function = _runtime_function(source, "_send_chain_with_hooks", {
+    package_name = "proactive_background_fixture.core"
+    for name, path in (("proactive_background_fixture", directory), (package_name, directory / "core")):
+        package = ModuleType(name)
+        package.__path__ = [str(path)]
+        monkeypatch.setitem(sys.modules, name, package)
+    monkeypatch.setitem(sys.modules, "astrbot.api", NS(logger=Mock()))
+    monkeypatch.setitem(sys.modules, "astrbot.core.platform.platform", NS(
+        PlatformStatus=NS(RUNNING="running")))
+    name = f"{package_name}.wechat_group_scope"
+    spec = importlib.util.spec_from_file_location(name, directory / "core/wechat_group_scope.py")
+    scope = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, scope)
+    spec.loader.exec_module(scope)
+
+    def function(method, namespace):
+        return _runtime_function(source, method, {"__package__": package_name, **namespace})
+
+    def owner(**kwargs):
+        return NS(context=background.context, session_data={SESSION: {"self_id": "wxid_bot"}},
+                  _parse_session_id=lambda session: tuple(session.split(":", 2)), **kwargs)
+
+    return NS(function=function, owner=owner)
+
+
+def test_proactive_send_checks_permission_before_decorators(background, proactive_sender):
+    function = proactive_sender.function("_send_chain_with_hooks", {
         "PlatformStatus": NS(RUNNING="running"), "MessageChain": list, "logger": Mock()})
-    owner = NS(context=background.context, _trigger_decorating_hooks=AsyncMock(),
-               _persist_proactive_message_to_platform_history=AsyncMock())
+    owner = proactive_sender.owner(_trigger_decorating_hooks=AsyncMock(),
+                                   _persist_proactive_message_to_platform_history=AsyncMock())
     background.save([])
     asyncio.run(function(owner, SESSION, ["hello"]))
     owner._trigger_decorating_hooks.assert_not_called()
 
 
-def test_proactive_rechecks_after_decorators(background, tmp_path):
-    directory = tmp_path / "plugin"
-    directory.mkdir()
-    source = _patched(directory, "astrbot_plugin_proactive_chat", "core/message_sender.py", all_patches=True)
-    function = _runtime_function(source, "_send_chain_with_hooks", {
+def test_proactive_authorized_send_uses_bound_account(background, proactive_sender):
+    function = proactive_sender.function("_send_chain_with_hooks", {
         "PlatformStatus": NS(RUNNING="running"), "MessageChain": list, "logger": Mock()})
-    async def decorate(*args, **kwargs):
+    owner = proactive_sender.owner(_trigger_decorating_hooks=AsyncMock(return_value=["hello"]),
+                                   _persist_proactive_message_to_platform_history=AsyncMock())
+    assert asyncio.run(function(owner, SESSION, ["hello"])) is True
+    assert background.bot.send_group_msg.call_args.kwargs["self_id"] == "wxid_bot"
+    owner._persist_proactive_message_to_platform_history.assert_awaited_once()
+
+
+def test_proactive_rechecks_after_decorators(background, proactive_sender):
+    function = proactive_sender.function("_send_chain_with_hooks", {
+        "PlatformStatus": NS(RUNNING="running"), "MessageChain": list, "logger": Mock()})
+    async def revoke(*args, **kwargs):
         background.save([])
         return ["hello"]
-    owner = NS(context=background.context, _trigger_decorating_hooks=decorate,
-               _persist_proactive_message_to_platform_history=AsyncMock())
+    decorate = AsyncMock(side_effect=revoke)
+    owner = proactive_sender.owner(_trigger_decorating_hooks=decorate,
+                                   _persist_proactive_message_to_platform_history=AsyncMock())
     asyncio.run(function(owner, SESSION, ["hello"]))
+    decorate.assert_awaited_once()
     background.bot.send_group_msg.assert_not_called()
     owner._persist_proactive_message_to_platform_history.assert_not_called()
 
@@ -160,12 +195,9 @@ def test_mystool_background_summary_obeys_contact_feature_grants(background, tmp
     background.bot.send_group_msg.assert_not_called()
 
 
-def test_proactive_denial_precedes_tts_and_session_work(background, tmp_path):
-    directory = tmp_path / "proactive"
-    directory.mkdir()
-    source = _patched(directory, "astrbot_plugin_proactive_chat", "core/message_sender.py", all_patches=True)
-    function = _runtime_function(source, "_send_proactive_message", {"logger": Mock()})
-    owner = NS(context=background.context, _get_session_config=Mock())
+def test_proactive_denial_precedes_tts_and_session_work(background, proactive_sender):
+    function = proactive_sender.function("_send_proactive_message", {"logger": Mock()})
+    owner = proactive_sender.owner(_get_session_config=Mock())
     background.save([])
     asyncio.run(function(owner, SESSION, "hello"))
     owner._get_session_config.assert_not_called()

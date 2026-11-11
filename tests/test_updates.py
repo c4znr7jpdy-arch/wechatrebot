@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+import ctypes
 import hashlib
 import io
 import json
@@ -427,6 +428,124 @@ def test_update_plan_uses_detached_manager_copy_and_applies_transactionally(
     }
 
 
+@pytest.mark.parametrize("phase", ["plan", "helper"])
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager executable ownership guard")
+def test_manager_only_update_checks_independent_windows_before_changes(tmp_path, monkeypatch, phase):
+    from wechatrebot_manager import windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    install = tmp_path / "install"
+    target = install / "manager/WeChatReBot.exe"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old-manager")
+    (install / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+    )
+    working = install / "updates/.pending-manager"
+    payload = _ready_payload(working / "payload")
+    (payload / "app/feature.txt").unlink()
+    manifest = payload / "release-manifest.json"
+    content = json.loads(manifest.read_text(encoding="utf-8"))
+    content["files"] = [entry for entry in content["files"] if entry["path"].startswith("manager/")]
+    manifest.write_text(json.dumps(content), encoding="utf-8")
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease("0.8.0", "update", (), "", "https://example.test/update.zip", 7, "A" * 64, False)
+    prepared = PreparedUpdate(release, working, payload, archive)
+    queries = []
+    blocked = [phase == "plan"]
+
+    def holders(files):
+        queries.append(tuple(files))
+        return ((123, ProcessIdentity(str(target), 456)),) if blocked[0] else ()
+
+    monkeypatch.setattr(windows_file_holders, "file_holders", holders)
+    if phase == "plan":
+        with pytest.raises(UpdateFailure) as error:
+            create_update_plan(prepared, install, executable=target, parent_pid=0)
+        assert error.value.definition.code == "UPD-1005"
+        assert not (working / "WeChatReBot-Updater.exe").exists()
+        assert not (working / "update-plan.json").exists()
+    else:
+        plan = create_update_plan(prepared, install, executable=target, parent_pid=0)
+        blocked[0] = True
+        assert apply_update_plan(plan.plan_path, restart=False) == 1
+        assert not (install / "updates/update-journal.json").exists()
+    assert queries and all(files == (target,) for files in queries)
+    assert target.read_bytes() == b"old-manager"
+    assert archive.is_file() and prepared.payload_root.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager executable ownership guard")
+def test_helper_window_failure_clears_inherited_update_handshake_before_restart(tmp_path, monkeypatch):
+    from test_app_shell import _api
+    from wechatrebot_manager import windows_file_holders
+    from wechatrebot_manager.launcher import ProcessIdentity
+
+    target = tmp_path / "manager/WeChatReBot.exe"
+    target.parent.mkdir()
+    target.write_bytes(b"old-manager")
+    (tmp_path / ".wechatrebot-install.json").write_text(
+        json.dumps({"schema_version": 1, "state": "ready"}), encoding="utf-8",
+    )
+    working = tmp_path / "updates/.pending-manager"
+    payload = _ready_payload(working / "payload")
+    archive = working / "update.zip"
+    archive.write_bytes(b"archive")
+    release = UpdateRelease("0.8.0", "update", (), "", "https://example.test/update.zip", 7, "A" * 64, False)
+    prepared = PreparedUpdate(release, working, payload, archive)
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: ())
+    plan = create_update_plan(prepared, tmp_path, executable=target, parent_pid=0, current_version="0.7.9")
+    monkeypatch.setattr(windows_file_holders, "file_holders", lambda _: ((123, ProcessIdentity(str(target), 456)),))
+    monkeypatch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_: None)
+    for name, value in (("ID", "a" * 32), ("FROM", "0.7.8"), ("TO", "0.7.9")):
+        monkeypatch.setenv(f"WECHATREBOT_UPDATE_{name}", value)
+    launches = []
+    monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
+                        launches.append((args, kwargs)) or object())
+    monkeypatch.setattr(updates_module, "start_owned_process", lambda *args, **kwargs:
+                        launches.append((args, kwargs)) or object())
+
+    assert apply_update_plan(plan.plan_path) == 1
+
+    assert target.read_bytes() == b"old-manager"
+    assert not (tmp_path / "updates/update-journal.json").exists()
+    failure = consume_update_result(tmp_path)
+    assert failure["error_code"] == "UPD-1005"
+    assert "配置窗口" in failure["message"] and "保留" not in failure["message"]
+    assert len(launches) == 1 and launches[0][0][0] == [str(target)]
+    environment = launches[0][1]["env"]
+    assert not any(f"WECHATREBOT_UPDATE_{suffix}" in environment for suffix in ("ID", "FROM", "TO"))
+    api = _api(tmp_path)
+    api._update_result = failure
+    api._startup_update_id = environment.get("WECHATREBOT_UPDATE_ID", "")
+    api._startup_update_from = environment.get("WECHATREBOT_UPDATE_FROM", "")
+    api._startup_update_to = environment.get("WECHATREBOT_UPDATE_TO", "")
+    api.confirm_update_startup()
+    assert api._update_result is failure and api._update_result["status"] == "failed"
+    assert not (tmp_path / "updates" / f"startup-success-{'a' * 32}.json").exists()
+    assert archive.is_file() and payload.is_dir()
+
+
+def test_successful_restart_uses_only_current_update_handshake(tmp_path, monkeypatch):
+    target = tmp_path / "WeChatReBot.exe"
+    target.write_bytes(b"manager")
+    launches = []
+    for name, value in (("ID", "a" * 32), ("FROM", "0.7.8"), ("TO", "0.7.9")):
+        monkeypatch.setenv(f"WECHATREBOT_UPDATE_{name}", value)
+    monkeypatch.setattr(updates_module.subprocess, "Popen", lambda *args, **kwargs:
+                        launches.append(kwargs) or object())
+    monkeypatch.setattr(updates_module, "start_owned_process", lambda *args, **kwargs:
+                        launches.append(kwargs) or object())
+
+    updates_module._restart_manager(target, tmp_path, update_id="b" * 32, version="0.8.0")
+
+    environment = launches[0]["env"]
+    assert environment["WECHATREBOT_UPDATE_ID"] == "b" * 32
+    assert environment["WECHATREBOT_UPDATE_TO"] == "0.8.0"
+    assert environment.get("WECHATREBOT_UPDATE_FROM") is None
+
+
 def test_startup_failure_restores_previous_manager_and_payload(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -554,6 +673,106 @@ def test_plugin_incremental_update_uses_current_helper_and_only_backs_up_changes
     assert (install / "manager/WeChatReBot.exe").read_bytes() == b"old-manager"
     assert not (install / "卸载机器人.exe").exists()
     assert not (install / "启动机器人.exe").exists()
+
+
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("blocked", ["result", "journal", "backup", "flag"])
+def test_confirmed_update_cleanup_failure_never_rolls_back(
+    tmp_path: Path, monkeypatch, blocked: str, restart: bool,
+) -> None:
+    install, prepared = _ready_incremental_update(tmp_path)
+    manager = prepared.payload_root / "manager/WeChatReBot.exe"
+    manager.parent.mkdir()
+    manager.write_bytes(b"new-manager")
+    manifest_path = prepared.payload_root / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].append({"path": "manager/WeChatReBot.exe", "sha256": sha256_file(manager)})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    plan = create_update_plan(
+        prepared, install, executable=install / "manager/WeChatReBot.exe", parent_pid=0,
+    )
+    update_id = json.loads(plan.plan_path.read_text(encoding="utf-8"))["update_id"]
+    journal = install / "updates/update-journal.json"
+    flag = install / "updates" / f"startup-success-{update_id}.json"
+    backup = install / "updates" / f".rollback-{update_id}"
+    result_path = install / "updates/update-result.json"
+    unlink = Path.unlink
+    rmtree = updates_module.shutil.rmtree
+    write_json = updates_module.write_json_atomic
+
+    def locked_unlink(path, *args, **kwargs):
+        if path == {"journal": journal, "flag": flag}.get(blocked):
+            raise PermissionError("file in use")
+        return unlink(path, *args, **kwargs)
+
+    def locked_rmtree(path, *args, **kwargs):
+        if blocked == "backup" and Path(path) == updates_module._extended_windows_path(backup):
+            raise PermissionError("backup in use")
+        return rmtree(path, *args, **kwargs)
+
+    def locked_result(path, payload):
+        if blocked == "result" and path == result_path:
+            raise PermissionError("result in use")
+        return write_json(path, payload)
+
+    def confirmed(path, update_id, _process):
+        write_json(path, {"update_id": update_id, "ok": True})
+
+    def forbidden_rollback(*_args):
+        raise AssertionError("confirmed manager must not be stopped or rolled back")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(updates_module, "assert_update_runtime_stopped", lambda *_args: None)
+        patch.setattr(updates_module, "_restart_manager", lambda *_args, **_kwargs: object())
+        patch.setattr(updates_module, "_wait_for_startup_confirmation", confirmed)
+        patch.setattr(updates_module, "_stop_restarted_manager", forbidden_rollback)
+        patch.setattr(updates_module, "_restore_update_targets", forbidden_rollback)
+        # Arm the lock only after installation, so the final cleanup fails.
+        def complete_with_locked_files(*args, **kwargs):
+            patch.setattr(Path, "unlink", locked_unlink)
+            patch.setattr(updates_module.shutil, "rmtree", locked_rmtree)
+            patch.setattr(updates_module, "write_json_atomic", locked_result)
+            return complete(*args, **kwargs)
+        complete = updates_module._complete_successful_update
+        patch.setattr(updates_module, "_complete_successful_update", complete_with_locked_files)
+        assert apply_update_plan(plan.plan_path, restart=restart) == 0
+        if blocked in {"result", "journal"}:
+            assert updates_module.recover_interrupted_update(install) is False
+            assert journal.is_file() and flag.is_file() and backup.is_dir()
+
+    assert (install / "manager/WeChatReBot.exe").read_bytes() == b"new-manager"
+    assert (install / "启动机器人.exe").read_bytes() == b"new-manager"
+    assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"new-plugin"
+    assert flag.is_file()
+    if blocked in {"result", "journal"}:
+        assert journal.is_file() and backup.is_dir()
+        assert updates_module.recover_interrupted_update(install) is False
+        assert not journal.exists() and not flag.exists() and not backup.exists()
+    assert json.loads(result_path.read_text(encoding="utf-8"))["ok"] is True
+    events = [json.loads(line)["event"] for line in (install / "logs/update.log").read_text(encoding="utf-8").splitlines()]
+    assert "cleanup_deferred" in events
+    assert "apply_failed" not in events
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_startup_recovery_leaves_active_helpers_journal_and_proof_alone(
+    tmp_path: Path, monkeypatch, confirmed: bool,
+) -> None:
+    updates = tmp_path / "updates"
+    updates.mkdir()
+    journal = updates / "update-journal.json"
+    journal.write_text("locked helper journal", encoding="utf-8")
+    flag = updates / f"startup-success-{'a' * 32}.json"
+    if confirmed:
+        flag.write_text(json.dumps({"update_id": "a" * 32, "ok": True}), encoding="utf-8")
+    with updates_module.SingleInstanceLock(f"update-helper:{tmp_path}"):
+        monkeypatch.setattr(
+            updates_module, "_read_json_object",
+            lambda _path: (_ for _ in ()).throw(AssertionError("must acquire helper lock before reading")),
+        )
+        assert updates_module.recover_interrupted_update(tmp_path) is False
+    assert journal.read_text(encoding="utf-8") == "locked helper journal"
+    assert flag.is_file() == confirmed
 
 
 def test_incremental_helper_rechecks_baseline_before_touching_files(tmp_path: Path) -> None:
@@ -871,8 +1090,9 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
     assert error.value.definition.code == "UPD-1004"
 
 
+@pytest.mark.parametrize("wait_failure", [None, "open", "wait"])
 def test_next_start_recovery_restores_an_interrupted_install(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, windows_process_wait, wait_failure,
 ) -> None:
     install = tmp_path / "install"
     updates = install / "updates"
@@ -916,7 +1136,7 @@ def test_next_start_recovery_restores_an_interrupted_install(
                 "install_root": str(install),
                 "target_executable": str(install / "manager" / "WeChatReBot.exe"),
                 "parent_pid": 0,
-                "wait_pids": [0],
+                "wait_pids": [1234] if wait_failure else [0],
             }
         ),
         encoding="utf-8",
@@ -927,6 +1147,20 @@ def test_next_start_recovery_restores_an_interrupted_install(
         "_restart_manager",
         lambda target, _root, **_kwargs: restarted.append(target),
     )
+
+    if wait_failure:
+        before = journal_path.read_bytes()
+        windows_process_wait(handle=0 if wait_failure == "open" else 123,
+                             result=0xFFFFFFFF, error=5)
+        assert recover_update_plan(plan_path) == 1
+        assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"new-manager"
+        assert (install / "app" / "feature.txt").read_text(encoding="utf-8") == "new-feature"
+        assert journal_path.read_bytes() == before
+        assert (backup_files / "00000000").read_bytes() == b"old-manager"
+        assert (backup_files / "00000001").read_text(encoding="utf-8") == "old-feature"
+        result = json.loads((updates / "update-result.json").read_text(encoding="utf-8"))
+        assert result["error_code"] == "UPD-1010"
+        return
 
     assert recover_update_plan(plan_path) == 0
     assert (install / "manager" / "WeChatReBot.exe").read_bytes() == b"old-manager"
@@ -1034,3 +1268,54 @@ def test_download_accepts_https_redirect_to_github_asset_host(monkeypatch, tmp_p
         prepare_update(release, channel, tmp_path / "install-insecure")
     assert rejected.value.definition.code == "UPD-1003"
     assert "HTTPS" in rejected.value.detail
+
+
+@pytest.fixture
+def windows_process_wait(monkeypatch):
+    def install(*, handle=123, result=0, error=0):
+        calls, last_error = [], [error]
+
+        def open_process(*args):
+            calls.append(("open", args))
+            return handle
+
+        def wait(*args):
+            calls.append(("wait", args))
+            return result
+
+        def close(*args):
+            calls.append(("close", args))
+            last_error[0] = 6  # Cleanup must not replace the original wait error.
+            return 1
+
+        kernel = SimpleNamespace(OpenProcess=open_process, WaitForSingleObject=wait, CloseHandle=close)
+        monkeypatch.setattr(updates_module, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: last_error[0], raising=False)
+        return calls
+
+    return install
+
+
+@pytest.mark.parametrize("error", [0, 5, 6, 87, 259, 1168])
+def test_wait_for_windows_process_exit_fails_closed_on_query_errors(windows_process_wait, error):
+    calls = windows_process_wait(handle=0, error=error)
+    if error == 87:
+        updates_module._wait_for_process_exit(1234)
+    else:
+        with pytest.raises(UpdateError, match=f"无法确认旧版本进程.*错误 {error}"):
+            updates_module._wait_for_process_exit(1234)
+    assert calls == [("open", (0x00100000, False, 1234))]
+
+
+@pytest.mark.parametrize("result", [0, 0x00000102, 0xFFFFFFFF, 0x00000080])
+def test_wait_for_windows_process_exit_requires_signaled_handle(windows_process_wait, result):
+    calls = windows_process_wait(result=result, error=5)
+    if result == 0:
+        updates_module._wait_for_process_exit(1234, timeout_seconds=2)
+    else:
+        message = ("等待旧版本退出超时" if result == 0x00000102 else
+                   "错误 5" if result == 0xFFFFFFFF else "等待结果 128")
+        with pytest.raises(UpdateError, match=message):
+            updates_module._wait_for_process_exit(1234, timeout_seconds=2)
+    assert calls == [("open", (0x00100000, False, 1234)), ("wait", (123, 2000)), ("close", (123,))]

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import hashlib
-import json
 from pathlib import Path
 import re
 import secrets
@@ -10,9 +9,11 @@ import secrets
 from .brand import BrandProfile
 from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
 from .json_io import write_json_atomic
+from .port_config import RuntimePorts, _load_object, load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
+    normalize_service_kind,
     with_thinking_mode,
 )
 from .retired_plugins import purge_retired_plugins
@@ -24,40 +25,24 @@ _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
 def normalize_admin_id(value: str | None) -> str | None:
     if value is None:
         return None
+    if not isinstance(value, str):
+        raise ValueError("管理员 wxid 格式无效，只能使用字母、数字及 _ @ . -。")
     normalized = value.strip()
     if normalized and not _ADMIN_ID.fullmatch(normalized):
         raise ValueError("管理员 wxid 格式无效，只能使用字母、数字及 _ @ . -。")
     return normalized
 
 
-def _load_object(path: Path) -> dict[str, object]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"现有配置无法读取：{path}：{exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"现有配置根节点必须是 JSON 对象：{path}")
-    return payload
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimePorts:
-    dashboard: int = 6185
-    astrbot_ws: int = 6200
-    bridge_callback: int = 5000
-    hook_api: int = 19088
-
-    def validate(self) -> tuple[str, ...]:
-        errors: list[str] = []
-        values = asdict(self)
-        for name, value in values.items():
-            if not 1 <= value <= 65535:
-                errors.append(f"{name} 端口超出范围。")
-        if len(set(values.values())) != len(values):
-            errors.append("各本地服务端口不能重复。")
-        return tuple(errors)
+def normalize_admin_ids(value: list[str] | tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Validate the complete administrator list while keeping its stable order."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("管理员列表格式无效，请每行填写一个 wxid。")
+    if any(not isinstance(item, str) for item in value):
+        raise ValueError("管理员列表格式无效，请每行填写一个 wxid。")
+    normalized = [normalize_admin_id(item) for item in value]
+    return tuple(dict.fromkeys(item for item in normalized if item))
 
 
 def bridge_config_payload(
@@ -110,11 +95,15 @@ def astrbot_config_payload(
     brand_profile: BrandProfile | None = None,
     provider_profile: OpenAIProviderProfile | None = None,
     admin_id: str | None = None,
+    admin_ids: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     errors = ports.validate()
     if errors:
         raise ValueError("；".join(errors))
-    normalized_admin = normalize_admin_id(admin_id)
+    normalized_admins = normalize_admin_ids(admin_ids)
+    if normalized_admins is None:
+        normalized_admin = normalize_admin_id(admin_id)
+        normalized_admins = (normalized_admin,) if normalized_admin else ()
     payload: dict[str, object] = {
         "config_version": 2,
         "platform": [
@@ -156,7 +145,7 @@ def astrbot_config_payload(
             "websearch_exa_key": [],
             "web_search_link": False,
         },
-        "admins_id": [normalized_admin] if normalized_admin else [],
+        "admins_id": list(normalized_admins),
         "dashboard": {
             "enable": True,
             "username": "local-console",
@@ -474,14 +463,26 @@ def _sync_living_memory_config(
             },
         },
     )
-    if provider_profile is not None:
+    if provider_profile is not None and provider_profile.service_kind == "chat":
         provider_settings = payload.get("provider_settings")
         if not isinstance(provider_settings, dict):
             provider_settings = {}
             payload["provider_settings"] = provider_settings
-        provider_settings.setdefault(
-            "llm_provider_id", provider_profile.normalized().model_id
-        )
+        current_id = provider_settings.get("llm_provider_id")
+        engine = _load_object(astrbot_data_root / "cmd_config.json")
+        models = engine.get("provider")
+        current = next(
+            (item for item in models if isinstance(item, dict) and item.get("id") == current_id),
+            None,
+        ) if isinstance(models, list) else None
+        try:
+            current_kind = normalize_service_kind(
+                current.get("service_kind") or current.get("provider_type") or current.get("type")
+            ) if current is not None else "chat"
+        except ValueError:
+            current_kind = "chat"  # Preserve a customer binding to an unknown adapter.
+        if not current_id or current_kind != "chat":
+            provider_settings["llm_provider_id"] = provider_profile.normalized().model_id
     write_json_atomic(path, payload)
 
 
@@ -557,14 +558,26 @@ def write_runtime_configs(
     wechat_exe_path: str | Path | None = None,
     *,
     wechat_version: str | None = None,
-    ports: RuntimePorts = RuntimePorts(),
+    ports: RuntimePorts | None = None,
     brand_profile: BrandProfile | None = None,
     apply_brand_persona: bool = True,
     provider_profile: OpenAIProviderProfile | None = None,
     provider_make_default: bool = True,
     admin_id: str | None = None,
+    admin_ids: list[str] | tuple[str, ...] | None = None,
 ) -> None:
+    normalized_admins = normalize_admin_ids(admin_ids)
+    if normalized_admins is None and admin_id is not None:
+        normalized_admin = normalize_admin_id(admin_id)
+        normalized_admins = (normalized_admin,) if normalized_admin else ()
     root = Path(install_root).expanduser().resolve()
+    manager_path = root / "config" / "manager.json"
+    manager_payload = _load_object(manager_path)
+    if ports is None:
+        ports = load_runtime_ports(root)
+    errors = ports.validate()
+    if errors:
+        raise ValueError("；".join(errors))
     bridge_config = root / "app" / "bridge" / "config.json"
     bridge_payload = _load_object(bridge_config)
     bridge_payload.update(bridge_config_payload(wechat_exe_path, ports=ports))
@@ -586,6 +599,7 @@ def write_runtime_configs(
         brand_profile=brand_profile,
         provider_profile=provider_profile,
         admin_id=admin_id,
+        admin_ids=normalized_admins,
     )
     astrbot_payload = _load_object(astrbot_path)
     if astrbot_payload:
@@ -625,11 +639,8 @@ def write_runtime_configs(
                 provider_profile,
                 make_default=provider_make_default,
             )
-        normalized_admin = normalize_admin_id(admin_id)
-        if normalized_admin is not None:
-            astrbot_payload["admins_id"] = (
-                [normalized_admin] if normalized_admin else []
-            )
+        if normalized_admins is not None:
+            astrbot_payload["admins_id"] = list(normalized_admins)
     else:
         astrbot_payload = generated_astrbot
     from .provider import repair_embedding_provider_types
@@ -657,8 +668,6 @@ def write_runtime_configs(
     )
     _sync_living_memory_config(astrbot_data_root, provider_profile)
     _sync_emotion_config(astrbot_data_root)
-    manager_path = root / "config" / "manager.json"
-    manager_payload = _load_object(manager_path)
     manager_payload.update(
         {
             "schema_version": 1,
@@ -676,9 +685,8 @@ def write_runtime_configs(
         manager_payload["provider_configured"] = True
     else:
         manager_payload.setdefault("provider_configured", False)
-    normalized_admin = normalize_admin_id(admin_id)
-    if normalized_admin is not None:
-        manager_payload["admin_configured"] = bool(normalized_admin)
+    if normalized_admins is not None:
+        manager_payload["admin_configured"] = bool(normalized_admins)
     else:
         manager_payload.setdefault("admin_configured", False)
     write_json_atomic(

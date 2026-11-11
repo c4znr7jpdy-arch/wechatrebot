@@ -30,10 +30,17 @@ from test_manager_startup import browser  # noqa: F401
 from wechatrebot_manager.updates import canonical_manifest_bytes
 
 
+def _expand_advanced(page, label):
+    summary = page.get_by_text(label, exact=True)
+    if summary.locator("..").get_attribute("open") is None:
+        summary.click()
+
+
 class UploadGitHub(FakeGitHub):
     def __init__(self, directory):
         super().__init__(directory)
         self.uploads = []
+        self.publications = []
         self.upload_error = False
         self.version = "1.0.0"
 
@@ -43,7 +50,14 @@ class UploadGitHub(FakeGitHub):
     async def listing(self):
         return await PageGitHub.listing(self)
 
-    async def switch(self, version, digest):
+    async def candidate(self, version):
+        return self.target, self._manifest(self.target, version)[1]
+
+    async def switch(self, version, digest, *, message=None, expected_candidate_digest=""):
+        if message is not None:
+            if expected_candidate_digest != hashlib.sha256(self.target).hexdigest():
+                raise GitHubError("待发布版本已变化，请重新预览。")
+            self.publications.append(message)
         result = await PageGitHub.switch(self, version, digest)
         self.version = version
         return result
@@ -152,6 +166,7 @@ def upload_page(browser, upload_server):
         page.get_by_role("button", name="登录", exact=True).click()
         expect(page.get_by_text("授权数据库连接正常")).to_be_visible()
         page.get_by_role("link", name="发布版本", exact=True).click()
+        _expand_advanced(page, "高级操作：手动上传更新包")
         expect(page.locator('form[action$="/releases/upload"]')).to_be_visible()
         yield page
         assert page.url.startswith(upload_server.url)
@@ -188,6 +203,7 @@ def _candidate_files(tmp_path, github):
 
 
 def _fill_upload(page, server, files):
+    _expand_advanced(page, "高级操作：手动上传更新包")
     form = page.locator('form[action$="/releases/upload"]')
     server.clock[0] += 30
     form.locator('input[name="totp"]').fill(totp(server.secret, server.clock[0] // 30))
@@ -220,6 +236,7 @@ def test_admin_upload_is_separate_from_stable_notification(upload_page, upload_s
     assert not server.github.calls
     page.screenshot(path=str(tmp_path / f"admin-upload-verified-{width}.png"), full_page=True)
     server.clock[0] += 30
+    _expand_advanced(page, "高级操作：切换或回滚稳定清单")
     switch = page.locator('form[action$="/releases"]')
     switch.locator('select[name="version"]').select_option("1.0.1")
     switch.locator('input[name="totp"]').fill(totp(server.secret, server.clock[0] // 30))
@@ -238,6 +255,7 @@ def test_admin_upload_missing_files_stays_in_form_and_failed_upload_can_retry(up
     server.github.upload_error = True
     _fill_upload(page, server, files).get_by_role("button", name="上传并验证", exact=True).click()
     expect(page.locator(".message")).to_contain_text("请保留本地文件后重试上传")
+    _expand_advanced(page, "高级操作：手动上传更新包")
     expect(page.locator('form[action$="/releases/upload"]')).to_be_visible()
     expect(page.get_by_text("当前稳定版本：")).to_contain_text("1.0.0")
     assert not server.github.calls
@@ -266,6 +284,7 @@ def test_admin_upload_invalid_candidate_explains_and_allows_retry(upload_page, u
         form.locator('input[name="packages"]').set_input_files(files["wechatrebot-1.0.1.zip"])
     form.get_by_role("button", name="上传并验证", exact=True).click()
     expect(page.locator(".message")).to_contain_text("清单验签失败" if invalid == "signature" else "文件缺失")
+    _expand_advanced(page, "高级操作：手动上传更新包")
     expect(page.locator('form[action$="/releases/upload"]')).to_be_visible()
     expect(page.get_by_text("当前稳定版本：")).to_contain_text("1.0.0")
     assert not server.github.uploads and not server.github.calls

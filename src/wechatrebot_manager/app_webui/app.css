@@ -431,7 +431,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .message { display: flex; gap: 9px; margin-bottom: 15px; }
 .message.assistant { flex-direction: row-reverse; }
 .message-avatar { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 8px; color: #fff; background: #7c8da2; font-size: 11px; font-weight: 800; }
-.message.assistant .message-avatar { background: var(--blue-600); }
+.message.assistant .message-avatar { color: var(--primary-ink, #fff); background: var(--blue-600); }
 .message-avatar-button { flex: 0 0 34px; width: 34px; height: 34px; margin: -2px; padding: 2px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; transition: background-color .18s ease, box-shadow .18s ease; }
 .message-avatar-button:hover { background: var(--blue-100); }
 .message-avatar-button:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
@@ -702,12 +702,16 @@ tbody tr:hover { background: #fbfdff; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(4,17,31,.48); }
 .modal-backdrop[hidden] { display: none; }
-.modal { width: min(440px,100%); padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.22); }
+.app-shell[inert] *, .app-shell[inert] *::before, .app-shell[inert] *::after { animation-play-state: paused !important; }
+.modal { display: flex; flex-direction: column; width: min(440px,100%); max-height: calc(100dvh - 40px); padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.22); overflow-wrap: anywhere; }
+.modal > h2, .modal > .modal-actions { flex-shrink: 0; }
+.modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .modal h2 { margin: 0 0 10px; font-size: 19px; }
 .modal-subject { margin: 16px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; }
 .modal-subject dt { color: var(--muted); font-size: 12px; }
 .modal-subject dd { margin: 5px 0 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .modal p { margin: 0; color: var(--muted); }
+#modalMessage { white-space: pre-wrap; line-height: 1.75; }
 .modal-progress { height: 8px; margin-top: 18px; overflow: hidden; background: var(--blue-100); border-radius: 999px; }
 .modal-progress span { display: block; width: 0; height: 100%; background: var(--blue-600); border-radius: inherit; transition: width .2s ease; }
 .modal-progress span.is-indeterminate { animation: update-progress-sweep 1.3s ease-in-out infinite alternate; }
@@ -1158,8 +1162,8 @@ tbody tr:hover { background: #fbfdff; }
 .contact-facts dt { color: var(--muted); font-size: 11px; }
 .contact-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .contact-facts code { color: #435268; font: 11px "Cascadia Mono", Consolas, monospace; }
-.profile-state { min-height: 70px; padding: 16px; border-radius: 8px; color: var(--muted); background: #f5f8fc; font-size: 11px; }
-.profile-state.error { color: var(--red-700); background: var(--red-100); }
+.profile-state { min-height: 70px; padding: 16px; border-radius: 8px; color: var(--muted); background: var(--surface-2); font-size: 11px; }
+.profile-state.error { color: var(--ink); background: var(--red-100); }
 .private-feature-policy { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .private-feature-policy > p { margin: 5px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .private-feature-options { grid-template-columns: 1fr; }

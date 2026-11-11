@@ -107,33 +107,6 @@ MODEL_PROVIDER_PRESETS: tuple[dict[str, object], ...] = (
         "description": "填写 Sub2 兼容接口地址和模型名称；按所选服务的实际能力使用。",
     },
     {
-        "id": "embedding_custom",
-        "name": "向量模型（兼容接口）",
-        "api_base": "",
-        "model": "",
-        "service_kind": "embedding",
-        "modalities": ("embedding",),
-        "description": "新增 Embedding 文本向量模型，供长期记忆等功能选择。",
-    },
-    {
-        "id": "image_custom",
-        "name": "图片模型（兼容接口）",
-        "api_base": "",
-        "model": "",
-        "service_kind": "image",
-        "modalities": ("image",),
-        "description": "新增图片生成模型，供功能中心图片生成选择。",
-    },
-    {
-        "id": "voice_custom",
-        "name": "语音模型（兼容接口）",
-        "api_base": "",
-        "model": "",
-        "service_kind": "voice",
-        "modalities": ("audio",),
-        "description": "新增语音模型，供语音回复或转写功能选择。",
-    },
-    {
         "id": "custom",
         "name": "其他兼容服务",
         "api_base": "",
@@ -505,16 +478,37 @@ def infer_thinking_mode(
     return True
 
 
+def normalize_api_base(api_base: str) -> str:
+    """Complete an OpenAI-compatible base without rewriting explicit versions."""
+    value = api_base.strip()
+    try:
+        endpoint = urlsplit(value)
+    except ValueError:
+        return value
+    # Leave invalid or credential-bearing values intact for profile validation.
+    if (
+        endpoint.scheme not in {"http", "https"}
+        or not endpoint.hostname
+        or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+    ):
+        return value
+    path = endpoint.path.rstrip("/")
+    path = re.sub(r"(/v1)(?:/v1)+(?=/|$)", r"\1", path)
+    if not re.search(r"(?:^|/)v\d+(?:[a-z]+\d*)?(?:/|$)", path) and not path.endswith("/models"):
+        path = f"{path}/v1"
+    return endpoint._replace(path=path).geturl()
+
+
 def provider_source_id(api_base: str, model: str) -> str:
     """Return a stable internal source id without exposing it in customer UI."""
-    normalized_base = api_base.strip().rstrip("/").casefold()
+    normalized_base = normalize_api_base(api_base).casefold()
     normalized_model = model.strip().casefold()
     if (
         normalized_base == DEFAULT_PROVIDER_API_BASE.casefold()
         and normalized_model == DEFAULT_PROVIDER_MODEL.casefold()
     ):
         return DEFAULT_PROVIDER_SOURCE_ID
-    if normalized_base == DEEPSEEK_PROVIDER_API_BASE.casefold():
+    if normalized_base == normalize_api_base(DEEPSEEK_PROVIDER_API_BASE).casefold():
         return DEEPSEEK_PROVIDER_SOURCE_ID
     digest = hashlib.sha256(normalized_base.encode("utf-8")).hexdigest()[:10]
     return f"custom_{digest}"
@@ -624,7 +618,7 @@ class OpenAIProviderProfile:
     def normalized(self) -> "OpenAIProviderProfile":
         return OpenAIProviderProfile(
             api_key=self.api_key.strip(),
-            api_base=self.api_base.strip().rstrip("/"),
+            api_base=normalize_api_base(self.api_base),
             model=self.model.strip(),
             source_id=self.source_id.strip().casefold(),
             thinking_enabled=self.thinking_enabled,
@@ -822,6 +816,7 @@ __all__ = [
     "discover_openai_models",
     "provider_display_name",
     "provider_service_label",
+    "normalize_api_base",
     "normalize_service_kind",
     "infer_provider_modalities",
     "provider_source_id",

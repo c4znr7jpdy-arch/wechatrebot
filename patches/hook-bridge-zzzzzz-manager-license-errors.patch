@@ -1,0 +1,45 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+index 7731841..477a72f 100644
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/callback_server.py
+@@ -11,6 +11,9 @@ from typing import Any
+ 
+ from aiohttp import ContentTypeError, web
+ 
++from wechatrebot_manager.licensing.protocol import LicenseError
++from wechatrebot_manager.licensing.runtime_guard import runtime_guard
++
+ 
+ logger = logging.getLogger(__name__)
+ _MANAGER_MEMBER_LIMIT = 500
+@@ -27,6 +30,21 @@ def _manager_error(message: str, status: int) -> web.Response:
+     return _manager_response({"ok": False, "error": message}, status)
+ 
+ 
++def _manager_license_error(exc: LicenseError, account_id: str) -> web.Response:
++    # The final hook guard also uses automation_paused for expired/revoked
++    # authorization. Only a fresh, matching authorized pause gets this hint.
++    state = runtime_guard().status(account_id)
++    if (exc.code == "automation_paused" and state.get("enabled") is True
++            and state.get("can_run") is False and state.get("authorized") is True and state.get("state") == "paused"
++            and state.get("account") == account_id):
++        return _manager_response({"ok": False, "error": {
++            "code": "LIC-automation_paused",
++            "message": "自动化已暂停，群二维码暂不可用。请在运行中心点击启动机器人后重试。",
++            "retryable": False,
++        }}, 403)
++    return _manager_error("当前无法验证群二维码访问权限，请检查授权状态后重试。", 403)
++
++
+ def _manager_text(value: Any) -> str:
+     for _ in range(3):
+         if not isinstance(value, Mapping):
+@@ -388,6 +406,8 @@ def create_callback_app(
+             if not await account_still_current(account_id):
+                 return _manager_error("当前微信账号已变化，请刷新后重试", 409)
+             image = await manager_hook.get_group_qrcode(group_id)
++        except LicenseError as exc:
++            return _manager_license_error(exc, account_id)
+         except Exception:
+             logger.exception("manager group QR code read failed")
+             return _manager_error("群二维码读取失败，请稍后重试", 502)

@@ -1,0 +1,440 @@
+diff --git a/core/command_handler.py b/core/command_handler.py
+index 108e939..3309d21 100644
+--- a/core/command_handler.py
++++ b/core/command_handler.py
+@@ -353,6 +353,7 @@ class CommandHandler:
+             return
+ 
+         session_id = event.unified_msg_origin
++        session_revision = await self.conversation_manager._summary_snapshot(session_id)
+         try:
+             if not is_event_memory_allowed(self.config_manager, event):
+                 logger.debug("当前事件不在记忆白名单中，跳过手动总结")
+@@ -461,32 +462,40 @@ class CommandHandler:
+             }
+             metadata["source_session_id"] = session_id
+ 
+-            await self.memory_engine.add_memory(
+-                content=content,
+-                session_id=memory_scope,
+-                persona_id=persona_id,
+-                importance=importance,
+-                metadata=metadata,
+-                atoms=atoms,
+-                source_messages=(
+-                    serialize_source_messages(history_messages)
+-                    if importance
+-                    >= float(
+-                        self.config_manager.get(
+-                            "reflection_engine.source_retention_importance_threshold",
+-                            0.8,
+-                        )
++            async with self.conversation_manager._summary_commit(
++                session_id, session_revision
++            ) as current:
++                if current:
++                    await self.memory_engine.add_memory(
++                        content=content,
++                        session_id=memory_scope,
++                        persona_id=persona_id,
++                        importance=importance,
++                        metadata=metadata,
++                        atoms=atoms,
++                        source_messages=(
++                            serialize_source_messages(history_messages)
++                            if importance
++                            >= float(
++                                self.config_manager.get(
++                                    "reflection_engine.source_retention_importance_threshold",
++                                    0.8,
++                                )
++                            )
++                            else None
++                        ),
+                     )
+-                    else None
+-                ),
+-            )
+ 
+-            await self.conversation_manager.update_session_metadata(
+-                session_id, "last_summarized_index", actual_count
+-            )
+-            await self.conversation_manager.update_session_metadata(
+-                session_id, "pending_summary", None
+-            )
++                    await self.conversation_manager.update_session_metadata(
++                        session_id, "last_summarized_index", actual_count
++                    )
++                    await self.conversation_manager.update_session_metadata(
++                        session_id, "pending_summary", None
++                    )
++
++            if not current:
++                yield event.plain_result(t("summarize.cancelled_by_reset"))
++                return
+ 
+             topics = ", ".join(metadata.get("topics", [])) or t("common.none")
+             yield event.plain_result(
+diff --git a/core/event_handler_modules/memory_reflection.py b/core/event_handler_modules/memory_reflection.py
+index 707630f..0c9f7c6 100644
+--- a/core/event_handler_modules/memory_reflection.py
++++ b/core/event_handler_modules/memory_reflection.py
+@@ -144,6 +144,8 @@ class MemoryReflection:
+                 )
+                 return
+ 
++            session_revision = await self.conversation_manager._summary_snapshot(session_id)
++
+             # 添加助手响应
+             await self.conversation_manager.add_message_from_event(
+                 event=event,
+@@ -202,9 +204,10 @@ class MemoryReflection:
+                 )
+                 # 调整为当前消息总数，而非归零（避免重复处理已总结的内容）
+                 last_summarized_index = total_messages
+-                await self.conversation_manager.update_session_metadata(
+-                    session_id, "last_summarized_index", total_messages
+-                )
++                if not await self.conversation_manager._summary_update_metadata(
++                    session_id, session_revision, {"last_summarized_index": total_messages}
++                ):
++                    return
+ 
+             # 计算未总结的消息数量
+             unsummarized_messages = total_messages - last_summarized_index
+@@ -243,16 +246,19 @@ class MemoryReflection:
+ 
+                     # 检查是否已达到最大重试次数
+                     if retry_count >= 3:
++                        try:
++                            failed_end = int(pending_summary.get("end_index", last_summarized_index))
++                        except (TypeError, ValueError, OverflowError):
++                            failed_end = last_summarized_index
++                        abandoned_end = max(last_summarized_index, min(end_index, failed_end))
+                         logger.warning(
+                             f"[{session_id}] 待处理总结已连续失败 {retry_count} 次，放弃该范围 "
+-                            f"[{pending_start}:{pending_summary.get('end_index', end_index)}]"
++                            f"[{pending_start}:{abandoned_end}]"
+                         )
+-                        # 清除待处理记录，更新 last_summarized_index 到当前位置
+-                        await self.conversation_manager.update_session_metadata(
+-                            session_id, "pending_summary", None
+-                        )
+-                        await self.conversation_manager.update_session_metadata(
+-                            session_id, "last_summarized_index", end_index
++                        # 只跳过已失败的历史范围，保留之后新到的消息供下次总结。
++                        await self.conversation_manager._summary_update_metadata(
++                            session_id, session_revision,
++                            {"pending_summary": None, "last_summarized_index": abandoned_end},
+                         )
+                         return
+ 
+@@ -306,6 +312,7 @@ class MemoryReflection:
+                                 start_index,
+                                 end_index,
+                                 retry_count,
++                                session_revision=session_revision,
+                                 memory_scope=(
+                                     resolve_memory_scope(self.config_manager, event)
+                                     or session_id
+@@ -335,6 +342,7 @@ class MemoryReflection:
+         end_index: int,
+         retry_count: int,
+         memory_scope: str | None | object = _DEFAULT_MEMORY_SCOPE,
++        session_revision: int | None = None,
+     ):
+         """后台存储任务"""
+         from ..utils import OperationContext
+@@ -342,6 +350,11 @@ class MemoryReflection:
+         if memory_scope is _DEFAULT_MEMORY_SCOPE:
+             memory_scope = session_id
+ 
++        if session_revision is None:
++            session_revision = await self.conversation_manager._summary_snapshot(session_id)
++        if session_revision != self.conversation_manager._summary_revision(session_id):
++            return
++
+         async with OperationContext("记忆存储", session_id):
+             try:
+                 # 如果其他任务已经推进了总结进度，本任务可能已过期，直接跳过
+@@ -380,7 +393,7 @@ class MemoryReflection:
+                 if not self.memory_processor:
+                     logger.error(f"[{session_id}] MemoryProcessor 未初始化，记录待重试")
+                     await self._record_pending_summary(
+-                        session_id, start_index, end_index, retry_count
++                        session_id, start_index, end_index, retry_count, session_revision
+                     )
+                     return
+ 
+@@ -427,57 +440,45 @@ class MemoryReflection:
+                         exc_info=True,
+                     )
+                     await self._record_pending_summary(
+-                        session_id, start_index, end_index, retry_count
++                        session_id, start_index, end_index, retry_count, session_revision
+                     )
+                     return
+ 
+-                # 正常流程：添加到记忆引擎
+-                if self.memory_engine:
+-                    source_threshold = float(
+-                        self.config_manager.get(
+-                            "reflection_engine.source_retention_importance_threshold",
+-                            0.8,
++                async with self.conversation_manager._summary_commit(
++                    session_id, session_revision
++                ) as current:
++                    if not current:
++                        logger.info(f"[{session_id}] 会话已清空，丢弃旧总结结果")
++                        return
++                    # 正常流程：添加到记忆引擎
++                    if self.memory_engine:
++                        source_threshold = float(
++                            self.config_manager.get(
++                                "reflection_engine.source_retention_importance_threshold",
++                                0.8,
++                            )
+                         )
+-                    )
+-                    source_messages = (
+-                        serialize_source_messages(history_messages)
+-                        if importance >= source_threshold
+-                        else None
+-                    )
+-                    await self.memory_engine.add_memory(
+-                        content=content,
+-                        session_id=memory_scope,
+-                        persona_id=persona_id,
+-                        importance=importance,
+-                        metadata=metadata,
+-                        atoms=atoms,
+-                        source_messages=source_messages,
+-                    )
+-
+-                    logger.info(
+-                        f"[{session_id}] 成功存储对话记忆（{len(history_messages)}条消息，重要性={importance:.2f}）"
+-                    )
+-
+-                # 成功：更新已总结的位置，清除待处理记录
+-                if self.conversation_manager:
+-                    try:
+-                        await self.conversation_manager.update_session_metadata(
+-                            session_id, "last_summarized_index", end_index
++                        source_messages = (
++                            serialize_source_messages(history_messages)
++                            if importance >= source_threshold
++                            else None
+                         )
+-                        await self.conversation_manager.update_session_metadata(
+-                            session_id, "pending_summary", None
++                        await self.memory_engine.add_memory(
++                            content=content,
++                            session_id=memory_scope,
++                            persona_id=persona_id,
++                            importance=importance,
++                            metadata=metadata,
++                            atoms=atoms,
++                            source_messages=source_messages,
+                         )
++
+                         logger.info(
+-                            f"[{session_id}] 更新滑动窗口位置: last_summarized_index = {end_index}"
++                            f"[{session_id}] 成功存储对话记忆（{len(history_messages)}条消息，重要性={importance:.2f}）"
+                         )
+-                    except Exception as meta_err:
+-                        logger.error(
+-                            f"[{session_id}] 记忆已存储但元数据更新失败: {meta_err}。"
+-                            "下次触发时将跳过本段消息，避免重复总结。",
+-                            exc_info=True,
+-                        )
+-                        # Advance the index anyway to prevent re-processing the
+-                        # same message range (memory is already stored durably).
++
++                    # 成功：更新已总结的位置，清除待处理记录
++                    if self.conversation_manager:
+                         try:
+                             await self.conversation_manager.update_session_metadata(
+                                 session_id, "last_summarized_index", end_index
+@@ -485,17 +486,35 @@ class MemoryReflection:
+                             await self.conversation_manager.update_session_metadata(
+                                 session_id, "pending_summary", None
+                             )
+-                        except Exception:
++                            logger.info(
++                                f"[{session_id}] 更新滑动窗口位置: last_summarized_index = {end_index}"
++                            )
++                        except Exception as meta_err:
+                             logger.error(
+-                                f"[{session_id}] 重试元数据更新仍然失败，"
+-                                "可能出现重复总结。",
++                                f"[{session_id}] 记忆已存储但元数据更新失败: {meta_err}。"
++                                "下次触发时将跳过本段消息，避免重复总结。",
+                                 exc_info=True,
+                             )
++                            # Advance the index anyway to prevent re-processing the
++                            # same message range (memory is already stored durably).
++                            try:
++                                await self.conversation_manager.update_session_metadata(
++                                    session_id, "last_summarized_index", end_index
++                                )
++                                await self.conversation_manager.update_session_metadata(
++                                    session_id, "pending_summary", None
++                                )
++                            except Exception:
++                                logger.error(
++                                    f"[{session_id}] 重试元数据更新仍然失败，"
++                                    "可能出现重复总结。",
++                                    exc_info=True,
++                                )
+ 
+             except Exception as e:
+                 logger.error(f"[{session_id}] 存储记忆失败: {e}", exc_info=True)
+                 await self._record_pending_summary(
+-                    session_id, start_index, end_index, retry_count
++                    session_id, start_index, end_index, retry_count, session_revision
+                 )
+ 
+     async def _record_pending_summary(
+@@ -504,6 +523,7 @@ class MemoryReflection:
+         start_index: int,
+         end_index: int,
+         current_retry_count: int,
++        session_revision: int,
+     ):
+         """记录待处理的失败总结信息"""
+         if not self.conversation_manager:
+@@ -516,9 +536,10 @@ class MemoryReflection:
+             "retry_count": new_retry_count,
+         }
+ 
+-        await self.conversation_manager.update_session_metadata(
+-            session_id, "pending_summary", pending_summary
+-        )
++        if not await self.conversation_manager._summary_update_metadata(
++            session_id, session_revision, {"pending_summary": pending_summary}
++        ):
++            return
+ 
+         logger.warning(
+             f"[{session_id}] 记录待重试总结: 范围=[{start_index}:{end_index}], "
+diff --git a/core/i18n/en.json b/core/i18n/en.json
+index 1f07f0d..5044ad1 100644
+--- a/core/i18n/en.json
++++ b/core/i18n/en.json
+@@ -68,6 +68,7 @@
+     "action_name": "Memory summarization",
+     "access_denied": "The current user or session is not on the long-term memory allowlist.",
+     "invalid_count": "The summary message count must be an integer greater than or equal to 2.",
++    "cancelled_by_reset": "The current conversation was cleared. Summarization of the previous conversation has been cancelled.",
+     "no_new": "No new conversations to summarize currently.\nTotal messages: {total}\nLast summarized message index: {index}",
+     "starting": "Starting manual memory summarization...\nMessage range: [{start}:{end}], total {count} items",
+     "fetch_failed": "Failed to fetch messages: no summarizable messages read.\nPlease confirm the current session has historical messages and retry.",
+diff --git a/core/i18n/ru.json b/core/i18n/ru.json
+index f25a03a..aa4286b 100644
+--- a/core/i18n/ru.json
++++ b/core/i18n/ru.json
+@@ -68,6 +68,7 @@
+     "action_name": "Суммирование памяти",
+     "access_denied": "Текущий пользователь или сессия отсутствует в списке разрешений долгосрочной памяти.",
+     "invalid_count": "Количество сообщений для суммирования должно быть целым числом не меньше 2.",
++    "cancelled_by_reset": "Текущий диалог очищен. Суммирование предыдущего диалога отменено.",
+     "no_new": "Нет новых диалогов для суммирования.\nВсего сообщений: {total}\nПоследний суммированный индекс: {index}",
+     "starting": "Начинаю ручное суммирование памяти...\nДиапазон сообщений: [{start}:{end}], всего {count} записей",
+     "fetch_failed": "Не удалось получить сообщения: нет данных для суммирования.\nУбедитесь, что текущая сессия содержит историю, и повторите.",
+diff --git a/core/i18n/zh.json b/core/i18n/zh.json
+index 18fc02e..1344b6f 100644
+--- a/core/i18n/zh.json
++++ b/core/i18n/zh.json
+@@ -68,6 +68,7 @@
+     "action_name": "记忆总结",
+     "access_denied": "当前用户或会话不在长期记忆白名单中。",
+     "invalid_count": "总结消息条数必须是大于等于 2 的整数。",
++    "cancelled_by_reset": "当前会话已清空，已取消旧对话的记忆总结。",
+     "no_new": "当前没有需要总结的新对话。\n当前消息总数: {total}\n已总结到消息序号: {index}",
+     "starting": "开始手动总结记忆...\n消息范围: [{start}:{end}]，共 {count} 条",
+     "fetch_failed": "获取消息失败：未读取到可总结的消息。\n请确认当前会话存在历史消息后重试。",
+diff --git a/core/managers/conversation_manager.py b/core/managers/conversation_manager.py
+index 261d0d3..c09a592 100644
+--- a/core/managers/conversation_manager.py
++++ b/core/managers/conversation_manager.py
+@@ -14,7 +14,9 @@ import asyncio
+ import json
+ import time
+ from collections import OrderedDict
++from contextlib import asynccontextmanager
+ from typing import Any
++from weakref import WeakValueDictionary
+ 
+ from astrbot.api import logger
+ from astrbot.api.platform import MessageType
+@@ -77,6 +79,9 @@ class ConversationManager:
+         self._cache: OrderedDict = OrderedDict()
+         # 缓存锁，保护并发访问
+         self._cache_lock = asyncio.Lock()
++        # 总结生成不持锁；仅在最终提交或清空会话时协调同一会话。
++        self._summary_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
++        self._summary_revisions: dict[str, int] = {}
+ 
+         logger.info(
+             f"[ConversationManager] 初始化完成: "
+@@ -532,6 +537,37 @@ class ConversationManager:
+         """
+         return await self.store.get_recent_sessions(limit)
+ 
++    def _summary_revision(self, session_id: str) -> int:
++        return self._summary_revisions.get(session_id, 0)
++
++    def _summary_lock(self, session_id: str) -> asyncio.Lock:
++        lock = self._summary_locks.get(session_id)
++        if lock is None:
++            lock = asyncio.Lock()
++            self._summary_locks[session_id] = lock
++        return lock
++
++    async def _summary_snapshot(self, session_id: str) -> int:
++        """等待进行中的清空完成，再获取后续历史读取所属的代次。"""
++        async with self._summary_lock(session_id):
++            return self._summary_revision(session_id)
++
++    @asynccontextmanager
++    async def _summary_commit(self, session_id: str, revision: int):
++        """提交与 clear 互斥，拒绝清空前取到的旧历史快照。"""
++        async with self._summary_lock(session_id):
++            yield self._summary_revision(session_id) == revision
++
++    async def _summary_update_metadata(
++        self, session_id: str, revision: int, updates: dict[str, Any]
++    ) -> bool:
++        async with self._summary_commit(session_id, revision) as current:
++            if not current:
++                return False
++            for key, value in updates.items():
++                await self.update_session_metadata(session_id, key, value)
++            return True
++
+     async def clear_session(self, session_id: str):
+         """
+         清空会话历史
+@@ -539,15 +575,13 @@ class ConversationManager:
+         Args:
+             session_id: 会话ID
+         """
+-        # 删除数据库中的消息
+-        await self.store.delete_session_messages(session_id)
+-
+-        # 清除缓存
+-        async with self._cache_lock:
+-            if session_id in self._cache:
+-                del self._cache[session_id]
+-        # 同步重置会话元数据，特别是记忆总结的计数器
+-        await self.reset_session_metadata(session_id)
++        async with self._summary_lock(session_id):
++            self._summary_revisions[session_id] = self._summary_revision(session_id) + 1
++            # 所有用户清空入口都经由此处；过期清理和滑动裁剪不改变会话代次。
++            await self.store.delete_session_messages(session_id)
++            async with self._cache_lock:
++                self._cache.pop(session_id, None)
++            await self.reset_session_metadata(session_id)
+ 
+         logger.info(f"[ConversationManager] 已清空会话并重置记忆上下文: {session_id}")
+ 

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="app.css?v=20260922-dark-complete">
   <link rel="stylesheet" href="design-overrides.css?v=20260929-native-page">
   <link rel="stylesheet" href="provider-settings.css?v=20261012">
-  <link rel="stylesheet" href="subscription.css?v=20261105">
+  <link rel="stylesheet" href="subscription.css?v=20261111">
   <link rel="stylesheet" href="activity.css?v=20261010">
   <link rel="stylesheet" href="runtime-alerts.css">
   <link rel="stylesheet" href="updates.css">
@@ -63,7 +63,10 @@
       <div class="sidebar-foot">
         <div class="sidebar-health"><span class="health-dot" id="sideHealthDot"></span><span id="sideHealthText">正在检查</span></div>
         <div class="sidebar-meta">
-          <span class="sidebar-version" id="versionText">v0.0.0</span>
+          <span class="sidebar-version-status" id="versionStatus" role="status" title="尚未检查更新">
+            <span class="health-dot" id="versionStatusDot" aria-hidden="true"></span>
+            <span class="sidebar-version" id="versionText">v0.0.0</span>
+          </span>
             <button class="nav-item help-toggle" data-page="help" data-action-bound disabled aria-label="帮助" title="帮助"><svg><use href="#i-help"/></svg></button>
           <button class="theme-toggle" id="themeToggle" type="button" data-action-bound disabled aria-pressed="false" aria-label="切换到深色模式" title="切换到深色模式">
             <svg aria-hidden="true"><use id="themeToggleIcon" href="#i-moon"/></svg>
@@ -184,28 +187,26 @@
             <div class="subscription-status-heading"><h2 id="licenseStateTitle">正在读取授权</h2><span class="subscription-tag" id="licenseStateTag">请稍候</span></div>
             <p id="licenseStateMessage">正在读取本机授权状态。</p>
             <dl class="subscription-facts">
-              <div><dt>当前套餐</dt><dd id="licensePlan">未激活</dd></div>
+              <div><dt>当前套餐</dt><dd id="licensePlan">未激活</dd><small id="licensePlanDescription"></small></div>
               <div><dt>到期时间（北京时间）</dt><dd id="licenseExpires">—</dd><small id="licenseRemaining"></small></div>
-              <div><dt>绑定微信</dt><dd id="licenseAccount">尚未绑定</dd></div>
+              <div class="subscription-rebind" id="licenseRebindSummary" hidden>
+                <dt><svg aria-hidden="true"><use href="#i-refresh"/></svg>剩余换绑</dt>
+                <dd><strong id="licenseRebindQuota" aria-label="正在读取换绑次数">—</strong><span class="subscription-rebind-unit">次</span><button class="button ghost small" id="licenseRebind" type="button" disabled hidden>更换微信<svg aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button class="button ghost small subscription-rebind-refresh" id="licenseRebindRefresh" type="button" aria-label="刷新换绑次数" title="刷新换绑次数" disabled><svg aria-hidden="true"><use href="#i-refresh"/></svg></button></dd>
+                <small id="licenseRebindHint" role="status" hidden></small>
+              </div>
             </dl>
-            <ol class="subscription-steps" id="licenseSteps" aria-label="授权步骤">
-              <li id="licenseStepCode"><span>1</span>选择授权方式</li><li id="licenseStepRedeem"><span>2</span>激活授权</li><li id="licenseStepAccount"><span>3</span>确认微信账号</li>
-            </ol>
-            <div class="subscription-account" id="licenseCurrentAccountRow" hidden><span>当前登录微信</span><strong id="licenseCurrentAccount"></strong></div>
-            <p class="subscription-pause-note" id="licensePausedInfo" hidden>自动回复、模型调用、主动推送和定时任务已暂停。微信与数据保留；续费后由你确认恢复，不补发暂停期间的任务。</p>
-            <div class="button-row subscription-runtime-actions">
-              <button class="button primary" id="licenseConnect" type="button" disabled hidden>连接微信</button>
-              <button class="button primary" id="licenseBind" type="button" disabled hidden>确认绑定当前微信</button>
-              <button class="button primary" id="licenseResume" type="button" disabled hidden>启动机器人</button>
-            </div>
+            <p class="subscription-pause-note" id="licensePausedInfo" hidden>机器人未运行。微信和本机数据保留，处理授权问题后可手动启动；未运行期间的任务不会补发。</p>
             <details class="subscription-support">
-              <summary>授权编号与换机</summary>
+              <summary>授权信息</summary>
               <p>续期时向群管理员提供授权编号；换机时提供新电脑的设备编号，领取迁移码。</p>
+              <div><span>绑定微信</span><code id="licenseAccount">尚未绑定</code></div>
               <div><span>授权编号</span><code id="licenseIdText">尚未激活</code><button class="button ghost small" id="licenseCopyId" type="button" disabled>复制授权编号</button></div>
               <div><span>本机设备编号</span><code id="licenseDeviceText">尚未生成</code><div class="button-row"><button class="button ghost small" id="licensePrepareDevice" type="button" disabled hidden>获取本机设备编号</button><button class="button ghost small" id="licenseCopyDevice" type="button" disabled>复制设备编号</button></div></div>
             </details>
           </section>
 
+          <details id="licenseOptions" open>
+          <summary id="licenseOptionsTitle">激活授权</summary>
           <section class="subscription-plans-section" aria-labelledby="subscriptionPlansTitle">
             <div class="section-heading"><h2 id="subscriptionPlansTitle">选择套餐</h2><p>免费试用可直接激活；月付、年付请入群联系管理员。模型费用自理。</p></div>
             <div class="subscription-plans" id="licensePlans"><p class="subtle">正在读取套餐…</p></div>
@@ -239,9 +240,10 @@
               </section>
             </section>
           </div>
+          </details>
 
           <section class="subscription-data-access" aria-label="数据与帮助">
-            <p>授权到期仍可查看配置、消息记录，并备份和导出自己的数据。</p>
+            <p>授权到期仍保留配置和消息数据，可备份自己的数据。查看和导出消息记录需有效授权，并登录绑定的微信账号。</p>
             <div class="button-row"><button class="button ghost small" id="licenseOpenHistory" type="button">查看消息记录</button><button class="button ghost small" id="licenseOpenMaintenance" type="button">设置与备份</button></div>
           </section>
         </section>
@@ -406,6 +408,7 @@
           </nav>
           <div class="settings-grid">
             <section class="provider-workspace" data-settings-section="model">
+              <section class="settings-card panel" id="providerReadbackFeedback" role="status" hidden><span class="form-note" id="providerReadbackMessage"></span><div class="button-row"><button class="button secondary small" id="reloadProviderServices" type="button" data-action-bound disabled>重新读取模型列表</button></div></section>
               <section class="provider-overview-card panel" id="providerOverview" aria-labelledby="providerOverviewTitle">
                 <div class="provider-overview-heading">
                   <div><h2 id="providerOverviewTitle" tabindex="-1">模型服务</h2></div>
@@ -423,8 +426,8 @@
                   <form class="settings-card provider-settings-card panel" id="providerForm" autocomplete="off" novalidate>
                     <div class="panel-heading"><div><h2 id="providerEditorTitle" tabindex="-1">新建模型服务</h2></div></div>
                     <input name="provider_id" type="hidden">
-                    <div class="field-pair"><label><span>模型供应商</span><span class="provider-preset-control"><span class="provider-preset-icon" id="providerPresetIcon" aria-hidden="true"></span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="embedding_custom">向量模型（兼容接口）</option><option value="image_custom">图片模型（兼容接口）</option><option value="voice_custom">语音模型（兼容接口）</option><option value="custom">其他兼容服务</option></select></span></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select></label></div>
-                    <div class="field-pair"><label><span class="field-label-action">Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint" role="status"></small></label></div>
+                    <div class="field-pair"><label><span>模型供应商</span><span class="provider-preset-control"><span class="provider-preset-icon" id="providerPresetIcon" aria-hidden="true"></span><select name="preset" id="providerPreset"><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="xiaomi_mimo">小米 MiMo</option><option value="qwen">通义千问 Qwen</option><option value="volcengine">火山引擎豆包</option><option value="hunyuan">腾讯混元</option><option value="gemini_proxy">Gemini</option><option value="sub2">Sub2 兼容服务</option><option value="custom">其他兼容服务</option></select></span></label><label><span>模型用途</span><select name="service_kind" id="providerServiceKind"><option value="chat">聊天模型</option><option value="embedding">向量模型</option><option value="image">图片模型</option><option value="voice">语音模型</option></select></label></div>
+                    <div class="field-pair"><label><span class="field-label-action">Base URL</span><input name="api_base" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required><small>兼容接口地址会自动补齐 /v1 并去重；已有版本路径会保留。</small></label><label><span class="field-label-action"><span>模型名称</span><button class="inline-action" id="discoverProviderModels" type="button" data-action-bound disabled>获取可用模型</button></span><span class="model-combobox" id="providerModelCombobox"><input name="model" id="providerModelInput" role="combobox" aria-autocomplete="list" aria-controls="providerModelOptions" aria-expanded="false" autocomplete="off" placeholder="例如 qwen-plus 或 image-1" required><span class="model-options" id="providerModelOptions" role="listbox" hidden></span></span><small id="providerModelHint" role="status"></small></label></div>
                     <label><span>API Key / Token Plan</span><span class="secret-input"><input name="api_key" id="providerApiKey" type="password" autocomplete="new-password" placeholder="填写 API Key 或 Token Plan；已保存内容不会回显"><button class="button ghost small" id="revealProviderKey" type="button" aria-controls="providerApiKey" aria-pressed="false" data-action-bound disabled>显示</button></span><small id="apiKeyHint">API Key / Token Plan 只保存在本机</small></label>
                     <div class="toggle-line provider-thinking-row" id="providerThinkingRow"><span><strong>思考模式</strong></span><span class="toggle"><input id="providerThinkingEnabled" name="thinking_enabled" type="checkbox" checked><label class="toggle-track" for="providerThinkingEnabled" aria-label="切换思考模式"></label><span id="providerThinkingValue">已开启</span></span></div>
                     <section id="providerTestResult" class="provider-test-result" role="status" hidden><strong id="providerTestTitle"></strong><span id="providerTestMeta"></span><pre id="providerTestOutput"></pre></section>
@@ -445,7 +448,7 @@
                 <div class="field-pair"><label><span>搜索服务商</span><select id="webSearchProvider" name="provider"></select></label><label><span>搜索结果链接</span><select name="link_enabled"><option value="false">只给模型整理结果</option><option value="true">同时在回复中保留来源链接</option></select></label></div>
                 <div class="web-search-provider-summary" id="webSearchProviderSummary" aria-live="polite" aria-atomic="true"></div>
                 <label><span>服务密钥</span><span class="secret-input"><input id="webSearchKey" name="key" type="password" autocomplete="new-password" placeholder="粘贴当前服务商密钥；已保存密钥不会回显"><button class="button ghost small" id="revealWebSearchKey" type="button" data-action-bound disabled aria-controls="webSearchKey" aria-pressed="false">显示</button></span><small id="webSearchKeyHint">密钥仅保存在本机；切换服务商不会覆盖其他服务商的密钥。</small></label>
-                </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
+                </div><div class="form-actions"><span class="form-note" id="webSearchNote" role="status"></span><div class="button-row"><button class="button ghost" id="reloadWebSearch" type="button" data-action-bound disabled>重新读取设置</button><button class="button ghost" id="clearWebSearchKey" type="button" data-action-bound disabled>清除当前密钥</button><button class="button primary" type="submit">保存联网搜索</button></div></div>
               </form>
 
             <section class="settings-card panel skin-settings" data-settings-section="skin" hidden aria-labelledby="skinHeading">
@@ -469,6 +472,8 @@
               <div class="maintenance-row"><div><strong>设置与记忆备份</strong><span id="backupSummary">包含机器人设置、人格和长期记忆；机器人停止后可创建。</span></div><button class="button secondary small" id="createBackup" data-action-bound disabled>立即备份</button></div>
               <div class="maintenance-row"><div><strong>恢复备份</strong><span id="restoreSummary">尚无可恢复备份</span></div><button class="button ghost small" id="restoreBackup" data-action-bound disabled>选择恢复</button></div>
               <div class="maintenance-row"><div><strong>安全诊断</strong><span id="diagnosticSummary">不包含密钥、聊天正文或本机路径</span></div><button class="button ghost small" id="exportDiagnostics" data-action-bound disabled>导出摘要</button></div>
+              <p class="activity-feedback" id="diagnosticExportFeedback" role="status" aria-live="polite"></p>
+              <div class="path-box" id="diagnosticExportLocation" hidden><span>保存位置</span><code id="diagnosticExportPath"></code><button class="button ghost small" id="copyDiagnosticPath" type="button" disabled>复制保存位置</button></div>
               <div class="maintenance-row"><div><strong>使用帮助</strong></div><button class="button ghost small" id="openOnboarding" data-action-bound disabled>打开帮助</button></div>
               <div class="maintenance-row"><div><strong>记忆数据</strong><span>查看和删除已保存的记忆</span></div><button class="button ghost small" id="manageMemories" data-action-bound disabled>管理记忆</button></div>
               <div class="maintenance-row"><div><strong>聊天记录清理</strong><span>删除指定日期以前的本机副本</span></div><button class="button ghost small" id="cleanHistory" data-action-bound disabled>按日期清理</button></div>
@@ -488,16 +493,18 @@
     <div class="update-card-heading"><strong id="updateCardTitle"></strong><span id="updateCardPercent"></span></div>
     <p id="updateCardMessage" role="status" aria-live="polite"></p>
     <div class="update-card-progress" id="updateCardProgress" role="progressbar" aria-label="更新进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="updateCardProgressBar"></span></div>
-    <div class="update-card-action"><button class="button primary small" id="updateCardAction" type="button" hidden>立即安装</button></div>
+    <div class="update-card-action"><button class="button ghost small" id="updateCardDismiss" type="button" hidden>收起</button><button class="button primary small" id="updateCardAction" type="button" hidden>立即安装</button></div>
   </section>
   <div class="modal-backdrop" id="modalBackdrop" hidden>
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <h2 id="modalTitle">确认操作</h2>
-      <dl class="modal-subject" id="modalSubject" hidden><dt id="modalSubjectLabel"></dt><dd id="modalSubjectValue"></dd></dl>
-      <p id="modalMessage"></p><div id="modalField"></div>
-      <div class="modal-progress" id="modalProgress" hidden><span id="modalProgressBar"></span></div>
-      <div class="modal-error" id="modalError" role="alert" hidden></div>
-        <div class="modal-actions"><button class="button ghost" id="modalCancel" data-action-bound disabled>取消</button><button class="button danger" id="modalConfirm" data-action-bound disabled>确认</button></div>
+      <div class="modal-body" id="modalBody" role="region" aria-label="操作说明，可滚动查看" tabindex="-1">
+        <dl class="modal-subject" id="modalSubject" hidden><dt id="modalSubjectLabel"></dt><dd id="modalSubjectValue"></dd></dl>
+        <p id="modalMessage"></p><div id="modalField"></div>
+        <div class="modal-progress" id="modalProgress" hidden><span id="modalProgressBar"></span></div>
+        <div class="modal-error" id="modalError" role="alert" hidden></div>
+      </div>
+      <div class="modal-actions"><button class="button ghost" id="modalCancel" data-action-bound disabled>取消</button><button class="button danger" id="modalConfirm" data-action-bound disabled>确认</button></div>
     </section>
   </div>
   <div class="onboarding-backdrop" id="onboardingBackdrop" hidden>
@@ -515,7 +522,7 @@
   <script src="date-range.js"></script>
   <script src="report-preview.js"></script>
   <script src="panel-layout.js"></script>
-  <script src="subscription.js?v=20261105"></script>
+  <script src="subscription.js?v=20261106"></script>
   <script src="features.js"></script>
   <script src="chat-profiles.js"></script>
   <script src="contact-profile.js"></script>

@@ -1,18 +1,18 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:0bc15292-5b55-55ee-bcbd-3971f145a6ff",
+  "serialNumber": "urn:uuid:0eee4d06-c56a-570d-8047-bd9a5593f4b3",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
       "name": "WeChatReBot",
-      "version": "0.9.8"
+      "version": "1.0.16"
     },
     "properties": [
       {
         "name": "wechatrebot:runtime_aggregate_sha256",
-        "value": "75AC05C668E4A6FE33C0500A96BCE46A460C3E7326435BA525A80E9045CA7835"
+        "value": "352E91487D94041FF6AACAFAF9CF453529AA6C6706461D0039C934F33E235F8F"
       },
       {
         "name": "wechatrebot:ffmpeg_included",
@@ -1244,6 +1244,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "docx2pdf",
+      "version": "0.1.8",
+      "purl": "pkg:pypi/docx2pdf@0.1.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/AlJohri/docx2pdf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "edge-tts",
       "version": "7.2.8",
       "purl": "pkg:pypi/edge-tts@7.2.8",
@@ -1472,6 +1498,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "fire",
+      "version": "0.7.1",
+      "purl": "pkg:pypi/fire@0.7.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/google/python-fire"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "Flask",
       "version": "3.1.3",
       "purl": "pkg:pypi/flask@3.1.3",
@@ -1492,6 +1544,32 @@
         {
           "type": "website",
           "url": "https://github.com/pallets/flask/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "fonttools",
+      "version": "4.66.1",
+      "purl": "pkg:pypi/fonttools@4.66.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://github.com/fonttools/fonttools"
         }
       ]
     },
@@ -2836,6 +2914,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "opencv-python-headless",
+      "version": "5.0.0.93",
+      "purl": "pkg:pypi/opencv-python-headless@5.0.0.93",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/opencv/opencv-python"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "openpyxl",
       "version": "3.1.5",
       "purl": "pkg:pypi/openpyxl@3.1.5",
@@ -2968,6 +3072,84 @@
         {
           "name": "wechatrebot:inventory_group",
           "value": "runtime"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pdf2docx",
+      "version": "0.5.13",
+      "purl": "pkg:pypi/pdf2docx@0.5.13",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://artifex.com/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pdfminer.six",
+      "version": "20260107",
+      "purl": "pkg:pypi/pdfminer-six@20260107",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pdfminer/pdfminer.six"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "pdfplumber",
+      "version": "0.11.10",
+      "purl": "pkg:pypi/pdfplumber@0.11.10",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jsvine/pdfplumber"
         }
       ]
     },
@@ -3682,6 +3864,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "pymupdf",
+      "version": "1.28.2",
+      "purl": "pkg:pypi/pymupdf@1.28.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/pymupdf/pymupdf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "PyMySQL",
       "version": "1.2.0",
       "purl": "pkg:pypi/pymysql@1.2.0",
@@ -3878,6 +4086,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "python-docx",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/python-docx@1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/python-openxml/python-docx"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "python-dotenv",
       "version": "1.2.2",
       "purl": "pkg:pypi/python-dotenv@1.2.2",
@@ -3924,6 +4158,32 @@
         {
           "type": "website",
           "url": "https://github.com/Kludex/python-multipart"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "python-pptx",
+      "version": "1.0.2",
+      "purl": "pkg:pypi/python-pptx@1.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/scanny/python-pptx"
         }
       ]
     },
@@ -4822,6 +5082,32 @@
     {
       "type": "library",
       "group": "runtime",
+      "name": "tabula-py",
+      "version": "2.10.0",
+      "purl": "pkg:pypi/tabula-py@2.10.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/chezou/tabula-py"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
       "name": "tabulate",
       "version": "0.10.0",
       "purl": "pkg:pypi/tabulate@0.10.0",
@@ -4888,6 +5174,32 @@
         {
           "type": "website",
           "url": "https://github.com/jd/tenacity"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "group": "runtime",
+      "name": "termcolor",
+      "version": "3.3.0",
+      "purl": "pkg:pypi/termcolor@3.3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:inventory_group",
+          "value": "runtime"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/termcolor/termcolor"
         }
       ]
     },
@@ -6040,6 +6352,31 @@
     {
       "type": "application",
       "group": "delivered-plugin",
+      "name": "astrbot_plugin_office_assistant",
+      "version": "1.9.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "wechatrebot:ownership",
+          "value": "third-party"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Clhikari/astrbot_plugin_office_assistant"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "group": "delivered-plugin",
       "name": "astrbot_plugin_angel_heart",
       "version": "2.2.2",
       "licenses": [
@@ -6285,7 +6622,7 @@
       "type": "application",
       "group": "delivered-plugin",
       "name": "astrbot_plugin_qq_group_daily_analysis",
-      "version": "5.7.4",
+      "version": "5.7.4 # 插件版本号。格式：v1.1.1 或者 v1.1",
       "licenses": [
         {
           "license": {
@@ -6354,7 +6691,7 @@
       "type": "application",
       "group": "delivered-plugin",
       "name": "jiang_commands",
-      "version": "1.1.2",
+      "version": "UNKNOWN",
       "licenses": [
         {
           "license": {

@@ -1,5 +1,7 @@
 import json
+from io import BytesIO
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
@@ -283,3 +285,33 @@ def test_late_qrcode_response_cannot_populate_a_new_account_cache(tmp_path, monk
     with pytest.raises(directory.GroupDirectoryError, match="账号已变化"):
         obj.qrcode(account[0], "test@chatroom")
     assert not obj._qrcodes
+
+
+@pytest.mark.parametrize("status,body,paused", [
+    (403, {"ok": False, "error": {"code": "LIC-automation_paused", "retryable": False,
+                                 "message": "untrusted transport detail"}}, True),
+    (403, {"ok": False, "error": "untrusted transport detail"}, False),
+    (403, {"ok": False, "error": {"code": "LIC-license_revoked", "retryable": False}}, False),
+    (403, {"ok": True, "error": {"code": "LIC-automation_paused", "retryable": False}}, False),
+    (403, {"ok": False, "error": {"code": "LIC-automation_paused", "retryable": True}}, False),
+    (502, {"ok": False, "error": {"code": "LIC-automation_paused", "retryable": False}}, False),
+    (403, "malformed", False),
+    (403, "x" * 5000, False),
+    (403, "[" * 1200 + "]" * 1200, False),
+])
+def test_qrcode_request_only_accepts_bounded_explicit_paused_denial(tmp_path, monkeypatch, status, body, paused):
+    obj = directory.GroupDirectoryService(tmp_path)
+    raw = json.dumps(body).encode("utf-8") if not isinstance(body, str) else body.encode("utf-8")
+
+    class Opener:
+        def open(self, request, **_kwargs):
+            raise HTTPError(request.full_url, status, "denied", {}, BytesIO(raw))
+
+    monkeypatch.setattr(directory, "build_opener", lambda *_args: Opener())
+    error = directory.LicenseError if paused else directory.GroupDirectoryError
+    with pytest.raises(error) as caught:
+        obj._request(5000, "local-test-token", "wxid_actual", "/api/manager/groups/room%40chatroom/qrcode")
+    assert "untrusted" not in str(caught.value)
+    if paused:
+        assert caught.value.code == "automation_paused"
+        assert "运行中心" in str(caught.value)

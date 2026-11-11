@@ -301,16 +301,15 @@ async function manualRefresh() {
   await assert.rejects(timeoutRequest, /读取记录超时，请点击刷新/);
 }
 
-function offlineHistoryActions() {
+function historyAccessActions() {
   const {context: c, state: s, $} = historyContext();
-  s.status = {history_offline: true, runtime: {account_status_available: false}};
+  s.status = {runtime: {account_status_available: false}};
   c.setHistoryActionsEnabled(true);
-  assert.equal($('#exportHistory').disabled, false);
-  assert.equal($('#refreshHistory').disabled, false);
+  assert.equal($('#exportHistory').disabled, true);
+  assert.equal($('#refreshHistory').disabled, true);
   assert.equal($('#cleanHistory').disabled, true);
   assert.equal($('#deleteConversation').disabled, true);
   assert.equal(c.canEditHistory(), false);
-  s.status.history_offline = false;
   c.setHistoryActionsEnabled(false);
   assert.equal($('#exportHistory').disabled, true);
   assert.equal($('#refreshHistory').disabled, true);
@@ -319,9 +318,11 @@ function offlineHistoryActions() {
   assert.equal($('#cleanHistory').disabled, false);
   assert.equal($('#deleteConversation').disabled, false);
   assert.equal(c.canEditHistory('account-b'), false);
-  s.status.history_offline = true;
+  s.historyAccount = '';
   c.setHistoryActionsEnabled(true);
-  assert.equal($('#deleteConversation').disabled, true, 'a previously rendered delete button must become read-only');
+  assert.equal($('#exportHistory').disabled, true);
+  assert.equal($('#refreshHistory').disabled, true);
+  assert.equal($('#deleteConversation').disabled, true, 'loss of access disables previously rendered actions');
 }
 
 async function unknownAccountPolling() {
@@ -336,10 +337,13 @@ async function unknownAccountPolling() {
   await c.pollHistory();
   assert.equal(reads, 1, 'history polling resumes after the account probe recovers');
   s.status.runtime.account_status_available = false;
-  s.status.history_offline = true;
   await c.pollHistory();
-  assert.equal(reads, 2, 'verified offline history remains available');
+  assert.equal(reads, 1, 'unknown account must not fall back to offline history');
+  s.status.runtime.account_status_available = true;
+  s.historyAccount = '';
+  await c.pollHistory();
+  assert.equal(reads, 1, 'missing history access must not poll');
 }
 
-(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); offlineHistoryActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); historyAccessActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

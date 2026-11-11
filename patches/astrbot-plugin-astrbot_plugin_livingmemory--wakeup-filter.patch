@@ -1,0 +1,39 @@
+# Backport: LivingMemory PR #392, synthetic wakeup history filtering.
+# Source: https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory/pull/392
+# Implementation commit: 52e21ca8a9bc041b787b4091a8f656291e60fcaf
+--- a/core/managers/conversation_manager.py
++++ b/core/managers/conversation_manager.py
+@@ -88,7 +88,7 @@
+         event: Any,  # AstrBot MessageEvent
+         role: str,
+         content: str,
+-    ) -> Message:
++    ) -> Message | None:
+         """
+         从AstrBot事件添加消息(自动提取发送者信息)
+ 
+@@ -98,7 +98,7 @@
+             content: 消息内容
+ 
+         Returns:
+-            创建的Message对象
++            创建的Message对象；框架合成唤醒事件返回 None（不写入）
+         """
+         # 使用 unified_msg_origin 作为会话ID，确保多Bot场景下的唯一性
+         session_id = event.unified_msg_origin
+@@ -107,6 +107,15 @@
+             if hasattr(event, "get_platform_name")
+             else "unknown"
+         )
++
++        # Framework wakeups reuse a real session but are not user dialogue.
++        # Older AstrBot uses the cron platform; newer versions mark the event.
++        if getattr(event, "event_kind", "") == "agent_wakeup" or platform == "cron":
++            logger.debug(
++                f"[add_message_from_event] 跳过合成唤醒消息: "
++                f"session={session_id}, platform={platform}"
++            )
++            return None
+ 
+         # 提取发送者信息
+         sender_id = None
