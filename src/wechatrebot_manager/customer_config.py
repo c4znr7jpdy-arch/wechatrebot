@@ -24,7 +24,7 @@ from .provider import (
     thinking_mode_matches,
     with_thinking_mode,
 )
-from .runtime_config import normalize_admin_id, write_runtime_configs
+from .runtime_config import normalize_admin_id, normalize_admin_ids, write_runtime_configs
 
 
 _UI_PREFERENCES_LOCK = threading.Lock()
@@ -227,6 +227,7 @@ def delete_provider_thinking_preference(root: str | Path, provider_id: str) -> N
 class RobotSettings:
     profile: BrandProfile
     admin_id: str = ""
+    admin_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +382,7 @@ def replace_provider_references(
 
 
 def load_robot_settings(root: str | Path) -> RobotSettings:
-    install, _, engine_path = _paths(root)
+    install, _, _ = _paths(root)
     brand_payload = _object(install / "config" / "brand.json")
     profile = BrandProfile(
         display_name=str(brand_payload.get("display_name", "小妹")),
@@ -417,10 +418,17 @@ def load_robot_settings(root: str | Path) -> RobotSettings:
                 .replace("\u59dc\u5c0f\u59b9", "小妹")
             ),
         )
-    engine = _object(engine_path)
-    admins = engine.get("admins_id")
-    admin_id = str(admins[0]) if isinstance(admins, list) and admins else ""
-    return RobotSettings(profile=profile, admin_id=admin_id)
+    admins = load_robot_admin_ids(root)
+    return RobotSettings(profile=profile, admin_id=admins[0] if admins else "", admin_ids=admins)
+
+
+def load_robot_admin_ids(root: str | Path) -> tuple[str, ...]:
+    """Return the same complete administrator allowlist used by AstrBot."""
+    _, _, engine_path = _paths(root)
+    configured = _object(engine_path).get("admins_id", [])
+    if not isinstance(configured, list):
+        raise ValueError("管理员列表格式无效，请重新保存机器人管理员。")
+    return normalize_admin_ids(configured) or ()
 
 
 def save_robot_settings(
@@ -429,7 +437,13 @@ def save_robot_settings(
     install, manager_path, _ = _paths(root)
     manager = _object(manager_path)
     wechat_path = str(manager.get("wechat_exe_path", ""))
-    normalized_admin = normalize_admin_id(settings.admin_id) or ""
+    normalized_admins = normalize_admin_ids(settings.admin_ids)
+    if normalized_admins is None:
+        normalized_admin = normalize_admin_id(settings.admin_id) or ""
+        existing = load_robot_admin_ids(install)
+        normalized_admins = existing if existing and normalized_admin == existing[0] else (
+            (normalized_admin,) if normalized_admin else ()
+        )
     from .brand import install_brand_profile
 
     profile = install_brand_profile(install, settings.profile)
@@ -439,9 +453,9 @@ def save_robot_settings(
         wechat_version=str(manager.get("wechat_version") or "") or None,
         brand_profile=profile,
         apply_brand_persona=apply_reply_identity,
-        admin_id=normalized_admin,
+        admin_ids=normalized_admins,
     )
-    return RobotSettings(profile=profile, admin_id=normalized_admin)
+    return RobotSettings(profile=profile, admin_id=normalized_admins[0] if normalized_admins else "", admin_ids=normalized_admins)
 
 
 def load_provider_services(
@@ -842,6 +856,7 @@ __all__ = [
     "replace_provider_references",
     "replace_provider_value",
     "load_robot_settings",
+    "load_robot_admin_ids",
     "save_provider_profile",
     "save_provider_thinking_preference",
     "save_robot_settings",

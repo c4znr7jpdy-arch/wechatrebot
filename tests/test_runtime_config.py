@@ -6,6 +6,7 @@ import pytest
 from wechatrebot_manager.runtime_config import (
     RuntimePorts,
     normalize_admin_id,
+    normalize_admin_ids,
     write_runtime_configs,
 )
 from wechatrebot_manager.brand import BrandProfile
@@ -248,6 +249,28 @@ def test_admin_id_validation_and_reconfiguration_preservation(tmp_path: Path) ->
         )
     )
     assert astrbot["admins_id"] == ["wxid_customer"]
+
+
+def test_admin_list_validation_round_trip_and_omitted_update_preserves_all(tmp_path: Path) -> None:
+    assert normalize_admin_ids([" wxid_first ", "wxid_second", "wxid_first", ""]) == ("wxid_first", "wxid_second")
+    write_runtime_configs(tmp_path, admin_ids=["wxid_first", "wxid_second"])
+    write_runtime_configs(tmp_path)
+    path = tmp_path / "app/astrbot/data/cmd_config.json"
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == ["wxid_first", "wxid_second"]
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is True
+    write_runtime_configs(tmp_path, admin_ids=[])
+    assert json.loads(path.read_text(encoding="utf-8"))["admins_id"] == []
+    assert json.loads((tmp_path / "config/manager.json").read_text(encoding="utf-8"))["admin_configured"] is False
+
+
+@pytest.mark.parametrize("admins", ["wxid_first", [None], [True], ["bad wxid"]])
+def test_bad_admin_list_cannot_partially_write_runtime_configuration(tmp_path: Path, admins) -> None:
+    write_runtime_configs(tmp_path, admin_id="wxid_first")
+    paths = [tmp_path / name for name in ("app/astrbot/data/cmd_config.json", "app/bridge/config.json", "config/manager.json")]
+    before = [path.read_bytes() for path in paths]
+    with pytest.raises(ValueError, match="管理员"):
+        write_runtime_configs(tmp_path, admin_ids=admins)
+    assert [path.read_bytes() for path in paths] == before
 
 
 def test_delivery_uses_native_context_and_seeds_angel_heart_model(tmp_path: Path) -> None:

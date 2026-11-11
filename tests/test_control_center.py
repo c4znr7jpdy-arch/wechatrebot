@@ -12,7 +12,7 @@ def test_brand_change_updates_profile_and_astrbot_persona(tmp_path: Path) -> Non
     wechat.write_bytes(b"placeholder")
     original = BrandProfile("旧名称", "旧名", "旧人格").normalized()
     save_brand_profile(install / "config" / "brand.json", original)
-    write_runtime_configs(install, wechat, brand_profile=original)
+    write_runtime_configs(install, wechat, brand_profile=original, admin_ids=["wxid_first", "wxid_second"])
 
     updated = BrandProfile("新名称", "新名", "新人格").normalized()
     apply_brand_change(install, updated)
@@ -28,3 +28,4 @@ def test_brand_change_updates_profile_and_astrbot_persona(tmp_path: Path) -> Non
     assert brand["display_name"] == "新名称"
     assert "新名称" in astrbot["persona"][0]["prompt"]
     assert astrbot["provider_settings"]["default_personality"] == "commercial_brand"
+    assert astrbot["admins_id"] == ["wxid_first", "wxid_second"]

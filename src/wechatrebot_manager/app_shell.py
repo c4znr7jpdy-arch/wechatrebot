@@ -4,6 +4,7 @@ from collections.abc import Callable
 import json
 import logging
 import os
+import secrets
 from pathlib import Path
 import sqlite3
 import sys
@@ -15,6 +16,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
 
 from . import __version__
+from .admin_plugin_control import CONTROL_DESCRIPTOR, CONTROL_PATH
 from .chat_api import ChatApiMixin
 from .activity_api import ActivityApiMixin
 from .schedule_api import ScheduleApiMixin
@@ -68,6 +70,7 @@ from .update_logger import UpdateLogger
 from .shortcuts import refresh_windows_shortcuts
 from .uninstaller import launch_installed_uninstaller, provision_uninstaller
 from .installed_entries import ensure_launcher_executable
+from .json_io import write_json_atomic
 from .wechat_path import validate_wechat_executable
 from .windows_tray import WindowsTrayController
 from .windows_titlebar import apply_window_theme
@@ -225,6 +228,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         self._tray: WindowsTrayController | None = None
         self._feature_page_server: ThreadingHTTPServer | None = None
         self._feature_page_thread: threading.Thread | None = None
+        self._plugin_control_token = ""
         self._history_group_members: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
         self._action_lock = threading.Lock()
         self._ui_error_lock = threading.Lock()
@@ -289,9 +293,12 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         server = getattr(self, "_feature_page_server", None)
         if server is not None:
             return server
+        token = secrets.token_urlsafe(32)
         server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            plugin_center_handler(self._features, manager_assets=_asset_root()),
+            plugin_center_handler(
+                self._features, manager_assets=_asset_root(), plugin_control_token=token,
+            ),
         )
         server.daemon_threads = True
         thread = threading.Thread(
@@ -299,9 +306,24 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             daemon=True,
             name="wechatrebot-feature-page",
         )
-        thread.start()
+        published_token = token
+        try:
+            write_json_atomic(self._install_root / CONTROL_DESCRIPTOR, {
+                "url": f"http://127.0.0.1:{server.server_port}{CONTROL_PATH}",
+                "token": token,
+                "pid": os.getpid(),
+            })
+        except OSError:
+            published_token = ""
+            logging.getLogger(__name__).warning("插件管理接口描述文件无法写入，自然语言插件开关暂不可用。")
+        try:
+            thread.start()
+        except Exception:
+            server.server_close()
+            raise
         self._feature_page_server = server
         self._feature_page_thread = thread
+        self._plugin_control_token = published_token
         return server
 
     def _close_feature_page_server(self) -> None:
@@ -311,6 +333,16 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         if server is not None:
             server.shutdown()
             server.server_close()
+        path = self._install_root / CONTROL_DESCRIPTOR
+        token = getattr(self, "_plugin_control_token", "")
+        self._plugin_control_token = ""
+        if token:
+            try:
+                descriptor = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(descriptor, dict) and descriptor.get("token") == token:
+                    path.unlink(missing_ok=True)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                logging.getLogger(__name__).warning("插件管理接口描述文件未能清理，下次启动将重新生成。")
 
     def get_feature_page(self, feature_id: str) -> dict[str, object]:
         try:

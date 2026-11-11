@@ -56,7 +56,7 @@ def test_core_is_single_settings_entry_and_exposes_all_schema_fields(tmp_path):
     assert 'AngelHeart' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
     assert '助理' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
     assert '助手' not in json.dumps(detail['advanced_schema'], ensure_ascii=False)
-    assert detail['identity'] == {'robot_name': '', 'admin_id': '', 'wechat_nickname': ''}
+    assert detail['identity'] == {'robot_name': '', 'admin_id': '', 'admin_ids': [], 'wechat_nickname': ''}
     assert detail['advanced_config']['wake_interaction']['alias'] == '小妹'
     assert detail['advanced_config']['personality']['ai_self_identity'].startswith('你是小妹')
     config = detail['advanced_config']
@@ -128,6 +128,38 @@ def test_core_identity_rejects_invalid_admin_before_changing_core(tmp_path):
             detail['revision'],
             {'robot_name': '小妹', 'admin_id': 'not valid'},
         )
+    assert not (tmp_path / 'app/astrbot/data/config/astrbot_plugin_angel_heart_config.json').exists()
+
+
+def test_core_identity_saves_multiple_admins_and_name_only_save_keeps_all(tmp_path):
+    service = _service(tmp_path)
+    detail = service.detail()
+    saved = service.save_global(detail['advanced_config'], detail['revision'], {
+        'robot_name': '阿妹', 'admin_ids': [' wxid_first ', 'wxid_second', 'wxid_first', ''],
+    })
+    assert saved['brand']['admin_id'] == 'wxid_first'
+    assert saved['brand']['admin_ids'] == ['wxid_first', 'wxid_second']
+    for identity in ({'robot_name': '妹妹'}, {'robot_name': '妹宝', 'admin_id': 'wxid_first'}):
+        detail = service.detail()
+        assert detail['identity']['admin_ids'] == ['wxid_first', 'wxid_second']
+        service.save_global(detail['advanced_config'], detail['revision'], identity)
+        assert load_robot_settings(tmp_path).admin_ids == ('wxid_first', 'wxid_second')
+    detail = service.detail()
+    saved = service.save_global(detail['advanced_config'], detail['revision'], {
+        'robot_name': '妹宝', 'admin_ids': [],
+    })
+    assert saved['brand']['admin_ids'] == []
+    assert load_robot_settings(tmp_path).admin_id == ''
+
+
+@pytest.mark.parametrize('admins', ['wxid_first', [True], [None], ['bad wxid'], None])
+def test_core_invalid_admin_list_fails_before_changing_core(tmp_path, admins):
+    service = _service(tmp_path)
+    detail = service.detail()
+    with pytest.raises(ValueError, match='管理员'):
+        service.save_global(detail['advanced_config'], detail['revision'], {
+            'robot_name': '妹宝', 'admin_ids': admins,
+        })
     assert not (tmp_path / 'app/astrbot/data/config/astrbot_plugin_angel_heart_config.json').exists()
 
 
@@ -205,7 +237,7 @@ def test_core_ui_flattens_settings_and_moves_chat_binding_to_chat_details():
     assert 'id="createBackup"' in html and 'id="openUninstaller"' in html
     profiles = (webui / 'chat-profiles.js').read_text(encoding='utf-8')
     assert '机器人名称与管理员' in core
-    assert 'name="robot_name"' in core and 'name="admin_id"' in core
+    assert 'name="robot_name"' in core and 'name="admin_ids"' in core
     assert 'api("save_robot_core"' in app
     for endpoint in ['profiles/create', 'profiles/update', 'profiles/delete']:
         assert endpoint in core

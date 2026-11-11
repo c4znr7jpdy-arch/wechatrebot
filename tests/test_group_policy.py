@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 import sqlite3
 from pathlib import Path
 import zoneinfo
@@ -37,6 +38,112 @@ def test_setu_has_independent_group_checkbox_and_persists(tmp_path):
     assert "jiang_commands" not in policy["allowed_features"]
     service.save(ACCOUNT_A, GROUP, {"allowed_features": ["jiang_commands"]})
     assert "jiang_commands.setu" not in service.get(ACCOUNT_A, GROUP)["allowed_features"]
+
+
+def test_feature_permissions_reads_only_grants_without_schedule_access_or_writes(tmp_path, monkeypatch):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+
+    def unexpected_schedules(**_kwargs):
+        pytest.fail("Feature permission queries must not reconcile scheduled tasks")
+
+    monkeypatch.setattr(service.schedules, "list", unexpected_schedules)
+    initial_files = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    defaults = service.feature_permissions(ACCOUNT_A, GROUP)
+    assert set(defaults) == {"policy", "features"}
+    assert defaults["policy"]["configured"] is False
+    assert any(item["id"] == "jiang_commands.setu" for item in defaults["features"])
+    assert {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == initial_files
+
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": ["jiang_commands.setu"]})
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    result = service.feature_permissions(ACCOUNT_A, GROUP)
+    allowed = {item["id"] for item in result["features"] if item["allowed"]}
+    assert allowed == {"jiang_commands.setu"}
+    assert {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+def test_single_feature_toggle_preserves_group_options_and_other_scopes(tmp_path):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    service.save(ACCOUNT_A, GROUP, {
+        "allowed_features": ["jiang_commands", "jiang_commands.setu"],
+        "daily_limit": 7, "reply_mode": "natural", "scheduled_enabled": False,
+    })
+    other_group = "other@chatroom"
+    before_other_group = service.get(ACCOUNT_A, other_group)
+    before_other_account = service.get(ACCOUNT_B, GROUP)
+    changed = service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands.setu", False, actor_id="wxid_second_admin")
+    assert changed["saved"] is True and changed["enabled"] is False
+    assert changed["module"] == "jiang_commands.setu"
+    assert changed["allowed_features"] == ["jiang_commands"]
+    assert changed["daily_limit"] == 7 and changed["reply_mode"] == "natural"
+    assert changed["scheduled_enabled"] is False
+    assert changed["updated_by"] == "wxid_second_admin"
+    assert service.get(ACCOUNT_A, other_group) == before_other_group
+    assert service.get(ACCOUNT_B, GROUP) == before_other_account
+    service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands.setu", True)
+    service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands", False)
+    assert service.get(ACCOUNT_A, GROUP)["allowed_features"] == ["jiang_commands.setu"]
+
+
+def test_single_feature_toggle_preserves_implicit_defaults_and_rejects_stale_revision(tmp_path):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    initial = service.get(ACCOUNT_A, GROUP)
+    # Complete-list UI saves still reject undelivered grants. The one-feature
+    # transaction alone preserves unrelated inherited defaults atomically.
+    with pytest.raises(GroupPolicyError, match="未交付"):
+        service.save(ACCOUNT_A, GROUP, {"allowed_features": initial["allowed_features"]})
+    changed = service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands", False)
+    assert changed["allowed_features"] == [module for module in DEFAULT_GROUP_FEATURES if module != "jiang_commands"]
+    before = service.path.read_bytes()
+    with pytest.raises(GroupPolicyError, match="其他窗口"):
+        service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands", True, expected_revision=initial["revision"])
+    assert service.path.read_bytes() == before
+
+
+def test_single_feature_toggle_cannot_add_unknown_even_when_other_legacy_grants_exist(tmp_path):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    service.path.parent.mkdir(parents=True, exist_ok=True)
+    service.path.write_text(json.dumps({"schema_version": 1, "accounts": {
+        ACCOUNT_A: {"groups": {GROUP: {"allowed_features": ["legacy_unknown", "jiang_commands"]}}},
+    }}), encoding="utf-8")
+    before = service.path.read_bytes()
+    with pytest.raises(GroupPolicyError, match="正式功能"):
+        service.set_feature_enabled(ACCOUNT_A, GROUP, "new_unknown", True)
+    with pytest.raises(GroupPolicyError, match="未交付"):
+        service.save(ACCOUNT_A, GROUP, {"allowed_features": ["legacy_unknown"]})
+    assert service.path.read_bytes() == before
+    changed = service.set_feature_enabled(ACCOUNT_A, GROUP, "jiang_commands", False)
+    assert changed["allowed_features"] == ["legacy_unknown"]
+
+
+def test_concurrent_single_feature_toggles_do_not_lose_other_admin_changes(tmp_path):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    service.save(ACCOUNT_A, GROUP, {"allowed_features": []})
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(service.set_feature_enabled, ACCOUNT_A, GROUP, module, True, actor_id=f"wxid_admin_{index}")
+                   for index, module in enumerate(("jiang_commands", "jiang_commands.setu"))]
+        for future in futures:
+            assert future.result()["saved"] is True
+    assert set(service.get(ACCOUNT_A, GROUP)["allowed_features"]) == {"jiang_commands", "jiang_commands.setu"}
+    audit = json.loads(service.path.read_text(encoding="utf-8"))["audit"]
+    assert {item["actor_id"] for item in audit[-2:]} == {"wxid_admin_0", "wxid_admin_1"}
+
+
+@pytest.mark.parametrize("module,enabled", [
+    ("missing_feature", True), ("astrbot_plugin_angel_heart", False),
+    ("jiang_commands", "false"), ("jiang_commands", 0), (None, False),
+])
+def test_invalid_single_feature_toggle_does_not_create_policy(tmp_path, module, enabled):
+    _feature_set(tmp_path)
+    service = GroupPolicyService(tmp_path)
+    with pytest.raises(GroupPolicyError):
+        service.set_feature_enabled(ACCOUNT_A, GROUP, module, enabled)
+    assert not service.path.exists()
 
 
 def _feature_set(root: Path) -> None:

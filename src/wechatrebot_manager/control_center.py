@@ -56,7 +56,7 @@ def apply_brand_change(install_root: str | Path, profile: BrandProfile) -> Brand
     current = load_robot_settings(install_root)
     return save_robot_settings(
         install_root,
-        RobotSettings(profile=profile, admin_id=current.admin_id),
+        RobotSettings(profile=profile, admin_id=current.admin_id, admin_ids=current.admin_ids),
     ).profile
 
 
