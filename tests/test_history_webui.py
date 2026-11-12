@@ -21,6 +21,96 @@ def test_message_center_date_cache_and_paging_behaviour():
     assert "history date, cache, pagination, refresh and account isolation: passed" in result.stdout
 
 
+@pytest.mark.parametrize("resume", ["navigation", "poll"])
+def test_unchanged_history_refresh_retains_panels_and_reading_position(
+    browser, manager_url, tmp_path, resume,
+):
+    page = browser.new_page(viewport={"width": 1440, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.add_init_script("""(() => {
+      const schedule = window.setInterval;
+      window.setInterval = (callback, ...args) => {
+        if (callback.name === 'pollHistory') { window.refreshRetainedHistory = callback; return 0; }
+        return callback.name === 'refreshStatus' ? 0 : schedule(callback, ...args);
+      };
+    })();""")
+    try:
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""src => {
+          const api = window.pywebview.api;
+          window.retainedDirectoryReads = 0;
+          window.retainedDirectoryRefreshes = [];
+          window.retainedQrReads = 0;
+          api.get_conversations = async filters => {
+            window.retainedDirectoryReads++;
+            window.retainedDirectoryRefreshes.push(filters.refresh_groups);
+            return {ok:true, data:{account_id:'wxid_demo_account', summary:{directory_groups:24},
+              items:Array.from({length:24}, (_, index) => ({conversation_id:`retained-${index}@chatroom`,
+                display_name:`阅读状态测试群 ${index}`, type:'group', message_count:40, last_timestamp:40}))}};
+          };
+          api.get_messages = async () => ({ok:true, data:{account_id:'wxid_demo_account', has_more:false,
+            items:Array.from({length:40}, (_, index) => ({id:index+1, timestamp:1793200000+index,
+              content:`保留阅读位置 ${index+1}`, role:'user', sender_id:`member-${index % 2}`,
+              sender_name:`测试成员 ${index % 2}`}))}});
+          api.get_group_qrcode = async (account, group) => {
+            window.retainedQrReads++;
+            return {ok:true, data:{account_id:account, group_id:group, image_data_url:src}};
+          };
+        }""", image_source((64, 64), "PNG"))
+        page.locator('.nav-item[data-page="history"]').click()
+        page.locator('[data-conversation="retained-1@chatroom"]').click()
+        expect(page.locator("#messageList .message-bubble")).to_have_count(40)
+        page.locator("#messageList .message-avatar-button").first.click()
+        expect(page.locator("#conversationInspector .group-qrcode img")).to_be_visible()
+        before = page.evaluate("""() => {
+          const ids = ['conversationList', 'conversationHeader', 'messageList', 'conversationInspector'];
+          const elements = ids.map(id => document.getElementById(id));
+          elements[0].scrollTop = 180;
+          elements[2].scrollTop = 300;
+          window.retainedHistoryNodes = elements.map(element => element.firstElementChild);
+          window.retainedHistoryScrolls = elements.map(element => element.scrollTop);
+          window.retainedQrNode = document.querySelector('.group-qrcode img');
+          window.retainedHistoryIds = ids;
+          return {reads:window.retainedDirectoryReads, qrReads:window.retainedQrReads,
+            scrolls:window.retainedHistoryScrolls};
+        }""")
+        assert before["scrolls"][0] > 0 and before["scrolls"][2] > 0
+        assert page.evaluate("window.retainedDirectoryRefreshes[0]") is True
+        if resume == "navigation":
+            page.locator('.nav-item[data-page="home"]').click()
+            page.locator('.nav-item[data-page="history"]').click()
+        else:
+            page.evaluate("window.refreshRetainedHistory()")
+        page.wait_for_function("reads => window.retainedDirectoryReads > reads", arg=before["reads"])
+        expect(page.locator("#conversationInspector .group-qrcode img")).to_be_visible()
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        state = page.evaluate("""() => ({
+          nodes:window.retainedHistoryIds.map((id, index) =>
+            document.getElementById(id).firstElementChild === window.retainedHistoryNodes[index]),
+          scrolls:window.retainedHistoryIds.map(id => document.getElementById(id).scrollTop),
+          qrRetained:document.querySelector('.group-qrcode img') === window.retainedQrNode,
+          qrReads:window.retainedQrReads,
+        })""")
+        page.screenshot(path=str(tmp_path / f"history-stable-panels-{resume}.png"), animations="disabled")
+        print(f"History refresh retention ({resume}): {state}; evidence: {tmp_path}")
+        expect(page.locator('[data-conversation="retained-1@chatroom"]')).to_have_class("conversation-item active")
+        expect(page.locator("#messageList .message-avatar-button.selected").first).to_be_visible()
+        assert state["scrolls"] == before["scrolls"]
+        assert state["nodes"] == [True, True, True, True]
+        assert state["qrRetained"]
+        assert state["qrReads"] == before["qrReads"]
+        assert page.evaluate("window.retainedDirectoryRefreshes.at(-1)") is False
+        assert page.url == manager_url and page.title().startswith("消息中心")
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("resume", ["focus", "visibilitychange", "navigation"])
 def test_long_absence_keeps_visible_history_until_latest_is_requested(
     browser, manager_url, tmp_path, resume,
