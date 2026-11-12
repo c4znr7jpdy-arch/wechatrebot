@@ -1248,6 +1248,68 @@ def test_source_switch_preserves_episode_position_speed_and_starts_playback(sour
     assert before - .15 <= page.locator("#video").evaluate("video => video.currentTime") < before + 2
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("same_address", [
+    "https://media.example/bf-2.m3u8",
+    "https://MEDIA.example:443/bf-2.m3u8#retry",
+])
+def test_source_switch_rejects_same_current_episode_address_but_allows_other_episodes(source_catalog, width, same_address, screenshots):
+    page, state = source_catalog
+    page.get_by_label("返回", exact=True).click()
+    state["variants"][1]["episodes"][1]["url"] = same_address
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.set_viewport_size({"width": width, "height": 844})
+    page.locator(".recommend-card").click()
+    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length === 2")
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-2.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#video").evaluate("video => { video.pause(); video.currentTime = 2; }")
+    page.wait_for_function("!document.getElementById('video').seeking")
+    page.evaluate("""() => {
+      window.sourceReloads = 0;
+      document.getElementById('video').addEventListener('loadstart', () => window.sourceReloads++);
+    }""")
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    assert page.locator("#sourceStatus").inner_text() == "该资源当前集与正在播放的地址相同，请选择其他资源。"
+    assert page.locator("#sourceButton").inner_text().strip() == "暴风"
+    assert page.locator("#sourceMenu").is_visible()
+    assert page.locator("#video").evaluate("video => video.currentSrc.includes('bf-2.mp4') && video.paused")
+    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.1)
+    assert page.evaluate("window.sourceReloads") == 0
+    assert "已切换" not in page.locator("#videoHint").inner_text()
+    page.screenshot(path=str(screenshots / f"source-duplicate-address-{width}.png"))
+
+    # Another episode on the same catalog source has a genuinely different stream.
+    page.locator("#sourceButton").click()
+    page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-3.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#sourceButton").click()
+    assert page.locator("#sourceStatus").inner_text() == ""
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-3.mp4') && document.getElementById('video').readyState >= 2")
+    assert page.locator("#sourceButton").inner_text().strip() == "非凡"
+    assert page.locator("#meta").inner_text() == "第3集"
+    assert "已切换至非凡" in page.locator("#videoHint").inner_text()
+
+
+def test_source_switch_failed_media_never_announces_success(source_catalog):
+    page, _ = source_catalog
+    page.route("**/ff-1.mp4", lambda route: route.abort("failed"))
+    page.evaluate("""() => {
+      window.sourceHints = [];
+      new MutationObserver(() => window.sourceHints.push(document.getElementById('videoHint').textContent))
+        .observe(document.getElementById('videoHint'), {childList: true, characterData: true, subtree: true});
+    }""")
+    page.locator("#sourceButton").click()
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.locator("#switchSourceOnError").wait_for(state="visible")
+    assert page.locator("#status").evaluate("node => node.classList.contains('error')")
+    assert not any("已切换" in hint for hint in page.evaluate("window.sourceHints"))
+    assert "已切换" not in page.locator("#videoHint").inner_text()
+
+
 def test_source_switch_does_not_substitute_another_episode_when_missing(source_catalog):
     page, state = source_catalog
     page.get_by_label("返回", exact=True).click()
@@ -1327,10 +1389,12 @@ def test_source_switch_late_response_does_not_reopen_player_after_return(source_
     assert page.locator("#video").get_attribute("src") is None
 
 
-def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming(source_catalog):
+def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming(source_catalog, screenshots):
     page, _ = source_catalog
     page.locator("#video").evaluate("video => { video.currentTime = 2; }")
     page.wait_for_function("!document.getElementById('video').seeking")
+    play_click(page)
+    page.wait_for_function("!document.getElementById('video').paused")
     page.evaluate("""() => {
       document.getElementById('video').canPlayType = () => '';
       window.Hls = class {
@@ -1344,14 +1408,22 @@ def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming
       };
     }""")
     page.locator("#sourceButton").click()
+    resume_position = page.locator("#video").evaluate("video => video.currentTime")
     page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    assert page.locator("#video").evaluate("video => video.paused")
+    assert "正在切换至非凡" in page.locator("#videoHint").inner_text()
+    assert "已切换" not in page.locator("#videoHint").inner_text()
     # A real HLS manifest may arrive while the previous video's duration is still valid.
     page.evaluate("window.testHls.handlers.manifest()")
     assert page.locator("#video").evaluate("video => video.readyState >= 2 && video.currentSrc.includes('bf-1.mp4')")
+    assert page.locator("#video").evaluate("video => video.paused")
+    assert "已切换" not in page.locator("#videoHint").inner_text()
+    page.screenshot(path=str(screenshots / "source-pending-metadata-390.png"))
     page.evaluate("window.testHls.video.src = window.testHls.url")
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
-    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(2, abs=.1)
+    assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(resume_position, abs=.3)
     page.wait_for_function("!document.getElementById('video').paused")
+    assert "已切换至非凡" in page.locator("#videoHint").inner_text()
 
 
 def test_source_switch_keyboard_escape_restores_button_focus(source_catalog):

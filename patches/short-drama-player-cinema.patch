@@ -1169,7 +1169,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +938,673 @@
+@@ -537,8 +938,681 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1360,16 +1360,23 @@ diff --git a/index.html b/index.html
 +          sourceStatus.textContent = '该资源暂无当前集，请选择其他资源。';
 +          return;
 +        }
++        const address = (url) => new URL(url).href.split('#')[0];
++        if (address(item.episodes[index].url) === address(playlist.episodes[current].url)) {
++          sourceStatus.textContent = '该资源当前集与正在播放的地址相同，请选择其他资源。';
++          return;
++        }
 +        const resumeTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
 +        const autoplay = true;
-+        saveWatchHistory();
++        saveWatchHistory(true);
++        video.pause();
 +        playlist = item; current = index;
 +        closeSourceMenu();
 +        metadataStatus.textContent = ''; metadataRetry.hidden = true;
 +        titleNode.textContent = item.title;
 +        updateWatchDetails(); renderEpisodes();
-+        loadEpisode(index, {autoplay, resumeTime});
-+        showHint(`已切换至${sourceDisplayName(item.source)}，继续第 ${index + 1} 集`, 2400);
++        showHint(`正在切换至${sourceDisplayName(item.source)}…`, 15000);
++        loadEpisode(index, {autoplay, resumeTime,
++          onReady: () => showHint(`已切换至${sourceDisplayName(item.source)}，继续第 ${index + 1} 集`, 2400)});
 +        focusForKeyboard(sourceButton);
 +      };
 +      const renderSources = () => {
@@ -1419,6 +1426,7 @@ diff --git a/index.html b/index.html
 +        if (!sourceSession || sourceButton.hidden) return;
 +        morePanel.hidden = true; moreButton.setAttribute('aria-expanded', 'false');
 +        sourceMenu.hidden = false; sourceButton.setAttribute('aria-expanded', 'true');
++        if (sourceSession.loaded && sourceSession.items.length > 1) sourceStatus.textContent = '';
 +        renderSources(); showControls(); loadSources();
 +        focusForKeyboard(sourceOptions.querySelector('[aria-pressed="true"]'));
 +      };
@@ -1844,7 +1852,7 @@ diff --git a/index.html b/index.html
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -549,31 +1615,39 @@
+@@ -549,31 +1623,39 @@
            if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
@@ -1892,7 +1900,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1655,24 @@
+@@ -581,19 +1663,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1924,7 +1932,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1693,15 @@
+@@ -614,27 +1701,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1959,7 +1967,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1763,90 @@
+@@ -696,27 +1771,90 @@
          updateQualityActive();
        };
  
@@ -2037,7 +2045,7 @@ diff --git a/index.html b/index.html
 +      };
 +
 +
-+      const loadEpisode = (index, { autoplay = false, resumeTime = 0 } = {}) => {
++      const loadEpisode = (index, { autoplay = false, resumeTime = 0, onReady = null } = {}) => {
          if (!playlist) return;
          if (index < 0 || index >= playlist.episodes.length) return;
          const resumePlayback = autoplay || (!video.paused && !video.ended);
@@ -2057,7 +2065,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1854,42 @@
+@@ -724,24 +1862,45 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -2095,7 +2103,10 @@ diff --git a/index.html b/index.html
 +            video.currentTime = Math.max(0, Math.min(resumeTime, video.duration - 0.25));
 +            seekPending = false;
 +          }
-+          if (event?.type === 'loadedmetadata') { historyReady = true; saveWatchHistory(true); }
++          if (event?.type === 'loadedmetadata') {
++            historyReady = true; saveWatchHistory(true);
++            if (!video.error && !statusNode.classList.contains('error')) onReady?.();
++          }
            applyVideoAspect();
 -          video.playbackRate = Number(playbackRate.value) || 1;
 -          if (resumePlayback && video.paused) {
@@ -2112,7 +2123,7 @@ diff --git a/index.html b/index.html
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1897,20 @@
+@@ -749,21 +1908,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -2140,7 +2151,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,68 +1920,148 @@
+@@ -773,68 +1931,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2331,7 +2342,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +2083,11 @@
+@@ -856,10 +2094,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2344,7 +2355,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +2110,7 @@
+@@ -882,7 +2121,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2353,7 +2364,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +2118,117 @@
+@@ -890,22 +2129,117 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2483,7 +2494,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2241,56 @@
+@@ -918,19 +2252,56 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2545,7 +2556,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2301,15 @@
+@@ -941,6 +2312,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2561,7 +2572,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2319,45 @@
+@@ -950,20 +2330,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);
