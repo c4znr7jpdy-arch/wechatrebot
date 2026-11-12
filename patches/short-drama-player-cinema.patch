@@ -1169,7 +1169,7 @@ diff --git a/index.html b/index.html
          item.cover = isSafePublicHttpsUrl(cover) ? cover : '';
          return item;
        };
-@@ -537,8 +938,681 @@
+@@ -537,8 +938,689 @@
          return payload.items.map(validateSelectionItem);
        };
  
@@ -1353,6 +1353,7 @@ diff --git a/index.html b/index.html
 +        if (episodeNumber !== null) return target.episodes.findIndex((episode) => number(episode.name) === episodeNumber);
 +        return reference?.episodes.length === 1 && reference.episodeCount === 1 && target.episodes.length === 1 ? 0 : -1;
 +      };
++      const playbackAddress = (url) => new URL(url).href.split('#')[0];
 +      const selectSource = (item) => {
 +        if (!playlist || item.source === playlist.source) { closeSourceMenu(); return; }
 +        const index = matchingEpisode(item);
@@ -1360,9 +1361,8 @@ diff --git a/index.html b/index.html
 +          sourceStatus.textContent = '该资源暂无当前集，请选择其他资源。';
 +          return;
 +        }
-+        const address = (url) => new URL(url).href.split('#')[0];
-+        if (address(item.episodes[index].url) === address(playlist.episodes[current].url)) {
-+          sourceStatus.textContent = '该资源当前集与正在播放的地址相同，请选择其他资源。';
++        if (playbackAddress(item.episodes[index].url) === playbackAddress(playlist.episodes[current].url)) {
++          renderSources();
 +          return;
 +        }
 +        const resumeTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
@@ -1381,7 +1381,15 @@ diff --git a/index.html b/index.html
 +      };
 +      const renderSources = () => {
 +        sourceOptions.replaceChildren();
-+        sourceSession?.items.forEach((item) => {
++        const addresses = new Set();
++        const items = playlist ? [playlist, ...(sourceSession?.items || []).filter((item) => item.source !== playlist.source)] : [];
++        items.forEach((item) => {
++          const index = matchingEpisode(item);
++          if (index >= 0) {
++            const address = playbackAddress(item.episodes[index].url);
++            if (addresses.has(address)) return;
++            addresses.add(address);
++          }
 +          const button = document.createElement('button');
 +          button.type = 'button';
 +          button.setAttribute('aria-pressed', String(item.source === playlist?.source));
@@ -1852,7 +1860,7 @@ diff --git a/index.html b/index.html
            const selectionToken = params.get('s');
            if (!/^[A-Za-z0-9_-]{16,96}$/.test(selectionToken)
              || [...params.keys()].some((key) => key !== 's')) {
-@@ -549,31 +1623,39 @@
+@@ -549,31 +1631,39 @@
            if (!response.ok || !payload || payload.v !== 1) throw new Error(payload?.error || '选集链接已过期');
            recommendationItems = validateSelectionPayload(payload);
            selectionKind = String(payload.kind || 'recommendations');
@@ -1900,7 +1908,7 @@ diff --git a/index.html b/index.html
        }
        if (playlist) titleNode.textContent = String(playlist.title || '短剧播放');
  
-@@ -581,19 +1663,24 @@
+@@ -581,19 +1671,24 @@
          if (!playlist) {
            previous.disabled = true;
            next.disabled = true;
@@ -1932,7 +1940,7 @@ diff --git a/index.html b/index.html
          });
        };
  
-@@ -614,27 +1701,15 @@
+@@ -614,27 +1709,15 @@
        };
  
        const applyVideoAspect = () => {
@@ -1967,7 +1975,7 @@ diff --git a/index.html b/index.html
  
        const levelName = (level) => {
          if (level?.height) return `${level.height}P`;
-@@ -696,27 +1771,90 @@
+@@ -696,27 +1779,91 @@
          updateQualityActive();
        };
  
@@ -2057,6 +2065,7 @@ diff --git a/index.html b/index.html
 +        resetCast();
          removeEpisodeReadyListener();
          current = index;
++        if (!sourceMenu.hidden) renderSources();
 +        historyPlaylist = playlist; historyEpisode = current;
 +        if (episodePage !== Math.floor(current / EPISODES_PER_PAGE)) {
 +          episodePage = Math.floor(current / EPISODES_PER_PAGE);
@@ -2065,7 +2074,7 @@ diff --git a/index.html b/index.html
          const item = playlist.episodes[current] || {};
          const source = String(item.url || '').trim();
          episodeNode.textContent = String(item.name || `第${current + 1}集`);
-@@ -724,24 +1862,45 @@
+@@ -724,24 +1871,45 @@
          statusNode.classList.remove('error');
          statusNode.textContent = '正在连接资源站……';
          retry.hidden = true;
@@ -2098,7 +2107,8 @@ diff --git a/index.html b/index.html
 +        };
 +        const onEpisodeReady = (event) => {
            if (loadId !== episodeLoadId) return;
-           if (loadTimer) clearTimeout(loadTimer);
+-          if (loadTimer) clearTimeout(loadTimer);
++          if (event?.type === 'loadedmetadata' && loadTimer) clearTimeout(loadTimer);
 +          if (seekPending && event?.type === 'loadedmetadata' && video.readyState >= 1 && Number.isFinite(video.duration)) {
 +            video.currentTime = Math.max(0, Math.min(resumeTime, video.duration - 0.25));
 +            seekPending = false;
@@ -2118,12 +2128,12 @@ diff --git a/index.html b/index.html
 -          } else if (video.paused) {
 -            statusNode.textContent = '已连接，点击播放。';
 -          }
-+          if (seekPending && event?.type !== 'loadedmetadata') return;
++          if ((seekPending || onReady) && event?.type !== 'loadedmetadata') return;
 +          resumeEpisode();
          };
          if (hls) { hls.destroy(); hls = null; }
          qualityMenu.hidden = true;
-@@ -749,21 +1908,20 @@
+@@ -749,21 +1917,20 @@
          qualityMenu.replaceChildren();
          qualityButton.disabled = true;
          qualityLabel.textContent = '原画';
@@ -2151,7 +2161,7 @@ diff --git a/index.html b/index.html
            hls.loadSource(source);
            hls.attachMedia(video);
            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-@@ -773,68 +1931,148 @@
+@@ -773,68 +1940,148 @@
            });
            hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityActive());
            hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -2342,7 +2352,7 @@ diff --git a/index.html b/index.html
          const hasCompactEpisodes = recommendationItems.some(
            (item) => item.episodeCount > item.episodes.length,
          );
-@@ -856,10 +2094,11 @@
+@@ -856,10 +2103,11 @@
              image.alt = `${item.title || '短剧'}封面`;
              image.loading = 'lazy';
              image.referrerPolicy = 'no-referrer';
@@ -2355,7 +2365,7 @@ diff --git a/index.html b/index.html
            cover.appendChild(badge);
            const info = document.createElement('div');
            info.className = 'info';
-@@ -882,7 +2121,7 @@
+@@ -882,7 +2130,7 @@
            source.textContent = String(item.source || '未知来源');
            const play = document.createElement('div');
            play.className = 'play';
@@ -2364,7 +2374,7 @@ diff --git a/index.html b/index.html
            info.append(name, tags, source, play);
            button.append(cover, info);
            button.addEventListener('click', () => selectRecommendation(index));
-@@ -890,22 +2129,117 @@
+@@ -890,22 +2138,117 @@
          });
          statusNode.classList.remove('error');
          statusNode.textContent = '请选择要播放的作品。';
@@ -2494,7 +2504,7 @@ diff --git a/index.html b/index.html
        sheetBackdrop.addEventListener('click', closeEpisodeSheet);
        sheetClose.addEventListener('click', closeEpisodeSheet);
        qualityButton.addEventListener('click', (event) => {
-@@ -918,19 +2252,56 @@
+@@ -918,19 +2261,56 @@
          const rate = Number(playbackRate.value) || 1;
          video.defaultPlaybackRate = rate;
          video.playbackRate = rate;
@@ -2556,7 +2566,7 @@ diff --git a/index.html b/index.html
        video.addEventListener('error', () => {
          if (video.error) fail('视频加载失败，请重试或更换资源。');
        });
-@@ -941,6 +2312,15 @@
+@@ -941,6 +2321,15 @@
          }
        });
        document.addEventListener('keydown', (event) => {
@@ -2572,7 +2582,7 @@ diff --git a/index.html b/index.html
          if (event.key === 'Escape' && !qualityMenu.hidden) {
            qualityMenu.hidden = true;
            qualityButton.setAttribute('aria-expanded', 'false');
-@@ -950,20 +2330,45 @@
+@@ -950,20 +2339,45 @@
        document.addEventListener('fullscreenchange', () => { applyVideoAspect(); syncNativeControls(); });
        window.addEventListener('resize', () => { applyVideoAspect(); syncNativeControls(); });
        video.addEventListener('loadedmetadata', applyVideoAspect);

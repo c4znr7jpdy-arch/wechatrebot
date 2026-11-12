@@ -1150,9 +1150,12 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
     import hashlib
     page, state = source_catalog
     state["variants"].extend(
-        {**state["variants"][1], "source": source}
-        for source in ("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源",
-                       "飘零资源", "360资源", "无尽资源", "魔都资源", "新浪资源")
+        {**state["variants"][1], "source": source, "episodes": [
+            {**episode, "url": episode["url"].replace("ff-", f"source-{index}-")}
+            for episode in state["variants"][1]["episodes"]
+        ]}
+        for index, source in enumerate(("量子资源", "红牛资源", "极速资源", "金鹰资源", "百度云资源",
+                                        "飘零资源", "360资源", "无尽资源", "魔都资源", "新浪资源"))
     )
     page.get_by_label("返回", exact=True).click()
     page.evaluate("localStorage.removeItem('short-drama-watch-history')")
@@ -1212,7 +1215,7 @@ def test_source_switch_button_is_compact_clickable_and_fits_viewport(source_cata
         }""")
     page.screenshot(path=str(screenshots / f"source-menu-{width}.png"))
     alternative.click()
-    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4')")
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('source-4-1.mp4')")
     assert button.inner_text().strip() == "百度云"
     value = button.locator(".source-value")
     assert value.evaluate("node => node.scrollWidth <= node.clientWidth")
@@ -1253,7 +1256,7 @@ def test_source_switch_preserves_episode_position_speed_and_starts_playback(sour
     "https://media.example/bf-2.m3u8",
     "https://MEDIA.example:443/bf-2.m3u8#retry",
 ])
-def test_source_switch_rejects_same_current_episode_address_but_allows_other_episodes(source_catalog, width, same_address, screenshots):
+def test_source_menu_deduplicates_current_episode_addresses_but_keeps_other_episodes(source_catalog, width, same_address, screenshots):
     page, state = source_catalog
     page.get_by_label("返回", exact=True).click()
     state["variants"][1]["episodes"][1]["url"] = same_address
@@ -1271,8 +1274,8 @@ def test_source_switch_rejects_same_current_episode_address_but_allows_other_epi
       document.getElementById('video').addEventListener('loadstart', () => window.sourceReloads++);
     }""")
     page.locator("#sourceButton").click()
-    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
-    assert page.locator("#sourceStatus").inner_text() == "该资源当前集与正在播放的地址相同，请选择其他资源。"
+    assert page.locator("#sourceOptions button").all_text_contents() == ["暴风"]
+    assert page.locator("#sourceStatus").inner_text() == ""
     assert page.locator("#sourceButton").inner_text().strip() == "暴风"
     assert page.locator("#sourceMenu").is_visible()
     assert page.locator("#video").evaluate("video => video.currentSrc.includes('bf-2.mp4') && video.paused")
@@ -1281,17 +1284,47 @@ def test_source_switch_rejects_same_current_episode_address_but_allows_other_epi
     assert "已切换" not in page.locator("#videoHint").inner_text()
     page.screenshot(path=str(screenshots / f"source-duplicate-address-{width}.png"))
 
-    # Another episode on the same catalog source has a genuinely different stream.
-    page.locator("#sourceButton").click()
-    page.locator("#episodeGrid").get_by_label("第3集", exact=True).click()
+    # Auto-next must refresh the open menu for the new episode's distinct streams.
+    page.locator("#video").evaluate("video => { video.currentTime = video.duration - .2; return video.play(); }")
     page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-3.mp4') && document.getElementById('video').readyState >= 2")
-    page.locator("#sourceButton").click()
+    assert page.locator("#sourceMenu").is_visible()
+    assert page.locator("#sourceOptions button").all_text_contents() == ["暴风", "非凡"]
     assert page.locator("#sourceStatus").inner_text() == ""
     page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-3.mp4') && document.getElementById('video').readyState >= 2")
     assert page.locator("#sourceButton").inner_text().strip() == "非凡"
     assert page.locator("#meta").inner_text() == "第3集"
     assert "已切换至非凡" in page.locator("#videoHint").inner_text()
+    # When both catalogs share the next selected episode, retain the active source name.
+    page.locator("#episodeGrid").get_by_label("第2集", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('bf-2.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#sourceButton").click()
+    assert page.locator("#sourceOptions button").all_text_contents() == ["非凡"]
+    assert page.locator("#sourceStatus").inner_text() == ""
+
+
+def test_source_menu_deduplicates_addresses_shared_by_other_catalogs(source_catalog):
+    page, state = source_catalog
+    page.get_by_label("返回", exact=True).click()
+    state["variants"].extend([
+        {**state["variants"][1], "source": "量子资源"},
+        {**state["variants"][1], "source": "红牛资源", "episodes": [
+            {**episode, "url": episode["url"].replace("media.example", "MEDIA.example:443") + "#retry"}
+            for episode in state["variants"][1]["episodes"]
+        ]},
+    ])
+    page.evaluate("localStorage.removeItem('short-drama-watch-history')")
+    page.goto("https://player.example/short-drama/player?s=abcdefghijklmnop")
+    page.locator(".recommend-card").click()
+    page.wait_for_function("document.querySelectorAll('#sourceOptions button').length >= 2")
+    page.locator("#sourceButton").click()
+    assert page.locator("#sourceOptions button").all_text_contents() == ["暴风", "非凡"]
+    assert page.locator("#sourceStatus").inner_text() == ""
+    page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
+    page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2")
+    page.locator("#sourceButton").click()
+    assert sorted(page.locator("#sourceOptions button").all_text_contents()) == ["暴风", "非凡"]
+    assert page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).get_attribute("aria-pressed") == "true"
 
 
 def test_source_switch_failed_media_never_announces_success(source_catalog):
@@ -1389,12 +1422,16 @@ def test_source_switch_late_response_does_not_reopen_player_after_return(source_
     assert page.locator("#video").get_attribute("src") is None
 
 
-def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming(source_catalog, screenshots):
+@pytest.mark.parametrize(("playing", "load_timeout"), [(False, False), (True, False), (False, True)])
+def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming(source_catalog, screenshots, playing, load_timeout):
     page, _ = source_catalog
-    page.locator("#video").evaluate("video => { video.currentTime = 2; }")
-    page.wait_for_function("!document.getElementById('video').seeking")
-    play_click(page)
-    page.wait_for_function("!document.getElementById('video').paused")
+    if playing:
+        page.locator("#video").evaluate("video => { video.currentTime = 2; }")
+        page.wait_for_function("!document.getElementById('video').seeking")
+        play_click(page)
+        page.wait_for_function("!document.getElementById('video').paused")
+    else:
+        assert page.locator("#video").evaluate("video => video.paused && video.currentTime === 0")
     page.evaluate("""() => {
       document.getElementById('video').canPlayType = () => '';
       window.Hls = class {
@@ -1407,6 +1444,8 @@ def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming
         destroy() {}
       };
     }""")
+    if load_timeout:
+        page.clock.install()
     page.locator("#sourceButton").click()
     resume_position = page.locator("#video").evaluate("video => video.currentTime")
     page.locator("#sourceMenu").get_by_role("button", name="非凡", exact=True).click()
@@ -1418,7 +1457,15 @@ def test_source_switch_hls_manifest_waits_for_new_media_metadata_before_resuming
     assert page.locator("#video").evaluate("video => video.readyState >= 2 && video.currentSrc.includes('bf-1.mp4')")
     assert page.locator("#video").evaluate("video => video.paused")
     assert "已切换" not in page.locator("#videoHint").inner_text()
-    page.screenshot(path=str(screenshots / "source-pending-metadata-390.png"))
+    page.screenshot(path=str(screenshots / f"source-pending-metadata-390-{'playing' if playing else 'paused'}.png"))
+    if load_timeout:
+        page.clock.fast_forward(16000)
+        assert page.locator("#switchSourceOnError").is_visible()
+        assert page.locator("#status").evaluate("node => node.classList.contains('error')")
+        assert "超时" in page.locator("#status").inner_text()
+        assert page.locator("#video").evaluate("video => video.paused")
+        assert "已切换" not in page.locator("#videoHint").inner_text()
+        return
     page.evaluate("window.testHls.video.src = window.testHls.url")
     page.wait_for_function("document.getElementById('video').currentSrc.includes('ff-1.mp4') && document.getElementById('video').readyState >= 2 && !document.getElementById('video').seeking")
     assert page.locator("#video").evaluate("video => video.currentTime") == pytest.approx(resume_position, abs=.3)
