@@ -2736,7 +2736,7 @@ def test_message_center_reentry_refreshes_retained_messages_silently() -> None:
     history_entry = script[start:end]
 
     assert "await loadConversations({refreshGroups: true});" in history_entry
-    assert 'void loadConversations({silent: true, refreshGroups: true});' in history_entry
+    assert 'void loadConversations({silent: true});' in history_entry
     assert "current messages or scroll position" in history_entry
 
 

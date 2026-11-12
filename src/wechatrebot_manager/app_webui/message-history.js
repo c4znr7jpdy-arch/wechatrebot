@@ -154,6 +154,7 @@ window.createMessageHistory = function (helpers) {
 
   function invalidateHistoryState() {
     clearHistoryMessageCache();
+    state.historyRenderedPanels?.clear();
     state.historyQrCache?.clear();
     window.closeMessageImagePreview?.();
     state.historyLoad += 1;
@@ -323,21 +324,32 @@ window.createMessageHistory = function (helpers) {
     return request;
   }
 
+  function renderHistoryPanel(panel, markup, context = "") {
+    const panels = state.historyRenderedPanels ||= new Map();
+    const previous = panels.get(panel);
+    if (previous?.account === state.historyAccount && previous.markup === markup
+        && previous.context === context && previous.node === panel.firstElementChild) return false;
+    panel.innerHTML = markup;
+    panels.set(panel, {account: state.historyAccount, markup, context, node: panel.firstElementChild});
+    return true;
+  }
+
   function renderConversations() {
     const list = $("#conversationList");
     const previousScroll = list.scrollTop;
-    list.innerHTML = state.conversations.length ? state.conversations.map((item) => `
+    const markup = state.conversations.length ? state.conversations.map((item) => `
       <button class="conversation-item ${state.selectedConversation?.conversation_id === item.conversation_id ? "active" : ""}" data-conversation="${escapeHtml(item.conversation_id)}" data-type="${escapeHtml(item.type)}">
         ${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}
         <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${item.last_timestamp ? escapeHtml(new Date(item.last_timestamp * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})) : "—"}</time></span><small class="conversation-id">${escapeHtml(item.conversation_id)}</small><small class="conversation-preview">${escapeHtml(item.last_content ? displayMessageContent(item.last_content) : (item.message_count ? `${item.message_count} 条本机消息` : "暂无本机消息"))}</small></span>
       </button>`).join("") : '<div class="empty-state compact"><div class="empty-symbol">空</div><h2>没有找到聊天记录</h2><p>调整筛选条件或启动机器人接收新消息。</p></div>';
+    if (!renderHistoryPanel(list, markup)) return;
     $$(".conversation-item", list).forEach((button) => button.addEventListener("click", () => selectConversation(button.dataset.conversation)));
     bindAvatarFallbacks(list);
     list.scrollTop = previousScroll;
   }
 
   function renderConversationHeader(item) {
-    $("#conversationHeader").innerHTML = `<div class="conversation-header-main">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><strong>${escapeHtml(item.display_name)}</strong><span>${escapeHtml(item.conversation_id)}</span></div></div><span class="status-badge online"><span></span>${item.message_count} 条消息${item.message_count ? " · 自动更新中" : " · 暂无消息"}</span>`;
+    if (!renderHistoryPanel($("#conversationHeader"), `<div class="conversation-header-main">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><strong>${escapeHtml(item.display_name)}</strong><span>${escapeHtml(item.conversation_id)}</span></div></div><span class="status-badge online"><span></span>${item.message_count} 条消息${item.message_count ? " · 自动更新中" : " · 暂无消息"}</span>`)) return;
     bindAvatarFallbacks($("#conversationHeader"));
   }
 
@@ -814,21 +826,25 @@ window.createMessageHistory = function (helpers) {
     const identityFacts = item.type === "group"
       ? `<div><dt>群昵称</dt><dd>${escapeHtml(senderName)}</dd></div><div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`
       : `<div><dt>微信号</dt><dd>${escapeHtml(senderId)}</dd></div>`;
-    $("#conversationInspector").innerHTML = `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>该发送者消息</dt><dd>${Number.isInteger(currentSender?.sender_message_count) ? `${currentSender.sender_message_count} 条` : "未统计"}</dd></div><div><dt>该发送者最近消息</dt><dd>${escapeHtml(fullTime(currentSender?.sender_last_timestamp))}</dd></div><div><dt>本会话消息</dt><dd>${item.message_count} 条</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`;
+    const profileContactId = item.type === "private" ? item.conversation_id
+      : currentSender?.role !== "assistant" && currentSender?.sender_id
+        && !["bot", state.historyAccount].includes(currentSender.sender_id) ? currentSender.sender_id : "";
+    const updated = renderHistoryPanel($("#conversationInspector"), `<span class="eyebrow">聊天信息</span><div class="inspector-conversation-title">${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}<div><h2>${escapeHtml(item.display_name)}</h2><p>${escapeHtml(item.conversation_id)}</p></div></div><section class="current-sender"><span>当前消息发送者</span><div>${avatarMarkup("message-avatar", senderName, currentSender?.avatar)}<div><strong>${escapeHtml(senderName)}</strong><small>${escapeHtml(senderId)}</small></div><button class="row-action" type="button" id="copySenderId">复制${currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"}</button></div></section><dl class="inspector-list">${identityFacts}<div><dt>该发送者消息</dt><dd>${Number.isInteger(currentSender?.sender_message_count) ? `${currentSender.sender_message_count} 条` : "未统计"}</dd></div><div><dt>该发送者最近消息</dt><dd>${escapeHtml(fullTime(currentSender?.sender_last_timestamp))}</dd></div><div><dt>本会话消息</dt><dd>${item.message_count} 条</dd></div></dl>${item.message_count ? '<div class="inspector-actions"><button class="button danger-ghost small" id="deleteConversation">删除这段记录</button></div>' : '<p class="subtle">群聊当前没有本机消息副本，因此无需清理。</p>'}`, JSON.stringify([item.type, profileContactId]));
     const heading = $("#conversationInspector .inspector-conversation-title");
     heading.querySelector("h2").title = item.display_name;
     heading.querySelector("p").title = item.conversation_id;
     heading.classList.toggle("has-group-qrcode", item.type === "group");
     if (item.type === "group") {
-      heading.insertAdjacentHTML("beforeend", '<button class="group-qrcode" type="button" aria-label="群二维码" disabled>加载中</button>');
-      loadGroupQrCode(item, heading.querySelector(".group-qrcode"), {
-        restoreFocus: focusedQr === JSON.stringify([state.historyAccount, item.conversation_id]),
-      });
+      if (updated) heading.insertAdjacentHTML("beforeend", '<button class="group-qrcode" type="button" aria-label="群二维码" disabled>加载中</button>');
+      const key = JSON.stringify([state.historyAccount, item.conversation_id]);
+      const entry = state.historyQrCache?.get(key);
+      if (updated || !entry || entry.expires <= Date.now()) {
+        loadGroupQrCode(item, heading.querySelector(".group-qrcode"), {restoreFocus: focusedQr === key});
+      }
     }
+    if ($("#deleteConversation")) $("#deleteConversation").disabled = !canEditHistory();
+    if (!updated) return;
     $("#copySenderId")?.addEventListener("click", () => copyText(senderId, currentSender?.wechat_id && currentSender.wechat_id !== currentSender.sender_id ? "微信号" : "微信标识"));
-    const profileContactId = item.type === "private" ? item.conversation_id
-      : currentSender?.role !== "assistant" && currentSender?.sender_id
-        && !["bot", state.historyAccount].includes(currentSender.sender_id) ? currentSender.sender_id : "";
     if (profileContactId) {
       const copyButton = $("#copySenderId");
       const actions = document.createElement("div");
@@ -845,7 +861,6 @@ window.createMessageHistory = function (helpers) {
       actions.append(button);
     }
     bindAvatarFallbacks($("#conversationInspector"));
-    if ($("#deleteConversation")) $("#deleteConversation").disabled = !canEditHistory();
     $("#deleteConversation")?.addEventListener("click", () => {
       const accountId = state.historyAccount;
       if (!canEditHistory(accountId)) return;

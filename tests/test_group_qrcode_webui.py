@@ -38,6 +38,12 @@ def test_group_qrcode_layout_preview_copy_and_failure(browser, manager_url, tmp_
         open_history(page, manager_url)
         page.evaluate("""src => {
           window.qrCalls = [];
+          window.qrDirectoryReads = 0;
+          const read = window.pywebview.api.get_conversations;
+          window.pywebview.api.get_conversations = async (...args) => {
+            window.qrDirectoryReads++;
+            return read(...args);
+          };
           window.pywebview.api.get_group_qrcode = async (account, group) => {
             window.qrCalls.push([account, group]);
             return {ok:true, data:{account_id:account, group_id:group, image_data_url:src}};
@@ -86,9 +92,12 @@ def test_group_qrcode_layout_preview_copy_and_failure(browser, manager_url, tmp_
         expect(dialog.get_by_role("status")).to_contain_text("复制失败")
         dialog.get_by_role("button", name="关闭预览").click()
         expect(qr).to_be_focused()
-        # Directory polling replaces the inspector; keyboard access survives.
+        # An unchanged directory poll retains the QR node and keyboard focus.
         qr.evaluate("button => button.dataset.focusProbe = 'old'")
-        expect(page.locator('[data-focus-probe="old"]')).to_have_count(0)
+        reads = page.evaluate("window.qrDirectoryReads")
+        page.wait_for_function("reads => window.qrDirectoryReads > reads", arg=reads)
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        expect(page.locator('[data-focus-probe="old"]')).to_have_count(1)
         expect(qr).to_be_focused()
         page.evaluate("""() => { window.pywebview.api.get_group_qrcode = async () => ({ok:false,
           error:{code:'19000', title:'群二维码暂不可用', message:'请重试', recorded:true}}); }""")
@@ -153,10 +162,10 @@ def test_group_qrcode_poll_respects_retryability_and_keeps_manual_retry(browser,
         expect(retry).to_be_visible()
         expect(retry).to_have_attribute("title", "自动化已暂停，请在运行中心启动后重试。")
         assert page.evaluate("window.qrCalls") == 1
-        # Polling renders a replacement inspector after the old failure TTL.
+        # Retryable failures expire without replacing the inspector button.
         retry.evaluate("button => button.dataset.expiryProbe = 'old'")
         page.clock.fast_forward(16000)
-        expect(page.locator('[data-expiry-probe="old"]')).to_have_count(0)
+        expect(page.locator('[data-expiry-probe="old"]')).to_have_count(1)
         expect(page.get_by_role("button", name="重新获取群二维码")).to_be_visible()
         page.wait_for_function("expected => window.qrCalls >= expected", arg=expected_calls)
         assert page.evaluate("window.qrCalls") == expected_calls

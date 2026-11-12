@@ -770,7 +770,7 @@
           await loadConversations({refreshGroups: true});
         }
       } else if (!state.historyConversationsLoading) {
-        void loadConversations({silent: true, refreshGroups: true});
+        void loadConversations({silent: true});
       }
     }
     if (page === "schedules") { await loadSchedules({background: true}); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
