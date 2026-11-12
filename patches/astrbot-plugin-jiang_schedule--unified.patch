@@ -45,12 +45,20 @@ diff --git a/main.py b/main.py
 +    @filter.regex(_COMMAND_ENTRY_PATTERN)
      async def schedule(self, event: AstrMessageEvent):
          """定时任务管理"""
-@@ -813,8 +825,12 @@
+@@ -813,8 +825,20 @@
              tasks = _load_tasks()
              mine = [t for t in tasks if t.get("session") == session]
 -            if not mine:
 -                yield event.plain_result("当前聊天暂无定时任务")
-+            unified = await self._unified.command_tasks(event)
++            try:
++                unified = await self._unified.command_tasks(event)
++            except ValueError as exc:
++                yield event.plain_result(str(exc))
++                return
++            except Exception:
++                logger.exception("读取统一定时任务失败")
++                yield event.plain_result("本次未能读取任务，无法确认当前聊天的定时任务，请稍后重试。")
++                return
 +            if not mine and not unified:
 +                yield event.plain_result("当前聊天暂无定时任务")
                  return
@@ -61,7 +69,7 @@ diff --git a/main.py b/main.py
 +                lines.append(f"  • {item['name']}  {item['schedule_text']}  {state}")
              for t in mine:
                  label = _type_label(t["type"])
-@@ -857,8 +873,8 @@
+@@ -857,8 +881,16 @@
                  return
              tasks = _load_tasks()
 -            new_tasks = []
@@ -69,12 +77,20 @@ diff --git a/main.py b/main.py
 -            for task in tasks:
 -                if task.get("session") == session and task["type"] == t:
 +            new_tasks = []
-+            removed = await self._unified.command_delete(event, t)
++            try:
++                removed = await self._unified.command_delete(event, t)
++            except ValueError as exc:
++                yield event.plain_result(str(exc))
++                return
++            except Exception:
++                logger.exception("删除统一定时任务失败")
++                yield event.plain_result("本次删除结果未确认，请在管理器核对任务后重试。")
++                return
 +            for task in tasks:
 +                if task.get("session") == session and task["type"] == t:
                      removed = True
                  else:
-@@ -915,6 +931,17 @@
+@@ -915,6 +947,17 @@
                  day_of_week = _DOW_MAP.get(dow_raw, "")
 
 -            tasks = _load_tasks()

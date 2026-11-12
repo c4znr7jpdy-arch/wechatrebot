@@ -240,9 +240,9 @@ diff --git a/main.py b/main.py
              tasks = _load_tasks()
 -            mine = [t for t in tasks if t.get("session") == session]
 +            mine = [t for t in tasks if t.get("session") == session and t.get("type") in _CALLBACKS]
-             unified = await self._unified.command_tasks(event)
-             if not mine and not unified:
-                 yield event.plain_result("当前聊天暂无定时任务")
+             try:
+                 unified = await self._unified.command_tasks(event)
+             except ValueError as exc:
 @@ -861,20 +742,6 @@
          m = _RE_DEL.search(text)
          if m:
@@ -263,7 +263,7 @@ diff --git a/main.py b/main.py
 -                return
              tasks = _load_tasks()
              new_tasks = []
-             removed = await self._unified.command_delete(event, t)
+             try:
 @@ -899,27 +766,6 @@
              city = m.group(3) or ""
              hour, minute = _parse_time(m.group(4), m.group(5))
