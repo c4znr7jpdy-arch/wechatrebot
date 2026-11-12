@@ -16,6 +16,8 @@ _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _GROUP_ID = re.compile(r"^[A-Za-z0-9_.-]{1,119}@chatroom$")
 # Only a cheap read-only lookup hint; the manager owns intent authorization.
 _CONTROL_MESSAGE_HINT = re.compile(r"开启|启用|打开|启动|恢复|开起来|打开来|关闭|禁用|停用|关掉|停掉|关了|关起来")
+_SCHEDULE_MESSAGE_HINT = re.compile(r"定时任务|定时推送")
+_SCHEDULE_CONTROL_HINT = re.compile(r"开启|启用|打开|启动|恢复|关闭|禁用|停用|关掉|停掉|停止|暂停")
 _MAX_DESCRIPTOR_BYTES = 16 * 1024
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 10.0
@@ -161,6 +163,33 @@ def control_message_candidate(message: str) -> bool:
     return bool(isinstance(message, str) and len(message) <= 4000
                 and not message.lstrip().startswith(("/", "\\"))
                 and _CONTROL_MESSAGE_HINT.search(message))
+
+
+def schedule_message_candidate(message: str) -> bool:
+    """Only identify a read-only resolver candidate; manager validates intent."""
+    return bool(isinstance(message, str) and len(message) <= 4000
+                and not message.lstrip().startswith(("/", "\\"))
+                and _SCHEDULE_MESSAGE_HINT.search(message)
+                and _SCHEDULE_CONTROL_HINT.search(message))
+
+
+def format_scheduled_tasks(data: dict[str, object]) -> str:
+    """Reject incomplete reads instead of presenting them as an empty task list."""
+    tasks, receiving = data.get("tasks"), data.get("scheduled_enabled")
+    if (not isinstance(tasks, list) or type(receiving) is not bool
+            or type(data.get("task_count")) is not int or data["task_count"] != len(tasks)):
+        raise PluginControlError("本群定时任务查询结果无效，不能确认任务数量。")
+    lines = [f"当前群共有 {len(tasks)} 个定时任务；本群定时接收{'已开启' if receiving else '已暂停'}。"]
+    for item in tasks:
+        if (not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                or not item["name"].strip() or not isinstance(item.get("schedule_text"), str)
+                or type(item.get("enabled")) is not bool or type(item.get("draft")) is not bool):
+            raise PluginControlError("本群定时任务查询结果不完整，不能确认任务状态。")
+        state = "草稿" if item["draft"] else "已启用" if item["enabled"] else "已暂停"
+        lines.append(f"- {item['name']}：{item['schedule_text']}，任务{state}")
+    if tasks and not receiving:
+        lines.append("任务配置已保留；本群暂停接收，任务中的其他聊天不受影响。")
+    return "\n".join(lines)
 
 
 def valid_module_name(module: str) -> bool:

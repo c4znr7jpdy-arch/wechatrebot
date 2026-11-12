@@ -512,12 +512,17 @@ class UnifiedRuntime:
         return f"已添加「{task['name']}」→ {schedule_text(task['schedule'])}，仅发送到当前聊天。可在管理器定时任务中编辑、复制和删除。"
 
     async def command_tasks(self, event) -> list[dict]:
-        account, _client = await self.connection()
-        actual = str(getattr(getattr(event, "message_obj", None), "self_id", "") or "")
-        if not account or actual != account:
+        platform = getattr(event, "get_platform_name", lambda: "")()
+        if isinstance(platform, str) and platform and platform != "aiocqhttp":
+            # Other platforms keep using their legacy schedules, never this
+            # installation's account-bound WeChat task store.
             return []
+        account = str(getattr(getattr(event, "message_obj", None), "self_id", "") or "")
+        await self._require_account(account)
         kind = "private" if event.is_private_chat() else "group"
-        identity = str(event.get_sender_id() if kind == "private" else event.get_group_id())
+        identity = str((event.get_sender_id() if kind == "private" else event.get_group_id()) or "")
+        if not identity:
+            raise ValueError("无法确认当前聊天，定时任务尚未查询或修改。")
         return [task for task in self.store.list(account) if {"type": kind, "id": identity} in task["targets"]]
 
     async def command_delete(self, event, action: str) -> bool:

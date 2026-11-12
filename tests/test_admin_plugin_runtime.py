@@ -97,12 +97,14 @@ def runtime_function(name, **extra):
     namespace = {
         "copy": copy,
         "control_message_candidate": control.control_message_candidate,
+        "schedule_message_candidate": control.schedule_message_candidate,
+        "format_scheduled_tasks": control.format_scheduled_tasks,
         "current_group_scope": control.current_group_scope,
         "matches_group_scope": control.matches_group_scope,
         "valid_module_name": control.valid_module_name,
         "PluginControlError": control.PluginControlError,
         "_original_message_text": lambda event: event.message_obj.message_str.strip(),
-        "_GROUP_PLUGIN_TOOL_NAMES": {"group_plugin_list", "group_plugin_set_enabled"},
+        "_GROUP_PLUGIN_TOOL_NAMES": {"group_plugin_list", "group_plugin_set_enabled", "current_group_scheduled_tasks"},
         "get_recent_actions": lambda _session: [],
         "_session": lambda event: event.unified_msg_origin,
         "Comp": Comp,
@@ -526,8 +528,10 @@ def test_group_tools_expose_only_module_and_enabled_model_parameters():
 
 def control_hook(request, *, admins=None):
     toggle = runtime_function("group_plugin_set_enabled_tool", request_control=request)
+    schedules = runtime_function("current_group_scheduled_tasks_tool", request_control=request)
     plugin = NS(context=context(admins), config={"inject_capability_prompt": False})
     plugin.group_plugin_set_enabled_tool = lambda event, module, enabled: toggle(plugin, event, module, enabled)
+    plugin.current_group_scheduled_tasks_tool = lambda event, action="list", enabled=None: schedules(plugin, event, action, enabled)
     hook = runtime_function("apply_explicit_group_plugin_message", request_control=request)
     return plugin, hook
 

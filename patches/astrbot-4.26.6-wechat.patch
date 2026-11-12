@@ -950,3 +950,40 @@ diff --git a/official/astrbot/core/astr_agent_tool_exec.py b/expected/astrbot/co
                                  await event.send(
                                      MessageChain(
                                          chain=res.chain,
+diff --git a/official/astrbot/core/tools/cron_tools.py b/expected/astrbot/core/tools/cron_tools.py
+--- a/official/astrbot/core/tools/cron_tools.py
++++ b/expected/astrbot/core/tools/cron_tools.py
+@@ -54,7 +54,9 @@
+         "Manage your future tasks. "
+         "Use action='create' to schedule a recurring cron task or one-time run_at task. "
+         "Use action='edit' to update an existing task. "
+-        "Use action='list' to inspect existing tasks. "
++        "Use action='list' to inspect this sender's personal cron tasks only; "
++        "manager-configured group schedules are separate and must be queried with "
++        "current_group_scheduled_tasks. "
+         "Use action='delete' to remove a task by job_id."
+     )
+     parameters: dict = Field(
+@@ -243,9 +245,20 @@
+                 for job in await cron_mgr.list_jobs()
+                 if _job_belongs_to_current_sender(job, current_umo, current_sender_id)
+             ]
++            event = context.context.event
++            group_scope = (
++                getattr(event, "get_platform_name", lambda: "")() == "aiocqhttp"
++                and bool(getattr(event, "get_group_id", lambda: "")())
++            )
++            scope_hint = (
++                "以下仅为当前发言人创建的旧版个人提醒，不包含管理器中的群定时任务。"
++                "不能据此判断本群没有定时任务；请使用 current_group_scheduled_tasks "
++                "查询或暂停当前群的定时推送。\n"
++                if group_scope else ""
++            )
+             if not jobs:
+-                return "No cron jobs found."
+-            lines = []
++                return scope_hint + "No cron jobs found for this sender." if group_scope else "No cron jobs found."
++            lines = [scope_hint.rstrip()] if scope_hint else []
+             for j in jobs:
+                 lines.append(
+                     f"{j.job_id} | {j.name} | {j.job_type} | run_once={getattr(j, 'run_once', False)} | enabled={j.enabled} | next={j.next_run_time}"

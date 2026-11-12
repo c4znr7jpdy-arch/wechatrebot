@@ -76,6 +76,63 @@ def _task():
     }
 
 
+def _command_event(*, account="wxid_robot", group="123456@chatroom", private=False, platform="aiocqhttp"):
+    return SimpleNamespace(
+        message_obj=SimpleNamespace(self_id=account),
+        get_platform_name=lambda: platform,
+        is_private_chat=lambda: private,
+        get_group_id=lambda: group,
+        get_sender_id=lambda: "wxid_sender",
+    )
+
+
+def test_command_tasks_reads_manager_tasks_for_only_current_account_and_chat(tmp_path):
+    module = _copy_runtime_package(tmp_path)
+
+    async def connection():
+        return "wxid_robot", FakeClient()
+
+    runtime = module.UnifiedRuntime(object(), install_root=tmp_path, connection=connection)
+    for task in (
+        _task(),
+        {**_task(), "id": "second-task", "name": "第二项", "enabled": False},
+        {**_task(), "id": "other-group", "targets": [{"type": "group", "id": "987654@chatroom"}]},
+        {**_task(), "id": "other-account", "account_id": "wxid_other"},
+        {**_task(), "id": "private-task", "targets": [{"type": "private", "id": "wxid_sender"}]},
+    ):
+        runtime.store.save(task)
+
+    tasks = asyncio.run(runtime.command_tasks(_command_event()))
+    assert {task["id"] for task in tasks} == {"runtime-task", "second-task"}
+    assert {task["id"] for task in asyncio.run(runtime.command_tasks(_command_event(private=True)))} == {"private-task"}
+    assert asyncio.run(runtime.command_tasks(_command_event(group="000000@chatroom"))) == []
+
+
+@pytest.mark.parametrize("connected_account,has_client,event_account,group", [
+    ("", False, "wxid_robot", "123456@chatroom"),
+    ("wxid_other", True, "wxid_robot", "123456@chatroom"),
+    ("wxid_robot", False, "wxid_robot", "123456@chatroom"),
+    ("wxid_robot", True, "", "123456@chatroom"),
+    ("wxid_robot", True, "wxid_robot", ""),
+])
+def test_command_query_and_delete_fail_without_confirmed_scope(
+    tmp_path, connected_account, has_client, event_account, group,
+):
+    module = _copy_runtime_package(tmp_path)
+
+    async def connection():
+        return connected_account, FakeClient() if has_client else None
+
+    runtime = module.UnifiedRuntime(object(), install_root=tmp_path, connection=connection)
+    saved = runtime.store.save(_task())
+    event = _command_event(account=event_account, group=group)
+    with pytest.raises(ValueError, match="微信账号|无法确认当前聊天"):
+        asyncio.run(runtime.command_tasks(event))
+    with pytest.raises(ValueError, match="微信账号|无法确认当前聊天"):
+        asyncio.run(runtime.command_delete(event, "text"))
+    assert runtime.store.get(saved["account_id"], saved["id"]) == saved
+
+
 def _analysis_runtime(tmp_path: Path):
     module = _copy_runtime_package(tmp_path)
     client = FakeClient()
@@ -601,7 +658,7 @@ def test_short_drama_does_not_depend_on_commands_configuration(tmp_path: Path) -
     assert content.preview()["text"] == "短剧甲"
 
 
-def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
+def _patched_schedule_source(tmp_path: Path) -> str:
     assert (PROJECT / "data/plugins/jiang_schedule/main.py").is_file()
     checkout = tmp_path / "schedule-plugin"
     checkout.mkdir()
@@ -609,8 +666,7 @@ def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
     shutil.copy2(PROJECT / "data/plugins/jiang_schedule/main.py", checkout / "main.py")
     for patch in (
         ROOT / "patches/astrbot-plugin-jiang_schedule.patch",
-        ROOT / "patches/astrbot-plugin-jiang_schedule--permissions.patch",
-        ROOT / "patches/astrbot-plugin-jiang_schedule--unified.patch",
+        *sorted((ROOT / "patches").glob("astrbot-plugin-jiang_schedule--*.patch")),
     ):
         subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
         subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
@@ -619,7 +675,104 @@ def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
     shutil.copy2(ROOT / "src/wechatrebot_manager/task_store.py", checkout / "task_store.py")
     source = (checkout / "main.py").read_text(encoding="utf-8")
     compile(source, str(checkout / "main.py"), "exec")
+    return source
+
+
+def test_runtime_plugin_patches_apply_to_upstream_copy(tmp_path: Path) -> None:
+    source = _patched_schedule_source(tmp_path)
     assert "UnifiedRuntime" in source
+
+
+def _schedule_handler(source, **extra):
+    main = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "Main")
+    handler = next(node for node in main.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "schedule")
+    handler.decorator_list = []
+    namespace = {
+        "AstrMessageEvent": object, "_is_mutation_command": lambda _text: True,
+        "_can_manage_current_chat": lambda _event: True, "_load_tasks": lambda: [],
+        "_RE_LIST": re.compile("定时列表"), "_RE_DEL": re.compile("定时删除(.+)"),
+        "_normalize_type": lambda _label: "news",
+        "logger": SimpleNamespace(exception=lambda _message: None),
+    }
+    namespace.update(extra)
+    exec(compile(ast.Module([handler], type_ignores=[]), "schedule-handler", "exec"), namespace)
+    return namespace["schedule"]
+
+
+@pytest.mark.parametrize("message", ["/定时列表", "/定时删除新闻"])
+@pytest.mark.parametrize("error", [ValueError("微信账号未连接或已经切换"), OSError("internal database path")])
+def test_schedule_command_reports_query_failures_without_empty_or_success(tmp_path, message, error):
+    handler = _schedule_handler(_patched_schedule_source(tmp_path))
+
+    async def fail(*_args):
+        raise error
+
+    event = SimpleNamespace(get_message_str=lambda: message, unified_msg_origin="test:GroupMessage:123456@chatroom",
+                            plain_result=lambda text: text)
+    plugin = SimpleNamespace(_unified=SimpleNamespace(command_tasks=fail, command_delete=fail))
+
+    async def collect():
+        return [reply async for reply in handler(plugin, event)]
+
+    replies = asyncio.run(collect())
+    assert len(replies) == 1
+    assert "暂无定时任务" not in replies[0] and "未找到" not in replies[0] and "已删除" not in replies[0]
+    assert "internal database path" not in replies[0]
+    assert "未连接" in replies[0] or "未能读取" in replies[0] or "结果未确认" in replies[0]
+
+
+@pytest.mark.parametrize("message", ["/定时列表", "/定时删除新闻"])
+def test_other_platform_legacy_schedule_commands_do_not_touch_wechat_store(tmp_path, message):
+    module = _copy_runtime_package(tmp_path)
+
+    async def forbidden_connection():
+        pytest.fail("non-WeChat schedule command checked the WeChat connection")
+
+    def forbidden_store(*_args):
+        pytest.fail("non-WeChat schedule command accessed the WeChat task store")
+
+    store = SimpleNamespace(list=forbidden_store, save=forbidden_store, delete=forbidden_store)
+    runtime = module.UnifiedRuntime(object(), install_root=tmp_path, connection=forbidden_connection, store=store)
+    event = _command_event(account="qq_robot", group="123456", platform="qq_official")
+    event.unified_msg_origin = "qq:GroupMessage:123456"
+    event.get_message_str = lambda: message
+    event.plain_result = lambda text: text
+    mine = {"type": "news", "session": event.unified_msg_origin, "hour": 8, "minute": 30}
+    other = {**mine, "session": "qq:GroupMessage:987654"}
+    saved, synced = [], []
+
+    async def sync_jobs(context):
+        synced.append(context)
+
+    handler = _schedule_handler(
+        _patched_schedule_source(tmp_path), _load_tasks=lambda: [mine, other],
+        _CALLBACKS={"news": None}, _type_label=lambda _kind: "新闻", _DOW_LABEL={},
+        _save_tasks=lambda tasks: saved.append(tasks), _sync_jobs=sync_jobs,
+    )
+    plugin = SimpleNamespace(_unified=runtime, context=object())
+
+    async def collect():
+        return [reply async for reply in handler(plugin, event)]
+
+    replies = asyncio.run(collect())
+    if message == "/定时列表":
+        assert "新闻" in replies[0] and "08:30" in replies[0]
+        assert saved == synced == []
+    else:
+        assert replies == ["已删除「新闻」定时任务"]
+        assert saved == [[other]] and synced == [plugin.context]
+
+
+@pytest.mark.parametrize("platform", [None, ""])
+def test_unknown_platform_does_not_mask_unconfirmed_wechat_connection(tmp_path, platform):
+    module = _copy_runtime_package(tmp_path)
+
+    async def disconnected():
+        return "", None
+
+    runtime = module.UnifiedRuntime(object(), install_root=tmp_path, connection=disconnected)
+    with pytest.raises(ValueError, match="微信账号未连接"):
+        asyncio.run(runtime.command_tasks(_command_event(platform=platform)))
 
 
 def test_manual_weather_patch_reuses_the_scheduled_card_renderer(tmp_path: Path) -> None:

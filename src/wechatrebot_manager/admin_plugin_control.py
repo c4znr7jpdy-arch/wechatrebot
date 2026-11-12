@@ -108,6 +108,11 @@ def handle_plugin_control(service: PluginCenterService, payload: Mapping[str, An
     """Use trusted event scope and configured administrators; never change global plugins."""
     from .group_policy import GroupPolicyError, GroupPolicyService
 
+    if payload.get("resource") == "scheduled_tasks":
+        from .admin_schedule_control import handle_schedule_control
+
+        return handle_schedule_control(service, payload)
+
     sender_id = payload.get("sender_id")
     if not isinstance(sender_id, str) or sender_id not in load_robot_admin_ids(service.install_root):
         raise PluginCenterError("这个管理功能只有配置中的管理员微信号可用。")
