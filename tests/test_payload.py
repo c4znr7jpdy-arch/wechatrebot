@@ -18,20 +18,27 @@ from wechatrebot_manager.payload import (
 
 
 def _payload(root: Path, *, path: str = "app/example.txt") -> Path:
-    source = root / Path(*path.split("/"))
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text("commercial payload\n", encoding="utf-8")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest().upper()
+    _payload_files(root, {path: b"commercial payload\n"})
+    return root / Path(*path.split("/"))
+
+
+def _payload_files(root: Path, contents: dict[str, bytes]) -> Path:
+    entries = []
+    for path, content in contents.items():
+        source = root / Path(*path.split("/"))
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(content)
+        entries.append({"path": path, "sha256": hashlib.sha256(content).hexdigest().upper()})
     (root / "release-manifest.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "files": [{"path": path, "sha256": digest}],
+                "files": entries,
             }
         ),
         encoding="utf-8",
     )
-    return source
+    return root
 
 
 def test_verified_payload_installs_and_records_hashes(tmp_path: Path) -> None:
@@ -584,3 +591,175 @@ def test_schema2_rejects_symlink_target_or_parent(tmp_path: Path, parent_link: b
     with pytest.raises(PayloadError, match="符号链接"):
         install_payload(delta, install)
     assert (install / "app/real/file.py").read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("packed", [False, True])
+@pytest.mark.parametrize("preserved_config", [False, True])
+def test_existing_files_skip_staging_but_keep_source_verification(
+    tmp_path: Path, monkeypatch, packed: bool, preserved_config: bool,
+) -> None:
+    from wechatrebot_manager import payload as payload_module
+
+    relative = "config/defaults.json" if preserved_config else "app/example.txt"
+    payload = tmp_path / "payload"
+    source = _payload(payload, path=relative)
+    if packed:
+        archive = tmp_path / "payload.zip"
+        with zipfile.ZipFile(archive, "w") as package:
+            package.write(payload / "release-manifest.json", "release-manifest.json")
+            package.write(source, relative)
+        payload = archive
+    install = tmp_path / "install"
+    target = install / relative
+    target.parent.mkdir(parents=True)
+    existing = b"customer configuration" if preserved_config else source.read_bytes()
+    target.write_bytes(existing)
+    real_copy_stream = payload_module._copy_stream_and_hash
+    stream_targets = []
+
+    def no_copy(*_args, **_kwargs):
+        raise AssertionError("unchanged files must not be written to staging")
+
+    def check_stream(reader, staged, **kwargs):
+        stream_targets.append(staged)
+        return real_copy_stream(reader, staged, **kwargs)
+
+    monkeypatch.setattr(payload_module, "_copy_and_hash", no_copy)
+    monkeypatch.setattr(payload_module, "_copy_stream_and_hash", check_stream)
+    result = install_payload(payload, install, preserve_existing_user_config=True)
+    assert target.read_bytes() == existing
+    assert result.files[0].sha256 == hashlib.sha256(existing).hexdigest().upper()
+    assert stream_targets == ([None] if packed else [])
+
+
+@pytest.mark.parametrize("packed", [False, True])
+def test_unstaged_source_tamper_is_rejected_even_with_reused_plan(tmp_path: Path, packed: bool) -> None:
+    source = _payload(tmp_path / "payload")
+    payload = tmp_path / "payload"
+    archive = tmp_path / "payload.zip"
+
+    def pack():
+        with zipfile.ZipFile(archive, "w") as package:
+            package.write(payload / "release-manifest.json", "release-manifest.json")
+            package.write(source, "app/example.txt")
+
+    if packed:
+        pack()
+    package_path = archive if packed else payload
+    verified = verify_payload(package_path)
+    install = tmp_path / "install"
+    target = install / "app/example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(source.read_bytes())
+    source.write_bytes(b"tampered after verification")
+    if packed:
+        pack()
+    with pytest.raises(PayloadError, match="校验失败"):
+        install_payload(package_path, install, verified_payload=verified)
+    assert target.read_bytes() == b"commercial payload\n"
+    assert not (install / "config/installed-payload.json").exists()
+
+
+def test_reused_verified_plan_does_not_repeat_payload_traversal(tmp_path: Path, monkeypatch) -> None:
+    from wechatrebot_manager import payload as payload_module
+
+    payload = tmp_path / "payload"
+    _payload(payload)
+    verified = verify_payload(payload)
+
+    def no_traversal(*_args, **_kwargs):
+        raise AssertionError("the same transaction must reuse its verified inventory")
+
+    monkeypatch.setattr(Path, "rglob", no_traversal)
+    monkeypatch.setattr(payload_module, "_plan_payload", no_traversal)
+    install_payload(payload, tmp_path / "install", verified_payload=verified)
+    assert (tmp_path / "install/app/example.txt").read_bytes() == b"commercial payload\n"
+
+
+@pytest.mark.parametrize("change", ["root", "manifest", "source"])
+def test_reused_plan_rejects_changed_scope(tmp_path: Path, change: str) -> None:
+    from dataclasses import replace
+
+    payload = tmp_path / "payload"
+    _payload(payload)
+    verified = verify_payload(payload)
+    if change == "root":
+        verified = replace(verified, root=tmp_path / "other")
+    elif change == "source":
+        verified = replace(verified, files=(replace(verified.files[0], source_path=tmp_path / "outside"),))
+    else:
+        manifest = dict(verified.manifest, release_version="new version")
+        (payload / "release-manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(PayloadError):
+        install_payload(payload, tmp_path / "install", verified_payload=verified)
+    assert not (tmp_path / "install").exists()
+
+
+@pytest.mark.parametrize("parent_link", [False, True])
+def test_reused_plan_rechecks_source_links(tmp_path: Path, parent_link: bool) -> None:
+    payload = tmp_path / "payload"
+    source = _payload(payload)
+    verified = verify_payload(payload)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / source.name).write_bytes(source.read_bytes())
+    source.unlink()
+    try:
+        if parent_link:
+            source.parent.rmdir()
+            source.parent.symlink_to(outside, target_is_directory=True)
+        else:
+            source.symlink_to(outside / source.name)
+    except OSError:
+        pytest.skip("symbolic link privilege unavailable")
+    with pytest.raises(PayloadError, match="符号链接"):
+        install_payload(payload, tmp_path / "install", verified_payload=verified)
+    assert not (tmp_path / "install").exists()
+
+
+@pytest.mark.parametrize("snapshot_guard", [False, True])
+def test_unstaged_target_drift_aborts_before_first_replacement(tmp_path: Path, snapshot_guard: bool) -> None:
+    payload = _payload_files(tmp_path / "payload", {"app/first.txt": b"new", "app/last.txt": b"same"})
+    install = tmp_path / "install"
+    _installed_tree(install, {"app/first.txt": b"old", "app/last.txt": b"same"})
+    before_manifest = (install / "config/installed-payload.json").read_bytes()
+
+    def drift(phase, current, total):
+        if phase == "prepare" and current == total:
+            (install / "app/last.txt").write_bytes(b"concurrent edit")
+
+    guards = {Path("app/last.txt"): hashlib.sha256(b"same").hexdigest().upper()} if snapshot_guard else None
+    with pytest.raises(PayloadError, match="已改变"):
+        install_payload(payload, install, progress_callback=drift, unchanged_files=guards)
+    assert (install / "app/first.txt").read_bytes() == b"old"
+    assert (install / "app/last.txt").read_bytes() == b"concurrent edit"
+    assert (install / "config/installed-payload.json").read_bytes() == before_manifest
+
+
+def test_snapshot_guard_drift_during_install_rolls_back_prior_replacements(tmp_path: Path) -> None:
+    payload = _payload_files(tmp_path / "payload", {"app/first.txt": b"new", "app/last.txt": b"same"})
+    install = tmp_path / "install"
+    _installed_tree(install, {"app/first.txt": b"old", "app/last.txt": b"same"})
+
+    def drift(phase, current, _total):
+        if phase == "install" and current == 1:
+            (install / "app/last.txt").write_bytes(b"concurrent edit")
+
+    guards = {Path("app/last.txt"): hashlib.sha256(b"same").hexdigest().upper()}
+    with pytest.raises(PayloadError, match="已改变"):
+        install_payload(payload, install, progress_callback=drift, unchanged_files=guards)
+    assert (install / "app/first.txt").read_bytes() == b"old"
+    assert (install / "app/last.txt").read_bytes() == b"concurrent edit"
+
+
+def test_snapshot_guard_does_not_repair_file_changed_before_preparation(tmp_path: Path) -> None:
+    payload = tmp_path / "payload"
+    source = _payload(payload)
+    install = tmp_path / "install"
+    target = install / "app/example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"concurrent edit")
+    guards = {Path("app/example.txt"): hashlib.sha256(source.read_bytes()).hexdigest().upper()}
+    with pytest.raises(PayloadError, match="已改变"):
+        install_payload(payload, install, unchanged_files=guards)
+    assert target.read_bytes() == b"concurrent edit"
