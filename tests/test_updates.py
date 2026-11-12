@@ -516,6 +516,8 @@ def test_helper_window_failure_clears_inherited_update_handshake_before_restart(
     assert len(launches) == 1 and launches[0][0][0] == [str(target)]
     environment = launches[0][1]["env"]
     assert not any(f"WECHATREBOT_UPDATE_{suffix}" in environment for suffix in ("ID", "FROM", "TO"))
+    assert environment["WECHATREBOT_UPDATE_RELAUNCH_ROOT"] == str(tmp_path.resolve())
+    assert environment["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
     api = _api(tmp_path)
     api._update_result = failure
     api._startup_update_id = environment.get("WECHATREBOT_UPDATE_ID", "")
@@ -544,6 +546,37 @@ def test_successful_restart_uses_only_current_update_handshake(tmp_path, monkeyp
     assert environment["WECHATREBOT_UPDATE_ID"] == "b" * 32
     assert environment["WECHATREBOT_UPDATE_TO"] == "0.8.0"
     assert environment.get("WECHATREBOT_UPDATE_FROM") is None
+    assert environment["WECHATREBOT_UPDATE_RELAUNCH_ROOT"] == str(tmp_path.resolve())
+    assert environment["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+
+def test_full_update_snapshot_omits_only_actual_unchanged_files(tmp_path):
+    payload = _ready_payload(tmp_path / "payload")
+    install = tmp_path / "install"
+    (install / "manager").mkdir(parents=True)
+    (install / "app").mkdir()
+    (install / "manager/WeChatReBot.exe").write_bytes(b"old-manager")
+    (install / "app/feature.txt").write_bytes((payload / "app/feature.txt").read_bytes())
+    rollback = install / "updates/.rollback-test"
+    journal = updates_module._snapshot_update_targets(
+        payload, install, rollback, update_id="test", version="0.8.0",
+        verified_payload=updates_module.verify_payload(payload),
+    )
+    assert journal["unchanged_files"] == {
+        "app/feature.txt": sha256_file(install / "app/feature.txt"),
+    }
+    assert "app/feature.txt" not in {entry["path"] for entry in journal["files"]}
+    assert [path.read_bytes() for path in (rollback / "files").iterdir()] == [b"old-manager"]
+    # A stale inventory must never hide a damaged installed file from rollback.
+    (install / "app/feature.txt").write_bytes(b"damaged")
+    journal = updates_module._snapshot_update_targets(
+        payload, install, install / "updates/.rollback-damaged",
+        update_id="test2", version="0.8.0",
+        verified_payload=updates_module.verify_payload(payload),
+    )
+    entry = next(item for item in journal["files"] if item["path"] == "app/feature.txt")
+    assert (install / "updates/.rollback-damaged" / entry["backup"]).read_bytes() == b"damaged"
+    assert journal["unchanged_files"] == {}
 
 
 def test_startup_failure_restores_previous_manager_and_payload(
@@ -746,12 +779,48 @@ def test_confirmed_update_cleanup_failure_never_rolls_back(
     assert flag.is_file()
     if blocked in {"result", "journal"}:
         assert journal.is_file() and backup.is_dir()
+        monkeypatch.setattr(
+            updates_module.threading, "Thread",
+            lambda *, target, args, **_kwargs: SimpleNamespace(start=lambda: target(*args)),
+        )
         assert updates_module.recover_interrupted_update(install) is False
         assert not journal.exists() and not flag.exists() and not backup.exists()
     assert json.loads(result_path.read_text(encoding="utf-8"))["ok"] is True
     events = [json.loads(line)["event"] for line in (install / "logs/update.log").read_text(encoding="utf-8").splitlines()]
     assert "cleanup_deferred" in events
     assert "apply_failed" not in events
+
+
+def test_confirmed_startup_commits_before_deferring_large_backup_cleanup(tmp_path, monkeypatch):
+    updates = tmp_path / "updates"
+    rollback = updates / ".rollback-confirmed"
+    rollback.mkdir(parents=True)
+    (rollback / "old-file").write_bytes(b"backup")
+    update_id = "a" * 32
+    journal_path = updates / "update-journal.json"
+    journal = {
+        "update_id": update_id, "version": "0.8.0", "state": "awaiting_startup",
+        "rollback_root": "updates/.rollback-confirmed", "files": [],
+    }
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    flag = updates / f"startup-success-{update_id}.json"
+    flag.write_text(json.dumps({"update_id": update_id, "ok": True}), encoding="utf-8")
+    workers = []
+    monkeypatch.setattr(
+        updates_module.threading, "Thread",
+        lambda *, target, args, **_kwargs: SimpleNamespace(start=lambda: workers.append((target, args))),
+    )
+    assert updates_module.recover_interrupted_update(tmp_path) is False
+    assert not journal_path.exists()
+    assert json.loads((updates / "update-result.json").read_text(encoding="utf-8"))["ok"] is True
+    assert rollback.is_dir() and flag.is_file()
+    # A later update can already own the shared journal. Cleanup may only touch
+    # the old transaction's unique backup and proof.
+    journal_path.write_text("new transaction", encoding="utf-8")
+    target, args = workers.pop()
+    target(*args)
+    assert not rollback.exists() and not flag.exists()
+    assert journal_path.read_text() == "new transaction"
 
 
 @pytest.mark.parametrize("confirmed", [False, True])

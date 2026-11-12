@@ -4,11 +4,12 @@ import hashlib
 import json
 import os
 import stat
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 import time
-from typing import BinaryIO, Callable
+from typing import BinaryIO, Callable, Mapping
 import uuid
 import zipfile
 
@@ -468,18 +469,20 @@ def validate_incremental_base(payload_root: str | Path, install_root: str | Path
 
 
 def _copy_stream_and_hash(
-    reader: BinaryIO, target: Path, *, max_bytes: int | None = None,
+    reader: BinaryIO, target: Path | None, *, max_bytes: int | None = None,
 ) -> str:
     digest = hashlib.sha256()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if target is not None:
+        target.parent.mkdir(parents=True, exist_ok=True)
     copied = 0
-    with target.open("wb") as writer:
+    with target.open("wb") if target is not None else nullcontext() as writer:
         for chunk in iter(lambda: reader.read(1024 * 1024), b""):
             copied += len(chunk)
             if max_bytes is not None and copied > max_bytes:
                 raise PayloadError("文件复制体积超出允许范围。")
             digest.update(chunk)
-            writer.write(chunk)
+            if writer is not None:
+                writer.write(chunk)
     return digest.hexdigest().upper()
 
 
@@ -538,14 +541,62 @@ def verify_payload(
     return VerifiedPayload(root, manifest, tuple(verified))
 
 
+def _reuse_verified_payload_plan(
+    payload_root: str | Path, verified: VerifiedPayload,
+) -> tuple[Path, dict[str, object], tuple[VerifiedPayloadFile, ...]]:
+    """Reuse one transaction's inventory; installation still hashes every source."""
+    root = Path(payload_root).expanduser().resolve()
+    if root != verified.root:
+        raise PayloadError("已校验载荷与当前安装来源不匹配。")
+    packed = root.is_file()
+    manifest = _archive_plan(root)[1] if packed else _read_directory_manifest(root)
+    specs = _manifest_file_specs(manifest)
+    if manifest != verified.manifest or specs != tuple(
+        (item.relative_path, item.sha256) for item in verified.files
+    ):
+        raise PayloadError("已校验载荷的清单已改变，请重新准备更新。")
+    checked_directories = {root.parent}
+    for item in verified.files:
+        expected_source = root if packed else root / item.relative_path
+        if item.source_path != expected_source:
+            raise PayloadError("已校验载荷包含不匹配的文件来源。")
+        if packed:
+            continue
+        # Recheck source boundaries once per directory, rather than repeatedly
+        # walking all ancestors of tens of thousands of already listed files.
+        for component in (expected_source, *expected_source.parents):
+            if component in checked_directories:
+                break
+            if component.is_symlink() or (
+                hasattr(component, "is_junction") and component.is_junction()
+            ):
+                raise PayloadError("载荷文件不能经过符号链接或目录联接。")
+            if component != expected_source:
+                checked_directories.add(component)
+    return root, manifest, verified.files
+
+
 def install_payload(
     payload_root: str | Path,
     install_root: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
     preserve_existing_user_config: bool = False,
+    verified_payload: VerifiedPayload | None = None,
+    unchanged_files: Mapping[Path, str] | None = None,
 ) -> VerifiedPayload:
-    payload_root_path, manifest, planned = _plan_payload(payload_root)
+    payload_root_path, manifest, planned = (
+        _reuse_verified_payload_plan(payload_root, verified_payload)
+        if verified_payload is not None else _plan_payload(payload_root)
+    )
+    unchanged = dict(unchanged_files or {})
+    expected_files = {item.relative_path: item.sha256 for item in planned}
+    if any(
+        not isinstance(relative, Path) or not _valid_digest(digest)
+        or expected_files.get(relative) != digest
+        for relative, digest in unchanged.items()
+    ):
+        raise PayloadError("更新的未变更文件记录与载荷不匹配。")
     root = Path(install_root).expanduser().resolve()
     incremental = manifest.get("schema_version") == 2
     removals = _manifest_specs(manifest)[1]
@@ -566,8 +617,10 @@ def install_payload(
         else {"files": []}
     )
     _validate_incremental_base(manifest, root, previous_manifest)
-    for relative in [item.relative_path for item in planned] + [path for path, _digest in removals]:
-        _checked_target(root, relative)
+    targets = {
+        relative: _checked_target(root, relative)
+        for relative in [item.relative_path for item in planned] + [path for path, _digest in removals]
+    }
     manifest_target = _checked_target(root, Path("config/installed-payload.json"))
     updates_candidate = root / "updates"
     if updates_candidate.is_symlink() or (
@@ -591,12 +644,26 @@ def install_payload(
     try:
         file_count = len(planned)
         verified_files: list[VerifiedPayloadFile] = []
+        unstaged: dict[Path, str] = {}
         archive = zipfile.ZipFile(payload_root_path) if payload_root_path.is_file() else None
         try:
             for index, item in enumerate(planned, start=1):
                 staged = _transaction_file(stage_root, index)
+                target = targets[item.relative_path]
+                existing_digest = sha256_file(target) if target.is_file() else None
+                if item.relative_path in unchanged and existing_digest != unchanged[item.relative_path]:
+                    raise PayloadError(f"未变更文件在更新准备期间已改变：{item.relative_path.as_posix()}")
+                if existing_digest is not None and (
+                    existing_digest == item.sha256
+                    or preserve_existing_user_config and _is_user_config(item.relative_path)
+                ):
+                    unstaged[item.relative_path] = existing_digest
+                    staged = None
                 if archive is None:
-                    actual = _copy_and_hash(item.source_path, staged)
+                    actual = (
+                        _copy_and_hash(item.source_path, staged)
+                        if staged is not None else sha256_file(item.source_path)
+                    )
                 else:
                     with archive.open(item.relative_path.as_posix()) as reader:
                         actual = _copy_stream_and_hash(reader, staged)
@@ -617,11 +684,20 @@ def install_payload(
             previous_manifest = _read_installed_manifest_for_merge(root)
             _validate_incremental_base(manifest, root, previous_manifest)
         for relative in [item.relative_path for item in planned] + [path for path, _digest in removals]:
-            _checked_target(root, relative)
+            target = _checked_target(root, relative)
+            if relative in unstaged and (
+                not target.is_file() or sha256_file(target) != unstaged[relative]
+            ):
+                raise PayloadError(f"未变更文件在更新准备期间已改变：{relative.as_posix()}")
         _checked_target(root, Path("config/installed-payload.json"))
         installed_files: list[VerifiedPayloadFile] = []
         for index, item in enumerate(verified_files, start=1):
             target = _checked_target(root, item.relative_path)
+            existing_digest = sha256_file(target) if target.is_file() else None
+            if item.relative_path in unchanged and (
+                existing_digest != unchanged[item.relative_path]
+            ):
+                raise PayloadError(f"未变更文件在更新期间已改变：{item.relative_path.as_posix()}")
             if (
                 preserve_existing_user_config
                 and _is_user_config(item.relative_path)
@@ -629,18 +705,23 @@ def install_payload(
                 and not target.is_symlink()
             ):
                 installed_files.append(
-                    VerifiedPayloadFile(item.relative_path, target, sha256_file(target))
+                    VerifiedPayloadFile(
+                        item.relative_path, target,
+                        existing_digest if existing_digest is not None else sha256_file(target),
+                    )
                 )
                 if progress_callback is not None:
                     progress_callback("install", index, file_count)
                 continue
             # Identical binaries can still be mapped by Windows. The incoming
             # bytes were verified during preparation, so no replacement is needed.
-            if target.is_file() and sha256_file(target) == item.sha256:
+            if existing_digest == item.sha256:
                 installed_files.append(item)
                 if progress_callback is not None:
                     progress_callback("install", index, file_count)
                 continue
+            if item.relative_path in unstaged:
+                raise PayloadError(f"未变更文件在更新期间已改变：{item.relative_path.as_posix()}")
             target.parent.mkdir(parents=True, exist_ok=True)
             backup: Path | None = None
             if target.exists():
