@@ -14,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 from typing import Callable
 import urllib.error
@@ -30,6 +31,7 @@ from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
     PayloadError,
+    VerifiedPayload,
     _checked_target,
     _is_user_config,
     _read_installed_manifest_for_merge,
@@ -1196,6 +1198,10 @@ def _restart_manager(
     if not target.is_file():
         return None
     environment = os.environ.copy()
+    # Consumed by the desktop entry before taking the manager lock. Both the
+    # new manager and rollback restart must pass the active helper's gate.
+    environment["WECHATREBOT_UPDATE_RELAUNCH_ROOT"] = str(install_root.resolve())
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     for name, value in (
         ("WECHATREBOT_UPDATE_ID", update_id),
         ("WECHATREBOT_UPDATE_FROM", current_version),
@@ -1228,17 +1234,19 @@ def _snapshot_update_targets(
     *,
     update_id: str,
     version: str,
+    verified_payload: VerifiedPayload | None = None,
 ) -> dict[str, object]:
     paths = _update_target_paths(payload_root)
+    incoming_hashes = (
+        {item.relative_path: item.sha256 for item in verified_payload.files}
+        if verified_payload is not None else {}
+    )
     files_root = rollback_root / "files"
     files_root.mkdir(parents=True, exist_ok=True)
     snapshots: list[dict[str, object]] = []
+    unchanged: dict[str, str] = {}
     for index, relative in enumerate(sorted(paths, key=lambda item: item.as_posix().casefold())):
-        target = (install_root / relative).resolve()
-        try:
-            target.relative_to(install_root)
-        except ValueError as exc:
-            raise UpdateError("更新文件路径越过安装目录。") from exc
+        target = _checked_target(install_root, relative)
         if (
             _is_preserved_user_config(relative)
             and target.is_file()
@@ -1248,6 +1256,12 @@ def _snapshot_update_targets(
         if target.exists() and (not target.is_file() or target.is_symlink()):
             raise UpdateError(f"更新目标不是普通文件：{relative.as_posix()}")
         exists = target.is_file()
+        expected = incoming_hashes.get(relative)
+        if exists and expected and sha256_file(target) == expected:
+            # The installer must reject drift for these omitted backups before
+            # writing anything. Compare actual bytes, never just the inventory.
+            unchanged[relative.as_posix()] = expected
+            continue
         backup_relative = f"files/{index:08X}" if exists else ""
         if exists:
             shutil.copy2(target, rollback_root / backup_relative)
@@ -1265,6 +1279,7 @@ def _snapshot_update_targets(
         "state": "backed_up",
         "rollback_root": rollback_root.relative_to(install_root).as_posix(),
         "files": snapshots,
+        "unchanged_files": unchanged,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 
@@ -1352,12 +1367,24 @@ def _stop_restarted_manager(process: subprocess.Popen | OwnedProcess | None) -> 
             raise ProcessTreeStopError("无法确认本次重启的客户端已退出。") from exc
 
 
+def _cleanup_successful_update_files(
+    rollback_root: Path, flag_path: Path, logger: UpdateLogger, version: str,
+) -> None:
+    try:
+        if rollback_root.exists():
+            shutil.rmtree(_extended_windows_path(rollback_root))
+        flag_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.write("cleanup_deferred", state="success", version=version, message=str(exc))
+
+
 def _complete_successful_update(
     root: Path,
     journal: dict[str, object],
     logger: UpdateLogger,
     *,
     current_version: str | None = None,
+    defer_cleanup: bool = False,
 ) -> None:
     """Commit a confirmed update; cleanup failures must never roll it back."""
     update_id = str(journal["update_id"])
@@ -1384,10 +1411,17 @@ def _complete_successful_update(
         # Keep the startup proof and backups until the journal is gone. If
         # Windows temporarily locks it, the next startup can safely retry.
         journal_path.unlink(missing_ok=True)
-        if rollback_root.exists():
-            shutil.rmtree(_extended_windows_path(rollback_root))
-        flag_path.unlink(missing_ok=True)
-    except OSError as exc:
+        if defer_cleanup:
+            # The transaction is committed under the helper lock. Deleting a
+            # large old backup must not hold up the first visible window.
+            threading.Thread(
+                target=_cleanup_successful_update_files,
+                args=(rollback_root, flag_path, logger, version),
+                daemon=True,
+            ).start()
+        else:
+            _cleanup_successful_update_files(rollback_root, flag_path, logger, version)
+    except (OSError, RuntimeError) as exc:
         logger.write(
             "cleanup_deferred",
             state="success",
@@ -1436,7 +1470,7 @@ def apply_update_plan(
                 _wait_for_process_exit(pid)
             except UpdateError as exc:
                 raise UpdateFailure("UPD-1005", str(exc)) from exc
-        verify_payload(payload_root)
+        verified = verify_payload(payload_root)
         _validate_update_baseline(payload_root, root)
         assert_update_runtime_stopped(payload_root, root)
         _assert_manager_executable_available(payload_root, root)
@@ -1448,6 +1482,7 @@ def apply_update_plan(
             rollback_root,
             update_id=update_id,
             version=version,
+            verified_payload=verified,
         )
         journal_path = root / "updates" / UPDATE_JOURNAL_FILE
         write_json_atomic(journal_path, journal)
@@ -1470,6 +1505,8 @@ def apply_update_plan(
             root,
             progress_callback=log_install_progress,
             preserve_existing_user_config=True,
+            verified_payload=verified,
+            unchanged_files={Path(path): digest for path, digest in journal["unchanged_files"].items()},
         )
         # Manager-only updates must also refresh the standalone uninstall
         # entrypoint.  Otherwise a customer who double-clicks the old copy
@@ -1779,7 +1816,7 @@ def recover_interrupted_update(
             )
             rollback_root = (root / rollback_relative).resolve()
             rollback_root.relative_to(updates_root)
-            _complete_successful_update(root, journal, logger, current_version="")
+            _complete_successful_update(root, journal, logger, current_version="", defer_cleanup=True)
             logger.write(
                 "startup_recovery_cleanup",
                 state="success",
