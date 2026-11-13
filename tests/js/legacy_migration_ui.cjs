@@ -334,6 +334,7 @@ const cases = {
     f.responses.get_legacy_schedule_migrations.items = [{key: 'pending-a', account_id: 'account-a'}];
     await f.context.loadSchedules();
     assert.equal(f.$('#scheduleRows').innerHTML, '', 'Unknown current account hides old tasks');
+    f.responses.get_schedules.items = [];
     f.responses.get_scheduled_task_context = {account_id: 'account-a', items: []};
     await f.context.loadSchedules();
     assert.equal(f.$('#scheduleRows').innerHTML, 'pending-a');
