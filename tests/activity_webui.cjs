@@ -90,7 +90,7 @@ async function main() {
     fullTime: (v) => v, reportError: () => { errors++; },
     copyText: async (v) => { reports.push(v); return !copyFails; },
   });
-  const initialRead = view.loadActivity({background: true});
+  const initialRead = view.loadActivity({initialOnly: true});
   assert.equal($('#refreshActivity').disabled, true, 'first entry still uses normal loading');
   await initialRead;
   assert.match($('#activityPage').textContent, /17/);
@@ -98,6 +98,10 @@ async function main() {
   assert.ok(!$('#activityList').innerHTML.includes('已恢复'));
   const initialWrites = $('#activityList').writes;
   const initialSourceWrites = $('#activitySource').writes;
+  const initialReads = reads;
+  await view.loadActivity({initialOnly: true});
+  assert.equal(reads, initialReads, 'returning to the loaded page must not read again');
+  assert.equal($('#activityList').writes, initialWrites, 'returning must keep the existing rows');
   let finishRead;
   pendingRead = new Promise((resolve) => { finishRead = resolve; });
   const previousReads = reads;
@@ -144,6 +148,9 @@ async function main() {
   await view.loadActivity({background: true});
   assert.equal($('#activitySource').value, 'manager', 'a temporarily missing source does not reset the filter');
   const emptyWrites = $('#activityList').writes;
+  const emptyReads = reads;
+  await view.loadActivity({initialOnly: true});
+  assert.equal(reads, emptyReads, 'an empty result is still a loaded page');
   fail = true;
   await view.loadActivity({background: true});
   assert.equal($('#activityList').writes, emptyWrites, 'a cached empty result survives background failure');

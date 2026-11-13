@@ -23,21 +23,24 @@ window.createScheduledTasks = function (helpers) {
 
   async function loadSchedules(options = {}) {
     const background = options?.background === true;
-    if (background && (state.scheduledBusy || state.legacyMigrationLoading || !$("#modalBackdrop").hidden
-        || (state.scheduledContext && !state.scheduledContext.loading
-          && state.status?.runtime?.account_status_available === false))) return;
+    if (background && (state.scheduledBusy || state.legacyMigrationLoading || !$("#modalBackdrop").hidden)) return;
+    if (state.scheduledContext && !state.scheduledContext.loading
+        && state.status?.runtime?.account_status_available === false) {
+      showScheduledReadbackFailure(background);
+      return;
+    }
     if (background && state.scheduledContextRequest) return state.scheduledContextRequest;
-    const retained = (background || (pendingTaskReadback && pendingTaskReadback === state.scheduledContext?.account_id))
-      && state.scheduledContext && !state.scheduledContext.loading
+    const retained = state.scheduledContext && !state.scheduledContext.loading
+      && (state.scheduledContext.account_id || !state.scheduledContext.readFailed)
       && scheduledAccountMatches(state.scheduledContext.account_id || "")
       ? {context: state.scheduledContext, schedules: state.schedules, migrations: state.legacyMigrations} : null;
     const generation = ++state.scheduledLoad;
     const button = $("#refreshSchedules");
+    if (!background || !retained) button.disabled = true;
     if (!retained) {
-      button.disabled = true;
       $$("button", $("#scheduleRows")).forEach((control) => { control.disabled = true; });
     }
-    const request = loadScheduledData(generation, retained);
+    const request = loadScheduledData(generation, retained, background);
     state.scheduledContextRequest = request;
     try { await request; }
     finally {
@@ -75,7 +78,7 @@ window.createScheduledTasks = function (helpers) {
     if (state.scheduledEditor && !$("#scheduledTaskEditor").hidden) updateScheduledSummary();
   }
 
-  async function loadScheduledData(generation, retained = null) {
+  async function loadScheduledData(generation, retained = null, background = false) {
     try {
       let initialAccount = retained?.context.account_id || "";
       if (!retained) {
@@ -110,11 +113,11 @@ window.createScheduledTasks = function (helpers) {
       ]);
       if (generation !== state.scheduledLoad) return;
       if (retained && state.status?.runtime?.account_status_available === false) return;
-      // A failed background read must not replace a verified same-account view.
+      // A failed refresh must not replace a verified same-account view.
       if (retained && scheduledAccountMatches(initialAccount)
           && [context, legacy, migrations].some((result) => result.status === "rejected")
           && (context.status === "rejected" || context.value.account_id === initialAccount)) {
-        showPendingTaskReadback();
+        showScheduledReadbackFailure(background);
         return;
       }
       let contextData = context.status === "fulfilled" ? context.value : {account_id: "", items: [], message: context.reason?.message || "任务列表暂时无法读取，请刷新重试。"};
@@ -123,6 +126,8 @@ window.createScheduledTasks = function (helpers) {
       if (accountChanged) {
         contextData = {account_id: "", items: [], message: "微信账号已变化，请刷新任务列表。"};
       }
+      contextData = {...contextData, readFailed: accountChanged
+        || [context, legacy, migrations].some((result) => result.status === "rejected")};
       pendingTaskReadback = "";
       const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
       const visibleMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
@@ -145,7 +150,7 @@ window.createScheduledTasks = function (helpers) {
     } catch (error) {
       if (generation !== state.scheduledLoad) return;
       if (retained && scheduledAccountMatches(retained.context.account_id || "")) {
-        showPendingTaskReadback();
+        showScheduledReadbackFailure(background);
         return;
       }
       state.scheduledContext = null;
@@ -162,9 +167,11 @@ window.createScheduledTasks = function (helpers) {
     }
   }
 
-  function showPendingTaskReadback() {
-    if (!pendingTaskReadback) return;
-    $("#scheduleContextMessage").textContent = "任务操作已确认，列表本次未能完整刷新；正在显示已确认的结果。可点击“刷新”重新读取，无需重复提交。";
+  function showScheduledReadbackFailure(background) {
+    if (!pendingTaskReadback && background) return;
+    $("#scheduleContextMessage").textContent = pendingTaskReadback
+      ? "任务操作已确认，列表本次未能完整刷新；正在显示已确认的结果。可点击“刷新”重新读取，无需重复提交。"
+      : "任务列表本次未能完整刷新；已有结果仍保留，请稍后点击“刷新”重试。";
     $("#scheduleContextMessage").hidden = false;
   }
 

@@ -301,6 +301,48 @@ async function manualRefresh() {
   await assert.rejects(timeoutRequest, /读取记录超时，请点击刷新/);
 }
 
+async function retainedRefreshFailures() {
+  for (const [failedRead, manual] of [['directory', true], ['messages', true], ['directory', false], ['messages', false]]) {
+    const {context: c, state: s, $} = historyContext();
+    const conversation = {conversation_id: 'a', message_count: 40, last_timestamp: 40};
+    s.conversations = [conversation];
+    s.status = {runtime: {wechat_identity: 'account-a', account_status_available: true}};
+    c.response = () => ({account_id: 'account-a', items: messages(21, 40), has_more: true});
+    await c.selectConversation('a');
+    c.setHistoryActionsEnabled(true);
+    s.selectedSenderKey = 'member';
+    $('#messageList').scrollTop = 320;
+    const retained = $('#messageList').innerHTML;
+    c.reportError = () => {};
+    let rejectRead;
+    c.response = filters => {
+      const directory = typeof filters === 'object';
+      if (directory === (failedRead === 'directory')) {
+        return new Promise((resolve, reject) => { rejectRead = reject; });
+      }
+      return {account_id: 'account-a', items: [conversation], summary: {}};
+    };
+    const refresh = manual ? c.refreshHistoryRecords() : c.loadConversations({silent: true, forceRefresh: true});
+    await new Promise(setImmediate);
+    const assertRetained = () => {
+      assert.equal($('#messageList').innerHTML, retained, `${failedRead} refresh must retain visible messages`);
+      assert.equal($('#messageList').scrollTop, 320);
+      assert.deepEqual(Array.from(s.conversations, item => item.conversation_id), ['a']);
+      assert.equal(s.selectedConversation.conversation_id, 'a');
+      assert.equal(s.selectedSenderKey, 'member');
+      assert.equal(s.selectedMessages[0].id, 21);
+    };
+    assertRetained();
+    rejectRead(new Error('temporary history read failure'));
+    await refresh;
+    assertRetained();
+    assert.equal(s.historyManualRefresh, false);
+    assert.equal(s.historyConversationsLoading, false);
+    assert.equal(s.historyMessagesLoading, false);
+    assert.equal($('#refreshHistory').disabled, false);
+  }
+}
+
 function historyAccessActions() {
   const {context: c, state: s, $} = historyContext();
   s.status = {runtime: {account_status_available: false}};
@@ -345,5 +387,5 @@ async function unknownAccountPolling() {
   assert.equal(reads, 1, 'missing history access must not poll');
 }
 
-(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); historyAccessActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); await retainedRefreshFailures(); historyAccessActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

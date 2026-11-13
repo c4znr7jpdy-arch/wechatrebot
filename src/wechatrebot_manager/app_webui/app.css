@@ -105,9 +105,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .content-scroll { min-height: 0; overflow: auto; padding: 30px; }
 .content-scroll.history-active { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
 .page { display: none; max-width: 1480px; min-width: 0; margin: 0 auto; }
-.page.active { display: block; animation: page-in .2s ease both; }
+.page.active { display: block; }
 #page-history.active { display: flex; flex-direction: column; width: 100%; height: auto; min-height: 100%; }
-@keyframes page-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .page-heading.compact { align-items: center; }
 .page-heading h1 { margin: 4px 0 3px; font-size: 26px; line-height: 1.25; letter-spacing: -.02em; }

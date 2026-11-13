@@ -125,7 +125,8 @@ def test_activity_reentry_keeps_details_filters_and_scroll(browser, manager_url,
         reads = page.evaluate("window.activityReadCount")
         page.locator('.nav-item[data-page="home"]').click()
         page.locator('.nav-item[data-page="activity"]').click()
-        page.wait_for_function("count => window.activityReadCount > count", arg=reads)
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        assert page.evaluate("window.activityReadCount") == reads
         expect(page.locator("#refreshActivity")).to_be_enabled()
         assert page.evaluate("window.cachedActivityCard === document.querySelector('[data-activity-id=\"cached-0\"]')")
         assert first_card.locator("details").evaluate("node => node.open")
