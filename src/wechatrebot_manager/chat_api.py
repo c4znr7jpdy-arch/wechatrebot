@@ -67,6 +67,29 @@ class ChatApiMixin:
             # stable text fallback for the verified history account.
             return {}
 
+    @staticmethod
+    def _history_current_group_ids(directory: dict[str, Any]) -> set[str] | None:
+        """Use only a complete live directory to infer departed history groups."""
+        groups = directory.get("items")
+        updated_at = directory.get("updated_at")
+        if (directory.get("stale") is not False
+                or directory.get("truncated") is not False
+                or not isinstance(updated_at, str) or not updated_at.strip()
+                or not isinstance(groups, list) or not groups
+                or type(directory.get("total")) is not int
+                or directory["total"] != len(groups)):
+            # An empty successful response can be an unpopulated WeChat cache.
+            return None
+        group_ids = set()
+        for group in groups:
+            group_id = group.get("group_id") if isinstance(group, dict) else None
+            if (not isinstance(group_id, str) or not group_id.endswith("@chatroom")
+                    or not group_id.removesuffix("@chatroom").strip()
+                    or group_id != group_id.strip()):
+                return None
+            group_ids.add(group_id)
+        return group_ids if len(group_ids) == len(groups) else None
+
     def get_conversations(self, filters: dict[str, Any] | None = None) -> dict[str, object]:
         try:
             values = filters or {}
@@ -138,6 +161,7 @@ class ChatApiMixin:
                     contact.get("avatar") or item.get("avatar") or ""
                 )
             if kind in {"all", "group"}:
+                current_group_ids = self._history_current_group_ids(directory)
                 known = {
                     str(item.get("conversation_id") or ""): item
                     for item in items
@@ -175,6 +199,12 @@ class ChatApiMixin:
                     }
                     items.append(item)
                     known[group_id] = item
+                for item in items:
+                    if isinstance(item, dict) and item.get("type") == "group":
+                        item["group_membership"] = (
+                            "unknown" if current_group_ids is None else
+                            "joined" if item.get("conversation_id") in current_group_ids else "left"
+                        )
                 items.sort(
                     key=lambda item: (
                         -float(item.get("last_timestamp") or 0),
