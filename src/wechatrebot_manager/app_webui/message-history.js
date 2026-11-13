@@ -87,20 +87,22 @@ window.createMessageHistory = function (helpers) {
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
-      if (state.selectedConversation) {
-        const refreshed = state.conversations.find((item) => item.conversation_id === state.selectedConversation.conversation_id);
-        state.selectedConversation = refreshed || null;
-      }
+      const selectionKey = JSON.stringify([requestAccount, query, state.historyKind]);
+      const remembered = state.historyKindSelections?.get(selectionKey);
+      const selectedId = options.localFilter && remembered
+        ? remembered : state.selectedConversation?.conversation_id;
+      const selected = state.conversations.find((item) => item.conversation_id === selectedId);
       const summary = data.summary || {};
       const visible = state.conversations.length;
       const visibleMessages = state.conversations.reduce((sum, item) => sum + (item.message_count || 0), 0);
       $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
       renderConversations();
-      if (state.selectedConversation) {
-        await selectConversation(state.selectedConversation.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
+      if (selected) {
+        await selectConversation(selected.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
       } else if (state.conversations.length) {
         await selectConversation(state.conversations[0].conversation_id, {silent: true, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
       } else {
+        state.selectedConversation = null;
         ++state.messageLoad;
         state.historyMessagesLoading = false;
         state.historyOlderLoad += 1;
@@ -154,6 +156,8 @@ window.createMessageHistory = function (helpers) {
 
   function invalidateHistoryState() {
     clearHistoryMessageCache();
+    state.historyMessageDom = null;
+    state.historyKindSelections = new Map();
     state.historyRenderedPanels?.clear();
     state.historyQrCache?.clear();
     window.closeMessageImagePreview?.();
@@ -548,7 +552,30 @@ window.createMessageHistory = function (helpers) {
     const previousIds = new Set(state.selectedMessages.map((message) => message.id));
     const added = messages.filter((message) => !previousIds.has(message.id)).length;
     const previousScroll = list.scrollTop;
-    list.innerHTML = messages.length ? messages.map(messageMarkup).join("") : '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
+    // Reconcile within the exact account/conversation/filter context. Keep
+    // existing media and avatar nodes alive when only newer messages arrive.
+    const context = historyMessageCacheKey(state.historyAccount,
+      state.selectedConversation?.conversation_id, state.historyMessageQuery);
+    const previous = state.historyMessageDom;
+    const rows = previous?.context === context ? previous.rows : new Map();
+    const nextRows = new Map();
+    let cursor = list.firstChild;
+    for (const message of messages) {
+      const key = String(message.id);
+      const signature = messagesSignature([message]);
+      let row = rows.get(key);
+      if (!row || row.signature !== signature) {
+        const template = document.createElement("template");
+        template.innerHTML = messageMarkup(message);
+        row = {node: template.content.firstElementChild, signature};
+      }
+      if (row.node !== cursor) list.insertBefore(row.node, cursor);
+      cursor = row.node.nextSibling;
+      nextRows.set(key, row);
+    }
+    while (cursor) { const next = cursor.nextSibling; cursor.remove(); cursor = next; }
+    if (!messages.length) list.innerHTML = '<div class="empty-state compact"><p>这个聊天暂无消息；群聊仍会保留在左侧目录中。</p></div>';
+    state.historyMessageDom = {context, rows: nextRows};
     bindAvatarFallbacks(list);
     state.selectedMessages = messages;
     bindMessageSenderSelection(list);
@@ -586,6 +613,11 @@ window.createMessageHistory = function (helpers) {
       state.historyHasNewer = true;
       showHistoryNewerMessages();
     }
+    if (state.historyMessageDom) {
+      state.historyMessageDom.rows = new Map(state.selectedMessages.map((message, index) => [
+        String(message.id), {node: list.children[index], signature: messagesSignature([message])},
+      ]));
+    }
     bindMessageSenderSelection(list);
     updateSelectedSenderButtons();
     saveSelectedHistoryMessages();
@@ -601,6 +633,11 @@ window.createMessageHistory = function (helpers) {
     const list = $("#messageList");
     if (changed) saveSelectedHistoryMessages();
     state.selectedConversation = item;
+    const selections = state.historyKindSelections ||= new Map();
+    const selectionKey = JSON.stringify([state.historyAccount, JSON.stringify([state.historyAccount, historyFilters()]), state.historyKind]);
+    selections.delete(selectionKey);
+    selections.set(selectionKey, conversationId);
+    while (selections.size > HISTORY_MESSAGE_CACHE_LIMIT) selections.delete(selections.keys().next().value);
     const requestAccount = state.historyAccount;
     const key = historyMessageCacheKey(requestAccount, conversationId, query);
     const cacheEntry = getHistoryMessageCacheEntry(key);
