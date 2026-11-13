@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -22,6 +23,7 @@ def _patched_player(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     shutil.copy2(source / "index.html", checkout / "index.html")
     shutil.copy2(source / "state_server.py", checkout / "state_server.py")
+    shutil.copy2(ROOT / "runtime/jiang_short_drama/title_search.py", checkout / "title_search.py")
     for name in ("short-drama-player-hosted-only.patch", "short-drama-player-controls.patch", "short-drama-player-cinema.patch"):
         patch = ROOT / "patches" / name
         subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
@@ -33,10 +35,14 @@ def _load_state_server(checkout: Path, module_name: str):
     path = checkout / "state_server.py"
     source = path.read_text(encoding="utf-8")
     compile(source, str(path), "exec")
-    spec = importlib.util.spec_from_file_location(module_name, path)
+    package = types.ModuleType(module_name)
+    package.__path__ = [str(checkout)]
+    sys.modules[module_name] = package
+    qualified_name = f"{module_name}.state_server"
+    spec = importlib.util.spec_from_file_location(qualified_name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules[qualified_name] = module
     spec.loader.exec_module(module)
     return module
 

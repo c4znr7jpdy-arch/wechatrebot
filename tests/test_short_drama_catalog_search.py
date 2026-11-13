@@ -47,7 +47,8 @@ def test_search_visits_every_source_and_keeps_playable_versions(state_module, mo
     assert response["failures"] == [sources[-1]]
     assert response["suggestions"] == ["欢天喜地七仙女续集"]
     assert {base for base, _ in calls} == set(resolver.SOURCES.values())
-    assert all(params == {"ac": "detail", "wd": "欢天喜地七仙女", "pg": 1} for _, params in calls)
+    assert all({key: value for key, value in params.items() if key != "_deadline"}
+               == {"ac": "detail", "wd": "欢天喜地七仙女", "pg": 1} for _, params in calls)
     assert [item["title"] for item in response["items"][:len(sources) - 1]] == ["欢天喜地七仙女"] * (len(sources) - 1)
     assert all(len(item["episodes"]) == 3 for item in response["items"])
     assert not any(item["title"] == "不安全" for item in response["items"])
@@ -70,6 +71,116 @@ def test_plugin_hosted_and_browser_catalogs_share_all_sources(state_module, patc
     assert len(plugin_sources) == 12
     assert plugin_sources["魔都资源"] == "https://www.mdzyapi.com/api.php/provide/vod/"
     assert plugin_sources["新浪资源"] == "https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/"
+    helper = Path(state_module.__file__).with_name("title_search.py")
+    assert helper.read_bytes() == (patched_plugins / "jiang_short_drama/title_search.py").read_bytes()
+
+
+@pytest.mark.parametrize("query", ["写给阿嬷的情书", "写给给阿嬷的情书", "写给阿嫲的情书"])
+def test_fallback_finds_formal_title_and_preserves_original_query(state_module, monkeypatch, query):
+    search = state_module.CatalogSearch(state_module.SelectionResolver())
+    calls = []
+
+    def fetch(_base, **params):
+        calls.append(params["wd"])
+        return {"list": [record("给阿嬷的情书")] if params["wd"] == "给阿嬷的情书" else []}
+
+    monkeypatch.setattr(state_module, "_catalog_json", fetch)
+    response = search.search(query)
+    assert response["query"] == query
+    assert response["heading"] == f"搜索：{query}"
+    assert {item["title"] for item in response["items"]} == {"给阿嬷的情书"}
+    assert {item["source"] for item in response["items"]} == set(search.resolver.SOURCES)
+    assert response["sources_searched"] == response["sources_total"] == 12
+    assert response["failures"] == []
+    assert calls[:12] == [query] * 12
+    assert len(calls) <= 60
+    assert search.search(query) == response
+
+
+def test_empty_fallbacks_are_bounded_and_count_each_source_once(state_module, monkeypatch):
+    search = state_module.CatalogSearch(state_module.SelectionResolver())
+    calls = []
+    monkeypatch.setattr(state_module, "_catalog_json",
+                        lambda base, **params: calls.append((base, params["wd"])) or {"list": []})
+    response = search.search("这部片名不存在")
+    assert response["items"] == []
+    assert response["sources_searched"] == 12 and response["failures"] == []
+    assert 12 < len(calls) <= 60
+    assert all(len(query) >= 3 for _, query in calls)
+
+
+def test_fallback_failures_preserve_primary_coverage_and_recovered_items(state_module, monkeypatch):
+    search = state_module.CatalogSearch(state_module.SelectionResolver())
+    sources = list(search.resolver.SOURCES.values())
+    calls = []
+
+    def fetch(base, **params):
+        calls.append((base, params["wd"]))
+        if base == sources[-1] or (params["wd"] != "写给阿嬷的情书" and base != sources[0]):
+            raise OSError("offline")
+        return {"list": [] if params["wd"] == "写给阿嬷的情书" else [record("给阿嬷的情书")]}
+
+    monkeypatch.setattr(state_module, "_catalog_json", fetch)
+    response = search.search("写给阿嬷的情书")
+    assert response["items"][0]["title"] == "给阿嬷的情书"
+    assert response["sources_searched"] == 11
+    assert response["failures"] == [list(search.resolver.SOURCES)[-1]]
+    assert sum(base == sources[-1] for base, _ in calls) == 1
+    assert search.cache[response["query"]][0] <= state_module.time.time() + 30
+
+
+def test_search_budget_skips_late_requests_and_fallback_rounds(state_module, monkeypatch):
+    search = state_module.CatalogSearch(state_module.SelectionResolver())
+    monkeypatch.setattr(state_module, "_catalog_json", lambda *_a, **_kw: pytest.fail("late request"))
+    assert search._source_items("片名", next(iter(search.resolver.SOURCES)),
+                                state_module.time.monotonic() + search.source_seconds - 1) is None
+    now, calls = [100.0], []
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: now[0])
+
+    def source_items(query, source, deadline):
+        calls.append(query)
+        now[0] = deadline
+        return []
+
+    monkeypatch.setattr(search, "_source_items", source_items)
+    response = search.search("写给阿嬷的情书")
+    assert calls == ["写给阿嬷的情书"] * 12
+    assert response["sources_searched"] == 12
+    assert response["items"] == []
+
+
+def test_catalog_budget_is_internal_and_caps_socket_wait(state_module, monkeypatch):
+    from types import SimpleNamespace
+    observed = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read1(self, _size):
+            return b""
+
+    class Opener:
+        def open(self, request, *, timeout):
+            observed.append((request.full_url, timeout))
+            return Response()
+
+    monkeypatch.setattr(state_module, "time", SimpleNamespace(monotonic=lambda: 100.0))
+    monkeypatch.setattr("urllib.request.build_opener", lambda *_a: Opener())
+    source = state_module.SelectionResolver.SOURCES["魔都资源"]
+    with pytest.raises(ValueError):  # Empty fake response is not JSON, after the bounded GET.
+        state_module._catalog_json(source, _deadline=100.25, ac="detail", wd="片名")
+    assert observed[0][1] == 0.25
+    assert "_deadline" not in observed[0][0]
+    with pytest.raises(TimeoutError, match="deadline"):
+        state_module._catalog_json(source, _deadline=99, wd="片名")
+    assert len(observed) == 1
+    state_module._XINLANG_NEXT_REQUEST = 101.0
+    with pytest.raises(TimeoutError, match="request limit"):
+        state_module._wait_catalog_request(state_module.SelectionResolver.SOURCES["新浪资源"], 100.25)
 
 
 def test_xinlang_concurrent_catalog_requests_keep_interval(state_module, monkeypatch):

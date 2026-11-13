@@ -92,6 +92,36 @@ def test_clicking_autocomplete_searches_that_title_and_keeps_result_suggestions(
     assert page.locator(".recommend-card").filter(has_text="外传完整剧集").is_visible()
 
 
+@pytest.mark.parametrize("width", [390, 1440])
+@pytest.mark.parametrize("query", ["给阿嬷的情书", "写给阿嬷的情书", "写给给阿嬷的情书", "写给阿嫲的情书", "写给阿妈的情书"])
+def test_fuzzy_search_keeps_original_query_and_displays_formal_catalog_movie_title(continuity_page, width, query):
+    page, _ = continuity_page()
+    page.set_viewport_size({"width": width, "height": 844})
+    formal_title = "给阿嬷的情书"
+    payload = search_payload(query, title=formal_title, suggestions=[])
+    payload["items"][0]["category"] = "剧情片"
+    payload["items"][0]["episodes"] = payload["items"][0]["episodes"][:1]
+    calls = catalog_responses(page, {query: payload})
+    search = page.locator("#catalogSearch")
+    search.fill(query)
+    # Enter with no active suggestion submits the user's input verbatim.
+    search.press("Enter")
+    card = page.locator(".recommend-card").filter(has_text=formal_title)
+    card.wait_for()
+    assert calls[-1] == query
+    assert search.input_value() == query
+    assert parse_qs(urlsplit(page.url).fragment)["search"] == [query]
+    assert page.locator(".recommend-card:visible strong").all_text_contents() == [formal_title]
+    assert formal_title in card.inner_text()
+    assert page.locator("#recommendationsTitle").inner_text() == f"搜索：{query}"
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    card.click()
+    page.wait_for_function("document.getElementById('video').readyState >= 2")
+    assert page.locator("#title").inner_text() == formal_title
+    assert page.title() == formal_title
+    assert formal_title in page.locator("#videoTitle").inner_text()
+
+
 def test_keyboard_can_choose_suggestion_or_submit_original_query(continuity_page):
     page, _ = continuity_page()
     calls = catalog_responses(page)

@@ -233,3 +233,15 @@ kanju.ai 的内容接口需要请求签名，未作为新源接入；索尼、ik
 本地实际执行：`python -m pytest tests/test_short_drama_catalog_search.py tests/test_short_drama_network_safety.py tests/test_short_drama_source_switching.py -q --tb=short` 为 38 passed；`python -m pytest tests/test_short_drama_player_controls.py tests/test_short_drama_player_hardening.py tests/test_hosted_tweet_pages.py -q --tb=short` 为 106 passed。候选内联脚本 `node --check`、候选 Python 编译、改动测试文件 `compileall`、`python scripts/source_inputs.py`、`python scripts/validate_release_metadata.py`、`git diff --check` 均通过。菜单边界断言允许不超过半个 CSS 像素的嵌套滚动取整误差，并继续检查每个按钮中心命中与可点击。
 
 本次候选为托管页面与状态服务更新，并同步后续客户端交付的插件源列表；客户端待发布目标保持 1.0.15，不制作客户端包。代码提交、合并与服务器部署分别记录，本次不宣称已上线。iPhone 用户反馈的问题是选中设备后未建立投屏连接，不能将本轮新增资源或分片成功视为该连接问题已经解决。
+
+## 2026-11-13 标题包含与有限容错搜索
+
+微信插件和托管目录搜索共用 `runtime/jiang_short_drama/title_search.py`，复用原有标题清理、别名、请求校验、缓存、排序和十二源注册。精确标题优先；较长输入包含完整片名时不再被分数阈值误删。仅匹配时归一化“嬷/嬤/嫲”，长标题允许有限增删字和错字；短片名从严，用户指定的续集数字不能被省略或改成另一部，年份可由目录独立字段确认。原始搜索文字和正式片名分别保留。
+
+原词无可靠候选后才逐轮查询最多四个连续短词，找到可靠候选即停止；Latin 标题保留完整单词。插件元数据查询总预算 22 秒，超时取消尚未完成的任务并保留成功结果；网页按剩余时间限制排队、源间隔和 HTTP 读取，保留末次 socket read 的余量。继续使用四并发及既有扫描合并、限流、响应大小和缓存上限，回退不增加源计数，初次成功源后续失败不丢弃已有结果。
+
+真实源只读元数据验证：`写给阿嬷的情书`、`写给给阿嬷的情书`、`写给阿嫲的情书` 在微信与网页路径均返回正式片名 `给阿嬷的情书`；另测 `写给阿妈的情书`，网页约 19.1 秒、插件约 13.3 秒返回正式片名。源响应随网络变化，单次初始扫描成功 9–12 源，不能将此视为所有源持续可用或每源均召回；未请求媒体、启动机器人或操作线上服务。
+
+本地验证：共享规则与浏览器搜索交互 66 passed；插件装配/搜索/网络 14 passed，命令路由 2 passed；目录搜索/状态服务/既有换源与托管 Twitter 页面 46 passed；新增内部 deadline/GET 参数隔离 1 passed。浏览器沿用项目 Chromium Playwright（Browser plugin not available），覆盖 390/1440 宽度、五种原始输入、正式片名展示与点击播放；原查询保留在输入和 URL。相关命令及 CI 结果见 PR，未运行本地全量测试，真实微信/iPhone 仍未验证。
+
+交付文件为共享 helper、两端补丁、插件 source-manifest 和对应测试；固定 `vendor/` 与依赖不变。托管服务以后部署时必须将同一份 `title_search.py` 放到 `state_server.py` 同目录并一起更新/回滚；插件由现有 staging manifest 自动装配，无需新增依赖。待发布目标为 1.0.19，本次不改版本号；兼容基线上的插件源码适用 Python 组件增量，托管服务独立交付，无完整载荷构建、打包、部署或发布。
