@@ -903,6 +903,10 @@ tbody tr:hover { background: #fbfdff; }
 .history-layout { grid-template-columns: 292px minmax(430px,1fr) 246px; border-radius: 10px; }
 .conversation-item { min-height: 68px; }
 .conversation-main > small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-main > .conversation-preview { display: flex; align-items: center; gap: 6px; }
+.conversation-preview-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-left-group { display: inline-flex; flex: 0 0 auto; color: var(--amber-700); }
+.conversation-left-group svg { width: 14px; height: 14px; }
 .message-pane { grid-template-rows: 64px minmax(0,1fr); }
 .conversation-profile,
 .conversation-header-main,

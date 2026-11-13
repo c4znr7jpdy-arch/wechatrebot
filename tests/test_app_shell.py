@@ -1398,6 +1398,77 @@ def test_conversations_can_refresh_group_directory_on_page_entry(tmp_path: Path)
     assert result["data"]["items"][0]["avatar"] == "https://example.test/new.jpg"
 
 
+@pytest.fixture
+def group_membership_history(tmp_path: Path):
+    api = _api(tmp_path)
+    api._history_account_id = lambda: "wxid_bot"
+    api._history = SimpleNamespace(conversations=lambda **_filters: {
+        "items": [
+            {"conversation_id": "active@chatroom", "type": "group", "message_count": 2},
+            {"conversation_id": "departed@chatroom", "type": "group", "message_count": 480},
+            {"conversation_id": "wxid_friend", "type": "private", "message_count": 1},
+        ],
+        "summary": {"messages": 483},
+    })
+    directory = {
+        "account_id": "wxid_bot", "stale": False, "truncated": False,
+        "updated_at": "2026-11-13T00:00:00+00:00", "total": 2,
+        "items": [
+            {"group_id": "active@chatroom", "name": "当前群"},
+            {"group_id": "empty@chatroom", "name": "无消息的当前群"},
+        ],
+    }
+    api._groups = SimpleNamespace(list=lambda _refresh: directory)
+    return api, directory
+
+
+@pytest.mark.parametrize("search", ["", "只出现在历史消息正文中的关键词"])
+def test_history_group_membership_uses_full_directory_and_updates_after_rejoin(
+    group_membership_history, search,
+):
+    api, directory = group_membership_history
+    filters = {"kind": "all", "search": search, "refresh_groups": True}
+    result = api.get_conversations(filters)
+    assert result["ok"] is True
+    items = {item["conversation_id"]: item for item in result["data"]["items"]}
+    assert items["active@chatroom"]["group_membership"] == "joined"
+    assert items["departed@chatroom"]["group_membership"] == "left"
+    assert items["departed@chatroom"]["message_count"] == 480
+    assert "group_membership" not in items["wxid_friend"]
+    if not search:
+        assert items["empty@chatroom"]["group_membership"] == "joined"
+
+    directory["items"].append({"group_id": "departed@chatroom", "name": "重新加入的群"})
+    directory["total"] = 3
+    result = api.get_conversations(filters)
+    assert result["ok"] is True
+    rejoined = next(item for item in result["data"]["items"]
+                    if item["conversation_id"] == "departed@chatroom")
+    assert rejoined["group_membership"] == "joined"
+    assert rejoined["message_count"] == 480
+
+
+@pytest.mark.parametrize("changes", [
+    {"stale": True}, {"stale": None}, {"truncated": True}, {"truncated": None},
+    {"updated_at": None}, {"updated_at": ""}, {"updated_at": 123},
+    {"items": [], "total": 0}, {"total": 3}, {"total": None},
+    {"items": [{"group_id": "active@chatroom"}, None]},
+    {"items": [{"group_id": "active@chatroom"}, {"group_id": ""}]},
+    {"items": [{"group_id": "active@chatroom"}, {"group_id": "wxid_friend"}]},
+    {"items": [{"group_id": "active@chatroom"}, {"group_id": "active@chatroom"}]},
+])
+def test_history_group_membership_stays_unknown_without_complete_fresh_directory(
+    group_membership_history, changes,
+):
+    api, directory = group_membership_history
+    directory.update(changes)
+    result = api.get_conversations({"kind": "all"})
+    assert result["ok"] is True
+    items = result["data"]["items"]
+    assert all(item["group_membership"] == "unknown" for item in items if item["type"] == "group")
+    assert next(item for item in items if item["conversation_id"] == "departed@chatroom")["message_count"] == 480
+
+
 def test_conversation_search_matches_group_without_local_messages(tmp_path: Path) -> None:
     api = _api(tmp_path)
     api._history_account_id = lambda: "wxid_bot"
