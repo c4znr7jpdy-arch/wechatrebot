@@ -844,7 +844,7 @@
         || state.historyConversationsLoading || state.historyMessagesLoading) return;
     state.historyPolling = true;
     try {
-      await loadConversations({silent: true, refreshGroups: true, forceRefresh: true});
+      await loadConversations({silent: true, forceRefresh: true});
     } finally {
       state.historyPolling = false;
     }
@@ -1142,10 +1142,9 @@
     $("#contactPrevious").addEventListener("click", () => { state.contactPage -= 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
     $("#contactNext").addEventListener("click", () => { state.contactPage += 1; renderContacts(); $(".contact-table-scroll").scrollTop = 0; });
     $$("#historyKinds button").forEach((button) => button.addEventListener("click", () => {
-      const changed = state.historyKind !== button.dataset.kind;
       state.historyKind = button.dataset.kind;
       $$("#historyKinds button").forEach((item) => item.classList.toggle("active", item === button));
-      loadConversations({localFilter: true, animate: changed});
+      loadConversations({localFilter: true});
     }));
     $("#historyFilter").addEventListener("click", () => loadConversations({forceRefresh: true}));
     $("#refreshHistory").addEventListener("click", refreshHistoryRecords);
