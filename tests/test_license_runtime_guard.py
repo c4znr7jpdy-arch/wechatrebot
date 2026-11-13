@@ -471,3 +471,62 @@ def test_action_context_reaches_delayed_child_tasks(runtime):
 
     asyncio.run(run())
     assert results == ["write"]
+
+
+def test_bridge_action_uses_requested_account_before_business_write(runtime):
+    calls = []
+
+    class Actions:
+        @module.guard_bridge_action
+        async def handle(self, request):
+            calls.append("write")
+
+    with pytest.raises(LicenseError):
+        asyncio.run(Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_old"}}))
+    assert calls == []
+
+
+def test_action_account_is_rechecked_at_hook_after_licensed_account_switch(runtime):
+    calls = []
+
+    class Actions:
+        @module.guard_bridge_action
+        async def handle(self, request):
+            runtime.identity["account"] = "wxid_other"
+            runtime.client.state["account"] = "wxid_other"
+            runtime.guard.require_hook("/api/send_text_msg")
+            calls.append("write")
+
+    with pytest.raises(LicenseError):
+        asyncio.run(Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_actual"}}))
+    assert calls == []
+
+
+def test_legacy_action_account_survives_downloads_and_child_tasks(tmp_path, monkeypatch):
+    identity = ["wxid_actual"]
+    guard = RuntimeGuard(tmp_path, account_source=lambda: identity[0])
+    monkeypatch.setattr(module, "_guard", guard)
+    calls = []
+
+    class Actions:
+        @module.guard_bridge_action
+        async def handle(self, request):
+            async def delayed():
+                await asyncio.sleep(0)
+                guard.require_hook("/api/send_text_msg")
+                calls.append("write")
+            return asyncio.create_task(delayed())
+
+    async def run():
+        task = await Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_actual"}})
+        identity[0] = "wxid_other"
+        with pytest.raises(LicenseError):
+            await task
+        with pytest.raises(LicenseError):
+            await Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_actual"}})
+        # A new request uses its own account after the previous scope is reset.
+        task = await Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_other"}})
+        await task
+
+    asyncio.run(run())
+    assert calls == ["write"]

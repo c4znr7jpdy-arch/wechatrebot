@@ -333,8 +333,10 @@ const cases = {
     f.responses.get_scheduled_task_context = new Error('机器人已断开');
     f.responses.get_legacy_schedule_migrations.items = [{key: 'pending-a', account_id: 'account-a'}];
     await f.context.loadSchedules();
+    assert.equal(f.$('#scheduleRows').innerHTML, '', 'Unknown current account hides old tasks');
+    f.responses.get_scheduled_task_context = {account_id: 'account-a', items: []};
+    await f.context.loadSchedules();
     assert.equal(f.$('#scheduleRows').innerHTML, 'pending-a');
-    assert.match(f.$('#scheduleContextMessage').textContent, /可继续完成下方已确认的旧任务迁移/);
     f.responses.get_legacy_schedule_migrations.items = [];
     await f.context.loadSchedules();
     assert.equal(f.$('#scheduleRows').innerHTML, '');

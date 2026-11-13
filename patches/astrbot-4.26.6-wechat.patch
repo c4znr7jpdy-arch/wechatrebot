@@ -130,96 +130,6 @@ index 6156601..d101d8d 100644
                          "ws_reverse_token": "",
                      },
                      "微信公众平台": {
-diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
-index 91a7444..1f68163 100644
---- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
-+++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
-@@ -19,6 +19,19 @@ from astrbot.api.message_components import (
- from astrbot.api.platform import Group, MessageMember
- 
- 
-+def _is_meme_manager_image(segment: Image) -> bool:
-+    """Return whether an image comes from meme_manager's old or v4 pack layout."""
-+    image_ref = str(segment.path or segment.file or "")
-+    normalized = image_ref.replace("\\", "/").lower()
-+    plugin_root = "/plugin_data/meme_manager/"
-+    if plugin_root not in normalized:
-+        return False
-+    relative_path = normalized.split(plugin_root, 1)[1]
-+    return relative_path.startswith("memes/") or (
-+        relative_path.startswith("packs/") and "/memes/" in relative_path
-+    )
-+
-+
- class AiocqhttpMessageEvent(AstrMessageEvent):
-     def __init__(
-         self,
-@@ -34,8 +47,22 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
-     @staticmethod
-     async def _from_segment_to_dict(segment: BaseMessageComponent) -> dict:
-         """修复部分字段"""
--        if isinstance(segment, Image | Record):
--            # For Image and Record segments, we convert them to base64
-+        if isinstance(segment, Image):
-+            # meme_manager 图片需要保留本地路径并显式标记为表情包。
-+            # 否则统一转成 base64 后，微信桥接层无法区分表情包与普通图片。
-+            if _is_meme_manager_image(segment):
-+                payload = await segment.to_dict()
-+                payload.setdefault("data", {})["sub_type"] = "emoji"
-+                return payload
-+            bs64 = await segment.convert_to_base64()
-+            return {
-+                "type": segment.type.lower(),
-+                "data": {
-+                    "file": f"base64://{bs64}",
-+                },
-+            }
-+        if isinstance(segment, Record):
-+            # For Record segments, we convert them to base64
-             bs64 = await segment.convert_to_base64()
-             return {
-                 "type": segment.type.lower(),
-@@ -95,23 +122,23 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
-         session_id: str | None,
-         messages: list[dict],
-     ) -> None:
--        # session_id 必须是纯数字字符串
--        session_id_int = (
--            int(session_id) if session_id and session_id.isdigit() else None
--        )
-+        # session_id: QQ 协议为纯数字，WeChat 为 wxid 或 xxx@chatroom
-         routing_params = {}
-         if isinstance(event, Event) and event.get("self_id"):
-             routing_params["self_id"] = event["self_id"]
- 
--        if is_group and isinstance(session_id_int, int):
-+        if is_group and session_id:
-+            # QQ: 纯数字; WeChat: xxx@chatroom 或 wxid_xxx
-+            group_id = int(session_id) if session_id.isdigit() else session_id
-             await bot.send_group_msg(
--                group_id=session_id_int,
-+                group_id=group_id,
-                 message=messages,
-                 **routing_params,
-             )
--        elif not is_group and isinstance(session_id_int, int):
-+        elif not is_group and session_id:
-+            user_id = int(session_id) if session_id.isdigit() else session_id
-             await bot.send_private_msg(
--                user_id=session_id_int,
-+                user_id=user_id,
-                 message=messages,
-                 **routing_params,
-             )
-@@ -119,7 +146,7 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
-             await bot.send(event=event, message=messages)
-         else:
-             raise ValueError(
--                f"无法发送消息：缺少有效的数字 session_id({session_id}) 或 event({event})",
-+                f"无法发送消息：缺少有效的 session_id({session_id}) 或 event({event})",
-             )
- 
-     @classmethod
 diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
 index a69cb91..f60f2b7 100644
 --- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py
@@ -953,7 +863,22 @@ diff --git a/official/astrbot/core/astr_agent_tool_exec.py b/expected/astrbot/co
 diff --git a/official/astrbot/core/tools/cron_tools.py b/expected/astrbot/core/tools/cron_tools.py
 --- a/official/astrbot/core/tools/cron_tools.py
 +++ b/expected/astrbot/core/tools/cron_tools.py
-@@ -54,7 +54,9 @@
+@@ -32,11 +32,13 @@
+ 
+ 
+ def _job_belongs_to_current_sender(
+-    job: Any, current_umo: str, current_sender_id: str
++    job: Any, current_umo: str, current_sender_id: str, current_account: str | None = None
+ ) -> bool:
+     return (
+         _extract_job_session(job) == current_umo
+         and _extract_job_sender(job) == current_sender_id
++        and (current_account is None or (isinstance(job.payload, dict)
++             and job.payload.get("account_id") == current_account))
+     )
+ 
+ 
+@@ -54,7 +56,9 @@
          "Manage your future tasks. "
          "Use action='create' to schedule a recurring cron task or one-time run_at task. "
          "Use action='edit' to update an existing task. "
@@ -964,9 +889,53 @@ diff --git a/official/astrbot/core/tools/cron_tools.py b/expected/astrbot/core/t
          "Use action='delete' to remove a task by job_id."
      )
      parameters: dict = Field(
-@@ -243,9 +245,20 @@
+@@ -102,6 +106,13 @@
+         if cron_mgr is None:
+             return "error: cron manager is not available."
+ 
++        from astrbot.core.cron.wechat_accounts import event_account
++
++        event = context.context.event
++        try:
++            current_account = await event_account(context.context.context, event)
++        except PermissionError as exc:
++            return f"error: {exc}"
+         action = str(kwargs.get("action") or "").strip().lower()
+         if action == "create":
+             cron_expression = kwargs.get("cron_expression")
+@@ -129,6 +140,8 @@
+                 "note": note,
+                 "origin": "tool",
+             }
++            if current_account is not None:
++                payload["account_id"] = current_account
+ 
+             try:
+                 job = await cron_mgr.add_active_job(
+@@ -164,7 +177,7 @@
+             job = await cron_mgr.db.get_cron_job(str(job_id))
+             if not job:
+                 return f"error: cron job {job_id} not found."
+-            if not _job_belongs_to_current_sender(job, current_umo, current_sender_id):
++            if not _job_belongs_to_current_sender(job, current_umo, current_sender_id, current_account):
+                 return "error: you can only edit your own future tasks."
+ 
+             payload = dict(job.payload) if isinstance(job.payload, dict) else {}
+@@ -232,7 +245,7 @@
+             job = await cron_mgr.db.get_cron_job(str(job_id))
+             if not job:
+                 return f"error: cron job {job_id} not found."
+-            if not _job_belongs_to_current_sender(job, current_umo, current_sender_id):
++            if not _job_belongs_to_current_sender(job, current_umo, current_sender_id, current_account):
+                 return "error: you can only delete your own future tasks."
+             await cron_mgr.delete_job(str(job_id))
+             return f"Deleted cron job {job_id}."
+@@ -241,11 +254,22 @@
+             jobs = [
+                 job
                  for job in await cron_mgr.list_jobs()
-                 if _job_belongs_to_current_sender(job, current_umo, current_sender_id)
+-                if _job_belongs_to_current_sender(job, current_umo, current_sender_id)
++                if _job_belongs_to_current_sender(job, current_umo, current_sender_id, current_account)
              ]
 +            event = context.context.event
 +            group_scope = (
@@ -987,3 +956,333 @@ diff --git a/official/astrbot/core/tools/cron_tools.py b/expected/astrbot/core/t
              for j in jobs:
                  lines.append(
                      f"{j.job_id} | {j.name} | {j.job_type} | run_once={getattr(j, 'run_once', False)} | enabled={j.enabled} | next={j.next_run_time}"
+diff --git a/official/astrbot/core/cron/manager.py b/expected/astrbot/core/cron/manager.py
+--- a/official/astrbot/core/cron/manager.py
++++ b/expected/astrbot/core/cron/manager.py
+@@ -195,6 +195,21 @@
+         return job
+ 
+     async def update_job(self, job_id: str, **kwargs) -> CronJob | None:
++        from .wechat_accounts import require_account, session_platform
++
++        current = await self.db.get_cron_job(job_id)
++        if current is None:
++            return None
++        payload = current.payload if isinstance(current.payload, dict) else {}
++        session = str(payload.get("session") or "")
++        if current.job_type == "active_agent" and session:
++            if session_platform(self.ctx, session).meta().name == "aiocqhttp":
++                owner = payload.get("account_id")
++                changed = kwargs.get("payload", payload)
++                if (not isinstance(changed, dict) or changed.get("account_id") != owner
++                        or changed.get("session") != session):
++                    raise PermissionError("不能更改任务绑定的微信账号或发送对象。")
++                await require_account(self.ctx, session, owner)
+         job = await self.db.update_cron_job(job_id, **kwargs)
+         if not job:
+             return None
+@@ -204,6 +219,14 @@
+         return job
+ 
+     async def delete_job(self, job_id: str) -> None:
++        from .wechat_accounts import require_account
++
++        job = await self.db.get_cron_job(job_id)
++        if job and job.job_type == "active_agent" and isinstance(job.payload, dict):
++            session = str(job.payload.get("session") or "")
++            platform = self.ctx.get_platform_inst(session.split(":", 1)[0]) if session else None
++            if platform is not None and platform.meta().name == "aiocqhttp":
++                await require_account(self.ctx, session, job.payload.get("account_id"))
+         self._remove_scheduled(job_id)
+         self._basic_handlers.pop(job_id, None)
+         await self.db.delete_cron_job(job_id)
+@@ -361,12 +384,17 @@
+             "cron_payload": payload,
+         }
+ 
+-        await self._woke_main_agent(
+-            message=note,
+-            session_str=session_str,
+-            extras=extras,
+-            delivery_session_str=delivery_session_str,
+-        )
++        from .wechat_accounts import account_scope, require_account
++
++        account = payload.get("account_id")
++        platform = await require_account(self.ctx, delivery_session_str, account) if delivery_session_str else None
++        if platform is not None:
++            with account_scope(delivery_session_str, account, self.ctx):
++                await self._woke_main_agent(message=note, session_str=session_str, extras=extras,
++                                            delivery_session_str=delivery_session_str)
++        else:
++            await self._woke_main_agent(message=note, session_str=session_str, extras=extras,
++                                        delivery_session_str=delivery_session_str)
+ 
+     async def _woke_main_agent(
+         self,
+diff --git a/official/astrbot/core/cron/events.py b/expected/astrbot/core/cron/events.py
+--- a/official/astrbot/core/cron/events.py
++++ b/expected/astrbot/core/cron/events.py
+@@ -33,10 +33,14 @@
+ 
+         msg_obj = AstrBotMessage()
+         msg_obj.type = message_type
+-        msg_obj.self_id = sender_id
++        payload = (extras or {}).get("cron_payload") or {}
++        account = payload.get("account_id") if isinstance(payload, dict) else None
++        msg_obj.self_id = account or sender_id
++        if account and session.message_type == MessageType.GROUP_MESSAGE:
++            msg_obj.group_id = session.session_id
+         msg_obj.session_id = session.session_id
+         msg_obj.message_id = uuid.uuid4().hex
+-        msg_obj.sender = MessageMember(user_id=session.session_id, nickname=sender_name)
++        msg_obj.sender = MessageMember(user_id=str(payload.get("sender_id") or session.session_id), nickname=sender_name)
+         msg_obj.message = [Plain(message)]
+         msg_obj.message_str = message
+         msg_obj.raw_message = message
+diff --git a/official/astrbot/core/star/context.py b/expected/astrbot/core/star/context.py
+--- a/official/astrbot/core/star/context.py
++++ b/expected/astrbot/core/star/context.py
+@@ -530,6 +530,10 @@
+             except BaseException as e:
+                 raise ValueError("不合法的 session 字符串: " + str(e))
+ 
++        from astrbot.core.cron.wechat_accounts import send_scoped_message
++
++        if await send_scoped_message(self, session, message_chain):
++            return True
+         for platform in self.platform_manager.platform_insts:
+             if platform.meta().id == session.platform_name:
+                 await platform.send_by_session(session, message_chain)
+diff --git a/official/astrbot/core/cron/wechat_accounts.py b/expected/astrbot/core/cron/wechat_accounts.py
+new file mode 100644
+--- /dev/null
++++ b/expected/astrbot/core/cron/wechat_accounts.py
+@@ -0,0 +1,128 @@
++"""Account and recipient binding for native WeChat agent reminders."""
++from __future__ import annotations
++
++import asyncio
++from contextlib import contextmanager
++from contextvars import ContextVar
++
++
++_scope = ContextVar("wechat_cron_account", default=None)
++
++
++def session_platform(context, session):
++    platform_id = str(session).split(":", 1)[0]
++    platform = context.get_platform_inst(platform_id)
++    if platform is None:
++        raise PermissionError("定时任务的平台连接尚未就绪。")
++    return platform
++
++
++async def require_account(context, session, account):
++    platform = session_platform(context, session)
++    if platform.meta().name != "aiocqhttp":
++        return None
++    parts = str(session).split(":", 2)
++    # QQ also uses aiocqhttp; numeric bot and recipient IDs retain its native behavior.
++    if len(parts) == 3 and parts[2].isdigit() and (not account or str(account).isdigit()):
++        return None
++    if (len(parts) != 3 or parts[1] not in {"GroupMessage", "FriendMessage"}
++            or not parts[2] or (parts[1] == "GroupMessage") != parts[2].endswith("@chatroom")):
++        raise PermissionError("定时任务的微信发送对象无法确认。")
++    if not isinstance(account, str) or not account.strip():
++        raise PermissionError("旧任务缺少微信账号归属，请先在管理器确认归属。")
++    try:
++        login = await asyncio.wait_for(platform.bot.get_login_info(self_id=account), timeout=5)
++    except Exception as exc:
++        raise PermissionError("定时任务的微信账号状态无法确认。") from exc
++    if not isinstance(login, dict) or str(login.get("user_id") or "") != account:
++        raise PermissionError("微信账号已变化，定时任务等待原账号登录。")
++    return platform
++
++
++async def event_account(context, event):
++    platform = session_platform(context, event.unified_msg_origin)
++    if platform.meta().name != "aiocqhttp":
++        return None
++    account = str(event.get_self_id() or "").strip()
++    platform = await require_account(context, event.unified_msg_origin, account)
++    return account if platform is not None else None
++
++
++@contextmanager
++def account_scope(session, account, context):
++    token = _scope.set((str(session), account, context))
++    try:
++        yield
++    finally:
++        _scope.reset(token)
++
++
++class _AccountBot:
++    def __init__(self, context, session, account, platform, delegate=None):
++        self.context, self.session, self.account, self.platform = context, session, account, platform
++        self.delegate = delegate or platform.bot
++
++    async def _call(self, method, *args, **kwargs):
++        await require_account(self.context, self.session, self.account)
++        _, kind, target = self.session.split(":", 2)
++        group = kind == "GroupMessage"
++        key = "group_id" if group else "user_id"
++        action = args[0] if method == "call_action" and args else method
++        allowed = {"send_group_msg", "send_group_forward_msg", "upload_group_file"} if group else {
++            "send_private_msg", "send_private_forward_msg"}
++        if (action not in allowed or str(kwargs.get(key) or "") != target
++                or kwargs.get("self_id", self.account) != self.account):
++            raise PermissionError("定时任务发送账号或对象与原授权不一致。")
++        kwargs.update(self_id=self.account, _wechatrebot_delivery="proactive", _wechatrebot_wake=False)
++        result = await getattr(self.delegate, method)(*args, **kwargs)
++        if result is False or (isinstance(result, dict) and (
++                result.get("status") == "failed" or str(result.get("retcode", 0)) != "0")):
++            raise RuntimeError("定时任务消息发送未完成。")
++        return result
++
++    async def send_group_msg(self, **kwargs):
++        return await self._call("send_group_msg", **kwargs)
++
++    async def send_private_msg(self, **kwargs):
++        return await self._call("send_private_msg", **kwargs)
++
++    async def call_action(self, action, **kwargs):
++        return await self._call("call_action", action, **kwargs)
++
++
++async def bind_scoped_sender(bot, event, is_group, session_id):
++    scope = _scope.get()
++    if scope is None:
++        return bot, event
++    session, account, context = scope
++    _, kind, target = session.split(":", 2)
++    if is_group != (kind == "GroupMessage") or str(session_id or "") != target:
++        raise PermissionError("定时任务只允许发送到创建时的聊天。")
++    platform = await require_account(context, session, account)
++    if not isinstance(bot, _AccountBot):
++        bot = _AccountBot(context, session, account, platform, delegate=bot)
++    from aiocqhttp import Event
++
++    return bot, Event({**(dict(event) if isinstance(event, dict) else {}), "self_id": account})
++
++
++async def send_scoped_message(context, session, message):
++    scope = _scope.get()
++    if scope is None:
++        return False
++    expected_session, account, _context = scope
++    if str(session) != expected_session:
++        raise PermissionError("定时任务只允许发送到创建时的聊天。")
++    platform = await require_account(context, expected_session, account)
++    if platform is None:
++        return False
++    from aiocqhttp import Event
++    from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
++
++    _, kind, target = expected_session.split(":", 2)
++    await AiocqhttpMessageEvent.send_message(
++        bot=_AccountBot(context, expected_session, account, platform), message_chain=message,
++        event=Event({"self_id": account}), is_group=kind == "GroupMessage", session_id=target,
++        delivery="proactive", wake=False,
++    )
++    return True
+diff --git a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+--- a/official/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
++++ b/expected/astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py
+@@ -19,6 +19,19 @@
+ from astrbot.api.platform import Group, MessageMember
+ 
+ 
++def _is_meme_manager_image(segment: Image) -> bool:
++    """Return whether an image comes from meme_manager's old or v4 pack layout."""
++    image_ref = str(segment.path or segment.file or "")
++    normalized = image_ref.replace("\\", "/").lower()
++    plugin_root = "/plugin_data/meme_manager/"
++    if plugin_root not in normalized:
++        return False
++    relative_path = normalized.split(plugin_root, 1)[1]
++    return relative_path.startswith("memes/") or (
++        relative_path.startswith("packs/") and "/memes/" in relative_path
++    )
++
++
+ class AiocqhttpMessageEvent(AstrMessageEvent):
+     def __init__(
+         self,
+@@ -34,8 +47,22 @@
+     @staticmethod
+     async def _from_segment_to_dict(segment: BaseMessageComponent) -> dict:
+         """修复部分字段"""
+-        if isinstance(segment, Image | Record):
+-            # For Image and Record segments, we convert them to base64
++        if isinstance(segment, Image):
++            # meme_manager 图片需要保留本地路径并显式标记为表情包。
++            # 否则统一转成 base64 后，微信桥接层无法区分表情包与普通图片。
++            if _is_meme_manager_image(segment):
++                payload = await segment.to_dict()
++                payload.setdefault("data", {})["sub_type"] = "emoji"
++                return payload
++            bs64 = await segment.convert_to_base64()
++            return {
++                "type": segment.type.lower(),
++                "data": {
++                    "file": f"base64://{bs64}",
++                },
++            }
++        if isinstance(segment, Record):
++            # For Record segments, we convert them to base64
+             bs64 = await segment.convert_to_base64()
+             return {
+                 "type": segment.type.lower(),
+@@ -95,23 +122,23 @@
+         session_id: str | None,
+         messages: list[dict],
+     ) -> None:
+-        # session_id 必须是纯数字字符串
+-        session_id_int = (
+-            int(session_id) if session_id and session_id.isdigit() else None
+-        )
++        # session_id: QQ 协议为纯数字，WeChat 为 wxid 或 xxx@chatroom
+         routing_params = {}
+         if isinstance(event, Event) and event.get("self_id"):
+             routing_params["self_id"] = event["self_id"]
+ 
+-        if is_group and isinstance(session_id_int, int):
++        if is_group and session_id:
++            # QQ: 纯数字; WeChat: xxx@chatroom 或 wxid_xxx
++            group_id = int(session_id) if session_id.isdigit() else session_id
+             await bot.send_group_msg(
+-                group_id=session_id_int,
++                group_id=group_id,
+                 message=messages,
+                 **routing_params,
+             )
+-        elif not is_group and isinstance(session_id_int, int):
++        elif not is_group and session_id:
++            user_id = int(session_id) if session_id.isdigit() else session_id
+             await bot.send_private_msg(
+-                user_id=session_id_int,
++                user_id=user_id,
+                 message=messages,
+                 **routing_params,
+             )
+@@ -119,7 +146,7 @@
+             await bot.send(event=event, message=messages)
+         else:
+             raise ValueError(
+-                f"无法发送消息：缺少有效的数字 session_id({session_id}) 或 event({event})",
++                f"无法发送消息：缺少有效的 session_id({session_id}) 或 event({event})",
+             )
+ 
+     @classmethod
+@@ -141,6 +168,9 @@
+             session_id (str | None, optional): 会话 ID（群号或 QQ 号
+ 
+         """
++        from astrbot.core.cron.wechat_accounts import bind_scoped_sender
++
++        bot, event = await bind_scoped_sender(bot, event, is_group, session_id)
+         # 转发消息、文件消息不能和普通消息混在一起发送
+         send_one_by_one = any(
+             isinstance(seg, Node | Nodes | File) for seg in message_chain.chain

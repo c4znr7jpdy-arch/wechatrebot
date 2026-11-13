@@ -33,7 +33,7 @@ window.createScheduledTasks = function (helpers) {
     const retained = state.scheduledContext && !state.scheduledContext.loading
       && (state.scheduledContext.account_id || !state.scheduledContext.readFailed)
       && scheduledAccountMatches(state.scheduledContext.account_id || "")
-      ? {context: state.scheduledContext, schedules: state.schedules, migrations: state.legacyMigrations} : null;
+      ? {context: state.scheduledContext, schedules: state.schedules, migrations: state.legacyMigrations, agents: state.agentSchedules} : null;
     const generation = ++state.scheduledLoad;
     const button = $("#refreshSchedules");
     if (!background || !retained) button.disabled = true;
@@ -54,6 +54,7 @@ window.createScheduledTasks = function (helpers) {
   function scheduledAccountMatches(account) {
     const runtime = state.status?.runtime;
     return (!runtime || runtime.account_status_available !== false)
+      && (!runtime?.wechat_identity || String(runtime.wechat_identity).trim() === account)
       && (state.historyAccount === undefined || state.historyAccount === account);
   }
 
@@ -64,6 +65,7 @@ window.createScheduledTasks = function (helpers) {
     state.scheduledContext = null;
     state.scheduledCommandCatalog = [];
     state.schedules = [];
+    state.agentSchedules = [];
     state.legacyMigrations = [];
     const runs = $("#scheduledTaskRuns");
     if (clearEditor) state.scheduledEditor = null;
@@ -88,6 +90,7 @@ window.createScheduledTasks = function (helpers) {
           initialAccount = initial.account_id || "";
           state.scheduledContext = scheduledAccountMatches(initialAccount) ? initial : {account_id: "", items: [], loading: true};
           state.schedules = [];
+          state.agentSchedules = [];
           state.legacyMigrations = [];
           $("#scheduleContextMessage").textContent = "";
           $("#scheduleContextMessage").hidden = true;
@@ -99,6 +102,7 @@ window.createScheduledTasks = function (helpers) {
           if (generation !== state.scheduledLoad) return;
           state.scheduledContext = {account_id: "", items: [], loading: true};
           state.schedules = [];
+          state.agentSchedules = [];
           state.legacyMigrations = [];
           renderSchedules();
           renderGroupAnalysisMigration();
@@ -130,13 +134,18 @@ window.createScheduledTasks = function (helpers) {
         || [context, legacy, migrations].some((result) => result.status === "rejected")};
       pendingTaskReadback = "";
       const migrationItems = migrations.status === "fulfilled" ? migrations.value.items || [] : [];
-      const visibleMigrations = accountChanged ? [] : migrationItems.filter((item) => !contextData.account_id || item.account_id === contextData.account_id);
+      const visibleMigrations = accountChanged || !contextData.account_id ? [] : migrationItems.filter((item) => item.account_id === contextData.account_id);
       const legacyAccountMatches = Boolean(contextData.account_id) && legacy.status === "fulfilled" && legacy.value.account_id === contextData.account_id;
       const schedules = legacyAccountMatches && migrations.status === "fulfilled" ? (legacy.value.items || []).filter((item) => !item.action && !visibleMigrations.some((migration) => migration.job_id === item.id)) : [];
       state.scheduledContext = contextData;
       state.scheduledCommandCatalog = Array.isArray(contextData.command_catalog) ? contextData.command_catalog : [];
       state.legacyMigrations = visibleMigrations;
       state.schedules = schedules;
+      const directory = [...(contextData.groups || []), ...(contextData.contacts || [])];
+      const withTargetNames = (item) => ({...item, targets: (item.targets || []).map((target) => ({...target,
+        name: directory.find((entry) => entry.type === target.type && entry.id === target.id)?.name || target.name || target.id}))});
+      state.agentSchedules = legacyAccountMatches && scheduledAccountMatches(contextData.account_id)
+        ? (legacy.value.agent_items || []).filter((item) => item.account_id === contextData.account_id && item.action === "agent").map(withTargetNames) : [];
       const message = $("#scheduleContextMessage");
       message.textContent = contextData.message || (!contextData.account_id ? "请先登录机器人微信账号，再选择发送对象。可以先填写任务草稿。" : "");
       if (context.status === "rejected" && state.legacyMigrations.length) message.textContent += " 可继续完成下方已确认的旧任务迁移。";
@@ -156,6 +165,7 @@ window.createScheduledTasks = function (helpers) {
       state.scheduledContext = null;
       state.scheduledCommandCatalog = [];
       state.schedules = [];
+      state.agentSchedules = [];
       state.legacyMigrations = [];
       renderSchedules();
       renderGroupAnalysisMigration();
@@ -201,16 +211,21 @@ window.createScheduledTasks = function (helpers) {
     if (changed([previous?.schedules, previous?.migrations], [state.schedules, state.legacyMigrations])) renderSchedules();
     const migration = (context) => [context?.account_id, context?.legacy_group_analysis, context?.groups];
     if (changed(migration(previous?.context), migration(state.scheduledContext))) renderGroupAnalysisMigration();
-    if (changed([previous?.context.items, previous?.schedules], [state.scheduledContext?.items, state.schedules])) renderScheduledTasks();
+    if (changed([previous?.context.items, previous?.schedules, previous?.agents], [state.scheduledContext?.items, state.schedules, state.agentSchedules])) renderScheduledTasks();
     if (previous && (previous.schedules.length || previous.migrations.length)) $("#legacyScheduleSection").open = legacyOpen;
     if (previous && scroll) scroll.scrollTop = scrollTop;
   }
 
+  function invalidateAgentSchedules() {
+    state.agentSchedules = [];
+    const runs = $("#scheduledTaskRuns");
+    if (runs?.dataset?.agentAccount) { showScheduledList(); runs.innerHTML = ""; delete runs.dataset.agentAccount; }
+    renderScheduledTasks();
+  }
+
   function groupAnalysisMigrationAccount(context = {}) {
     const legacy = context.legacy_group_analysis;
-    if (!["confirmed", "prepared"].includes(legacy?.state)) return context.account_id || "";
-    if (context.account_id && legacy.account_id && context.account_id !== legacy.account_id) return "";
-    return legacy.account_id || context.account_id || "";
+    return context.account_id && legacy?.account_id === context.account_id ? context.account_id : "";
   }
 
   function renderGroupAnalysisMigration() {
@@ -223,7 +238,7 @@ window.createScheduledTasks = function (helpers) {
     const selectedDays = sameAccount ? $("#analysisMigrationDays")?.value ?? null : null;
     const expanded = sameAccount ? $("details", root)?.open ?? null : null;
     root.dataset.account = context.account_id || "";
-    root.hidden = !legacy || ["none", "complete"].includes(legacy.state);
+    root.hidden = !groupAnalysisMigrationAccount(context) || ["none", "complete"].includes(legacy.state);
     if (root.hidden) { root.replaceChildren(); return; }
     const groups = context.groups || [];
     const resuming = ["confirmed", "prepared"].includes(legacy.state);
@@ -315,8 +330,14 @@ window.createScheduledTasks = function (helpers) {
     ].filter(Boolean).join("；");
   }
 
+  function agentScheduleCanChangeTime(item) {
+    return String(item.cron_expression || "").trim().split(/\s+/).length === 5;
+  }
+
   function scheduledTaskItems() {
-    return state.scheduledContext?.items || [];
+    const account = state.scheduledContext?.account_id;
+    const agents = account && scheduledAccountMatches(account) ? state.agentSchedules || [] : [];
+    return [...(state.scheduledContext?.items || []), ...agents].filter((item) => account && item.account_id === account);
   }
 
   function scheduledTime(value) {
@@ -365,7 +386,7 @@ window.createScheduledTasks = function (helpers) {
 
   function scheduledStatus(item) {
     if (item.draft || item.status === "draft") return "草稿";
-    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", checking: "正在确认", blocked: "待处理", needs_review: "需要检查", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
+    return ({enabled: "已启用", paused: "已暂停", completed: "已完成", running: "正在执行", checking: "正在确认", blocked: "待处理", needs_review: "需要检查", waiting_account: "等待账号登录", waiting_runtime: "等待机器人就绪", failed: "执行失败"})[item.status] || item.status || (item.enabled ? "已启用" : "已暂停");
   }
 
   function scheduledResultText(value) {
@@ -375,6 +396,8 @@ window.createScheduledTasks = function (helpers) {
   }
 
   function renderScheduledTasks() {
+    const account = state.scheduledContext?.account_id;
+    $("#scheduledAccountLabel").textContent = account && scheduledAccountMatches(account) ? `当前微信账号：${account}` : "正在确认微信账号";
     const all = scheduledTaskItems();
     const total = all.length + state.schedules.length;
     $("#scheduleTotal").textContent = total;
@@ -397,11 +420,11 @@ window.createScheduledTasks = function (helpers) {
     $("#scheduledTaskHead").hidden = items.length === 0;
     $("#scheduledTaskTable").classList.toggle("is-empty", items.length === 0);
     $("#scheduledTaskRows").innerHTML = items.length ? items.map((item) => `<tr>
-      <td><button class="row-action scheduled-name" data-task-action="edit" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name || scheduledName(item))}</button><small>${escapeHtml(SCHEDULED_ACTIONS[item.action] || "定时任务")}</small></td>
+      <td><button class="row-action scheduled-name" data-task-action="${item.action === "agent" ? "runs" : "edit"}" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name || scheduledName(item))}</button><small>${escapeHtml(item.action === "agent" ? "AI 聊天任务" : SCHEDULED_ACTIONS[item.action] || "定时任务")}</small></td>
       <td><span>${escapeHtml(scheduledTargetText(item.targets))}</span><small class="schedule-target-names">${escapeHtml((item.targets || []).map((entry) => entry.name || "待确认对象").join("、"))}</small></td>
       <td>${escapeHtml(item.schedule_text || scheduledTimeText(item.schedule))}<small>下次：${escapeHtml(scheduledTime(item.next_run_time))}</small></td>
       <td><span class="task-status ${["enabled", "running"].includes(item.status) ? "running" : ["blocked", "needs_review", "waiting_account", "waiting_runtime"].includes(item.status) ? "warning" : ""}">${escapeHtml(scheduledStatus(item))}</span><small>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</small></td>
-      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">记录</button><button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button><button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="schedule-empty-cell"><div class="schedule-empty-state"><div class="schedule-empty-icon" aria-hidden="true">${icon("i-clock")}</div><h2>${all.length ? "没有符合条件的任务" : "暂无定时任务"}</h2><p>${all.length ? "调整内容、发送对象或状态筛选，查看其他任务。" : "可创建群聊分析日报、每日天气预报、定时资讯或一句提醒，选择发送对象后自动触发。"}</p><button class="button secondary schedule-empty-cta" id="emptyNewScheduledTask">${all.length ? "+ 新建任务" : "+ 创建第一个定时任务"}</button></div></td></tr>`;
+      <td><div class="row-actions"><button class="row-action" data-task-action="${item.draft ? "edit" : "toggle"}" data-id="${escapeHtml(item.id)}">${item.draft ? "继续编辑" : item.enabled ? "暂停" : "启用"}</button><button class="row-action" data-task-action="runs" data-id="${escapeHtml(item.id)}">${item.action === "agent" ? "说明" : "记录"}</button>${item.action === "agent" ? (agentScheduleCanChangeTime(item) ? `<button class="row-action" data-task-action="time" data-id="${escapeHtml(item.id)}">改时间</button>` : "") : `<button class="row-action" data-task-action="copy" data-id="${escapeHtml(item.id)}">复制</button>`}<button class="row-action delete" data-task-action="delete" data-id="${escapeHtml(item.id)}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="schedule-empty-cell"><div class="schedule-empty-state"><div class="schedule-empty-icon" aria-hidden="true">${icon("i-clock")}</div><h2>${all.length ? "没有符合条件的任务" : "暂无定时任务"}</h2><p>${all.length ? "调整内容、发送对象或状态筛选，查看其他任务。" : "可创建群聊分析日报、每日天气预报、定时资讯或一句提醒，选择发送对象后自动触发。"}</p><button class="button secondary schedule-empty-cta" id="emptyNewScheduledTask">${all.length ? "+ 新建任务" : "+ 创建第一个定时任务"}</button></div></td></tr>`;
     $$('[data-task-action]', $("#scheduledTaskRows")).forEach((button) => {
       button.disabled = state.scheduledContext?.loading === true;
       button.addEventListener("click", () => scheduledTaskAction(button.dataset.taskAction, button.dataset.id));
@@ -598,7 +621,7 @@ window.createScheduledTasks = function (helpers) {
     if (editor.action === "group_analysis") {
       if (editor.targets.some((target) => target.type !== "group")) return {ready: false, message: "群聊分析只支持群聊。"};
       const legacy = context.legacy_group_analysis;
-      if (legacy && ["available", "confirmed", "prepared", "blocked"].includes(legacy.state)) return {ready: false, message: "请先在任务列表迁移旧日报；当前内容可保存为草稿。"};
+      if (legacy?.account_id === context.account_id && ["available", "confirmed", "prepared", "blocked"].includes(legacy.state)) return {ready: false, message: "请先在任务列表迁移旧日报；当前内容可保存为草稿。"};
     }
     if (!capability || !capability.ready) return {ready: false, message: capability?.message || "所需功能尚未就绪，可以先保存草稿。", feature: true};
     if (!context.runtime_ready) return {ready: false, message: "定时发送能力尚未就绪，可以先保存草稿。"};
@@ -790,7 +813,12 @@ window.createScheduledTasks = function (helpers) {
   async function scheduledTaskAction(action, id) {
     if (state.scheduledBusy) return;
     const item = scheduledTaskItems().find((entry) => entry.id === id);
-    if (!item) return;
+    if (!item || !scheduledAccountMatches(item.account_id)) return;
+    if (item.action === "agent") {
+      if (action === "runs") { await showScheduledRuns(item); return; }
+      if (["toggle", "time", "delete"].includes(action)) await scheduleAction(action === "time" ? "edit" : action, id);
+      return;
+    }
     if (action === "edit" || action === "copy") { await openScheduledEditor(item, action === "copy"); return; }
     if (action === "runs") { await showScheduledRuns(item); return; }
     confirmAction({title: action === "delete" ? "永久删除定时任务？" : item.enabled ? "暂停定时任务？" : "启用定时任务？", message: action === "delete" ? `“${item.name}”将永久删除，重启或升级后也不会恢复。已提交微信的消息无法撤回。` : `${item.name}：${item.schedule_text || scheduledTimeText(item.schedule)}，发送给${scheduledTargetText(item.targets)}。`, confirmText: action === "delete" ? "永久删除" : item.enabled ? "暂停任务" : "启用任务", intent: action === "delete" ? "danger" : action === "toggle" && !item.enabled ? "primary" : "secondary", onConfirm: async () => {
@@ -802,11 +830,17 @@ window.createScheduledTasks = function (helpers) {
 
   async function showScheduledRuns(item) {
     const root = $("#scheduledTaskRuns");
+    root.dataset.agentAccount = item.action === "agent" ? item.account_id : "";
     $("#scheduleListView").hidden = true; $("#scheduledTaskEditor").hidden = true; root.hidden = false;
-    $("#scheduleHeading").textContent = "执行记录";
-    root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · 执行记录</h2><p>已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
+    $("#scheduleHeading").textContent = item.action === "agent" ? "任务说明 / 最近执行" : "执行记录";
+    root.innerHTML = `<div class="schedule-runs-heading"><button class="button ghost small" id="scheduledRunsBack">返回任务列表</button><h2>${escapeHtml(item.name)} · ${item.action === "agent" ? "说明 / 最近执行" : "执行记录"}</h2><p>${item.action === "agent" ? "这里只保留最近一次执行状态。所有时间为北京时间。" : "已提交微信表示发送请求已接受，不代表对方已读。所有时间为北京时间。"}</p></div><div id="scheduledRunsBody" class="loading-row">正在读取…</div>`;
     $("#scheduledRunsBack").addEventListener("click", showScheduledList);
     const body = $("#scheduledRunsBody");
+    if (item.action === "agent") {
+      body.className = "schedule-runs-body";
+      body.innerHTML = `<article class="schedule-run"><h3>任务说明</h3><p>${escapeHtml(item.description || "未填写任务说明")}</p><p>最近执行：${escapeHtml(scheduledTime(item.last_run_at))}</p><p>${escapeHtml(item.status_message || scheduledResultText(item.last_result))}</p><p>执行时间：${escapeHtml(item.schedule_text || "待确认")}</p><p>发送到：${escapeHtml((item.targets || []).map((target) => target.name || target.id).join("、"))}</p></article>`;
+      return;
+    }
     const current = () => body.isConnected && !root.hidden
       && state.scheduledContext?.account_id === item.account_id;
     try {
@@ -874,26 +908,35 @@ window.createScheduledTasks = function (helpers) {
   }
 
   async function scheduleAction(action, id) {
-    const item = state.schedules.find((value) => value.id === id);
-    if (!item) return;
+    const item = [...state.schedules, ...(state.agentSchedules || [])].find((value) => value.id === id);
+    if (!item || !scheduledAccountMatches(state.scheduledContext?.account_id || "")
+        || (item.account_id && item.account_id !== state.scheduledContext?.account_id)) return;
+    const expectedAccount = state.scheduledContext?.account_id;
+    const requireCurrent = () => {
+      if (!expectedAccount || !scheduledAccountMatches(expectedAccount) || state.scheduledContext?.account_id !== expectedAccount) {
+        throw new Error("微信账号已变化，请刷新任务列表。");
+      }
+    };
     if (action === "toggle") {
-      try { const result = await api("set_schedule_enabled", id, !item.enabled); await loadSchedules(); toast(result.message || (item.enabled ? "任务已暂停。" : "任务已开启。")); }
+      try { requireCurrent(); const result = await api("set_schedule_enabled", id, !item.enabled); await loadSchedules(); toast(result.message || (item.enabled ? "任务已暂停。" : "任务已开启。")); }
       catch (error) { reportError(error); }
       return;
     }
     if (action === "edit") {
-      const parts = item.cron_expression.split(" ");
+      if (item.action === "agent" && !agentScheduleCanChangeTime(item)) return;
+      const parts = String(item.cron_expression || "").split(" ");
       const clock = parts.length === 5 && Number.isFinite(Number(parts[0])) && Number.isFinite(Number(parts[1])) ? `${String(parts[1]).padStart(2, "0")}:${String(parts[0]).padStart(2, "0")}` : "08:00";
-      confirmAction({ title: "修改执行时间", message: `${item.name}当前安排为“${item.schedule_text}”。`, confirmText: "保存时间", field: {label: "每天执行时间", type: "time", value: clock}, onConfirm: async (value) => { const result = await api("update_schedule_time", id, value); await loadSchedules(); toast(result.message || "执行时间已更新。"); } });
+      confirmAction({ title: "修改执行时间", message: `${item.name}当前安排为“${item.schedule_text}”。`, confirmText: "保存时间", field: {label: "执行时间", type: "time", value: clock}, onConfirm: async (value) => { requireCurrent(); const result = await api("update_schedule_time", id, value); await loadSchedules(); toast(result.message || "执行时间已更新。"); } });
       return;
     }
-    confirmAction({ title: "删除定时任务？", message: `“${item.name}”删除后将停止执行，相关功能的其他设置不受影响。`, confirmText: "删除任务", onConfirm: async () => { await api("delete_schedule", id); await loadSchedules(); toast("定时任务已删除。 "); } });
+    confirmAction({ title: "删除定时任务？", message: `“${item.name}”删除后将停止执行，相关功能的其他设置不受影响。`, confirmText: "删除任务", onConfirm: async () => { requireCurrent(); await api("delete_schedule", id); await loadSchedules(); toast("定时任务已删除。 "); } });
   }
 
   return {
     SCHEDULED_ACTIONS,
     guardScheduledDraft,
     invalidateScheduledContext,
+    invalidateAgentSchedules,
     loadSchedules,
     openScheduledEditor,
     openScheduledForChat,

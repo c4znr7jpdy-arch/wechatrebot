@@ -129,8 +129,9 @@ def test_lightweight_context_reads_current_account_without_waiting_for_directori
     assert context["groups"] == context["contacts"] == []
 
 
+@pytest.mark.parametrize("lightweight", [False, True])
 @pytest.mark.parametrize("failure", [False, True])
-def test_lightweight_context_never_reads_store_without_verified_account(tmp_path, failure):
+def test_context_never_reads_store_without_verified_account(tmp_path, failure, lightweight):
     value = service(tmp_path)
     def identity():
         if failure:
@@ -140,10 +141,134 @@ def test_lightweight_context_never_reads_store_without_verified_account(tmp_path
     value.store.list = lambda _account: pytest.fail("unverified identity must not read history")
     value._snapshot = lambda **_kwargs: pytest.fail("no directory fallback for unknown account")
 
-    context = value.context(True)
+    context = value.context(lightweight)
 
     assert context["account_id"] == ""
     assert context["items"] == []
+
+
+def test_full_context_does_not_trust_old_account_snapshots(tmp_path):
+    value = service(tmp_path)
+    value.store.save(payload())
+    value.account_hint = lambda: "wxid_other"
+    value.store.list = lambda _account: pytest.fail("old health and directories cannot authorize task reads")
+
+    context = value.context()
+
+    assert context["account_id"] == ""
+    assert context["items"] == context["groups"] == context["contacts"] == []
+    assert context["runtime_ready"] is False
+
+
+@pytest.mark.parametrize("lightweight", [False, True])
+def test_context_discards_tasks_if_account_changes_during_store_read(tmp_path, lightweight):
+    value = service(tmp_path)
+    value.store.save(payload())
+    current = [ACCOUNT]
+    value.account_hint = lambda: current[0]
+    original = value.store.list
+
+    def read(account):
+        items = original(account)
+        current[0] = "wxid_other"
+        return items
+
+    value.store.list = read
+
+    context = value.context(lightweight)
+
+    assert context["account_id"] == ""
+    assert context["items"] == context["groups"] == context["contacts"] == []
+
+
+def test_full_context_discards_directory_response_if_account_changes(tmp_path):
+    value = service(tmp_path)
+    current = [ACCOUNT]
+    value.account_hint = lambda: current[0]
+    original = value._snapshot
+
+    def snapshot():
+        result = original()
+        current[0] = "wxid_other"
+        return result
+
+    value._snapshot = snapshot
+    value.store.list = lambda _account: pytest.fail("account changed before task read")
+
+    context = value.context()
+
+    assert context["account_id"] == ""
+    assert context["items"] == []
+
+
+def test_full_context_switches_to_new_accounts_tasks(tmp_path):
+    value = service(tmp_path)
+    value.store.save(payload(draft=True))
+    other = value.store.save({**payload(draft=True), "id": "other-task", "account_id": "wxid_other"})
+    snapshot = value._snapshot()
+    value._snapshot = lambda: tuple({**part, "account_id": "wxid_other"} for part in snapshot)
+    value.account_hint = lambda: "wxid_other"
+
+    context = value.context()
+
+    assert context["account_id"] == "wxid_other"
+    assert [item["id"] for item in context["items"]] == [other["id"]]
+
+
+def test_offline_drafts_use_verified_current_account_without_runtime_snapshot(tmp_path):
+    value = service(tmp_path)
+    value._snapshot = lambda **_kwargs: pytest.fail("draft save only needs the live account identity")
+    saved = value.save(payload(draft=True))["item"]
+    value._snapshot = lambda: (
+        {"account_id": ACCOUNT, "items": [], "stale": True},
+        {"account_id": ACCOUNT, "items": [], "stale": True},
+        {"online": False, "runtime_ready": False, "message": "机器人尚未就绪。"},
+    )
+
+    context = value.context()
+
+    assert context["account_id"] == ACCOUNT
+    assert [item["id"] for item in context["items"]] == [saved["id"]]
+    assert context["runtime_ready"] is False
+
+
+@pytest.mark.parametrize("operation", ["draft", "active", "pause", "delete"])
+def test_old_snapshots_cannot_authorize_task_mutations_after_account_switch(tmp_path, operation):
+    value = service(tmp_path)
+    saved = value.store.save(payload())
+    value.account_hint = lambda: "wxid_other"
+    value._snapshot = lambda **_kwargs: pytest.fail("old snapshots must not authorize task mutations")
+
+    with pytest.raises(ValueError, match="账号"):
+        if operation in {"draft", "active"}:
+            value.save({**payload(draft=operation == "draft"), "revision": saved["revision"]})
+        elif operation == "pause":
+            value.set_enabled(ACCOUNT, saved["id"], False, saved["revision"])
+        else:
+            value.delete(ACCOUNT, saved["id"], saved["revision"])
+
+    unchanged = value.store.get(ACCOUNT, saved["id"])
+    assert unchanged["revision"] == saved["revision"]
+    assert unchanged["enabled"] is True
+
+
+def test_live_validation_rechecks_account_after_directory_read(tmp_path):
+    value = service(tmp_path)
+    current = [ACCOUNT]
+    value.account_hint = lambda: current[0]
+    original = value._snapshot
+
+    def snapshot(**kwargs):
+        result = original(**kwargs)
+        current[0] = "wxid_other"
+        return result
+
+    value._snapshot = snapshot
+
+    with pytest.raises(ValueError, match="账号"):
+        value.save(payload())
+
+    assert value.store.list(ACCOUNT) == []
 
 
 def test_schedule_context_api_preserves_default_full_contract():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from contextvars import ContextVar
 from functools import wraps
 import inspect
@@ -34,6 +35,7 @@ _READ_ONEBOT_ACTIONS = frozenset({
 })
 _EVENT_RUN_ID_FIELD = "_wechatrebot_license_run_id"
 _action_session: ContextVar[str | None] = ContextVar("wechatrebot_license_action", default=None)
+_action_account: ContextVar[str] = ContextVar("wechatrebot_action_account", default="")
 _PROVIDER_CALLS = frozenset({
     "text_chat", "text_chat_stream", "get_text", "get_audio", "get_audio_stream",
     "get_embedding", "get_embeddings", "get_embeddings_batch", "rerank",
@@ -143,6 +145,10 @@ class RuntimeGuard:
     def require(self, expected_account: str = "", *, session: str | None = None) -> dict:
         state = self.status(expected_account)
         if not state.get("enabled"):
+            # Account-bound requests remain scoped even on legacy channels.
+            # Unscoped legacy calls retain their existing no-probe behavior.
+            if expected_account and self.account_source() != expected_account:
+                raise LicenseError("account_mismatch", "微信账号已变化，原账号操作已取消。")
             return state
         if session is not None and session != state.get("run_id"):
             raise LicenseError("automation_paused", state.get("message") or "自动化已暂停，请在管理器中确认恢复。")
@@ -202,7 +208,7 @@ class RuntimeGuard:
 
     def require_hook(self, path: str) -> None:
         if path not in _READ_HOOK_PATHS:
-            self.require(session=_action_session.get())
+            self.require(_action_account.get(), session=_action_session.get())
 
     def refresh_once(self) -> dict:
         # A network request can cross expiry or a login change. Always re-read
@@ -257,6 +263,14 @@ def guard_bridge_action(function):
     @wraps(function)
     async def action(self, request, *args, **kwargs):
         guard = runtime_guard()
+        resolve_params = getattr(self, "_params", None)
+        params = resolve_params(request) if callable(resolve_params) else request.get("params", request.get("data", {}))
+        supplied_account = str((params.get("self_id") if isinstance(params, Mapping) else "")
+                               or request.get("self_id") or "").strip()
+        inherited_account = _action_account.get()
+        if supplied_account and inherited_account and supplied_account != inherited_account:
+            raise LicenseError("account_mismatch", "微信账号已变化，原账号操作已取消。")
+        expected_account = inherited_account or supplied_account
         inherited = _action_session.get()
         if inherited is None:
             state = guard.status()
@@ -264,11 +278,13 @@ def guard_bridge_action(function):
         else:
             session = inherited
         if request.get("action") not in _READ_ONEBOT_ACTIONS:
-            guard.require(session=session)
+            guard.require(expected_account, session=session)
         token = _action_session.set(session)
+        account_token = _action_account.set(expected_account)
         try:
             return await function(self, request, *args, **kwargs)
         finally:
+            _action_account.reset(account_token)
             _action_session.reset(token)
     return action
 

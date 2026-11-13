@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -114,6 +115,36 @@ def _schedule_text(expression: str | None) -> str:
     return expression
 
 
+def _utc_time(value: object) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return ""
+    return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).isoformat()
+
+
+def _agent_item(row: sqlite3.Row, owner: str) -> dict[str, Any]:
+    payload = json.loads(row["payload"] or "{}")
+    kind, target = _target_identity(payload)
+    error = sanitize_log_text(str(row["last_error"] or ""))
+    enabled = bool(row["enabled"])
+    return {
+        "id": str(row["job_id"]), "account_id": owner, "action": "agent", "source_kind": "agent",
+        "name": sanitize_log_text(str(row["name"] or "AI 定时任务")),
+        "description": sanitize_log_text(str(payload.get("note") or row["description"] or "")),
+        "targets": [{"type": "private" if kind == "direct" else kind, "id": target, "name": target}],
+        "enabled": enabled, "draft": False,
+        "status": "failed" if error and enabled else "enabled" if enabled else "paused",
+        "status_message": error,
+        "cron_expression": str(row["cron_expression"] or ""),
+        "schedule_text": _schedule_text(row["cron_expression"]),
+        "next_run_time": _utc_time(row["next_run_time"]) if enabled else "",
+        "last_run_at": _utc_time(row["last_run_at"]), "last_result": error,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ScheduleItem:
     id: str
@@ -200,19 +231,22 @@ class ScheduleService:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT job_id, name, description, cron_expression, payload,
-                       enabled, status, last_run_at, next_run_time, last_error
+                SELECT *
                 FROM cron_jobs ORDER BY enabled DESC, next_run_time, name
                 """
             ).fetchall()
         items: list[ScheduleItem] = []
-        unassigned = 0
+        agents: list[dict[str, Any]] = []
         for row in rows:
             owner = self._owner(row)
-            if not owner:
-                unassigned += 1
-                continue
             if owner != account:
+                continue
+            if "job_type" in row.keys() and row["job_type"] == "active_agent":
+                try:
+                    agent = _agent_item(row, owner)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                agents.append(agent)
                 continue
             raw_name = str(row["name"] or "")
             if raw_name in _REMOVED_TASK_NAMES or any(
@@ -257,8 +291,9 @@ class ScheduleService:
             "running": sum(1 for item in items if item.enabled),
             "paused": sum(1 for item in items if not item.enabled),
             "account_id": account,
-            "unassigned_count": unassigned,
-            "message": "部分旧任务缺少账号归属，已保留原数据并限制操作。" if unassigned else "",
+            "agent_items": agents,
+            "unassigned_count": 0,
+            "message": "",
         }
 
     def _remove_obsolete_default_checkins(self) -> None:
@@ -291,13 +326,21 @@ class ScheduleService:
             raise ValueError("当前还没有定时任务。")
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT job_id, name, cron_expression, payload FROM cron_jobs WHERE job_id = ?",
+                "SELECT * FROM cron_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
             raise ValueError("没有找到这个定时任务。")
         self._authorize_job(row)
         return row
+
+    def _validate_job_source(self, row: sqlite3.Row) -> None:
+        if "job_type" not in row.keys() or row["job_type"] != "active_agent":
+            self._validate_source(str(row["name"]))
+
+    def _update_job_source(self, row: sqlite3.Row, **values: Any) -> None:
+        if "job_type" not in row.keys() or row["job_type"] != "active_agent":
+            self._update_source(str(row["name"]), **values)
 
     def _engine_update(self, job_id: str, payload: dict[str, object]) -> bool:
         if not self.engine.is_available():
@@ -467,10 +510,10 @@ class ScheduleService:
 
     def set_enabled(self, job_id: str, enabled: bool) -> dict[str, object]:
         row = self._job(job_id)
-        self._validate_source(str(row["name"]))
+        self._validate_job_source(row)
         online = self._engine_update(job_id, {"enabled": enabled})
         self._job(job_id)
-        self._update_source(str(row["name"]), enabled=enabled)
+        self._update_job_source(row, enabled=enabled)
         if not online:
             self._offline_update(
                 job_id,
@@ -493,10 +536,10 @@ class ScheduleService:
         if len(parts) != 5:
             raise ValueError("这个任务暂不支持修改执行时间。")
         expression = " ".join((str(minute), str(hour), *parts[2:]))
-        self._validate_source(str(row["name"]))
+        self._validate_job_source(row)
         online = self._engine_update(job_id, {"cron_expression": expression})
         self._job(job_id)
-        self._update_source(str(row["name"]), clock=(hour, minute))
+        self._update_job_source(row, clock=(hour, minute))
         if not online:
             self._offline_update(job_id, cron_expression=expression, next_run_time=None)
         return {"updated": True, "cron_expression": expression, "applied": online,
@@ -504,12 +547,12 @@ class ScheduleService:
 
     def delete(self, job_id: str) -> dict[str, object]:
         row = self._job(job_id)
-        self._validate_source(str(row["name"]))
+        self._validate_job_source(row)
         deleted_online = self.engine.is_available()
         self._authorize_job(row)
         if deleted_online:
             self.engine.request("DELETE", f"/api/v1/cron/jobs/{quote(job_id, safe='')}")
-        self._update_source(str(row["name"]), delete=True)
+        self._update_job_source(row, delete=True)
         if not deleted_online:
             with self._connect() as connection:
                 connection.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
