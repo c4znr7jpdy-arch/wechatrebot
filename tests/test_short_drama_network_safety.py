@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import ModuleType
 
 import pytest
 
@@ -20,16 +21,23 @@ def _load_patched_search(tmp_path: Path):
     checkout.mkdir()
     subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
     shutil.copy2(source, checkout / "search.py")
-    patch = ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzz-network-safety.patch"
-    subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
-    subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
-    catalog_patch = ROOT / "patches/astrbot-plugin-jiang_short_drama--zzzzzzzz-catalog-sources.patch"
-    subprocess.run(["git", "apply", "--check", str(catalog_patch)], cwd=checkout, check=True)
-    subprocess.run(["git", "apply", str(catalog_patch)], cwd=checkout, check=True)
+    shutil.copy2(ROOT / "runtime/jiang_short_drama/title_search.py", checkout / "title_search.py")
+    for name in (
+        "astrbot-plugin-jiang_short_drama--zzzz-network-safety.patch",
+        "astrbot-plugin-jiang_short_drama--zzzzzzzz-catalog-sources.patch",
+        "astrbot-plugin-jiang_short_drama--zzzzzzzzz-title-search.patch",
+    ):
+        patch = ROOT / "patches" / name
+        subprocess.run(["git", "apply", "--check", str(patch)], cwd=checkout, check=True)
+        subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
     patched_source = (checkout / "search.py").read_text(encoding="utf-8")
     compile(patched_source, str(checkout / "search.py"), "exec")
 
-    module_name = f"short_drama_safe_search_{tmp_path.name}"
+    package_name = f"short_drama_safe_search_{tmp_path.name}"
+    package = ModuleType(package_name)
+    package.__path__ = [str(checkout)]
+    sys.modules[package_name] = package
+    module_name = f"{package_name}.search"
     spec = importlib.util.spec_from_file_location(module_name, checkout / "search.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

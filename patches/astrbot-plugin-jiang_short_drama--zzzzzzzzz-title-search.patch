@@ -1,0 +1,295 @@
+diff --git a/search.py b/search.py
+--- a/search.py
++++ b/search.py
+@@ -9,10 +9,8 @@
+ import re
+ import socket
+ import time
+-import unicodedata
+ from dataclasses import dataclass, replace
+ from datetime import datetime
+-from difflib import SequenceMatcher
+ from typing import Any, Iterable
+ from urllib.parse import urljoin, urlsplit
+ 
+@@ -20,8 +18,14 @@
+ from aiohttp.abc import AbstractResolver
+ from aiohttp.resolver import DefaultResolver
+ 
++from .title_search import (
++    DEFAULT_MIN_FUZZY_SCORE, EXACT_TITLE_SCORE, MAX_FALLBACK_TERMS,
++    fuzzy_search_terms, known_title_hints, normalize_title, title_score,
++)
++
+ 
+ logger = logging.getLogger("jiang_short_drama")
++_TITLE_SEARCH_TIMEOUT_SECONDS = 22.0
+ _MAX_REMOTE_BODY_BYTES = 5_000_000
+ 
+ 
+@@ -248,23 +252,8 @@
+ _EPISODE_RANGE_RE = re.compile(
+     r"第?\s*(?P<start>\d+)\s*(?:[-~～—至到]\s*(?P<end>\d+)\s*)?集"
+ )
+-EXACT_TITLE_SCORE = 10_000
+-DEFAULT_MIN_FUZZY_SCORE = 3_000
+ _PERSON_ACTOR_SCORE = 8_000
+ _PERSON_DIRECTOR_SCORE = 7_000
+-_KNOWN_TITLE_HINTS: dict[str, tuple[str, ...]] = {
+-    "全球杀机": ("全球杀戮",),
+-    "腊肉": ("致命的腊肉", "腊肉风云"),
+-}
+-_NOISE_RE = re.compile(
+-    r"(?:全集|高清|超清|蓝光|修复版|国语|中字|中文字幕|完整版|无删减|"
+-    r"4k|8k|bd|hd|web-?dl|webrip|bluray)$",
+-    re.IGNORECASE,
+-)
+-_BRACKET_NOISE_RE = re.compile(
+-    r"[（(【\[].*?(?:全集|高清|超清|4k|8k|国语|中字|完整版).*?[）)】\]]",
+-    re.IGNORECASE,
+-)
+ _VERSION_TITLE_SUFFIX_RE = re.compile(
+     r"(?:动画版|动画|动漫版|电视剧版|电视剧|真人版|新版|老版)$",
+     re.IGNORECASE,
+@@ -510,76 +499,6 @@
+     return None
+ 
+ 
+-def normalize_title(value: str) -> str:
+-    """生成仅用于匹配的标题，不改变最终展示标题。"""
+-    text = unicodedata.normalize("NFKC", value or "").strip().lower()
+-    text = _BRACKET_NOISE_RE.sub("", text)
+-    while True:
+-        cleaned = _NOISE_RE.sub("", text).strip()
+-        if cleaned == text:
+-            break
+-        text = cleaned
+-    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
+-
+-
+-def title_score(query: str, candidate: str) -> int:
+-    """标题越接近输入分数越高；短标题的泛匹配会受到明显惩罚。"""
+-    wanted = normalize_title(query)
+-    actual = normalize_title(candidate)
+-    if not wanted or not actual:
+-        return 0
+-    if wanted == actual:
+-        return 10_000
+-    if actual.startswith(wanted):
+-        return 7_000 - max(0, len(actual) - len(wanted)) * 20
+-    if wanted.startswith(actual):
+-        return 5_500 - max(0, len(wanted) - len(actual)) * 30
+-    if wanted in actual:
+-        return 4_000 - max(0, len(actual) - len(wanted)) * 25
+-    if actual in wanted:
+-        return 3_000 - max(0, len(wanted) - len(actual)) * 35
+-
+-    # 容忍一个错字，例如“全球杀机”与“全球杀戮：……”。只比较等长窗口，
+-    # 避免长标题的公共字过多导致误判。
+-    if len(wanted) >= 3 and len(actual) >= len(wanted):
+-        window_size = len(wanted)
+-        best_ratio = max(
+-            SequenceMatcher(
+-                None,
+-                wanted,
+-                actual[index : index + window_size],
+-                autojunk=False,
+-            ).ratio()
+-            for index in range(len(actual) - window_size + 1)
+-        )
+-        if best_ratio >= 0.75:
+-            return int(3_000 + best_ratio * 4_000)
+-
+-    overlap = len(set(wanted) & set(actual))
+-    ratio = overlap / max(len(set(wanted)), 1)
+-    return int(ratio * 1_000) if ratio >= 0.7 else 0
+-
+-
+-def known_title_hints(query: str) -> tuple[str, ...]:
+-    return _KNOWN_TITLE_HINTS.get(normalize_title(query), ())
+-
+-
+-def fuzzy_search_terms(query: str) -> tuple[str, ...]:
+-    """生成安全的二次检索词；短词不盲目拆成单字。"""
+-    hints = known_title_hints(query)
+-    if hints:
+-        return hints
+-
+-    text = (query or "").strip()
+-    if len(text) < 4:
+-        return ()
+-    terms: list[str] = []
+-    for value in (text[:-1].strip(), text[1:].strip()):
+-        if len(value) >= 2 and value != text and value not in terms:
+-            terms.append(value)
+-    return tuple(terms)
+-
+-
+ def candidate_pool(
+     candidates: Iterable[SearchResult],
+     *,
+@@ -702,7 +621,7 @@
+         if media_type and not is_media_category(media_type, category):
+             continue
+         title = str(item.get("vod_name") or "").strip()
+-        score = title_score(query, title)
++        score = title_score(query, title, candidate_year=str(item.get('vod_year') or ''))
+         if score <= 0:
+             continue
+         result = _result_from_item(item, source_name, score)
+@@ -1048,6 +967,49 @@
+         )
+         return result
+ 
++    async def _search_title_candidates(
++        self,
++        session: aiohttp.ClientSession,
++        semaphore: asyncio.Semaphore,
++        query: str,
++        media_type: str | None,
++    ) -> list[SearchResult]:
++        """Try bounded metadata waves while preserving the original title match."""
++        deadline = time.monotonic() + _TITLE_SEARCH_TIMEOUT_SECONDS
++        candidates: list[SearchResult] = []
++        terms = (query, *fuzzy_search_terms(query)[:MAX_FALLBACK_TERMS])
++        for term in dict.fromkeys(terms):
++            remaining = deadline - time.monotonic()
++            if remaining <= 0:
++                break
++            completed: dict[int, list[SearchResult]] = {}
++
++            async def load_source(index: int, source: Source) -> None:
++                completed[index] = await self._search_source_variants(
++                    session, semaphore, source, term,
++                    match_query=query, media_type=media_type,
++                )
++
++            try:
++                await asyncio.wait_for(
++                    asyncio.gather(*(load_source(index, source)
++                                     for index, source in enumerate(self.sources))),
++                    timeout=remaining,
++                )
++            except asyncio.TimeoutError:
++                logger.info("[SHORT_DRAMA] title metadata deadline reached")
++            candidates = self._dedupe_results(
++                candidates + [item for index in sorted(completed)
++                              for item in completed[index]]
++            )
++            reliable, _ = candidate_pool(
++                (item for item in candidates if is_selectable_variant(item)),
++                min_fuzzy_score=self.min_fuzzy_score,
++            )
++            if reliable or time.monotonic() >= deadline:
++                break
++        return candidates
++
+     async def search_variants(
+         self,
+         query: str,
+@@ -1080,43 +1042,10 @@
+             trust_env=False,
+             connector=_public_connector(),
+         ) as session:
+-            source_results = await asyncio.gather(
+-                *(
+-                    self._search_source_variants(
+-                        session,
+-                        semaphore,
+-                        source,
+-                        query,
+-                        media_type=media_type,
+-                    )
+-                    for source in self.sources
+-                )
+-            )
+-            candidates = [item for result in source_results for item in result]
++            candidates = await self._search_title_candidates(
++                session, semaphore, query, media_type,
++            )
+             variants = self._rank_variants(candidates, wanted)
+-            if not variants:
+-                terms = fuzzy_search_terms(query)
+-                if terms:
+-                    secondary_results = await asyncio.gather(
+-                        *(
+-                            self._search_source_variants(
+-                                session,
+-                                semaphore,
+-                                source,
+-                                term,
+-                                match_query=query,
+-                                media_type=media_type,
+-                            )
+-                            for term in terms
+-                            for source in self.sources
+-                        )
+-                    )
+-                    candidates = [
+-                        item
+-                        for result in secondary_results
+-                        for item in result
+-                    ]
+-                    variants = self._rank_variants(candidates, wanted)
+ 
+         self._remember_variants(cache_key, variants)
+         logger.info(
+@@ -1398,54 +1327,13 @@
+             trust_env=False,
+             connector=_public_connector(),
+         ) as session:
+-            source_results = await asyncio.gather(
+-                *(
+-                    self._search_source_variants(
+-                        session,
+-                        semaphore,
+-                        source,
+-                        query,
+-                        media_type=media_type,
+-                    )
+-                    for source in self.sources
+-                )
+-            )
+-            available = [item for result in source_results for item in result]
+-            variant_candidates = available
++            variant_candidates = await self._search_title_candidates(
++                session, semaphore, query, media_type,
++            )
+             pool, exact_match = candidate_pool(
+-                available,
++                (item for item in variant_candidates if is_selectable_variant(item)),
+                 min_fuzzy_score=self.min_fuzzy_score,
+             )
+-            if not exact_match:
+-                secondary_terms = fuzzy_search_terms(query)
+-                if secondary_terms:
+-                    secondary_results = await asyncio.gather(
+-                        *(
+-                            self._search_source_variants(
+-                                session,
+-                                semaphore,
+-                                source,
+-                                term,
+-                                match_query=query,
+-                                media_type=media_type,
+-                            )
+-                            for term in secondary_terms
+-                            for source in self.sources
+-                        )
+-                    )
+-                    combined = self._dedupe_results(
+-                        available
+-                        + [
+-                            item
+-                            for result in secondary_results
+-                            for item in result
+-                        ]
+-                    )
+-                    variant_candidates = combined
+-                    pool, exact_match = candidate_pool(
+-                        combined,
+-                        min_fuzzy_score=self.min_fuzzy_score,
+-                    )
+             self._remember_variants(
+                 f"{media_type or '*'}:{normalize_title(query)}",
+                 # 普通搜索使用独立中间列表页，保留更多候选供用户按相关性选择。

@@ -2648,11 +2648,15 @@ diff --git a/state_server.py b/state_server.py
  
  
  class StateStore:
-@@ -187,6 +189,584 @@
+@@ -187,6 +189,615 @@
      return payload, None
  
  
 +from urllib.request import HTTPRedirectHandler
++if __package__:
++    from .title_search import DEFAULT_MIN_FUZZY_SCORE, fuzzy_search_terms, normalize_title, title_score
++else:
++    from title_search import DEFAULT_MIN_FUZZY_SCORE, fuzzy_search_terms, normalize_title, title_score
 +
 +
 +class _NoRedirect(HTTPRedirectHandler):
@@ -2666,13 +2670,13 @@ diff --git a/state_server.py b/state_server.py
 +_XINLANG_NEXT_REQUEST = 0.0
 +
 +
-+def _wait_catalog_request(base: str) -> None:
++def _wait_catalog_request(base: str, deadline: float | None = None) -> None:
 +    """Respect Xinlang's published interval without queuing a long scan."""
 +    from urllib.parse import urlsplit
 +    global _XINLANG_NEXT_REQUEST
 +    if urlsplit(base).hostname != 'api.xinlangapi.com':
 +        return
-+    deadline = time.monotonic() + 1.5
++    deadline = min(time.monotonic() + 1.5, deadline) if deadline is not None else time.monotonic() + 1.5
 +    while True:
 +        with _CATALOG_REQUEST_LOCK:
 +            now = time.monotonic()
@@ -2688,14 +2692,17 @@ diff --git a/state_server.py b/state_server.py
 +        time.sleep(delay)
 +
 +
-+def _catalog_json(base: str, **params: object) -> dict:
++def _catalog_json(base: str, *, _deadline: float | None = None, **params: object) -> dict:
 +    """Read bounded metadata from a fixed, existing product source, never media."""
 +    from urllib.parse import urlencode
 +    from urllib.request import Request, build_opener
 +    request = Request(base + '?' + urlencode(params), headers={'User-Agent': 'ShortDramaPlayer/1.0'})
-+    _wait_catalog_request(base)
-+    deadline = time.monotonic() + 4
-+    with build_opener(_NoRedirect()).open(request, timeout=3) as response:
++    _wait_catalog_request(base, _deadline)
++    remaining = _deadline - time.monotonic() if _deadline is not None else 4
++    if remaining <= 0:
++        raise TimeoutError('catalog read deadline exceeded')
++    deadline = time.monotonic() + min(4, remaining)
++    with build_opener(_NoRedirect()).open(request, timeout=min(3, remaining)) as response:
 +        chunks, size = [], 0
 +        while size <= MAX_BODY_BYTES:
 +            # read1 performs at most one socket read, so slow trickles cannot keep
@@ -2959,11 +2966,13 @@ diff --git a/state_server.py b/state_server.py
 +        if not title or len(title) > 300 or source not in self.SOURCES or not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
 +            raise ValueError('invalid metadata request')
 +
-+    def _records(self, title: str, source: str) -> list:
-+        if not self.slots.acquire(timeout=4):
++    def _records(self, title: str, source: str, *, deadline: float | None = None) -> list:
++        remaining = max(0, deadline - time.monotonic()) if deadline is not None else 4
++        if not self.slots.acquire(timeout=min(4, remaining)):
 +            raise OSError('metadata resolver busy')
 +        try:
-+            details = _catalog_json(self.SOURCES[source], ac='detail', wd=title, pg=1)
++            options = {'_deadline': deadline} if deadline is not None else {}
++            details = _catalog_json(self.SOURCES[source], ac='detail', wd=title, pg=1, **options)
 +            records = details.get('list', [])
 +            if not isinstance(records, list):
 +                raise ValueError('invalid source records')
@@ -3131,6 +3140,9 @@ diff --git a/state_server.py b/state_server.py
 +        self.cache = {}
 +        self.cache_limit = 64
 +        self.cache_bytes = 8 * 1024 * 1024
++        self.search_seconds = 22
++        # Reserve the last possible socket read beyond the shared read deadline.
++        self.source_seconds = 3
 +
 +    @staticmethod
 +    def normalize_query(value: str) -> str:
@@ -3149,17 +3161,18 @@ diff --git a/state_server.py b/state_server.py
 +        cached = self.cache.get(query)
 +        return cached[1] if cached and cached[0] > time.time() else None
 +
-+    def _source_items(self, query: str, source: str) -> list[dict] | None:
++    def _source_items(self, query: str, source: str, deadline: float) -> list[dict] | None:
++        if time.monotonic() + self.source_seconds > deadline:
++            return None
 +        try:
-+            return [item for record in self.resolver._records(query, source)
++            return [item for record in self.resolver._records(query, source, deadline=deadline - self.source_seconds)
 +                    if (item := _catalog_item(record, source, short_only=False))]
 +        except (OSError, ValueError, TypeError, KeyError, AttributeError):
 +            LOGGER.warning('search catalog source unavailable: %s', source)
 +            return None
 +
 +    def _response(self, query: str, results: list[tuple[str, list[dict] | None]]) -> dict:
-+        from difflib import SequenceMatcher
-+        wanted = _source_identity({'title': query})[0]
++        wanted = normalize_title(query)
 +        source_order = {source: index for index, source in enumerate(self.resolver.SOURCES)}
 +        unique = {}
 +        for source, items in results:
@@ -3170,17 +3183,14 @@ diff --git a/state_server.py b/state_server.py
 +                    unique[key] = item
 +
 +        def rank(item):
-+            title = _source_identity(item)[0]
-+            similarity = SequenceMatcher(None, wanted, title).ratio()
-+            match = 0 if title == wanted else 1 if wanted in title else 2
-+            return match, -similarity, source_order[item['source']], item['title']
++            return -title_score(query, item['title'], candidate_year=item['year']), source_order[item['source']], item['title']
 +
-+        # Several catalogs use OR matching for individual Han characters. Keep
-+        # their useful related titles without filling the page with unrelated hits.
++        # Use the same threshold and matching rules as WeChat search, since some
++        # providers return unrelated records for individual Han characters.
 +        candidates = sorted((item for item in unique.values()
-+                             if rank(item)[0] < 2 or -rank(item)[1] >= 0.45), key=rank)
++                             if -rank(item)[0] >= DEFAULT_MIN_FUZZY_SCORE), key=rank)
 +        suggestions = list(dict.fromkeys(item['title'] for item in candidates
-+                                        if _source_identity(item)[0] != wanted))[:6]
++                                        if normalize_title(item['title']) != wanted))[:6]
 +        response = {'v': 1, 'kind': 'search', 'heading': f'搜索：{query}', 'query': query,
 +                    'sources_total': len(self.resolver.SOURCES),
 +                    'sources_searched': sum(items is not None for _, items in results),
@@ -3209,13 +3219,34 @@ diff --git a/state_server.py b/state_server.py
 +                if cached is not None:
 +                    return cached
 +            from concurrent.futures import ThreadPoolExecutor
++            deadline = time.monotonic() + self.search_seconds
++            incomplete = False
 +            with ThreadPoolExecutor(max_workers=4) as executor:
-+                futures = [(source, executor.submit(self._source_items, query, source))
++                futures = [(source, executor.submit(self._source_items, query, source, deadline))
 +                           for source in self.resolver.SOURCES]
 +                results = [(source, future.result()) for source, future in futures]
-+            if all(items is None for _, items in results):
-+                raise OSError('search catalogs unavailable')
-+            response = self._response(query, results)
++                if all(items is None for _, items in results):
++                    raise OSError('search catalogs unavailable')
++                response = self._response(query, results)
++                # Keep source coverage distinct from request count. Failed initial
++                # sources are not retried in every fallback round.
++                merged = {source: items for source, items in results}
++                if not response['items']:
++                    for term in fuzzy_search_terms(query):
++                        if time.monotonic() + self.source_seconds > deadline:
++                            incomplete = True
++                            break
++                        futures = [(source, executor.submit(self._source_items, term, source, deadline))
++                                   for source, items in results if items is not None]
++                        for source, future in futures:
++                            items = future.result()
++                            if items is None:
++                                incomplete = True
++                            else:
++                                merged[source] = [*merged[source], *items]
++                        response = self._response(query, list(merged.items()))
++                        if response['items']:
++                            break
 +            size = len(json.dumps(response, ensure_ascii=False).encode('utf-8'))
 +            with self.lock:
 +                now = time.time()
@@ -3224,7 +3255,7 @@ diff --git a/state_server.py b/state_server.py
 +                                     or sum(entry[2] for entry in self.cache.values()) + size > self.cache_bytes):
 +                    self.cache.pop(next(iter(self.cache)))
 +                if size <= self.cache_bytes:
-+                    lifetime = 30 if response['failures'] or not response['items'] else 120
++                    lifetime = 30 if incomplete or response['failures'] or not response['items'] else 120
 +                    self.cache[query] = (now + lifetime, response, size)
 +            return response
 +        return self.resolver._scan(('search', query), load)
@@ -3233,7 +3264,7 @@ diff --git a/state_server.py b/state_server.py
  class Handler(BaseHTTPRequestHandler):
      server_version = "short-drama-state/1.0"
  
-@@ -211,6 +791,71 @@
+@@ -211,6 +822,71 @@
          path = unquote(urlsplit(self.path).path)
          if path == "/health":
              self._send_json(HTTPStatus.OK, {"ok": True, "service": "short-drama-state"})
@@ -3305,7 +3336,7 @@ diff --git a/state_server.py b/state_server.py
              return
          prefix = "/selections/"
          if path.startswith(prefix):
-@@ -272,6 +917,9 @@
+@@ -272,6 +948,9 @@
      logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
      server = ThreadingHTTPServer((args.host, args.port), Handler)
      server.state_store = StateStore(Path(args.directory), args.ttl, args.max_entries)  # type: ignore[attr-defined]

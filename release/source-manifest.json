@@ -182,6 +182,11 @@
       "target": "app/astrbot/data/plugins/jiang_short_drama"
     },
     {
+      "origin": "commercial",
+      "source": "runtime/jiang_short_drama/title_search.py",
+      "target": "app/astrbot/data/plugins/jiang_short_drama/title_search.py"
+    },
+    {
       "origin": "vendor",
       "source": "data/plugins/jiang_commands",
       "target": "app/astrbot/data/plugins/jiang_commands",
