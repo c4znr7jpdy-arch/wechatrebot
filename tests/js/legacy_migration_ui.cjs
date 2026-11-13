@@ -6,7 +6,7 @@ const script = require('./webui_source.cjs').managerScript(require('node:path').
 function fixture() {
   const draft = {account_id: 'account-a', arguments: {text: 'unsaved reminder'}};
   const state = {scheduledLoad: 0, activePage: 'schedules', scheduledDirty: true,
-    scheduledEditor: draft, scheduledContext: {account_id: 'account-a', items: [{id: 'task-a'}]},
+    scheduledEditor: draft, scheduledContext: {account_id: 'account-a', items: [{id: 'task-a'}], loading: true},
     scheduledCommandCatalog: [], schedules: [{id: 'old-a'}],
     legacyMigrations: [{key: 'pending-a', account_id: 'account-a'}], legacyMigrationLoading: false};
   const elements = new Map();
@@ -89,7 +89,7 @@ const cases = {
     await f.context.loadSchedules({background: true});
     assert.equal(f.calls.length, calls, 'A retained view waits for account verification before its next background read');
   },
-  async background_retains_snapshot() {
+  async background_retains_snapshot(background = true) {
     const f = fixture();
     await f.context.loadSchedules();
     Object.keys(f.renders).forEach(key => { f.renders[key] = 0; });
@@ -100,11 +100,11 @@ const cases = {
     const current = f.state.scheduledContext;
     f.responses.get_scheduled_task_context = () => new Promise(resolve => { finish = resolve; });
     const beforeCalls = f.calls.length;
-    const pending = f.context.loadSchedules({background: true});
+    const pending = f.context.loadSchedules({background});
     const repeated = f.context.loadSchedules({background: true});
-    assert.equal(f.calls.length - beforeCalls, 3, 'Background reads share the full request and skip the lightweight stage');
+    assert.equal(f.calls.length - beforeCalls, 3, 'A retained refresh skips the lightweight stage and shares background reads');
     assert.equal(f.controls[0].disabled, false);
-    assert.equal(f.$('#refreshSchedules').disabled, false);
+    assert.equal(f.$('#refreshSchedules').disabled, !background);
     assert.equal(f.$('#taskRows').innerHTML, 'task-a');
     assert.equal(f.$('#scheduleRows').innerHTML, 'old-a');
     finish(structuredClone(current));
@@ -112,6 +112,39 @@ const cases = {
     assert.deepEqual(f.renders, {legacy: 0, tasks: 0, migration: 0}, 'Unchanged responses must retain DOM and expanded controls');
     assert.equal(f.$('.content-scroll').scrollTop, 320);
     assert.equal(f.$('#scheduledTaskRuns').innerHTML, 'opened run details');
+    assertDraftRetained(f);
+  },
+  async manual_retains_snapshot() {
+    await cases.background_retains_snapshot(false);
+  },
+  async manual_refresh_failures() {
+    const f = fixture();
+    await f.context.loadSchedules();
+    const current = f.state.scheduledContext;
+    Object.keys(f.renders).forEach(key => { f.renders[key] = 0; });
+    for (const failure of ['get_scheduled_task_context', 'get_schedules', 'get_legacy_schedule_migrations']) {
+      const response = f.responses[failure];
+      f.responses[failure] = new Error('temporary failure');
+      await f.context.loadSchedules();
+      assert.equal(f.state.scheduledContext, current);
+      assert.equal(f.state.scheduledContext.readFailed, false, 'A failed refresh must not invalidate a fully loaded page');
+      assert.equal(f.$('#taskRows').innerHTML, 'task-a');
+      assert.equal(f.$('#scheduleRows').innerHTML, 'old-a');
+      assert.equal(f.$('#scheduleContextMessage').hidden, false);
+      assert.match(f.$('#scheduleContextMessage').textContent, /已有结果仍保留/);
+      assert.equal(f.$('#refreshSchedules').disabled, false);
+      f.responses[failure] = response;
+    }
+    assert.deepEqual(f.renders, {legacy: 0, tasks: 0, migration: 0});
+    f.state.status = {runtime: {account_status_available: false}};
+    const calls = f.calls.length;
+    await f.context.loadSchedules();
+    assert.equal(f.calls.length, calls, 'An unconfirmed account does not clear a verified retained view');
+    assert.equal(f.state.scheduledContext, current);
+    f.state.status.runtime.account_status_available = true;
+    await f.context.loadSchedules();
+    assert.equal(f.state.scheduledContext.readFailed, false);
+    assert.equal(f.$('#scheduleContextMessage').hidden, true, 'Successful retry clears the refresh failure');
     assertDraftRetained(f);
   },
   async background_updates_and_failures() {
@@ -270,6 +303,7 @@ const cases = {
     assert.match(f.$('#scheduleContextMessage').textContent, /请登录原微信账号/);
     assert.equal(f.$('#scheduleContextMessage').hidden, false, 'Actionable failures remain visible');
     assert.equal(f.state.scheduledContext.legacy_group_analysis, undefined);
+    assert.equal(f.state.scheduledContext.readFailed, true, 'An initial failure does not become a loaded empty view');
     assert.equal(f.$('#refreshSchedules').disabled, false);
     assertDraftRetained(f);
   },
@@ -280,6 +314,7 @@ const cases = {
     assert.equal(f.$('#scheduleRows').innerHTML, '');
     assert.equal(f.$('#taskRows').innerHTML, 'task-a');
     assert.match(f.$('#scheduleContextMessage').textContent, /迁移记录暂时无法读取/);
+    assert.equal(f.state.scheduledContext.readFailed, true, 'An initial partial read remains retryable');
     assertDraftRetained(f);
   },
   async cross_account_rows() {

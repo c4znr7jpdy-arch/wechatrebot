@@ -2729,15 +2729,16 @@ def test_message_center_clears_data_when_the_robot_account_changes() -> None:
     assert 'setHistoryActionsEnabled(false);' in script
 
 
-def test_message_center_reentry_refreshes_retained_messages_silently() -> None:
+def test_message_center_reentry_reuses_loaded_page() -> None:
     script = manager_script()
     start = script.index('    if (page === "history") {')
     end = script.index('    if (page === "schedules")', start)
     history_entry = script[start:end]
 
     assert "await loadConversations({refreshGroups: true});" in history_entry
-    assert 'void loadConversations({silent: true});' in history_entry
-    assert "current messages or scroll position" in history_entry
+    assert "state.historyReadyAccount !== state.historyAccount" in history_entry
+    assert "if (!state.historyConversationsLoading)" in history_entry
+    assert 'void loadConversations({silent: true});' not in history_entry
 
 
 def test_091_history_and_group_layout_regressions_are_covered() -> None:

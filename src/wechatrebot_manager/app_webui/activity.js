@@ -91,7 +91,7 @@ window.createActivityView = function (helpers) {
 
   async function loadActivity(options = {}) {
     bindActivity();
-    if (loading) return;
+    if (loading || (options.initialOnly === true && loaded)) return;
     const background = options.background === true && loaded;
     loading = true;
     if (!background) {

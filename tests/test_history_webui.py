@@ -86,7 +86,7 @@ def test_unchanged_history_refresh_retains_panels_and_reading_position(
             page.locator('.nav-item[data-page="history"]').click()
         else:
             page.evaluate("window.refreshRetainedHistory()")
-        page.wait_for_function("reads => window.retainedDirectoryReads > reads", arg=before["reads"])
+            page.wait_for_function("reads => window.retainedDirectoryReads > reads", arg=before["reads"])
         expect(page.locator("#conversationInspector .group-qrcode img")).to_be_visible()
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
         state = page.evaluate("""() => ({
@@ -104,7 +104,10 @@ def test_unchanged_history_refresh_retains_panels_and_reading_position(
         assert state["nodes"] == [True, True, True, True]
         assert state["qrRetained"]
         assert state["qrReads"] == before["qrReads"]
-        assert page.evaluate("window.retainedDirectoryRefreshes.at(-1)") is False
+        if resume == "navigation":
+            assert page.evaluate("window.retainedDirectoryReads") == before["reads"]
+        else:
+            assert page.evaluate("window.retainedDirectoryRefreshes.at(-1)") is False
         assert page.url == manager_url and page.title().startswith("消息中心")
         assert not errors, errors
     finally:
@@ -121,8 +124,10 @@ def test_long_absence_keeps_visible_history_until_latest_is_requested(
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.add_init_script("""(() => {
       const schedule = window.setInterval;
-      window.setInterval = (callback, ...args) => callback.name === 'pollHistory'
-        ? 0 : schedule(callback, ...args);
+      window.setInterval = (callback, ...args) => {
+        if (callback.name === 'pollHistory') { window.refreshRetainedHistory = callback; return 0; }
+        return schedule(callback, ...args);
+      };
     })();""")
     try:
         page.goto(manager_url)
@@ -163,6 +168,10 @@ def test_long_absence_keeps_visible_history_until_latest_is_requested(
         page.evaluate("window.testHistoryLatest = 500")
         if resume == "navigation":
             page.locator('.nav-item[data-page="history"]').click()
+            page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+            assert page.evaluate("typeof window.resolveHistoryRefresh") == "undefined"
+            assert page.evaluate("document.querySelector('#messageList').innerHTML === window.retainedMessageHtml")
+            page.evaluate("void window.refreshRetainedHistory()")
         else:
             page.evaluate("event => (event === 'focus' ? window : document).dispatchEvent(new Event(event))", resume)
         page.wait_for_function("typeof window.resolveHistoryRefresh === 'function'")

@@ -761,20 +761,24 @@
       }
     }
     if (page === "history") {
-      // The first visit needs the account gate and initial loading state. Once
-      // the account has been read, refresh the retained conversation silently
-      // on every return so a long-hidden page catches up immediately without
-      // replacing the current messages or scroll position with a loader.
+      // Navigation only reveals the retained page. Polling and explicit refresh
+      // update its data without making tab switches depend on another read.
       if (!state.historyAccount || state.historyReadyAccount !== state.historyAccount) {
         if (!state.historyConversationsLoading) {
           await loadConversations({refreshGroups: true});
         }
-      } else if (!state.historyConversationsLoading) {
-        void loadConversations({silent: true});
       }
     }
-    if (page === "schedules") { await loadSchedules({background: true}); if (state.scheduledReturnDraft && state.scheduledEditor) { state.scheduledReturnDraft = false; renderScheduledEditor(); } }
-    if (page === "activity") await loadActivity({background: true});
+    if (page === "schedules") {
+      if (!state.scheduledContext || state.scheduledContext.loading || state.scheduledContext.readFailed) {
+        await loadSchedules({background: true});
+      }
+      if (state.scheduledReturnDraft && state.scheduledEditor) {
+        state.scheduledReturnDraft = false;
+        renderScheduledEditor();
+      }
+    }
+    if (page === "activity") await loadActivity({initialOnly: true});
     if (page === "help") {
       if (!state.featuresLoaded) await loadFeatures();
       renderHelp();
