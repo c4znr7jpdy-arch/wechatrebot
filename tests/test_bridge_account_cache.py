@@ -40,6 +40,20 @@ def router_for(bridge, tmp_path):
     return router
 
 
+@pytest.mark.parametrize("action", ["get_login_info", "send_group_msg", "send_raw_xml", "delete_msg"])
+def test_requested_self_id_is_verified_before_dispatch_even_without_license(bridge, tmp_path, action):
+    router = router_for(bridge, tmp_path)
+    response = asyncio.run(router.handle({"action": action, "params": {"self_id": B}}))
+    assert response["status"] == "failed" and response["retcode"] == 1403
+    router.hook.recall.assert_not_awaited()
+
+
+def test_matching_requested_account_keeps_login_query_available(bridge, tmp_path):
+    router = router_for(bridge, tmp_path)
+    response = asyncio.run(router.handle({"action": "get_login_info", "params": {"self_id": A}}))
+    assert response["status"] == "ok" and response["data"]["user_id"] == A
+
+
 def message(account=A, *, group=False, message_id=1):
     return {
         "self_id": account, "post_type": "message", "message_id": message_id,

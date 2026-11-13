@@ -149,7 +149,7 @@ index 37f894d..ff83aff 100644
          try:
 +            ensure_current_account()
              result = await self.hook.recall(
-@@ -790,2 +803,9 @@ class OneBotActionRouter:
+@@ -790,5 +803,15 @@ class OneBotActionRouter:
      async def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
 +        try:
 +            return await self._handle_current_account(request)
@@ -159,6 +159,12 @@ index 37f894d..ff83aff 100644
 +    @account_bound
 +    async def _handle_current_account(self, request: Mapping[str, Any]) -> dict[str, Any]:
          action = str(request.get("action", ""))
+         echo = request.get("echo")
+         params = self._params(request)
++        expected_account = str(params.get("self_id") or request.get("self_id") or "").strip()
++        if expected_account and expected_account != self.state.bot_wxid:
++            raise AccountChangedError("微信账号已变化，原账号请求已取消。")
+ 
 @@ -1161,2 +1181,9 @@ class OneBotActionRouter:
  
 +    def cancel_account_tasks(self) -> None:

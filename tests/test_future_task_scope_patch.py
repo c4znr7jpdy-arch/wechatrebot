@@ -1,12 +1,15 @@
 """Legacy personal reminders must not masquerade as the group's task inventory."""
 import ast
 import asyncio
+import importlib.util
+import sys
 from datetime import datetime
 from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -23,7 +26,7 @@ def future_task_call(tmp_path_factory):
     target.parent.mkdir(parents=True)
     shutil.copy2(ROOT / "vendor/engine" / relative, target)
     subprocess.run([
-        "git", "apply", "-p2", f"--include={relative}",
+        "git", "apply", "-p2", f"--include={relative}", "--include=astrbot/core/cron/wechat_accounts.py",
         str(ROOT / "patches/astrbot-4.26.6-wechat.patch"),
     ], cwd=checkout, check=True)
     tree = ast.parse(target.read_text(encoding="utf-8"))
@@ -36,13 +39,19 @@ def future_task_call(tmp_path_factory):
     nodes.append(call)
     namespace = {"Any": Any, "datetime": datetime}
     exec(compile(ast.Module(nodes, type_ignores=[]), str(target), "exec"), namespace)
-    return namespace["call"]
+    call = namespace["call"]
+    spec = importlib.util.spec_from_file_location("astrbot.core.cron.wechat_accounts",
+        checkout / "astrbot/core/cron/wechat_accounts.py")
+    call.account_helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(call.account_helper)
+    return call
 
 
 def _list(call, *, group=True, jobs=()):
     event = SimpleNamespace(
         unified_msg_origin="wechat:GroupMessage:123@chatroom" if group else "wechat:FriendMessage:user",
         get_sender_id=lambda: "admin",
+        get_self_id=lambda: "wxid_bot",
         get_platform_name=lambda: "aiocqhttp",
         get_group_id=lambda: "123@chatroom" if group else "",
     )
@@ -50,10 +59,17 @@ def _list(call, *, group=True, jobs=()):
     async def list_jobs():
         return list(jobs)
 
+    async def login(**kwargs):
+        return {"user_id": "wxid_bot"}
+
+    platform = SimpleNamespace(meta=lambda: SimpleNamespace(name="aiocqhttp"),
+                               bot=SimpleNamespace(get_login_info=login))
     context = SimpleNamespace(context=SimpleNamespace(
-        event=event, context=SimpleNamespace(cron_manager=SimpleNamespace(list_jobs=list_jobs)),
+        event=event, context=SimpleNamespace(cron_manager=SimpleNamespace(list_jobs=list_jobs),
+                                                 get_platform_inst=lambda _id: platform),
     ))
-    return asyncio.run(call(None, context, action="list"))
+    with patch.dict(sys.modules, {"astrbot.core.cron.wechat_accounts": call.account_helper}):
+        return asyncio.run(call(None, context, action="list"))
 
 
 def test_empty_legacy_group_query_explicitly_excludes_manager_tasks(future_task_call):
@@ -66,7 +82,7 @@ def test_empty_legacy_group_query_explicitly_excludes_manager_tasks(future_task_
 def test_group_query_preserves_personal_reminder_ownership(future_task_call):
     def job(identity, sender, session="wechat:GroupMessage:123@chatroom"):
         return SimpleNamespace(job_id=identity, name=identity, job_type="active_agent",
-                               payload={"session": session, "sender_id": sender},
+                               payload={"session": session, "sender_id": sender, "account_id": "wxid_bot"},
                                enabled=True, next_run_time=None)
 
     result = _list(future_task_call, jobs=[job("own", "admin"), job("other-admin", "admin2"),

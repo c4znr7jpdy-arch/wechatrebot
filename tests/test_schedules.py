@@ -359,7 +359,7 @@ def test_unassigned_and_other_account_jobs_cannot_be_changed(tmp_path, monkeypat
     monkeypatch.setattr(service.engine, "is_available", lambda: pytest.fail("Unauthorized job probed engine"))
     result = service.list()
     assert result["items"] == []
-    assert result["unassigned_count"] == (1 if owner is None else 0)
+    assert result["unassigned_count"] == 0
     with pytest.raises(ValueError, match="账号"):
         if action == "enable":
             service.set_enabled(job_id, False)
@@ -398,6 +398,6 @@ def test_unassigned_obsolete_job_is_not_deleted_on_read(tmp_path, monkeypatch):
                            ("unknown", "checkin_", '{"session":""}', 1))
     service = ScheduleService(tmp_path)
     monkeypatch.setattr(service.engine, "is_available", lambda: pytest.fail("Unassigned cleanup reached engine"))
-    assert service.list()["unassigned_count"] == 1
+    assert service.list()["unassigned_count"] == 0
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT enabled FROM cron_jobs WHERE job_id='unknown'").fetchone() == (1,)

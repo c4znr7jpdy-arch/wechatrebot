@@ -78,6 +78,7 @@
     historyMessageRequests: new Map(),
     historyMessageCacheEpoch: 0,
     schedules: [],
+    agentSchedules: [],
     scheduledContext: null,
     legacyMigrations: [],
     legacyMigrationLoading: false,
@@ -426,6 +427,8 @@
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
+    if (!accountStatusAvailable && ((state.agentSchedules || []).length
+      || $("#scheduledTaskRuns").dataset.agentAccount)) invalidateAgentSchedules();
     const confirmingConnection = !status.error && ((current === "VERIFYING_CONNECTION" && !wechatLoggedIn)
       || (current === "RUNNING" && !online && !accountStatusAvailable));
     contactProfile.updateAccount(accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : "");
@@ -1495,7 +1498,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { SCHEDULED_ACTIONS, guardScheduledDraft, invalidateScheduledContext, loadSchedules, openScheduledEditor, openScheduledForChat, openScheduledFromFeature, renderScheduledEditor, renderScheduledTasks, scheduledTimeText } = createPageController("createScheduledTasks", {
+  const { SCHEDULED_ACTIONS, guardScheduledDraft, invalidateScheduledContext, invalidateAgentSchedules, loadSchedules, openScheduledEditor, openScheduledForChat, openScheduledFromFeature, renderScheduledEditor, renderScheduledTasks, scheduledTimeText } = createPageController("createScheduledTasks", {
     $,
     $$,
     api: (...args) => api(...args),

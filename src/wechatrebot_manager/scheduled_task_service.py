@@ -113,17 +113,37 @@ class ScheduledTaskService:
                     return "执行时间落在发送对象的安静时段。"
         return ""
 
+    def _current_account(self) -> str:
+        try:
+            return str(self.account_hint() or "").strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _empty_context(*, online: bool = False, loading: bool = False,
+                       message: str = "请先确认机器人微信账号，再刷新任务列表。") -> dict[str, Any]:
+        return {"account_id": "", "items": [], "groups": [], "contacts": [], "capabilities": [],
+                "command_catalog": scheduled_command_catalog(),
+                "command_definition_version": SCHEDULED_COMMAND_VERSION,
+                "online": online, "runtime_ready": False, "loading": loading, "message": message}
+
     def context(self, lightweight: bool = False) -> dict[str, Any]:
+        account = self._current_account()
+        if not account:
+            empty = self._empty_context(loading=lightweight)
+            if not lightweight:
+                # An explicitly confirmed migration can outlive the stop that
+                # disconnected WeChat; keep its existing recovery contract.
+                empty["legacy_group_analysis"] = self.analysis_migration.context("")
+            return empty
         if lightweight:
-            try:
-                account = str(self.account_hint() or "")
-            except OSError:
-                account = ""
-            items = self.store.list(account) if account else []
+            items = self.store.list(account)
             for item in items:
                 if item["enabled"] and item["status"] != "completed":
                     item["status"] = "checking"
                     item["status_message"] = "正在确认运行状态…"
+            if self._current_account() != account:
+                return self._empty_context(loading=True, message="微信账号已变化，请刷新任务列表。")
             return {"account_id": account, "items": items, "groups": [], "contacts": [],
                     "capabilities": [], "command_catalog": scheduled_command_catalog(),
                     "command_definition_version": SCHEDULED_COMMAND_VERSION,
@@ -131,19 +151,11 @@ class ScheduledTaskService:
                     "message": "正在读取发送对象与运行状态…" if account else "请先确认机器人微信账号，再刷新任务列表。"}
         group, contact, health = self._snapshot()
         fresh_accounts = {str(data.get("account_id")) for data in (group, contact) if data.get("account_id") and not data.get("stale")}
-        account = str(health.get("account_id") or "")
-        if not account and len(fresh_accounts) == 1:
-            account = next(iter(fresh_accounts))
-        if not health["online"] and not account and not fresh_accounts:
-            try:
-                account = str(self.account_hint() or "")
-            except OSError:
-                account = ""  # Stopping WeChat can make identity unavailable.
-        if len(fresh_accounts) > 1 or (account and fresh_accounts and fresh_accounts != {account}):
-            return {"account_id": "", "items": [], "groups": [], "contacts": [], "capabilities": [],
-                    "command_catalog": scheduled_command_catalog(), "online": health["online"],
-                    "command_definition_version": SCHEDULED_COMMAND_VERSION,
-                    "runtime_ready": False, "message": "微信账号正在变化，请刷新后重新选择发送对象。"}
+        reported_account = str(health.get("account_id") or "")
+        if (self._current_account() != account or fresh_accounts - {account}
+                or (reported_account and reported_account != account)):
+            return self._empty_context(online=health["online"],
+                                       message="微信账号正在变化，请刷新后重新选择发送对象。")
         groups = self._directory(group, "group", account)
         contacts = self._directory(contact, "private", account)
         names = {(target["type"], target["id"]): target["name"] for target in groups + contacts}
@@ -181,20 +193,24 @@ class ScheduledTaskService:
         messages = [health.get("message", "")]
         if group.get("stale") or contact.get("stale"):
             messages.append("部分聊天目录尚未更新；启用前会重新核验所选对象。")
+        migration = self.analysis_migration.context(account)
+        if self._current_account() != account:
+            return self._empty_context(online=health["online"], message="微信账号已变化，请刷新任务列表。")
         return {"account_id": account, "items": items, "capabilities": capabilities,
                 "command_catalog": scheduled_command_catalog(), "groups": groups, "contacts": contacts,
                 "command_definition_version": SCHEDULED_COMMAND_VERSION,
                 "online": health["online"], "runtime_ready": health["runtime_ready"],
-                "legacy_group_analysis": self.analysis_migration.context(account),
+                "legacy_group_analysis": migration,
                 "message": " ".join(filter(None, messages))}
 
     def _verify_live(self, task: dict, *, check_scheduled_time: bool = True) -> None:
         if task.get("definition_version", SCHEDULED_COMMAND_VERSION) != SCHEDULED_COMMAND_VERSION:
             raise ValueError("命令定义已更新，请重新检查任务参数和依赖后再启用。")
+        account = task["account_id"]
+        self._require_current_account(account)
         group, contact, health = self._snapshot(refresh=True)
         if not health["runtime_ready"]:
             raise ValueError(health.get("message") or "请先启用定时任务功能。")
-        account = task["account_id"]
         if health.get("account_id") != account:
             raise ValueError("当前登录微信与任务所属账号不一致，请刷新后重试。")
         capabilities = {
@@ -227,6 +243,7 @@ class ScheduledTaskService:
                 start, end = quiet.get("start", "22:00"), quiet.get("end", "08:00")
                 if start == end or (start < end and start <= clock < end) or (start > end and (clock >= start or clock < end)):
                     raise ValueError("执行时间处于所选聊天的安静时段，请修改时间或聊天规则。")
+        self._require_current_account(account)
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         task = normalize_task(payload)
@@ -245,6 +262,7 @@ class ScheduledTaskService:
     def set_enabled(self, account: str, task_id: str, enabled: bool, revision: int) -> dict[str, Any]:
         if not isinstance(enabled, bool):
             raise ValueError("任务启用状态格式不正确。")
+        self._require_current_account(account)
         task = self.store.get(account, task_id)
         if enabled:
             return self.save({**task, "revision": revision, "enabled": True, "draft": False})
@@ -260,7 +278,7 @@ class ScheduledTaskService:
 
     def _require_current_account(self, account: str) -> None:
         validate_account(account)
-        if self.context()["account_id"] != account:
+        if self._current_account() != account:
             raise ValueError("微信账号已变化或尚未确认，请刷新后重试。")
 
     def preview(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -280,6 +298,7 @@ class ScheduledTaskService:
                                         "enabled": True, "draft": False})
             self._verify_live(candidate, check_scheduled_time=False)
             payload = {**payload, "preview_target": candidate["targets"][0]}
+        self._require_current_account(payload.get("account_id"))
         health = self.health()
         if not health["runtime_ready"]:
             raise ValueError(health.get("message") or "内容服务尚未就绪。")
@@ -289,6 +308,7 @@ class ScheduledTaskService:
         result = client.request("POST", _API + "preview", {**payload, "action": action, "arguments": arguments})
         if not isinstance(result, dict) or result.get("kind") not in {"text", "image", "link_card"}:
             raise PluginCenterError("内容预览暂时不可用。")
+        self._require_current_account(payload["account_id"])
         return result
 
     def preview_group_analysis_migration(self, payload: dict[str, Any]) -> dict:
@@ -331,6 +351,7 @@ class ScheduledTaskService:
         for run in runs:
             for result in run["deliveries"]:
                 result["name"] = names.get((result["type"], result["id"]), "对象待确认")
+        self._require_current_account(account)
         return {"items": runs}
 
 
