@@ -225,7 +225,9 @@ window.createScheduledTasks = function (helpers) {
 
   function groupAnalysisMigrationAccount(context = {}) {
     const legacy = context.legacy_group_analysis;
-    return context.account_id && legacy?.account_id === context.account_id ? context.account_id : "";
+    if (!["confirmed", "prepared"].includes(legacy?.state)) return context.account_id || "";
+    if (context.account_id && legacy.account_id && context.account_id !== legacy.account_id) return "";
+    return legacy.account_id || context.account_id || "";
   }
 
   function renderGroupAnalysisMigration() {
@@ -238,7 +240,7 @@ window.createScheduledTasks = function (helpers) {
     const selectedDays = sameAccount ? $("#analysisMigrationDays")?.value ?? null : null;
     const expanded = sameAccount ? $("details", root)?.open ?? null : null;
     root.dataset.account = context.account_id || "";
-    root.hidden = !groupAnalysisMigrationAccount(context) || ["none", "complete"].includes(legacy.state);
+    root.hidden = !legacy || ["none", "complete"].includes(legacy.state);
     if (root.hidden) { root.replaceChildren(); return; }
     const groups = context.groups || [];
     const resuming = ["confirmed", "prepared"].includes(legacy.state);
