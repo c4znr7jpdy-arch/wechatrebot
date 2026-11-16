@@ -1,0 +1,63 @@
+diff --git a/utils/time_utils.py b/utils/time_utils.py
+--- a/utils/time_utils.py
++++ b/utils/time_utils.py
+@@ -23,3 +23,15 @@
+     except (ValueError, TypeError):
+         # 配置非法时按“非免打扰”处理，避免误阻断主动消息
+         return False
++
++
++def format_current_time(tz: zoneinfo.ZoneInfo | None) -> str:
++    """Format an authoritative local date, weekday and timezone for LLM requests."""
++    now = datetime.now(tz) if tz else datetime.now().astimezone()
++    weekday = "一二三四五六日"[now.weekday()]
++    zone_name = getattr(now.tzinfo, "key", None) or now.tzname()
++    offset = now.strftime("%z")
++    return (
++        f"{now:%Y年%m月%d日} 星期{weekday} {now:%H:%M} "
++        f"({zone_name}, UTC{offset[:3]}:{offset[3:]})"
++    )
+diff --git a/core/llm_adapter.py b/core/llm_adapter.py
+--- a/core/llm_adapter.py
++++ b/core/llm_adapter.py
+@@ -5,11 +5,12 @@
+ import asyncio
+ import json
+ import re
+-from datetime import datetime
+ from difflib import SequenceMatcher
+ from typing import Any
+ 
+ from astrbot.api import logger
++
++from ..utils.time_utils import format_current_time
+ 
+ 
+ class LlmMixin:
+@@ -616,7 +617,7 @@
+                     "请结合以上聊天流水、当前时间、未回复次数与当前人格设定，用最像你自己的、最自然的方式，生成一句适合此刻发出的主动消息。"
+                 )
+ 
+-            now_str = datetime.now(self.timezone).strftime("%Y年%m月%d日 %H:%M")
++            now_str = format_current_time(self.timezone)
+             content = (
+                 prompt_template.replace("{{platform_history_lines}}", body)
+                 .replace("{{unanswered_count}}", str(unanswered_count))
+@@ -910,7 +911,16 @@
+     ) -> tuple[str | None, str]:
+         """统一 LLM 调用入口，返回(生成文本, 用户提示词)。"""
+         motivation_template = session_config.get("proactive_prompt", "")
+-        now_str = datetime.now(self.timezone).strftime("%Y年%m月%d日 %H:%M")
++        now_str = format_current_time(self.timezone)
++        system_prompt = (
++            f"{system_prompt}\n\n"
++            "[本次生成的当前时间基准]\n"
++            f"当前时间：{now_str}。\n"
++            "谈到今天、现在、星期或周末时，以此时间为准，直接使用上面给出的星期。"
++            "历史对话、平台聊天流水、示例和近期主动消息中的日期、星期及相对时间"
++            "只描述各自当时的语境，不代表本次的当前时间；不得据此推断今天是星期几。"
++            "保持原有人格和表达方式，无需在回复中复述这段时间提示。"
++        )
+         final_user_simulation_prompt = motivation_template.replace(
+             "{{unanswered_count}}", str(unanswered_count)
+         ).replace("{{current_time}}", now_str)
