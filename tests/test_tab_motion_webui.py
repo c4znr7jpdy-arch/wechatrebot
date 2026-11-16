@@ -24,7 +24,7 @@ def open_preview(page, url):
       const animate = Element.prototype.animate;
       Element.prototype.animate = function(...args) {
         const animation = animate.apply(this, args);
-        if (window.pauseHistoryAnimations && this.matches('.history-layout')) animation.pause();
+        if (window.pauseTabAnimations && this.matches('.skin-settings')) animation.pause();
         window.tabAnimations.push(animation);
         return animation;
       };
@@ -69,7 +69,11 @@ def test_internal_tabs_animate_content_and_keep_filters_and_focus(browser, manag
         for kind in ("group", "private", "all"):
             page.locator(f'#historyKinds [data-kind="{kind}"]').click()
             expect(page.locator(f'#historyKinds [data-kind="{kind}"]')).to_have_class("active")
-            assert_content_motion(page, ".history-layout")
+            # Kind tabs filter retained history; they must not replay the
+            # whole reading area's entrance animation on every switch.
+            assert not page.evaluate("""() => window.tabAnimations.some(animation =>
+              animation.id === 'manager-tab-enter' && animation.effect.target.matches('.history-layout'))""")
+            expect(page.locator(".history-layout")).to_have_css("transform", "none")
             if kind == "all":
                 expect(page.locator("#conversationList .conversation-item")).to_have_count(total)
             else:
@@ -152,34 +156,38 @@ def test_reduced_motion_and_rapid_filters_finish_in_current_state(browser, manag
         open_preview(page, manager_url + "&style=soft")
         page.locator('.nav-item[data-page="history"]').click()
         expect(page.locator("#messageList .message").first).to_be_visible()
-        page.evaluate("""reduced => {
-          // Keep the final animation available until reduced-motion is toggled,
-          // regardless of how long browser assertions take on a busy CI runner.
-          window.pauseHistoryAnimations = !reduced;
+        page.evaluate("""() => {
           window.tabAnimations = [];
           for (const kind of ['group', 'private', 'all', 'group']) {
             document.querySelector(`#historyKinds [data-kind="${kind}"]`).click();
           }
-        }""", reduced)
+        }""")
         expect(page.locator('#historyKinds [data-kind="group"]')).to_have_class("active")
         expect(page.locator('#conversationList .conversation-item:not([data-type="group"])')).to_have_count(0)
+        assert page.evaluate("window.tabAnimations.length") == 0
+        expect(page.locator(".history-layout")).to_have_css("transform", "none")
+        # Retain the dynamic reduced-motion cancellation test on Settings,
+        # whose tab transition still intentionally has entrance motion.
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.evaluate("""reduced => {
+          window.pauseTabAnimations = !reduced;
+          window.tabAnimations = [];
+        }""", reduced)
+        page.locator('[data-settings-tab="skin"]').click()
+        expect(page.locator("#skinOptions")).to_be_visible()
         if reduced:
-            assert page.evaluate("window.tabAnimations.length") == 0
-            page.locator('.nav-item[data-page="settings"]').click()
-            page.locator('[data-settings-tab="skin"]').click()
-            expect(page.locator("#skinOptions")).to_be_visible()
             assert page.evaluate("window.tabAnimations.length") == 0
         else:
             page.wait_for_function("""() => window.tabAnimations.some(animation =>
               animation.id === 'manager-tab-enter' && animation.playState === 'paused'
-              && animation.effect.target.matches('.history-layout'))""", timeout=5000)
-            assert page.locator(".history-layout").evaluate("node => node.getAnimations().filter(a => a.id === 'manager-tab-enter').length <= 1")
+              && animation.effect.target.matches('.skin-settings'))""", timeout=5000)
+            assert page.locator(".skin-settings").evaluate("node => node.getAnimations().filter(a => a.id === 'manager-tab-enter').length <= 1")
             page.evaluate("""() => {
               window.activeTabAnimations = window.tabAnimations.filter(animation => animation.playState === 'paused');
             }""")
             assert page.evaluate("window.activeTabAnimations.length") > 0
             page.emulate_media(reduced_motion="reduce")
-            expect(page.locator(".history-layout")).to_have_css("transform", "none")
+            expect(page.locator(".skin-settings")).to_have_css("transform", "none")
             assert page.evaluate("window.activeTabAnimations.every(animation => animation.playState === 'idle')")
         assert page.locator(".history-layout").evaluate("node => getComputedStyle(node).transform") == "none"
     finally:
