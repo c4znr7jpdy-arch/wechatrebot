@@ -1312,8 +1312,14 @@ def test_deleting_referenced_provider_hot_migrates_feature_config(
     ]
 
 
+@pytest.mark.parametrize("kind", ["all", "group"])
+@pytest.mark.parametrize("filters", [
+    {},
+    {"search": "图来"},
+    {"search": "图来", "start": "2026-11-01", "end": "2026-11-17"},
+])
 def test_conversations_merge_current_group_directory_including_empty_groups(
-    tmp_path: Path,
+    tmp_path: Path, kind: str, filters: dict,
 ) -> None:
     api = _api(tmp_path)
     api._history_account_id = lambda: "wxid_bot"
@@ -1352,18 +1358,20 @@ def test_conversations_merge_current_group_directory_including_empty_groups(
         }
     )
 
-    result = api.get_conversations({"kind": "group"})
+    result = api.get_conversations({"kind": kind, **filters})
 
     assert result["ok"] is True
     items = result["data"]["items"]
-    assert [item["conversation_id"] for item in items] == [
-        "active@chatroom",
-        "empty@chatroom",
-    ]
+    assert [item["conversation_id"] for item in items] == (
+        ["active@chatroom"] if filters else ["active@chatroom", "empty@chatroom"]
+    )
     assert items[0]["display_name"] == "现在的群名"
     assert items[0]["avatar"] == "https://example.test/active.jpg"
-    assert items[1]["message_count"] == 0
-    assert items[1]["member_count"] == 5
+    assert items[0]["member_count"] == 3
+    assert items[0]["message_count"] == 2
+    if not filters:
+        assert items[1]["message_count"] == 0
+        assert items[1]["member_count"] == 5
     assert result["data"]["summary"]["directory_groups"] == 2
 
 
