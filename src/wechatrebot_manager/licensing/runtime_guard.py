@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from contextvars import ContextVar
+from datetime import datetime
 from functools import wraps
 import inspect
 import logging
@@ -99,7 +100,9 @@ class RuntimeGuard:
         self._refresh_thread: threading.Thread | None = None
         self._refresh_lock = threading.Lock()
         self._core_session: str | None = None
+        self._core_block_lock = threading.Lock()
         self._core_blocked = False
+        self._core_stop_reason = ""
 
     @staticmethod
     def _denied(reason: str, message: str) -> dict:
@@ -150,30 +153,50 @@ class RuntimeGuard:
             if expected_account and self.account_source() != expected_account:
                 raise LicenseError("account_mismatch", "微信账号已变化，原账号操作已取消。")
             return state
+        self._require_run(state, session=session)
+        return state
+
+    @staticmethod
+    def _require_run(state: dict, *, session: str | None) -> None:
         if session is not None and session != state.get("run_id"):
             raise LicenseError("automation_paused", state.get("message") or "自动化已暂停，请在管理器中确认恢复。")
         if not state.get("can_run"):
             code = "account_status_unavailable" if state.get("state") == "account_status_unavailable" else "automation_paused"
             raise LicenseError(code, state.get("message") or "自动化已暂停，请在管理器中确认恢复。")
-        return state
 
     def claim_core_session(self) -> None:
         state = self.require()
-        self._core_session = state.get("run_id", "")
-        self._core_blocked = False
+        with self._core_block_lock:
+            self._core_session = state.get("run_id", "")
+            self._core_stop_reason = ""
+            self._core_blocked = False
         self.start_refresh()
 
     def require_core(self, expected_account: str = "") -> dict:
         if self._core_blocked:
             raise LicenseError("automation_paused", "本次自动化运行已停止，请在管理器中确认恢复。")
-        try:
+        # A stale event's account cannot decide whether the current core is
+        # authorized. First validate the actual account and original run grant.
+        state = self.status()
+        if not state.get("enabled"):
             return self.require(expected_account, session=self._core_session)
+        try:
+            self._require_run(state, session=self._core_session)
         except LicenseError as exc:
             # Recovery is a fresh core process/session. A still-unwinding old
             # task must not resume merely because the subscription was renewed.
             if exc.code != "account_status_unavailable":
-                self._core_blocked = True
+                with self._core_block_lock:
+                    if not self._core_blocked:
+                        self._core_stop_reason = (
+                            "run_session_changed" if state.get("can_run")
+                            else str(state.get("state") or exc.code)
+                        )
+                        self._core_blocked = True
             raise
+        if expected_account and expected_account != state.get("account"):
+            raise LicenseError("account_mismatch", "微信账号已变化，原账号操作已取消。")
+        return state
 
     def allow_event(self, event: dict, *, queued: bool = False) -> bool:
         if event.get("post_type") in {None, "", "meta_event"}:
@@ -341,7 +364,11 @@ async def watch_core(lifecycle, *, interval: float = 1.0) -> None:
                 await asyncio.sleep(interval)
                 continue
             lifecycle._license_stopping = True
-            _LOG.warning("Subscription unavailable; stopping automation and retaining WeChat/data.")
+            _LOG.warning(
+                "[%s] Subscription unavailable; stopping automation and retaining WeChat/data. reason=%s",
+                datetime.now().astimezone().isoformat(timespec="seconds"),
+                guard._core_stop_reason or exc.code,
+            )
             pending = list(getattr(getattr(lifecycle, "event_bus", None), "_pending_tasks", ()))
             for task in pending:
                 task.cancel()

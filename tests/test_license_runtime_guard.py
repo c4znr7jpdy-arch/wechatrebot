@@ -164,16 +164,88 @@ def test_refresh_rechecks_actual_identity_instead_of_trusting_response(runtime):
     assert runtime.client.accounts[-1] == "wxid_switched"
 
 
-def test_old_core_stays_blocked_after_subscription_restored(runtime, monkeypatch):
+@pytest.mark.parametrize("changes,actual_account,reason", [
+    ({"can_run": False, "state": "paused"}, "wxid_actual", "paused"),
+    ({"can_run": False, "state": "expired"}, "wxid_actual", "expired"),
+    ({"can_run": False, "state": "revoked"}, "wxid_actual", "revoked"),
+    ({"run_id": "b" * 32}, "wxid_actual", "run_session_changed"),
+    ({"state": "account_mismatch"}, "wxid_other", "account_mismatch"),
+    ({}, "", "account_mismatch"),
+])
+@pytest.mark.parametrize("requested_account", ["", "wxid_old"])
+def test_old_core_stays_blocked_after_subscription_restored(
+    runtime, monkeypatch, caplog, changes, actual_account, reason, requested_account,
+):
     monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
     runtime.guard.claim_core_session()
-    runtime.client.state["can_run"] = False
+    runtime.client.state.update(changes)
+    runtime.identity["account"] = actual_account
     with pytest.raises(LicenseError):
-        runtime.guard.require_core()
-    runtime.client.state.update(can_run=True, run_id="b" * 32)
+        runtime.guard.require_core(requested_account)
+    assert runtime.guard._core_blocked
+    runtime.client.state.update(can_run=True, state="running", run_id="a" * 32)
+    runtime.identity["account"] = "wxid_actual"
     assert runtime.guard.require()["can_run"]
     with pytest.raises(LicenseError):
         runtime.guard.require_core()
+    calls = []
+
+    class Lifecycle:
+        async def stop(self):
+            calls.append("stop")
+
+    asyncio.run(module.watch_core(Lifecycle(), interval=0.001))
+    assert calls == ["stop"]
+    assert f"reason={reason}" in caplog.text
+    assert "wxid_" not in caplog.text
+    assert "a" * 32 not in caplog.text and "b" * 32 not in caplog.text
+
+
+def test_concurrent_core_denials_preserve_first_recorded_stop_reason(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
+    current = runtime.guard.status()
+    entered, release = threading.Event(), threading.Event()
+    original_require = runtime.guard._require_run
+    failures, unexpected = [], []
+
+    def status():
+        reason = "expired" if threading.current_thread().name == "delayed-denial" else "revoked"
+        return {**current, "can_run": False, "state": reason, "run_id": ""}
+
+    def validate(state, *, session):
+        if state["state"] == "expired":
+            entered.set()
+            assert release.wait(2), "Concurrent denial did not release the first validation"
+        original_require(state, session=session)
+
+    def check():
+        try:
+            runtime.guard.require_core()
+        except LicenseError as exc:
+            failures.append(exc.code)
+        except BaseException as exc:
+            unexpected.append(exc)
+
+    monkeypatch.setattr(runtime.guard, "status", status)
+    monkeypatch.setattr(runtime.guard, "_require_run", validate)
+    delayed = threading.Thread(target=check, name="delayed-denial")
+    immediate = threading.Thread(target=check, name="first-recorded-denial")
+    delayed.start()
+    try:
+        assert entered.wait(2), "First core check did not enter validation"
+        immediate.start()
+        immediate.join(2)
+        assert not immediate.is_alive()
+        assert runtime.guard._core_stop_reason == "revoked"
+    finally:
+        release.set()
+        delayed.join(2)
+        if immediate.ident is not None:
+            immediate.join(2)
+    assert not delayed.is_alive() and not immediate.is_alive()
+    assert not unexpected and failures == ["automation_paused", "automation_paused"]
+    assert runtime.guard._core_blocked and runtime.guard._core_stop_reason == "revoked"
 
 
 def test_unconfirmed_account_blocks_work_and_recovers_same_core_session(runtime, monkeypatch):
@@ -254,6 +326,39 @@ def test_signed_run_grant_survives_unconfirmed_account_without_allowing_sends(li
     assert client.snapshot("wxid_actual")["run_id"] == grant["run_id"]
     guard.account_source = lambda: "wxid_actual"
     assert guard.require_core()["run_id"] == grant["run_id"]
+
+
+def test_signed_core_rejects_old_account_event_without_stopping_current_account(license_setup, monkeypatch):
+    client, _, _, _ = license_setup
+    activate(client)
+    client.bind("wxid_actual")
+    grant = client.authorize_run("wxid_actual")
+    guard = RuntimeGuard(client.root, client=client, account_source=lambda: "wxid_actual")
+    monkeypatch.setattr(guard, "start_refresh", lambda: None)
+    monkeypatch.setattr(module, "_guard", guard)
+    guard.claim_core_session()
+    calls = []
+
+    class Provider:
+        async def text_chat(self):
+            calls.append("model_call")
+            return "answer"
+
+    guard_provider_class(Provider)
+
+    async def process(account):
+        guard.require_core(account)
+        return await Provider().text_chat()
+
+    with pytest.raises(LicenseError):
+        asyncio.run(process("wxid_old"))
+    assert calls == []
+    assert not guard._core_blocked
+    assert guard.require_core()["run_id"] == grant["run_id"]
+    assert guard.require_core("wxid_actual")["run_id"] == grant["run_id"]
+    assert client.snapshot("wxid_actual")["run_id"] == grant["run_id"]
+    assert asyncio.run(process("wxid_actual")) == "answer"
+    assert calls == ["model_call"]
 
 
 def test_signed_grant_expiry_stops_core_even_while_account_remains_unconfirmed(license_setup, monkeypatch):
@@ -473,7 +578,9 @@ def test_action_context_reaches_delayed_child_tasks(runtime):
     assert results == ["write"]
 
 
-def test_bridge_action_uses_requested_account_before_business_write(runtime):
+def test_bridge_action_uses_requested_account_before_business_write(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
     calls = []
 
     class Actions:
@@ -484,6 +591,10 @@ def test_bridge_action_uses_requested_account_before_business_write(runtime):
     with pytest.raises(LicenseError):
         asyncio.run(Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_old"}}))
     assert calls == []
+    assert not runtime.guard._core_blocked
+    assert runtime.guard.require_core()["can_run"]
+    asyncio.run(Actions().handle({"action": "send_group_msg", "params": {"self_id": "wxid_actual"}}))
+    assert calls == ["write"]
 
 
 def test_action_account_is_rechecked_at_hook_after_licensed_account_switch(runtime):
