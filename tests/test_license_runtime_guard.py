@@ -201,6 +201,53 @@ def test_old_core_stays_blocked_after_subscription_restored(
     assert "a" * 32 not in caplog.text and "b" * 32 not in caplog.text
 
 
+def test_concurrent_core_denials_preserve_first_recorded_stop_reason(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
+    runtime.guard.claim_core_session()
+    current = runtime.guard.status()
+    entered, release = threading.Event(), threading.Event()
+    original_require = runtime.guard._require_run
+    failures, unexpected = [], []
+
+    def status():
+        reason = "expired" if threading.current_thread().name == "delayed-denial" else "revoked"
+        return {**current, "can_run": False, "state": reason, "run_id": ""}
+
+    def validate(state, *, session):
+        if state["state"] == "expired":
+            entered.set()
+            assert release.wait(2), "Concurrent denial did not release the first validation"
+        original_require(state, session=session)
+
+    def check():
+        try:
+            runtime.guard.require_core()
+        except LicenseError as exc:
+            failures.append(exc.code)
+        except BaseException as exc:
+            unexpected.append(exc)
+
+    monkeypatch.setattr(runtime.guard, "status", status)
+    monkeypatch.setattr(runtime.guard, "_require_run", validate)
+    delayed = threading.Thread(target=check, name="delayed-denial")
+    immediate = threading.Thread(target=check, name="first-recorded-denial")
+    delayed.start()
+    try:
+        assert entered.wait(2), "First core check did not enter validation"
+        immediate.start()
+        immediate.join(2)
+        assert not immediate.is_alive()
+        assert runtime.guard._core_stop_reason == "revoked"
+    finally:
+        release.set()
+        delayed.join(2)
+        if immediate.ident is not None:
+            immediate.join(2)
+    assert not delayed.is_alive() and not immediate.is_alive()
+    assert not unexpected and failures == ["automation_paused", "automation_paused"]
+    assert runtime.guard._core_blocked and runtime.guard._core_stop_reason == "revoked"
+
+
 def test_unconfirmed_account_blocks_work_and_recovers_same_core_session(runtime, monkeypatch):
     monkeypatch.setattr(runtime.guard, "start_refresh", lambda: None)
     runtime.guard.claim_core_session()

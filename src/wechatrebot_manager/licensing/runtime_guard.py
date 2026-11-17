@@ -100,6 +100,7 @@ class RuntimeGuard:
         self._refresh_thread: threading.Thread | None = None
         self._refresh_lock = threading.Lock()
         self._core_session: str | None = None
+        self._core_block_lock = threading.Lock()
         self._core_blocked = False
         self._core_stop_reason = ""
 
@@ -165,9 +166,10 @@ class RuntimeGuard:
 
     def claim_core_session(self) -> None:
         state = self.require()
-        self._core_session = state.get("run_id", "")
-        self._core_blocked = False
-        self._core_stop_reason = ""
+        with self._core_block_lock:
+            self._core_session = state.get("run_id", "")
+            self._core_stop_reason = ""
+            self._core_blocked = False
         self.start_refresh()
 
     def require_core(self, expected_account: str = "") -> dict:
@@ -184,11 +186,13 @@ class RuntimeGuard:
             # Recovery is a fresh core process/session. A still-unwinding old
             # task must not resume merely because the subscription was renewed.
             if exc.code != "account_status_unavailable":
-                self._core_blocked = True
-                self._core_stop_reason = (
-                    "run_session_changed" if state.get("can_run")
-                    else str(state.get("state") or exc.code)
-                )
+                with self._core_block_lock:
+                    if not self._core_blocked:
+                        self._core_stop_reason = (
+                            "run_session_changed" if state.get("can_run")
+                            else str(state.get("state") or exc.code)
+                        )
+                        self._core_blocked = True
             raise
         if expected_account and expected_account != state.get("account"):
             raise LicenseError("account_mismatch", "微信账号已变化，原账号操作已取消。")
