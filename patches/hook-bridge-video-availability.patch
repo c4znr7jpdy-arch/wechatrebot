@@ -182,6 +182,20 @@ index f3fe201..acbb2dc 100644
                  logger.warning("quoted image download failed for message %s", event.message_id)
                  return event
              video_metadata = (
+@@ -1537,6 +1609,5 @@ class BridgeApplication:
+                     "path": str(destination),
+                 }
+-                await self.hook.download_image(payload)
+             elif event.message_type == 34:
+                 payload = {
+                     "newMsgId": event.message_id,
+@@ -1546,6 +1617,5 @@ class BridgeApplication:
+                     "path": str(destination),
+                 }
+-                await self.hook.download_voice(payload)
+             elif event.message_type == 43:
+                 payload = {
+                     "total_len": advertised_size,
 @@ -1555,38 +1627,14 @@ class BridgeApplication:
                      }
                      | {"media_name": destination.name},
@@ -238,7 +252,7 @@ index f3fe201..acbb2dc 100644
                      logger.warning(
                          "HOOK video download did not complete for message %s: "
                          "expected_size=%s actual_size=%s",
-@@ -1623,25 +1671,29 @@ class BridgeApplication:
+@@ -1623,25 +1671,48 @@ class BridgeApplication:
                          "attachid": attachment.attach_id or payload["attachid"],
                          "type": "6",
                      })
@@ -258,6 +272,25 @@ index f3fe201..acbb2dc 100644
 +                    self._discard_media(destination, event.message_id)
                      logger.warning("attachment download incomplete message=%s", event.message_id)
                      return event
++            if event.message_type in {34, 47}:
++                download = self.hook.download_voice if event.message_type == 34 else self.hook.download_image
++                # voiceLength/length can be a duration, not a byte count.
++                _, complete, actual_size = await self._download_native_media(
++                    download,
++                    payload,
++                    destination,
++                    advertised_size,
++                    event.message_id,
++                    timeout_seconds=self.settings.request_timeout_seconds,
++                )
++                if not complete:
++                    self._discard_media(destination, event.message_id)
++                    logger.warning(
++                        "inbound media download incomplete message=%s message_type=%s "
++                        "expected_size=%s actual_size=%s",
++                        event.message_id, event.message_type, advertised_size, actual_size,
++                    )
++                    return event
              if destination.is_file() and destination.resolve().is_relative_to(destination_root):
                  actual_size = destination.stat().st_size
                  if actual_size == 0:

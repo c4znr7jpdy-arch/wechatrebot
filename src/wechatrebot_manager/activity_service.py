@@ -26,6 +26,12 @@ _MODEL_FAILURE = re.compile(
     r"\[sources\.request_retry:\d+\]: MODEL_REQUEST_FAILED "
     r"error_type=([A-Za-z_][A-Za-z_0-9]*) status_code=(\d{3}|none)\s*$"
 )
+_INBOUND_MEDIA_INCOMPLETE = re.compile(
+    rf"{_TIME.pattern} (?:WARNING|WARN) (?:hook_bridge|微信连接)\.app: "
+    r"(?:deleted empty inbound media for message \d+|"
+    r"inbound media download incomplete message=\d+ message_type=(?:34|47) "
+    r"expected_size=\d+ actual_size=(?:None|\d+))\s*"
+)
 _PRIVATE_FIELDS = re.compile(r"(?i)^(?:content|prompt|messages|chat_text|request_body|response_body)$")
 _SERVICE_EXIT_CONTEXT_SECONDS = 5
 _CONTEXT_RECORD_LIMIT = 3
@@ -108,7 +114,7 @@ class ActivityService:
         if not event and "Traceback (most recent call last)" in raw:
             level = "error"
         if not code and level != "info":
-            code = classify_log_code(raw)
+            code = classify_log_code(raw, source=source.key)
         if code and code.startswith("UPD-") and code in UPDATE_ERRORS:
             definition = UPDATE_ERRORS[code]
             title, suggestion = definition.title, definition.message
@@ -251,9 +257,12 @@ class ActivityService:
         return "\n".join(lines)
 
 
-def classify_log_code(text: str) -> str:
-    """Only recognize explicit SDK exception evidence, not HTTP-like chat text."""
+def classify_log_code(text: str, *, source: str = "") -> str:
+    """Recognize runtime evidence without treating chat text as errors."""
     text = strip_log_ansi(text)
+    if (source in {"wechat-connection", "message-forward"}
+            and _INBOUND_MEDIA_INCOMPLETE.fullmatch(text)):
+        return "12006"
     failure = _MODEL_FAILURE.search(text)
     if failure:
         status = int(failure.group(2)) if failure.group(2) != "none" else None
