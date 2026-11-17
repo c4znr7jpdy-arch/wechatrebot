@@ -95,11 +95,15 @@ diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrb
  from .inbound_image import (
      ImageCdnCandidate,
      callback_image_candidates_from_payload,
-@@ -1228,6 +1229,10 @@
+@@ -1228,6 +1229,14 @@
                  quoted_message = parse_quoted_message(raw_xml)
                  if quoted_message is not None:
                      break
 +        attachment = parse_file_attachment(data) if event.message_type == 49 and quoted_message is None else None
++        if event.message_type == 49 and quoted_message is None and attachment is None:
++            # Links and mini-program cards also use type 49, but carry no file.
++            # Keep their existing message path without starting a native download.
++            return event
 +        if attachment is not None and (attachment.size <= 0 or attachment.size > self.settings.media_max_bytes):
 +            logger.warning("rejected attachment with invalid size message=%s", event.message_id)
 +            return event
