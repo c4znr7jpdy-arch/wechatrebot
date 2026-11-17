@@ -172,7 +172,7 @@ def test_live_manifest_does_not_reuse_cached_stable_redirect(tmp_path, monkeypat
         return io.BytesIO(json.dumps({"version": "1.0.1" if fresh else "1.0.0"}).encode())
 
     monkeypatch.setattr(module.urllib.request, "urlopen", cached_edge)
-    monkeypatch.setattr(module, "parse_update_manifest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "manifest_package_releases", lambda *args, **kwargs: ())
     assert module._fetch_live_manifest(channel)["version"] == "1.0.1"
     assert module._fetch_live_manifest(channel)["version"] == "1.0.1"
     assert seen[0] != seen[1]

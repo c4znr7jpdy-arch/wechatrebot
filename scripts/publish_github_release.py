@@ -14,6 +14,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -32,7 +33,7 @@ import publish_full_update as full
 from source_inputs import verify_source_inputs
 import publish_manager_update as publisher
 from build_update_release import attach_incremental_payloads
-from wechatrebot_manager.payload import sha256_file
+from wechatrebot_manager.payload import installed_payload_fingerprint, install_payload, sha256_file
 from wechatrebot_manager.update_message import (
     MAX_MESSAGE_BYTES, message_asset_name, parse_update_message,
 )
@@ -42,6 +43,7 @@ from wechatrebot_manager.updates import (
     canonical_manifest_bytes,
     load_update_channel,
     manifest_package_releases,
+    extract_update_archive,
     parse_update_manifest,
     prepare_update,
 )
@@ -239,10 +241,10 @@ def _load_manifest(path: Path) -> dict:
 
 def _verify_signed_manifest(payload: dict, channel: UpdateChannel, version: str) -> None:
     try:
-        parsed = parse_update_manifest(payload, channel, current_version="0.0.0")
+        packages = manifest_package_releases(payload, channel)
     except (UpdateError, ValueError) as exc:
         raise ValueError(f"清单签名校验失败：{exc}") from exc
-    if parsed is None or parsed.version != str(Version(version)):
+    if not packages or any(package.version != str(Version(version)) for package in packages):
         raise ValueError(f"清单签名校验失败或版本不是 {version}")
 
 
@@ -331,10 +333,14 @@ def _write_checksum(path: Path) -> Path:
     return checksum
 
 
-def _write_notes(path: Path, *, title: str, notes: tuple[str, ...], version: str) -> Path:
+def _write_notes(path: Path, *, title: str, notes: tuple[str, ...], version: str,
+                 component_only: bool = False) -> Path:
     lines = [f"# {title.strip() or f'版本 {version}'}", ""]
     lines.extend(f"- {note.strip()}" for note in notes if note.strip())
     lines.extend([
+        "", "已有安装通过管理器下载匹配安装基线的组件更新包。",
+        "首次安装请使用最近的完整安装版本；此 Release 只提供组件更新。",
+    ] if component_only else [
         "",
         "安装：下载 `WeChatReBot-*-online-*.zip`，解压后运行其中的安装程序；"
         "安装时会从本 Release 下载 `payload.wrb` 并校验 SHA-256。",
@@ -348,6 +354,9 @@ def _write_notes(path: Path, *, title: str, notes: tuple[str, ...], version: str
 def smoke_update_from_github(channel: UpdateChannel, release, smoke_root: Path) -> None:
     """Act like an installed manager: read the manifest, download the package, check the digest."""
     live = fetch_stable_manifest(channel)
+    if live and live.get("component_update_protocol") == 1 and "package" not in live:
+        _smoke_components(channel, live, release, smoke_root)
+        return
     parsed = parse_update_manifest(live or {}, channel, current_version="0.0.0")
     if parsed is None or parsed.version != release.version or parsed.package_sha256 != release.package_sha256:
         raise ValueError("公网稳定清单未指向刚发布的更新包")
@@ -356,6 +365,107 @@ def smoke_update_from_github(channel: UpdateChannel, release, smoke_root: Path) 
         raise ValueError("从 GitHub 下载的更新包摘要不一致")
     if not (prepared.payload_root / "manager" / "WeChatReBot.exe").is_file():
         raise ValueError("从 GitHub 下载的更新包缺少管理器")
+
+
+def _component_context(output: Path, packages) -> dict:
+    """Bind preparation snapshots to every advertised base before any upload."""
+    context = _load_manifest(output / "component-context.json")
+    bases = context.get("baselines")
+    if not isinstance(bases, list) or len(bases) != len(packages):
+        raise ValueError("组件候选缺少完整基线快照")
+    expected = {package.base_fingerprint for package in packages}
+    seen = set()
+    for entry in bases:
+        for key, fingerprint_key in (("source", "base_fingerprint"), ("target", "target_fingerprint")):
+            path = (output / entry[key]).resolve()
+            if output not in path.parents or not path.is_dir():
+                raise ValueError("组件基线快照路径越界或丢失")
+            if installed_payload_fingerprint(path) != entry[fingerprint_key]:
+                raise ValueError("组件基线快照指纹已改变")
+        seen.add(entry["base_fingerprint"])
+    if seen != expected:
+        raise ValueError("组件快照与签名基线不一致")
+    return context
+
+
+def _smoke_components(channel: UpdateChannel, live: dict, release, smoke_root: Path) -> None:
+    from prepare_component_update import snapshot_baseline
+
+    packages = manifest_package_releases(live, channel)
+    if any(package.version != release.version for package in packages):
+        raise ValueError("公网组件清单未指向刚发布的版本")
+    output = release.manifest_path.parent.parent
+    if live != _load_manifest(release.manifest_path):
+        raise ValueError("公网组件清单与候选不同")
+    context = _component_context(output, packages)
+    smoke_root = smoke_root / f"run-{time.time_ns()}"
+    for index, entry in enumerate(context["baselines"]):
+        fingerprint = entry["base_fingerprint"]
+        install = snapshot_baseline(output / entry["source"], smoke_root / str(index))
+        parsed = parse_update_manifest(live, channel, current_version="0.0.0", install_root=install)
+        if parsed is None or parsed.base_fingerprint != fingerprint:
+            raise ValueError("客户端没有选择匹配的组件更新包")
+        prepared = prepare_update(parsed, channel, install)
+        install_payload(prepared.payload_root, install)
+        if installed_payload_fingerprint(install) != entry["target_fingerprint"]:
+            raise ValueError("组件冒烟安装结果与目标快照不一致")
+
+
+def _cache_component_baselines(output: Path, channel: UpdateChannel) -> None:
+    """Only publish successful target snapshots into the reusable baseline cache."""
+    manifest = _load_manifest(output / "update" / "stable.json")
+    packages = manifest_package_releases(manifest, channel)
+    cache = COMMERCIAL_ROOT / "artifacts" / "component-baselines"
+    if "package" not in manifest:
+        context = _component_context(output, packages)
+        sources = [output / entry["target"] for entry in context["baselines"]]
+    elif (output / "staging" / "release-manifest.json").is_file():
+        sources = [output / "staging"]
+    else:
+        from prepare_component_update import snapshot_baseline
+
+        # A standalone manager update also changes the complete base fingerprint.
+        # Apply it only to disposable release snapshots, preserving old bases.
+        archive = output / "update" / packages[0].package_url.rsplit("/", 1)[-1]
+        work = output / f"manager-baselines-{time.time_ns()}"
+        payload = extract_update_archive(archive, work / "payload")
+        sources = []
+        for index, base in enumerate(sorted(cache.glob("*"))):
+            if not base.is_dir() or not re.fullmatch(r"[A-Fa-f0-9]{12,64}", base.name):
+                continue
+            target = snapshot_baseline(base, work / str(index))
+            install_payload(payload, target)
+            sources.append(target)
+    cache.mkdir(parents=True, exist_ok=True)
+    for source in sources:
+        _store_baseline(source, cache)
+
+
+def _store_baseline(source: Path, cache: Path) -> Path:
+    from prepare_component_update import snapshot_baseline
+
+    cache.mkdir(parents=True, exist_ok=True)
+    staged = snapshot_baseline(source, cache / f".pending-{time.time_ns()}")
+    fingerprint = installed_payload_fingerprint(staged)
+    target = cache / fingerprint[:12]
+    if target.exists():
+        if installed_payload_fingerprint(target) != fingerprint:
+            raise ValueError("发布基线缓存名称冲突，请保留快照并核对指纹")
+        shutil.rmtree(staged)
+    else:
+        staged.rename(target)
+    return target
+
+
+def _selected_baselines(args) -> list[Path]:
+    cache = COMMERCIAL_ROOT / "artifacts" / "component-baselines"
+    baselines = args.baseline or sorted(path for path in cache.glob("*")
+        if path.is_dir() and re.fullmatch(r"[A-Fa-f0-9]{12,64}", path.name))
+    if not baselines:
+        raise ValueError("缺少发布基线；先在一键入口登记已发布完整 staging，不会回退完整构建。")
+    if len(baselines) > 64:
+        raise ValueError("发布基线超过 64 项，请显式选择本次支持的基线")
+    return [path.expanduser().resolve() for path in baselines]
 
 
 def _verify_release_target(repo: str, tag: str, target: str, state: dict | None = None) -> None:
@@ -433,7 +543,11 @@ def _publish_assets(repo: str, tag: str, *, title: str, notes: tuple[str, ...], 
             unique.append(path)
     checksums = [_write_checksum(path) for path in unique
                  if not path.name.endswith(".sha256") and f"{path.name}.sha256" not in names]
-    notes_file = _write_notes(work_root / "release-notes.md", title=title, notes=notes, version=version)
+    signed = next((p for p in assets if p.name == f"stable-{version}.json"), None)
+    component_only = bool(signed and _load_manifest(signed).get("component_update_protocol") == 1
+                          and "package" not in _load_manifest(signed))
+    notes_file = _write_notes(work_root / "release-notes.md", title=title, notes=notes, version=version,
+                              component_only=component_only)
     all_assets = [*unique, *checksums]
     pending = list(all_assets)
     if exists:
@@ -492,6 +606,8 @@ def _save_candidate(output: Path, release, assets: list[Path], *, repo: str, tar
     candidate = {"schema_version": 1, "version": release.version, "repo": repo, "target": target,
                  "title": title, "notes": list(notes), "previous_manifest": previous,
                  "manifest": artifact(release.manifest_path), "assets": [artifact(p) for p in assets]}
+    if (output / "component-context.json").is_file():
+        candidate["component_context"] = artifact(output / "component-context.json")
     _write_json(output / "publish-candidate.json", candidate)
     return candidate
 
@@ -511,10 +627,16 @@ def _load_candidate(output: Path, *, repo: str, version: str, channel: UpdateCha
     manifest_path = verified_path(candidate["manifest"])
     manifest = _load_manifest(manifest_path)
     _verify_signed_manifest(manifest, channel, version)
-    parsed = parse_update_manifest(manifest, channel, current_version="0.0.0")
+    packages = manifest_package_releases(manifest, channel)
+    parsed = packages[0]
+    if "package" not in manifest:
+        if "component_context" not in candidate:
+            raise ValueError("恢复组件候选缺少基线快照记录")
+        verified_path(candidate["component_context"])
+        _component_context(output, packages)
     assets = [verified_path(item) for item in candidate["assets"]]
     expected_url = asset_prefix(repo, release_tag(version)) + "/"
-    for package in manifest_package_releases(manifest, channel):
+    for package in packages:
         if not package.package_url.startswith(expected_url):
             raise ValueError("恢复候选更新地址不属于该版本 Release")
         asset = next((p for p in assets if asset_url(repo, release_tag(version), p.name) == package.package_url), None)
@@ -593,7 +715,7 @@ def _finish_publication(repo: str, release, *, channel: UpdateChannel, work_root
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="构建、签名并发布到 GitHub Release；稳定清单放在 stable 标签。")
     parser.add_argument("--source-root", type=Path, default=COMMERCIAL_ROOT / "vendor")
-    parser.add_argument("--title", default="完整载荷更新")
+    parser.add_argument("--title", default="组件更新")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--minimum-supported-version", default="0.7.0")
     parser.add_argument("--build", type=int)
@@ -604,7 +726,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--manager-build", type=Path, help="--manager-only 时复用已完成的管理器构建目录")
-    parser.add_argument("--manager-only", action="store_true", help="只发布管理器增量包")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--manager-only", action="store_true", help="只发布管理器增量包")
+    modes.add_argument("--component-only", action="store_true", help="按发布基线生成组件小包（默认）")
+    modes.add_argument("--full", action="store_true", help="明确执行完整载荷构建")
+    parser.add_argument("--baseline", type=Path, action="append", default=[],
+                        help="发布专用基线快照或完整 staging；默认读取 artifacts/component-baselines")
+    parser.add_argument("--register-baseline", type=Path, help="登记已发布完整 staging 为后续组件基线；不构建或发布")
+    parser.add_argument("--plan", action="store_true", help="仅检查组件基线兼容性，不构建、签名或发布")
     parser.add_argument("--incremental-payload", type=Path, action="append", default=[],
                         help="附加按安装基线生成的组件差异载荷；可重复，每个基线一份")
     parser.add_argument("--rollback", metavar="VERSION", help="把 stable 清单回滚到该版本的签名副本")
@@ -626,6 +755,34 @@ def _build_candidate(args, *, version: str, channel: UpdateChannel, live_version
     publisher._signing_key(private_key, channel)
     tag = release_tag(version)
     repo = _repo(urllib.parse.urlsplit(prefix).path.strip("/").split("/releases/")[0])
+    if args.component_only:
+        from build_update_release import build_component_release
+        from prepare_component_update import prepare_component_payloads, snapshot_baseline
+
+        baselines = _selected_baselines(args)
+        source = verify_source_inputs(COMMERCIAL_ROOT, args.source_root)
+        copied = []
+        for index, base in enumerate(baselines):
+            copied.append(snapshot_baseline(base.expanduser().resolve(), output / "component-bases" / str(index)))
+        prepared = prepare_component_payloads(COMMERCIAL_ROOT, source, copied,
+            output / "component-build", version=version, build=args.build, manager_build=args.manager_build)
+        manifest, assets = build_component_release(prepared["payloads"], output / "update", version=version,
+            private_key_path=private_key, channel=channel, asset_prefix=prefix, title=args.title,
+            notes=tuple(args.note), minimum_supported_version=args.minimum_supported_version,
+            build=args.build, mandatory=args.mandatory)
+        context = {"baselines": [{
+            "source": str(base.relative_to(output)),
+            "base_fingerprint": installed_payload_fingerprint(base),
+            "target": str(target.relative_to(output)),
+            "target_fingerprint": installed_payload_fingerprint(target),
+        } for base, target in zip(copied, prepared["target_baselines"], strict=True)]}
+        _write_json(output / "component-context.json", context)
+        packages = manifest_package_releases(_load_manifest(manifest), channel)
+        _component_context(output, packages)
+        first = packages[0]
+        release = full.BuiltFullUpdate(version=version, archive_path=assets[0], manifest_path=manifest,
+            package_url=first.package_url, package_size=first.package_size, package_sha256=first.package_sha256)
+        return release, assets
     if args.manager_only:
         if not args.skip_tests:
             env = os.environ.copy()
@@ -667,12 +824,43 @@ def _build_candidate(args, *, version: str, channel: UpdateChannel, live_version
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if not (args.manager_only or args.full):
+        args.component_only = True
+    if args.baseline and not args.component_only:
+        parser.error("--baseline 只适用于组件更新")
+    if args.component_only and args.incremental_payload:
+        parser.error("组件模式自动从基线生成差异包，不接受附加完整包的 --incremental-payload")
+    if args.plan and not args.component_only:
+        parser.error("--plan 只适用于组件更新")
     if tuple(sys.version_info[:2]) != (3, 13) or platform.architecture()[0] != "64bit":
         parser.error("必须使用 Python 3.13 x64 执行发布脚本")
     if args.resume and args.output is None:
         parser.error("--resume 必须同时指定原 --output 产物目录")
     if args.prepare_only and args.rollback:
         parser.error("--prepare-only 不能与 --rollback 同时使用")
+    if args.register_baseline:
+        if args.resume or args.rollback or args.plan:
+            parser.error("登记基线不能同时恢复、回滚或预检")
+        cache = COMMERCIAL_ROOT / "artifacts" / "component-baselines"
+        target = _store_baseline(args.register_baseline.expanduser().resolve(), cache)
+        print(json.dumps({"baseline": str(target), "fingerprint": installed_payload_fingerprint(target)}, ensure_ascii=False))
+        return 0
+    if args.plan:
+        from update_local_incremental import manager_changed, source_scopes, verify_base_inputs
+        from prepare_component_update import snapshot_baseline
+
+        source = verify_source_inputs(COMMERCIAL_ROOT, args.source_root)
+        plans = []
+        for base in _selected_baselines(args):
+            with tempfile.TemporaryDirectory(prefix="wrb-plan-") as temporary:
+                snapshot = snapshot_baseline(base, Path(temporary) / "base")
+                verify_base_inputs(COMMERCIAL_ROOT, snapshot)
+                _, scopes = source_scopes(COMMERCIAL_ROOT, snapshot)
+                plans.append({"baseline": str(base), "base_fingerprint": installed_payload_fingerprint(snapshot),
+                              "manager_build_required": manager_changed(COMMERCIAL_ROOT, snapshot), "components": scopes})
+        print(json.dumps({"mode": "component-only", "runtime_build_required": False,
+                          "source_root": str(source), "baselines": plans}, ensure_ascii=False, indent=2))
+        return 0
     channel = load_update_channel()
     repo = repo_name_with_owner()
     if not args.dry_run:
@@ -755,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
         _publish_assets(repo, tag, title=candidate["title"], notes=tuple(candidate["notes"]), version=version,
                         assets=[*assets, versioned], work_root=work_root, timeout=channel.request_timeout_seconds,
                         resume=args.resume, target=candidate["target"], channel=channel,
-                        latest=not args.prepare_only)
+                        latest=not args.prepare_only and any(path.suffix == ".wrb" for path in assets))
     except Exception as exc:
         receipt.update(status="failed_before_promotion", error=_safe_error(exc))
         _write_json(receipt_path, receipt)
@@ -772,6 +960,12 @@ def main(argv: list[str] | None = None) -> int:
     _finish_publication(repo, release, channel=channel, work_root=work_root, target=candidate["target"],
                         previous=candidate.get("previous_manifest"), skip_smoke=args.skip_remote_smoke,
                         receipt=receipt)
+    try:
+        _cache_component_baselines(output, channel)
+        receipt["baseline_cache"] = "saved"
+    except Exception as exc:
+        receipt.update(baseline_cache="failed", baseline_cache_error=_safe_error(exc))
+    _write_json(receipt_path, receipt)
     print(json.dumps(receipt, ensure_ascii=False, indent=2))
     return 0
 

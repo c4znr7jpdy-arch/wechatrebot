@@ -311,7 +311,7 @@ def _fake_build(root: Path, module, version: str, prefix: str):
     archive = update / f"wechatrebot-{version}-update.zip"
     archive.write_bytes(b"zip")
     manifest = update / "stable.json"
-    manifest.write_text("{}", encoding="utf-8")
+    manifest.write_text('{"package": {}}', encoding="utf-8")
     customer = out / "customer.zip"
     customer.write_bytes(b"customer")
     checksum = customer.with_suffix(".zip.sha256")
@@ -378,7 +378,7 @@ def test_main_dry_run_builds_without_touching_github(tmp_path: Path, monkeypatch
     monkeypatch.setattr(module.full, "build_full_update_artifacts", lambda options, **_k: _move_build(built, options.output))
     gh = _FakeGh()
     monkeypatch.setattr(module, "_gh", gh)
-    assert module.main(["--dry-run", "--output", str(root / "artifacts" / "publish"), "--title", "t"]) == 0
+    assert module.main(["--full", "--dry-run", "--output", str(root / "artifacts" / "publish"), "--title", "t"]) == 0
     assert gh.calls == []
 
 
@@ -398,7 +398,7 @@ def test_main_full_publish_creates_release_uploads_verifies_and_promotes(tmp_pat
     monkeypatch.setattr(module, "smoke_update_from_github",
                         lambda channel, release, root: smoked.append(release.version))
 
-    assert module.main(["--output", str(root / "artifacts" / "publish"), "--title", "t", "--yes"]) == 0
+    assert module.main(["--full", "--output", str(root / "artifacts" / "publish"), "--title", "t", "--yes"]) == 0
 
     create = next(c for c in gh.calls if c[:2] == ["release", "create"])
     assert create[2] == "v0.9.9" and "--draft" in create
@@ -497,7 +497,7 @@ def test_prepare_only_verifies_public_assets_without_promoting_stable(tmp_path, 
     monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: pytest.fail("must await webpage confirmation"))
     output = root / "artifacts" / "publish"
 
-    assert module.main(["--prepare-only", "--output", str(output), "--yes"]) == 0
+    assert module.main(["--full", "--prepare-only", "--output", str(output), "--yes"]) == 0
 
     receipt = json.loads((output / "publication-receipt.json").read_text("utf-8"))
     assert receipt["status"] == "awaiting_admin_confirmation"
@@ -520,7 +520,7 @@ def test_prepare_only_asset_failure_never_promotes_or_claims_ready(tmp_path, mon
     monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: pytest.fail("must not promote"))
     output = root / "artifacts" / "publish"
     with pytest.raises(ValueError, match="digest mismatch"):
-        module.main(["--prepare-only", "--output", str(output), "--yes"])
+        module.main(["--full", "--prepare-only", "--output", str(output), "--yes"])
     receipt = json.loads((output / "publication-receipt.json").read_text("utf-8"))
     assert receipt["status"] == "failed_before_promotion" and not receipt.get("assets_verified")
 
