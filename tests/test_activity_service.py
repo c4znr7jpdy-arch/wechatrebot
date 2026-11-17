@@ -150,6 +150,97 @@ def test_model_failure_marker_requires_runtime_logger_prefix(error_type, status,
     assert classify_log_code(f"[12:00:01.200] [Core] [ERRO] [other.module:74]: {marker}") == ""
 
 
+@pytest.fixture
+def group_policy_block_log():
+    failure = (
+        "<ActionFailed status='failed', retcode=1403, data=None, "
+        "message='本群仅在明确点名时回复。', echo={'seq': 11091}>"
+    )
+    return (
+        "[2026-10-10 09:31:57.641] [Core] [ERRO] [v4.26.6] [respond.stage:310]: "
+        "发送消息链失败: chain = MessageChain(chain=[Reply(id='152'), "
+        "Plain(text='我的信息')]), error = " + failure + "\n"
+        "Traceback (most recent call last):\n"
+        '  File "aiocqhttp/api_impl.py", line 38, in _handle_api_result\n'
+        "    raise ActionFailed(result=result)\n"
+        "aiocqhttp.exceptions.ActionFailed: " + failure + "\n"
+    )
+
+
+@pytest.mark.parametrize("relative,source,colored", [
+    ("app/logs/astrbot-core.log", "engine-runtime", False),
+    ("logs/astrbot-service.log", "engine-service", True),
+])
+def test_group_policy_block_is_informational_and_keeps_diagnostic_evidence(
+    tmp_path, group_policy_block_log, relative, source, colored,
+):
+    raw = group_policy_block_log
+    if colored:
+        raw = raw.replace("[2026-10-10 09:31:57.641]", "\x1b[32m[09:31:57.641]\x1b[0m")
+        raw = raw.replace("[ERRO] [v4.26.6]", "\x1b[31m[ERROR]\x1b[0m")
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(raw, encoding="utf-8")
+
+    service = ActivityService(tmp_path)
+    item, = service.recent()
+    assert item["source"] == source
+    assert item["code"] == "17006" and item["level"] == "info"
+    assert item["title"] == "消息按规则未发送"
+    assert "本群仅在明确点名时回复。" in item["message"]
+    assert "Traceback (most recent call last):" in item["detail"]
+    assert "aiocqhttp.exceptions.ActionFailed:" in item["report"]
+    assert "line 38" in item["report"]
+    assert "级别：提示" in item["report"] and "错误码：17006" in item["report"]
+    assert item["report"] == service.report(item)
+    assert "\x1b" not in item["report"]
+
+
+@pytest.mark.parametrize("old,new", [
+    ("retcode=1403", "retcode=10003"),
+    ("status='failed'", "status='unknown'"),
+    ("本群仅在明确点名时回复。", "群聊策略无法确认，消息已取消。"),
+    ("本群仅在明确点名时回复。", "机器人账号已切换，消息已取消。"),
+    ("本群仅在明确点名时回复。", "定时任务暂不支持此消息类型。"),
+    ("[respond.stage:310]", "[core.event_bus:74]"),
+    ("[Core]", "[Plug]"),
+    ("[2026-10-10 09:31:57.641] ", ""),
+    ("发送消息链失败: chain =", "收到聊天正文: chain ="),
+    ("Traceback (most recent call last):", "用户引用的异常内容："),
+    ("aiocqhttp.exceptions.ActionFailed:", "RuntimeError:"),
+])
+def test_group_policy_classification_does_not_hide_other_failures(
+    tmp_path, group_policy_block_log, old, new,
+):
+    raw = group_policy_block_log.replace(old, new)
+    source = LogSource("engine-runtime", "运行核心", tmp_path / "core.log")
+    item = ActivityService(tmp_path)._item(source, raw)
+    assert item["code"] == "19000" and item["level"] == "error"
+
+
+@pytest.mark.parametrize("source", ["", "manager", "wechat-connection", "message-forward"])
+def test_group_policy_classification_requires_engine_source(group_policy_block_log, source):
+    assert classify_log_code(group_policy_block_log, source=source) == ""
+
+
+def test_group_policy_classification_requires_complete_matching_final_exception(group_policy_block_log):
+    head, tail = group_policy_block_log.rsplit("aiocqhttp.exceptions.ActionFailed:", 1)
+    for raw in (
+        head,
+        head + "aiocqhttp.exceptions.ActionFailed:" + tail.replace("retcode=1403", "retcode=10003"),
+        group_policy_block_log + "\nDuring handling of the above exception, another exception occurred:\n"
+        "Traceback (most recent call last):\nRuntimeError: unexpected failure\n",
+        group_policy_block_log.replace(
+            "Traceback (most recent call last):",
+            "Traceback (most recent call last):\nRuntimeError: original failure\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "Traceback (most recent call last):",
+        ),
+        "ERROR 用户引用了以下日志：\n" + group_policy_block_log,
+    ):
+        assert classify_log_code(raw, source="engine-runtime") == ""
+
+
 def test_activity_reads_application_runtime_log_with_legacy_fallback(tmp_path):
     legacy = tmp_path / "logs/astrbot-core.log"
     legacy.parent.mkdir()

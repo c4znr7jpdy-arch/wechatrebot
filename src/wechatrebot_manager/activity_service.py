@@ -32,6 +32,15 @@ _INBOUND_MEDIA_INCOMPLETE = re.compile(
     r"inbound media download incomplete message=\d+ message_type=(?:34|47) "
     r"expected_size=\d+ actual_size=(?:None|\d+))\s*"
 )
+_GROUP_REPLY_POLICY_SKIP = re.compile(
+    r"\A\[(?:\d{4}-\d{2}-\d{2}[ T])?\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\] "
+    r"\[Core\] \[(?:ERROR|ERRO)\](?: \[v[^\]\r\n]+\])? "
+    r"\[respond\.stage:\d+\]: 发送消息链失败: [^\r\n]*, error = "
+    r"(?P<failure><ActionFailed status='failed', retcode=1403, data=None, "
+    r"message='本群仅在明确点名时回复。', echo=(?:None|\{[^\r\n]*\})>)"
+    r"\r?\n(?:\r?\n)*Traceback \(most recent call last\):[\s\S]*\n"
+    r"aiocqhttp\.exceptions\.ActionFailed: (?P=failure)\s*\Z"
+)
 _PRIVATE_FIELDS = re.compile(r"(?i)^(?:content|prompt|messages|chat_text|request_body|response_body)$")
 _SERVICE_EXIT_CONTEXT_SECONDS = 5
 _CONTEXT_RECORD_LIMIT = 3
@@ -263,6 +272,13 @@ def classify_log_code(text: str, *, source: str = "") -> str:
     if (source in {"wechat-connection", "message-forward"}
             and _INBOUND_MEDIA_INCOMPLETE.fullmatch(text)):
         return "12006"
+    # 1403 also covers real permission/configuration failures. Only this known
+    # policy refusal, without chained failures and with matching send-error and
+    # final exception, is a skip.
+    if (source in {"engine-service", "engine-runtime"}
+            and text.count("Traceback (most recent call last):") == 1
+            and _GROUP_REPLY_POLICY_SKIP.fullmatch(text)):
+        return "17006"
     failure = _MODEL_FAILURE.search(text)
     if failure:
         status = int(failure.group(2)) if failure.group(2) != "none" else None
