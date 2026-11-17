@@ -238,7 +238,7 @@ index f3fe201..acbb2dc 100644
                      logger.warning(
                          "HOOK video download did not complete for message %s: "
                          "expected_size=%s actual_size=%s",
-@@ -1623,25 +1671,29 @@ class BridgeApplication:
+@@ -1623,25 +1671,37 @@ class BridgeApplication:
                          "attachid": attachment.attach_id or payload["attachid"],
                          "type": "6",
                      })
@@ -256,7 +256,16 @@ index f3fe201..acbb2dc 100644
                  if not complete or (attachment is not None and actual_size != attachment.size):
 -                    destination.unlink(missing_ok=True)
 +                    self._discard_media(destination, event.message_id)
-                     logger.warning("attachment download incomplete message=%s", event.message_id)
+-                    logger.warning("attachment download incomplete message=%s", event.message_id)
++                    logger.warning(
++                        "attachment download incomplete message=%s expected_size=%s "
++                        "actual_size=%s complete=%s timeout_seconds=%s",
++                        event.message_id,
++                        attachment.size if attachment is not None else advertised_size,
++                        actual_size,
++                        complete,
++                        self.settings.file_download_timeout_seconds,
++                    )
                      return event
              if destination.is_file() and destination.resolve().is_relative_to(destination_root):
                  actual_size = destination.stat().st_size

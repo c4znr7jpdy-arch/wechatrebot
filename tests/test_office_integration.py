@@ -68,9 +68,53 @@ def test_app_card_is_not_an_office_attachment(office_bridge):
     assert office_bridge.inbound_file.parse_file_attachment({"content": "<broken"}) is None
 
 
-@pytest.mark.parametrize("size,downloaded,expected", [(4, b"data", True), (4, b"da", False),
-                                                           (0, b"data", False), (500, b"data", False)])
-def test_attachment_download_and_onebot_handoff(office_bridge, tmp_path, size, downloaded, expected):
+@pytest.mark.parametrize("data", [
+    pytest.param({"content": attachment_xml(kind=5)}, id="link"),
+    pytest.param({"content": attachment_xml(kind=33)}, id="mini-program"),
+    pytest.param({"content": attachment_xml(kind=36)}, id="mini-program-card"),
+    pytest.param({"content": attachment_xml(kind=57)}, id="reply-without-reference"),
+    pytest.param({"content": "<broken"}, id="malformed-xml"),
+    pytest.param({}, id="missing-metadata"),
+])
+def test_non_file_app_message_skips_native_download(office_bridge, tmp_path, caplog, data):
+    application = object.__new__(office_bridge.app.BridgeApplication)
+    application.state = office_bridge.app.BridgeState(600, 256)
+    application._active_native_downloads = 0
+    application._native_download_generation = 0
+    application.settings = NS(media_root=tmp_path, media_max_bytes=100,
+                              request_timeout_seconds=.02, file_download_timeout_seconds=.02)
+    application.hook = NS(download_file=AsyncMock())
+    event = office_bridge.models.NormalizedEvent(
+        kind="message", message_type=49, message_id="non-file", sender_id="wxid_user",
+        conversation_id="room@chatroom", content="应用消息",
+        raw={"data": data},
+    )
+
+    result = asyncio.run(application._prepare_inbound_media(event))
+
+    application.hook.download_file.assert_not_awaited()
+    assert result is event
+    assert result.media_path is None
+    message = office_bridge.message_codec.encode_inbound(result, "wxid_bot", 123)
+    assert message["raw_message"] == "应用消息"
+    assert message["message"] == [{"type": "text", "data": {"text": "[文件或应用消息]"}}]
+    assert not list(tmp_path.iterdir())
+    assert "attachment download incomplete" not in caplog.text
+
+
+@pytest.mark.parametrize("size,downloaded,expected,flat", [
+    pytest.param(4, b"data", True, False, id="complete"),
+    pytest.param(4, b"data", True, True, id="flat-file-metadata"),
+    pytest.param(4, None, False, False, id="missing"),
+    pytest.param(4, b"", False, False, id="empty"),
+    pytest.param(4, b"da", False, False, id="partial"),
+    pytest.param(4, b"data!", False, False, id="larger-than-declared"),
+    pytest.param(0, b"data", False, False, id="invalid-declared-size"),
+    pytest.param(500, b"data", False, False, id="over-media-limit"),
+])
+def test_attachment_download_and_onebot_handoff(
+    office_bridge, tmp_path, caplog, size, downloaded, expected, flat,
+):
     application = object.__new__(office_bridge.app.BridgeApplication)
     application.state = office_bridge.app.BridgeState(600, 256)
     application._active_native_downloads = 0
@@ -80,14 +124,18 @@ def test_attachment_download_and_onebot_handoff(office_bridge, tmp_path, size, d
 
     async def download(payload):
         calls.append(payload)
-        Path(payload["path"]).write_bytes(downloaded)
+        if downloaded is not None:
+            Path(payload["path"]).write_bytes(downloaded)
 
     application.hook = NS(download_file=download)
+    data = {"from_user": "wxid_user", "MsgId": "123"}
+    data.update({
+        "appType": 6, "file_name": "销售表.xlsx", "total_len": str(size),
+        "attachid": "opaque-id",
+    } if flat else {"content": attachment_xml(size=size)})
     event = office_bridge.models.NormalizedEvent(
         kind="message", message_type=49, message_id="123", sender_id="wxid_user",
-        conversation_id="room@chatroom", raw={"data": {
-            "content": attachment_xml(size=size), "from_user": "wxid_user", "MsgId": "123",
-        }},
+        conversation_id="room@chatroom", raw={"data": data},
     )
     result = asyncio.run(application._prepare_inbound_media(event))
     assert bool(result.media_path) is expected
@@ -103,6 +151,18 @@ def test_attachment_download_and_onebot_handoff(office_bridge, tmp_path, size, d
         assert segment["data"]["file"] == result.media_path.as_uri()
     else:
         assert not list(tmp_path.iterdir())
+        if size == 4:
+            warnings = [record.message for record in caplog.records
+                        if "attachment download incomplete" in record.message]
+            assert len(warnings) == 1
+            actual_size = None if downloaded is None else len(downloaded)
+            assert "expected_size=4" in warnings[0]
+            assert f"actual_size={actual_size}" in warnings[0]
+            assert f"complete={actual_size is not None and actual_size >= size}" in warnings[0]
+            assert "timeout_seconds=0.02" in warnings[0]
+            assert "销售表.xlsx" not in warnings[0]
+            assert "opaque-id" not in warnings[0]
+            assert str(tmp_path) not in warnings[0]
 
 
 def test_local_file_adapter_is_scoped_to_wechat():
