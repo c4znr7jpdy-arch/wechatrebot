@@ -173,18 +173,20 @@ class ChatApiMixin:
                         continue
                     group_id = str(group.get("group_id") or "").strip()
                     group_name = str(group.get("name") or "").strip()
-                    if not group_id or (
-                        keyword
-                        and keyword not in group_id.casefold()
-                        and keyword not in group_name.casefold()
-                    ):
+                    if not group_id:
                         continue
                     if group_id in known:
+                        # Message-content matches still need the group's profile,
+                        # even when its name and ID do not match the search.
                         known[group_id]["display_name"] = group_name or known[group_id].get("display_name")
                         # History rows carry the sender's portrait. A group may
                         # only use the portrait returned for that group.
                         known[group_id]["avatar"] = str(group.get("avatar") or known[group_id].get("avatar") or "")
                         known[group_id]["member_count"] = group.get("member_count")
+                        continue
+                    if (keyword
+                            and keyword not in group_id.casefold()
+                            and keyword not in group_name.casefold()):
                         continue
                     if start_time is not None or end_time is not None:
                         continue
