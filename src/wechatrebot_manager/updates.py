@@ -335,12 +335,15 @@ def _manifest_package_fields(
 def _manifest_package_releases(
     payload: dict[str, object], channel: UpdateChannel, metadata: dict[str, object]
 ) -> tuple[UpdateRelease, ...]:
-    releases = [UpdateRelease(
+    component_only = _component_only_manifest(payload)
+    releases = [] if component_only else [UpdateRelease(
         **metadata, **_manifest_package_fields(payload.get("package"), channel)
     )]
     candidates = payload.get("incremental_packages", [])
     if not isinstance(candidates, list) or len(candidates) > MAX_INCREMENTAL_PACKAGES:
         raise UpdateError("增量更新包列表格式错误或数量超限。")
+    if component_only and not candidates:
+        raise UpdateError("组件更新清单没有可用的基线安装包。")
     fingerprints: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, dict) or not _valid_digest(candidate.get("base_fingerprint")):
@@ -356,10 +359,23 @@ def _manifest_package_releases(
     return tuple(releases)
 
 
+def _component_only_manifest(payload: dict[str, object]) -> bool:
+    protocol = payload.get("component_update_protocol")
+    if "component_update_protocol" in payload and (type(protocol) is not int or protocol != 1):
+        raise UpdateError("组件更新协议版本不受支持。")
+    component_only = protocol == 1 and "package" not in payload
+    if component_only and not isinstance(payload.get("version"), str):
+        raise UpdateError("组件更新版本格式错误。")
+    build = payload.get("build")
+    if component_only and build is not None and (type(build) is not int or build < 0):
+        raise UpdateError("组件更新构建号必须为非负整数。")
+    return component_only
+
+
 def manifest_package_releases(
     payload: dict[str, object], channel: UpdateChannel
 ) -> tuple[UpdateRelease, ...]:
-    """Verify every advertised package, requiring a default package for legacy clients."""
+    """Verify every signed default or component package before publication."""
     metadata = _manifest_release_metadata(payload, channel)
     return _manifest_package_releases(payload, channel, metadata)
 
@@ -407,6 +423,8 @@ def parse_update_manifest(
         current = Version(current_version)
     except (TypeError, ValueError, InvalidVersion) as exc:
         raise UpdateError("更新版本格式错误。") from exc
+    component_only = _component_only_manifest(payload)
+    releases = _manifest_package_releases(payload, channel, metadata) if component_only else ()
     latest = Version(metadata["version"])
     minimum = Version(metadata["minimum_supported_version"])
     build = metadata["build"]
@@ -414,22 +432,25 @@ def parse_update_manifest(
         raise MandatoryUpdateUnavailable("当前版本低于最低支持版本，但更新清单未提供可用的新版本。")
     if not is_newer_update(metadata["version"], build, current_version=current_version, current_build=current_build):
         return None
-    releases = _manifest_package_releases(payload, channel, metadata)
+    releases = releases or _manifest_package_releases(payload, channel, metadata)
     selected = releases[0]
-    if install_root is not None and len(releases) > 1:
+    if install_root is not None and (component_only or len(releases) > 1):
         try:
             current_fingerprint = installed_payload_fingerprint(install_root)
         except (OSError, PayloadError, ValueError):
-            # Without a readable inventory use the default; never scan runtime files.
+            # Legacy releases can fall back; components require an exact base.
             current_fingerprint = ""
     fingerprint = current_fingerprint.upper() if _valid_digest(current_fingerprint) else ""
-    for candidate in releases[1:]:
+    for candidate in releases if component_only else releases[1:]:
         if (
             candidate.base_fingerprint == fingerprint
-            and candidate.package_size < selected.package_size
+            and (component_only or candidate.package_size < selected.package_size)
         ):
             selected = candidate
             break
+    else:
+        if component_only:
+            raise UpdateError("当前安装基线没有匹配的组件更新包，请联系技术支持获取适配当前安装的更新；未下载任何更新包。")
     return replace(selected, mandatory=selected.mandatory or current < minimum)
 
 
