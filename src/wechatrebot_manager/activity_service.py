@@ -26,6 +26,12 @@ _MODEL_FAILURE = re.compile(
     r"\[sources\.request_retry:\d+\]: MODEL_REQUEST_FAILED "
     r"error_type=([A-Za-z_][A-Za-z_0-9]*) status_code=(\d{3}|none)\s*$"
 )
+_INBOUND_MEDIA_INCOMPLETE = re.compile(
+    rf"{_TIME.pattern} (?:WARNING|WARN) (?:hook_bridge|微信连接)\.app: "
+    r"(?:deleted empty inbound media for message \d+|"
+    r"inbound media download incomplete message=\d+ message_type=(?:34|47) "
+    r"expected_size=\d+ actual_size=(?:None|\d+))\s*"
+)
 _GROUP_REPLY_POLICY_SKIP = re.compile(
     r"\A\[(?:\d{4}-\d{2}-\d{2}[ T])?\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\] "
     r"\[Core\] \[(?:ERROR|ERRO)\](?: \[v[^\]\r\n]+\])? "
@@ -261,8 +267,11 @@ class ActivityService:
 
 
 def classify_log_code(text: str, *, source: str = "") -> str:
-    """Recognize runtime exception evidence without treating chat text as errors."""
+    """Recognize runtime evidence without treating chat text as errors."""
     text = strip_log_ansi(text)
+    if (source in {"wechat-connection", "message-forward"}
+            and _INBOUND_MEDIA_INCOMPLETE.fullmatch(text)):
+        return "12006"
     # 1403 also covers real permission/configuration failures. Only this known
     # policy refusal, without chained failures and with matching send-error and
     # final exception, is a skip.

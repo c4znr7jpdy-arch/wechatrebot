@@ -49,6 +49,59 @@ def test_sdk_evidence_does_not_guess_quota_from_http_status():
     assert classify_error(ValueError("some 401 text"), "15001", "test_provider") == "19000"
 
 
+@pytest.mark.parametrize("source", ["wechat-connection", "message-forward"])
+@pytest.mark.parametrize("logger", ["hook_bridge.app", "微信连接.app"])
+@pytest.mark.parametrize("message", [
+    "deleted empty inbound media for message 1382713465728651675",
+    "inbound media download incomplete message=123 message_type=34 expected_size=0 actual_size=0",
+    "inbound media download incomplete message=123 message_type=47 expected_size=12 actual_size=5",
+    "inbound media download incomplete message=123 message_type=34 expected_size=0 actual_size=None",
+])
+def test_inbound_media_warning_has_specific_report(tmp_path, source, logger, message):
+    service = ActivityService(tmp_path)
+    raw = f"2026-10-10 09:22:12 WARNING {logger}: {message}"
+    item = service._item(LogSource(source, "微信连接", tmp_path / "bridge.log"), raw)
+    assert item["code"] == "12006" and item["level"] == "warning"
+    assert item["title"] == "接收媒体未完成"
+    assert "请重发该条" in item["suggestion"]
+    assert message in item["detail"]
+    report = service.report(item)
+    assert "错误码：12006" in report and "级别：警告" in report
+    assert "当时运行状态：未记录" in report and "已恢复" not in report
+
+
+@pytest.mark.parametrize("source,raw", [
+    ("engine-service", "2026-10-10 09:22:12 WARNING hook_bridge.app: deleted empty inbound media for message 123"),
+    ("wechat-connection", "2026-10-10 09:22:12 WARNING other.app: deleted empty inbound media for message 123"),
+    ("wechat-connection", "2026-10-10 09:22:12 WARNING hook_bridge.app: 用户输入: deleted empty inbound media for message 123"),
+    ("wechat-connection", "2026-10-10 09:22:12 ERROR hook_bridge.app: deleted empty inbound media for message 123"),
+    ("wechat-connection", "2026-10-10 09:22:12 WARNING hook_bridge.app: deleted empty inbound media for message 123\nTraceback (most recent call last):\nOSError: failed"),
+    ("wechat-connection", "2026-10-10 09:22:12 WARNING hook_bridge.app: deleted empty inbound media for message 123\nunknown error"),
+])
+def test_inbound_media_classification_requires_exact_runtime_evidence(tmp_path, source, raw):
+    item = ActivityService(tmp_path)._item(LogSource(source, "测试", tmp_path / "bridge.log"), raw)
+    assert item["code"] == "19000"
+
+
+def test_other_image_success_does_not_clear_empty_media_warning(tmp_path):
+    path = tmp_path / "logs/new-hook-bridge.log"
+    path.parent.mkdir()
+    path.write_text(
+        "2026-10-10 09:04:19 INFO hook_bridge.app: HOOK API is no longer accepting connections\n"
+        "2026-10-10 09:22:12 WARNING hook_bridge.app: deleted empty inbound media for message 123\n"
+        "2026-10-10 09:30:43 INFO hook_bridge.app: inbound image CDN download message=456 imgType=2 actual_size=52425 complete=True\n",
+        encoding="utf-8",
+    )
+    items = ActivityService(tmp_path).recent()
+    assert len(items) == 3
+    failed = next(item for item in items if item["code"] == "12006")
+    assert failed["level"] == "warning" and failed["count"] == 1
+    assert "message=456" in failed["context"]
+    assert "deleted empty inbound media for message 123" in failed["detail"]
+    assert "已恢复" not in failed["report"]
+    assert [item["level"] for item in items if item is not failed] == ["info", "info"]
+
+
 def test_colored_service_logs_keep_timeout_and_adjacent_records_separate(tmp_path):
     path = tmp_path / "logs/astrbot-service.log"
     path.parent.mkdir()
