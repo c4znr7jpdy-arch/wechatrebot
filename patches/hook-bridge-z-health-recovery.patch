@@ -1,0 +1,110 @@
+diff --git a/hook_41827_astrbot_bridge/src/hook_bridge/app.py b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+--- a/hook_41827_astrbot_bridge/src/hook_bridge/app.py
++++ b/hook_41827_astrbot_bridge/src/hook_bridge/app.py
+@@ -42,6 +42,10 @@
+ 
+ 
+ logger = logging.getLogger(__name__)
++# Stay within the manager/runtime guard's two-second health request budget.
++_HOOK_PROBE_CONNECT_TIMEOUT_SECONDS = 0.5
++_HOOK_PROBE_CLOSE_TIMEOUT_SECONDS = 0.1
++_HOOK_PROBE_RETRY_DELAY_SECONDS = 0.1
+ 
+ 
+ class RedactingFilter(logging.Filter):
+@@ -128,6 +132,7 @@
+         self._cleanup_task: asyncio.Task[None] | None = None
+         self._injector_watch_task: asyncio.Task[None] | None = None
+         self._hook_watch_task: asyncio.Task[None] | None = None
++        self._hook_probe_task: asyncio.Task[bool] | None = None
+         self._group_member_watch_task: asyncio.Task[None] | None = None
+         # The 4.1.8.27 native download endpoints may stop accepting HTTP connections
+         # while a native download is running.  Keep the health watcher from
+@@ -251,16 +256,51 @@
+         )
+ 
+     async def _hook_api_accepting_connections(self) -> bool:
++        # Share only an in-flight check; completed results are never cached.
++        probe = getattr(self, "_hook_probe_task", None)
++        if probe is None or probe.done():
++            probe = asyncio.create_task(self._probe_hook_api())
++            self._hook_probe_task = probe
+         try:
+-            reader, writer = await asyncio.open_connection(
+-                self.settings.hook_api_host, self.settings.hook_api_port
+-            )
+-            del reader
+-            writer.close()
+-            await writer.wait_closed()
++            return await asyncio.shield(probe)
++        finally:
++            if probe.done() and self._hook_probe_task is probe:
++                self._hook_probe_task = None
++
++    async def _probe_hook_api(self) -> bool:
++        for attempt in range(2):
++            try:
++                reader, writer = await asyncio.wait_for(
++                    asyncio.open_connection(
++                        self.settings.hook_api_host, self.settings.hook_api_port
++                    ),
++                    timeout=_HOOK_PROBE_CONNECT_TIMEOUT_SECONDS,
++                )
++                del reader
++            except (OSError, TimeoutError) as exc:
++                logger.log(
++                    logging.DEBUG if attempt == 0 else logging.INFO,
++                    "HOOK connection probe failed: attempt=%s error=%s errno=%s winerror=%s",
++                    attempt + 1, type(exc).__name__,
++                    getattr(exc, "errno", None), getattr(exc, "winerror", None),
++                )
++                if attempt == 0:
++                    await asyncio.sleep(_HOOK_PROBE_RETRY_DELAY_SECONDS)
++                continue
++            try:
++                writer.close()
++                await asyncio.wait_for(
++                    writer.wait_closed(), timeout=_HOOK_PROBE_CLOSE_TIMEOUT_SECONDS
++                )
++            except (OSError, TimeoutError) as exc:
++                writer.transport.abort()
++                # A successful connection is not invalidated by peer teardown.
++                logger.debug("HOOK probe cleanup failed: error=%s", type(exc).__name__)
++            except asyncio.CancelledError:
++                writer.transport.abort()
++                raise
+             return True
+-        except OSError:
+-            return False
++        return False
+ 
+     def _hook_check_overlapped_native_download(self, generation: int) -> bool:
+         # A download can finish before an older request reports its failure.
+@@ -274,8 +314,9 @@
+         if hook_ready and not self._hook_check_overlapped_native_download(generation):
+             accepting = await self._hook_api_accepting_connections()
+             if not accepting and not self._hook_check_overlapped_native_download(generation):
+-                logger.info("HOOK API is no longer accepting connections")
+-                self._hook_ready = hook_ready = False
++                logger.info("HOOK API connection could not be confirmed after retry")
++                hook_ready = False
++        hook_ready = hook_ready and self._hook_ready
+         wechat_identity = self.state.bot_wxid if hook_ready else ""
+         return {
+             "service_ready": True,
+@@ -1881,6 +1922,7 @@
+             self._cleanup_task,
+             self._injector_watch_task,
+             self._hook_watch_task,
++            getattr(self, "_hook_probe_task", None),
+             self._group_member_watch_task,
+         ):
+             if task is not None:
+@@ -1896,6 +1938,7 @@
+                 self._cleanup_task,
+                 self._injector_watch_task,
+                 self._hook_watch_task,
++                getattr(self, "_hook_probe_task", None),
+                 self._group_member_watch_task,
+             )
+             if task is not None
