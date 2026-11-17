@@ -26,6 +26,15 @@ _MODEL_FAILURE = re.compile(
     r"\[sources\.request_retry:\d+\]: MODEL_REQUEST_FAILED "
     r"error_type=([A-Za-z_][A-Za-z_0-9]*) status_code=(\d{3}|none)\s*$"
 )
+_GROUP_REPLY_POLICY_SKIP = re.compile(
+    r"\A\[(?:\d{4}-\d{2}-\d{2}[ T])?\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\] "
+    r"\[Core\] \[(?:ERROR|ERRO)\](?: \[v[^\]\r\n]+\])? "
+    r"\[respond\.stage:\d+\]: 发送消息链失败: [^\r\n]*, error = "
+    r"(?P<failure><ActionFailed status='failed', retcode=1403, data=None, "
+    r"message='本群仅在明确点名时回复。', echo=(?:None|\{[^\r\n]*\})>)"
+    r"\r?\n(?:\r?\n)*Traceback \(most recent call last\):[\s\S]*\n"
+    r"aiocqhttp\.exceptions\.ActionFailed: (?P=failure)\s*\Z"
+)
 _PRIVATE_FIELDS = re.compile(r"(?i)^(?:content|prompt|messages|chat_text|request_body|response_body)$")
 _SERVICE_EXIT_CONTEXT_SECONDS = 5
 _CONTEXT_RECORD_LIMIT = 3
@@ -108,7 +117,7 @@ class ActivityService:
         if not event and "Traceback (most recent call last)" in raw:
             level = "error"
         if not code and level != "info":
-            code = classify_log_code(raw)
+            code = classify_log_code(raw, source=source.key)
         if code and code.startswith("UPD-") and code in UPDATE_ERRORS:
             definition = UPDATE_ERRORS[code]
             title, suggestion = definition.title, definition.message
@@ -251,9 +260,16 @@ class ActivityService:
         return "\n".join(lines)
 
 
-def classify_log_code(text: str) -> str:
-    """Only recognize explicit SDK exception evidence, not HTTP-like chat text."""
+def classify_log_code(text: str, *, source: str = "") -> str:
+    """Recognize runtime exception evidence without treating chat text as errors."""
     text = strip_log_ansi(text)
+    # 1403 also covers real permission/configuration failures. Only this known
+    # policy refusal, without chained failures and with matching send-error and
+    # final exception, is a skip.
+    if (source in {"engine-service", "engine-runtime"}
+            and text.count("Traceback (most recent call last):") == 1
+            and _GROUP_REPLY_POLICY_SKIP.fullmatch(text)):
+        return "17006"
     failure = _MODEL_FAILURE.search(text)
     if failure:
         status = int(failure.group(2)) if failure.group(2) != "none" else None
