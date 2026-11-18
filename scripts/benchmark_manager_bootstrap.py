@@ -160,6 +160,21 @@ def measure(*, providers: int, plugins: int, samples: int, warmups: int) -> dict
     }
 
 
+def check_budget(report: dict, budget: dict) -> list[str]:
+    """Gate deterministic work only; timing remains diagnostic on shared runners."""
+    if budget.get("schema_version") != 1 or budget.get("fixture") != report["fixture"]:
+        raise ValueError("Bootstrap budget does not match this fixture")
+    failures = []
+    for category in ("reads_per_bootstrap", "probes_per_bootstrap"):
+        limits = budget.get(category)
+        if not isinstance(limits, dict) or any(type(v) is not int or v < 0 for v in limits.values()):
+            raise ValueError(f"Invalid bootstrap budget: {category}")
+        for name, actual in report[category].items():
+            if actual > limits.get(name, 0):
+                failures.append(f"{category}.{name}: {actual} > {limits.get(name, 0)}")
+    return failures
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--providers", type=int, default=12)
@@ -167,17 +182,30 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=15)
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--budget", type=Path, help="check fixture-matched read/probe limits; never gate timing")
     args = parser.parse_args()
     if not 1 <= args.providers <= 200 or not 0 <= args.plugins <= 500:
         parser.error("providers must be 1..200 and plugins must be 0..500")
     if not 1 <= args.samples <= 200 or not 0 <= args.warmups <= 20:
         parser.error("samples must be 1..200 and warmups must be 0..20")
     report = measure(providers=args.providers, plugins=args.plugins, samples=args.samples, warmups=args.warmups)
+    failures = []
+    if args.budget:
+        try:
+            budget = json.loads(args.budget.read_text(encoding="utf-8"))
+            if not isinstance(budget, dict):
+                raise ValueError("Bootstrap budget must be an object")
+            failures = check_budget(report, budget)
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        report["budget"] = {"ok": not failures, "violations": failures}
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
     print(text)
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

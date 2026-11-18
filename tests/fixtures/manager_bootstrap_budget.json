@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "fixture": {"providers": 12, "plugins": 40},
+  "reads_per_bootstrap": {"engine_config": 4, "other": 5, "plugin_config": 40},
+  "probes_per_bootstrap": {"lifecycle_refresh": 1}
+}
