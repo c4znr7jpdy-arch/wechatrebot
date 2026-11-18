@@ -30,6 +30,7 @@ from wechatrebot_manager.updates import (
     UpdateChannel,
     canonical_manifest_bytes,
     fresh_stable_manifest_url,
+    manifest_package_releases,
     parse_update_manifest,
 )
 
@@ -234,7 +235,7 @@ def _fetch_live_manifest(channel: UpdateChannel) -> dict[str, object]:
     payload = json.loads(content.decode("utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("线上更新清单根节点不是对象")
-    parse_update_manifest(payload, channel, current_version="0.0.0")
+    manifest_package_releases(payload, channel)
     return payload
 
 
