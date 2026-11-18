@@ -476,6 +476,8 @@ class ChatHistoryService:
 
     def _sync_source(self, source_path: Path, *, strict: bool = False, upper_id: int | None = None) -> int:
         if not source_path.is_file():
+            if strict and upper_id is not None:
+                raise sqlite3.OperationalError("聊天记录来源在同步期间不可用，请稍后重试。")
             self.sync_pending = False
             return 0
         source_key = str(source_path.resolve()).casefold()

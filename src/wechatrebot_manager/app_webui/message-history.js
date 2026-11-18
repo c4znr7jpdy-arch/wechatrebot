@@ -62,15 +62,17 @@ window.createMessageHistory = function (helpers) {
       renderHistoryAccountGate("");
       return;
     }
-    const load = ++state.historyLoad;
     const filters = historyFilters();
     const query = JSON.stringify([requestAccount, filters]);
-    const cached = state.historyConversationSnapshot;
     const kind = state.historyKind;
+    const snapshotKey = JSON.stringify([query, kind]);
+    const cached = options.localFilter && state.historyConversationSnapshots?.get(snapshotKey)
+      || state.historyConversationSnapshot;
     const compatible = cached?.query === query && (cached.kind === kind || (cached.kind === "all" && !cached.data.has_more));
     const reuse = options?.localFilter === true && compatible;
     const append = options?.append === true && cached?.query === query && cached.kind === kind && cached.data.has_more;
     if (options?.append && (!append || state.historyConversationsLoading)) return;
+    const load = ++state.historyLoad;
     state.historyConversationsLoading = true;
     try {
       let data = reuse ? cached.data : null;
@@ -102,6 +104,10 @@ window.createMessageHistory = function (helpers) {
       saveSelectedHistoryMessages();
       state.historyActionNotice = null;
       state.historyConversationSnapshot = {query, kind: reuse ? cached.kind : kind, data};
+      const snapshots = state.historyConversationSnapshots ||= new Map();
+      snapshots.delete(snapshotKey);
+      snapshots.set(snapshotKey, state.historyConversationSnapshot);
+      while (snapshots.size > 6) snapshots.delete(snapshots.keys().next().value);
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
@@ -112,8 +118,8 @@ window.createMessageHistory = function (helpers) {
       const selected = state.conversations.find((item) => item.conversation_id === selectedId);
       const summary = data.summary || {};
       const visible = state.conversations.length;
-      const privateMessages = summary.private_messages ?? state.conversations.filter(item => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0);
-      const groupMessages = summary.group_messages ?? state.conversations.filter(item => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0);
+      const privateMessages = kind === "group" ? 0 : (summary.private_messages ?? state.conversations.filter(item => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0));
+      const groupMessages = kind === "private" ? 0 : (summary.group_messages ?? state.conversations.filter(item => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0));
       const totalMessages = kind === "private" ? privateMessages : kind === "group" ? groupMessages : (summary.messages ?? privateMessages + groupMessages);
       $("#historySummary").textContent = `${data.has_more ? "已显示 " : ""}${visible} 个聊天 · ${totalMessages} 条消息 · 个人消息 ${privateMessages} · 群聊消息 ${groupMessages} · 群目录 ${summary.directory_groups || 0}${data.sync_pending ? " · 正在补录历史消息…" : ""}`;
       renderConversations();
@@ -196,6 +202,7 @@ window.createMessageHistory = function (helpers) {
     state.historyMessageQuery = "";
     state.historyReadyAccount = "";
     state.historyConversationSnapshot = null;
+    state.historyConversationSnapshots?.clear();
   }
 
   function renderHistoryAccountGate(accountId) {

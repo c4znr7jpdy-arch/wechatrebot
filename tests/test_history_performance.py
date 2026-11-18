@@ -1,6 +1,8 @@
 """Deterministic read/import budgets, using temporary history only."""
 from contextlib import contextmanager
+import gc
 import sqlite3
+import pytest
 
 from wechatrebot_manager.chat_history import ChatHistoryService, HISTORY_IMPORT_BATCH_SIZE
 from test_chat_history import _bridge_source
@@ -131,3 +133,33 @@ def test_old_database_adds_summary_without_changing_history(tmp_path):
             connection.execute(f"DROP TABLE {table}")
     migrated = ChatHistoryService(tmp_path)
     assert migrated.conversations(account_id="wxid_bot") == expected
+
+
+@pytest.mark.parametrize("operation", ["delete", "export"])
+def test_strict_sync_rejects_source_disappearing_between_batches(tmp_path, monkeypatch, operation):
+    source = _many_messages(tmp_path, HISTORY_IMPORT_BATCH_SIZE * 2 + 7)
+    service = ChatHistoryService(tmp_path)
+    original = service._sync_source
+    gc.collect()  # Legacy fixture connections use SQLite's transaction context.
+    moved = source.with_suffix(".temporarily-unavailable")
+
+    def interrupted(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if source.exists():
+            source.rename(moved)
+        return result
+
+    monkeypatch.setattr(service, "_sync_source", interrupted)
+    target = tmp_path / "export.json"
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            if operation == "delete":
+                service.delete_conversation("456@chatroom", account_id="wxid_bot")
+            else:
+                service.export(target, format="json", account_id="wxid_bot")
+        with service._connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == HISTORY_IMPORT_BATCH_SIZE
+        assert not target.exists()
+    finally:
+        if moved.exists():
+            moved.rename(source)
