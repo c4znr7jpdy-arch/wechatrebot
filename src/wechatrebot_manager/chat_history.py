@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import csv
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from html import unescape
 import json
@@ -10,7 +11,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 import uuid
 
 from .location import chat_history_path
@@ -349,13 +350,18 @@ class ChatHistoryService:
             # partial target must not block the next migration attempt.
             temporary.unlink(missing_ok=True)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA foreign_keys=ON")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:

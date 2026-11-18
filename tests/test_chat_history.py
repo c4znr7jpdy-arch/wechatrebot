@@ -12,6 +12,23 @@ from wechatrebot_manager.chat_history import (
 )
 
 
+def test_history_connection_closes_after_commit_and_rollback(tmp_path: Path) -> None:
+    service = ChatHistoryService(tmp_path)
+    with service._connect() as connection:
+        connection.execute("CREATE TABLE connection_probe (value TEXT)")
+        connection.execute("INSERT INTO connection_probe VALUES ('committed')")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    with pytest.raises(RuntimeError, match="rollback"):
+        with service._connect() as failed:
+            failed.execute("INSERT INTO connection_probe VALUES ('rolled back')")
+            raise RuntimeError("rollback")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        failed.execute("SELECT 1")
+    with service._connect() as verified:
+        assert [row[0] for row in verified.execute("SELECT value FROM connection_probe")] == ["committed"]
+
+
 def _source(root: Path) -> Path:
     path = (
         root
