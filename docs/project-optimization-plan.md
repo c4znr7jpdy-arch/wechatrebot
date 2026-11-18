@@ -108,6 +108,7 @@
 - 整合定向验证：历史浏览器/恢复43 passed（60.43秒）；trace/组件清单/启动预算67 passed；元数据校验通过；启动预算满足engine_config=4、plugin_config=40、lifecycle_refresh=1。所有测试命令在独立工作树执行，Python源码路径设为src。PR的CI与合并状态以GitHub为准，代码/本地验证状态不代表已经上线。
 
 - CI首轮发现SBOM在Windows写入CRLF后被Git规范化为LF导致登记哈希失配；已改用固定LF计算，工作树/提交字节哈希一致，元数据复检通过。PR：https://github.com/c4znr7jpdy-arch/wechatrebot/pull/220；完整CI与合并结果由该PR留痕。
+- trace最终复查修复：日志路径每次读取解析，支持管理器先于运行日志启动；底层provider流确定性关闭；正常最终响应在yield前结束模型计时，fallback/step提前退出也关闭迭代器。使用真实runner方法和真实tenacity（test extras固定运行时9.1.4）覆盖正常/错误回退/关闭/取消/停止，最终6个定向文件97 passed。合并依赖变更时保留已有pytest/Jinja2/pytest-asyncio精确版本。
 
 ## 已运行的主要定向命令
 
